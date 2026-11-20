@@ -21,8 +21,10 @@ import json
 import pathlib
 import subprocess
 import sys
-import tempfile
 import threading
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -245,11 +247,10 @@ STORIES = [
 ]
 
 
-def isolated(prefix):
+def isolated(root):
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix=prefix, dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -257,9 +258,10 @@ def isolated(prefix):
     return root
 
 
-def units() -> dict:
+@tool_scratch.case('clarp-quota-keeper-units-')
+def units(root) -> dict:
     """The functions themselves, their memory a dictionary."""
-    isolated('clarp-quota-keeper-units-')
+    isolated(root)
     from lib import janitor_autonomy as A, settings_store
     kept = {}
     settings_store.get_text = lambda key, default='': kept.get(key, default)
@@ -298,9 +300,10 @@ def units() -> dict:
     return {'keys': keys, 'crossings': crossings, 'seeds': seeds}
 
 
-def story(index) -> dict:
+@tool_scratch.case('clarp-quota-keeper-story-')
+def story(root, index) -> dict:
     """One story of the lane, on a database of its own."""
-    root = isolated('clarp-quota-keeper-story-')
+    isolated(root)
     from lib import agents, artifacts, db, janitors, janitor_builtins, janitor_autonomy as A, settings_store, turn_dispatch
     from lib import log as host_log
     host_log.log = host_log.log_exception = lambda *said, **more: None
@@ -448,7 +451,7 @@ def story(index) -> dict:
 
 def child(args):
     ran = subprocess.run([sys.executable, '-I', __file__, *args], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TZ': 'UTC'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TZ': 'UTC'}), check=False)
     if ran.returncode != 0:
         raise SystemExit(f'{args}: {ran.stderr[-4000:]}')
     return json.loads(ran.stdout.splitlines()[-1])

@@ -17,14 +17,15 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'decision-on-behalf-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-decision-on-behalf-vectors')
 
 # The owner's files: what stands under [agents], as TOML.
 FILES = [
@@ -40,20 +41,19 @@ FILES = [
 ]
 
 
-def run() -> dict:
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
+@tool_scratch.case('clarp-decision-on-behalf-vectors-')
+def run(root) -> dict:
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
-        'CLARP_CODE_ROOT': str(REPO / 'server'), 'HOME': str(SCRATCH / 'home'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
+        'CLARP_CODE_ROOT': str(REPO / 'server'), 'HOME': str(root / 'home'),
     })
     sys.path.insert(0, str(REPO / 'server'))
     from lib import config
     files = []
     for number, (what, text) in enumerate(FILES):
-        path = SCRATCH / f'config-{number}.toml'
+        path = root / f'config-{number}.toml'
         path.write_text(text)
         files.append({'what': what, 'toml': text,
                       'sessions': list(config.load(path).decision_on_behalf_sessions)})
@@ -65,7 +65,7 @@ def main() -> int:
         print(json.dumps(run()))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-5000:], file=sys.stderr)
         return 1

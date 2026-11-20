@@ -41,8 +41,10 @@ import itertools
 import json
 import pathlib
 import sys
-import tempfile
 import threading
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -440,7 +442,7 @@ def read(failover):
                'sys.stdout.write(sys.argv[1])\n'
                'sys.exit(int(sys.argv[2]))\n')
     out = []
-    with tempfile.TemporaryDirectory(prefix='clarp-account-pool-selector-', dir='/var/tmp') as scratch:
+    with tool_scratch.directory(prefix='clarp-account-pool-selector-') as scratch:
         given = pathlib.Path(scratch) / 'given'
         for code, printed, models in SELECTORS:
             verdict = failover.switch_account((sys.executable, '-I', '-c', program, printed, str(code), str(given)),
@@ -451,11 +453,11 @@ def read(failover):
     return out
 
 
-def run() -> dict:
+@tool_scratch.case('clarp-account-pool-vectors-')
+def run(root) -> dict:
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-account-pool-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()

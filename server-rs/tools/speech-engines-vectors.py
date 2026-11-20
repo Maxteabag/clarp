@@ -7,8 +7,10 @@ from pathlib import Path
 import runpy
 import subprocess
 import sys
-import tempfile
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parents[1]
@@ -186,8 +188,8 @@ def reference(root):
 
 if __name__ == '__main__':
     if sys.argv[1:]==['--isolated']:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tool_scratch.directory() as tmp:
             OUT.write_text(json.dumps(reference(Path(tmp)),ensure_ascii=True,indent=1)+'\n')
     else:
         subprocess.run([sys.executable,'-I','-B',__file__,'--isolated'],check=True,
-                       env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'})
+                       env=tool_scratch.child_env({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'}))

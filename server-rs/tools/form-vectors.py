@@ -28,23 +28,22 @@ import itertools
 import json
 import os
 import pathlib
-import shutil
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'form-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-form-vectors')
 
 
-def isolate() -> None:
+def isolate(root) -> None:
     """Points the library at a place of its own before it is imported."""
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
         'CLARP_CODE_ROOT': str(REPO / 'server'),
     })
     sys.path.insert(0, str(REPO / 'server'))
@@ -294,7 +293,12 @@ def cases() -> list[tuple[dict, object]]:
 
 
 def main() -> int:
-    isolate()
+    with tool_scratch.directory('clarp-form-vectors-') as name:
+        return generate(pathlib.Path(name))
+
+
+def generate(root):
+    isolate(root)
     from jsonschema import Draft202012Validator
     from lib import html_forms
     from importlib.metadata import version
@@ -333,7 +337,6 @@ def main() -> int:
     unfit = sum(1 for row in vectors['answers'] if row['error'])
     print(f'{len(vectors["reprs"])} values, {len(vectors["contracts"])} payloads ({refused} refused), '
           f'{len(vectors["answers"])} answers ({unfit} do not fit) -> {OUT.relative_to(REPO)}')
-    shutil.rmtree(SCRATCH, ignore_errors=True)
     return 0
 
 

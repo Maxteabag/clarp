@@ -23,14 +23,15 @@ import io
 import json
 import os
 import pathlib
-import shutil
 import sys
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'goal-keeper-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-goal-keeper-vectors')
 T0 = 1_794_700_000_000
 MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
 
@@ -40,14 +41,12 @@ ITEMS = [{'id': 'probe', 'title': 'Probe the behaviour'},
          {'id': 'ship', 'title': 'Ship it'}]
 
 
-def isolate() -> None:
+def isolate(root) -> None:
     """Points the library at a place of its own before it is imported."""
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
         'CLARP_CODE_ROOT': str(REPO / 'server'),
     })
     for name in ('CLAUDE_PWA_SESSION', 'CLARP_PROVIDER_TURN', 'CLARP_BACKGROUND_ORIGIN', 'CLARP_HEARTBEATS_DISABLED',
@@ -64,7 +63,7 @@ def iso(at_ms: int) -> str:
 class World:
     """One scenario's clock, ids, owner and goal."""
 
-    def __init__(self, number: int):
+    def __init__(self, number: int, root: pathlib.Path):
         import secrets
         from lib import agents, clock, db
         self.db, self.agents = db, agents
@@ -77,7 +76,7 @@ class World:
             if getattr(module, '__name__', '').startswith('lib.') and hasattr(module, 'now_ms'):
                 module.now_ms = lambda: self.now
         secrets.token_hex = self.token_hex
-        db.reset_for_tests(SCRATCH / f'scenario-{number}.sqlite')
+        db.reset_for_tests(root / f'scenario-{number}.sqlite')
         self.number = number
         self.owner = self.agent('vera', 'Vera')
         self.plan, self.revision = '', 0
@@ -594,11 +593,16 @@ CONFIGS = [
 def main(argv: list[str]) -> int:
     if os.environ.get('PYTHONHASHSEED') != '0':
         os.execve(sys.executable, [sys.executable, *argv], {**os.environ, 'PYTHONHASHSEED': '0'})
-    isolate()
+    with tool_scratch.directory('clarp-goal-keeper-vectors-') as name:
+        return generate(pathlib.Path(name))
+
+
+def generate(root):
+    isolate(root)
     from lib import goal_keeper
     scenarios = []
     for number, scenario in enumerate(SCENARIOS, start=1):
-        world = World(number)
+        world = World(number, root)
         scenario(world)
         scenarios.append({'name': scenario.__name__, 'what': scenario.__doc__, 'steps': world.steps})
     watched = []

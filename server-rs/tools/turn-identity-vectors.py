@@ -22,14 +22,15 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'turn-identity-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-turn-identity-vectors')
 NOW = 1_800_000_000_000
 DAY = 86_400_000
 
@@ -44,18 +45,17 @@ TURNS = [
 ]
 
 
-def run() -> dict:
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
+@tool_scratch.case('clarp-turn-identity-vectors-')
+def run(root) -> dict:
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
-        'CLARP_CODE_ROOT': str(REPO / 'server'), 'HOME': str(SCRATCH / 'home'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
+        'CLARP_CODE_ROOT': str(REPO / 'server'), 'HOME': str(root / 'home'),
     })
     sys.path.insert(0, str(REPO / 'server'))
     from lib import db, provider_background_jobs as turns, turn_identity
-    db.reset_for_tests(SCRATCH / 'turns.sqlite')
+    db.reset_for_tests(root / 'turns.sqlite')
     db.now_ms = lambda: NOW
     given = []
     for what, ended_ago in TURNS:
@@ -97,7 +97,7 @@ def main() -> int:
         print(json.dumps(run()))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-5000:], file=sys.stderr)
         return 1

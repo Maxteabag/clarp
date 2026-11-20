@@ -18,7 +18,9 @@ import json
 import pathlib
 import shutil
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -40,11 +42,11 @@ MODELS = ['', 'claude-opus-4-6-thinking', 'claude-fable-5-2', 'claude-sonnet-5-5
 IDENTITIES = ['a1b2c3d4e5f60718', 'claire.png', 'mike 7.png', 'ü/ö?&=#%.png', 'A-Z_a-z.0-9~', '', ' ', 'été', '+', "it's", '日本']
 
 
-def main() -> int:
+@tool_scratch.case('clarp-portrait-vectors-')
+def main(root) -> int:
     sys.path.insert(0, str(REPO / 'server'))
     from lib import avatar_urls, backends, model_avatars
 
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-portrait-vectors-', dir='/var/tmp'))
     try:
         versions = {}
         for name in SHIPPED:

@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/oracle-live-usage-vectors.json'
@@ -15,7 +17,7 @@ def generate():
     spec = importlib.util.spec_from_file_location('host', ROOT / 'tests/replay/host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    with tempfile.TemporaryDirectory() as work:
+    with tool_scratch.directory() as work:
         root = Path(work)
         (root / 'scenario-config.toml').write_text('')
         host.isolate(root)
@@ -44,5 +46,5 @@ if __name__ == '__main__':
         print(json.dumps(generate(), indent=1))
     else:
         result = subprocess.check_output([sys.executable, '-I', __file__, '--run'],
-                                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
+                                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}))
         OUT.write_bytes(result)

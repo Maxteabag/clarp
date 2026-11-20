@@ -4,8 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
-import tempfile
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "server-rs/crates/clarp-kernel/tests/fixtures/model-fallbacks-vectors.json"
@@ -166,6 +168,6 @@ def capture(root):
 
 
 if __name__=="__main__":
-    with tempfile.TemporaryDirectory() as root:
+    with tool_scratch.directory() as root:
         data=capture(Path(root))
     OUT.write_text(json.dumps(data,sort_keys=True,indent=1)+"\n",encoding="ascii")

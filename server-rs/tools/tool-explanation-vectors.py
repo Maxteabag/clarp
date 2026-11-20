@@ -28,7 +28,9 @@ import pathlib
 import shutil
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -332,12 +334,12 @@ SNIPPETS = [('plain', 1600), ('x' * 2000, 1600), ('token=abcdef123456 after', 16
             ('password=\u00e9t\u00e9 x', 1600), ('token=a;b', 1600), ('K' + 'x' * 1700 + ' sk-abcdefghijklmnop', 1600)]
 
 
-def run() -> dict:
+@tool_scratch.case('clarp-tool-explanation-vectors-')
+def run(root) -> dict:
     """Runs in a process of its own: what the Python Host makes of the uses above."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-tool-explanation-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -409,7 +411,7 @@ def main() -> int:
         print(json.dumps(run()))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-5000:], file=sys.stderr)
         return 1

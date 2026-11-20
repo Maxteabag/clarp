@@ -19,7 +19,9 @@ import json
 import pathlib
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 OUT = REPO / 'server-rs' / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'hotseat-gate-vectors.json'
@@ -47,11 +49,11 @@ class Desk:
         return 200, self.asked
 
 
-def run() -> dict:
+@tool_scratch.case('clarp-hotseat-gate-vectors-')
+def run(root) -> dict:
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-hotseat-gate-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -119,7 +121,7 @@ def main() -> int:
         sys.stdout.write(json.dumps(run()) + '\n')
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-3000:], file=sys.stderr)
         return 1

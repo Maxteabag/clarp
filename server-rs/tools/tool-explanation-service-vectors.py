@@ -33,8 +33,10 @@ import json
 import pathlib
 import subprocess
 import sys
-import tempfile
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -203,13 +205,13 @@ def answer(request, level):
     return {'text': f'Runs {name}{reader}.', 'template': ''}
 
 
-def scene(number: int) -> dict:
+@tool_scratch.case('clarp-explainer-service-')
+def scene(root, number: int) -> dict:
     """Runs in a process of its own: one scene against the Python Host's service."""
     told = SCENES[number]
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-explainer-service-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -331,12 +333,12 @@ LEDGERS = [
 ]
 
 
-def extras() -> dict:
+@tool_scratch.case('clarp-explainer-ledger-')
+def extras(root) -> dict:
     """Runs in a process of its own: the words a model is asked with, and what the ledger says."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-explainer-ledger-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -402,13 +404,13 @@ def main() -> int:
     scenes = []
     for number, told in enumerate(SCENES):
         ran = subprocess.run([sys.executable, '-I', __file__, '--scene', str(number)], capture_output=True, text=True,
-                             env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                             env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
         if ran.returncode != 0:
             print(f'{told["name"]}: {ran.stderr[-3000:]}', file=sys.stderr)
             return 1
         scenes.append(json.loads(ran.stdout.splitlines()[-1]))
     ran = subprocess.run([sys.executable, '-I', __file__, '--extras'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(f'extras: {ran.stderr[-3000:]}', file=sys.stderr)
         return 1

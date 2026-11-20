@@ -35,7 +35,9 @@ import json
 import pathlib
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -498,12 +500,12 @@ NAMES = ['claude', 'codex', 'agy', 'gemini', 'grok', 'opencode', 'echo', 'muse',
          'claude-code', 'antigravity', 'openai', 'anthropic']
 
 
-def told(name: str) -> dict:
+@tool_scratch.case('clarp-desk-vectors-')
+def told(root, name: str) -> dict:
     """Runs in a process of its own: one story, from an empty store."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-desk-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()

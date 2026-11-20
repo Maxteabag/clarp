@@ -8,7 +8,9 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/long-recordings-vectors.json'
@@ -18,7 +20,7 @@ def record():
     spec = importlib.util.spec_from_file_location('host', ROOT / 'tests/replay/host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    with tempfile.TemporaryDirectory() as d:
+    with tool_scratch.directory() as d:
         p = Path(d)
         (p / 'scenario-config.toml').write_text('')
         host.isolate(p)
@@ -120,4 +122,4 @@ if __name__=='__main__':
         print(json.dumps(record(),indent=1,ensure_ascii=True))
     else:
         OUT.write_bytes(subprocess.check_output([sys.executable,'-IB',__file__,'--record'],
-                                                env={'PATH':os.defpath,'LANG':'C.UTF-8'}))
+                                                env=tool_scratch.child_env({'PATH':os.defpath,'LANG':'C.UTF-8'})))

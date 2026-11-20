@@ -8,8 +8,10 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/body-limits-vectors.json'
@@ -49,10 +51,10 @@ def generate(directory):
 
 if __name__ == '__main__':
     if '--isolated' in sys.argv:
-        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stderr(io.StringIO()):
+        with tool_scratch.directory() as temp, contextlib.redirect_stderr(io.StringIO()):
             print(json.dumps(generate(Path(temp)), ensure_ascii=True))
     else:
         result = subprocess.check_output([sys.executable, '-I', __file__, '--isolated'],
-                                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, text=True)
+                                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), text=True)
         cases = json.loads(result.splitlines()[-1])
         OUT.write_text('[\n' + ',\n'.join(json.dumps(c) for c in cases) + '\n]\n')

@@ -26,7 +26,9 @@ import pathlib
 import re
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 OUT = REPO / 'server-rs' / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'oracle-memory-vectors.json'
@@ -293,7 +295,8 @@ TIMES = [NOW, NOW + 1, NOW + 999, 0, 1, -1000, 1_782_000_000_000, 1_774_746_000_
          1_792_890_000_000, 1_792_893_600_000, 253_402_300_799_000]
 
 
-def run() -> dict:
+@tool_scratch.case('clarp-oracle-memory-vectors-')
+def run(root) -> dict:
     """Runs in a process of its own: what the Python Host's modules do."""
     import os
     import time
@@ -302,7 +305,6 @@ def run() -> dict:
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-oracle-memory-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -520,7 +522,7 @@ def main() -> int:
         print(json.dumps(run()))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-3000:], file=sys.stderr)
         return 1

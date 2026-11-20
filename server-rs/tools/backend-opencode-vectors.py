@@ -7,7 +7,9 @@ import os
 import pathlib
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / "server-rs/crates/clarp-kernel/tests/fixtures/backend-opencode-vectors.json"
@@ -68,7 +70,7 @@ def generate():
     spec = importlib.util.spec_from_file_location("replay", ROOT / "tests/replay/host.py")
     replay = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(replay)
-    with tempfile.TemporaryDirectory() as scratch:
+    with tool_scratch.directory() as scratch:
         root = pathlib.Path(scratch)
         (root / "scenario-config.toml").write_text("")
         replay.isolate(root)
@@ -159,6 +161,6 @@ if __name__ == "__main__":
         print(json.dumps(generate(), ensure_ascii=True))
     else:
         ran = subprocess.run([sys.executable, "-I", __file__, "--inside"], check=True,
-                             env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+                             env=tool_scratch.child_env({"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}),
                              capture_output=True, text=True)
         OUT.write_text(json.dumps(json.loads(ran.stdout.splitlines()[-1]), indent=1) + "\n")

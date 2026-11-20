@@ -7,7 +7,9 @@ import pathlib
 import runpy
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -16,7 +18,7 @@ OUT = HERE.parent / 'crates/clarp-kernel/tests/fixtures/backend-grok-vectors.jso
 
 def vectors():
     harness = runpy.run_path(str(ROOT / 'tests/replay/host.py'))
-    with tempfile.TemporaryDirectory() as directory:
+    with tool_scratch.directory() as directory:
         harness['isolate'](pathlib.Path(directory))
         harness['loopback_only']()
         sys.path.insert(0, str(ROOT / 'server'))
@@ -197,4 +199,4 @@ if __name__ == '__main__':
         OUT.write_text(json.dumps(vectors(), indent=1, ensure_ascii=True) + '\n')
     else:
         subprocess.run([sys.executable, '-I', '-B', __file__, '--isolated'], check=True,
-                       env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
+                       env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}))

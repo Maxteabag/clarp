@@ -21,13 +21,14 @@ import hashlib
 import json
 import os
 import pathlib
-import shutil
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'request-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-request-vectors')
 
 AGENTS = [{'persona': 'Vera', 'session': 'vera'}, {'persona': 'Omar the Second', 'session': 'omar-2'},
           {'persona': 'Ünïcödé', 'session': 'u'}]
@@ -37,20 +38,23 @@ LONG = 'x' * 8100
 IDS = ['r0123456789ab', 'rffffffffffff']
 
 
-def isolate() -> None:
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
+def isolate(root) -> None:
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
         'CLARP_CODE_ROOT': str(REPO / 'server'),
     })
     sys.path.insert(0, str(REPO / 'server'))
 
 
 def main() -> int:
-    isolate()
+    with tool_scratch.directory('clarp-request-vectors-') as name:
+        return generate(pathlib.Path(name))
+
+
+def generate(root):
+    isolate(root)
     from lib import peer_requests as pr
 
     requests = [{'request_id': request_id, 'requester': requester, 'text': text,

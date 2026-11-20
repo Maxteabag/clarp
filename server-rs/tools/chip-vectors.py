@@ -28,7 +28,9 @@ import pathlib
 import shutil
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -300,12 +302,12 @@ KNOWN = {
 }
 
 
-def run() -> dict:
+@tool_scratch.case('clarp-chip-vectors-')
+def run(root) -> dict:
     """Runs in a process of its own: what the Python Host's module does."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-chip-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -469,7 +471,7 @@ def main() -> int:
         print(json.dumps(run(), default=lambda value: sorted(value) if isinstance(value, (set, frozenset)) else str(value)))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-3000:], file=sys.stderr)
         return 1

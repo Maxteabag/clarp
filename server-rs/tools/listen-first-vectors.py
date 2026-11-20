@@ -13,7 +13,9 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT/'server-rs/crates/clarp-kernel/tests/fixtures/listen-first-vectors.json'
@@ -287,10 +289,10 @@ def admissions(op):
 
 if __name__=='__main__':
     if '--record' in sys.argv:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tool_scratch.directory() as tmp:
             print(json.dumps(record(Path(tmp))))
     else:
-        env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'}
+        env=tool_scratch.child_env({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'})
         output=subprocess.check_output([sys.executable,'-I',__file__,'--record'],env=env)
         data=json.loads(output)
         fields=[json.dumps(k)+':['+',\n'.join(json.dumps(row,ensure_ascii=True) for row in rows)+']' for k,rows in data.items()]

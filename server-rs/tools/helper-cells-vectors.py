@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "server-rs/crates/clarp-backend/tests/fixtures/helper-cells.json"
@@ -103,9 +105,9 @@ def record(directory):
 
 if __name__=="__main__":
     if "--record" in sys.argv:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tool_scratch.directory() as tmp:
             print(json.dumps(record(Path(tmp)), ensure_ascii=True))
     else:
-        records=json.loads(subprocess.check_output([sys.executable,"-I",__file__,"--record"],env={"PATH":"/usr/bin:/bin","LANG":"C.UTF-8"}))
+        records=json.loads(subprocess.check_output([sys.executable,"-I",__file__,"--record"],env=tool_scratch.child_env({"PATH":"/usr/bin:/bin","LANG":"C.UTF-8"})))
         OUT.write_text("[\n"+",\n".join(json.dumps(r,ensure_ascii=True) for r in records)+"\n]\n",encoding="ascii")
         print(len(records),"parent transcripts")

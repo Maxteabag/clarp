@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/call-transcription-vectors.json'
@@ -17,7 +19,7 @@ def record():
     spec = importlib.util.spec_from_file_location('host', ROOT / 'tests/replay/host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    with tempfile.TemporaryDirectory() as temp:
+    with tool_scratch.directory() as temp:
         root = Path(temp)
         (root / 'scenario-config.toml').write_text('')
         host.isolate(root)
@@ -127,7 +129,7 @@ if __name__=='__main__':
         for k,v in record().items():
             print(json.dumps(k),json.dumps(v,ensure_ascii=True,separators=(',',':')))
     else:
-        data=subprocess.check_output([sys.executable,'-I',__file__,'--record'],env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'})
+        data=subprocess.check_output([sys.executable,'-I',__file__,'--record'],env=tool_scratch.child_env({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'}))
         rows={}
         for line in data.decode().splitlines():
             k,v=line.split(' ',1)
