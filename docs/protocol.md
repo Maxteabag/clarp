@@ -333,12 +333,6 @@ Rules:
   cached chat.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
-- **The other agents a row names** (`sender_name` and `sender_session` by
-  `sender_agent_id`, `reply_to_name` and `reply_to_session` by
-  `reply_to_agent_id`) are the roster's at the moment of reading. They change
-  without the row's `revision` moving: a follower learns of a rename or a
-  removal from the roster's events, not from the row. A removed agent is named
-  as it was last.
 - **Delivery state (feature `send_delivery_state`, Host contract 78).**
   A user row whose current `trace_id` has a launch
   receipt carries `delivery: {state, rev, seq, for: {client_msg_id,
