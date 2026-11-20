@@ -445,3 +445,93 @@ def test_the_broker_gets_the_scrubbed_environment(tmp_path, monkeypatch, provide
     assert all(n in janitor_reset.BROKER_ENV or n.startswith(janitor_reset.BROKER_ENV_PREFIXES)
                or n in {"PWD", "SHLVL", "_", "LC_CTYPE", "__CF_USER_TEXT_ENCODING"} for n in names), names
 
+
+# ---- the Claude lane's aliases, through the real keeper and the real reset worker ---------------
+# Before this change a Claude receipt was verified when its account matched the pattern aiN (N 1-15).
+# Now it must name one of the Claude aliases the keeper's own read listed.
+
+def _claude_broker(tmp_path, monkeypatch, body):
+    script = tmp_path / "claude-broker.py"
+    requests = tmp_path / "claude-requests.jsonl"
+    script.write_text("import json,pathlib,sys\n"
+                      f"pathlib.Path({str(requests)!r}).open('a').write(sys.stdin.read().strip()+'\\n')\n"
+                      f"print({json.dumps(json.dumps(body))})\n")
+    cfg = config.load()
+    monkeypatch.setattr(config, "load", lambda: dataclasses.replace(
+        cfg, claude_reset_command=(sys.executable, str(script))))
+    return requests
+
+
+def _claude_exhausted(worker, readings, monkeypatch):
+    from lib import janitor_autonomy
+    from tests.unit.test_janitor_hotseat import claude_payload
+    readings["claude"] = claude_payload(a=(True, "rejected"), b=(False, "rejected"))
+    monkeypatch.setattr(janitor_autonomy, "_provider_model_demand", lambda *a: (("Fable",), ("Fable",)))
+    worker.reset_worker = janitor_reset.ResetWorker(worker.stop_event)
+
+
+def _claude_run(worker, clock):
+    _check_again("hotseat-switcher.claude")
+    worker.hotseat_once()
+    if worker.reset_worker.thread:
+        worker.reset_worker.thread.join(5)
+    clock[0] += 1
+    worker.hotseat_once()
+
+
+def test_the_keeper_gives_the_claude_lane_its_read_aliases(switcher, tmp_path, monkeypatch):  # noqa: F811
+    """(M21) A real Claude reset through the keeper: the receipt names one of the read's aliases
+    and is verified, told to the owner as a redemption, not left to six reconciles."""
+    owner, worker, readings, calls, sent = switcher
+    requests = _claude_broker(tmp_path, monkeypatch, {"status": "redeemed", "verified": True, "account": "b"})
+    _claude_exhausted(worker, readings, monkeypatch)
+    clock = [db.now_ms() + 1000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    _claude_run(worker, clock)
+    assert [json.loads(line) for line in requests.read_text().splitlines()] == [{"models": ["Fable"]}]
+    state = json.loads(settings_store.get_text("hotseat-reset.claude.state"))
+    assert state["accounts"] == ["a", "b"] and state["result"]["verified"] is True
+    assert [n["preview"] for n in sent if n["preview"].startswith("Banked reset ")] == \
+        ["Banked reset redeemed for b; quota refill verified."]
+
+
+def test_a_reconcile_checks_the_aliases_its_attempt_was_offered_with(tmp_path, monkeypatch, keeper_owns):
+    """(M5) An unverified attempt offered with 'work'; today's read no longer lists 'work'; the
+    reconcile's receipt for 'work' still verifies: the attempt's own aliases are kept."""
+    receipt, requests = _broker(tmp_path, monkeypatch)
+    receipt.write_text(json.dumps({"status": "unverified", "verified": False}))
+    clock = [db.now_ms()]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    worker = janitor_reset.ResetWorker(SimpleNamespace(is_set=lambda: False))
+    worker.offer("codex", "codex_reset_command", [], _owner(), accounts=("work",), cap_field="codex_reset_max_per_day")
+    _run(worker)
+    clock[0] += 11 * 60_000
+    receipt.write_text(json.dumps({"status": "reconciled", "verified": True, "account": "work"}))
+    worker.offer("codex", "codex_reset_command", [], _owner(), accounts=("home",), reconcile_only=True)
+    _run(worker)
+    state = json.loads(settings_store.get_text("hotseat-reset.codex.state"))
+    assert state["result"]["verified"] is True and state["accounts"] == ["work", "home"]
+
+
+def test_a_reconcile_of_an_attempt_stored_before_the_aliases_uses_the_keepers_read(switcher, tmp_path, monkeypatch):  # noqa: F811
+    """(M19) An attempt left unsettled by the release before this one has no aliases with it; the
+    keeper's reconcile gives the worker the read's aliases, so a reconciled receipt verifies."""
+    from lib import janitor_builtins, turn_queue
+    owner, worker, readings, calls, sent = switcher
+    receipt, requests = _broker(tmp_path, monkeypatch, cap=5)
+    receipt.write_text(json.dumps({"status": "reconciled", "verified": True, "account": "work"}))
+    worker.reset_worker = janitor_reset.ResetWorker(worker.stop_event)
+    clock = [db.now_ms() + 1000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    keeper = janitor_builtins.resolve("account-hotseat")
+    settings_store.set_text("hotseat-reset.codex.state", json.dumps({   # no "accounts": stored before
+        "id": "old-attempt", "owner": keeper["agent_id"], "generation": keeper["generation"], "models": [],
+        "reconcile_only": False, "stop_generation": turn_queue.user_stop_generation(keeper["agent_id"]),
+        "started": clock[0] - 60 * 60_000, "next_at": clock[0] - 1, "handled": True, "needs_reconcile": True,
+        "reconcile_attempts": 0, "result": {"status": "unverified", "verified": False, "needs_reconcile": True}}))
+    readings["codex"] = _codex(("work", True, 0.0), ("home", False, 0.0))
+    _keeper_run(worker, clock)
+    assert _requests(requests) == [{"models": [], "reconcile_only": True}]
+    state = json.loads(settings_store.get_text("hotseat-reset.codex.state"))
+    assert state["result"]["verified"] is True
+
