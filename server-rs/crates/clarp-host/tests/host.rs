@@ -25758,13 +25758,13 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
             said["error"].as_str().unwrap_or_default().to_string(),
         )
     };
-    // The news of the queue that names no message: it was held or let go, or one was taken back.
-    let plain_news = || -> Vec<(u64, bool, u64)> {
+    let queue_news = |id: Option<&str>, change: Option<&str>| -> Vec<(u64, bool, u64)> {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
             event["type"] == "queue-updated"
                 && event["session"] == echo.as_str()
-                && event.get("client_msg_id").is_none()
+                && event["client_msg_id"].as_str() == id
+                && event["queue_change"].as_str() == change
         });
         ours.map(|event| {
             (
@@ -25775,6 +25775,8 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
         })
         .collect()
     };
+    let plain_news = || queue_news(None, None);
+    let deleted = |id| queue_news(Some(id), Some("deleted"));
 
     // A turn runs, and four messages are left for later behind it: one of the phone's, whose
     // ids come with the mark, among them.
@@ -25818,7 +25820,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     assert_eq!(waiting(), ["m2", "m4", "m5"]);
     assert_eq!(queue()["revision"], before + 1);
     wait_for("the news that one was taken back", || {
-        plain_news() == [(3, false, before + 1)]
+        deleted(phones) == [(3, false, before + 1)]
     });
     assert_eq!(
         refused("DELETE", &format!("/turn-queue/{phones}")),
@@ -25856,14 +25858,11 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     // One more is taken back, and the last is sent by hand: nothing waits any more, and the
     // hold is over without a resume. That is told with the turn that began, not by itself.
     let told_before = plain_news().len();
+    let before = queue()["revision"].as_u64().unwrap();
     host.ask("DELETE", "/turn-queue/m2", None);
     wait_for("the news of the second one taken back", || {
-        plain_news().len() == told_before + 1
+        deleted("m2") == [(1, true, before + 1)]
     });
-    assert_eq!(
-        plain_news().last().map(|news| (news.0, news.1)),
-        Some((1, true))
-    );
     let (status, _) = host.ask("POST", "/turn-queue/m5/send", Some(&json!({})));
     assert_eq!(status, 202);
     wait_for("the last message to be answered", || {
@@ -25873,7 +25872,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     });
     let free = queue();
     assert_eq!((&free["paused"], waiting().len()), (&json!(false), 0));
-    assert_eq!(plain_news().len(), told_before + 1, "{:?}", plain_news());
+    assert_eq!(plain_news().len(), told_before, "{:?}", plain_news());
     let began: Vec<Value> = {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
@@ -26338,12 +26337,14 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         host.ask("PUT", &format!("/turn-queue/{id}"), Some(&body))
     };
     let refused = |status: u16, why: &str| (status, json!({ "error": why }));
-    let plain_news = || -> usize {
+    let edit_news = || -> usize {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
             event["type"] == "queue-updated"
                 && event["session"] == echo.as_str()
-                && event.get("client_msg_id").is_none()
+                && event["client_msg_id"] == "m2"
+                && event["queue_change"] == "edited"
+                && event["text"] == "second, in other words"
         });
         ours.count()
     };
@@ -26405,7 +26406,7 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         ]
     );
     assert_eq!(queue(&host)["revision"], before + 1);
-    wait_for("the news that the queue changed", || plain_news() == 1);
+    wait_for("the news that the queue changed", || edit_news() == 1);
     assert_eq!(
         put(phones, json!({ "text": "third, as the phone has it now" })).0,
         200
