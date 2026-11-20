@@ -877,6 +877,8 @@ async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut phone_spoke = Instant::now();
     let mut signs_seen = line.signs_of_life();
+    // The kinds of event of the voice no part of this Host reads, said once a call.
+    let mut unread: std::collections::HashSet<String> = std::collections::HashSet::new();
     let ending = loop {
         // What the step before this told is said now, in its order; then what it said to
         // keep is kept.
@@ -894,6 +896,18 @@ async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
             voice_gone |= voice.resume("go_away").await.is_err();
         }
         if !voice_gone && let Some(event) = voice.events.pop_front() {
+            // A kind of event of the voice nothing here reads (a session's standby, a kind to
+            // come) is passed over, and said once a call by its type alone. What the Host put
+            // there itself (`oracle_v2.*`, as a second voice's reconnect) is no such event.
+            let own = event["type"]
+                .as_str()
+                .is_some_and(|kind| kind.starts_with("oracle_v2."));
+            if !own
+                && let Some(kind) = clarp_kernel::live_call::unread_voice_event(&event)
+                && unread.insert(kind.clone())
+            {
+                eprintln!("oracleVoiceEventUnread type={kind}");
+            }
             let now = session.now();
             session.machine.voice(&event, &mut session.said, now);
             continue;

@@ -816,6 +816,8 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let mut polling = false;
     let mut last_poll = 0.0;
     let mut last_user = f64::NEG_INFINITY;
+    // The kinds of event of the voice no part of this Host reads, said once a call.
+    let mut unread: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut last_output = f64::NEG_INFINITY;
     loop {
         // What the step before this told is said now, in its order, the books let go of.
@@ -956,6 +958,13 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                     Some(Ok(_)) => None,
                 };
                 if let Some(event) = event.filter(Value::is_object) {
+                    // A kind of event nothing here reads (a session's standby, a kind to come)
+                    // is passed over, and said once by its type alone.
+                    if let Some(kind) = live_call::unread_voice_event(&event)
+                        && unread.insert(kind.clone())
+                    {
+                        eprintln!("agentLiveEventUnread type={kind}");
+                    }
                     if configured {
                         routing.observe(&event,seconds(began));
                         if event["type"]=="session.input_transcript.delta" && event["delta"].as_str().is_some_and(|s|!python::strip(s).is_empty()){last_user=seconds(began);}
