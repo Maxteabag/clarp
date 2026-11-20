@@ -266,6 +266,17 @@ impl MemFiles {
 }
 
 impl Blobs for MemFiles {
+    fn names_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+        if prefix.len() < 2 || !is_name(prefix) { return Err(not_a_name(prefix)); }
+        Ok(self.files.lock().map_err(|_| lost())?.keys().filter(|key| key.starts_with(prefix)).cloned().collect())
+    }
+
+    fn remove(&self, name: &str) -> Result<(), StoreError> {
+        if !is_name(name) { return Err(not_a_name(name)); }
+        self.files.lock().map_err(|_| lost())?.remove(name);
+        Ok(())
+    }
+
     fn put(&self, name: &str, bytes: &[u8]) -> Result<(), StoreError> {
         if !is_name(name) {
             return Err(not_a_name(name));
