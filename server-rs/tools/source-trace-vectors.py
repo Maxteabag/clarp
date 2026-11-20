@@ -61,7 +61,11 @@ KINDS = ('document', 'render_spec', 'report')
 def generate(place: pathlib.Path) -> int:
     isolate(place)
     from lib import agents as agents_db, artifacts, db, provider_background_jobs as provider_jobs
-    from lib import render_spec, turn_identity, turn_lifecycle
+    from lib import apns, render_spec, turn_identity, turn_lifecycle
+    # A decision that is made is pushed to the phones from a thread of its own: no push goes out
+    # from here, and no thread outlives the scratch place.
+    apns.on_decision_created = lambda artifact: None
+    apns.send_decision_created = lambda artifact: {}
     from lib.routes.artifacts import ArtifactRoutes
     db.reset_for_tests(place / 'trace.sqlite')
     minted = iter(f'agent-{n}' for n in range(1, 1000))
@@ -207,7 +211,12 @@ def generate(place: pathlib.Path) -> int:
         shown[vector['shown']] = shown.get(vector['shown'], 0) + 1
     print(f'{OUT.relative_to(REPO)}: {len(vectors)} publications {dict(sorted(shown.items()))}, '
           f'{OUT.stat().st_size} bytes')
-    # The library's connections are closed before its place goes: nothing of it is left.
+    # The library's connections are closed, and whatever it started has ended, before its place
+    # goes: nothing of it is left.
+    import threading
+    for thread in threading.enumerate():
+        if thread is not threading.main_thread():
+            thread.join(timeout=10)
     db.reset_for_tests()
     return 0
 
