@@ -185,7 +185,8 @@ async fn choose(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiE
         )
     })?;
     // Every agent's voice may have changed: open apps re-read the agents.
-    app.hub.publish(crate::profile::changed_for_all(), app.clock.now_ms());
+    app.hub
+        .publish(crate::profile::changed_for_all(), app.clock.now_ms());
     let Json(mut result) = engines_told(State(app)).await;
     result["restart_scheduled"] = json!(false);
     Ok(Json(result))
