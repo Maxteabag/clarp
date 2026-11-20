@@ -32,6 +32,13 @@ use crate::edge::{ApiError, App, Principal};
 use crate::ids;
 use crate::personas::object;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KINDS: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    KEPT,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Book>,
+)];
+
 /// The kind of thing a phone's book of handoffs is, among what is left with the fleet.
 const KEPT: &str = "oracle-handoff";
 /// What a phone that may only read and send is told.

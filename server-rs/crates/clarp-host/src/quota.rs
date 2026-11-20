@@ -45,6 +45,20 @@ use sha2::{Digest, Sha256};
 use crate::fleet::FleetHandle;
 use crate::hub::Hub;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits)];
+
+/// Whether bytes are one of this desk's records, as it reads them. One table holds five shapes,
+/// told apart by their keys, which a judge does not see: a tool's standing (`Kept`), Claude's
+/// (`Standing`), and the rest as text (a failure's count, Antigravity's view, the key it draws,
+/// which is no JSON). So no record that is text is set aside.
+fn fits(kept: &[u8]) -> bool {
+    crate::kept::fits::<Kept>(kept)
+        || crate::kept::fits::<Standing>(kept)
+        || crate::kept::text(kept)
+}
+
 /// The kind of thing this is, among what is left with the fleet: a tool's records under the
 /// tool's name, and the key that logins are named with under [`KEY`].
 const KIND: &str = "quota";

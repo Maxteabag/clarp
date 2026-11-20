@@ -25,6 +25,23 @@ use std::{
 };
 use tokio::sync::{Mutex, watch};
 
+/// What this desk keeps, declared once (`kept.rs`): its registry and audit, judged at the start,
+/// and its receipts, listed at an action and never at the start, judged when read.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits),
+    crate::kept::Kind::book(
+        RECEIPTS,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Receipt>,
+    )
+    .when_read(),
+];
+
+/// Whether bytes are one of this desk's two records, as it reads them: its registry, or its audit.
+fn fits(kept: &[u8]) -> bool {
+    crate::kept::fits::<Registry>(kept) || crate::kept::fits::<Vec<Value>>(kept)
+}
+
 const KIND: &str = "controller-actions";
 const RECEIPTS: &str = "controller-action-receipts";
 type Answer = Result<Value, Error>;
@@ -211,7 +228,7 @@ async fn record_result(app: &App, request: &str, result: Value, event: Value) ->
     // Decide expiry while holding the completion lock. Never remove a newer
     // receipt written while this action was executing or delete the row we replace.
     let mut expired = Vec::new();
-    for (key, bytes) in app.fleet.kept_all(RECEIPTS).await.map_err(unavailable)? {
+    for (key, bytes) in app.fleet.kept_listed(RECEIPTS).await.map_err(unavailable)? {
         let prior: Receipt = serde_json::from_slice(&bytes).map_err(unavailable)?;
         if key != request && !rule::receipt_current(prior.at, receipt.at) {
             expired.push((RECEIPTS, key));
@@ -245,7 +262,7 @@ async fn invoke_owned(app: &App, id: String, data: Value, actor: String) -> Answ
     let now = app.clock.now_ms();
     if let Some(bytes) = app
         .fleet
-        .kept(RECEIPTS, request.clone())
+        .kept_book(RECEIPTS, request.clone())
         .await
         .map_err(unavailable)?
     {

@@ -62,6 +62,21 @@ use crate::edge::App;
 use crate::janitors::{Gone, Row};
 use crate::pusher::TurnDone;
 
+/// What this desk keeps, declared once (`kept.rs`; judged when read where it says so).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    // Kept for ever and listed by a later look, never at the start: judged when read. Of an
+    // approval only that it is there is read.
+    crate::kept::Kind::book(APPROVALS, crate::kept::Key::Plain, crate::kept::any).when_read(),
+    crate::kept::Kind::book(LANE, crate::kept::Key::Plain, crate::kept::fits::<Lane>),
+    crate::kept::Kind::book(
+        RECEIPTS,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Receipt>,
+    )
+    .when_read(),
+    crate::kept::Kind::book(WINDOWS, crate::kept::Key::Plain, crate::kept::json),
+];
+
 /// The kinds of thing the keeper leaves with the fleet.
 const WINDOWS: &str = "quota-keeper-window";
 const RECEIPTS: &str = "quota-keeper-receipt";
@@ -265,7 +280,7 @@ async fn pass(app: &App) {
     };
     let mut receipts = desk.receipts.lock().await;
     if receipts.is_none() {
-        let kept = match app.fleet.kept_all(RECEIPTS).await {
+        let kept = match app.fleet.kept_listed(RECEIPTS).await {
             Ok(kept) => kept,
             Err(why) => return failed(app, "its receipts", &why),
         };
@@ -334,7 +349,7 @@ async fn pass(app: &App) {
         .iter()
         .any(|card| card["decision"]["resolved_choice"] == "accepted");
     let acted: std::collections::BTreeSet<String> = if accepted {
-        match app.fleet.kept_all(APPROVALS).await {
+        match app.fleet.kept_listed(APPROVALS).await {
             Ok(kept) => kept.into_iter().map(|(id, _)| id).collect(),
             Err(why) => return failed(app, "the cards a recovery ran by", &why),
         }

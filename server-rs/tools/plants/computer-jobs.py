@@ -74,11 +74,14 @@ change(K,"rows",[
 ])
 
 change(F, "recovery", [
-    ('"clarp-host: skipped {} unreadable computer job records; original bytes retained"', '"skipped {}"'),
     ('|| self.unreadable.contains(id)', '|| !self.unreadable.contains(id)'),
     ('self.computer_jobs.unreadable.remove(&job.id)', 'self.computer_jobs.unreadable.remove("other")'),
-    ('jobs.unreadable.len()', '1'),
     ('"clarp-host: registration replaced an unreadable computer job record"', '"computer job changed"'),
+])
+# A record that cannot be read is set aside, counted and said by the one loader at the start (`kept.rs`); its
+# words are planted here, its count in tools/plants/start-tolerance.py.
+change("clarp-host/src/kept.rs", "recovery", [
+    ('"clarp-host: a record of the kind {} could not be read and is set aside {}: its desk starts without it"', '"skipped {} {}"'),
 ])
 change(F, "wait", [
     ('job.generation != generation || !job.status.is_active()', 'job.generation == generation || !job.status.is_active()'),

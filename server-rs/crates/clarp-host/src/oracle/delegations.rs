@@ -32,6 +32,15 @@ use crate::calls::caller;
 use crate::edge::{self, ApiError, App, Principal};
 use crate::personas::object;
 
+/// What this desk keeps, declared once (`kept.rs`). Listed whole at the first question, not at
+/// the start (a delegation is kept for ever): judged when read, as the delegation it reads.
+pub(crate) const KINDS: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    KEPT,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Delegation>,
+)
+.when_read()];
+
 /// The kind of thing a delegation is, among what is left with the fleet.
 const KEPT: &str = "oracle-delegation";
 /// Why a delegation failed whose turn ended with nothing said.
@@ -52,7 +61,7 @@ fn text(said: &Map<String, Value>, key: &str) -> String {
 /// The book, read from what was kept the first time it is asked for.
 async fn opened<'a>(app: &App, held: &'a mut Option<Book>) -> Result<&'a mut Book, Unavailable> {
     if held.is_none() {
-        let kept = app.fleet.kept_all(KEPT).await?;
+        let kept = app.fleet.kept_listed(KEPT).await?;
         let rows = kept
             .iter()
             .filter_map(|(_, row)| serde_json::from_slice::<Delegation>(row).ok());

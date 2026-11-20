@@ -5,6 +5,33 @@ use clarp_kernel::artifacts::form_events as rules;
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 
+/// What this desk keeps, declared once (`kept.rs`). Each kind is read by key alone (the events
+/// are immutable rows with no expiry, and a start does not read a history): judged when read, by
+/// the type this desk reads.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(COUNTER, crate::kept::Key::Plain, crate::kept::fits::<i64>).when_read(),
+    crate::kept::Kind::book(
+        TAIL,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<(i64, i64)>,
+    )
+    .when_read(),
+    crate::kept::Kind::book(ROW, crate::kept::Key::Plain, row_fits).when_read(),
+    crate::kept::Kind::book(
+        ID,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<(i64, String)>,
+    )
+    .when_read(),
+    crate::kept::Kind::book(CONFIG, crate::kept::Key::Plain, crate::kept::json).when_read(),
+];
+
+/// Whether bytes are an event's row as this desk reads it: an object with its place in the
+/// global order.
+fn row_fits(stored: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(stored).is_ok_and(|row| row["seq"].as_i64().is_some())
+}
+
 const COUNTER: &str = "form-event-counter";
 const TAIL: &str = "form-event-tails";
 const ROW: &str = "form-event-rows";
@@ -20,16 +47,22 @@ fn broken() -> ApiError {
 fn key(id: &str, suffix: &str) -> String {
     format!("{}:{id}{suffix}", id.len())
 }
+/// A record, judged by its type as it is read (`kept.rs`). One that is not this desk's is set
+/// aside, counted and said; a form's draft key then begins anew, and every other record answers
+/// that it is broken, as before: a ledger is not numbered anew over the rows it kept.
 async fn read<T: DeserializeOwned>(
     app: &App,
     kind: &'static str,
     key: String,
 ) -> Result<Option<T>, ApiError> {
-    app.fleet
-        .kept(kind, key)
-        .await?
-        .map(|bytes| serde_json::from_slice(&bytes).map_err(|_| broken()))
-        .transpose()
+    match app.fleet.judged(kind, key).await? {
+        crate::kept::Found::Read(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|_| broken()),
+        crate::kept::Found::Absent => Ok(None),
+        crate::kept::Found::Unfit if kind == CONFIG => Ok(None),
+        crate::kept::Found::Unfit => Err(broken()),
+    }
 }
 fn put(kind: &'static str, key: String, value: &impl Serialize) -> Result<Write, ApiError> {
     Ok((kind, key, serde_json::to_vec(value).map_err(|_| broken())?))

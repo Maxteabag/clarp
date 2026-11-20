@@ -41,7 +41,7 @@ changes("clarp-host/src/heard/inventory.rs", "host", [
     ('records.iter().position(|r| r["id"] == id)', 'records.iter().position(|r| r["id"] != id)'),
     ('let Some(stored) = record.get("_managed_root")', 'let Some(stored) = record.get("_private_unused")'),
     ('installed_path(record).is_none()', 'installed_path(record).is_some()'),
-    ('r["id"] == model', 'r["id"] != model'), ('kept("transcription-models", "records".into())', 'kept("transcription-models", "unknown".into())'),
+    ('r["id"] == model', 'r["id"] != model'), ('judged("transcription-models", "records".into())', 'judged("transcription-models", "unknown".into())'),
     ('records.remove(index);', 'let _ = index;'),
     ('text.trim().to_owned()', 'text.to_owned()'), ('"model_id": id', '"model_id": ""'),
 ])
@@ -76,18 +76,24 @@ changes("clarp-host/src/heard/inventory.rs", "host", [
     ('records[index]["_remove_pending"] = json!(true)', 'records[index]["_remove_pending"] = json!(false)'),
     ('if record["_remove_pending"] == true', 'if record["_remove_pending"] == false'),
     ('if unreadable {','if !unreadable {'),
-    ('"clarp-host: unreadable transcription inventory; using an empty list"', '"corrupt record"'),
-    ('"records.unreadable".into()', '"records.backup".into()'),
+])
+# Its unreadable list is set aside by the one loader now (`kept.rs`): the words and the copy's name are there.
+changes("clarp-host/src/kept.rs", "host", [
+    ('"clarp-host: a record of the kind {} could not be read and is set aside {}: its desk starts without it"', '"corrupt record {}{}"'),
+    ('pub const SET_ASIDE: &str = ".unreadable";', 'pub const SET_ASIDE: &str = ".backup";'),
 ])
 changes("clarp-host/src/heard/managed.rs", "host", [
     ('Ok(dir) => dir,\n                        Err(e) if e.kind() == std::io::ErrorKind::NotFound', 'Ok(dir) => dir,\n                        Err(e) if e.kind() != std::io::ErrorKind::NotFound'),
     ('Ok(meta) => meta.file_type(),\n            Err(e) if e.kind() == std::io::ErrorKind::NotFound', 'Ok(meta) => meta.file_type(),\n            Err(e) if e.kind() != std::io::ErrorKind::NotFound'),
 ])
 # The 501 for install has been replaced by a working 202 route. Its rules live in transcription-installer.
+# The copy and a refused write are the loader's (`kept::judge`, through `FleetHandle::judged`).
+changes("clarp-host/src/kept.rs", "port", [
+    ('(table.to_string(), aside.clone(), Some(stored)),', '(table.to_string(), aside.clone(), Some(Vec::new())),'),
+    ('store.put_together(&moved)?;', 'let _ = store.put_together(&moved);'),
+])
 changes("clarp-host/src/heard/inventory.rs", "port", [
-    ('Some(bytes),', 'Some(Vec::new()),'),
     ('.await\n            .map_err(|e| e.0)?;', '.await.unwrap_or(None);'),
-    ('.await\n                        .map_err(|e| e.0)?;', '.await.unwrap_or(());'),
 ])
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

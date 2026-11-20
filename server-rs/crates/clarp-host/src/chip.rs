@@ -39,6 +39,16 @@ use crate::pairing::Scope;
 use crate::relay::{Limited, Outcome, Push, Relay};
 use clarp_kernel::alert_routes::{ActivityRoutes, Path};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits)];
+
+/// Whether bytes are one of this desk's two records, as it reads them: its activities, or its day
+/// (what `Spent::kept` reads as one).
+fn fits(kept: &[u8]) -> bool {
+    crate::kept::fits::<Vec<Activity>>(kept) || matches!(Spent::kept(Some(kept)), Spent::Of(_))
+}
+
 /// The kind of thing the chip keeps with the fleet, and the names of its parts.
 const KIND: &str = "chip";
 const ACTIVITIES: &str = "activities";

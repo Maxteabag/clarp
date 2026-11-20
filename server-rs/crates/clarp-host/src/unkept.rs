@@ -736,9 +736,15 @@ pub(crate) mod at_the_port {
         .unwrap();
         let fleet = &place.fleet;
         assert!(fleet.computer_jobs().await.unwrap().is_empty());
+        // Each is moved aside by the start's walk, and said by its key (`kept.rs`).
+        let aside = |key: &str| {
+            format!(
+                "clarp-host: a record of the kind computer-jobs could not be read and is set aside as {key}.unreadable: its desk starts without it"
+            )
+        };
         assert_eq!(
             place.said.lock().unwrap().as_slice(),
-            ["clarp-host: skipped 2 unreadable computer job records; original bytes retained"]
+            [aside("private-one"), aside("private-two")]
         );
         assert!(
             fleet
@@ -761,30 +767,20 @@ pub(crate) mod at_the_port {
         };
         *place.refused.lock().unwrap() = Some(table);
         assert!(fleet.change_computer_job(register.clone()).await.is_err());
-        assert_eq!(place.said.lock().unwrap().len(), 1);
-        assert_eq!(
-            fleet
-                .kept("computer-jobs", "private-one".into())
-                .await
-                .unwrap()
-                .unwrap(),
-            b"private-corrupt-bytes"
-        );
+        assert_eq!(place.said.lock().unwrap().len(), 2);
+        // Moved aside whole, never lost: both copies stand, counted, and no desk reads them.
+        assert_eq!(fleet.left_out().counts().get("computer-jobs"), Some(&2));
+        let copy = fleet.kept("computer-jobs", "private-one.unreadable".into());
+        assert_eq!(copy.await.unwrap(), None);
         *place.refused.lock().unwrap() = None;
         fleet.change_computer_job(register).await.unwrap().unwrap();
         assert_eq!(
-            place.said.lock().unwrap()[1],
+            place.said.lock().unwrap()[2],
             "clarp-host: registration replaced an unreadable computer job record"
         );
         assert_eq!(fleet.computer_jobs().await.unwrap().len(), 1);
-        assert_eq!(
-            fleet
-                .kept("computer-jobs", "private-two".into())
-                .await
-                .unwrap()
-                .unwrap(),
-            b"private-corrupt-bytes"
-        );
+        // The copies stand beside the registered job, counted until somebody removes them.
+        assert_eq!(fleet.left_out().counts().get("computer-jobs"), Some(&2));
     }
 
     #[tokio::test]
@@ -922,14 +918,12 @@ pub(crate) mod at_the_port {
             None
         );
         assert!(crate::heard::Ears::new(&config, &place.fleet).await.is_ok());
-        assert_eq!(
-            place
-                .fleet
-                .kept(key, "records.unreadable".into())
-                .await
-                .unwrap(),
-            Some(original)
-        );
+        // Moved aside whole (`kept.rs`): the key is free, the copy stands and is counted, and no
+        // desk reads it.
+        assert_eq!(place.fleet.kept(key, "records".into()).await.unwrap(), None);
+        let counted = place.fleet.left_out().counts();
+        assert_eq!(counted.get("transcription-models"), Some(&1));
+        let _ = original;
     }
 
     #[tokio::test]

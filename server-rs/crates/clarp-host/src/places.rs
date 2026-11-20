@@ -22,6 +22,16 @@ use crate::agent::Unavailable;
 use crate::edge::{ApiError, App};
 use crate::personas::object;
 
+/// What this desk keeps, declared once (`kept.rs`): a session's last place, read by key alone
+/// (one for every session that ever said one, and none is listed), judged as the place it reads.
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(PLACES, crate::kept::Key::Plain, fits).when_read()];
+
+/// Whether bytes are a place as this desk reads one.
+fn fits(kept: &[u8]) -> bool {
+    Fix::read(kept).is_some()
+}
+
 /// The kind of thing a place is, among what is left with the fleet.
 const PLACES: &str = "place";
 
@@ -43,7 +53,7 @@ pub(crate) async fn last(app: &App, session: &str) -> Result<Value, Unavailable>
     if session.is_empty() {
         return Ok(json!({}));
     }
-    let kept = app.fleet.kept(PLACES, session.to_string()).await?;
+    let kept = app.fleet.kept_book(PLACES, session.to_string()).await?;
     let fix = kept.as_deref().and_then(Fix::read);
     Ok(fix.map_or_else(|| json!({}), |fix| fix.told()))
 }

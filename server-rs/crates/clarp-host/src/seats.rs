@@ -52,6 +52,13 @@ use tokio::sync::watch;
 
 use crate::edge::App;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KINDS: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    KIND,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Kept>,
+)];
+
 /// The kind of thing this is, among what is left with the fleet, and the one key it has.
 const KIND: &str = "seats";
 const KEPT: &str = "desk";

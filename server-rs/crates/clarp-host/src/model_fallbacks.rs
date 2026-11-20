@@ -7,6 +7,12 @@ use serde_json::json;
 use std::future::Future;
 use std::time::Duration;
 
+/// What this desk keeps, declared once (`kept.rs`). A receipt for each attempt, never let go,
+/// read by key alone and so not at the start: this desk reads only that one is there (an
+/// attempt claimed is never made twice), so whatever is there is one of its own.
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, crate::kept::any).when_read()];
+
 const KIND: &str = "model-fallback-attempt";
 #[derive(Default)]
 pub struct Desk(tokio::sync::Mutex<()>);
@@ -162,7 +168,7 @@ where
             }
             if app
                 .fleet
-                .kept(KIND, key.clone())
+                .kept_book(KIND, key.clone())
                 .await
                 .map_err(|_| unavailable())?
                 .is_some()

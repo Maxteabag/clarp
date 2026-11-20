@@ -43,6 +43,7 @@ webpki-roots.workspace = true
 
 [dev-dependencies]
 proc-macro2 = "1"
+regex.workspace = true
 syn = { version = "2", features = ["full", "visit"] }
 
 [lints]
