@@ -12,7 +12,6 @@
 //! workflow on 16 Nov 2026 (`screens.json`).
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
 use axum::extract::{Query, State};
 use axum::http::{StatusCode, Uri};
@@ -21,12 +20,6 @@ use axum::{Json, Router};
 use serde_json::{Value, json};
 
 use crate::edge::{ApiError, App};
-
-fn kept(path: &str) -> Value {
-    static KEPT: LazyLock<Value> =
-        LazyLock::new(|| serde_json::from_str(include_str!("screens.json")).unwrap_or(Value::Null));
-    KEPT[path].clone()
-}
 
 type Asked = Query<HashMap<String, String>>;
 type Answered = Result<Json<Value>, ApiError>;
@@ -114,14 +107,6 @@ async fn agent_goal(State(app): State<App>, Query(asked): Asked) -> Answered {
 
 async fn no_agent_goal(uri: Uri) -> ApiError {
     not_built_at(&uri, "A goal of this kind is")
-}
-
-async fn portrait_generation() -> Json<Value> {
-    Json(kept("/agent-portrait-generation"))
-}
-
-async fn no_pictures() -> ApiError {
-    not_built("Making and choosing pictures is")
 }
 
 // ---- how the Host speaks up and judges ---------------------------------------------------------
@@ -349,10 +334,6 @@ pub fn routes() -> Router<App> {
         .route("/agent-dreaming", post(set_dreaming))
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))
         .route("/agent-goal/{action}", post(no_agent_goal))
-        .route(
-            "/agent-portrait-generation",
-            get(portrait_generation).post(no_pictures),
-        )
         .route(
             "/diagnostics/settings",
             get(crate::diagnostics::settings).post(crate::diagnostics::update),

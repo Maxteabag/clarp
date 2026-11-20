@@ -1,0 +1,165 @@
+"""A note to the user is never removed or rewritten by any backend's import (issue 478, F3).
+
+The note is the only thing the user is given from a turn they may keep hidden, and it is the
+Host's own row (source_file note:<id>, a negative seq). Every backend's transcript import runs
+through the same writer; each is driven here under its own backend name: a tail import, a later
+import, a full re-import, and a positional shift of every transcript row before the note. AGY's
+own commit (the snapshot restore at the end of its turn) and the Codex app-server's finalize are
+driven too. Afterwards the note's row is there with the same id, text, trace and audience."""
+from __future__ import annotations
+
+import pathlib
+
+import pytest
+
+from lib import agents, clock, coordination, db, message_store, transcript_incremental, turn_lifecycle
+
+BACKENDS = ("claude", "codex", "agy", "grok", "muse", "opencode", "deepseek")
+BASE = 1_795_000_000_000
+
+
+def _turn(role, text, at):
+    return {"role": role, "text": text, "timestamp": clock.iso_from_ms(BASE + at), "tools": []}
+
+
+def _conversation(extra_before=0):
+    turns = [_turn("user", f"older request {i}", 100 + i * 10) for i in range(extra_before)]
+    return turns + [_turn("user", "first request", 1_000), _turn("assistant", "first answer", 2_000),
+                    _turn("user", "second request", 5_000), _turn("assistant", "second answer", 6_000)]
+
+
+def _note_row(agent_id):
+    return db.conn().execute(
+        "SELECT message_id, text, trace_id, kind, origin, source_file FROM messages WHERE kind='note'"
+        " AND agent_id=?", (agent_id,)).fetchall()
+
+
+def _on_log(agent_id, session):
+    return [row for row in agents.list_messages(agent_id=agent_id, backend_session_id=session, limit=500)
+            if row["kind"] == "note"]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_every_backends_import_keeps_a_note(tmp_path, backend, monkeypatch):
+    now = [BASE]
+    monkeypatch.setattr(clock, "now_ms", lambda: now[0])
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend=backend)
+    session = "native"
+    agents.bind_backend_session(agent_id, session)
+    path = pathlib.Path(tmp_path, "transcript.jsonl")
+    path.write_text("")
+    current = {"turns": _conversation()[:2]}
+
+    def imported():
+        now[0] += 10
+        transcript_incremental.import_transcript(backend=backend, path=path, agent_id=agent_id,
+                                                 backend_session_id=session,
+                                                 parse=lambda _p: list(current["turns"]))
+        db.close_local()
+
+    imported()                                                # the tail import
+    agents.open_turn(agent_id=agent_id, source="pwa", trace_id="t-note")
+    now[0] = BASE + 3_000
+    note = message_store.record_note(agent_id=agent_id, backend_session_id=session, note_id="n-1",
+                                     text="For you.", trace_id="t-note")
+    want = [(message_store.note_message_id(agent_id, "n-1"), "For you.", "t-note", "note", "note", "note:n-1")]
+    assert [tuple(row) for row in _note_row(agent_id)] == want
+    current["turns"] = _conversation()
+    imported()                                                # a later import
+    assert [tuple(row) for row in _note_row(agent_id)] == want
+    message_store.store_transcript_turns(agent_id=agent_id, backend_session_id=session,
+                                         source_file=str(path), turns=_conversation())   # a full re-import
+    db.close_local()
+    assert [tuple(row) for row in _note_row(agent_id)] == want
+    current["turns"] = _conversation(extra_before=3)          # every row before the note shifts
+    imported()
+    message_store.store_transcript_turns(agent_id=agent_id, backend_session_id=session,
+                                         source_file=str(path), turns=_conversation(extra_before=3))
+    db.close_local()
+    assert [tuple(row) for row in _note_row(agent_id)] == want
+    shown = _on_log(agent_id, session)
+    assert [(row["id"], row["text"], row["trace_id"], row["audience"]) for row in shown] == [
+        (message_store.note_message_id(agent_id, "n-1"), "For you.", "t-note", "user")]
+    assert note["created"] is True
+
+
+def test_agys_commit_at_the_end_of_its_turn_keeps_a_note_written_during_it(tmp_path):
+    """AGY restores its assistant rows from a snapshot taken before the turn; a note written
+    while the turn ran was deleted with them (the reviewer's L8)."""
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="agy")
+    agents.bind_backend_session(agent_id, "native")
+    message_store.store_transcript_turns(agent_id=agent_id, backend_session_id="native", source_file="t.jsonl",
+                                         turns=_conversation())
+    earlier = message_store.record_note(agent_id=agent_id, backend_session_id="native", note_id="n-before",
+                                        text="Said before.", trace_id="t-before")
+    agents.open_turn(agent_id=agent_id, source="pwa", trace_id="t-agy")
+    snapshot = message_store.capture_assistant_state(agent_id=agent_id, backend_session_id="native")
+    message_store.record_note(agent_id=agent_id, backend_session_id="native", note_id="n-during",
+                              text="Said during.", trace_id="t-agy")
+    agents.commit_agy_assistant_turn(agent_id=agent_id, backend_session_id="native", trace_id="t-agy",
+                                     snapshot=snapshot, terminal_status="success", text="Done.")
+    rows = {row["message_id"]: (row["text"], row["trace_id"]) for row in _note_row(agent_id)}
+    assert rows == {message_store.note_message_id(agent_id, "n-before"): ("Said before.", "t-before"),
+                    message_store.note_message_id(agent_id, "n-during"): ("Said during.", "t-agy")}
+    assert earlier["created"] is True
+
+
+def test_the_codex_app_servers_finalize_keeps_a_note(tmp_path):
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="codex")
+    agents.bind_backend_session(agent_id, "native")
+    agents.open_turn(agent_id=agent_id, source="pwa", trace_id="t-cx")
+    turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.PROMPT_ADMITTED, {"trace_id": "t-cx"})
+    message_store.upsert_live_assistant_message(agent_id=agent_id, backend_session_id="native",
+                                                trace_id="t-cx", item_key="it-1", text="Work")
+    message_store.record_note(agent_id=agent_id, backend_session_id="native", note_id="n-cx",
+                              text="For you.", trace_id="t-cx")
+    message_store.finalize_live_assistant_message(agent_id=agent_id, backend_session_id="native",
+                                                  trace_id="t-cx", text="Work done.")
+    assert [(row["message_id"], row["trace_id"]) for row in _note_row(agent_id)] == [
+        (message_store.note_message_id(agent_id, "n-cx"), "t-cx")]
+    assert coordination.audience_of(agent_id, "t-cx") == "user"
+
+
+def test_agys_restore_keeps_each_rows_trace_phase_and_summary(tmp_path):
+    """R153: the restore put rows back without trace_id (and phase, turn_json), so after any
+    later AGY turn a coordination turn's reply read 'user' and a turn lost its summary."""
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="agy")
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    agents.bind_backend_session(agent_id, "native")
+    agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-boss",
+                               text="Report", trace_id="t-boss", origin="agent", sender_agent_id=boss)
+    with db.conn() as con:
+        con.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id, source_file, seq, role,
+                       timestamp, text, updated_at, revision, origin, trace_id, phase, turn_json)
+                       VALUES ('reply-1', ?, 'native', 't.jsonl', 0, 'assistant', ?, 'Green.', 1, 1, 'agent',
+                               't-boss', 'final', '{"turn_id":"t-boss","status":"completed"}')""",
+                    (agent_id, clock.iso_from_ms(BASE)))
+    db.close_local()
+    agents.open_turn(agent_id=agent_id, source="pwa", trace_id="t-next")
+    snapshot = message_store.capture_assistant_state(agent_id=agent_id, backend_session_id="native")
+    agents.commit_agy_assistant_turn(agent_id=agent_id, backend_session_id="native", trace_id="t-next",
+                                     snapshot=snapshot, terminal_status="success", text="Next.")
+    row = db.conn().execute("SELECT trace_id, phase, turn_json FROM messages WHERE message_id='reply-1'").fetchone()
+    assert tuple(row) == ("t-boss", "final", '{"turn_id":"t-boss","status":"completed"}')
+    reply = next(r for r in agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50)
+                 if r["id"] == "reply-1")
+    assert reply["audience"] == "agents"
+
+
+def test_agys_restore_takes_a_snapshot_the_previous_release_captured(tmp_path):
+    """A snapshot captured by the code before this change has no trace_id, phase or turn_json
+    keys: the restore reads them with a default and does not fail."""
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="agy")
+    agents.bind_backend_session(agent_id, "native")
+    message_store.store_transcript_turns(agent_id=agent_id, backend_session_id="native", source_file="t.jsonl",
+                                         turns=_conversation())
+    agents.open_turn(agent_id=agent_id, source="pwa", trace_id="t-old")
+    snapshot = message_store.capture_assistant_state(agent_id=agent_id, backend_session_id="native")
+    for row in snapshot["messages"]:
+        for key in ("trace_id", "phase", "turn_json"):
+            row.pop(key, None)
+    agents.commit_agy_assistant_turn(agent_id=agent_id, backend_session_id="native", trace_id="t-old",
+                                     snapshot=snapshot, terminal_status="success", text="Done.")
+    texts = [row["text"] for row in db.conn().execute(
+        "SELECT text FROM messages WHERE agent_id=? AND role='assistant' ORDER BY seq", (agent_id,))]
+    assert "first answer" in texts and "second answer" in texts

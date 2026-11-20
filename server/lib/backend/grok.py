@@ -19,7 +19,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from ..backend_catalogue import GROK
-from .base import CatalogueDefault, BackendBrand, CompactionStrategy
+from .base import CatalogueDefault, BackendBrand, CliMissing, CompactionStrategy
 from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
 from .long_prompt import PromptFile, fits_argv, removing
 
@@ -185,7 +185,7 @@ class GrokBackend(StreamJsonBackend):
     ) -> TurnHandle:
         grok_bin = self.required_binary
         if shutil.which(grok_bin) is None:
-            raise FileNotFoundError(
+            raise CliMissing(
                 f"`{grok_bin}` not on PATH — install Grok Build "
                 f"(https://x.ai/cli) to run Grok-backed agents")
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))

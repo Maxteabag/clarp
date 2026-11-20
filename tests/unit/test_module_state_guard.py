@@ -102,10 +102,14 @@ ALLOWED: dict[tuple[str, str], str] = {
     # Recycled app-server clients whose process has not been seen to exit;
     # their threads stay held until it has (BACKENDS-07b).
     ("lib/codex_app_server.py", "_RETIRING"): JOBS,
+    # The size the app-server last reported per thread: the "before" of the
+    # user's compaction; after a restart the rollout's tail stands in (R148).
+    ("lib/codex_app_server.py", "_CONTEXT_SIZES"): CACHE,
     # Draining app-server generations after a credential change (BACKENDS-06b).
     ("lib/codex_app_server.py", "_DRAINING"): JOBS,
     ("lib/compaction.py", "_active"): JOBS,
     ("lib/compaction.py", "_runtime_client"): CLIENT,
+    ("lib/compaction.py", "_lingering"): JOBS,
     ("lib/config.py", "PERSONA_PERSONALITIES"): IMPORT,
     # Request threads share which controller-action requests are in flight and
     # when each action last ran; both are meaningless after a restart.
@@ -201,6 +205,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcription_models.py", "_activation_retry_after"): THROTTLE,
     ("lib/transcription_models.py", "_tasks"): JOBS,
     ("lib/transcription_results.py", "_locks"): LOCKS,
+    ("lib/turn_queue.py", "_DEFERRED_LOGGED"): THROTTLE,
     ("lib/turn_dispatch.py", "_JANITOR_SPAWN_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_REQUEST_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_RUNTIME_CLIENT"): CLIENT,

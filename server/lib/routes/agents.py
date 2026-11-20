@@ -33,6 +33,41 @@ class AgentRoutes:
         return self._json_ok({"ok": True, "session": session,
                               "archived": archived})
 
+    def _handle_agent_note(self):
+        """POST /agent-notes {session, text, note_id?}: an agent's note to the
+        user, from its own running turn (lib.agent_notes)."""
+        from lib import agent_notes, apns, turn_identity, user_notifications
+        from lib.provider_background_jobs import TURN_ENV
+        data = self._read_json()
+        token = (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")
+        try:
+            caller_agent_id, caller_trace = turn_identity.caller_turn({TURN_ENV: token})
+        except Exception as exc:  # noqa: BLE001 - unknown identity: refused, retryable
+            from lib.log import log_exception
+            log_exception("turnCallerLookupFail", exc)
+            raise turn_identity.TurnIdentityUnavailable() from exc
+        try:
+            posted = agent_notes.post(data, caller_agent_id=caller_agent_id,
+                                      caller_trace=caller_trace)
+        except agent_notes.NoteRefused as refused:
+            return self._json_error(refused.status, str(refused))
+        note, notification = posted.note, posted.notification
+        stream = getattr(self.ctx, "stream", None)
+        if note.get("created") and stream is not None:
+            events.broadcast(stream, events.transcript_updated(
+                agent_id=posted.agent["agent_id"], session=posted.agent.get("session"),
+                backend_session_id=posted.backend_session_id))
+        if notification.get("notify"):
+            if stream is not None:
+                events.broadcast(stream, events.as_event(
+                    user_notifications.event_payload(notification)))
+            apns.on_user_notification(notification)
+        return self._json_ok({"ok": True, "session": posted.agent.get("session"),
+                              "message_id": note["id"], "trace_id": note.get("trace_id") or "",
+                              "created": bool(note.get("created")),
+                              "notified": bool(notification.get("notify")),
+                              "reason": notification.get("reason") or ""})
+
     def _handle_agent_assign(self):
         from lib.contact_assignment import assign_contact
         data = self._read_json()
@@ -48,8 +83,10 @@ class AgentRoutes:
         except ValueError as exc:
             return self._json_error(409, str(exc))
         if data.get("mode") != "options":
+            from lib import voice_profile
             events.broadcast(self.ctx.stream, events.agent_roster(
-                "contact-assigned", session=result["session"], name=result["name"]))
+                "contact-assigned", session=result["session"], name=result["name"],
+                voice_profile=voice_profile.for_session(result["session"])))
         return self._json_ok(result)
 
     def _handle_agent_avatar(self, agent_id: str):
@@ -291,8 +328,10 @@ class AgentRoutes:
  })
         if str(agent.get("persona") or "") != name:
             agents_db.update_agent(agent["agent_id"], persona=name)
+            from lib import voice_profile
             events.broadcast(self.ctx.stream, events.agent_roster(
-                "agent-renamed", session=session, name=name))
+                "agent-renamed", session=session, name=name,
+                voice_profile=voice_profile.for_session(session)))
         return self._json_ok({
             "ok": True, "session": session, "name": name,
         })
@@ -333,6 +372,10 @@ class AgentRoutes:
                 static_root=static_root,
             )
         )
+        from lib import events as events_module, voice_profile
+        profile = voice_profile.for_session(result.session)
+        if profile is not events_module.OMIT:
+            agent["voice_profile"] = profile
         agent.update(
             alive=True,
             latest_state=state.get("kind") or "idle",

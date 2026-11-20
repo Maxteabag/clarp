@@ -140,14 +140,15 @@ def context_for(episode, position, duration, source=None):
     return json.dumps(context, ensure_ascii=False)
 
 
-def session_config(context, *, stable=False):
+def session_config(context, *, stable=False, wire=None, model=None):
     """The tinkered engine adds the podcast prompt to Oracle's own instructions;
-    the stable engine replaces them, because it has no agent operations."""
+    the stable engine replaces them, because it has no agent operations.
+    ``wire`` (tinkered) or ``model`` (stable) is the session's own read of the model."""
     if stable:
-        config = oracle_live_stable.live_config()
+        config = oracle_live_stable.live_config(model=model)
         config["instructions"] = STABLE_PROMPT
     else:
-        config = live_config()
+        config = live_config(wire=wire)
         config["instructions"] += "\n" + PROMPT
     config["input"] = [{"type": "message", "role": "user",
                         "content": [{"type": "input_text", "text": "Reference data for the paused episode:\n"+context}]}]

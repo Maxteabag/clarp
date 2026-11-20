@@ -147,6 +147,48 @@ pub async fn caller(app: &App, token: &str) -> Result<Option<Arc<Member>>, Unava
     Ok(current.then(|| member.clone()))
 }
 
+/// The trace an artifact is published under (R102, the Python Host's `_publishing_trace`): the
+/// trace of the turn whose token the request presents, only when that turn is `agent_id`'s own
+/// and is that agent's running turn now; the empty text otherwise: no token, a token this Host
+/// did not make, another agent's, a turn that ended (a job it started that publishes later).
+/// Nothing the caller writes is taken: the token is the Host's own proof. A key or a log that
+/// cannot be read is answered so, and that it may be asked again (503), as the Python Host
+/// answers a lookup that failed.
+///
+/// The rule is the token's: every turn of every tool has its token on this Host, so what a Codex
+/// turn publishes names its trace here, where the Python Host's Codex agents, run through its
+/// shared app-server, have no token to name it by (a registered difference; its R102b).
+pub async fn publishing_trace(
+    app: &App,
+    token: Option<&str>,
+    agent_id: &str,
+) -> Result<String, ApiError> {
+    let unavailable =
+        |why: Unavailable| ApiError::retryable(StatusCode::SERVICE_UNAVAILABLE, why.0);
+    let Some(token) = token.filter(|token| !token.is_empty()) else {
+        return Ok(String::new());
+    };
+    let key = app
+        .turns
+        .key_or_read(&app.fleet)
+        .await
+        .map_err(unavailable)?;
+    let Some(claim) = turn_identity::read(&key, token) else {
+        return Ok(String::new());
+    };
+    if claim.agent_id != agent_id {
+        return Ok(String::new());
+    }
+    let directory = app.fleet.directory();
+    let mut everyone = directory.members.iter().chain(directory.janitors.iter());
+    let Some(member) = everyone.find(|member| member.record.agent_id == claim.agent_id) else {
+        return Ok(String::new());
+    };
+    let running = member.agent.running_trace(claim.turn).await;
+    let running = running.map_err(|_| unavailable(Unavailable(UNAVAILABLE.to_string())))?;
+    Ok(running.unwrap_or_default())
+}
+
 /// A new key from the system's source of randomness; none where it has none to give.
 fn made() -> Option<Key> {
     let mut key = [0u8; KEY_BYTES];

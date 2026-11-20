@@ -466,6 +466,8 @@ pub struct Publish {
     pub validate_only: bool,
     /// Another agent has an artifact with this id.
     pub elsewhere: bool,
+    /// The trace of the turn that publishes it, as the Host proved it: kept by a new spec.
+    pub source_trace_id: String,
 }
 
 impl ArtifactBook {
@@ -523,6 +525,7 @@ impl ArtifactBook {
                 summary: asked.summary.clone(),
                 status: asked.status.clone(),
                 reference_id: asked.reference_id.clone(),
+                source_trace_id: asked.source_trace_id.clone(),
                 ..New::default()
             };
             let opening = Opening {
