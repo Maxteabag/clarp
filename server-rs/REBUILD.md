@@ -2284,6 +2284,22 @@ work; Keeper asks and publishes as a member, is refused as a janitor while its t
 refused a message, and its own run is held while Mike works: no notification, no push, nothing in `/attention`, the
 inbox or the chip, and its new request and document are refused) and the wrong rules `tools/plants/quiet-agents.py`.
 
+**What may stop the Host from starting** (20 Nov 2026; the lead's rulings of that day). Only its configuration, its
+listener, a store that does not answer and a core thread that does not start stop a start. What it keeps is read through
+one loader (`kept.rs`): each record of a kind alone, and one that cannot be read is LEFT OUT of what the Host does, never
+written over or deleted by the Host, counted by its kind and said once in the journal by its kind and key, never by what
+it holds (a push token by its first signs only). The counts are said in one line when the Host starts and shown at the
+Host's own door, `GET /host/start` (the administrator's only: `{agents, opening, broken, left_out}`, how many agents are
+still being opened and how many could not be beside what could not be read); `/server-info` and `/status` keep the
+reference's shape in every state, since the count is not zero for a moment at every start. `install-host` asks it until
+nothing is opening, prints what is broken and left out and ends with code 3 when either is not zero; the Host stays up. The one write
+such a key gets is the owner's own (a token registered again, a peer named again): that is its repair, said, and the
+record is no longer counted (the fleet's store is watched for it). An agent the Host keeps and does not run (left out,
+where its bytes are JSON that name it, or read and not set up for a tool this Host has not) keeps its session and the
+name it goes by: no new agent gets them. A deleted agent whose goals cannot be retired is retired at a later start and
+counted until then. Held by the loader's tests and the fleet's at the port (`fleet/tolerance_tests.rs`: stores written by
+their own crate before a start, a store that does not answer) and the wrong rules `tools/plants/start-tolerance.py`.
+
 **Who stops or repairs an agent, and why** (19 Nov 2026; Host feature `turn_slot_repair`, 61). `POST /stop` takes
 `actor` and `reason`, and so does `POST /repair-slot {session, reason, actor?}`; both are read as the Python Host reads
 them (`actor` cut to 80 signs, `user` where none is said; `reason` cut to 200; what is no text is written as Python

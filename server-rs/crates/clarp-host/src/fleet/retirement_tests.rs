@@ -57,6 +57,7 @@ pub(super) fn test_works(dir: &Path, engine: Arc<dyn LogEngine>, log: crate::unk
         turns: Arc::default(),
         pools: vec![],
         log,
+        left_out: Arc::default(),
     }
 }
 

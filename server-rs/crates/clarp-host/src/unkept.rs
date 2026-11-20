@@ -560,6 +560,7 @@ pub(crate) mod at_the_port {
                 },
                 clock.clone(),
             ),
+            left_out: Arc::default(),
         };
         let refused: Refused = Arc::default();
         let refused_read: Refused = Arc::default();
