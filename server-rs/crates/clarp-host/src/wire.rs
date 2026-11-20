@@ -12,6 +12,7 @@ use clarp_kernel::control;
 use clarp_kernel::conversation::{Entry, Notice, ToolCall, ToolStatus, TurnEnd};
 use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
+use clarp_kernel::launch_refused;
 use clarp_kernel::notify;
 use clarp_kernel::recovery;
 use clarp_kernel::said;
@@ -172,14 +173,23 @@ pub fn dispatched(record: &AgentRecord, live: &LiveStatus, waiting: usize) -> Va
 /// What a turn that waits a moment for its next attempt shows.
 const RECONNECTING: &str = "Reconnecting… Your message is saved.";
 
-/// The attempt a live turn waits a moment for, and how long it waits: when it waits for one.
-fn reconnecting(live: &LiveStatus) -> Option<(u32, i64)> {
+/// The attempt a live turn waits a moment for, how long it waits, and of how many tries:
+/// when it waits for one. A turn whose launch was refused before its tool was given anything
+/// has the tries of R121 (its own, and eight of one refusal); another, those of a failure
+/// that passes.
+fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
     let parked = live.parked.as_ref()?;
+    let of = if parked.kind == failures::NOT_STARTED {
+        launch_refused::PARK_AFTER + 1
+    } else {
+        recovery::MAX_ATTEMPTS
+    };
     match parked.wait {
         Wait::Retry { until_ms } => Some((
             // Waits for an account are no tries against a bad line.
             parked.attempts - parked.account.count + 1,
             until_ms - parked.since_ms,
+            of,
         )),
         Wait::Account { .. } => None,
     }
@@ -296,12 +306,12 @@ pub fn state(
         }
         // Between two attempts: the turn is as busy as before, and reconnects.
         (Some(live), _) if reconnecting(live).is_some() => {
-            let (next, after_ms) = reconnecting(live).unwrap_or_default();
+            let (next, after_ms, of) = reconnecting(live).unwrap_or_default();
             json!({
                 "action": "reconnecting",
                 "after_ms": after_ms,
                 "dispatch": backend,
-                "of": recovery::MAX_ATTEMPTS,
+                "of": of,
                 "origin": live.origin.name(),
                 "reconnect": next,
                 "summary": RECONNECTING,
