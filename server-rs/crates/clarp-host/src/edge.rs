@@ -1702,6 +1702,8 @@ async fn import_agent(
     State(app): State<App>,
     Json(request): Json<ImportRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    crate::admin::movable(&request.agent)
+        .map_err(|why| ApiError::new(StatusCode::CONFLICT, why))?;
     let field = |name: &str| request.agent[name].as_str().unwrap_or("").to_string();
     let backend_session = Some(field("backend_session_id")).filter(|session| !session.is_empty());
     // A picture that cannot be read is refused before anything is written: an agent that

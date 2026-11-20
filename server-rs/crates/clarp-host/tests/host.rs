@@ -31,6 +31,8 @@ mod installer;
 mod janitor_attention;
 #[path = "host/launch_directories.rs"]
 mod launch_directories;
+#[path = "host/move_janitors.rs"]
+mod move_janitors;
 #[path = "host/pictures.rs"]
 mod pictures;
 #[path = "host/provider_tasks.rs"]
