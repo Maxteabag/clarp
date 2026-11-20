@@ -39,6 +39,8 @@ PLANTS = [
      '            .any(|(name, minimum)| name == platform && contract >= *minimum)'),
     (K, 'kernel', "a client's minimum of the apps is not ios's", 'pub const AGENT_LIVE_MODEL_MIN_CLIENT: [(&str, i64); 2] = [("ios", 75), ("android", 29)];',
      'pub const AGENT_LIVE_MODEL_MIN_CLIENT: [(&str, i64); 2] = [("ios", 76), ("android", 29)];'),
+    (C, 'host', 'a key of the table is taken in lower case', '                None => minimums.push((name.clone(), minimum)),',
+     '                None => minimums.push((name.to_lowercase(), minimum)),'),
     (C, 'host', "the owner's minimum for a name is not taken", '                Some(known) => known.1 = minimum,', '                Some(_) => {}'),
     (G, 'host', 'a grant names another model than the call keeps', '"model": live.running(), "voice": live_call::VOICE,',
      '"model": live_call::MODEL, "voice": live_call::VOICE,'),
