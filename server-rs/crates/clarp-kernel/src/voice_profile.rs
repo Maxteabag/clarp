@@ -143,7 +143,12 @@ pub fn provider_voice(view: &HostView, agent: Agent<'_>, route: &Route, provider
         }
         // A stored value without an ElevenLabs entry is handed over as it is.
         ELEVENLABS => {
-            Choice::own(saved.or_else(|| stored.filter(|s| !s.is_empty()).map(str::to_string)))
+            let voice = saved.or_else(|| stored.map(str::to_string));
+            let origin = voice
+                .as_deref()
+                .filter(|voice| !voice.is_empty())
+                .map(|_| OWN);
+            Choice { voice, origin }
         }
         GEMINI => {
             let cartesia = provider_voice(view, agent, route, CARTESIA).voice;
