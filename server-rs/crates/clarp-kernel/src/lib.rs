@@ -36,6 +36,7 @@ pub mod fork;
 pub mod goals;
 pub mod grok_muse;
 pub mod grok_muse_history;
+pub mod harness_providers;
 pub mod heard;
 pub mod heartbeat;
 pub mod helper_cells;
