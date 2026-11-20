@@ -184,6 +184,8 @@ async fn choose(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiE
             "speech settings could not be saved",
         )
     })?;
+    // Every agent's voice may have changed: open apps re-read the agents.
+    app.hub.publish(crate::profile::changed_for_all(), app.clock.now_ms());
     let Json(mut result) = engines_told(State(app)).await;
     result["restart_scheduled"] = json!(false);
     Ok(Json(result))
@@ -309,6 +311,9 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
     if amended.is_err() {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
     }
+    // Open apps show the voice the agent now speaks with (its profile is added as it is told).
+    let changed = json!({ "type": "agent-roster", "kind": "voice-changed", "session": session });
+    app.hub.publish(changed, app.clock.now_ms());
     Ok(Json(json!({ "ok": true })).into_response())
 }
 

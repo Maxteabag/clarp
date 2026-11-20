@@ -79,6 +79,7 @@ pub mod plans;
 pub mod pool;
 pub mod portrait_generation;
 pub mod process;
+pub mod profile;
 pub mod push;
 pub mod pusher;
 pub mod quota;
