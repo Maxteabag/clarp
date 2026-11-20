@@ -2858,6 +2858,7 @@ mod following {
     const BACK: &str = "a cursor that goes back";
     const TIME: &str = "a row the follower holds at another time than a reload reads it";
     const ORDER: &str = "a conversation read anew in pages in another order than in one";
+    const LOG_BEHIND: &str = "(the log behind the first page of changes not ascending)";
     const STUCK: &str = "an older page that gives nothing new while it says there is more";
 
     /// What was found: for each kind, how often, and where first.
@@ -2919,6 +2920,8 @@ mod following {
         given: usize,
         told: bool,
         anew: bool,
+        /// Where the first page of changes that was not ascending was asked from.
+        disorder: Option<u64>,
     }
 
     impl Follower {
@@ -2932,6 +2935,7 @@ mod following {
                 given: 0,
                 told: false,
                 anew: false,
+                disorder: None,
             }
         }
 
@@ -2955,13 +2959,36 @@ mod following {
                     self.told = true;
                     return self.read_anew(actor, at, found);
                 }
-                for pair in page.entries.windows(2) {
-                    if pair[0].revision >= pair[1].revision {
-                        found.note(NOT_ASCENDING, at, || {
-                            let ids = (pair[0].entry.id(), pair[1].entry.id());
-                            format!("{ids:?} at {} and {}", pair[0].revision, pair[1].revision)
-                        });
-                    }
+                if page
+                    .entries
+                    .windows(2)
+                    .any(|pair| pair[0].revision >= pair[1].revision)
+                {
+                    let (cursor, limit) = (self.cursor, self.limit);
+                    found.note(NOT_ASCENDING, at, || {
+                        // Each row: id, position and place of its revision, its tools, whether
+                        // it was said along the way, the row that closed its turn, live.
+                        let rows: Vec<_> = page
+                            .entries
+                            .iter()
+                            .map(|row| {
+                                let closes = row.turn.as_ref().map(|end| end.closes.clone());
+                                let (at, place) = (row.revision >> 20, row.revision & 0xF_FFFF);
+                                let tools = row.tools.len();
+                                (
+                                    row.entry.id(),
+                                    at,
+                                    place,
+                                    tools,
+                                    row.commentary,
+                                    closes,
+                                    row.live,
+                                )
+                            })
+                            .collect();
+                        format!("{limit} a page after position {}: {rows:?}", cursor >> 20)
+                    });
+                    self.disorder.get_or_insert(cursor);
                 }
                 for row in page.entries {
                     self.given += 1;
@@ -3173,6 +3200,29 @@ mod following {
                 follower.follow(actor, &at, &mut self.found);
                 let reload = actor.tail_of(1_000_000, follower.which).unwrap();
                 follower.compare(&reload, &at, &mut self.found);
+                if let Some(from) = follower.disorder.take() {
+                    // What the log holds of the conversation from there: each item's position,
+                    // kind and key, and the row a part of one names.
+                    let log = self
+                        .world
+                        .engine
+                        .open(&self.world.profile.dir, standard_set("zstd").unwrap())
+                        .unwrap();
+                    self.found.note(LOG_BEHIND, &at, || {
+                        let items = log.read_after(from >> 20, kind::CONVERSATION, 40).unwrap();
+                        let said: Vec<String> = items
+                            .iter()
+                            .map(|item| {
+                                let names = Entry::from_item(item)
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|entry| entry.part_of().map(str::to_string));
+                                format!("{} {} {:?} {:?}", item.seq, item.kind, item.key, names)
+                            })
+                            .collect();
+                        said.join("; ")
+                    });
+                }
             }
         }
 
