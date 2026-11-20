@@ -1470,7 +1470,25 @@ mod tests {
         batch
             .command(Command::TurnStarted { turn: TurnId(1) }, 2)
             .unwrap();
-        let launched = batch.commit().unwrap().first_seq;
+        batch.commit().unwrap();
+        // Where turn 1 was launched: its send is handed over there.
+        let launched = recorder
+            .log()
+            .read_after(0, Kinds::only(kind::AGENT_EVENT), 10)
+            .unwrap()
+            .into_iter()
+            .find(|item| {
+                let event: AgentEvent = serde_json::from_slice(&item.body).unwrap();
+                matches!(
+                    event,
+                    AgentEvent::Turn {
+                        turn: TurnId(1),
+                        change: crate::turn::TurnEvent::Started { .. }
+                    }
+                )
+            })
+            .expect("turn 1 was launched")
+            .seq;
         recorder.take_deliveries();
         recorder.take_launched();
 
