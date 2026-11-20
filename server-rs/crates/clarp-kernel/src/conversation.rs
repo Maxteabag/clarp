@@ -71,7 +71,16 @@ pub struct Message {
     /// and an app is told of it under none ([`Message::told_id`]).
     #[serde(default, skip_serializing_if = "is_false")]
     pub unminted: bool,
+    /// When it was sent, for a message that had to wait for its turn: its row is written when
+    /// that turn starts and stands there, and this keeps the moment it was sent ([`SENT_AT`]).
+    /// A message whose turn started at once has none: its row's time is when it was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at_ms: Option<i64>,
 }
+
+/// The key the log keeps a waiting message's send time under in its row ([`Message::sent_at_ms`]).
+/// It is the log's, permanent once written, and no client reads it by this name.
+pub const SENT_AT: &str = "sent_at_ms";
 
 impl Message {
     /// Where a message is filed for the id its app gave it, and whether that id came with
