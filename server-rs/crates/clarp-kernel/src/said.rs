@@ -529,19 +529,6 @@ pub fn clip_part(range: Option<(u64, Option<u64>)>, there: u64) -> Part {
     Part::Bytes { first, last }
 }
 
-/// What an app is told when an agent could not be heard: a few words for its user, by
-/// what went wrong (`tts_worker.py`, `_publish_tts_error`).
-pub fn failure_told(error: &str) -> &'static str {
-    let low = error.to_lowercase();
-    if low.contains("quota") || low.contains("401") {
-        "Voice paused: ElevenLabs quota exceeded."
-    } else if low.contains("api_key") || low.contains("not configured") {
-        "Voice unavailable: TTS not configured."
-    } else {
-        "Voice synthesis failed."
-    }
-}
-
 /// A piece of what an agent says aloud as it is handed to an engine. The first piece of
 /// an agent the user is not looking at begins with who speaks, unless it does already.
 pub fn announced(piece: &str, first: bool, persona: &str, looked_at: bool) -> String {
@@ -593,24 +580,6 @@ mod tests {
         assert_eq!(clip_part(Some((100, None)), 100), Part::Missing);
         assert_eq!(clip_part(Some((0, Some(1))), 0), Part::Missing);
         assert_eq!(clip_part(Some((u64::MAX, None)), 100), Part::Missing);
-    }
-
-    #[test]
-    fn a_failure_is_told_in_a_few_words_by_what_went_wrong() {
-        assert_eq!(
-            failure_told("Cartesia key or voice is not configured"),
-            "Voice unavailable: TTS not configured."
-        );
-        assert_eq!(
-            failure_told("missing API_KEY"),
-            "Voice unavailable: TTS not configured."
-        );
-        assert_eq!(
-            failure_told("HTTP 401: Quota exceeded"),
-            "Voice paused: ElevenLabs quota exceeded."
-        );
-        assert_eq!(failure_told("gemini 503"), "Voice synthesis failed.");
-        assert_eq!(failure_told(""), "Voice synthesis failed.");
     }
 
     #[test]
