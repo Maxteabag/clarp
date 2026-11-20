@@ -990,7 +990,8 @@ def settle_unsent_held_sends(*, can_steer: Callable[[str], bool],
 
 # R121: a queued send whose launch a backend refused before anything was sent
 # (backend.base.LaunchRefused), recovery_backoff.PARK_AFTER times in a row with
-# the same error, ends ``failed`` instead of parking for good.
+# the same error or REFUSED_IN_ALL times in all, ends ``failed`` instead of
+# parking for good.
 REFUSED_LAUNCH = "launch_refused"
 REFUSED_LAUNCH_NOTICE = ("A message you sent was never run.\n\n"
                          "The agent could not be started for it {failures} times in a row: "
