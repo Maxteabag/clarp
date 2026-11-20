@@ -198,6 +198,7 @@ pub const NOT_READ: &[&str] = &[
     "AGY_TOOL_OK",
     "ASKED_AS",
     "CLARP",
+    "CLARP_",
     "CLARP_X",
     "CLARP_Y",
     "CLAUDE_PWA_",
