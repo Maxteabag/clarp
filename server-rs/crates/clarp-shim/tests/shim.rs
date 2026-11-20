@@ -110,14 +110,20 @@ fn a_shim_a_test_starts_gives_its_tool_nothing_of_the_machine() {
         .into_iter()
         .filter_map(|line| line.split_once('=').map(|(name, _)| name))
         .collect();
-    assert!(names.contains(&"PATH") && names.contains(&"HOME"), "{names:?}");
+    assert!(
+        names.contains(&"PATH") && names.contains(&"HOME"),
+        "{names:?}"
+    );
     let rule = clarp_sealed::sealed(&[], &running.dir, &[], &[]);
     let own = [clarp_shim::SOCKET_ENV, "PWD", "OLDPWD", "SHLVL", "_"];
     let more: Vec<&&str> = names
         .iter()
         .filter(|name| !own.contains(name) && !rule.contains_key(std::ffi::OsStr::new(name)))
         .collect();
-    assert!(more.is_empty(), "the tool saw more than the test gave: {more:?}");
+    assert!(
+        more.is_empty(),
+        "the tool saw more than the test gave: {more:?}"
+    );
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 

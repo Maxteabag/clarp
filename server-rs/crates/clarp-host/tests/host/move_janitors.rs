@@ -31,7 +31,8 @@ fn a_janitor_is_refused_before_any_move_and_its_neighbor_can_still_move() {
         ("/transcription-providers", "200 OK", "{}".to_string()),
     ]);
     let import = |session: &str, extra: &[&str]| {
-        place.host_command()
+        place
+            .host_command()
             .args([
                 "import",
                 "--from",
