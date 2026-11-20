@@ -2567,7 +2567,8 @@ impl Actor {
     /// were told to end.
     pub fn stop_as(&mut self, by: Control, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
         let silenced = by.is_the_users();
-        let stopped_between_attempts = matches!(self.recorder.agent().live(), Some(Turn::Parked(_)));
+        let stopped_between_attempts =
+            matches!(self.recorder.agent().live(), Some(Turn::Parked(_)));
         let command = Command::Stop { by };
         let effects = self.recorder.handle(command, now_ms)?;
         let told = effects

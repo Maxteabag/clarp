@@ -3199,3 +3199,7 @@ mod opening_reads {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod retirement_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod log_at_rest_tests;

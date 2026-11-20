@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::blobs::BlobEngine;
 use crate::codec::{CodecSet, Compressor};
 use crate::kv::KeyValueEngine;
-use crate::log::{Item, Kinds, LogEngine, NewItem, Seq};
+use crate::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -538,4 +538,47 @@ pub fn blob_conformance(engine: &dyn BlobEngine, path_a: &Path, path_b: &Path) {
     assert_eq!(store.read("first.bin", 0, 100).expect("read"), b"first");
     assert_eq!(store.len("big-file_1.bin").expect("len"), Some(300_000));
     assert_eq!(store.len("own-7.bin").expect("len"), Some(10_000));
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogAccess {
+    ReadOrWrite,
+    Rest,
+}
+
+/// A log that tells a test when the actor accesses it or releases its cached pages.
+pub struct ObservedLog<F> {
+    inner: Box<dyn AgentLog>,
+    observed: F,
+}
+impl<F: Fn(LogAccess) + Send> ObservedLog<F> {
+    pub fn new(inner: Box<dyn AgentLog>, observed: F) -> Self {
+        Self { inner, observed }
+    }
+}
+impl<F: Fn(LogAccess) + Send> AgentLog for ObservedLog<F> {
+    fn at_rest(&self) {
+        self.inner.at_rest();
+        (self.observed)(LogAccess::Rest);
+    }
+    fn append(&mut self, rows: &[NewItem]) -> Result<Seq, LogError> {
+        (self.observed)(LogAccess::ReadOrWrite);
+        self.inner.append(rows)
+    }
+    fn last_seq(&self) -> Result<Seq, LogError> {
+        (self.observed)(LogAccess::ReadOrWrite);
+        self.inner.last_seq()
+    }
+    fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
+        (self.observed)(LogAccess::ReadOrWrite);
+        self.inner.find(key)
+    }
+    fn read_before(&self, seq: Seq, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
+        (self.observed)(LogAccess::ReadOrWrite);
+        self.inner.read_before(seq, kinds, limit)
+    }
+    fn read_after(&self, seq: Seq, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
+        (self.observed)(LogAccess::ReadOrWrite);
+        self.inner.read_after(seq, kinds, limit)
+    }
 }
