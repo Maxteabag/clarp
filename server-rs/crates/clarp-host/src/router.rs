@@ -366,8 +366,13 @@ async fn say(app: &App, say: &Say) {
     if let Some(speaker) = speaker {
         if let Some(phrase) = clarp_kernel::router::flow::phrase_key(&say.text) {
             let owners = app.mouth.owners();
-            for (voice,primary) in crate::voice::phrase_voices(&owners,&speaker) {
-                if !app.router.phrases.say(app, &speaker, &say.text, phrase, (voice,primary), &owners).await {
+            for (voice, primary) in crate::voice::phrase_voices(&owners, &speaker) {
+                if !app
+                    .router
+                    .phrases
+                    .say(app, &speaker, &say.text, phrase, (voice, primary), &owners)
+                    .await
+                {
                     break;
                 }
             }
