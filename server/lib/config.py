@@ -911,8 +911,12 @@ def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
             log("config.render_spec_min_client", "ignored: not a whole number")
     table = artifacts.get("render_spec_min_contract")
     if isinstance(table, dict):
+        if "ios" in table and "ios" in out:
+            log("config.render_spec_min_client", "ignored: render_spec_min_contract names ios")
         for name, value in table.items():
-            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", str(name)) and type(value) is int and value >= 0:
+            # A client name as clients send it (lower case; matched exactly), and a whole number
+            # (a TOML boolean is not one, though Python counts it as an int).
+            if re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", str(name)) and type(value) is int and value >= 0:
                 out[str(name)] = value
             else:
                 log("config.render_spec_min_contract", "ignored an entry: a client name and a whole number")

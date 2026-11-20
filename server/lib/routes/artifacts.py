@@ -137,7 +137,9 @@ class ArtifactRoutes:
         X-Clarp-Client says. Another kind is refused in words, in a body shaped so a kind can be
         added later: a 'kind' and one object under the kind's name."""
         from lib import render_spec_store
-        if not _administrator(self):
+        # The administrator's token from the Authorization header only: never one a link carries in
+        # its query string, nor a browser's cookie, for a route that hands out a user's answers.
+        if not _administrator(self) or getattr(self, "_request_auth_source", "") not in ("header", ""):
             return self._json_error(403, "administrator only")
         try:
             exported = render_spec_store.export(artifact_id)
