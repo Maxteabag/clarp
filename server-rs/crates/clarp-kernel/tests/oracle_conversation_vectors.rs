@@ -667,6 +667,7 @@ fn the_voice_is_told_what_the_python_host_tells_it_when_a_call_begins() {
             .collect();
         let history = case["history"].as_array().unwrap();
         let told = Beginning {
+            model: voice::model(),
             roster: Some(&case["roster"]).filter(|roster| !roster.is_null()),
             direct: case["delegation_strategy"] == "direct_contact",
             vocabulary: case["voice_context"].get("terms"),

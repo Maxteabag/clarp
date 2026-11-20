@@ -864,6 +864,8 @@ async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
     // Of what the owner prepared for the contact, the voice is told the words.
     let prepared = call.asked.vocabulary.as_ref();
     let beginning = Beginning {
+        // The model this Host advertises of its calls (`GET /oracle/status`): the same value.
+        model: app.config.live_model,
         roster: Some(&roster),
         direct,
         vocabulary: prepared.map(|context| &context["terms"]),
