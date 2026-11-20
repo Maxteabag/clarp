@@ -24,6 +24,7 @@ pub mod controller_narration;
 pub mod conversation;
 pub mod delivery;
 pub mod desk;
+pub mod destination;
 pub mod devices;
 pub mod difflib;
 pub mod direct_push;
