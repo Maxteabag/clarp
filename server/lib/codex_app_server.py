@@ -113,6 +113,9 @@ STOP_DETACH_SEC = 10.0
 # then turn/start). The start runs outside the pool lock (TP-N3), so a hung
 # start holds up only its own agent, and only this long.
 START_RPC_TIMEOUT_SEC = 30.0
+# After a compaction that ran out of time is interrupted: how much longer than
+# the handle's own detach the compaction waits for its end (R148).
+COMPACT_STOP_GRACE_SEC = 2.0
 
 
 class _StoppedBeforeLaunch(Exception):
@@ -1231,15 +1234,25 @@ class _Client:
             return {"status": "refused", "replaced": False, "after": None,
                     "error": f"this Codex app-server did not compact the thread ({exc})"}
         if not handle._done.wait(timeout):
-            # Not ended in time: interrupt it. Until Codex ends it the agent
-            # stays busy (its handle is live), so no turn starts on top of it.
+            # Not ended in time: interrupt it, and wait (bounded) for Codex to
+            # end it. If it does not, the handle's own detach (STOP_DETACH_SEC)
+            # marks the agent detached: its thread stays held by this process
+            # (turn_holders) until the process is recycled, and the caller
+            # keeps the agent's slot until then, so no turn starts on top of it.
             try:
                 handle.terminate()
             except Exception as exc:  # noqa: BLE001
                 log_exception("codexCompactInterruptFail", exc, detail=agent_id)
+            ended = handle._done.wait(STOP_DETACH_SEC + COMPACT_STOP_GRACE_SEC)
+            stuck = agent_id in (getattr(self, "detached_agents", None) or ())
+            if ended and not stuck:
+                then = "it stopped when asked"
+            else:
+                then = ("it did not stop when asked; this agent's messages wait until "
+                        "that Codex process is restarted")
             return {"status": "timeout", "replaced": active.compact_replaced,
                     "after": None,
-                    "error": f"Codex did not finish compacting within {timeout:g} s"}
+                    "error": f"Codex did not finish compacting within {timeout:g} s; {then}"}
         replaced = active.compact_replaced
         after = active.compact_sizes[-1] if (replaced and active.compact_sizes) else None
         return {"status": active.compact_status or "completed", "replaced": replaced,

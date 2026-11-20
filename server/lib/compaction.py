@@ -30,7 +30,9 @@ on the agent's row, and one ``compactOutcome`` log line):
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -52,7 +54,10 @@ UNKNOWN = "unknown"
 _OUTCOME_KEY = "compaction.last."
 
 _active: set[str] = set()
+# A terminal compaction's CLI that outlived its kill, by session (pid).
+_lingering: dict[str, int] = {}
 _lock = threading.Lock()
+_REAP_SEC = 10.0              # a killed terminal CLI gets this long to exit
 _runtime_client: Any | None = None
 
 
@@ -258,13 +263,67 @@ def _run(session: str, agent: dict, backend: str, bsid: str, cwd: str,
         result = outcome(UNKNOWN, detail=f"the compaction failed: {e}")
     finally:
         record(agent_id, session, backend, result or outcome(UNKNOWN, detail="interrupted"))
+        try:
+            # The slot is given back only once nothing still works on the
+            # conversation: sends that waited never run on top of it.
+            _hold_while_held(session, agent_id, backend)
+        except Exception as e:  # noqa: BLE001
+            log_exception("compactHoldFail", e, detail=session)
         with _lock:
             _active.discard(session)
+            _lingering.pop(session, None)
         try:
             from . import turn_dispatch
             turn_dispatch.finish_compaction(dispatch, agent_id)
         except Exception as e:  # noqa: BLE001
             log_exception("compactFinishFail", e, detail=session)
+
+
+def _alive(items) -> bool:
+    for item in items or ():
+        try:
+            if item.is_alive():
+                return True
+        except Exception:  # noqa: BLE001 - can't tell: treat as alive
+            return True
+    return False
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _still_held(session: str, agent_id: str, backend: str) -> bool:
+    """Whether a process still works on the agent's conversation: a backend
+    turn handle (a Codex compaction not ended yet), a process holding its
+    session (a detached, stuck Codex process until it is recycled), or the
+    interactive CLI a terminal compaction started, if it outlived its kill."""
+    pid = _lingering.get(session)
+    if pid and _pid_alive(pid):
+        return True
+    return (_alive(backends.active_handles(backend, agent_id))
+            or _alive(backends.turn_holders(backend, agent_id)))
+
+
+def _hold_while_held(session: str, agent_id: str, backend: str) -> None:
+    """Keep the compaction's slot while a process still works on the
+    conversation, so a send that waited behind it starts only after. Ends at
+    once when a Stop took the slot (Stop then owns what follows)."""
+    from . import turn_dispatch
+    logged = False
+    while turn_dispatch.compaction_holds_slot(agent_id) and _still_held(session, agent_id, backend):
+        if not logged:
+            log("compactHoldsForProcess",
+                f"session={session} backend={backend} — a process still holds the "
+                "conversation; waiting messages start once it ends")
+            logged = True
+        time.sleep(_POLL_SEC)
 
 
 def _codex_size_before(bsid: str) -> int | None:
@@ -301,6 +360,7 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
             offset = 0
     tmux = f"pwa-compact-{session}"
     ending = "stopped"
+    pid = 0
     try:
         subprocess.run(["tmux", "kill-session", "-t", tmux],
                        capture_output=True, check=False)
@@ -309,6 +369,7 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
              *strategy.launch, bsid],
             check=True, capture_output=True, text=True,
         )
+        pid = _pane_pid(tmux)
         stopped = lambda: not turn_dispatch.compaction_holds_slot(agent_id)  # noqa: E731
         if _sleep(_STARTUP_WAIT_SEC, stopped):
             subprocess.run(["tmux", "send-keys", "-t", tmux, strategy.command, "Enter"],
@@ -317,6 +378,10 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
     finally:
         subprocess.run(["tmux", "kill-session", "-t", tmux],
                        capture_output=True, check=False)
+        if pid and not _reap(pid):
+            # Still running after SIGKILL: the slot is kept while it lives.
+            with _lock:
+                _lingering[session] = pid
     if not strategy.watches_transcript:
         return outcome(UNKNOWN, detail=(
             f"stopped; {backend} gives the Host no size to compare" if ending == "stopped"
@@ -324,6 +389,40 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
     from .claude_transcript import compact_boundary_since
     proof = compact_boundary_since(jsonl, offset or 0) if jsonl is not None else None
     return decide_claude(before, proof, transcript=jsonl is not None, ending=ending)
+
+
+def _pane_pid(tmux: str) -> int:
+    """The interactive CLI's pid (tmux runs it as the pane's process)."""
+    try:
+        out = subprocess.run(["tmux", "display-message", "-p", "-t", tmux, "#{pane_pid}"],
+                             capture_output=True, text=True, check=False).stdout.strip()
+        return int(out) if out.isdigit() else 0
+    except (OSError, ValueError):
+        return 0
+
+
+def _reap(pid: int) -> bool:
+    """After the tmux kill: wait for the CLI to exit (bounded), SIGKILL it if
+    it does not, and say whether it is gone. A compaction's CLI must not keep
+    writing the conversation while the agent's next turn runs."""
+    deadline = time.time() + _REAP_SEC
+    while time.time() < deadline:
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.2)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.1)
+    log("compactCliLingers", f"pid={pid} — still running after SIGKILL")
+    return False
 
 
 def _sleep(seconds: float, stopped) -> bool:
