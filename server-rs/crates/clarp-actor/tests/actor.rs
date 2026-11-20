@@ -495,7 +495,7 @@ fn a_turn_whose_shim_is_gone_without_a_word_is_interrupted_and_the_next_one_runs
 }
 
 #[test]
-fn a_shim_that_cannot_be_started_fails_the_turn_with_the_reason() {
+fn a_shim_that_cannot_be_started_leaves_the_turn_waiting_with_the_reason() {
     let mut world = World::new("nostart");
     let mut actor = world.open();
     let now = world.tick();
@@ -503,39 +503,41 @@ fn a_shim_that_cannot_be_started_fails_the_turn_with_the_reason() {
         .send(&message("u-1", "go"), Admission::Queue, now)
         .unwrap();
     assert!(matches!(&out.actions[..], [Action::Launch(_)]));
-    // The world could not start the shim at all.
+    // The world could not start the shim at all: nothing was given to the tool, and the turn
+    // waits to be tried again (R121), with the reason.
     let now = world.tick();
     let out = actor
         .launch_failed(TurnId(1), 1, "clarp-shim: no such file", now)
         .unwrap();
     assert!(out.actions.is_empty());
+    let parked = actor.status().live.unwrap().parked.unwrap();
     assert_eq!(
-        actor.status().last.unwrap().outcome,
-        Outcome::not_started("clarp-shim: no such file".to_string())
+        (parked.kind.as_str(), parked.reason.as_str()),
+        ("not_started", "clarp-shim: no such file")
     );
-    // A shim that started and could not start the tool says so in the spool.
+    // A shim that started and could not start the tool says so in the spool: the same.
+    let mut world = World::new("nostart-tool");
+    let mut actor = world.open();
     let now = world.tick();
     let (_, out) = actor
         .send(&message("u-2", "again"), Admission::Queue, now)
         .unwrap();
     let Action::Launch(order) = &out.actions[0] else {
-        panic!("the next message launches");
+        panic!("the message launches");
     };
     let mut spool = SpoolWriter::create(&order.spool).unwrap();
     spool
         .append(&Record {
-            t: 5,
+            t: now,
             entry: Line::Shim(ShimEvent::SpawnFailed {
                 error: "claude: not found".to_string(),
             }),
         })
         .unwrap();
     world.hint(&mut actor);
-    assert_eq!(
-        actor.status().last.unwrap().outcome,
-        Outcome::not_started("claude: not found".to_string())
-    );
-    assert_eq!(actor.status().live, None);
+    let parked = actor.status().live.unwrap().parked.unwrap();
+    assert_eq!(parked.reason, "claude: not found");
+    assert_eq!(actor.retry_at(), Some(now + 1_000));
 }
 
 #[test]
@@ -4584,4 +4586,231 @@ fn a_quiet_listener_keeps_its_heartbeat_without_growing_the_principals_ledger() 
     let reopened = world.open();
     assert!(row(&reopened)["last_heartbeat_at"].is_null());
     assert_eq!(row(&reopened)["job_handle"], "bg1:1:quiet");
+}
+
+// ---- R121: a send whose tool could not be started is tried again, as the Python Host tries it
+// (`clarp_kernel::launch_refused`, held to that Host by its vectors), and ends with its sender
+// told at the eighth of one refusal.
+
+/// The launch the actor asks for in `out`, where it asks for one.
+fn r121_launch(out: &Outputs) -> Option<&ShimOrder> {
+    out.actions.iter().find_map(|action| match action {
+        Action::Launch(order) => Some(order),
+        _ => None,
+    })
+}
+
+/// The shim of `order` could not start the tool: it says so in its spool, at `t`.
+fn r121_no_tool(actor: &mut Actor, order: &ShimOrder, t: i64) -> Outputs {
+    let mut spool = SpoolWriter::create(&order.spool).unwrap();
+    spool
+        .append(&Record {
+            t,
+            entry: Line::Shim(ShimEvent::SpawnFailed {
+                error: "claude: not found".to_string(),
+            }),
+        })
+        .unwrap();
+    actor.spool_changed(t).unwrap()
+}
+
+/// The launcher could not start the shim of `order`, at `t`.
+fn r121_no_shim(actor: &mut Actor, order: &ShimOrder, t: i64) -> Outputs {
+    actor
+        .launch_failed(order.turn, order.attempt, "clarp-shim: no such file", t)
+        .unwrap()
+}
+
+/// Every launch the actor asks for is refused by `refuse`, each as its wait ends, until nothing
+/// is tried any more: answers which turn was tried when, from `from`. No more than fifty tries.
+fn r121_refuse_all(
+    world: &mut World,
+    actor: &mut Actor,
+    mut out: Outputs,
+    from: i64,
+    refuse: fn(&mut Actor, &ShimOrder, i64) -> Outputs,
+) -> Vec<(u64, i64)> {
+    let mut tried = Vec::new();
+    loop {
+        if let Some(order) = r121_launch(&out).cloned() {
+            assert!(tried.len() < 50, "tried without end: {tried:?}");
+            tried.push((order.turn.0, world.now_ms - from));
+            out = refuse(actor, &order, world.now_ms);
+            continue;
+        }
+        let Some(at) = actor.retry_at() else {
+            return tried;
+        };
+        world.now_ms = world.now_ms.max(at);
+        out = actor.retry_due(world.now_ms).unwrap();
+    }
+}
+
+/// What the agent's conversation says of turns that failed.
+fn r121_told(actor: &Actor) -> Vec<String> {
+    actor
+        .tail(100)
+        .unwrap()
+        .entries
+        .into_iter()
+        .filter_map(|version| match version.entry {
+            Entry::Notice(notice) => Some(notice.text),
+            _ => None,
+        })
+        .collect()
+}
+
+fn r121_never_run(error: &str) -> String {
+    format!(
+        "A message you sent was never run.\n\nThe agent could not be started for it 8 times in a \
+         row: {error}. It will not be tried again; send it again once the agent can start."
+    )
+}
+
+#[test]
+fn r121_a_send_refused_every_time_is_tried_as_the_python_host_tries_it_and_its_sender_is_told() {
+    let mut world = World::new("r121-refused");
+    let mut actor = world.open();
+    let sent_at = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "go"), Admission::Queue, sent_at)
+        .unwrap();
+    // A second send waits behind it.
+    let (sent, more) = actor
+        .send(&message("u-2", "next"), Admission::Queue, sent_at)
+        .unwrap();
+    assert!(sent.queued && r121_launch(&more).is_none());
+    let tried = r121_refuse_all(&mut world, &mut actor, out, sent_at, r121_no_tool);
+    let of = |turn: u64| -> Vec<i64> {
+        tried
+            .iter()
+            .filter(|(t, _)| *t == turn)
+            .map(|(_, at)| *at)
+            .collect()
+    };
+    // Its own try, a second, then waits of 1, 2, 4 ... 60 s, and the eighth counted one ends it.
+    assert_eq!(
+        of(1),
+        [
+            0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 124_000
+        ]
+    );
+    // The next is tried when it is over, on a count of its own: its first try is counted.
+    assert_eq!(
+        of(2),
+        [
+            124_000, 125_000, 127_000, 131_000, 139_000, 155_000, 187_000, 247_000
+        ]
+    );
+    let status = actor.status();
+    assert_eq!(status.live, None);
+    assert_eq!(
+        status.last.unwrap().outcome,
+        Outcome::not_started("claude: not found".to_string())
+    );
+    let never = r121_never_run("claude: not found");
+    assert_eq!(r121_told(&actor), [never.clone(), never]);
+}
+
+#[test]
+fn r121_a_launcher_that_cannot_start_the_shim_is_tried_the_same_and_its_sender_is_told() {
+    let mut world = World::new("r121-no-shim-end");
+    let mut actor = world.open();
+    let sent_at = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "go"), Admission::Queue, sent_at)
+        .unwrap();
+    let tried = r121_refuse_all(&mut world, &mut actor, out, sent_at, r121_no_shim);
+    let at: Vec<i64> = tried.iter().map(|(_, at)| *at).collect();
+    assert_eq!(
+        at,
+        [
+            0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 124_000
+        ]
+    );
+    assert_eq!(
+        r121_told(&actor),
+        [r121_never_run("clarp-shim: no such file")]
+    );
+}
+
+#[test]
+fn r121_a_refused_turn_is_the_agents_turn_a_users_send_asks_for_it_again_and_a_stop_ends_it() {
+    let mut world = World::new("r121-behind");
+    let mut actor = world.open();
+    let now = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "first"), Admission::Queue, now)
+        .unwrap();
+    let order = r121_launch(&out).cloned().unwrap();
+    r121_no_tool(&mut actor, &order, now);
+    // Refused at its own try: it waits a second, and holds the agent; refused again, counted.
+    assert_eq!(actor.retry_at(), Some(now + 1_000));
+    let out = actor.retry_due(now + 1_000).unwrap();
+    let second = r121_launch(&out).cloned().unwrap();
+    r121_no_tool(&mut actor, &second, now + 1_000);
+    assert_eq!(actor.retry_at(), Some(now + 2_000));
+    // A user's send in the meantime waits behind it, and asks for the agent again: the first is
+    // tried at once, and its count begins anew.
+    let later = now + 1_400;
+    let (sent, out) = actor
+        .send(&message("u-2", "second"), Admission::Queue, later)
+        .unwrap();
+    assert!(sent.queued, "nothing overtakes the turn that waits");
+    let again = r121_launch(&out)
+        .cloned()
+        .expect("the first is tried at once");
+    assert_eq!((again.turn, again.attempt), (TurnId(1), 3));
+    r121_no_tool(&mut actor, &again, later);
+    assert_eq!(
+        actor.retry_at(),
+        Some(later + 1_000),
+        "the first refusal of a count begun anew waits a second"
+    );
+    assert_eq!(actor.status().waiting, [TurnId(2)]);
+    // The user's Stop ends the wait at once; nothing is tried again.
+    let stop_at = later + 500;
+    let (_, out) = actor.stop("user", stop_at).unwrap();
+    assert!(r121_launch(&out).is_none());
+    assert!(matches!(
+        actor.status().last.unwrap().outcome,
+        Outcome::Stopped { .. }
+    ));
+    assert_eq!(actor.retry_at(), None);
+}
+
+#[test]
+fn r121_a_restart_in_the_middle_keeps_the_turn_and_counts_from_nothing() {
+    let mut world = World::new("r121-restart");
+    let mut actor = world.open();
+    let now = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "go"), Admission::Queue, now)
+        .unwrap();
+    let order = r121_launch(&out).cloned().unwrap();
+    r121_no_shim(&mut actor, &order, now);
+    let out = actor.retry_due(now + 1_000).unwrap();
+    let second = r121_launch(&out).cloned().unwrap();
+    r121_no_shim(&mut actor, &second, now + 1_000);
+    let out = actor.retry_due(now + 2_000).unwrap();
+    let third = r121_launch(&out).cloned().unwrap();
+    r121_no_shim(&mut actor, &third, now + 2_000);
+    assert_eq!(
+        actor.retry_at(),
+        Some(now + 4_000),
+        "the second counted one: two seconds"
+    );
+
+    // The Host starts again while the turn waits: the turn is still the agent's, tried at once,
+    // and counted from nothing, as the Python Host's queue tries it when it starts.
+    drop(actor);
+    world.now_ms = now + 3_000;
+    let mut actor = world.open();
+    let reopened = world.now_ms;
+    assert!(actor.retry_at().is_some_and(|at| at <= reopened));
+    let out = actor.retry_due(reopened).unwrap();
+    let fourth = r121_launch(&out).cloned().unwrap();
+    assert_eq!((fourth.turn, fourth.attempt), (TurnId(1), 4));
+    r121_no_shim(&mut actor, &fourth, reopened);
+    assert_eq!(actor.retry_at(), Some(reopened + 1_000));
 }
