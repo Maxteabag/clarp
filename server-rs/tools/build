@@ -75,7 +75,10 @@ case "$cmd" in
     fleet-load-build) cargo_cmd="timeout 175 cargo build --locked --release -j $JOBS -p clarp-host -p clarp-shim --bins" ;;
     fleet-load)
         [[ $# = 2 && $1 == /var/tmp/* && $1 != *$'\n'* && $2 =~ ^(move|empty|full|populate|observe)$ ]] || exit 2
-        printf -v cargo_cmd '%q ' systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 timeout -k 3 170 unshare --user --map-root-user --net --pid --fork --kill-child --mount-proc sh -ec 'ip link set lo up; exec python3 tools/fleet-load "$@"' fleet-load "$1" "$2"
+        # A campaign with less than one full slice left may lower its hard timeout.
+        slice_seconds="${CLARP_FLEET_SLICE_SECONDS:-170}"
+        [[ "$slice_seconds" =~ ^[1-9][0-9]{0,2}$ ]] && (( slice_seconds <= 170 )) || exit 2
+        printf -v cargo_cmd '%q ' systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 timeout -k 3 "$slice_seconds" unshare --user --map-root-user --net --pid --fork --kill-child --mount-proc sh -ec 'ip link set lo up; exec python3 tools/fleet-load "$@"' fleet-load "$1" "$2"
         ;;
     release) cargo_cmd="cargo build --release -j $JOBS -p clarp-host -p clarp-shim" ;;
     *) echo "usage: build check|test [args]|clippy|fmt|conform [args]|answers [args]|release|status" >&2; exit 2 ;;
