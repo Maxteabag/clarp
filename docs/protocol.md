@@ -717,9 +717,10 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `POST /agent-notes` — `{"session", "text", "note_id"?}` (`clarp-admin
   tell-user`): an agent's note to the user, written into its own chat as a
   row of its running turn (see Provenance: a note). Accepted only from that
-  agent's own running turn: a turn token (`X-Clarp-Turn`) of another agent
-  answers 403, a call outside a running turn 409; without a token (the shared
-  Codex app-server) the agent's running turn is taken. `note_id` (up to 64 of
+  agent's own running turn, proven by its turn token (`X-Clarp-Turn`): a call
+  without one answers 403 for every caller (a device, a peer Host, the Host's
+  own token), so does another agent's token, and a call outside a running turn
+  answers 409. `note_id` (up to 64 of
   `a-z0-9-_`) makes a retry answer the same note. Answers `{"ok", "session",
   "message_id", "trace_id", "created", "notified", "reason"}`. At most 8000
   characters (413); a note with no words answers 400.
