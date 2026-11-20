@@ -107,6 +107,7 @@ pub struct Spoke {
 pub enum DelegationCommand {
     Inspect(Option<String>),
     Baseline(usize),
+    Applied(String, i64),
     #[cfg(test)]
     Receipt {
         id: String,
@@ -121,9 +122,14 @@ pub struct DelegationState {
     pub prior: Option<(clarp_actor::delegation::Transition, i64)>,
     pub accepted: bool,
     pub baseline: i64,
+    pub applied: Option<clarp_actor::bookkeeping::Applied>,
 }
 
 pub enum Ask {
+    Bookkeeping {
+        cmd: crate::bookkeeping::Command,
+        answer: Answer<ToolAnswer>,
+    },
     Delegation {
         command: DelegationCommand,
         answer: mpsc::Sender<Result<DelegationState, Unavailable>>,
@@ -930,6 +936,13 @@ impl AgentHandle {
     }
 
     /// Answers the goal tool from this agent's goals.
+    pub(crate) async fn bookkeeping(
+        &self,
+        cmd: crate::bookkeeping::Command,
+    ) -> Result<ToolAnswer, Unavailable> {
+        self.ask(|answer| Ask::Bookkeeping { cmd, answer }).await
+    }
+
     pub async fn goal(&self, ask: goaltool::Ask) -> Result<ToolAnswer, Unavailable> {
         self.goal_as(ask, GoalCaller::Default).await
     }
@@ -2594,6 +2607,7 @@ impl Worker {
             Ask::Delegation { command, answer } => {
                 let result = (|| -> Result<DelegationState, ActorError> {
                     let mut baseline = 0;
+                    let mut applied = None;
                     let (prior, accepted) = match command {
                         #[cfg(test)]
                         DelegationCommand::Receipt { id, caller } => {
@@ -2607,6 +2621,10 @@ impl Worker {
                                 )
                             })?;
                             (None, written.is_some())
+                        }
+                        DelegationCommand::Applied(id, initial) => {
+                            applied = Some(actor.applied_bookkeeping(&id, initial)?);
+                            (None, true)
                         }
                         DelegationCommand::Baseline(offset) => {
                             baseline = actor.delegation_baseline(offset)?;
@@ -2631,6 +2649,7 @@ impl Worker {
                         }
                     };
                     Ok(DelegationState {
+                        applied,
                         baseline,
                         active: actor.active_delegation().cloned(),
                         prior,
@@ -2647,6 +2666,9 @@ impl Worker {
                         return Err(error);
                     }
                 }
+            }
+            Ask::Bookkeeping { cmd, answer } => {
+                answered(crate::bookkeeping::execute(actor, cmd, now), answer)?
             }
             Ask::KeeperEvents {
                 plan,
@@ -3782,6 +3804,7 @@ fn refuse_for(
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobRecord { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Bookkeeping { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Delegation { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),

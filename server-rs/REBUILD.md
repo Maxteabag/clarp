@@ -1361,8 +1361,17 @@ and release of both keys commit together. A Host opening its stores releases an 
 completes the release for a logged stop. An agent reopening its log stops an active binding whose reservation
 is missing. A damaged reservation is left in the fleet store and counted in the startup journal.
 The principal serves ordinary work while the fleet repairs a mismatch. The fleet waits up to
-three seconds for each actor reply. History for either participant is read from the delegation rows. Listener launch and delegate
-observe/record are later parts of this feature.
+three seconds for each actor reply. History for either participant is read from the delegation rows.
+
+**Delegate observation and recording** (20 Nov 2026). A verified delegate with the relationship
+credential can page its principal’s messages and goal events and see its ten most recently changed
+open goals. The reader excludes the delegate’s own messages and this delegation’s events before
+counting either page. A claim, observation, discrepancy or unknown keeps a snapshot of each cited
+source. A delegate can propose a subgoal or update its bookkeeping with an expected revision.
+The principal commits the events, subgoal changes, replay keys, applied cursors and application
+time in one append. An empty acknowledgement also advances the cursors and time. A retry after a
+restart finds the committed keys. The plan shows the latest fifty subject-and-kind pairs drawn from
+its newest five hundred accounting entries. An older imported goal gets that projection on upgrade.
 
 **A goal’s ledger** (19 Nov 2026). The owning agent appends a goal change, its attributable
 events, their per-plan ordinals and their ID locators together. The next number belongs to the
@@ -1377,7 +1386,7 @@ as its keeper cursor in the same append. A moved goal retains the cursor up to i
 The keeper bounds its initial page by the owner's committed high-water inside the same actor ask.
 An owner can add, update and retire explicit subgoals. Each edit keeps the changed subgoal and its
 ledger event in the same append. The subgoal has its own revision and evidence accumulates across edits.
-Bookkeeping delegations remain separate work.
+The bookkeeping delegate records its own account beside the owner’s changes.
 
 **The Goal keeper** (17 Nov 2026). The janitor that ran most on the owner's Host after the explainer (1,647
 runs in the counted week), and the one a long piece of work leans on: agents rarely keep their own goal's

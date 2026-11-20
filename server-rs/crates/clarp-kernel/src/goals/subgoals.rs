@@ -31,7 +31,12 @@ impl Error {
     }
 }
 
-fn clean(value: &Value, name: &str, required: bool, limit: usize) -> Result<String, Refused> {
+pub(super) fn clean(
+    value: &Value,
+    name: &str,
+    required: bool,
+    limit: usize,
+) -> Result<String, Refused> {
     let raw = if !python::truthy(value) {
         String::new()
     } else if let Some(s) = value.as_str() {
@@ -59,7 +64,7 @@ fn criteria(v: &Value, field: &str) -> Result<Value, Refused> {
         .collect::<Result<Vec<_>, _>>()
         .map(Value::Array)
 }
-fn refs(v: &Value) -> Result<Vec<String>, Refused> {
+pub(super) fn refs(v: &Value) -> Result<Vec<String>, Refused> {
     if v.is_null() || v == "" {
         return Ok(vec![]);
     }
@@ -102,7 +107,7 @@ fn integer(v: &Value) -> Option<i64> {
     v.as_i64().or_else(|| v.as_bool().map(i64::from))
 }
 
-fn changes(current: &Value, data: &Value, id: &str) -> Result<Value, Error> {
+fn changes(current: &Value, data: &Value, id: &str, delegated: bool) -> Result<Value, Error> {
     let rev = current["revision"].as_i64().unwrap_or(1);
     if integer(&data["expected_revision"]) != Some(rev) {
         return Err(Error::from(Refused(format!(
@@ -122,6 +127,9 @@ fn changes(current: &Value, data: &Value, id: &str) -> Result<Value, Error> {
     let mut denied: Vec<_> = fields
         .keys()
         .filter(|s| {
+            if delegated && matches!(s.as_str(), "title" | "intent" | "criteria" | "owner") {
+                return true;
+            }
             !matches!(
                 s.as_str(),
                 "title"
@@ -157,6 +165,17 @@ fn changes(current: &Value, data: &Value, id: &str) -> Result<Value, Error> {
                         python::repr(v)
                     ))));
                 }
+                if delegated && !matches!(v.as_str(), Some("unknown" | "blocked")) {
+                    return Err(Error::Denied(
+                        "a delegate may only mark a subgoal unknown or blocked".into(),
+                    ));
+                }
+                if delegated && matches!(current["status"].as_str(), Some("retired" | "done")) {
+                    return Err(Error::Denied(format!(
+                        "subgoal {id} is {}; only its owner can reopen it",
+                        current["status"].as_str().unwrap_or_default()
+                    )));
+                }
                 if v == "retired" && !python::truthy(&data["reason"]) {
                     return Err(Error::from(Refused(
                         "retiring a subgoal needs a reason".into(),
@@ -181,7 +200,7 @@ fn changes(current: &Value, data: &Value, id: &str) -> Result<Value, Error> {
     Ok(Value::Object(changed))
 }
 
-fn type_name(value: &Value) -> &'static str {
+pub fn type_name(value: &Value) -> &'static str {
     match value {
         Value::Null => "NoneType",
         Value::Bool(_) => "bool",
@@ -202,6 +221,38 @@ impl GoalBook {
         caller: Option<&str>,
         now: i64,
     ) -> Result<(Change, Event), Error> {
+        self.change_subgoal(pid, action, data, caller, None, now)
+    }
+
+    pub fn delegate_subgoal(
+        &self,
+        by: &super::bookkeeping::Bookkeeper<'_>,
+        entry: &Value,
+    ) -> Result<(Change, Event), Error> {
+        let action = match entry["type"].as_str() {
+            Some("subgoal_propose") => "add",
+            Some("subgoal_update") => "update",
+            _ => return Err(Refused("unknown delegate subgoal operation".into()).into()),
+        };
+        self.change_subgoal(
+            by.plan,
+            action,
+            entry,
+            Some(by.caller),
+            Some(by.delegation),
+            by.now,
+        )
+    }
+
+    fn change_subgoal(
+        &self,
+        pid: &str,
+        action: &str,
+        data: &Value,
+        caller: Option<&str>,
+        delegation: Option<&str>,
+        now: i64,
+    ) -> Result<(Change, Event), Error> {
         let plan = self
             .plan(pid)
             .filter(|p| p.goal.is_some())
@@ -220,7 +271,9 @@ impl GoalBook {
         let id = clean(&data["subgoal_id"], "subgoal_id", true, 80)?;
         let existing = plan.subgoals.iter().position(|r| r["subgoal_id"] == id);
         let who = caller.unwrap_or(&plan.agent_id);
-        let actor = if who == plan.agent_id {
+        let actor = if delegation.is_some() {
+            "delegate"
+        } else if who == plan.agent_id {
             "owner"
         } else {
             "peer"
@@ -240,16 +293,28 @@ impl GoalBook {
                     "subgoal criteria must be a list of at most 20 strings".into(),
                 )));
             }
-            let new = json!({"title":clean(&data["title"],"title",true,300)?,"intent":clean(&data["intent"],"intent",false,4000)?,"criteria":criteria(c,"subgoal criteria")?,"owner":clean(&data["owner"],"owner",false,120)?,"status":"active"});
+            let mut new = json!({"title":clean(&data["title"],"title",true,300)?,"intent":clean(&data["intent"],"intent",false,4000)?,"criteria":criteria(c,"subgoal criteria")?,"owner":clean(&data["owner"],"owner",false,120)?,"status":"active"});
+            if delegation.is_some() {
+                new["status"] = json!("proposed");
+            }
             let mut row = json!({"subgoal_id":id,"evidence":[],"current_action":"","next_dependency":"","last_observed_at":null,"revision":1,"created_by":{"actor_kind":actor,"agent_id":who},"created_at":now,"updated_at":now});
             if let (Some(r), Some(n)) = (row.as_object_mut(), new.as_object()) {
                 r.extend(n.clone());
             }
-            (row, Value::Null, new, "subgoal_added")
+            (
+                row,
+                Value::Null,
+                new,
+                if delegation.is_some() {
+                    "subgoal_proposed"
+                } else {
+                    "subgoal_added"
+                },
+            )
         } else {
             let idx = existing.ok_or_else(|| Refused(format!("no subgoal {id}")))?;
             let mut row = plan.subgoals[idx].clone();
-            let new = changes(&row, data, &id)?;
+            let new = changes(&row, data, &id, delegation.is_some())?;
             let mut prior = Map::new();
             if let Some(fields) = new.as_object() {
                 for (k, v) in fields {
@@ -277,8 +342,13 @@ impl GoalBook {
             subject: format!("subgoal:{id}"),
             actor_kind: actor.into(),
             actor_agent_id: who.into(),
-            delegation_id: String::new(),
-            basis: String::new(),
+            delegation_id: delegation.unwrap_or("").into(),
+            basis: match (delegation, action) {
+                (Some(_), "add") => "claimed",
+                (Some(_), _) => "observed",
+                _ => "",
+            }
+            .into(),
             reason: clean(&data["reason"], "reason", false, 4000)?,
             source_refs: refs(&data["source_refs"])?,
             prior,
