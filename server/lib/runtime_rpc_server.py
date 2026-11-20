@@ -322,7 +322,8 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             if not session:
                 return {"ok": False, "status": 400,
                         "error": "session is required"}
-            return {"ok": True, "result": compaction.compact_session(session)}
+            return {"ok": True, "result": compaction.compact_session(
+                session, dispatch=self.dispatch_service)}
         if method == "dispatch_queued":
             result = self.dispatch_service.dispatch_queued(
                 str(params.get("queue_id") or ""))

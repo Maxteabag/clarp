@@ -49,6 +49,22 @@ purpose, status, output and cancellation.
 | Anything longer than about five minutes, or that edits code | `clarp-sub-agent` (fork or start) |
 | Fire-and-forget batch work | `clarp-sub-agent start` (systemd mode) |
 
+### One piece per helper, and a fresh helper for the next
+
+A helper is for ONE bounded piece of work. When it reports, mark it done.
+Give the next piece to a FRESH helper (`clarp-sub-agent start --clarp-agent`)
+that starts from a short written hand-over, not to the helper you already
+have: every turn re-reads its whole conversation, so a helper that has grown
+costs more on every call and remembers less of what matters. A fork copies
+your conversation, so it is only as small as yours.
+
+The hand-over is a file or brief of about a page and holds: the goal of the piece
+and when it is done; the files to read; what is already decided; what
+is ruled out and why; and where state lives (branch, worktree, issue,
+scratch files). Write it from your own notes, not from the old helper's chat.
+For a Claude helper its conversation size shows as `context_tokens` in its
+row of the snapshot; for other backends the Host does not show it.
+
 ### Antigravity (`--backend agy`)
 
 AGY runs Claude Opus/Sonnet 5.5 and Gemini on the Antigravity account, so
