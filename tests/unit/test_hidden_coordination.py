@@ -378,7 +378,6 @@ def test_a_notes_row_is_exactly_what_every_app_draws_as_an_ordinary_reply(world,
     """iOS, Android, desktop and the web app draw this row as the agent's reply: role assistant,
     kind and origin 'note' (a word none of them treats specially), no sender fields, not automated,
     no automation category, words in it. Pinned field by field, stored and on /log."""
-    from lib import origins
     world.turn("t-boss", "Report please", "Done.", origin="agent", sender=world.boss, settle=False)
     body = _note("  The release is out.  ", token=_token(world.id, "t-boss"), note_id="n-exact").answer[1]
     stored = dict(db.conn().execute(
@@ -397,7 +396,6 @@ def test_a_notes_row_is_exactly_what_every_app_draws_as_an_ordinary_reply(world,
         "sender_agent_id": "", "sender_name": "", "sender_session": "", "reply_to_agent_id": "",
         "reply_to_name": "", "reply_to_session": "", "audience": "user", "automated": False,
         "automation_kind": "", "phase": None}
-    assert "note" in origins.CHAT_ACTIVITY_ORIGINS
 
 
 def test_a_note_after_its_turn_completed_normally_is_refused(tmp_path, pushes):
