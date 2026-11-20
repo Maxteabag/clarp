@@ -41,7 +41,8 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 
 /// What is declared of a tool and this Host cannot do with it yet. Claude Code: a turn is
 /// not steered while it runs, a tool is given no servers of its own, nobody signs in from
-/// an app, and what an account has used is not read. Codex, beside those: a past session of
+/// an app (but on the Host that keeps the machine's tools: `told`), and what an account has
+/// used is not read. Codex, beside those: a past session of
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
 /// conversation is not made shorter from an app.
 const NOT_YET: [(&str, &[&str]); 4] = [
@@ -321,9 +322,18 @@ impl Shelf {
     }
 }
 
-/// `GET /agent-model-options`: the tools this Host runs and the models each can run.
+/// `GET /agent-model-options`: the tools this Host runs and the models each can run. The Host
+/// that keeps the machine's tools signs them in from an app, and says so of each it can.
 async fn told(State(app): State<App>) -> Json<Value> {
-    Json(app.models.told(app.clock.now_ms()).await)
+    let mut told = app.models.told(app.clock.now_ms()).await;
+    if crate::logins::sign_in::keeps(&app) {
+        for tool in clarp_kernel::sign_in::TOOLS {
+            if let Some(row) = told["providers"].get_mut(tool) {
+                row["supports_auth"] = json!(true);
+            }
+        }
+    }
+    Json(told)
 }
 
 pub fn routes() -> Router<App> {

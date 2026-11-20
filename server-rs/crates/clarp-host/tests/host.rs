@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
 #[path = "host/agent_portraits.rs"]
 mod agent_portraits;
+#[path = "host/backend_auth.rs"]
+mod backend_auth;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
@@ -23100,18 +23102,6 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
     // What the Python Host registers and this Host has not built: refused in words.
     for (path, what) in [
         (
-            "/backend-auth/login",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/backend-auth/login-code",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/backend-auth/logout",
-            "Signing a tool in or out from an app is",
-        ),
-        (
             "/harness-providers/login",
             "Signing a harness in to a provider of models is",
         ),
@@ -23444,7 +23434,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     for (path, body) in [
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
-        ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
         (
             "/harness-providers/login",
@@ -23452,7 +23441,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ),
         ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
         ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
-        ("/backend-auth/logout", json!({ "backend": "claude" })),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));
         let why = said["error"].as_str().unwrap_or("");

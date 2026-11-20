@@ -3419,3 +3419,36 @@ finds; `peers.rs` already holds a peer's address and token); a token of full sco
 limited device; the change relayed as it was asked and the keeper's status and body relayed as they came, and the
 reading relayed too, since what is linked is the keeper's release and catalogue, not this Host's; and a keeper that
 does not answer told as 502 with the reason, with a change that may have landed never sent again, only read back.
+
+**Signing a tool in and out from an app (`backend_auth`, 20 Nov 2026).** The Host that keeps
+its machine's tools (`--accounts select`) runs the tool's own sign-in (`claude auth login
+--claudeai`, `codex login --device-auth`, `grok login --device-auth`) when an app asks
+(`POST /backend-auth/login`), shows the app what it prints in `GET /backend-auth`'s `tasks`,
+hands a code pasted back to the tool's input (`/login-code`), stops a sign-in after ten
+minutes, and runs the tool's own sign-out (`/logout`). What an app is shown (a terminal's
+signs and anything that looks like a key taken out, the address, the device code, whether a
+code is asked for, why it failed) is `clarp_kernel::sign_in`, held to the Python Host's own
+functions by `tools/backend-auth-vectors.py`. One task owns the sign-ins
+(`logins::sign_in::Desk`); a sign-in lives as long as the Host, as there. Two Hosts may share
+a machine, and its tools keep one login each, so only one Host changes them: a Host beside it
+(`follow`) or with no mode refuses each change, 409 in words, whatever the request says, and
+starts nothing. A sign-in or sign-out takes no lock and waits for no turn, as there: it is the
+owner's own act. A turn that runs while its tool is signed out under it fails on the login,
+and this Host's account rule takes it up (`recovery::after_failed_attempt`): with a pool of the
+tool's accounts the pool decides whether it waits for another; without one the turn ends and
+says the sign-in is gone, and the agent answers again once the tool is signed in (held by
+`a_turn_whose_tool_is_signed_out_under_it_ends_on_the_login_and_holds_nothing`). A sign-in is
+stopped after ten minutes; the Host's tests shorten that with `CLARP_SIGN_IN_MOST_MS`, which is
+no owner's setting. The wrong rules are `tools/plants/backend-auth.py`.
+
+Not built: a Host in `follow` passing a change on to the Host that keeps the tools, instead of
+refusing it. It would need (1) where that Host is: a loopback address in this Host's
+configuration, and proof that it runs on the same machine and home; (2) a credential to it
+with full device scope, kept in a file the owner provisions and never in the repository; (3)
+the three changes forwarded as they came, and that Host's status and body answered as they
+are; (4) `GET /backend-auth`'s `tasks` taken from that Host, since the app follows a sign-in by
+reading this one, while the rows are still read here off the same files; (5) when that Host
+cannot be reached, 502 in words and never a change sent twice (a sign-in may have started:
+its `tasks` are read back instead); (6) a code sent to the Host that holds the sign-in it is
+for. The client contract would not change, and the follower of logins already wakes the turns
+that wait when the login file changes.
