@@ -109,25 +109,31 @@ class ResetWorker:
         return f"hotseat-reset.{provider}.redeemed"
 
     def spent_today(self, provider, now=None):
-        """The verified redemptions of the last 24 hours (their times, ms), kept in the settings
-        store so a restart does not forget them (R145)."""
+        """The redemptions of the last 24 hours (their times, ms), kept in the settings store so a
+        restart does not forget them (R145); None when that record cannot be read (anything but a
+        list of whole numbers): the caller then redeems nothing."""
         now = db.now_ms() if now is None else now
         try:
             times = json.loads(settings_store.get_text(self._spent_key(provider), default="[]"))
-            return [t for t in times if type(t) is int and now - DAY_MS < t <= now]
-        except (ValueError, TypeError) as exc:
-            log_fault("bankedResetLedgerUnreadable", exc)
-            return []
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(times, list) or not all(type(t) is int for t in times):
+            return None
+        return [t for t in times if now - DAY_MS < t <= now]
 
     def capped(self, provider, cap_field):
-        """'off' when the provider's cap is 0, 'daily_cap' when its redemptions of the last 24
-        hours reach it, else ''. A provider with no cap field has none."""
+        """'off' when the provider's cap is 0, 'ledger_unreadable' when its count cannot be read
+        (it fails closed), 'daily_cap' when its redemptions of the last 24 hours reach the cap,
+        else ''. A provider with no cap field has none."""
         if not cap_field:
             return ""
         cap = getattr(config.load(), cap_field, 0)
         if not cap:
             return "off"
-        return "daily_cap" if len(self.spent_today(provider)) >= cap else ""
+        spent = self.spent_today(provider)
+        if spent is None:
+            return "ledger_unreadable"
+        return "daily_cap" if len(spent) >= cap else ""
 
     def peek(self, provider, owner):
         try:
@@ -253,10 +259,12 @@ class ResetWorker:
                     value = json.loads(settings_store.get_text(self._key(provider), default="{}"))
                     if value.get("id") == claim["id"]:
                         if result.get("verified"):
-                            # A redemption spent: counted, in the same write as its result.
+                            # A redemption spent: counted, in the same write as its result. A count
+                            # that cannot be read is left as it is, so the step stays closed.
                             now = db.now_ms()
-                            spent = self.spent_today(provider, now) + [now]
-                            settings_store.set_text(self._spent_key(provider), json.dumps(spent))
+                            spent = self.spent_today(provider, now)
+                            if spent is not None:
+                                settings_store.set_text(self._spent_key(provider), json.dumps(spent + [now]))
                         value.update(result=result, completed=db.now_ms(),
                                      needs_reconcile=bool(result.get("needs_reconcile")),
                                      attention_required=bool(result.get("needs_reconcile") and claim.get("reconcile_attempts",0)>=MAX_RECONCILE_ATTEMPTS))
