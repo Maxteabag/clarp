@@ -187,12 +187,14 @@ TRACE_AUDIENCE_SQL = """CASE WHEN ct.audience = 'agents' AND NOT EXISTS (
 # A row the user does not see under 'hide' (alias m: messages): a row of a trace that is still
 # coordination, not a note, in a trace that holds no user row with the user's word. Applied
 # in SQL before the page limit, so a page of N is N visible rows. The caller applies it only
-# for an agent that can leave a note (can_leave_note): another agent is never hidden.
+# for an agent that can leave a note (can_leave_note): another agent is never hidden. The
+# user-word lookup names idx_messages_trace, as TRACE_AUDIENCE_SQL does: by agent it would walk
+# the whole conversation once per row it judges.
 HIDDEN_ROW_SQL = """(EXISTS (SELECT 1 FROM coordination_traces hc
                             WHERE hc.agent_id = m.agent_id AND hc.trace_id = m.trace_id
                               AND hc.audience = 'agents')
       AND COALESCE(m.kind, '') != 'note'
-      AND NOT EXISTS (SELECT 1 FROM messages hu
+      AND NOT EXISTS (SELECT 1 FROM messages hu INDEXED BY idx_messages_trace
                        WHERE hu.trace_id = m.trace_id AND hu.agent_id = m.agent_id
                          AND hu.role = 'user' AND COALESCE(hu.origin, 'user') IN ('user', 'oracle')))"""
 
