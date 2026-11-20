@@ -807,7 +807,7 @@ class AgyBackend(StreamJsonBackend):
             process.append(popen_turn(cmd, cwd=cwd, session=session,
                                       env_extra={**identity, "CLARP_AGY_MANAGED_TURN": "1"}))
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                          provider=self.id, pid=process[0].pid)
+                                          provider=self.id, pid=process[0].pid, trace_id=trace_id)
         try:
             admitted = owner_gate(admit_spawn)
             if not admitted or not process:

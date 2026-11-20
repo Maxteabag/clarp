@@ -1,4 +1,4 @@
--- user_version 128
+-- user_version 129
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -1909,7 +1909,8 @@ CREATE TABLE provider_turns (
     pid INTEGER,
     start_token TEXT NOT NULL DEFAULT '',
     started_at INTEGER NOT NULL,
-    exited_at INTEGER
+    exited_at INTEGER,
+    trace_id TEXT NOT NULL DEFAULT ''
 );
 
 -- table provider_usage_windows on provider_usage_windows
