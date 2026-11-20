@@ -16,7 +16,7 @@ use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, AgentEvent, Command, Effect, Refusal};
-use crate::turn::{Admission, IllegalTransition, Origin, TurnId};
+use crate::turn::{Admission, IllegalTransition, Origin, TurnEvent, TurnId};
 
 /// What an item in an agent's log is. The numbers are permanent once a log holds them.
 pub mod kind {
@@ -58,6 +58,13 @@ pub mod kind {
     /// A change to helper cells on a parent message. Its place in a
     /// conversation page is still the original row.
     pub const HELPER_CELLS: u16 = 113;
+    /// A [`Note`](crate::conversation::Note): what an agent left for its user from a turn
+    /// (`POST /agent-notes`). A row of the conversation, as a reply is.
+    pub const AGENT_NOTE: u16 = 105;
+    /// Which message a trace belongs to: its id, sender and origin, keyed by the trace
+    /// ([`super::trace_key`]), written with the message. A send that names a trace another
+    /// message has is refused by one look by key.
+    pub const TRACE: u16 = 900;
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;
@@ -93,7 +100,7 @@ pub mod kind {
     /// The rows of a conversation: what a page of a chat is counted in. An item of one of
     /// these kinds is where its row stands. What changes a row afterwards is an item of
     /// another kind that names the row: its tools' uses, what followed it, how its turn ended.
-    pub const ROWS: Kinds = Kinds::range(MESSAGE, IMPORTED);
+    pub const ROWS: Kinds = Kinds::range(MESSAGE, AGENT_NOTE);
 }
 
 const PAGE: usize = 1_000;
@@ -151,6 +158,9 @@ pub struct Incoming {
     pub body: Vec<u8>,
     pub origin: Origin,
     pub admission: Admission,
+    /// Another agent addresses this one: its id ("" for a peer Host's agent); `None`: the
+    /// user's. The turn the message becomes is marked so in its acceptance.
+    pub coordination: Option<String>,
 }
 
 /// What a message did: where it is in the log, and what the actor must now do.
@@ -213,6 +223,17 @@ pub struct Recorder {
     floor: Seq,
 }
 
+/// The key of the acceptance of a turn that answers another agent. Not `c-`, which a reply's
+/// commentary is keyed by (`c-<reply id>`).
+pub fn coordination_key(turn: u64) -> String {
+    format!("coordination-{turn}")
+}
+
+/// The key of the item that says which message a trace belongs to ([`kind::TRACE`]).
+pub fn trace_key(trace: &str) -> String {
+    format!("trace-{trace}")
+}
+
 fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     let body = serde_json::to_vec(event).map_err(|e| JournalError::Encode(e.to_string()))?;
     let written_as = match event {
@@ -220,6 +241,18 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         _ => kind::AGENT_EVENT,
     };
     let mut item = NewItem::new(written_as, ts_ms, body);
+    // A turn that answers another agent is found by its key: once per turn on a page, never by
+    // reading the conversation.
+    if let AgentEvent::Turn {
+        turn,
+        change: TurnEvent::Accepted {
+            coordination: Some(_),
+            ..
+        },
+    } = event
+    {
+        item.key = Some(coordination_key(turn.0));
+    }
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
         | AgentEvent::StopRequested { turn, .. }
@@ -471,6 +504,7 @@ impl Recorder {
                 body,
                 origin,
                 admission: Admission::Queue,
+                coordination: None,
             },
             now_ms,
         )
@@ -530,6 +564,7 @@ impl Recorder {
                     message_seq,
                     origin: message.origin,
                     admission: message.admission,
+                    coordination: message.coordination,
                 },
                 now_ms,
             )
@@ -1174,6 +1209,7 @@ mod tests {
             body: key.as_bytes().to_vec(),
             origin: Origin::User,
             admission,
+            coordination: None,
         }
     }
 
@@ -1524,6 +1560,7 @@ mod tests {
             message_seq,
             origin: Origin::User,
             admission: Admission::Queue,
+            coordination: None,
         };
         batch.command(accept, 3).unwrap();
         let stop = Command::Stop {

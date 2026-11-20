@@ -2696,6 +2696,7 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
             body: serde_json::to_vec(&said).unwrap(),
             origin: Origin::User,
             admission: Admission::Queue,
+            coordination: None,
         }
     };
     let ended = |recorder: &mut Recorder, turn: TurnId, now: i64| {
