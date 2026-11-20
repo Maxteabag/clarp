@@ -66,7 +66,10 @@ impl LogEngine for Gate {
         let count = state.opened.entry(id.clone()).or_default();
         *count += 1;
         let first = *count == 1;
-        while state.held.contains(&id) {
+        self.moved.notify_all();
+        // Only the actor's initial open is stalled. A premature retirement must be
+        // observable as another open, without stalling the test's fleet worker too.
+        while first && state.held.contains(&id) {
             state = self.moved.wait(state).unwrap();
         }
         if first && state.broken.contains(&id) {
@@ -180,7 +183,18 @@ impl Place {
     }
 
     fn start(&self) -> FleetHandle {
-        start(self.works(), self.store()).unwrap()
+        let fleet = start(self.works(), self.store()).unwrap();
+        // Ensure the agent owns the first open before a delete can attempt retirement.
+        let state = self.engine.state.lock().unwrap();
+        let waiting =
+            |state: &mut GateState| state.held.contains(HELD) && !state.opened.contains_key(HELD);
+        let (mut state, _) = self
+            .engine
+            .moved
+            .wait_timeout_while(state, Duration::from_secs(2), waiting)
+            .unwrap();
+        assert!(!waiting(&mut state), "the held agent did not open its log");
+        fleet
     }
 
     /// The events the apps were told that name `session` and say it was deleted.
