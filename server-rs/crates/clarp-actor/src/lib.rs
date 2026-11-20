@@ -595,6 +595,8 @@ const STOPPED_FOR_AN_ACCOUNT: &str =
     "usage limit reached: the account was out, and the turn was stopped to wait for another";
 
 pub struct Actor {
+    /// Recovery can settle a turn while the worker still has opening reads to do.
+    opening: bool,
     profile: Profile,
     backend: Arc<dyn Backend>,
     recorder: Recorder,
@@ -1007,6 +1009,19 @@ impl Actor {
         log: Box<dyn AgentLog>,
         now_ms: i64,
     ) -> Result<(Self, Outputs), ActorError> {
+        let (mut actor, out) = Self::open_for_recovery(profile, backend, log, now_ms)?;
+        actor.finish_opening();
+        Ok((actor, out))
+    }
+
+    /// Opens the actor for a Host that also folds projections from its log. Call
+    /// `finish_opening` after those reads so they do not immediately refill the cache.
+    pub fn open_for_recovery(
+        profile: Profile,
+        backend: Arc<dyn Backend>,
+        log: Box<dyn AgentLog>,
+        now_ms: i64,
+    ) -> Result<(Self, Outputs), ActorError> {
         let recorder = Recorder::open(log)?;
         let mut jobs = JobBook::new();
         records(
@@ -1067,6 +1082,7 @@ impl Actor {
         let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session);
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
+            opening: true,
             delegation,
             pool: None,
             stopped_for_pool: false,
@@ -1144,6 +1160,19 @@ impl Actor {
             });
         }
         Ok((actor, out))
+    }
+
+    /// Ends recovery, including the Host's initial reads, exactly once.
+    pub fn finish_opening(&mut self) {
+        if std::mem::take(&mut self.opening) {
+            self.rest_if_idle();
+        }
+    }
+
+    fn rest_if_idle(&self) {
+        if !self.opening && self.recorder.agent().live().is_none() {
+            self.recorder.log().at_rest();
+        }
     }
 
     /// What those who watch the agent are to be sent now: the events of its turn that nobody
@@ -2538,6 +2567,7 @@ impl Actor {
     /// were told to end.
     pub fn stop_as(&mut self, by: Control, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
         let silenced = by.is_the_users();
+        let stopped_between_attempts = matches!(self.recorder.agent().live(), Some(Turn::Parked(_)));
         let command = Command::Stop { by };
         let effects = self.recorder.handle(command, now_ms)?;
         let told = effects
@@ -2559,6 +2589,9 @@ impl Actor {
         // still the user's to hear.
         if silenced {
             out.changed.speech = self.drop_lines(now_ms)? > 0;
+        }
+        if stopped_between_attempts {
+            self.rest_if_idle();
         }
         Ok((u32::try_from(told).unwrap_or(u32::MAX), out))
     }
@@ -3342,6 +3375,7 @@ impl Actor {
             if let Ok(Some(end)) = self.turn_end(live.turn.0) {
                 self.remembered.take(&end);
             }
+            self.rest_if_idle();
             for attempt in 1..=live.attempt {
                 let _ = std::fs::remove_file(self.profile.stdin_path_of(live.turn, attempt));
                 if !self.profile.keep_spools {

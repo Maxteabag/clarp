@@ -114,6 +114,9 @@ impl From<CodecError> for LogError {
 
 /// One agent's log. It has one writer, the agent's actor, which is why `append` takes `&mut self`.
 pub trait AgentLog: Send {
+    /// The actor has finished reading for now. Engines may release cached pages.
+    fn at_rest(&self) {}
+
     /// Appends the items in order, all or none, and returns the position of the last item in the
     /// log afterwards. When this returns `Ok`, the items survive a crash of the process.
     fn append(&mut self, items: &[NewItem]) -> Result<Seq, LogError>;

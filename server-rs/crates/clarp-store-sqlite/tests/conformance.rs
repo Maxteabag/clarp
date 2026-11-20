@@ -188,3 +188,32 @@ fn a_failed_key_value_batch_rolls_back_prior_writes_on_reopen() {
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn log_at_rest_releases_cached_pages_and_keeps_the_normal_cache_target() {
+    // syscr counts reads made by this thread, including SQLite pread calls. Reading
+    // the counter itself costs the same on each pass. The OS may cache every file.
+    fn reads() -> u64 {
+        std::fs::read_to_string("/proc/thread-self/io").unwrap().lines()
+            .find_map(|line|line.strip_prefix("syscr: ")).unwrap().parse().unwrap()
+    }
+    let dir=scratch_dir("sqlite-log-at-rest");
+    let mut log=SqliteEngine::new().open(&dir,standard_set("none").unwrap()).unwrap();
+    let rows:Vec<_>=(0..128).map(|i| NewItem::new(1,i,vec![5;4096])).collect();
+    log.append(&rows).unwrap();
+    let scan=|| {
+        let before=reads();
+        assert_eq!(log.read_tail(Kinds::ALL,128).unwrap().len(),128);
+        reads()-before
+    };
+    scan();
+    let warm=scan();
+    log.at_rest();
+    let refill=scan();
+    assert!(refill>warm+100,"the released pages needed file reads: {refill} versus {warm}");
+    let warm_again=scan();
+    assert!(warm_again+100<refill,"the same connection can cache the full scan again");
+    drop(log);
+    std::fs::remove_dir_all(dir).unwrap();
+}
