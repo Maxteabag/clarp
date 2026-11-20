@@ -495,6 +495,23 @@ impl Entry {
 mod tests {
     use super::*;
 
+    /// The log keeps a waiting message's send time under its own key, and a message whose turn
+    /// started at once is written without one, as before issue 491.
+    #[test]
+    fn a_message_keeps_its_send_time_under_the_logs_key_only_when_it_waited() {
+        let at_once = serde_json::to_value(Message::default()).unwrap();
+        assert!(at_once.get(SENT_AT).is_none(), "{at_once}");
+        let waited = Message {
+            sent_at_ms: Some(1_700),
+            ..Message::default()
+        };
+        let row = serde_json::to_value(&waited).unwrap();
+        assert_eq!(row[SENT_AT], 1_700, "{row}");
+        assert_eq!(SENT_AT, "sent_at_ms", "the log's key is permanent once written");
+        let read: Message = serde_json::from_value(row).unwrap();
+        assert_eq!(read, waited);
+    }
+
     #[test]
     fn a_message_is_filed_under_its_apps_id_and_gives_that_id_back_as_it_was() {
         // An app whose ids come without the mark (the desk), and one whose ids have it
