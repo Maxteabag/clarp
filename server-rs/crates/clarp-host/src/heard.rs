@@ -260,6 +260,20 @@ impl Ears {
         }
     }
 
+    /// How this Host hears an agent that names no engine of its own, as an agent's profile
+    /// shows it (`clarp_kernel::voice_profile::hearing`): the engine that stands in for the
+    /// Host's own when nothing is asked for by name (empty: none does), the Host's own engine
+    /// (empty: it has none), and the Host's language. The same rules as [`Self::order`] and
+    /// `spoken_to`.
+    pub(crate) fn as_profiled(&self, directory: &Directory) -> (String, String, String) {
+        let default_engine = self.default_engine(directory);
+        let stands_in = heard::is_cloud(&default_engine) || self.inventory.path(&default_engine).is_some();
+        let cloud = if stands_in { default_engine } else { String::new() };
+        let own = self.own_id().unwrap_or_default();
+        let language = languages::selected(directory.setting(languages::LANGUAGE_KEY), &self.language);
+        (cloud, own, language)
+    }
+
     /// The engine that hears a clip nobody named one for: what the owner set from an app,
     /// else what this Host was started with.
     pub(crate) fn default_engine(&self, directory: &Directory) -> String {
@@ -1249,6 +1263,8 @@ async fn set_providers(
         }
     }
     app.fleet.set(settings).await?;
+    // Every agent's hearing may have changed: open apps re-read the agents.
+    app.hub.publish(crate::profile::changed_for_all(), app.clock.now_ms());
     let mut told = status(&app);
     told["ok"] = json!(true);
     Ok(Json(told))

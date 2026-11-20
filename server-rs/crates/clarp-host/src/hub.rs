@@ -73,6 +73,9 @@ pub struct Hub {
     statuses: broadcast::Sender<Arc<Value>>,
     /// Counts the changes of what waits for the user: who watches it wakes with each.
     badge: tokio::sync::watch::Sender<u64>,
+    /// What adds an agent's profile to the roster's events about it (feature
+    /// `voice_profile`), once the Host has its speaker and its ears.
+    pub profiles: crate::profile::Slot,
 }
 
 impl Hub {
@@ -98,6 +101,7 @@ impl Hub {
             }),
             live,
             waiting: Mutex::new(BTreeMap::new()),
+            profiles: crate::profile::Slot::new(),
         }
     }
 
@@ -137,6 +141,9 @@ impl Hub {
     /// Numbers an event, keeps it for those who reconnect and sends it to those who listen.
     /// The event is the object a client will read; its number is added to it here.
     pub fn publish(&self, mut event: Value, now_ms: i64) -> u64 {
+        if let Some(profiles) = self.profiles.get() {
+            profiles.add_to(&mut event);
+        }
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         let id = recent.next_id;
         recent.next_id += 1;
