@@ -170,6 +170,10 @@ pub enum Signal {
     Context {
         tokens: u64,
     },
+    /// The tool's own record that it made its conversation shorter, with the sizes it says
+    /// (`clarp_kernel::compaction::boundary`). What it means is the actor's to say: only of the
+    /// turn the user asked for it in.
+    Compacted(clarp_kernel::compaction::Boundary),
     /// What the tool says of its account's windows as it runs: how much of each is used and
     /// when it begins anew, in the tool's own words ([`limits`] reads them). The newest of a
     /// turn is told with the turn's end.

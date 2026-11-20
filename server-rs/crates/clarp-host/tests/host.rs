@@ -19,6 +19,8 @@ use serde_json::{Value, json};
 mod agent_portraits;
 #[path = "host/backend_auth.rs"]
 mod backend_auth;
+#[path = "host/compaction_outcome.rs"]
+mod compaction_outcome;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
