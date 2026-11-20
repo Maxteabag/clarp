@@ -1217,28 +1217,33 @@ fn a_tool_killed_from_outside_while_it_is_held_leaves_nothing_standing() {
 
 #[test]
 fn a_hooks_report_under_way_at_the_hold_is_counted() {
-    // `yes` keeps the pipe busy, so a hook's report waits for the output before it (up to a
-    // quarter of a second): at the hold one is nearly always under way.
-    let hook = env!("CARGO_BIN_EXE_clarp-hook");
-    let script = format!("yes abcdefgh & while :; do echo '{{\"n\":1}}' | {hook} Step; done");
-    let mut running = start("hold-hook", &script);
-    let hooks = |records: &[Record]| {
-        records
-            .iter()
-            .filter(|r| matches!(&r.entry, Entry::Hook { name, .. } if name == "Step"))
-            .count()
-    };
-    wait_for("some reports", || hooks(&after(&running.spool, 0)) >= 3);
+    // The marker proves that the tool sent the complete request. The shim can still be
+    // draining an earlier burst or handling the request when the hold arrives.
+    let script = r#"exec python3 -c 'import os,socket
+os.write(1,b"abcdefgh\n"*1024)
+s=socket.socket(socket.AF_UNIX)
+s.connect(os.environ["CLARP_SHIM_SOCKET"])
+s.sendall(b"{\"op\":\"hook\",\"name\":\"Step\",\"data\":{\"n\":1}}\n")
+print("report sent",flush=True)
+s.recv(4096)
+input()'"#;
+    let mut running = start("hold-hook", script);
+    wait_for("the tool to send its report", || {
+        outs(&records(&running.spool)).contains(&"report sent")
+    });
     let reply = hold(&running.socket, 2_000);
     assert!(reply.ok, "{reply:?}");
     let held = reply.held.unwrap();
-    let counted = hooks(
-        &SpoolReader::new(&running.spool)
-            .read_window(0, held.spool, usize::MAX)
-            .unwrap()
-            .records,
-    );
-    assert!(counted >= 3);
+    let window = SpoolReader::new(&running.spool)
+        .read_window(0, held.spool, usize::MAX)
+        .unwrap();
+    let reports = window
+        .records
+        .iter()
+        .filter(|r| matches!(&r.entry, Entry::Hook { name, .. } if name == "Step"))
+        .count();
+    assert_eq!(reports, 1);
+    assert_eq!(held.partial_reports, 0);
     // A report taken before the count and recorded after it would grow the spool here.
     stays(&running.spool, held.spool, Duration::from_millis(300));
     assert_eq!(release(&running.socket).let_go, Some(true));
