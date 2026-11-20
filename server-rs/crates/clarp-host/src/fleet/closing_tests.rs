@@ -74,7 +74,9 @@ impl LogEngine for Gate {
             panic!("the thread of {id} ends");
         }
         if !first && state.cut.contains(&id) {
-            return Err(clarp_ports::log::LogError::Storage("the log does not open".into()));
+            return Err(clarp_ports::log::LogError::Storage(
+                "the log does not open".into(),
+            ));
         }
         drop(state);
         self.logs.open(path, codecs)

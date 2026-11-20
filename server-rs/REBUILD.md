@@ -3310,6 +3310,26 @@ and reason, with its reason, its provider and its turn, in words made from them,
 was told is remembered in memory only, bounded, and pruned at every write. The vectors are
 `tools/voice-profile-vectors.py`, from `voice_profile.py` run as it is.
 
+**Closing an agent never waits without a bound (20 Nov 2026).** The fleet is one worker, and it closed an agent it
+removed by waiting for the agent's thread to answer, without a bound: one thread that did not answer held every request
+of every agent. `AgentHandle::close` now waits `CLOSE_WITHIN`, three seconds, as a delegation's ask does, and says
+whether the thread closed: it answered, or it is gone (its channel closed, at once, as before). `Fleet::remove` stops the
+agent's delegations and keeps its tombstone first, as before, and then closes it. Past the bound nothing more is done:
+the agent's thread is the one writer of its log, and a bound that passed says nothing of what the thread still writes,
+so its goals are not retired, its helpers not abandoned, the focus not let go, the apps not told, and the agent stays in
+the roster as it was. The answer says so in words (503: its thread did not answer within three seconds, it is not
+removed yet, ask again). The same request asked again does not stop it again and keeps the moment it was first
+deleted; it sends one more close (a close put behind the first is never handled: the thread ends at the first) and, once
+the thread has closed, does the rest of the removal once, keeping the tombstone again (a change made between the two
+asks writes the record without it). A Host that stops first leaves the tombstone, and its next start finishes the
+removal: the agent is not run, its goals are retired, the focus is left out, and a helper whose parent is deleted is
+abandoned there, as the removal would have left it. Held by the fleet's tests at the port (`fleet/closing_tests.rs`: a
+log engine that holds an agent's thread in its first open, or ends it there: at once, after the bound, never, a thread
+that ended before or during the wait, two deletes, a change between the asks, a delete while the Host stops and the
+starts after it), the Host's (`bounded_close.rs`: a store written by its own crate with a deleted parent and its helper)
+and the wrong rules `tools/plants/bounded-close.py`. The asks a request makes of an agent and awaits are not bounded by
+this piece: they hold that request alone, never the fleet.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
