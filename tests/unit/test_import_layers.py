@@ -65,6 +65,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     'clip_records',
     'config',
     'config_writer',
+    'coordination',
     'deployment',
     'diagnostics_settings',
     'error_classify',

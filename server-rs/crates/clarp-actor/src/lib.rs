@@ -629,6 +629,7 @@ pub struct Actor {
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
     delegation: Option<delegation::Binding>,
+    listener_heartbeat: Option<i64>,
     /// What the agent made for its user and what it asks its user, as the log has it.
     artifacts: ArtifactBook,
     /// The files the agent published, as the log has them.
@@ -1106,6 +1107,7 @@ impl Actor {
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
             delegation,
+            listener_heartbeat: None,
             pool: None,
             stopped_for_pool: false,
             held_for_an_account: false,
@@ -1655,6 +1657,26 @@ impl Actor {
             },
             None => Standing::Unknown,
         })
+    }
+
+    /// The trace of this turn, as its rows carry it, when it is the agent's running turn now
+    /// (starting, running, or between two attempts after a dropped connection, as the Python
+    /// Host's release owner ruled at his merge of PR 470): `None` for a turn that does not run
+    /// (one that ended, one that waits for an account, or another), and the empty text for a
+    /// running turn whose message came without one.
+    pub fn running_trace(&self, turn: u64) -> Result<Option<String>, ActorError> {
+        let message_seq = match self.recorder.agent().live() {
+            Some(Turn::Starting(live)) if live.id.0 == turn => live.message_seq,
+            Some(Turn::Running(live)) if live.id.0 == turn => live.message_seq,
+            // Between two attempts after one that passed (a dropped connection): the same turn
+            // goes on in a moment. Not one that waits for an account: it makes no progress.
+            Some(Turn::Parked(live)) if live.id.0 == turn && !live.wait.is_for_an_account() => {
+                live.message_seq
+            }
+            _ => return Ok(None),
+        };
+        let message = self.message_at(message_seq)?;
+        Ok(Some(message.trace_id.unwrap_or_default()))
     }
 
     /// What the agent last finished for one of those `asked_by` names (by the contract's

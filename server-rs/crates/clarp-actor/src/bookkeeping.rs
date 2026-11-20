@@ -19,6 +19,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Applied {
+    #[serde(default)]
+    pub listener: clarp_kernel::goals::listener::State,
+    #[serde(default)]
+    pub job_handle: String,
     pub message_through: i64,
     pub goal_event_through: i64,
     pub last_applied_at: Option<i64>,
@@ -29,6 +33,20 @@ pub struct Applied {
     message_head: u64,
     #[serde(default)]
     event_head: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityVersion {
+    messages: u64,
+    next_event: i64,
+    applied: (i64, i64),
+}
+
+pub struct ListenerUpdate {
+    pub state: clarp_kernel::goals::listener::State,
+    pub applied: (i64, i64),
+    pub since: Option<i64>,
+    pub job_handle: String,
 }
 
 pub struct Batch<'a> {
@@ -71,14 +89,21 @@ fn evidence_text<'a>(row: &'a Versioned, shown: &'a Value) -> &'a str {
 }
 
 pub fn read_progress(log: &dyn AgentLog, id: &str, initial: i64) -> Result<Applied, ActorError> {
-    Ok(load(log, &receipt_key(id))?.unwrap_or(Applied {
+    let mut progress = load(log, &receipt_key(id))?.unwrap_or(Applied {
         message_through: initial,
         ..Applied::default()
-    }))
+    });
+    // Older receipts included a heartbeat from the Host that wrote them.
+    progress.listener.last_heartbeat_at = None;
+    Ok(progress)
 }
 
 impl Applied {
     pub fn show(&self, row: &mut Value, now: i64) {
+        if let (Value::Object(extra), Some(fields)) = (json!(self.listener), row.as_object_mut()) {
+            fields.extend(extra);
+        }
+        row["job_handle"] = json!(self.job_handle);
         row["message_through"] = json!(self.message_through);
         row["goal_event_through"] = json!(self.goal_event_through);
         row["last_applied_at"] = json!(self.last_applied_at);
@@ -130,7 +155,14 @@ impl Actor {
     }
 
     pub fn applied_bookkeeping(&self, id: &str, initial: i64) -> Result<Applied, ActorError> {
-        read_progress(self.recorder.log(), id, initial)
+        let mut progress = read_progress(self.recorder.log(), id, initial)?;
+        if self
+            .active_delegation()
+            .is_some_and(|binding| binding.delegation_id == id)
+        {
+            progress.listener.last_heartbeat_at = self.listener_heartbeat;
+        }
+        Ok(progress)
     }
 
     /// Visit the current versions of rows changed after the cursor, filtering
@@ -316,6 +348,49 @@ impl Actor {
         Ok(rules::snapshot(r, src))
     }
 
+    pub fn activity_version(&self, progress: &Applied) -> Result<ActivityVersion, ActorError> {
+        Ok(ActivityVersion {
+            messages: self.head_revision(),
+            next_event: self.next_goal_event_id()?,
+            applied: (progress.message_through, progress.goal_event_through),
+        })
+    }
+
+    pub fn listener_activity(
+        &self,
+        id: &str,
+        caller: &str,
+        applied: &Applied,
+        render: fn(&Versioned) -> Value,
+    ) -> Result<clarp_kernel::goals::listener::Activity, ActorError> {
+        let mut marker = (0, 0);
+        let mut oldest: Option<i64> = None;
+        let mut newest: Option<i64> = None;
+        let mut time = |t: i64| {
+            if t != 0 {
+                oldest = Some(oldest.map_or(t, |old| old.min(t)));
+                newest = Some(newest.map_or(t, |old| old.max(t)));
+            }
+        };
+        self.visit_messages(applied.message_through, caller, render, |row, _| {
+            marker.0 = marker.0.max(row.revision as i64);
+            time(row.ts_ms);
+            true
+        })?;
+        self.visit_events(applied.goal_event_through, id, |event| {
+            if event.actor_kind != "system" {
+                marker.1 = marker.1.max(event.event_id);
+                time(event.at);
+            }
+            true
+        })?;
+        Ok(clarp_kernel::goals::listener::Activity {
+            marker,
+            oldest,
+            newest,
+        })
+    }
+
     fn oldest_unapplied(
         &self,
         id: &str,
@@ -325,18 +400,45 @@ impl Actor {
         created: i64,
         now: i64,
     ) -> Result<Option<i64>, ActorError> {
-        let mut oldest: Option<i64> = None;
-        self.visit_messages(applied.message_through, caller, render, |row, _| {
-            oldest = Some(oldest.map_or(row.ts_ms, |t| t.min(row.ts_ms)));
-            true
-        })?;
-        self.visit_events(applied.goal_event_through, id, |event| {
-            if event.actor_kind != "system" {
-                oldest = Some(oldest.map_or(event.at, |t| t.min(event.at)));
-            }
-            true
-        })?;
-        Ok(oldest.map(|t| t.max(created).min(now)))
+        let activity = self.listener_activity(id, caller, applied, render)?;
+        Ok((activity.marker != (0, 0))
+            .then(|| activity.oldest.unwrap_or(now).max(created).min(now)))
+    }
+
+    /// Listener writes carry only the fields it owns. A delegate can apply a
+    /// batch between the read and this append, so never replace its receipt.
+    pub fn keep_listener(
+        &mut self,
+        id: &str,
+        initial: i64,
+        mut update: ListenerUpdate,
+        now: i64,
+    ) -> Result<(), ActorError> {
+        let mut current = read_progress(self.recorder.log(), id, initial)?;
+        self.listener_heartbeat = update.state.last_heartbeat_at.take();
+        let since = if (current.message_through, current.goal_event_through) == update.applied {
+            current.unapplied_since.or(update.since)
+        } else {
+            current.unapplied_since
+        };
+        if current.listener == update.state
+            && current.unapplied_since == since
+            && current.job_handle == update.job_handle
+        {
+            return Ok(());
+        }
+        current.listener = update.state;
+        current.unapplied_since = since;
+        current.job_handle = update.job_handle;
+        let mut batch = self.recorder.batch();
+        batch.item(record_item(
+            kind::GOAL_LEDGER,
+            receipt_key(id),
+            &current,
+            now,
+        )?);
+        batch.commit()?;
+        Ok(())
     }
 }
 
@@ -481,7 +583,7 @@ impl Actor {
         }
         let count = events.len();
         goal_ledger::stage(self.recorder.log(), b.plan, events, 0, 0, b.now, &mut items)?;
-        let mut a = self.applied_bookkeeping(b.id, b.initial_message)?;
+        let mut a = read_progress(self.recorder.log(), b.id, b.initial_message)?;
         let previous = (a.message_through, a.goal_event_through);
         let requested = |key: &str| {
             if python::truthy(&b.data[key]) {
@@ -550,6 +652,7 @@ impl Actor {
             self.goals.apply(&delta);
             out.changed.goals = true;
         }
+        a.listener.last_heartbeat_at = self.listener_heartbeat;
         Ok((count, a, out))
     }
 }

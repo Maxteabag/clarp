@@ -58,7 +58,7 @@ use crate::{apps, ids, joblog, library, media, peers, plans, push, roster, wire}
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 105;
+pub const HOST_CONTRACT: u64 = 106;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -163,6 +163,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Goals kept current by the Goal keeper: `plan.goal.updater` beside the owner's own
     // checkpoint, `plan.updater`, a criterion set aside, a paused goal's step that keeps
     // its place.
+    ("goal_ledger", 52),
     ("goal_updater", 96),
     // A receipt for everything the keeper did with a goal: `plan.updater.last_receipt`,
     // `receipts` on the keeper's runs, `clarp-goal receipts`.
@@ -271,6 +272,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("herald", 1),
     // How the agents speak: the owner's personalities and the humanness of a spoken reply.
     ("personalities", 1),
+    ("agent_portraits", 1),
     ("voice_humanness", 46),
     // The router of spoken messages (`/orchestrator/*`).
     ("orchestrator", 1),
@@ -597,6 +599,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::past::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
+        .merge(crate::portrait_generation::routes())
         .merge(crate::contacts::routes())
         .merge(crate::places::routes())
         .merge(crate::oracle::routes())
@@ -2173,6 +2176,7 @@ async fn route_delegation(
 /// A message from an app: one that carries its call goes to the agent of the call that can
 /// take speech, whoever it names; then it is a message like any other.
 async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -> Response {
+    let voice = crate::voice_timeline::Sent::read(&request);
     let call_id: String = python::strip(request.call_id.as_deref().unwrap_or(""))
         .chars()
         .take(64)
@@ -2242,6 +2246,9 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         }
         return match sent {
             Ok(answer) => {
+                if let Some(voice) = &voice {
+                    voice.posted(app, &answer);
+                }
                 let mut body = json!(answer);
                 body["opening"] = result["opening"].clone();
                 Json(body).into_response()
@@ -2301,13 +2308,21 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
                         let _ = desk.routed(app, to).await;
                     }
                 }
+                if let Some(voice) = &voice {
+                    voice.posted(app, &answer);
+                }
                 return (status, Json(answer)).into_response();
             }
             Err(refused) => return refused.into_response(),
         }
     }
     match send_message(app, request).await {
-        Ok(sent) => Json(sent).into_response(),
+        Ok(sent) => {
+            if let Some(voice) = &voice {
+                voice.posted(app, &sent);
+            }
+            Json(sent).into_response()
+        }
         Err(refused) => refused.into_response(),
     }
 }

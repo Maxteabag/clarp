@@ -17,7 +17,7 @@ from .prompt_admissions import PromptAdmission
 from . import prompt_admissions
 from .send_service import SendTarget, resolve_send_target
 from .turn_dispatch_state import _SLOTS, _RECOVERY_RESUMING_ORIGINS, _ADMISSION
-from .turn_command import DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, DispatchError, _refuse_oversized, JanitorDispatchError, UNCONFIRMED_DELIVERY, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active, _admission_facts, _admit, _UNLAUNCHED_MARKER_RETRY_SEC, _unlaunched_marked, _ADMISSION_REFUSED, _is_call_opening, _backend_invoked, DispatchCommand, _serialize_client_retry, _PreInvokeFailure, _mark_preinvoke_failure, _preinvoke_failure, _QueuedReceiptUnavailable
+from .turn_command import DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, DispatchError, _refuse_oversized, JanitorDispatchError, UNCONFIRMED_DELIVERY, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active, _admission_facts, _admit, _UNLAUNCHED_MARKER_RETRY_SEC, _unlaunched_marked, _ADMISSION_REFUSED, _is_call_opening, _backend_invoked, DispatchCommand, _serialize_client_retry, _PreInvokeFailure, _mark_preinvoke_failure, _preinvoke_failure, _QueuedReceiptUnavailable, _turn_protocol
 from .turn_stop import _existing_cwd
 
 
@@ -242,10 +242,8 @@ class AdmissionMixin:
         )
         model, effort = _resolve_llm(agent, backend)
         team_digest, team_inbox_ids = team_store.pending_digest(agent_id)
-        team_protocol = team_store.team_protocol_instruction(
-            agent_id,
-            turn_origin=origin,
-        )
+        team_protocol = _turn_protocol(agent_id, origin=origin,
+                                       sender_agent_id=sender_agent_id)
         spec = _TurnSpec(
             backend=backend,
             text=text,

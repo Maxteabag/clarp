@@ -659,6 +659,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
+        "/agent-notes": "_handle_agent_note",
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
@@ -1508,6 +1509,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         except ValueError as exc:
             return self._json_error(400, str(exc))
         payload["ok"] = True
+        # Every agent's hearing may have changed: open apps re-read the agents.
+        from lib import events
+        events.broadcast(self.ctx.stream, events.agent_roster("voice-profile"))
         self._json_ok(payload)
 
     # ---- vocabulary: packs, terms, profiles, assignments, preview, runs ----

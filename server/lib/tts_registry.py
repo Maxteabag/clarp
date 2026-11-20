@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from .cartesia_tts import CartesiaError, synthesize as cartesia_synthesize
 from .eleven_ws import ElevenWSError, synthesize_streaming
+from . import tts_mode
 from .tts_provider import AudioSink, TTSProvider
-from .voice import CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE, resolve_voice
+from .voice import CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE
+from .voice_profile import provider_voice
 
 
 def cartesia_synthesize_raw_pcm(**kwargs) -> int:
@@ -20,34 +22,14 @@ def cartesia_synthesize_raw_pcm(**kwargs) -> int:
     return synthesize_raw_pcm(**kwargs)
 
 
-def _gemini_voice(cfg, raw_voice, persona: str, agent: dict | None,
-                  route_voice: str | None, cartesia_voice: str | None) -> str | None:
-    """Gemini voice for this clip, or None when the agent has none.
-
-    A helper speaking with a contact's Cartesia voice keeps that contact's
-    Gemini voice. The default voice is only for agents moved to Gemini on
-    purpose; a contact with no voice stays silent, as it would under Cartesia.
-    """
-    return (route_voice or resolve_voice(raw_voice, GEMINI)
-            or cfg.gemini_voice_for(persona)
-            or cfg.gemini_voice_for_cartesia(cartesia_voice)
-            or (cfg.gemini_voice
-                if cfg.tts_override_for(agent).get("provider") == GEMINI else None))
-
-
 def _google_voice(raw_voice: str | None, route_voice: str | None) -> str:
-    """The agent's Google voice: its [tts.agents] google_voice, else its stored google key, else a
-    bare stored id that is a Google voice (a preview passes the voice it auditions). Only an agent
-    with no Google voice at all gets the documented default for a new choice. A saved voice off
-    the allowlist is returned as it is, so synthesis refuses it (voice_unavailable) and it is
-    never replaced by the default."""
-    from . import google_tts
-    saved = route_voice or resolve_voice(raw_voice, GOOGLE)
-    if saved:
-        return saved
-    if raw_voice and raw_voice.strip() in google_tts.VOICES:
-        return raw_voice.strip()
-    return google_tts.DEFAULT_VOICE
+    """The agent's Google voice (voice_profile.provider_voice): its [tts.agents] google_voice,
+    else its stored google key, else a bare stored id that is a Google voice (a preview passes
+    the voice it auditions). Only an agent with no Google voice at all gets the documented
+    default for a new choice. A saved voice off the allowlist is returned as it is, so synthesis
+    refuses it (voice_unavailable) and it is never replaced by the default."""
+    route = tts_mode.Route(GOOGLE, route_voice, "")
+    return provider_voice(None, raw_voice, None, route, GOOGLE).voice
 
 
 class ProviderRegistry:
@@ -57,13 +39,13 @@ class ProviderRegistry:
         self.cfg, self.raw_voice, self.agent, self.route = cfg, raw_voice, agent, route
         self.providers = providers or {}
         self.persona = (agent or {}).get("persona", "")
-        self.cartesia_voice = self.voice_for(CARTESIA) or cfg.cartesia_voice_for(self.persona)
-        self.eleven_voice = self.voice_for(ELEVENLABS) or raw_voice
+        # The one resolver the profile also uses (voice_profile.provider_voice).
+        self.cartesia_voice = self.provider_voice(CARTESIA)
+        self.eleven_voice = self.provider_voice(ELEVENLABS)
 
-    def voice_for(self, selected):
-        if selected == self.route.provider and self.route.voice:
-            return self.route.voice
-        return resolve_voice(self.raw_voice, selected)
+    def provider_voice(self, selected, adapter_default=None):
+        return provider_voice(self.cfg, self.raw_voice, self.agent, self.route, selected,
+                              adapter_default=adapter_default).voice
 
     def get(self, selected: str) -> TTSProvider:
         if selected in self.providers:
@@ -91,7 +73,7 @@ class ConfiguredProvider:
 
     def synthesize(self, text: str, sink: AudioSink) -> int:
         selected, cfg = self.id, self.registry.cfg
-        raw_voice, agent = self.registry.raw_voice, self.registry.agent
+        raw_voice = self.registry.raw_voice
         persona, clip_route = self.registry.persona, self.registry.route
         provider = clip_route.provider
         out_path, on_chunk, trace_id = sink.out_path, sink.on_chunk, sink.trace_id
@@ -114,9 +96,7 @@ class ConfiguredProvider:
                 trace_id=trace_id)
         if selected == GEMINI:
             from .gemini_tts import GeminiTTSError, synthesize as gemini_synthesize
-            gemini_voice = _gemini_voice(
-                cfg, raw_voice, persona, agent,
-                clip_route.voice if provider == GEMINI else None, self.registry.cartesia_voice)
+            gemini_voice = self.registry.provider_voice(GEMINI)
             if not gemini_voice:
                 raise GeminiTTSError(f"no Gemini voice configured for {persona!r}")
             self.voice = gemini_voice
@@ -129,7 +109,7 @@ class ConfiguredProvider:
                 trace_id=trace_id)
         if selected == DEEPGRAM:
             from .deepgram_tts import synthesize as deepgram_synthesize
-            deepgram_voice = self.registry.voice_for(DEEPGRAM) or cfg.deepgram_model
+            deepgram_voice = self.registry.provider_voice(DEEPGRAM)
             self.voice = deepgram_voice
             return deepgram_synthesize(
                 text=text, voice_id=deepgram_voice, out_path=out_path,
@@ -149,7 +129,7 @@ class ConfiguredProvider:
         from .tts_providers import VALID_IDS, synthesize as provider_synthesize
         manifest = custom_adapter(selected, reserved_ids=VALID_IDS)
         if manifest is not None:
-            adapter_voice = self.registry.voice_for(selected) or manifest.default_voice
+            adapter_voice = self.registry.provider_voice(selected, manifest.default_voice)
             self.voice = adapter_voice
             return provider_synthesize(
                 selected, text=text, voice=adapter_voice,

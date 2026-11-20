@@ -45,12 +45,18 @@ mod pictures;
 mod provider_tasks;
 #[path = "host/remote_action.rs"]
 mod remote_action;
+#[path = "host/router_phrases.rs"]
+mod router_phrases;
+#[path = "host/source_trace.rs"]
+mod source_trace;
 #[path = "host/stand_ins.rs"]
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
+#[path = "host/voice_timeline.rs"]
+mod voice_timeline;
 
 /// This file holds no more tests than it held when the pieces were given files of their own
 /// (172 `#[test]`, 2 `#[tokio::test]`, and this one): two pieces that both add tests at its
@@ -478,7 +484,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 105);
+    assert_eq!(info["contract"]["host"], 106);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
 
     let session = host.new_agent("Echo");
@@ -8891,7 +8897,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 105);
+    assert_eq!(info["contract"]["host"], 106);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -18098,7 +18104,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     assert_eq!(response.status, 200);
     let ack: Value = serde_json::from_slice(&response.body).unwrap();
     assert_eq!(ack["ok"], true);
-    assert_eq!(ack["stored"], 0);
+    assert_eq!(ack["stored"], 500);
     drop(bytes);
     let too_many = post(
         "/voice-events",
@@ -21382,7 +21388,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }
 
     // An app's record of what its microphone and player did: taken, read as the Python Host
-    // reads it, and not kept on this Host yet.
+    // reads it, and kept on the corrected timeline.
     let report = |said: Value| host.ask("POST", "/voice-events", Some(&said));
     let (status, told) = report(json!({
         "source": "ios", "sent_at": now_ms(),
@@ -21390,7 +21396,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }));
     assert_eq!(
         (status, &told["ok"], &told["stored"]),
-        (200, &json!(true), &json!(0))
+        (200, &json!(true), &json!(1))
     );
     assert!(
         told["clock_offset_ms"]
@@ -23438,7 +23444,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     for (path, body) in [
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
-        ("/agent-portrait-generation", json!({ "session": echo })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
         (

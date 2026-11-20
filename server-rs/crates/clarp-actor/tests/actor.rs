@@ -4408,3 +4408,180 @@ fn a_bookkeeping_page_counts_only_eligible_rows_before_each_limit() {
         assert_eq!(got["has_more"], page["more"]);
     }
 }
+
+// ---- the turn an artifact names (R102) -------------------------------------------------------
+
+/// The trace of the agent's running turn, as its rows carry it, is what an artifact published in
+/// it names: the empty text for a running turn whose message came without one (the Python
+/// Host's vectors, `a running turn without a trace`), and none for a turn that does not run:
+/// one that ended, an older one, and one parked waiting for an account (the Python Host's PR 470
+/// at 1d82795b: parked for its account is not running), until an account takes it up again. A
+/// turn that waits a moment for a retry after a dropped connection runs: it names its trace.
+#[test]
+fn source_trace_a_turn_names_its_trace_only_while_it_runs() {
+    let mut world = World::new("source-trace");
+    world.profile.accounts = clarp_kernel::recovery::Accounts::Select;
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    assert_eq!(actor.running_trace(1).unwrap(), Some(String::new()));
+    assert_eq!(
+        actor.running_trace(2).unwrap(),
+        None,
+        "a turn that is not there"
+    );
+    world.says(1, "done");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(actor.running_trace(1).unwrap(), None, "a turn that ended");
+    let now = world.tick();
+    let traced = Message {
+        trace_id: Some("trace-b".to_string()),
+        ..message("u-2", "go on")
+    };
+    let (_, out) = actor.send(&traced, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(actor.running_trace(2).unwrap(), Some("trace-b".to_string()));
+    assert_eq!(actor.running_trace(1).unwrap(), None, "an older turn");
+    // Turn 2's account is out: it is stopped for it and parks, waiting for an account. Its row
+    // stays open, but it does not run: it names nothing.
+    world.says(2, r#"{"session": "s2"}"#);
+    world.hint(&mut actor);
+    let now = world.tick();
+    let out = actor.stop_for_an_account(now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.exits(2, None, Some(15));
+    world.hint(&mut actor);
+    let waits = actor.waits_for_an_account();
+    assert!(
+        waits.is_some_and(|(turn, _)| turn == TurnId(2)),
+        "{waits:?}"
+    );
+    assert_eq!(
+        actor.running_trace(2).unwrap(),
+        None,
+        "a turn parked for its account"
+    );
+    // An account takes it up: its next attempt runs, and it names its trace again.
+    let now = world.tick();
+    let out = actor.login_changed(now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(actor.running_trace(2).unwrap(), Some("trace-b".to_string()));
+    world.says(2, "done");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    // Turn 3's connection drops: it waits a moment for its next attempt, the same turn going on,
+    // and names its trace in that gap (the release owner's ruling at his merge of PR 470); after
+    // the retry it runs again and names it still, with the one token a turn has on this Host.
+    let now = world.tick();
+    let traced = Message {
+        trace_id: Some("trace-c".to_string()),
+        ..message("u-3", "and on")
+    };
+    let (_, out) = actor.send(&traced, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(3, r#"{"session": "s3"}"#);
+    world.hint(&mut actor);
+    world.write(3, Line::Err("API Error: socket hang up".to_string()));
+    world.exits(3, Some(1), None);
+    world.hint(&mut actor);
+    let at = actor.retry_at().expect("the turn waits for a retry");
+    assert_eq!(actor.waits_for_an_account(), None, "not for an account");
+    assert_eq!(
+        actor.running_trace(3).unwrap(),
+        Some("trace-c".to_string()),
+        "a turn that waits for a retry after a dropped connection"
+    );
+    world.now_ms = at;
+    let out = actor.retry_due(at).unwrap();
+    assert!(
+        matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(3) && order.attempt == 2),
+        "{:?}",
+        out.actions
+    );
+    world.carry_out(&mut actor, out);
+    assert_eq!(
+        actor.running_trace(3).unwrap(),
+        Some("trace-c".to_string()),
+        "the turn retried after a dropped connection"
+    );
+}
+
+#[test]
+fn a_quiet_listener_keeps_its_heartbeat_without_growing_the_principals_ledger() {
+    use clarp_actor::bookkeeping::ListenerUpdate;
+    use clarp_actor::delegation::{Binding, Transition};
+    use clarp_kernel::goals::listener::{Decision, Pending};
+    use clarp_ports::log::Kinds;
+
+    let mut world = World::new("quiet-bookkeeping-listener");
+    let mut actor = world.open();
+    let id = "quiet";
+    let caller = "helper";
+    let start = world.now_ms;
+    assert!(
+        actor
+            .change_delegation(
+                Transition::Start {
+                    binding: Binding {
+                        delegation_id: id.into(),
+                        delegate_agent_id: caller.into()
+                    },
+                },
+                start
+            )
+            .unwrap()
+    );
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let ledger_count = || {
+        log.read_after(0, Kinds::only(kind::GOAL_LEDGER), 1000)
+            .unwrap()
+            .len()
+    };
+    let mut pending = Pending::default();
+    let mut tick = |actor: &mut Actor, now| {
+        let progress = actor.applied_bookkeeping(id, 0).unwrap();
+        let activity = actor
+            .listener_activity(id, caller, &progress, bookkeeping_imported_row)
+            .unwrap();
+        let mut state = progress.listener;
+        assert!(matches!(
+            pending.decide(&mut state, id, (0, 0), &activity, "", now),
+            Decision::Idle
+        ));
+        actor
+            .keep_listener(
+                id,
+                0,
+                ListenerUpdate {
+                    state,
+                    applied: (0, 0),
+                    since: None,
+                    job_handle: "bg1:1:quiet".into(),
+                },
+                now,
+            )
+            .unwrap();
+    };
+    tick(&mut actor, start);
+    let before = ledger_count();
+    for elapsed in (2000..=60000).step_by(2000) {
+        tick(&mut actor, start + elapsed);
+    }
+    assert_eq!(ledger_count(), before);
+    let row = |actor: &Actor| {
+        let mut row = json!({});
+        actor
+            .applied_bookkeeping(id, 0)
+            .unwrap()
+            .show(&mut row, start + 60000);
+        row
+    };
+    assert_eq!(row(&actor)["last_heartbeat_at"], start + 60000);
+    drop(actor);
+    let reopened = world.open();
+    assert!(row(&reopened)["last_heartbeat_at"].is_null());
+    assert_eq!(row(&reopened)["job_handle"], "bg1:1:quiet");
+}
