@@ -163,6 +163,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Goals kept current by the Goal keeper: `plan.goal.updater` beside the owner's own
     // checkpoint, `plan.updater`, a criterion set aside, a paused goal's step that keeps
     // its place.
+    ("goal_ledger", 52),
     ("goal_updater", 96),
     // A receipt for everything the keeper did with a goal: `plan.updater.last_receipt`,
     // `receipts` on the keeper's runs, `clarp-goal receipts`.

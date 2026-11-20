@@ -231,12 +231,33 @@ fn a_delegation_is_reserved_started_enforced_stopped_and_read_back() {
     );
     let row = ok.1;
     let id = row["delegation_id"].as_str().unwrap();
-    assert_eq!(row["listener"]["started"], false);
-    assert_eq!(row["listener"]["error"], "bookkeeping listener unavailable");
+    assert_eq!(row["listener"]["started"], true);
+    assert_eq!(row["listener"]["error"], "");
     let oracle: Value = serde_json::from_str(include_str!(
         "../../../clarp-kernel/tests/fixtures/goal-delegation.json"
     ))
     .unwrap();
+    // The listener can tick between any two HTTP reads. Its changing fields
+    // have a separate end-to-end test. Compare the whole creation response
+    // against the static oracle before the listener has had any work.
+    let lifecycle = |mut row: Value| {
+        for key in [
+            "last_heartbeat_at",
+            "last_source_at",
+            "job_handle",
+            "unapplied_since",
+            "lag_ms",
+            "last_wake_at",
+            "last_wake_id",
+            "dispatched_message_through",
+            "dispatched_goal_event_through",
+            "in_flight",
+            "last_error",
+        ] {
+            row.as_object_mut().unwrap().remove(key);
+        }
+        row
+    };
     let expected = |status: &str, at: &Value| {
         let mut result = oracle[status].clone();
         result["delegation_id"] = json!(id);
@@ -252,6 +273,11 @@ fn a_delegation_is_reserved_started_enforced_stopped_and_read_back() {
         }
         result
     };
+    let mut initial = row.clone();
+    for k in ["baseline_message_revision", "listener", "token_path"] {
+        initial.as_object_mut().unwrap().remove(k);
+    }
+    assert_eq!(initial, expected("active", &Value::Null));
     assert_eq!(row["created_reason"], "keep");
     assert_eq!(row["principal_agent_id"], own);
     assert_eq!(row["delegate_agent_id"], helper);
@@ -273,7 +299,10 @@ fn a_delegation_is_reserved_started_enforced_stopped_and_read_back() {
         let records = host.get(&format!("{route}?session={who}"));
         assert_eq!(records["delegations"].as_array().unwrap().len(), 1);
         assert_eq!(records["delegations"][0]["delegation_id"], id);
-        assert_eq!(records["delegations"][0], expected("active", &Value::Null));
+        assert_eq!(
+            lifecycle(records["delegations"][0].clone()),
+            lifecycle(expected("active", &Value::Null))
+        );
     }
     let cmd = ["pause", plan, "0", r#"{"reason":"review"}"#];
     for who in [None, Some("helper"), Some("child")] {
@@ -371,8 +400,8 @@ fn a_delegation_is_reserved_started_enforced_stopped_and_read_back() {
     assert_eq!(stopped["stopped_reason"], "done");
     assert!(stopped["stopped_at"].is_i64());
     assert_eq!(
-        host.get(&format!("{route}?session=principal"))["delegations"][0],
-        expected("stopped", &stopped["stopped_at"])
+        lifecycle(host.get(&format!("{route}?session=principal"))["delegations"][0].clone()),
+        lifecycle(expected("stopped", &stopped["stopped_at"]))
     );
     let resumed = call(
         &host,
@@ -648,4 +677,139 @@ fn a_delegate_observes_records_and_replays_without_changing_the_owners_checkpoin
         json!({"delegation_id":did,"reason":"finished"}),
     );
     assert_eq!(call(&host, &helper, &credential, observe)["exit"], 4);
+}
+
+#[test]
+fn the_listener_wakes_the_delegate_once_and_cancelling_its_job_stops_the_grant() {
+    let place = Place::new("listener-wake");
+    let cli = place.root.join("stand-in");
+    program(
+        &cli,
+        &format!("#!/bin/sh\nread -r line\n{STAND_IN_ANSWERS}"),
+    );
+    let boot = || {
+        place.start_in(
+            "",
+            &[],
+            &[
+                ("HOME", place.root.to_str().unwrap()),
+                ("CLARP_CLAUDE_PROGRAM", cli.to_str().unwrap()),
+            ],
+        )
+    };
+    let host = boot();
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["goal_ledger"],
+        52
+    );
+    host.post(
+        "/agents",
+        json!({"session":"principal","name":"Principal","backend":"claude"}),
+    );
+    host.post("/agents",json!({"session":"delegate","name":"Delegate","backend":"claude","parent":"principal","role":"helper"}));
+    let route = "/goal-ledger/delegations";
+    let grant = host.post(
+        route,
+        json!({"principal":"principal","delegate":"delegate","reason":"check"}),
+    );
+    assert_eq!(grant["listener"]["started"], true);
+    let id = grant["delegation_id"].as_str().unwrap();
+    let public =
+        |host: &Host| host.get(&format!("{route}?session=principal"))["delegations"][0].clone();
+    host.send(
+        "principal",
+        "Please keep this accounted.",
+        "listener-source",
+    );
+    wait_for("the listener to dispatch the first wake", || {
+        public(&host)["in_flight"] == true
+    });
+    let first = public(&host);
+    let wake = first["last_wake_id"].as_str().unwrap();
+    assert!(wake.starts_with(&format!("bookkeeping-{id}-m")));
+    assert!(first["dispatched_message_through"].as_i64().unwrap() > 0);
+    assert!(first["last_heartbeat_at"].is_i64());
+    assert!(first["unapplied_since"].is_i64());
+    let handle = first["job_handle"].as_str().unwrap();
+    let job_id = clarp_kernel::jobs::parse_handle(handle).0;
+    let message = || {
+        host.conversation("delegate")
+            .iter()
+            .any(|(role, text)| role == "user" && text.contains(wake))
+    };
+    wait_for(
+        "the delegate to receive the bookkeeping instructions",
+        message,
+    );
+    assert!(
+        host.turns("delegate")
+            .iter()
+            .any(|r| r["id"] == format!("u-{wake}"))
+    );
+    host.kill();
+    let host = boot();
+    assert_eq!(public(&host)["last_wake_id"], wake);
+    assert_eq!(public(&host)["job_handle"], handle);
+    assert_eq!(
+        tool(
+            &host,
+            &place.root,
+            None,
+            &[
+                "clarp-agent-bg",
+                "delegate",
+                "job-fail",
+                handle,
+                "stand-in heartbeat lost"
+            ]
+        )
+        .0,
+        0
+    );
+    let restarted = format!("bg1:2:{job_id}");
+    wait_for(
+        "a failed listener job to resume with the same id in its next generation",
+        || public(&host)["job_handle"] == restarted,
+    );
+    assert_eq!(
+        host.ask("DELETE", &format!("/background-jobs/{job_id}"), None)
+            .0,
+        200
+    );
+    wait_for("the listener cancellation to stop authority", || {
+        public(&host)["status"] == "stopped"
+    });
+    assert_eq!(public(&host)["stopped_reason"], "listener job cancelled");
+    assert_eq!(
+        host.conversation("delegate")
+            .iter()
+            .filter(|(role, text)| role == "user" && text.contains(wake))
+            .count(),
+        1
+    );
+    let next = host.post(
+        route,
+        json!({"principal":"principal","delegate":"delegate","reason":"second pilot"}),
+    );
+    let next_id = next["delegation_id"].as_str().unwrap();
+    let next_row = || {
+        host.get(&format!("{route}?session=delegate"))["delegations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["delegation_id"] == next_id)
+            .unwrap()
+            .clone()
+    };
+    wait_for("the second listener to register", || {
+        !next_row()["job_handle"].as_str().unwrap_or("").is_empty()
+    });
+    let second_job = clarp_kernel::jobs::parse_handle(next_row()["job_handle"].as_str().unwrap()).0;
+    host.post(
+        "/goal-ledger/delegations/stop",
+        json!({"delegation_id":next_id,"reason":"pilot ended"}),
+    );
+    wait_for("a stopped listener to finish its own job", || {
+        host.get(&format!("/background-jobs/{second_job}"))["job"]["status"] == "succeeded"
+    });
 }

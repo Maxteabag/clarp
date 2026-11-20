@@ -108,6 +108,18 @@ pub enum DelegationCommand {
     Inspect(Option<String>),
     Baseline(usize),
     Applied(String, i64),
+    ListenerRead(
+        String,
+        String,
+        i64,
+        Option<clarp_actor::bookkeeping::ActivityVersion>,
+    ),
+    ListenerWrite(
+        String,
+        String,
+        i64,
+        clarp_actor::bookkeeping::ListenerUpdate,
+    ),
     #[cfg(test)]
     Receipt {
         id: String,
@@ -118,6 +130,8 @@ pub enum DelegationCommand {
 
 #[derive(Debug)]
 pub struct DelegationState {
+    pub activity: Option<clarp_kernel::goals::listener::Activity>,
+    pub version: Option<clarp_actor::bookkeeping::ActivityVersion>,
     pub active: Option<clarp_actor::delegation::Binding>,
     pub prior: Option<(clarp_actor::delegation::Transition, i64)>,
     pub accepted: bool,
@@ -2606,6 +2620,8 @@ impl Worker {
             }
             Ask::Delegation { command, answer } => {
                 let result = (|| -> Result<DelegationState, ActorError> {
+                    let mut version = None;
+                    let mut activity = None;
                     let mut baseline = 0;
                     let mut applied = None;
                     let (prior, accepted) = match command {
@@ -2621,6 +2637,30 @@ impl Worker {
                                 )
                             })?;
                             (None, written.is_some())
+                        }
+                        DelegationCommand::ListenerRead(id, caller, initial, known) => {
+                            let accepted = actor.admits_delegate(&id, Some(&caller));
+                            if accepted {
+                                let progress = actor.applied_bookkeeping(&id, initial)?;
+                                version = Some(actor.activity_version(&progress)?);
+                                if version != known {
+                                    activity = Some(actor.listener_activity(
+                                        &id,
+                                        &caller,
+                                        &progress,
+                                        crate::wire::row,
+                                    )?);
+                                }
+                                applied = Some(progress);
+                            }
+                            (None, accepted)
+                        }
+                        DelegationCommand::ListenerWrite(id, caller, initial, update) => {
+                            let accepted = actor.admits_delegate(&id, Some(&caller));
+                            if accepted {
+                                actor.keep_listener(&id, initial, update, now)?;
+                            }
+                            (None, accepted)
                         }
                         DelegationCommand::Applied(id, initial) => {
                             applied = Some(actor.applied_bookkeeping(&id, initial)?);
@@ -2649,6 +2689,8 @@ impl Worker {
                         }
                     };
                     Ok(DelegationState {
+                        version,
+                        activity,
                         applied,
                         baseline,
                         active: actor.active_delegation().cloned(),
