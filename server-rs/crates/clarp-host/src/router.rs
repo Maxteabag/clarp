@@ -24,6 +24,8 @@
 //! words are shown of the twenty that were last active, and always of the agent the
 //! message was said to and of the one that is open.
 
+mod phrases;
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -77,6 +79,7 @@ const TOOLS: [(&str, &str); 7] = [
 /// The router of this Host: its book. `None` until it was read where it is kept.
 #[derive(Default)]
 pub struct Desk {
+    pub(crate) phrases: phrases::Desk,
     book: tokio::sync::Mutex<Option<Book>>,
 }
 
@@ -361,6 +364,20 @@ async fn say(app: &App, say: &Say) {
         }),
     };
     if let Some(speaker) = speaker {
+        if let Some(phrase) = clarp_kernel::router::flow::phrase_key(&say.text) {
+            let owners = app.mouth.owners();
+            for (voice, primary) in crate::voice::phrase_voices(&owners, &speaker) {
+                if !app
+                    .router
+                    .phrases
+                    .say(app, &speaker, &say.text, phrase, (voice, primary), &owners)
+                    .await
+                {
+                    break;
+                }
+            }
+            return;
+        }
         app.mouth.announce(&speaker, &say.text).await;
     }
 }

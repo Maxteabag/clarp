@@ -3205,6 +3205,12 @@ arms another look in a minute. Each timer stays with the desk that knows when it
 A limited paired device may use either door. A controller edge requires POST and the receipt names the
 same event ID as the broadcast. Reconnecting clients cannot replay an earlier button press.
 
+**The router's ready-spoken phrases (20 Nov 2026).** A normal router announcement can keep its completed
+primary audio after the apps are offered their clip. The phrase book belongs to the fleet and the MP3 bytes
+to the blob store. A hit still names the speaker of the current request. Factoring out the session means
+two agents using the same engine voice can share one fill. No operator script or scheduled operation
+asks for audio. The first use after eviction follows the ordinary speech path.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
@@ -3388,3 +3394,101 @@ the two media records together. Once local publication finishes the Host
 removes the receipt and its staging bytes. On restart a committed receipt can
 finish locally and an interrupted generation ends failed. The bounded edit
 fixtures come from the Python Host's own functions in an isolated store.
+
+**The tools' skills kept installed (`managed_skills`, 20 Nov 2026).** A release ships a tree of skills with a
+manifest (the repository's `skills/`, or the tree `--skills-from` names); the install tool copies it to `<share>/releases/<version>/skills`, keeps the
+version installed before and removes older ones, and names it to the Host (`--skills`), with the releases of the
+Python Host on the machine (`--skills-other-releases`) and that Host's record of its chosen skills
+(`--skills-chosen-before`). It never touches a tool's skill folder, and the programs a skill requires are looked up
+on the unit's path, which is the Python Host's. The tools' folders (Claude Code's, Codex's, and Antigravity's where
+it is installed) are the machine's, and one Host keeps a machine's tools (the lead's ruling): this Host keeps them
+only when it is started with `--accounts select` and a tree. The install tool refuses `--accounts select` while the Python Host of the machine runs
+(its unit anything but stopped), with or without a selector of accounts: that Host keeps the tools while it runs,
+and links the skills at every update of its own. Then `GET /managed-skills` reports each skill as the
+Python Host does (`server/lib/managed_skills.py`: how each link stands, the skill's health, its requirements) and
+`POST /managed-skills` switches one on or off as it does: links made or taken away in every folder, a skill of the
+user's own preserved and the change refused, the same refusals in the same words, nothing written on a refusal and
+the links put back when the list cannot be kept. The chosen list is the Host's own, in its store; it is taken once,
+from the Python Host's record where there is one, else from the setup's defaults. At every start the Host enrols the
+core skills a newer release brought and links each chosen skill to its own release where nothing or another
+release's link is; a link into the Python Host's releases is Clarp's too (outdated), so a machine that Host kept is
+taken over without every skill reading as the user's. A Host started with `--accounts follow`, or with no mode,
+answers the list empty, refuses every change with `skills_kept_elsewhere` and one sentence, and writes nothing into
+a tool's folder, at a request or at its start; `managed_skills` is listed only by a Host that keeps the tools. The
+rules are in `clarp_kernel::managed_skills`, held to the reference's own functions run in stand-in homes and release
+trees (`tools/managed-skills-vectors.py`); the Host's part is `clarp-host` `managed_skills.rs`; the wrong rules are
+`tools/plants/managed-skills.py`. Left out: personal skills and the admin tool's `skills` words.
+
+What a Host in `follow` would need to pass a change on to the Host that keeps the tools, rather than refuse it (not
+built): which peer keeps them (a word of its configuration, which the install tool can write from the Python Host it
+finds; `peers.rs` already holds a peer's address and token); a token of full scope there, since the route takes no
+limited device; the change relayed as it was asked and the keeper's status and body relayed as they came, and the
+reading relayed too, since what is linked is the keeper's release and catalogue, not this Host's; and a keeper that
+does not answer told as 502 with the reason, with a change that may have landed never sent again, only read back.
+
+**Signing a tool in and out from an app (`backend_auth`, 20 Nov 2026).** The Host that keeps
+its machine's tools (`--accounts select`) runs the tool's own sign-in (`claude auth login
+--claudeai`, `codex login --device-auth`, `grok login --device-auth`) when an app asks
+(`POST /backend-auth/login`), shows the app what it prints in `GET /backend-auth`'s `tasks`,
+hands a code pasted back to the tool's input (`/login-code`), stops a sign-in after ten
+minutes, and runs the tool's own sign-out (`/logout`). What an app is shown (a terminal's
+signs and anything that looks like a key taken out, the address, the device code, whether a
+code is asked for, why it failed) is `clarp_kernel::sign_in`, held to the Python Host's own
+functions by `tools/backend-auth-vectors.py`. One task owns the sign-ins
+(`logins::sign_in::Desk`); a sign-in lives as long as the Host, as there. Two Hosts may share
+a machine, and its tools keep one login each, so only one Host changes them: a Host beside it
+(`follow`) or with no mode refuses each change, 409 in words, whatever the request says, and
+starts nothing. A sign-in or sign-out takes no lock and waits for no turn, as there: it is the
+owner's own act. A turn that runs while its tool is signed out under it fails on the login,
+and this Host's account rule takes it up (`recovery::after_failed_attempt`): with a pool of the
+tool's accounts the pool decides whether it waits for another; without one the turn ends and
+says the sign-in is gone, and the agent answers again once the tool is signed in (held by
+`a_turn_whose_tool_is_signed_out_under_it_ends_on_the_login_and_holds_nothing`). A sign-in is
+stopped after ten minutes; the Host's tests shorten that with `CLARP_SIGN_IN_MOST_MS`, which is
+no owner's setting. The wrong rules are `tools/plants/backend-auth.py`.
+
+Not built: a Host in `follow` passing a change on to the Host that keeps the tools, instead of
+refusing it. It would need (1) where that Host is: a loopback address in this Host's
+configuration, and proof that it runs on the same machine and home; (2) a credential to it
+with full device scope, kept in a file the owner provisions and never in the repository; (3)
+the three changes forwarded as they came, and that Host's status and body answered as they
+are; (4) `GET /backend-auth`'s `tasks` taken from that Host, since the app follows a sign-in by
+reading this one, while the rows are still read here off the same files; (5) when that Host
+cannot be reached, 502 in words and never a change sent twice (a sign-in may have started:
+its `tasks` are read back instead); (6) a code sent to the Host that holds the sign-in it is
+for. The client contract would not change, and the follower of logins already wakes the turns
+that wait when the login file changes.
+
+**A harness's providers of models, signed in from the app (20 Nov 2026).** OpenCode, and the
+DeepSeek card that runs through it, serve models of many providers, each with a sign-in of its
+own (`harness_model_providers`, listed at 75). `GET /harness-providers` lists OpenCode's catalogue
+(its cache of models.dev) with the type of each credential in OpenCode's store, never a key;
+`GET /harness-providers/models` lists a provider's models; `POST /harness-providers/login` writes
+an API key to OpenCode's store or starts the provider's own device or code sign-in in a private
+`opencode serve` (loopback, a password of its own), which writes the store itself;
+`/login-code` hands it the code; `/logout` takes a credential away. The rules are the Python
+Host's, run from its own module and route handlers (`tools/harness-provider-vectors.py`) and held
+in `clarp_kernel::harness_providers`; the Host reads and writes the files and runs OpenCode
+(`clarp-host` `harness_providers`). A key is written in one move, 0600 in a folder made 0700, and
+is in no answer, no log line and no error. One desk owns the sign-ins that run, and is told by
+threads of its own what OpenCode answered: a sign-in's server is ended before its end is told, and
+the app's picker of models is made to ask again before a completed sign-in is told, so whoever
+sees it complete finds the provider's models. Which sign-ins a phone can complete is asked of
+OpenCode aside, once a day, and kept in the fleet's settings, and only by a Host that keeps the
+tools: any other never starts OpenCode (the lead's review: a Host beside the Python Host would
+run the owner's tool in his home for a sign-in it refuses). The tools' logins and stores are one
+per machine, and one Host keeps a machine's tools (the lead's ruling): with `--accounts select` the
+Host changes them as the reference does; beside a Host that keeps them (`--accounts follow`) and
+with no mode it refuses every change in words, 409, before anything is read, and writes nothing;
+the readings answer in every mode.
+
+Not built: passing a change on to the Host that keeps the tools instead of refusing it. It needs
+the address of that Host and a credential of full-device scope on it (a peer today holds an
+address and a token for `/send` only; such a credential is the owner's to grant); the four
+changes passed on as they came, the key in the body over loopback only and never logged, and the
+other Host's status and body answered as they are; the sign-ins that run, which live in the
+memory of the Host that runs them, read from it too (the `tasks` of `GET /harness-providers`, or
+the whole answer), or an app never sees its code; this Host's picker of models made to ask again
+after a change passed on (or OpenCode's store watched by its digest, as the tools' logins are);
+and the other Host down means refused, and a change whose acceptance is not known is never sent
+again.

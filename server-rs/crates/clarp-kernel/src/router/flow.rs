@@ -98,6 +98,41 @@ const HELD_MESSAGE_GONE: Fixed = fixed(
     "That message is no longer waiting. Please say it again.",
 );
 
+const CLARIFY_TARGET: Fixed = fixed("clarify_target", "Was that for me?");
+const AMBIGUOUS_TARGET: Fixed = fixed("ambiguous_target", "I am not sure who that was for.");
+const REPEAT_MISSING: Fixed = fixed("repeat_missing", "I do not have anything recent to replay.");
+const CONTROL_UNKNOWN: Fixed = fixed(
+    "control_unknown",
+    "I am not sure what control action you meant.",
+);
+const AGENT_CONTROL_UNKNOWN: Fixed =
+    fixed("agent_control_unknown", "I am not sure how to do that yet.");
+
+/// Only the router's own words can address its phrase store.
+pub fn phrase_key(text: &str) -> Option<&'static str> {
+    [
+        CLARIFY_TARGET,
+        AMBIGUOUS_TARGET,
+        REPEAT_MISSING,
+        CONTROL_UNKNOWN,
+        AGENT_CONTROL_UNKNOWN,
+        NO_SUCH_AGENT,
+        WHICH_AGENT,
+        CANNOT_CHECK,
+        CANNOT_COMMAND,
+        UNSURE_COMMAND,
+        NO_VOICE_COMMANDS,
+        FORK_IN_APP,
+        NAME_TAKEN,
+        COMMAND_REFUSED,
+        NO_VALID_TARGET,
+        HELD_MESSAGE_GONE,
+    ]
+    .iter()
+    .find(|phrase| phrase.text == text)
+    .map(|phrase| phrase.key)
+}
+
 /// A decision as it is kept.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -1296,7 +1331,7 @@ impl Book {
         }
         let own = python::strip(&decision.spoken_text);
         let text = match (own, candidate) {
-            ("", "") => "I am not sure who that was for.".to_string(),
+            ("", "") => AMBIGUOUS_TARGET.text.to_string(),
             ("", candidate) => format!("Was that for {}?", name_of(around.agents, candidate)),
             (own, _) => own.to_string(),
         };
@@ -1534,7 +1569,7 @@ impl Book {
             action = Some(CONTROL);
             match asked.as_str() {
                 "repeat" | "repeat_last" | "say_again" => {
-                    let nothing = "I do not have anything recent to replay.";
+                    let nothing = REPEAT_MISSING.text;
                     effects.push(Effect::Repeat {
                         session: on.clone(),
                         or: self.as_agent(requested, nothing, "repeat_missing", around),
@@ -1545,7 +1580,7 @@ impl Book {
                     effects.push(router_says(format!("You are talking to {name}.")));
                 }
                 _ => {
-                    let words = "I am not sure what control action you meant.";
+                    let words = CONTROL_UNKNOWN.text;
                     effects.push(router_says(words.to_string()));
                 }
             }
@@ -1585,7 +1620,7 @@ impl Book {
                     }));
                 }
                 _ => {
-                    let words = "I am not sure how to do that yet.";
+                    let words = AGENT_CONTROL_UNKNOWN.text;
                     effects.extend(self.as_agent(requested, words, "", around).map(Effect::Say));
                 }
             }

@@ -41,6 +41,17 @@ pub struct Config {
     /// program's name or its path. Empty: this Host was told none, reads no seat, and says
     /// that the tool is not installed.
     pub seats_tool: String,
+    /// The tree of skills this Host's release ships (`--skills`, written by the install tool:
+    /// `<share>/releases/<commit>/skills`, with its `manifest.json`). Absent: this Host keeps
+    /// no skills. It keeps them only with `--accounts select`: the tools' skill folders are the
+    /// machine's, and one Host keeps a machine's tools.
+    pub skills: Option<PathBuf>,
+    /// The folder of the releases of the Host that kept this machine's tools before
+    /// (`--skills-other-releases`): a link it left into one of them is Clarp's own, outdated.
+    pub skills_other_releases: Option<PathBuf>,
+    /// That Host's record of the skills it kept chosen (`--skills-chosen-before`, its
+    /// `install.json`): read once, at the first start that keeps the tools, and never written.
+    pub skills_chosen_before: Option<PathBuf>,
     pub ask_usage: bool,
     /// Whether a contact nobody gave a picture is drawn one by the provider of pictures
     /// (`--contact-pictures`, which the install tool writes where its own word of that name is
@@ -174,7 +185,8 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
-[--accounts none|follow|select] [--seats-tool PROGRAM] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
+[--accounts none|follow|select] [--seats-tool PROGRAM] \
+[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -336,6 +348,7 @@ impl Config {
         let mut contact_pictures = false;
         let mut accounts = clarp_kernel::recovery::Accounts::None;
         let mut seats_tool = String::new();
+        let (mut skills, mut skills_other_releases, mut skills_chosen_before) = (None, None, None);
         let mut logins_checked_every_ms = 5_000;
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
@@ -383,6 +396,13 @@ impl Config {
                         .ok_or(format!("--accounts {named}: none, follow or select"))?;
                 }
                 "--seats-tool" => seats_tool = value("a program")?,
+                "--skills" => skills = Some(PathBuf::from(value("a directory")?)),
+                "--skills-other-releases" => {
+                    skills_other_releases = Some(PathBuf::from(value("a directory")?));
+                }
+                "--skills-chosen-before" => {
+                    skills_chosen_before = Some(PathBuf::from(value("a file")?));
+                }
                 "--push-relay" => {
                     push_relay = value("an address")?.trim_end_matches('/').to_string();
                     // What a phone is told goes over TLS, or stays on this machine.
@@ -577,6 +597,9 @@ impl Config {
                 ),
             },
             seats_tool,
+            skills,
+            skills_other_releases,
+            skills_chosen_before,
             logins_checked_every_ms,
             jobs_checked_every_ms,
             schedules_checked_every_ms,

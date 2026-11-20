@@ -4415,7 +4415,8 @@ fn a_bookkeeping_page_counts_only_eligible_rows_before_each_limit() {
 /// it names: the empty text for a running turn whose message came without one (the Python
 /// Host's vectors, `a running turn without a trace`), and none for a turn that does not run:
 /// one that ended, an older one, and one parked waiting for an account (the Python Host's PR 470
-/// at 1d82795b: parked for its account is not running), until an account takes it up again.
+/// at 1d82795b: parked for its account is not running), until an account takes it up again. A
+/// turn that waits a moment for a retry after a dropped connection runs: it names its trace.
 #[test]
 fn source_trace_a_turn_names_its_trace_only_while_it_runs() {
     let mut world = World::new("source-trace");
@@ -4465,6 +4466,44 @@ fn source_trace_a_turn_names_its_trace_only_while_it_runs() {
     let out = actor.login_changed(now).unwrap();
     world.carry_out(&mut actor, out);
     assert_eq!(actor.running_trace(2).unwrap(), Some("trace-b".to_string()));
+    world.says(2, "done");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    // Turn 3's connection drops: it waits a moment for its next attempt, the same turn going on,
+    // and names its trace in that gap (the release owner's ruling at his merge of PR 470); after
+    // the retry it runs again and names it still, with the one token a turn has on this Host.
+    let now = world.tick();
+    let traced = Message {
+        trace_id: Some("trace-c".to_string()),
+        ..message("u-3", "and on")
+    };
+    let (_, out) = actor.send(&traced, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(3, r#"{"session": "s3"}"#);
+    world.hint(&mut actor);
+    world.write(3, Line::Err("API Error: socket hang up".to_string()));
+    world.exits(3, Some(1), None);
+    world.hint(&mut actor);
+    let at = actor.retry_at().expect("the turn waits for a retry");
+    assert_eq!(actor.waits_for_an_account(), None, "not for an account");
+    assert_eq!(
+        actor.running_trace(3).unwrap(),
+        Some("trace-c".to_string()),
+        "a turn that waits for a retry after a dropped connection"
+    );
+    world.now_ms = at;
+    let out = actor.retry_due(at).unwrap();
+    assert!(
+        matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(3) && order.attempt == 2),
+        "{:?}",
+        out.actions
+    );
+    world.carry_out(&mut actor, out);
+    assert_eq!(
+        actor.running_trace(3).unwrap(),
+        Some("trace-c".to_string()),
+        "the turn retried after a dropped connection"
+    );
 }
 
 #[test]

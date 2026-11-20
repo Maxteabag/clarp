@@ -445,7 +445,15 @@ EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
 # fields and events are left out of both sides before the Rust Host is compared: they are not
 # differences to explain one by one, they are one feature that is not there yet. The register
 # of what is not there yet is server-rs/docs/differences.md.
-NOT_YET: dict = {}
+NOT_YET = {
+    # What the user's last compaction of an agent did, from numbers (`last_compaction` on its
+    # row of the snapshot, the Python Host's PR 483, R148): `null` there until the agent is
+    # compacted. The port to the Rust Host is owed; its contract stays 106 until it lands.
+    'compaction_outcome': {
+        'fields': ('last_compaction',),
+        'events': (),
+    },
+}
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
 NOT_BUILT = {
@@ -469,6 +477,15 @@ NOT_BUILT = {
     # (the scenario live-items turns it off on both).
     "the explaining of a tool's use": {
         'fields': ('tool_explanations',),
+        'events': (),
+    },
+    # Whom a row, a live turn and a dispatch's working state are for (`audience`: 'agents' for a
+    # turn another agent's message started, else 'user'), the coordination between agents of the
+    # Python Host's PR 482 (its contract 108); no feature stands for it until `hidden_coordination`
+    # is advertised. A name no other answer carries. The port to the Rust Host is owed; its
+    # contract stays 106 until it lands.
+    'coordination between agents': {
+        'fields': ('audience',),
         'events': (),
     },
 }

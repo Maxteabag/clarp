@@ -212,6 +212,69 @@
    "source_message_id": ""
   },
   {
+   "case": "the turn waits for a retry after a dropped connection",
+   "how": "its own agent, its turn waits for a retry after a dropped connection (its row open, unsettled)",
+   "kind": "document",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn waits for a retry after a dropped connection",
+   "how": "its own agent, its turn waits for a retry after a dropped connection (its row open, unsettled)",
+   "kind": "render_spec",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn waits for a retry after a dropped connection",
+   "how": "its own agent, its turn waits for a retry after a dropped connection (its row open, unsettled)",
+   "kind": "report",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn retried after a dropped connection: its first token",
+   "how": "its own agent, its turn run again after the retry; the token of its first attempt",
+   "kind": "document",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn retried after a dropped connection: its first token",
+   "how": "its own agent, its turn run again after the retry; the token of its first attempt",
+   "kind": "render_spec",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn retried after a dropped connection: its first token",
+   "how": "its own agent, its turn run again after the retry; the token of its first attempt",
+   "kind": "report",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn retried after a dropped connection: its new token",
+   "how": "its own agent, its turn run again after the retry; the token of the attempt that runs",
+   "kind": "document",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn retried after a dropped connection: its new token",
+   "how": "its own agent, its turn run again after the retry; the token of the attempt that runs",
+   "kind": "render_spec",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn retried after a dropped connection: its new token",
+   "how": "its own agent, its turn run again after the retry; the token of the attempt that runs",
+   "kind": "report",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
    "case": "a revision by a later turn",
    "how": "published in its turn that runs, then revised in a later turn",
    "kind": "document",

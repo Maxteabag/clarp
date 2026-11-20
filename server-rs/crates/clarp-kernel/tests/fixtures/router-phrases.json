@@ -1,0 +1,393 @@
+{
+  "events": [
+    {
+      "agent_id": null,
+      "cached_phrase": true,
+      "phrase_key": "clarify_target",
+      "session": "",
+      "type": "audio",
+      "url": "/audio/fixture.mp3",
+      "voice_id": "app-voice"
+    },
+    {
+      "agent_id": "id-a",
+      "cached_phrase": true,
+      "phrase_key": "clarify_target",
+      "session": "agent-a",
+      "type": "audio",
+      "url": "/audio/fixture.mp3",
+      "voice_id": "app-voice"
+    },
+    {
+      "agent_id": "id-b",
+      "cached_phrase": true,
+      "phrase_key": "clarify_target",
+      "session": "agent-b",
+      "type": "audio",
+      "url": "/audio/fixture.mp3",
+      "voice_id": "app-voice"
+    }
+  ],
+  "keys": [
+    [
+      "Was that for me?",
+      "",
+      "clarify_target",
+      true
+    ],
+    [
+      "Was that for me?",
+      "clarify_target",
+      "clarify_target",
+      true
+    ],
+    [
+      "Was that for me?",
+      "unrelated",
+      "clarify_target",
+      true
+    ],
+    [
+      "I am not sure who that was for.",
+      "",
+      "ambiguous_target",
+      true
+    ],
+    [
+      "I am not sure who that was for.",
+      "clarify_target",
+      "ambiguous_target",
+      true
+    ],
+    [
+      "I am not sure who that was for.",
+      "unrelated",
+      "ambiguous_target",
+      true
+    ],
+    [
+      "I do not have anything recent to replay.",
+      "",
+      "repeat_missing",
+      true
+    ],
+    [
+      "I do not have anything recent to replay.",
+      "clarify_target",
+      "repeat_missing",
+      true
+    ],
+    [
+      "I do not have anything recent to replay.",
+      "unrelated",
+      "repeat_missing",
+      true
+    ],
+    [
+      "I am not sure what control action you meant.",
+      "",
+      "control_unknown",
+      true
+    ],
+    [
+      "I am not sure what control action you meant.",
+      "clarify_target",
+      "control_unknown",
+      true
+    ],
+    [
+      "I am not sure what control action you meant.",
+      "unrelated",
+      "control_unknown",
+      true
+    ],
+    [
+      "I am not sure how to do that yet.",
+      "",
+      "agent_control_unknown",
+      true
+    ],
+    [
+      "I am not sure how to do that yet.",
+      "clarify_target",
+      "agent_control_unknown",
+      true
+    ],
+    [
+      "I am not sure how to do that yet.",
+      "unrelated",
+      "agent_control_unknown",
+      true
+    ],
+    [
+      "I do not have an agent by that name.",
+      "",
+      "no_such_agent",
+      true
+    ],
+    [
+      "I do not have an agent by that name.",
+      "clarify_target",
+      "no_such_agent",
+      true
+    ],
+    [
+      "I do not have an agent by that name.",
+      "unrelated",
+      "no_such_agent",
+      true
+    ],
+    [
+      "That message is no longer waiting. Please say it again.",
+      "",
+      "held_message_gone",
+      true
+    ],
+    [
+      "That message is no longer waiting. Please say it again.",
+      "clarify_target",
+      "held_message_gone",
+      true
+    ],
+    [
+      "That message is no longer waiting. Please say it again.",
+      "unrelated",
+      "held_message_gone",
+      true
+    ],
+    [
+      "I cannot check on that agent from here.",
+      "",
+      "cannot_check",
+      true
+    ],
+    [
+      "I cannot check on that agent from here.",
+      "clarify_target",
+      "cannot_check",
+      true
+    ],
+    [
+      "I cannot check on that agent from here.",
+      "unrelated",
+      "cannot_check",
+      true
+    ],
+    [
+      "I cannot do that for that agent from here.",
+      "",
+      "cannot_command",
+      true
+    ],
+    [
+      "I cannot do that for that agent from here.",
+      "clarify_target",
+      "cannot_command",
+      true
+    ],
+    [
+      "I cannot do that for that agent from here.",
+      "unrelated",
+      "cannot_command",
+      true
+    ],
+    [
+      "Which agent did you mean?",
+      "",
+      "which_agent",
+      true
+    ],
+    [
+      "Which agent did you mean?",
+      "clarify_target",
+      "which_agent",
+      true
+    ],
+    [
+      "Which agent did you mean?",
+      "unrelated",
+      "which_agent",
+      true
+    ],
+    [
+      "I am not sure what you wanted me to do.",
+      "",
+      "unsure_command",
+      true
+    ],
+    [
+      "I am not sure what you wanted me to do.",
+      "clarify_target",
+      "unsure_command",
+      true
+    ],
+    [
+      "I am not sure what you wanted me to do.",
+      "unrelated",
+      "unsure_command",
+      true
+    ],
+    [
+      "That agent does not accept voice commands.",
+      "",
+      "no_voice_commands",
+      true
+    ],
+    [
+      "That agent does not accept voice commands.",
+      "clarify_target",
+      "no_voice_commands",
+      true
+    ],
+    [
+      "That agent does not accept voice commands.",
+      "unrelated",
+      "no_voice_commands",
+      true
+    ],
+    [
+      "Please fork agents from the app.",
+      "",
+      "fork_in_app",
+      true
+    ],
+    [
+      "Please fork agents from the app.",
+      "clarify_target",
+      "fork_in_app",
+      true
+    ],
+    [
+      "Please fork agents from the app.",
+      "unrelated",
+      "fork_in_app",
+      true
+    ],
+    [
+      "I already have an agent by that name.",
+      "",
+      "name_taken",
+      true
+    ],
+    [
+      "I already have an agent by that name.",
+      "clarify_target",
+      "name_taken",
+      true
+    ],
+    [
+      "I already have an agent by that name.",
+      "unrelated",
+      "name_taken",
+      true
+    ],
+    [
+      "I could not do that.",
+      "",
+      "command_refused",
+      true
+    ],
+    [
+      "I could not do that.",
+      "clarify_target",
+      "command_refused",
+      true
+    ],
+    [
+      "I could not do that.",
+      "unrelated",
+      "command_refused",
+      true
+    ],
+    [
+      "I am not sure which agent that was for.",
+      "",
+      "no_valid_target",
+      true
+    ],
+    [
+      "I am not sure which agent that was for.",
+      "clarify_target",
+      "no_valid_target",
+      true
+    ],
+    [
+      "I am not sure which agent that was for.",
+      "unrelated",
+      "no_valid_target",
+      true
+    ],
+    [
+      "",
+      "",
+      "",
+      false
+    ],
+    [
+      "",
+      "clarify_target",
+      "clarify_target",
+      false
+    ],
+    [
+      "",
+      "unrelated",
+      "unrelated",
+      false
+    ],
+    [
+      "Other words",
+      "",
+      "",
+      false
+    ],
+    [
+      "Other words",
+      "clarify_target",
+      "clarify_target",
+      false
+    ],
+    [
+      "Other words",
+      "unrelated",
+      "unrelated",
+      false
+    ],
+    [
+      "Was that for me? ",
+      "",
+      "",
+      false
+    ],
+    [
+      "Was that for me? ",
+      "clarify_target",
+      "clarify_target",
+      false
+    ],
+    [
+      "Was that for me? ",
+      "unrelated",
+      "unrelated",
+      false
+    ]
+  ],
+  "table": {
+    "agent_control_unknown": "I am not sure how to do that yet.",
+    "ambiguous_target": "I am not sure who that was for.",
+    "cannot_check": "I cannot check on that agent from here.",
+    "cannot_command": "I cannot do that for that agent from here.",
+    "clarify_target": "Was that for me?",
+    "command_refused": "I could not do that.",
+    "control_unknown": "I am not sure what control action you meant.",
+    "fork_in_app": "Please fork agents from the app.",
+    "held_message_gone": "That message is no longer waiting. Please say it again.",
+    "name_taken": "I already have an agent by that name.",
+    "no_such_agent": "I do not have an agent by that name.",
+    "no_valid_target": "I am not sure which agent that was for.",
+    "no_voice_commands": "That agent does not accept voice commands.",
+    "repeat_missing": "I do not have anything recent to replay.",
+    "unsure_command": "I am not sure what you wanted me to do.",
+    "which_agent": "Which agent did you mean?"
+  }
+}

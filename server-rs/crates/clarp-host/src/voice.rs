@@ -719,6 +719,48 @@ fn sweep(audio: &FilePath, now_ms: i64) {
     }
 }
 
+/// Allocate the ordinary audio URL before offering a copy to any cache.
+fn save_outside_clip(
+    audio: &FilePath,
+    session: &str,
+    now: i64,
+    prefix: &str,
+    sound: &[u8],
+) -> Option<(String, PathBuf)> {
+    if sound.is_empty() {
+        return None;
+    }
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(audio)
+        .ok()?;
+    // A name of its own: the moment it was made, and the next when that is taken.
+    for later in 0..100 {
+        let name = format!("{prefix}{}", said::clip_name(Some(session), now + later));
+        let path = audio.join(&name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path);
+        match file {
+            Ok(mut file) => {
+                return match file.write_all(sound) {
+                    Ok(()) => Some((name, path)),
+                    Err(_) => {
+                        let _ = std::fs::remove_file(&path);
+                        None
+                    }
+                };
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 /// Who says a line, as the owner's file and the agent decide it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Chosen {
@@ -819,6 +861,51 @@ fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) ->
     }
 }
 
+fn eleven_model(file: &Table) -> String {
+    owner::text_at(file, &["elevenlabs", "model"]).unwrap_or_else(|| "eleven_flash_v2_5".into())
+}
+
+/// The configured primary voice, before checking credentials or constructing a speaker.
+/// Google and Deepgram select the model through the engine's voice name.
+pub(crate) fn phrase_voices(
+    file: &Table,
+    record: &AgentRecord,
+) -> Vec<(clarp_kernel::router::phrases::Voice, bool)> {
+    let voices = owner::voices(file);
+    let who = Who {
+        name: &record.persona,
+        persona: &record.persona,
+        session: &record.session,
+    };
+    let route = voices.route(who);
+    if route.provider == "none" {
+        return Vec::new();
+    }
+    let stored = Some(record.voice_id.as_str()).filter(|voice| !voice.is_empty());
+    let clip = voices.for_clip(stored, who, &route);
+    [(&route.provider, true), (&route.fallback, false)]
+        .into_iter()
+        .filter_map(|(provider, primary)| {
+            let voice = resolved_voice(file, &voices, &clip, stored, &route, provider)?;
+            let model = match provider.as_str() {
+                said::CARTESIA => owner::cartesia_model(file),
+                said::GEMINI => owner::gemini(file).model,
+                said::ELEVENLABS => eleven_model(file),
+                "deepgram" | "google" => voice.clone(),
+                _ => return None,
+            };
+            Some((
+                clarp_kernel::router::phrases::Voice {
+                    provider: provider.clone(),
+                    voice,
+                    model,
+                },
+                primary,
+            ))
+        })
+        .collect()
+}
+
 /// The name of the key an engine needs, as the owner's file is asked for it.
 fn key_of(provider: &str, file: &Table) -> &'static str {
     match provider {
@@ -885,8 +972,7 @@ impl Mouth {
                 model: if usage == SpeechUse::VoicePreview {
                     "eleven_multilingual_v2".into()
                 } else {
-                    owner::text_at(file, &["elevenlabs", "model"])
-                        .unwrap_or_else(|| "eleven_flash_v2_5".into())
+                    eleven_model(file)
                 },
                 speed: if usage == SpeechUse::VoicePreview {
                     1.0
@@ -1367,7 +1453,7 @@ impl Mouth {
         let Chosen::By(by) = chosen(&owners, record, &has_key) else {
             return None;
         };
-        let engines: Vec<(Box<dyn Speaker>, String)> = by
+        let engines = by
             .iter()
             .filter_map(|(provider, voice)| {
                 Some((
@@ -1376,8 +1462,45 @@ impl Mouth {
                 ))
             })
             .collect();
+        self.make_clip(record, text, prefix, engines, false)
+            .await
+            .ok()
+            .flatten()
+            .map(|(name, path, _)| (name, path))
+    }
+
+    pub(crate) async fn make_announcement(
+        &self,
+        record: &AgentRecord,
+        text: String,
+        owners: &Table,
+        voice: &clarp_kernel::router::phrases::Voice,
+        primary: bool,
+    ) -> Result<Option<(String, Option<Vec<u8>>)>, Mute> {
+        let engine = self
+            .has_key(&voice.provider, owners)
+            .then(|| self.engine(owners, &voice.provider, SpeechUse::Turn))
+            .flatten();
+        let engines = engine
+            .into_iter()
+            .map(|engine| (engine, voice.voice.clone()))
+            .collect();
+        Ok(self
+            .make_clip(record, text, "", engines, primary)
+            .await?
+            .map(|(name, _, bytes)| (name, bytes)))
+    }
+
+    async fn make_clip(
+        &self,
+        record: &AgentRecord,
+        text: String,
+        prefix: &'static str,
+        engines: Vec<(Box<dyn Speaker>, String)>,
+        retain: bool,
+    ) -> Result<Option<(String, PathBuf, Option<Vec<u8>>)>, Mute> {
         let (audio, session, now) = (self.audio.clone(), record.session.clone(), self.now_ms());
-        let made = tokio::task::spawn_blocking(move || -> Option<(String, PathBuf)> {
+        let made = tokio::task::spawn_blocking(move || {
             let listed: Vec<(&dyn Speaker, &str)> = engines
                 .iter()
                 .map(|(engine, voice)| (engine.as_ref(), voice.as_str()))
@@ -1386,40 +1509,14 @@ impl Mouth {
             let said = said_by_the_first_that_can(&listed, &text, &mut |piece| {
                 sound.extend_from_slice(piece);
             });
-            if said.is_err() || sound.is_empty() {
-                return None;
-            }
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(&audio)
-                .ok()?;
-            // A name of its own: the moment it was made, and the next when that is taken.
-            for later in 0..100 {
-                let name = format!("{prefix}{}", said::clip_name(Some(&session), now + later));
-                let path = audio.join(&name);
-                let file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(&path);
-                match file {
-                    Ok(mut file) => {
-                        return match file.write_all(&sound) {
-                            Ok(()) => Some((name, path)),
-                            Err(_) => {
-                                let _ = std::fs::remove_file(&path);
-                                None
-                            }
-                        };
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                    Err(_) => return None,
-                }
-            }
-            None
+            said?;
+            let clip = save_outside_clip(&audio, &session, now, prefix, &sound);
+            Ok(clip.map(|(name, path)| {
+                let keep = retain && sound.len() <= clarp_kernel::router::phrases::MAX_CLIP;
+                (name, path, keep.then_some(sound))
+            }))
         });
-        made.await.ok().flatten()
+        made.await.unwrap_or(Ok(None))
     }
 
     /// The user opened an agent: what the herald held of it is played.
@@ -1718,6 +1815,12 @@ async fn audio(State(app): State<App>, Path(name): Path<String>, headers: Header
     }
     if name.contains(['/', '\0']) {
         return plain(StatusCode::NOT_FOUND, "not found");
+    }
+    if clarp_kernel::router::phrases::blob_name(&name) {
+        return match app.router.phrases.audio(&app, &name).await {
+            Some(bytes) => Preview::Temporary(bytes.into()).send(&header_text(&headers, "range")),
+            None => plain(StatusCode::NOT_FOUND, "not found"),
+        };
     }
     if let Some(growing) = app.mouth.growing_named(&name) {
         return as_it_grows(growing);

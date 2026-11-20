@@ -7,9 +7,13 @@
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
 #                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
 #                                [--push-keys FILE|off] [--contact-pictures on|off]
-#                                [--seats-tool PATH|off] [--start] [--files-only]
+#                                [--seats-tool PATH|off] [--skills-from DIR] [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
+#   --skills-from DIR  the tree of skills this release ships, with its manifest.json (default: the
+#                  repository's skills/ beside server-rs). It is copied, whole, to a place of its own
+#                  for this version and named to the Host. Where it is not named and the default is
+#                  not there, no skills are shipped; a tree named without a manifest is refused
 #   --listen       where the Host listens (default 127.0.0.1:7690). Keep it on the loopback and put
 #                  whatever the phone reaches in front of it: the Host's own token is only taken
 #                  from the loopback
@@ -31,9 +35,11 @@
 #                  Python Host on this machine has a selector, else `none`. `select`: this
 #                  Host runs the owner's selector itself (the commands the owner's file names,
 #                  `--speech-keys`, under [agents]), for a machine on which it is the only
-#                  Host: never chosen by itself, and refused while the Python Host of this
-#                  machine runs with a selector of its own, since the logins are the machine's
-#                  and two Hosts must not both change them
+#                  Host: it then keeps the machine's tools, their logins, their providers'
+#                  settings and their skills. Never chosen by itself, and refused while the
+#                  Python Host of this machine runs (its unit is anything but stopped), with or
+#                  without a selector: those are the machine's, one Host keeps them, and that
+#                  Host links the skills at every update of its own
 #   --seats-tool   the owner's tool that knows the seats of the machine's accounts (Hotseat), which
 #                  the Host runs when an app asks for a reading of the desk of seats, and at no
 #                  other time. Default: `hotseat` where it is found on the path the agents' tools
@@ -103,16 +109,22 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 from="$here/dist"; start=0; files_only=0
+skills_from="$here/../skills"; skills_named=0
 declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
+        --skills-from) skills_from="$2"; skills_named=1; shift 2 ;;
         --listen|--name|--claude|--codex|--agy|--opencode|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool|--contact-pictures) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--skills-from DIR] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
+if [ "$skills_named" = 1 ] && [ ! -f "$skills_from/manifest.json" ]; then
+    echo "install-host: --skills-from $skills_from: no manifest.json there" >&2
+    exit 2
+fi
 
 share="${XDG_DATA_HOME:-$HOME/.local/share}/clarp-host"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/clarp-host"
@@ -174,11 +186,23 @@ if [ -z "$accounts" ]; then
     if grep -q '^[a-z]*_account_switch_command' "$python_config" 2>/dev/null; then accounts=follow; else accounts=none; fi
 fi
 case "$accounts" in follow|none|select) ;; *) echo "install-host: --accounts $accounts: follow, none or select" >&2; exit 2 ;; esac
-if [ "$accounts" = select ] && grep -q '^[a-z]*_account_switch_command' "$python_config" 2>/dev/null \
-    && systemctl --user is-active --quiet clarp.service 2>/dev/null; then
-    echo "install-host: --accounts select: the Python Host of this machine runs and has a selector of accounts." >&2
-    echo "  The logins are the machine's: two Hosts must not both change them. Use --accounts follow" >&2
-    echo "  beside it, or stop that Host first." >&2
+# One Host keeps a machine's tools: their logins, their providers' settings and their skills. A
+# Python Host that runs keeps them, whatever its settings of accounts: it links the skills at
+# every update of its own, and a Host in select beside it would move them back at every start.
+python_runs() {
+    local unit
+    for unit in clarp.service clarp-runtime.service; do
+        case "$(systemctl --user is-active "$unit" 2>/dev/null || true)" in
+            inactive|failed|unknown|'') ;;
+            *) return 0 ;;
+        esac
+    done
+    return 1
+}
+if [ "$accounts" = select ] && python_runs; then
+    echo "install-host: --accounts select: the Python Host of this machine runs." >&2
+    echo "  The tools' logins, the providers' settings and the skills are the machine's, and one Host" >&2
+    echo "  keeps them. Stop that Host first, or use --accounts follow beside it." >&2
     exit 2
 fi
 # Speech in. The Host's own engine is a worker run by a Python that has faster-whisper: the
@@ -478,7 +502,37 @@ mv -f "$share/libexec/.transcription-download.py.new" "$share/libexec/transcript
 install -m 644 "$here/tools/voice-metrics.py" "$share/libexec/.voice-metrics.py.new"
 mv -f "$share/libexec/.voice-metrics.py.new" "$share/libexec/voice-metrics.py"
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
+previous="$(cat "$share/data/DEPLOYED_VERSION" 2>/dev/null || true)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
+# The skills this Host keeps installed for its agents' tools where it keeps the machine's tools
+# (--accounts select; the Host itself decides that at its start): the repository's tree of
+# skills, copied into a place of its own for this version, so that a link an earlier version
+# left reads as outdated and is put right by the Host at its start. Named to the Host with the
+# releases of the Python Host that kept the tools before (a link it left is Clarp's own too) and
+# that Host's record of the skills it kept chosen, which the Host reads once and never writes.
+# This tool never touches a tool's skill folder. The programs a skill requires are looked up on
+# the unit's PATH below, which is the Python Host's.
+skills=""
+if [ -f "$skills_from/manifest.json" ]; then
+    release="$share/releases/$version"
+    if [ "$version" = unknown ] || [ ! -f "$release/skills/manifest.json" ]; then
+        mkdir -p "$release"
+        rm -rf "$release/.skills.new" "$release/.skills.old"
+        cp -R "$skills_from" "$release/.skills.new"
+        [ -d "$release/skills" ] && mv "$release/skills" "$release/.skills.old"
+        mv "$release/.skills.new" "$release/skills"
+        rm -rf "$release/.skills.old"
+    fi
+    # The release installed before this one stays until the Host has moved the links over at its
+    # start; older ones go. A link into one removed still reads as outdated and is moved too.
+    for old in $(ls -1 "$share/releases"); do
+        if [ "$old" != "$version" ] && [ "$old" != "$previous" ]; then rm -rf "${share:?}/releases/$old"; fi
+    done
+    skills=" --skills $release/skills"
+    [ -d "$python_share/releases" ] && skills="$skills --skills-other-releases $python_share/releases"
+    python_chosen="$(dirname "$python_config")/install.json"
+    [ -f "$python_chosen" ] && skills="$skills --skills-chosen-before $python_chosen"
+fi
 
 # The administrator's token: made once, kept. The Host reads it from its environment.
 if [ ! -s "$config/env" ]; then
@@ -532,7 +586,7 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${seats_tool:+ --seats-tool "$seats_tool"}${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
 Restart=on-failure
 RestartSec=2
 

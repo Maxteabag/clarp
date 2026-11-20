@@ -35,6 +35,12 @@ pub trait Blobs: Send + Sync {
     /// process. A name that is kept already is left as it is.
     fn put(&self, name: &str, bytes: &[u8]) -> Result<(), StoreError>;
 
+    /// Names owned by a cache. The prefix must start with two shard characters.
+    fn names_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError>;
+
+    /// Forget a blob owned exclusively by a cache; an absent blob is already forgotten.
+    fn remove(&self, name: &str) -> Result<(), StoreError>;
+
     /// How many bytes are kept under a name: `None` when nothing is, and for what is no name.
     fn len(&self, name: &str) -> Result<Option<u64>, StoreError>;
 
