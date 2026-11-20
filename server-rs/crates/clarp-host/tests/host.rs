@@ -37889,6 +37889,10 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     ];
     let flags = ["--janitors-checked-every-ms", "100"];
     let host = place.start_in(TOKEN, &flags, &env);
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["provider_background_tasks"],
+        24
+    );
     let made = host.post(
         "/agents",
         json!({"backend":"claude","name":"Fixture","cwd":cwd,"resume_session_id":sid}),

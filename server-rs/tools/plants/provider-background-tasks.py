@@ -180,6 +180,7 @@ PLANTS=[
     ('clarp-kernel/src/jobs.rs', 'actor', 'prefer the newest linked job', 'first()\n            .map(|(_, id)| id.as_str())', 'last().map(|(_,id)|id.as_str())'),
     ('clarp-kernel/src/jobs.rs', 'actor', 'assign insertion order at each registration', 'let first = *self\n                .first_seen\n                .entry(job.id.clone())\n                .or_insert(job.revision);', 'let first=job.revision;'),
     ('clarp-kernel/src/jobs.rs', 'actor', 'leave an old exact identity in the lookup', 'candidates.remove(&(first, job.id.clone()));', 'let _=&first;'),
+    ('clarp-host/src/edge.rs', 'host', 'advertise the wrong native task contract', '("provider_background_tasks", 24)', '("provider_background_tasks", 23)'),
 ]
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
