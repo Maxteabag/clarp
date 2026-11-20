@@ -115,10 +115,24 @@ def carry(database, *, agent_id: str, from_trace: str | None, to_trace: str | No
         (new, now_ms(), agent_id, old))
 
 
+def can_leave_note(agent_id: str) -> bool:
+    """Whether the agent can leave a note for the user (POST /agent-notes needs its turn
+    token): its backend gives every turn one (turn_identity.IDENTITY_BACKENDS). The one place
+    this is decided. An agent that cannot is never hidden (F6-b): the failure mode of this
+    feature is shown, never lost. Its turns are still marked, so they hide without a
+    migration on the day its backend gets a turn token."""
+    if not agent_id:
+        return False
+    from . import agents, backends
+    from .turn_identity import IDENTITY_BACKENDS
+    agent = agents.get_by_agent_id(agent_id) or {}
+    return backends.normalize(agent.get("backend")) in IDENTITY_BACKENDS
+
+
 def audience_of(agent_id: str, trace_id: str | None, *, database=None) -> str:
     """'agents' while the turn of ``trace_id`` is coordination, else 'user'."""
     trace = (trace_id or "").strip()
-    if not agent_id or not trace:
+    if not agent_id or not trace or not can_leave_note(agent_id):
         return USER
     if database is None:
         from .db import conn
@@ -133,7 +147,7 @@ def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | No
     """The sender of a turn that is coordination now ('' when this Host does
     not know it: a peer Host's agent); None when the turn is the user's."""
     trace = (trace_id or "").strip()
-    if not agent_id or not trace:
+    if not agent_id or not trace or not can_leave_note(agent_id):
         return None
     if database is None:
         from .db import conn
@@ -220,6 +234,8 @@ def reminder(agent: dict | None, *, origin: str | None, sender_agent_id: str | N
     if not agent or not is_coordination(agent_id=agent.get("agent_id") or "", origin=origin,
                                         sender_agent_id=sender_agent_id):
         return ""
+    if not can_leave_note(agent.get("agent_id") or ""):
+        return ""   # its turns are shown (F6-b); it would be told to run a command that refuses it
     if effective_visibility(agent.get("agent_id") or "") != HIDE:
         return ""
     sender = None

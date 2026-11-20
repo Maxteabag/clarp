@@ -738,3 +738,25 @@ def test_a_self_prompt_from_the_agents_own_turn_is_never_the_users_word(world, c
     req, mark = _boundary(world, origin=claimed, caller=world.id)
     assert (req.origin, req.sender_agent_id, mark) == ("automation", "", False)
     assert req.admit().cooperative_principal != "user"
+
+
+@pytest.mark.parametrize("backend, hidden", [("codex", False), ("muse", False), ("claude", True), ("agy", True)])
+def test_an_agent_that_cannot_leave_a_note_is_never_hidden(tmp_path, backend, hidden):
+    """F6-b: the failure mode is shown, never lost. An agent whose backend gives its turns no
+    token cannot leave a note, so under 'hide' nothing it means for the user could reach them:
+    its coordination turns read 'user' and it is given no reminder. The mark is still written."""
+    from lib import settings_store
+    settings_store.set_text(coordination.GLOBAL_KEY, "hide")
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend=backend)
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    agents.bind_backend_session(agent_id, "native")
+    agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-boss",
+                               text="Report", trace_id="t-boss", origin="agent", sender_agent_id=boss)
+    assert db.conn().execute("SELECT audience FROM coordination_traces WHERE trace_id='t-boss'").fetchone()[0] \
+        == "agents"
+    assert coordination.can_leave_note(agent_id) is hidden
+    rows = agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50)
+    assert [row["audience"] for row in rows] == ["agents" if hidden else "user"]
+    assert coordination.audience_of(agent_id, "t-boss") == ("agents" if hidden else "user")
+    brief = _turn_protocol(agent_id, origin="agent", sender_agent_id=boss)
+    assert ("tell-user" in brief) is hidden
