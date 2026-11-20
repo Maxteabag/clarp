@@ -99,7 +99,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                            m.phase, m.turn_json,
                            sender.persona AS sender_name,
                            sender.session AS sender_session,
-                           ct.audience AS trace_audience
+                           {coordination.TRACE_AUDIENCE_SQL} AS trace_audience
                       FROM messages m
                       LEFT JOIN agents sender
                         ON sender.agent_id = m.sender_agent_id
@@ -115,7 +115,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                            m.phase, m.turn_json,
                            sender.persona AS sender_name,
                            sender.session AS sender_session,
-                           ct.audience AS trace_audience
+                           {coordination.TRACE_AUDIENCE_SQL} AS trace_audience
                       FROM (
                             SELECT message_id, agent_id, role, timestamp, text, kind,
                                    tool_name, tools_json, display_cells_json,

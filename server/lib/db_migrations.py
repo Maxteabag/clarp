@@ -1116,7 +1116,9 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
     no-op; older code reads neither, so a rollback needs no down-migration. Nothing is
     backfilled: history before this step stays shown (a later, batched step marks it)."""
     from .persistence.schema_parts.coordination import SCHEMA
-    con.execute(SCHEMA)
+    for statement in SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
 

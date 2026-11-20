@@ -246,6 +246,9 @@ CREATE INDEX idx_podcast_source ON podcast_conversations(source_artifact_id, cre
 -- index idx_prompt_admissions_history on prompt_admissions
 CREATE INDEX idx_prompt_admissions_history ON prompt_admissions(agent_id, cooperative_principal, observed_at DESC, admission_id);
 
+-- index idx_prompt_admissions_trace on prompt_admissions
+CREATE INDEX idx_prompt_admissions_trace ON prompt_admissions(trace_id);
+
 -- index idx_provider_limit_episode_open on provider_limit_episodes
 CREATE INDEX idx_provider_limit_episode_open ON provider_limit_episodes(provider_instance_id, auth_generation_id, window_id, status);
 
@@ -266,6 +269,9 @@ CREATE INDEX idx_queued_turns_agent_time ON queued_turns(agent_id, enqueued_at);
 
 -- index idx_queued_turns_status_seq on queued_turns
 CREATE INDEX idx_queued_turns_status_seq ON queued_turns(status, queue_seq);
+
+-- index idx_queued_turns_trace on queued_turns
+CREATE INDEX idx_queued_turns_trace ON queued_turns(trace_id);
 
 -- index idx_runtimes_live_backend_session on runtimes
 CREATE INDEX idx_runtimes_live_backend_session ON runtimes(backend_session_id) WHERE ended_at IS NULL;
@@ -323,6 +329,9 @@ CREATE INDEX idx_turn_usage_backend_at ON turn_usage(backend, at);
 
 -- index idx_turns_agent_ts on turns
 CREATE INDEX idx_turns_agent_ts ON turns(agent_id, started_at);
+
+-- index idx_turns_trace on turns
+CREATE INDEX idx_turns_trace ON turns(trace_id);
 
 -- index idx_user_notifications_agent_done on user_notifications
 CREATE INDEX idx_user_notifications_agent_done ON user_notifications(agent_id, done_ts DESC);
