@@ -333,6 +333,18 @@ def _post_podcast_history(handler, path):
     return podcast_history_http.handle(handler, "POST")
 
 
+def _media_asset_path(path, suffix=""):
+    """The asset id of /media/<id><suffix>, or "" when the path is not exactly that."""
+    if not path.startswith("/media/") or not path.endswith(suffix):
+        return ""
+    asset_id = unquote(path[len("/media/"):len(path) - len(suffix)])
+    return asset_id if asset_id and "/" not in asset_id else ""
+
+
+def _post_media_favorite(handler, path):
+    return handler._handle_media_favorite(_media_asset_path(path, "/favorite"))
+
+
 def _post_artifact(handler, path):
     for action in ("archive", "discard", "submit", "pin", "events", "events-config"):
         suffix = "/" + action
@@ -359,6 +371,8 @@ POST = (
     Route("POST", "podcast-history", lambda path: path.startswith("/podcast-history/"),
           _post_podcast_history),
     Route("POST", "artifact", lambda path: path.startswith("/artifacts/"), _post_artifact),
+    Route("POST", "media-favorite", lambda path: bool(_media_asset_path(path, "/favorite")),
+          _post_media_favorite),
 )
 
 
@@ -416,6 +430,10 @@ def _delete_agent(handler, path):
     return handler._handle_delete_agent(path[len("/agents/"):])
 
 
+def _delete_media(handler, path):
+    return handler._handle_media_delete(_media_asset_path(path))
+
+
 def _delete_persona(handler, path):
     return handler._handle_delete_persona(path[len("/personas/"):].strip("/"))
 
@@ -439,6 +457,7 @@ DELETE = (
     Route("DELETE", "device", lambda path: path == "/devices", _delete_device),
     Route("DELETE", "agent", lambda path: path.startswith("/agents/"), _delete_agent),
     Route("DELETE", "persona", lambda path: path.startswith("/personas/"), _delete_persona),
+    Route("DELETE", "media", lambda path: bool(_media_asset_path(path)), _delete_media),
 )
 
 

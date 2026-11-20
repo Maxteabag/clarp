@@ -92,6 +92,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
     SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
+    SSEType.MEDIA_CHANGED: ("session", "agent_id", "asset_id", "change", "favorite", "at"),
     SSEType.ATTENTION_UPDATED: ("attention_count",),
     SSEType.BACKGROUND_JOB_UPDATED: (
         "change_revision", "observed_at", "job_id", "session", "agent_id",
@@ -347,6 +348,24 @@ def artifact_updated(*, session: str, agent_id: str,
     ])
 
 
+def media_changed(*, session: str, agent_id: str, asset_id: str, change: str,
+                  at: int, favorite: Any = OMIT) -> Event:
+    """A gallery image was created, deleted or (un)marked; ``favorite`` only with
+    change ``favorite``."""
+    if change not in {"created", "deleted", "favorite"}:
+        raise ValueError(f"media-changed: unknown change {change!r}")
+    if (change == "favorite") != (favorite is not OMIT):
+        raise ValueError("media-changed: favorite goes with change 'favorite' only")
+    return _build(SSEType.MEDIA_CHANGED, [
+        ("session", session),
+        ("agent_id", agent_id),
+        ("asset_id", asset_id),
+        ("change", change),
+        ("favorite", favorite),
+        ("at", at),
+    ])
+
+
 def attention_updated(*, attention_count: int) -> Event:
     return _build(SSEType.ATTENTION_UPDATED, [
         ("attention_count", attention_count),
@@ -510,6 +529,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.QUEUE_UPDATED: queue_updated,
     SSEType.DELIVERY_UPDATED: delivery_updated,
     SSEType.ARTIFACT_UPDATED: artifact_updated,
+    SSEType.MEDIA_CHANGED: media_changed,
     SSEType.ATTENTION_UPDATED: attention_updated,
     SSEType.BACKGROUND_JOB_UPDATED: background_job_updated,
     SSEType.PROVIDER_LIMIT: provider_limit,
