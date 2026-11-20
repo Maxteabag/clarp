@@ -368,8 +368,10 @@ def restamp_trace(database, agent_id: str, trace_id: str) -> list[str]:
     return sorted(heads)
 
 
-def note_message_id(note_id: str) -> str:
-    return f"note-{note_id}"
+def note_message_id(agent_id: str, note_id: str) -> str:
+    """A note's id is its agent's and the caller's id together: another
+    agent's note_id is another note (F5)."""
+    return f"note-{agent_id}-{note_id}"
 
 
 def record_note(*, agent_id: str, backend_session_id: str, note_id: str, text: str,
@@ -387,7 +389,7 @@ def record_note(*, agent_id: str, backend_session_id: str, note_id: str, text: s
     if not agent_id or not backend_session_id or not note_id or not str(text or "").strip():
         return None
     database = conn()
-    msg_id = note_message_id(note_id)
+    msg_id = note_message_id(agent_id, note_id)
     columns = """message_id, role, timestamp, text, kind, revision, trace_id"""
     existing = database.execute(
         f"SELECT {columns} FROM messages WHERE message_id = ?", (msg_id,)).fetchone()

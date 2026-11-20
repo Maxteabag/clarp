@@ -102,6 +102,12 @@ def post(data: Any, *, caller_agent_id: str, caller_trace: str) -> Posted:
         raise NoteRefused(409, f"{COMMAND} works only inside a running turn of {agent.get('session')}; "
                                "this call is not in one")
     backend_session_id = _conversation_of(agent_id, trace)
+    held = db.conn().execute(
+        "SELECT text FROM messages WHERE message_id = ?",
+        (message_store.note_message_id(agent_id, note_id),)).fetchone()
+    if held is not None and held["text"] != text:
+        raise NoteRefused(409, f"note_id {note_id} is already a note of {agent.get('session')} with "
+                               "other words; send the new words with a new note_id")
     note = message_store.record_note(agent_id=agent_id, backend_session_id=backend_session_id,
                                      note_id=note_id, text=text, trace_id=trace)
     if note is None:
