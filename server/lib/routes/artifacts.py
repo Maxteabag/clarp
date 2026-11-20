@@ -11,7 +11,16 @@ from lib import events
 def _can_render(handler):
     from lib import config, server_identity
     return server_identity.render_spec_capable(
-        handler.headers.get(server_identity.CLIENT_HEADER), config.load().render_spec_min_client)
+        handler.headers.get(server_identity.CLIENT_HEADER), config.load().render_spec_min_contract)
+
+
+def _administrator(handler):
+    """The local administrator's token (or a Host with no token, from this machine), never a
+    paired device: the same class controller actions use."""
+    if getattr(handler, "_request_principal", "") == "administrator":
+        return True
+    return (not (getattr(handler.ctx, "auth_token", "") or "")
+            and bool(getattr(handler, "_request_is_local", False)))
 
 
 def _spec_refusal(handler, error):
@@ -121,6 +130,23 @@ class ArtifactRoutes:
                                  else html_form_events.configuration(artifact_id))
         except (ValueError, TypeError) as exc:
             return self._json_error(400, str(exc))
+
+    def _handle_artifact_export(self, artifact_id: str):
+        """GET /artifacts/<id>/export (R137): a render_spec as a move to another Host needs it, for
+        the administrator only: any device is refused, limited or full, whatever its
+        X-Clarp-Client says. Another kind is refused in words, in a body shaped so a kind can be
+        added later: a 'kind' and one object under the kind's name."""
+        from lib import render_spec_store
+        if not _administrator(self):
+            return self._json_error(403, "administrator only")
+        try:
+            exported = render_spec_store.export(artifact_id)
+        except render_spec_store.NotExportable as kind:
+            return self._json(409, {"error": f"export is not available for {kind} artifacts",
+                                    "kind": str(kind)})
+        if exported is None:
+            return self._json_error(404, "not found")
+        return self._json_ok(exported)
 
     def _handle_artifact_get(self, artifact_id: str):
         from lib import artifacts

@@ -41,21 +41,41 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 106  # An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 108  # render_spec switched on per client (iOS 74); GET /artifacts/<id>/export for the administrator (issue 428, R137). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
 SEND_DELIVERY_STATE = "send_delivery_state"
 CLIENT_HEADER = "X-Clarp-Client"
-RENDER_SPEC_MIN_CLIENT: int | None = None  # No shipped client supports this kind yet.
+# The lowest client contract that draws and answers a render_spec, PER CLIENT (issue 428): each
+# client's contract numbers are its own series, so one number for all would one day tell a client
+# without a renderer that it can render. The name is the client's own (`ios/2981 contract=74`),
+# matched exactly. A client not named here never gets the kind: Android (until its owner names
+# its number), the desktop, the web app, the Watch, an unknown or absent name. 0: never.
+RENDER_SPEC_MIN_CONTRACT: dict[str, int] = {"ios": 74}  # iOS TestFlight 2981, the first to send 74
 
 
-def render_spec_capable(header, development_minimum=None):
+def render_spec_capable(header, minimums=None):
+    """Whether the client that sent ``header`` draws and answers a render_spec. ``minimums``
+    overrides the default per client: a mapping of client name to minimum contract (0: never),
+    laid over RENDER_SPEC_MIN_CONTRACT; a single number is iOS's minimum (the old development
+    key, which never meant every client)."""
     import re
-    minimum = RENDER_SPEC_MIN_CLIENT if development_minimum is None else development_minimum
-    if type(minimum) is not int or minimum < 1 or not isinstance(header, str):
+    from collections.abc import Mapping
+    if minimums is None:
+        table = RENDER_SPEC_MIN_CONTRACT
+    elif type(minimums) is int:
+        table = {**RENDER_SPEC_MIN_CONTRACT, "ios": minimums}
+    elif isinstance(minimums, Mapping):
+        table = {**RENDER_SPEC_MIN_CONTRACT, **minimums}
+    else:
+        return False
+    if not isinstance(header, str):
         return False
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}/[A-Za-z0-9._-]{1,80} contract=[0-9]{1,9}", header):
+        return False
+    minimum = table.get(header.split("/", 1)[0])                 # the name as sent, exactly
+    if type(minimum) is not int or minimum < 1:
         return False
     return parse_client_header(header)["contract"] >= minimum
 
