@@ -108,6 +108,10 @@ pub struct Profile {
     /// The name of this run of the Host, for those who watch a turn as it runs: a client that
     /// is told another name knows the Host started again and asks for everything anew.
     pub epoch: String,
+    /// Whether the agent's turns that answer another agent are shown as such: only an agent
+    /// that can leave a note for its user (`coordination::can_leave_note`), as the Host
+    /// decides it; [`Actor::hide_coordination`] changes it.
+    pub hides_coordination: bool,
 }
 
 impl Profile {
@@ -1532,11 +1536,16 @@ impl Actor {
             {
                 let name = shown_name(live.trace_id.as_deref(), &live.message_id);
                 let conversation = self.shown_conversation();
+                // A mark that cannot be read shows the turn to the user: never hidden by a fault.
+                let audience = self
+                    .audience_of(turn)
+                    .unwrap_or(clarp_kernel::coordination::USER);
                 let events = self.shown.begin_turn(
                     &self.profile.session,
                     &conversation,
                     &name,
                     Some(started_at_ms),
+                    audience,
                     now_ms,
                 );
                 self.shown_events.extend(events);
@@ -1578,6 +1587,25 @@ impl Actor {
     /// how its spoken answers sound. A turn that runs was told when it started.
     pub fn retell(&mut self, told: Option<Told>) {
         self.profile.told = told;
+    }
+
+    /// Sets whether the agent's turns that answer another agent are shown as such: only an
+    /// agent that can leave a note for its user is (`coordination::can_leave_note`), which
+    /// the Host decides. A turn begun before is shown as it was begun.
+    pub fn hide_coordination(&mut self, hides: bool) {
+        self.profile.hides_coordination = hides;
+    }
+
+    /// Whom a turn is for, as those who watch it run are told: `agents` for a turn that
+    /// answers another agent of an agent that can leave a note, else `user`. One look by key.
+    fn audience_of(&self, turn: TurnId) -> Result<&'static str, ActorError> {
+        if !self.profile.hides_coordination {
+            return Ok(clarp_kernel::coordination::USER);
+        }
+        Ok(match self.mark(turn.0)? {
+            Some(_) => clarp_kernel::coordination::AGENTS,
+            None => clarp_kernel::coordination::USER,
+        })
     }
 
     /// The name of the backend that runs this agent's turns.
@@ -2731,6 +2759,7 @@ impl Actor {
         &mut self,
         message: &Message,
         admission: Admission,
+        reservation: Option<serde_json::Value>,
         marks: &Marks,
         now_ms: i64,
     ) -> Result<Result<(Sent, Outputs), TraceTaken>, ActorError> {
@@ -2740,7 +2769,7 @@ impl Actor {
         {
             return Ok(Err(TraceTaken));
         }
-        self.take(message, admission, Vec::new(), None, marks, now_ms)
+        self.take(message, admission, Vec::new(), reservation, marks, now_ms)
             .map(Ok)
     }
 
@@ -3852,9 +3881,10 @@ impl Actor {
         };
         let conversation = self.shown_conversation();
         let session = self.profile.session.clone();
+        let audience = self.audience_of(turn)?;
         let _ = self
             .shown
-            .begin_turn(&session, &conversation, &name, Some(began), began);
+            .begin_turn(&session, &conversation, &name, Some(began), audience, began);
         self.shown_turn = Some((turn, name.clone()));
         while offset < until {
             let read = reader

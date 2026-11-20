@@ -70,7 +70,7 @@ fn shown(fixture: &str) -> (clarp_kernel::live::View, usize) {
     let mut hub = Hub::new("epoch-1", "agent-1", "claire");
     let mut client = View::new();
     client.apply_snapshot(&json!({"epoch": "epoch-1", "lseq": 0}));
-    let mut sent = hub.begin_turn("claire", "conv-1", "tr-1", None, 0);
+    let mut sent = hub.begin_turn("claire", "conv-1", "tr-1", None, "user", 0);
     let mut t = 0;
     for signal in read(fixture) {
         t += 1;

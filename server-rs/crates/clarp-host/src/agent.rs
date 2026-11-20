@@ -168,7 +168,17 @@ pub enum Ask {
         reservation: Option<Value>,
         message: Message,
         admission: Admission,
-        answer: Answer<Sent>,
+        /// Whether it is another agent's, and whether its caller named its trace.
+        marks: clarp_actor::Marks,
+        answer: Answer<Result<Sent, clarp_actor::TraceTaken>>,
+    },
+    /// A note the agent leaves for its user from its running turn: what became of it, and the
+    /// user's notification of it when one was made (`Err`: why nobody was told).
+    LeaveNote {
+        turn: u64,
+        id: String,
+        text: String,
+        answer: Answer<(clarp_actor::Noted, Option<Result<Value, String>>)>,
     },
     Stop {
         by: Control,
@@ -575,10 +585,48 @@ impl AgentHandle {
         admission: Admission,
         reservation: Option<Value>,
     ) -> Result<Sent, Unavailable> {
+        let marks = clarp_actor::Marks::default();
+        match self
+            .send_marked(message, admission, reservation, marks)
+            .await?
+        {
+            Ok(sent) => Ok(sent),
+            // A send whose caller named no trace is never refused for it.
+            Err(clarp_actor::TraceTaken) => Err(Unavailable(clarp_actor::TRACE_TAKEN.to_string())),
+        }
+    }
+
+    /// Sends as the Host decided it at the send ([`clarp_actor::Actor::send_marked`]): refused
+    /// when the caller named a trace another message of the agent has.
+    pub async fn send_marked(
+        &self,
+        message: Message,
+        admission: Admission,
+        reservation: Option<Value>,
+        marks: clarp_actor::Marks,
+    ) -> Result<Result<Sent, clarp_actor::TraceTaken>, Unavailable> {
         self.ask(|answer| Ask::Send {
             reservation,
             message,
             admission,
+            marks,
+            answer,
+        })
+        .await
+    }
+
+    /// Leaves a note for the user from the agent's turn `turn` under the row id `id`
+    /// ([`clarp_actor::Actor::leave_note`]), and tells the user of it.
+    pub async fn leave_note(
+        &self,
+        turn: u64,
+        id: String,
+        text: String,
+    ) -> Result<(clarp_actor::Noted, Option<Result<Value, String>>), Unavailable> {
+        self.ask(|answer| Ask::LeaveNote {
+            turn,
+            id,
+            text,
             answer,
         })
         .await
@@ -2381,19 +2429,29 @@ impl Worker {
         // the owner's settings and file are read now.
         if matches!(ask, Ask::Send { .. }) {
             actor.retell(Some(self.setup.telling.of(&self.setup.record)));
+            // Whether its turns that answer another agent are shown as such: the key may have
+            // been read since the agent was opened.
+            actor.hide_coordination(clarp_kernel::coordination::can_leave_note(
+                &self.setup.record.agent_id,
+                Some(&self.setup.record.backend),
+                self.setup.turns.has_key(),
+            ));
         }
         let (out, owed) = match ask {
             Ask::Send {
                 message,
                 admission,
                 reservation,
+                marks,
                 answer,
             } => {
-                let sent = match reservation {
-                    Some(proof) => actor.send_for_opening(&message, admission, proof, now),
-                    None => actor.send(&message, admission, now),
-                };
-                if let Ok((sent, _)) = &sent
+                let sent = actor
+                    .send_marked(&message, admission, reservation, &marks, now)
+                    .map(|sent| match sent {
+                        Ok((sent, out)) => (Ok(sent), out),
+                        Err(taken) => (Err(taken), Outputs::default()),
+                    });
+                if let Ok((Ok(sent), _)) = &sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
                     && let Some(c) = &self.setup.hub.capture
@@ -2401,6 +2459,48 @@ impl Worker {
                     c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
                 }
                 answered(sent, answer)?
+            }
+            Ask::LeaveNote {
+                turn,
+                id,
+                text,
+                answer,
+            } => {
+                let left = actor.leave_note(turn, &id, &text, now);
+                let left = left.map(|(noted, out)| {
+                    // Only a note written now tells the user: one asked again was told.
+                    let told = match &noted {
+                        clarp_actor::Noted::Written { id, .. } => Some(wire::note_notification(
+                            &self.setup.record,
+                            id,
+                            &text,
+                            now,
+                        )),
+                        _ => None,
+                    };
+                    ((noted, told), out)
+                });
+                if let Ok(((_, Some(Ok(told))), _)) = &left {
+                    // A phone that is not listening is pushed to, when the rule says so.
+                    if told["push"] == true {
+                        self.setup.pusher.turn_done(TurnDone {
+                            badge: true,
+                            unread: true,
+                            session: self.setup.record.session.clone(),
+                            persona: self.setup.record.persona.clone(),
+                            notification_id: told["notification_id"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            preview: told["preview"].as_str().unwrap_or("").to_string(),
+                            needs_response: actor
+                                .artifacts()
+                                .has_pending_decision(now),
+                        });
+                    }
+                    self.setup.hub.publish(told.clone(), now);
+                }
+                answered(left, answer)?
             }
             Ask::Stop { by, answer } => {
                 // The turn is no longer the agent's to finish: the pool of its tool's
@@ -3548,7 +3648,15 @@ impl Worker {
                     now,
                 );
             }
-            hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
+            hub.publish(
+                wire::dispatched(
+                    &record,
+                    live,
+                    status.waiting.len(),
+                    &working_with(actor, live),
+                ),
+                now,
+            );
         }
         // A turn that waited for an account is taken up: the word is said once more, as the
         // Python Host says it when it gives the turn to its tool anew.
@@ -3557,7 +3665,15 @@ impl Worker {
             && waits_for_an_account(was)
             && !waits_for_an_account(live)
         {
-            hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
+            hub.publish(
+                wire::dispatched(
+                    &record,
+                    live,
+                    status.waiting.len(),
+                    &working_with(actor, live),
+                ),
+                now,
+            );
         }
         // The mailbox was held or let go, or a waiting message was taken back: it left the
         // queue and no turn began for it. A hold that ended by itself, because the last
@@ -3794,6 +3910,30 @@ fn nobody() -> Owed {
 
 /// The result of a command, for the thread to go on with what follows from it, and the
 /// answer that is owed for it. A command that failed is answered at once.
+/// Whom a turn that begins works for, as its working state says it: the agents when another
+/// agent's message began it and this agent can leave a note (its profile says so), with that
+/// agent named when it is one of this Host; the user otherwise. A mark that cannot be read is
+/// the user's: nothing is hidden by a fault.
+fn working_with(actor: &Actor, live: &clarp_actor::LiveStatus) -> wire::WorkingWith {
+    if !actor.profile().hides_coordination {
+        return wire::WorkingWith::User;
+    }
+    let Ok(Some(sender)) = actor.mark(live.turn.0) else {
+        return wire::WorkingWith::User;
+    };
+    if sender.is_empty() {
+        return wire::WorkingWith::Agents { sender: None };
+    }
+    let name = actor.row(&live.message_id).ok().flatten();
+    let name = name.and_then(|row| match row.entry {
+        Entry::Message(message) => message.sender.map(|sender| sender.name),
+        _ => None,
+    });
+    wire::WorkingWith::Agents {
+        sender: Some((sender, name.unwrap_or_default())),
+    }
+}
+
 fn answered<T: Send + 'static>(
     result: Result<(T, Outputs), ActorError>,
     answer: Answer<T>,
@@ -3839,6 +3979,7 @@ fn refuse_for(
         let refusal = || Unavailable(format!("the agent cannot be opened: {why}"));
         match rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
             Ok(Ask::Send { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::LeaveNote { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Repair { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
