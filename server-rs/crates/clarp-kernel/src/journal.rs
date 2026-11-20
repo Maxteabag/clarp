@@ -1455,6 +1455,100 @@ mod tests {
         );
     }
 
+    /// A user's send admitted behind a turn that runs, and the user's Stop, in one write: each
+    /// is where its own event is in the log, the Stop strictly after the admission, and the
+    /// agent folded from the log again holds the send as it was left.
+    #[test]
+    fn a_send_and_the_users_stop_in_one_write_are_each_at_its_own_position() {
+        use crate::delivery::revision;
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        recorder
+            .accept_message(message("u-1", Admission::Queue), 1)
+            .unwrap();
+        let mut batch = recorder.batch();
+        batch
+            .command(Command::TurnStarted { turn: TurnId(1) }, 2)
+            .unwrap();
+        batch.commit().unwrap();
+        recorder.take_deliveries();
+        recorder.take_launched();
+
+        let message_seq = recorder.last_seq() + 1;
+        let mut batch = recorder.batch();
+        let mut said = NewItem::new(kind::MESSAGE, 3, b"u-2".to_vec()).in_turn(2);
+        said.key = Some("u-2".to_string());
+        batch.item(said);
+        let accept = Command::Accept {
+            message_seq,
+            origin: Origin::User,
+            admission: Admission::Queue,
+        };
+        batch.command(accept, 3).unwrap();
+        let stop = Command::Stop {
+            by: Control::by("user"),
+        };
+        batch.command(stop, 4).unwrap();
+        let committed = batch.commit().unwrap();
+
+        // Where each event of the write is.
+        let items = recorder
+            .log()
+            .read_after(committed.first_seq - 1, Kinds::only(kind::AGENT_EVENT), 10)
+            .unwrap();
+        let at = |found: &dyn Fn(&AgentEvent) -> bool| -> Seq {
+            let item = items.iter().find(|item| {
+                let event: AgentEvent = serde_json::from_slice(&item.body).unwrap();
+                found(&event)
+            });
+            item.expect("the event is in the write").seq
+        };
+        let admitted = at(&|event| {
+            matches!(
+                event,
+                AgentEvent::Turn {
+                    turn: TurnId(2),
+                    change: crate::turn::TurnEvent::Accepted { .. }
+                }
+            )
+        });
+        let fenced = at(&|event| matches!(event, AgentEvent::Paused { .. }));
+        assert!(committed.first_seq < admitted && admitted < fenced);
+        assert!(fenced <= committed.last_seq);
+
+        let told: Vec<(u64, bool, bool, u64, u64)> = recorder
+            .take_deliveries()
+            .iter()
+            .map(|send| (send.turn, send.fenced, send.handed, send.rev, send.seq))
+            .collect();
+        assert_eq!(
+            told,
+            [
+                (2, false, false, 1, revision(admitted, 0)),
+                (2, true, false, 2, revision(fenced, 0)),
+            ],
+            "admitted at its own event's position, fenced at the Stop's"
+        );
+        assert_eq!(recorder.agent().user_stop_generation(), 1);
+
+        // Folded from the log: the same send, at the same place.
+        let held = recorder.agent().deliveries().clone();
+        drop(recorder);
+        let mut reopened = open(&engine);
+        assert_eq!(reopened.agent().deliveries(), &held);
+        let sends: Vec<(u64, bool, u64, u64)> = reopened
+            .agent()
+            .deliveries()
+            .sends()
+            .map(|send| (send.turn, send.fenced, send.rev, send.seq))
+            .collect();
+        assert_eq!(sends, [(2, true, 2, revision(fenced, 0))]);
+        assert!(
+            reopened.take_deliveries().is_empty(),
+            "a fold tells nothing as changed"
+        );
+    }
+
     #[test]
     fn a_batch_that_is_dropped_or_cannot_be_written_never_happened() {
         let engine = MemEngine::new();
