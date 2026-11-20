@@ -20,8 +20,8 @@
 pub(crate) mod call;
 mod download;
 pub(crate) mod guidance;
-mod install;
-mod inventory;
+pub(crate) mod install;
+pub(crate) mod inventory;
 mod managed;
 mod staging;
 mod variants;

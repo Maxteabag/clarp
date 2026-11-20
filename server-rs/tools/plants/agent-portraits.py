@@ -146,10 +146,16 @@ change(W,'generation',[
 ])
 PLANTS.append((H,'generation','wrong feature contract','("agent_portraits", 1)', '("agent_portraits", 2)'))
 RUNS['startup'] = ['test','--test','host','startup_keeps_unreadable_portrait_publications']
-change(W,'startup',[
-    ('a pending publication that cannot be read stops the start',
-     'app.fleet.unread(PENDING, &key);\n            continue;',
-     'return Err(Unavailable("invalid portrait publication".into()));'),
+# NOT PLANTED, with its reason:
+#   that a pending publication which is no Publication is skipped by `recover` (`app.fleet.unread(PENDING, &key);
+#     continue;` after `serde_json::from_slice::<Publication>`): the kind is judged at the start against
+#     `Publication` (`portrait_jobs::KEPT`), so the walk has moved every such record aside before `recover` reads,
+#     and the arm never runs. It stays because a read must say what it does with a record that is not one (the lints
+#     forbid unwrap), and to pass it by is harmless. The rule is planted where it now lives: the declaration.
+change(J,'startup',[
+    ('a pending publication that cannot be read is not judged at the start',
+     'crate::kept::fits::<Publication>,',
+     'crate::kept::any,'),
 ])
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

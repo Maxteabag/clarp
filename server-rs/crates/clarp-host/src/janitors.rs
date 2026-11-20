@@ -47,6 +47,46 @@ use crate::fleet::{Amend, Directory, JanitorSeed, NotMade};
 use crate::ids;
 use crate::unkept::RecordFailure;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(KIND, crate::kept::Key::Plain, crate::kept::fits::<Book>),
+    crate::kept::Kind::book(
+        "janitor-config",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::book::Config>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-trigger",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::book::Trigger>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-builtin",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<String>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-run",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::runs::Run>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-progress",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::runs::Progress>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-creation",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::creation::Creation>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-alert",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::artifacts::Artifact>,
+    ),
+];
+
 /// The kind of thing the janitors' book is, among what is left with the fleet: what is left
 /// of it once its tables are kept apart.
 const KIND: &str = "janitors";
@@ -278,7 +318,9 @@ impl Desk {
     ) -> Result<tokio::sync::MutexGuard<'_, Option<Book>>, Unavailable> {
         let mut held = self.book.lock().await;
         if held.is_none() {
-            let kept = app.fleet.kept(KIND, ALL.to_string()).await?;
+            // The book's own document, through the loader: one that is not the book's is set
+            // aside first, and the book starts from its tables (`kept.rs`).
+            let kept = app.fleet.kept_book(KIND, ALL.to_string()).await?;
             let mut whole: Value = kept
                 .and_then(|kept| serde_json::from_slice(&kept).ok())
                 .filter(Value::is_object)
@@ -289,14 +331,22 @@ impl Desk {
                     .is_some_and(|rows| !rows.is_empty())
             };
             let kept_whole = TABLES.iter().any(|(table, _)| filled(table, &whole));
+            // Each row alone: one that is not its table's is carried through, left out of the
+            // book and kept as it came (the book's writes touch only rows it holds, and delete
+            // none it does not), counted and said once (`kept.rs`).
             for (table, kind) in TABLES {
                 for (key, row) in app.fleet.kept_all(kind).await? {
-                    if let Ok(row) = serde_json::from_slice::<Value>(&row) {
-                        whole[table][key] = row;
+                    let alone = serde_json::from_slice::<Value>(&row).ok().filter(|row| {
+                        let mut book = json!({});
+                        book[table] = json!({ key.as_str(): row });
+                        serde_json::from_value::<Book>(book).is_ok()
+                    });
+                    match alone {
+                        Some(row) => whole[table][key] = row,
+                        None => app.fleet.leave_out(kind, &key),
                     }
                 }
             }
-            // What cannot be read is a book with nothing in it.
             let mut book: Book = serde_json::from_value(whole).unwrap_or_default();
             if kept_whole {
                 keep(app, None, &mut book, Default::default()).await?;

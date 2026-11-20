@@ -342,3 +342,29 @@ def test_an_explicit_null_engine_or_turn_taking_is_refused_and_nothing_is_writte
 def test_omitting_engine_and_turn_taking_keeps_them():
     stt_providers.update_settings({"engine": "google:chirp_3"})
     assert stt_providers.update_settings({"call_languages": "no"})["engine"] == "google:chirp_3"
+
+
+def test_what_the_apps_are_told_and_what_the_fallback_hands_a_set_cannot_disagree(monkeypatch):
+    """One table (LANGUAGE_SET_PROVIDERS): every engine whose capability row says
+    accepts_language_set is one the R152 fallback may pick and hand a set, transcribe
+    takes a set on it, and no other engine is any of these."""
+    from lib import cartesia_stt_ws, google_stt
+    for module in (deepgram_stt, eleven_stt, cartesia_stt, cartesia_stt_ws, google_stt):
+        monkeypatch.setattr(module, "transcribe", lambda **kw: ("heard", 1.0))
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(google_stt_project="p"))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")   # every key held
+    monkeypatch.setattr(stt_language, "current_language", lambda: "no,en")
+    rows = stt_providers.cloud_models()
+    assert {r["id"] for r in rows} == {
+        model["id"] for item in stt_providers.CATALOG for model in item["models"]}
+    told = {r["id"] for r in rows if r["accepts_language_set"]}
+    assert told and told == set(stt_providers.language_set_engines())
+    for row in rows:
+        monkeypatch.setattr(stt_providers, "selected_engine", lambda model=row["id"]: model)
+        picked = stt_providers.language_set_engine() == row["id"]
+        try:
+            stt_providers.transcribe(row["id"], b"audio", "audio/wav", "")
+            takes = True
+        except stt_providers.LanguageSetUnsupported:
+            takes = False
+        assert row["accepts_language_set"] == picked == takes, row["id"]

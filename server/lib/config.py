@@ -464,7 +464,7 @@ class Config:
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
     janitor_read_diagnostics: bool = False
-    render_spec_min_client: int | None = None
+    render_spec_min_contract: dict[str, int] | None = None
     oracle_diagnostics: bool = False
     oracle_router_backend: str = "api"
     oracle_delegation_strategy: str = "operator"
@@ -544,6 +544,10 @@ class Config:
     claude_account_switch_command: tuple[str, ...] = ()
     # Opt-in banked-reset adapter; empty means no automated redemption.
     claude_reset_command: tuple[str, ...] = ()
+    codex_reset_command: tuple[str, ...] = ()
+    # At most this many automatic Codex reset redemptions in a rolling 24 hours (R145); unset is
+    # 1, 0 switches the Codex reset step off, and a value that is not a whole number is refused as 0.
+    codex_reset_max_per_day: int = 1
     codex_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = "high"          # "" (CLI default) | low | medium | high | xhigh | max
@@ -904,6 +908,20 @@ def _resolve_config_path() -> pathlib.Path:
     ))
 
 
+def _reset_cap(section: dict, key: str) -> int:
+    """A cap on automatic banked-reset redemptions (R145): unset is 1. A value that is not a whole
+    number of 0 or more (true, 1.5, 0.0, -1, "2") is refused with a log line and becomes 0, the
+    step off: a redemption cannot be undone, and off loses only a convenience."""
+    if key not in section:
+        return 1
+    raw = section[key]
+    if type(raw) is int and raw >= 0:
+        return raw
+    from .log import log
+    log(f"config.{key}", f"refused {raw!r}: not a whole number of 0 or more; the automatic reset is off")
+    return 0
+
+
 def _non_negative_float(raw: Any, default: float) -> float:
     try:
         value = float(raw)
@@ -964,6 +982,32 @@ def _controller_action_urls(raw) -> tuple[str, ...]:
         log("config.controller_action_urls", f"refused {len(texts) - len(kept)} allowed URL(s) that do not parse "
                                              "as a plain http(s) destination")
     return kept
+
+def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
+    """[artifacts] overrides of render_spec's minimum client contract, per client (issue 428):
+    ``render_spec_min_contract = {ios = 74, android = 30}``, laid over the default; 0 switches a
+    client off, so ``ios = 0`` switches the kind off on this Host. The old single number
+    (``render_spec_min_client``) is iOS's minimum, never every client's; a line says so. The
+    table's keys follow server_identity.client_minimums: a name as the client sends it."""
+    from .log import log
+    out: dict[str, int] = {}
+    single = artifacts.get("render_spec_min_client")
+    if single is not None:
+        if type(single) is int and single >= 0:
+            out["ios"] = single
+            log("config.render_spec_min_client", "applies to iOS only; name other clients in "
+                "[artifacts] render_spec_min_contract")
+        else:
+            log("config.render_spec_min_client", "ignored: not a whole number")
+    table = artifacts.get("render_spec_min_contract")
+    if isinstance(table, dict):
+        if "ios" in table and "ios" in out:
+            log("config.render_spec_min_client", "ignored: render_spec_min_contract names ios")
+        from .server_identity import client_minimums
+        out.update(client_minimums(table, setting="config.render_spec_min_contract"))
+    elif table is not None:
+        log("config.render_spec_min_contract", "ignored: expected a table of client = number")
+    return out or None
 
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
@@ -1145,7 +1189,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
         janitor_read_diagnostics = (data.get("diagnostics", {}).get("janitor_autonomy_reads") is True),
-        render_spec_min_client = (data.get("artifacts") or {}).get("render_spec_min_client"),
+        render_spec_min_contract = _render_spec_minimums(data.get("artifacts") or {}),
         oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
         oracle_router_backend = str(openai.get("oracle_router_backend", "api")).strip(),
         oracle_delegation_strategy = str(openai.get("oracle_delegation_strategy", "operator")).strip(),
@@ -1191,6 +1235,10 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         claude_reset_command = tuple(agents.get("claude_reset_command", ()))
             if isinstance(agents.get("claude_reset_command", ()), (list, tuple))
             and all(isinstance(arg, str) and arg for arg in agents.get("claude_reset_command", ())) else (),
+        codex_reset_command = tuple(agents.get("codex_reset_command", ()))
+            if isinstance(agents.get("codex_reset_command", ()), (list, tuple))
+            and all(isinstance(arg, str) and arg for arg in agents.get("codex_reset_command", ())) else (),
+        codex_reset_max_per_day = _reset_cap(agents, "codex_reset_max_per_day"),
         claude_effort   = str(agents.get("claude_effort", "high")),
         helper_archive_grace_hours=_non_negative_float(
             agents.get("helper_archive_grace_hours"), 24.0),

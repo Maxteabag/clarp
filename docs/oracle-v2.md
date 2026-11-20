@@ -45,6 +45,28 @@ docs/protocol.md). The Host's own idle close is unchanged: 180 s after the last
 audible input, output or transcript it closes the session (`oracle_v2.idle`). So
 standby pays the standby rate ($0.02 a minute) from the timeout to 180 s, then
 the Host closes. No WebSocket path and no agent Live call sends standby.
+`oracle_v2.standby` and the usage's `active_seconds`/`paused_seconds` came with
+Host contract 110.
+
+Measured on real calls (gpt-live-1.1, wake on speech, idle 20 s; issue 473,
+https://github.com/Maxteabag/clarp/issues/473#issuecomment-7043365799):
+
+- Before any speech the session sleeps: nothing is spoken and no event comes.
+- The first wake sends no `session.resumed`, so the app gets no
+  `oracle_v2.standby {active: false}` for it. It got no `{active: true}` before
+  it either, so its state stays right.
+- After the idle time `session.paused` arrives. A later wake by speech sends
+  `session.resumed`.
+- A result the Host appends while the session is paused
+  (`session.commentary.append`, `session.instructions.append`) does not wake it,
+  is not acknowledged and is not spoken. It is spoken at the user's next speech.
+  So with standby on, an agent result is not heard at once: it waits for the
+  user to speak.
+- The provider refuses standby on a WebSocket `session.start`:
+  `invalid_request_error`, code `unknown_parameter`, param `session.wake_policy`
+  ("Unknown parameter: 'session.wake_policy'."). Nothing was billed.
+- Usage at close reports both parts: 73 s active and 15 s paused, 88 s in all,
+  priced by the Host as active and standby time.
 
 Cost and limits of the WebRTC path: the provider bills a WebRTC create for at
 least 15 seconds, credited against the duration once the session runs, so a call

@@ -184,6 +184,7 @@ async fn serve(config: Config) -> Result<(), String> {
         turns: turns.clone(),
         pools: pools.clone(),
         log: clarp_host::unkept::Log::stderr(clock.clone()),
+        left_out: Arc::default(),
     };
     // The pictures this Host ships: for the list of agents, and for the face a push shows.
     let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
@@ -332,6 +333,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // A ring that rang when the Host stopped has its time again, or is missed now: the apps
     // and its agent are told without anybody having to ask first.
     // Repair admissions before speech queued by surviving shims can be voiced.
+    // What recovers, later, the call of an agent that does not answer now.
+    let recovering = clarp_host::calls::opening::Recovering(app.clone());
+    app.mouth.held.recovered_by(Arc::new(recovering));
     app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
     app.mouth.bindings_ready.notify_one();
     clarp_host::calls::resume(&app);
@@ -391,6 +395,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // And an idle agent's own label that outlived its time is taken back.
     clarp_host::labels::run(&app);
     eprintln!("clarp-host listens on {address}");
+    // What could not be read of what it keeps, in one line: the door shows the same counts.
+    // Said after where it listens, which is the Host's first line.
+    eprintln!("{}", app.fleet.left_out().line());
     if let Some(why) = app.turns.unkept() {
         app.fleet.unkept(clarp_host::turn_identity::KIND, why);
     } else if !app.turns.has_key() {
