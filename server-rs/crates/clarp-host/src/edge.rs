@@ -240,6 +240,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `clarp.hotseat-status/1`): served from what was kept, nothing read for it. Listed by
     // every Host, as there: the strict answer of a Host without the owner's tool says so.
     ("accounts_hotseat", 78),
+    // Signing OpenCode and DeepSeek in to their providers of models from an app
+    // (`/harness-providers`); with it an app lists every harness's login
+    // (`/backend-auth?harnesses=all`). A change is made only by a Host that keeps this
+    // machine's tools (`--accounts select`); any other refuses it in words.
+    ("harness_model_providers", 75),
     ("transcription", 1),
     // What an agent says aloud (`/tts/providers`, `/voices`, `/voice-catalog`,
     // `/voice-preview`, the clips): five built-in engines, among them Google's Chirp 3 HD
