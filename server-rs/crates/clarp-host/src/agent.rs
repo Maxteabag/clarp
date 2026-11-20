@@ -1274,7 +1274,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         terminals: 0,
         behind_terminal: None,
         let_go_by_hand: false,
-        reworded: false,
+        queue_edit: None,
         newest: None,
         ended: None,
         finished: None,
@@ -1312,6 +1312,11 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     }
 }
 
+enum QueueEdit {
+    Edited(Waiting),
+    Deleted(String),
+}
+
 struct Worker {
     setup: Setup,
     actor: Option<Actor>,
@@ -1336,9 +1341,8 @@ struct Worker {
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
     let_go_by_hand: bool,
-    /// The words of a waiting message were changed a moment ago: the clients are told how
-    /// the queue stands, so that they read it again.
-    reworded: bool,
+    /// The edit or withdrawal committed by the request this worker is handling.
+    queue_edit: Option<QueueEdit>,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
     /// How the last turn ended.
@@ -2746,14 +2750,24 @@ impl Worker {
                 return Ok(());
             }
             Ask::Withdraw { turn, by, answer } => {
+                let item = actor.queue_item(turn)?;
                 let withdrawn = actor.withdraw(turn, &by, now);
+                if matches!(withdrawn, Ok((true, _))) {
+                    self.queue_edit = item.map(|item| QueueEdit::Deleted(item.told_id));
+                }
                 let queue = actor.queue_state();
                 answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
             }
             Ask::SendNow { turn, by, answer } => answered(actor.send_now(turn, &by, now), answer)?,
             Ask::Reword { turn, text, answer } => {
+                let item = actor.queue_item(turn)?;
                 let reworded = actor.reword(turn, &text, now);
-                self.reworded = matches!(reworded, Ok((Reworded::Done, _)));
+                if matches!(reworded, Ok((Reworded::Done, _))) {
+                    self.queue_edit = item.map(|mut item| {
+                        item.text = text;
+                        QueueEdit::Edited(item)
+                    });
+                }
                 answered(reworded, answer)?
             }
             Ask::Note { id, text, answer } => answered(actor.note(&id, &text, now), answer)?,
@@ -3583,7 +3597,7 @@ impl Worker {
     /// Publishes the agent's view and tells the clients what changed since they were last told.
     fn show(&mut self, changed: Changed) {
         let by_hand = std::mem::take(&mut self.let_go_by_hand);
-        let reworded = std::mem::take(&mut self.reworded);
+        let queue_edit = self.queue_edit.take();
         let passed = std::mem::take(&mut self.passed);
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
@@ -3601,8 +3615,8 @@ impl Worker {
         let before = self.told.take();
         let was_live = before.as_ref().and_then(|told| told.live.as_ref());
         let was_waiting: &[TurnId] = before.as_ref().map_or(&[], |told| told.waiting.as_slice());
-        // The ids of the messages that have joined the queue since the clients were last told.
-        let joined: Vec<String> = if status
+        // The messages that have joined the queue since the clients were last told.
+        let joined: Vec<Waiting> = if status
             .waiting
             .iter()
             .any(|turn| !was_waiting.contains(turn))
@@ -3612,7 +3626,6 @@ impl Worker {
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|waiting| !was_waiting.contains(&waiting.turn))
-                .map(|waiting| waiting.told_id)
                 .collect()
         } else {
             Vec::new()
@@ -3708,9 +3721,9 @@ impl Worker {
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
 
         // The queue: a message joined it, one left it to run, it was held or let go.
-        for client_id in &joined {
+        for message in &joined {
             hub.publish(
-                wire::queue_updated(&record, &status, Some(client_id), false),
+                wire::queue_updated(&record, &status, wire::QueueUpdate::Joined(message)),
                 now,
             );
         }
@@ -3721,8 +3734,16 @@ impl Worker {
             // It left the queue to run: it had waited there, or it was left for later and
             // nothing was in its way.
             if live.from_queue {
+                let message = actor.started_queue_item().ok().flatten();
                 hub.publish(
-                    wire::queue_updated(&record, &status, Some(&live.client_id), true),
+                    wire::queue_updated(
+                        &record,
+                        &status,
+                        wire::QueueUpdate::Started {
+                            client_id: &live.client_id,
+                            message: message.as_ref(),
+                        },
+                    ),
                     now,
                 );
             }
@@ -3769,8 +3790,16 @@ impl Worker {
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
-        if (held_or_let_go && !told_with_its_turn) || taken_back || reworded {
-            hub.publish(wire::queue_updated(&record, &status, None, false), now);
+        let update = match &queue_edit {
+            Some(QueueEdit::Edited(message)) => Some(wire::QueueUpdate::Edited(message)),
+            Some(QueueEdit::Deleted(client_id)) => Some(wire::QueueUpdate::Deleted(client_id)),
+            None if (held_or_let_go && !told_with_its_turn) || taken_back => {
+                Some(wire::QueueUpdate::Mailbox)
+            }
+            None => None,
+        };
+        if let Some(update) = update {
+            hub.publish(wire::queue_updated(&record, &status, update), now);
         }
         // What the agent passed through on the way: each state in its turn, as it stood. A
         // tool that prints a whole turn in one breath is told as one that took its time.

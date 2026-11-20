@@ -3260,18 +3260,7 @@ async fn queue(
         .anyone(&query.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
     let (waiting, state) = member.agent.queue().await?;
-    let items: Vec<Value> = waiting
-        .iter()
-        .map(|message| {
-            json!({
-                // A waiting message is named as the client named it.
-                "id": message.client_id,
-                "text": message.text,
-                "enqueued_at": message.accepted_at_ms,
-                "synthesize_audio": message.speak,
-            })
-        })
-        .collect();
+    let items: Vec<Value> = waiting.iter().map(wire::queue_item).collect();
     Ok(Json(json!({
         "items": items,
         "paused": state.paused,

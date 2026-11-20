@@ -10,11 +10,14 @@ import runner
 RUNS = {
     'kernel': ['test', '-p', 'clarp-kernel', '--lib'],
     'actor': ['test', '-p', 'clarp-actor', '--test', 'actor'],
+    'host': ['test', '-p', 'clarp-host', '--test', 'host', '--', 'enter_at_start::'],
 }
 J = 'clarp-kernel/src/journal.rs'
 A = 'clarp-kernel/src/agent.rs'
 C = 'clarp-kernel/src/conversation.rs'
 L = 'clarp-actor/src/lib.rs'
+W = 'clarp-host/src/wire.rs'
+H = 'clarp-host/src/agent.rs'
 OUTSIDE = '        let outside = !self.agent.starts_at_once(message.admission);\n'
 AT_ONCE = '        self.live.is_none() && !(self.paused && admission == Admission::Background)\n'
 SENT_AT = '                    let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);\n'
@@ -94,6 +97,35 @@ PLANTS = [
     # What the actor tells.
     (L, 'actor', 'a waiting send is told as a change of the conversation', '            conversation: accepted.entered,\n',
      '            conversation: true,\n'),
+    # What the apps read in the queue, events and rows.
+    (W, 'host', 'a queue item has no client message ID',
+     '        ("client_msg_id".into(), json!(client_id)),\n',
+     '        ("wrong_id".into(), json!(client_id)),\n'),
+    (W, 'host', 'the queue gives the send time as a number',
+     '        ("sent_at".into(), json!(iso(message.accepted_at_ms))),\n',
+     '        ("sent_at".into(), json!(message.accepted_at_ms)),\n'),
+    (W, 'host', 'a plain waiting send is called later',
+     '        QueueKind::Waiting\n', '        QueueKind::Later\n'),
+    (W, 'host', 'an explicitly deferred send is called waiting',
+     '        QueueKind::Later\n', '        QueueKind::Waiting\n'),
+    (W, 'host', 'a waited row has no sent_at',
+     '                row["sent_at"] = json!(iso(sent_at_ms));\n',
+     '                row["wrong_sent_at"] = json!(iso(sent_at_ms));\n'),
+    (W, 'host', 'an immediate row has a sent_at too',
+     '            if let Some(sent_at_ms) = message.sent_at_ms {\n',
+     '            if let Some(sent_at_ms) = message.sent_at_ms.or(Some(version.ts_ms)) {\n'),
+    (H, 'host', 'the event for an edit has the old words',
+     '                        item.text = text;\n',
+     '                        let _ = (&mut item, text);\n'),
+    (W, 'host', 'an edit is not named',
+     '        QueueUpdate::Edited(_) => event.insert("queue_change".into(), json!("edited")),\n',
+     '        QueueUpdate::Edited(_) => None,\n'),
+    (W, 'host', 'a withdrawal is not named',
+     '        QueueUpdate::Deleted(_) => event.insert("queue_change".into(), json!("deleted")),\n',
+     '        QueueUpdate::Deleted(_) => None,\n'),
+    (H, 'host', 'the start event loses the queued item',
+     '                            message: message.as_ref(),\n',
+     '                            message: message.as_ref().filter(|_| false),\n'),
 ]
 
 if __name__ == '__main__':

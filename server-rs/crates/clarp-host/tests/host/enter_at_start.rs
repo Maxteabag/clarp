@@ -15,6 +15,25 @@ use super::*;
 /// and each enters when its turn starts.
 #[test]
 fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts() {
+    fn queue_event(
+        heard: &Mutex<Vec<Value>>,
+        id: &str,
+        started: bool,
+        change: Option<&str>,
+    ) -> Option<Value> {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| {
+                event["type"] == "queue-updated"
+                    && event["client_msg_id"] == id
+                    && event["queue_started"] == started
+                    && event["queue_change"].as_str() == change
+            })
+            .cloned()
+    }
+
     let place = Place::new("enter-at-start");
     // Give each stand-in its own gate so a stopped turn cannot take the next turn's signal.
     let took = place.root.join("took");
@@ -41,6 +60,18 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     );
     assert_eq!(made["session"], "ada", "{made}");
     let session = "ada";
+    let listen = |host: &Host| {
+        let heard = host.listen();
+        wait_for("the event stream's roster", || {
+            heard
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event["type"] == "agent-roster")
+        });
+        heard
+    };
+    let heard = listen(&host);
     let taken = || -> Vec<(u32, String)> {
         std::fs::read_to_string(&took)
             .unwrap_or_default()
@@ -73,11 +104,14 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
             .map(|(id, _)| id)
             .collect()
     };
-    let queue = |host: &Host| -> Vec<(String, String)> {
-        let queue = host.get(&format!("/turn-queue?session={session}"));
-        queue["items"]
+    let queue_items = |host: &Host| {
+        host.get(&format!("/turn-queue?session={session}"))["items"]
             .as_array()
             .unwrap()
+            .clone()
+    };
+    let queue = |host: &Host| -> Vec<(String, String)> {
+        queue_items(host)
             .iter()
             .map(|item| {
                 (
@@ -99,6 +133,7 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     assert_eq!(first["queued"], false, "{first}");
     wait_for("the first turn to run", || taken().len() == 1);
     assert_eq!(users(&host), ["u-m1"]);
+    assert!(host.turns(session)[0].get("sent_at").is_none());
 
     // The user, a trigger and an agent that names nobody each send while it runs: each waits.
     let sends = [
@@ -148,6 +183,31 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     assert_eq!(again["ok"], true, "{again}");
     assert_eq!(queue(&host).len(), 3);
 
+    let later = host.post(
+        "/send",
+        json!({ "session": session, "text": "later", "client_msg_id": "l6", "queue_if_busy": true }),
+    );
+    assert_eq!(later["queued"], true, "{later}");
+    let items = queue_items(&host);
+    let waiting_item = &items[0];
+    let later_item = &items[3];
+    let sent_at = waiting_item["sent_at"].clone();
+    for (item, id, kind) in [(waiting_item, "m2", "waiting"), (later_item, "l6", "later")] {
+        assert_eq!(item["id"], id);
+        assert_eq!(item["client_msg_id"], id);
+        assert_eq!(item["kind"], kind);
+        let sent_at_ms = item["enqueued_at"].as_i64().unwrap();
+        assert_eq!(item["sent_at"], clarp_host::wire::iso(sent_at_ms));
+        wait_for("queued item in SSE", || {
+            queue_event(&heard, id, false, None).is_some()
+        });
+        let event = queue_event(&heard, id, false, None).unwrap();
+        for key in ["client_msg_id", "text", "sent_at", "kind"] {
+            assert_eq!(event[key], item[key], "{key}: {event}");
+        }
+    }
+    assert_eq!(host.ask("DELETE", "/turn-queue/l6", None).0, 200);
+
     // Reworded and taken back while it waits.
     let (status, reworded) = host.ask(
         "PUT",
@@ -155,12 +215,25 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
         Some(&json!({ "text": "two, better" })),
     );
     assert_eq!((status, &reworded["ok"]), (200, &json!(true)), "{reworded}");
+    wait_for("edit in SSE", || {
+        queue_event(&heard, "m2", false, Some("edited")).is_some()
+    });
+    let edit = queue_event(&heard, "m2", false, Some("edited")).unwrap();
+    assert_eq!(edit["text"], "two, better");
+    assert_eq!(edit["kind"], "waiting");
+    assert_eq!(edit["sent_at"], sent_at);
+    assert_eq!(queue_items(&host)[0]["sent_at"], sent_at);
     let (status, withdrawn) = host.ask("DELETE", "/turn-queue/a4", None);
     assert_eq!(
         (status, &withdrawn["ok"]),
         (200, &json!(true)),
         "{withdrawn}"
     );
+    wait_for("withdrawal in SSE", || {
+        queue_event(&heard, "a4", false, Some("deleted")).is_some()
+    });
+    let deletion = queue_event(&heard, "a4", false, Some("deleted")).unwrap();
+    assert!(deletion.get("text").is_none(), "{deletion}");
     assert_eq!(
         queue(&host),
         waiting(&[("m2", "two, better"), ("t3", "three")])
@@ -170,11 +243,13 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     // Killed between the acceptance and the start: what waits waits on, and is no row.
     host.kill();
     let host = place.start_in("", &[], &world);
+    let heard = listen(&host);
     assert_eq!(
         queue(&host),
         waiting(&[("m2", "two, better"), ("t3", "three")])
     );
     assert_eq!(users(&host), ["u-m1"]);
+    assert_eq!(queue_items(&host)[0]["sent_at"], sent_at);
 
     // The first answers: the second starts, on its new words, and only now is a row, below
     // the answer that did not read it.
@@ -198,6 +273,18 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
         .find(|turn| turn["id"] == "u-m2")
         .unwrap();
     assert_eq!(row["text"], "two, better", "{row}");
+    assert_eq!(row["sent_at"], sent_at, "{row}");
+    assert!(
+        row["timestamp"].as_str().unwrap() > sent_at.as_str().unwrap(),
+        "{row}"
+    );
+    wait_for("started item in SSE", || {
+        queue_event(&heard, "m2", true, None).is_some()
+    });
+    let started = queue_event(&heard, "m2", true, None).unwrap();
+    assert_eq!(started["text"], "two, better");
+    assert_eq!(started["kind"], "waiting");
+    assert_eq!(started["sent_at"], sent_at);
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
     assert_eq!(pending(&host, "u-m2"), "handed_over");
 
