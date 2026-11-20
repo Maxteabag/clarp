@@ -50,10 +50,19 @@ fn a_helper_whose_parent_was_deleted_before_its_removal_came_is_abandoned_at_the
         record
     };
     let helper_of = |parent: &str| json!({ "parent_agent_id": parent, "role": "helper", "helper_state": "running" });
-    put_agent(&place, &agent("agent-gone", "gone", json!({ "deleted_at_ms": 5 })));
-    put_agent(&place, &agent("agent-left", "left", helper_of("agent-gone")));
+    put_agent(
+        &place,
+        &agent("agent-gone", "gone", json!({ "deleted_at_ms": 5 })),
+    );
+    put_agent(
+        &place,
+        &agent("agent-left", "left", helper_of("agent-gone")),
+    );
     put_agent(&place, &agent("agent-here", "here", json!({})));
-    put_agent(&place, &agent("agent-kept", "kept", helper_of("agent-here")));
+    put_agent(
+        &place,
+        &agent("agent-kept", "kept", helper_of("agent-here")),
+    );
 
     let host = place.start();
     let rows = host.get("/agents/snapshot")["agents"].clone();
@@ -74,7 +83,10 @@ fn a_helper_whose_parent_was_deleted_before_its_removal_came_is_abandoned_at_the
     assert_eq!(left["helper_state"], "abandoned");
     let completed = left["helper_completed_at_ms"].as_i64().unwrap();
     assert!(completed > 5, "{left}");
-    assert_eq!(stored_agent(&place, "agent-kept")["helper_state"], "running");
+    assert_eq!(
+        stored_agent(&place, "agent-kept")["helper_state"],
+        "running"
+    );
     assert_eq!(stored_agent(&place, "agent-gone")["ledger_retired"], true);
 
     // The next start finds it abandoned already: nothing is moved or written twice.

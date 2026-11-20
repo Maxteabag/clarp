@@ -204,13 +204,19 @@ async fn stored(fleet: &FleetHandle, id: &str) -> AgentRecord {
 /// tombstone kept.
 async fn left_as_it_was(place: &Place, fleet: &FleetHandle) -> i64 {
     let directory = fleet.directory();
-    let member = directory.by_session("held").expect("the agent is not removed");
+    let member = directory
+        .by_session("held")
+        .expect("the agent is not removed");
     assert_eq!(member.record.deleted_at_ms, None);
     assert_eq!(directory.focus.as_deref(), Some(HELD));
     assert!(!directory.gone.contains_key(HELD));
     assert_eq!(helper_state(fleet).as_deref(), Some("running"));
     assert_eq!(place.told_deleted("held"), 0);
-    assert_eq!(place.engine.opened(HELD), 1, "only its own thread opened its log");
+    assert_eq!(
+        place.engine.opened(HELD),
+        1,
+        "only its own thread opened its log"
+    );
     let kept = stored(fleet, HELD).await;
     assert!(!kept.ledger_retired);
     kept.deleted_at_ms.expect("its tombstone is kept")
@@ -228,11 +234,19 @@ async fn removed_whole(place: &Place, fleet: &FleetHandle) {
         stored(fleet, HELPER).await.helper_state.as_deref(),
         Some("abandoned")
     );
-    assert_eq!(place.told_deleted("held"), 3, "one roster event, two of its state");
+    assert_eq!(
+        place.told_deleted("held"),
+        3,
+        "one roster event, two of its state"
+    );
     let kept = stored(fleet, HELD).await;
     assert!(kept.deleted_at_ms.is_some());
     assert!(kept.ledger_retired);
-    assert_eq!(place.engine.opened(HELD), 2, "its thread, and its goals retired");
+    assert_eq!(
+        place.engine.opened(HELD),
+        2,
+        "its thread, and its goals retired"
+    );
 }
 
 fn not_closed(answer: Result<bool, Unavailable>) {
@@ -372,7 +386,11 @@ async fn a_delete_while_the_host_stops_is_answered_and_the_next_start_removes_th
         Some("abandoned")
     );
     assert!(stored(&fleet, HELD).await.ledger_retired);
-    assert_eq!(place.engine.opened(HELD), 2, "its thread, and its goals retired");
+    assert_eq!(
+        place.engine.opened(HELD),
+        2,
+        "its thread, and its goals retired"
+    );
     // A third start moves nothing again.
     drop(fleet);
     let fleet = place.start();
