@@ -67,7 +67,8 @@ PLANTS = [
     (MAIN, 'served', 'a served tool is refused in other words', 'Reply::failed("a served tool cannot be held")', 'Reply::failed("served")'),
     (MAIN, 'gone', 'a tool that is gone is held', '            if self.leader_exited.load(Ordering::SeqCst) {\n                return Reply::failed("the tool is gone");', '            if self.pid == 0 {\n                return Reply::failed("the tool is gone");'),
     (MAIN, 'gone', 'a tool that is gone is refused in other words', 'Reply::failed("the tool is gone")', 'Reply::failed("gone")'),
-    (MAIN, 'gone', 'a tool being stopped is held', '            if !matches!(*stage, StopStage::Ready) {\n                return Reply::failed("the tool is being stopped");', '            if matches!(*stage, StopStage::Finished) {\n                return Reply::failed("the tool is being stopped");'),
+    (MAIN, 'gone', 'a tool being stopped is held', '            if !stage.ready() {', '            if matches!(*stage, StopStage::Finished) {'),
+    (MAIN, 'gone', 'a stage asked to stop is ready', '        matches!(self, Self::Ready)', '        matches!(self, Self::Ready | Self::Asked)'),
     (MAIN, 'gone', 'a tool being stopped is refused in other words', 'Reply::failed("the tool is being stopped")', 'Reply::failed("stopping")'),
     (MAIN, 'once', 'a turn released is held again', '            if !matches!(*hold, Hold::Free) {', '            if matches!(*hold, Hold::Held { .. }) {'),
     (MAIN, 'once', 'a second hold is refused in other words', 'Reply::failed("the turn has been held once already")', 'Reply::failed("held")'),
@@ -133,8 +134,8 @@ PLANTS = [
     # Ended while held.
     (MAIN, 'ended', 'a held tool is stopped politely', '            if matches!(*hold, Hold::Held { .. }) {\n                *hold = Hold::Ended;', '            if matches!(*hold, Hold::Ended) {\n                *hold = Hold::Ended;'),
     (MAIN, 'unit-ended', 'a held tool ended is not marked so', '                *hold = Hold::Ended;\n                self.hold_changed.notify_all();', '                self.hold_changed.notify_all();'),
-    (MAIN, 'ended', 'a held tool is ended with the polite signal', '                drop(hold);\n                Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);', '                drop(hold);\n                Self::signal(self.pid, &self.to_spool, Signal::SIGTERM);'),
-    (MAIN, 'ended', 'the kill of a held tool is not on record', '                drop(hold);\n                Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);', '                drop(hold);\n                let _ = killpg(self.group(), Signal::SIGKILL);'),
+    (MAIN, 'ended', 'a held tool is ended with the polite signal', '                let kill = Signal::SIGKILL;', '                let kill = Signal::SIGTERM;'),
+    (MAIN, 'ended', 'the kill of a held tool is not on record', '                Self::signal(self.pid, &self.to_spool, kill);', '                let _ = killpg(self.group(), kill);'),
     (MAIN, 'ended', 'the end of a held tool is never written', '                *stage = StopStage::Signalled;\n                self.changed.notify_all();\n                return;', '                return;'),
 
     # The connections, rewritten for the count: what they did before still holds.
