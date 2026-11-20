@@ -3855,10 +3855,13 @@ mod follow_by_revision {
 
 /// The trace of the agent's running turn, as its rows carry it, is what an artifact published in
 /// it names: the empty text for a running turn whose message came without one (the Python
-/// Host's vectors, `a running turn without a trace`), and none for a turn that does not run.
+/// Host's vectors, `a running turn without a trace`), and none for a turn that does not run:
+/// one that ended, an older one, and one parked waiting for an account (the Python Host's PR 470
+/// at 1d82795b: parked for its account is not running), until an account takes it up again.
 #[test]
 fn source_trace_a_turn_names_its_trace_only_while_it_runs() {
     let mut world = World::new("source-trace");
+    world.profile.accounts = clarp_kernel::recovery::Accounts::Select;
     let mut actor = world.open();
     world.send(&mut actor, "u-1", "go", Admission::Queue);
     assert_eq!(actor.running_trace(1).unwrap(), Some(String::new()));
@@ -3880,4 +3883,28 @@ fn source_trace_a_turn_names_its_trace_only_while_it_runs() {
     world.carry_out(&mut actor, out);
     assert_eq!(actor.running_trace(2).unwrap(), Some("trace-b".to_string()));
     assert_eq!(actor.running_trace(1).unwrap(), None, "an older turn");
+    // Turn 2's account is out: it is stopped for it and parks, waiting for an account. Its row
+    // stays open, but it does not run: it names nothing.
+    world.says(2, r#"{"session": "s2"}"#);
+    world.hint(&mut actor);
+    let now = world.tick();
+    let out = actor.stop_for_an_account(now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.exits(2, None, Some(15));
+    world.hint(&mut actor);
+    let waits = actor.waits_for_an_account();
+    assert!(
+        waits.is_some_and(|(turn, _)| turn == TurnId(2)),
+        "{waits:?}"
+    );
+    assert_eq!(
+        actor.running_trace(2).unwrap(),
+        None,
+        "a turn parked for its account"
+    );
+    // An account takes it up: its next attempt runs, and it names its trace again.
+    let now = world.tick();
+    let out = actor.login_changed(now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(actor.running_trace(2).unwrap(), Some("trace-b".to_string()));
 }

@@ -108,21 +108,21 @@
   },
   {
    "case": "the turn ended",
-   "how": "its own agent, in a turn that ended (a job it started that publishes later)",
+   "how": "its own agent, in a turn that was closed (a Stop, a drain, a cancel or a hand-over)",
    "kind": "document",
    "shown": "none",
    "source_message_id": ""
   },
   {
    "case": "the turn ended",
-   "how": "its own agent, in a turn that ended (a job it started that publishes later)",
+   "how": "its own agent, in a turn that was closed (a Stop, a drain, a cancel or a hand-over)",
    "kind": "render_spec",
    "shown": "none",
    "source_message_id": ""
   },
   {
    "case": "the turn ended",
-   "how": "its own agent, in a turn that ended (a job it started that publishes later)",
+   "how": "its own agent, in a turn that was closed (a Stop, a drain, a cancel or a hand-over)",
    "kind": "report",
    "shown": "none",
    "source_message_id": ""
@@ -165,6 +165,48 @@
   {
    "case": "a running turn without a trace",
    "how": "its own agent, in its turn that runs, which has no trace",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn completed normally",
+   "how": "its own agent, in a turn that completed normally (settled by the lifecycle's own event, its row not closed), no newer turn begun: a job it started that publishes later",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn completed normally",
+   "how": "its own agent, in a turn that completed normally (settled by the lifecycle's own event, its row not closed), no newer turn begun: a job it started that publishes later",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn completed normally",
+   "how": "its own agent, in a turn that completed normally (settled by the lifecycle's own event, its row not closed), no newer turn begun: a job it started that publishes later",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn is parked for its account",
+   "how": "its own agent, its newest turn open and unsettled, parked waiting for an account by the lifecycle's own event",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn is parked for its account",
+   "how": "its own agent, its newest turn open and unsettled, parked waiting for an account by the lifecycle's own event",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn is parked for its account",
+   "how": "its own agent, its newest turn open and unsettled, parked waiting for an account by the lifecycle's own event",
    "kind": "report",
    "shown": "none",
    "source_message_id": ""
