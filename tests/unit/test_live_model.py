@@ -57,13 +57,27 @@ def test_the_idle_timeout_is_off_or_5_to_60_whole_seconds(raw, expected, monkeyp
     assert len(lines) == (0 if raw in (None, 0, 5, 20, 60) and type(raw) is not float and raw is not True else 1)
 
 
-def test_the_per_client_minimum_keeps_only_platform_and_positive_contract(monkeypatch):
+def test_the_per_client_minimum_keeps_a_platform_and_a_contract_or_0_for_never(monkeypatch):
     lines = []
     monkeypatch.setattr("lib.log.log", lambda *a, **k: lines.append(a))
     assert config._live_model_min_client({"ios": 75, "android": 30}) == {"ios": 75, "android": 30} and not lines
-    assert config._live_model_min_client({"ios": 0, "Android": 3, "web": "4", "android": 31}) == {"android": 31}
+    assert config._live_model_min_client({"ios": 0, "android": 31}) == {"ios": 0, "android": 31} and not lines
+    assert config._live_model_min_client({"ios": -1, "android": True, "web": 1.0, "desktop": "4", "Android": 3,
+                                          "watch": 29}) == {"watch": 29}
     assert len(lines) == 1
+    for refused in ("'ios'", "'android'", "'web'", "'desktop'", "'Android'"):
+        assert refused in lines[0][1]
     assert config._live_model_min_client("ios=75") == {} and len(lines) == 2
+
+
+@pytest.mark.parametrize("header", ["ios/2986 contract=75", "ios/9999 contract=999999999"])
+def test_0_in_the_table_switches_that_client_off_and_no_other(tmp_path, header):
+    path = tmp_path / "config.toml"
+    path.write_text('[openai]\nlive_model = "gpt-live-1.1"\n[openai.live_model_min_client]\nios = 0\n')
+    cfg = config.load(path)
+    assert cfg.live_model_min_client == {"ios": 0}
+    assert live.model_for_client(header, cfg) == "gpt-live-1"
+    assert live.model_for_client("android/993 contract=29", cfg) == "gpt-live-1.1"
 
 
 def test_the_file_setting_reaches_the_one_reader(tmp_path, monkeypatch):
@@ -145,6 +159,36 @@ CASES = [  # header, configured minimum override, the model the call runs on
 
 def test_the_first_builds_that_accept_both_names():
     assert live.AGENT_LIVE_MODEL_MIN_CLIENT == {"ios": 75, "android": 29}
+
+
+# The vectors both Hosts agreed (Arnold, 10:24): the Rust Host answers each of these the same. Word for word.
+AGREED = [
+    ("iOS/2985 contract=75", "gpt-live-1"),
+    ("Android/1 contract=29", "gpt-live-1"),
+    ("ios/2985 contract=075", "gpt-live-1.1"),            # read as 75
+    ("ios/2985 contract=74", "gpt-live-1"),
+    ("ios/2985  contract=75", "gpt-live-1"),              # two spaces
+    ("ios/2985\tcontract=75", "gpt-live-1"),              # a tab for the space
+    ("ios/2985 contract=75 ", "gpt-live-1"),              # a trailing blank
+    ("ios/2985 contract=75\n", "gpt-live-1"),             # a trailing newline
+    ("ios/2985 contract=75 beta", "gpt-live-1"),          # anything after the digits
+    ("i" * 33 + "/2985 contract=75", "gpt-live-1"),       # a name of 33
+    ("ios/" + "2" * 81 + " contract=75", "gpt-live-1"),   # a build of 81
+    ("ios/2985 contract=1234567890", "gpt-live-1"),       # ten digits
+    (None, "gpt-live-1"),                                 # no header
+]
+
+
+@pytest.mark.parametrize("header, expected", AGREED)
+def test_the_vectors_both_hosts_agreed(header, expected):
+    cfg = config.Config(openai_api_key="k", live_model="gpt-live-1.1", live_model_min_client={})
+    assert live.model_for_client(header, cfg) == expected
+
+
+@pytest.mark.parametrize("header", [h for h, _e in AGREED])
+def test_the_agreed_vectors_on_a_host_configured_to_gpt_live_1(header):
+    cfg = config.Config(openai_api_key="k", live_model="gpt-live-1", live_model_min_client={})
+    assert live.model_for_client(header, cfg) == "gpt-live-1"
 
 
 STRICT = [  # each must name no client (or a client below its minimum): the strict form, the name as sent
