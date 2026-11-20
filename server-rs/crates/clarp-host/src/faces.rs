@@ -106,9 +106,8 @@ impl Faces {
 
     /// Where the picture of an agent on the model it runs is fetched, for a name that has
     /// one drawn for that family of model. Empty: it has none.
-    pub fn on_model(&self, persona: &str, backend: &str, model: &str) -> String {
-        // Which model a tool runs when an agent names none is not kept on this Host.
-        let files = portraits::model_files(persona, backend, model, "");
+    pub fn on_model(&self, persona: &str, backend: &str, model: &str, default_model: &str) -> String {
+        let files = portraits::model_files(persona, backend, model, default_model);
         match self.first("avatars/models", files) {
             Some((file, version)) => format!("{}/{file}?v={version}", portraits::MODEL_AVATARS),
             None => String::new(),
@@ -243,12 +242,12 @@ mod tests {
         );
         assert!(
             faces
-                .on_model("Claire", "claude", "claude-opus-5-5")
+                .on_model("Claire", "claude", "claude-opus-5-5", "")
                 .starts_with("/static/avatars/models/claire.opus.png?v=")
         );
-        assert_eq!(faces.on_model("Claire", "claude", "claude-sonnet-5-5"), "");
+        assert_eq!(faces.on_model("Claire", "claude", "claude-sonnet-5-5", ""), "");
         assert_eq!(
-            faces.on_model("Claire", "claude", ""),
+            faces.on_model("Claire", "claude", "", ""),
             "",
             "Claude Code names no family"
         );
@@ -260,7 +259,7 @@ mod tests {
         assert_eq!(
             (
                 none.of("Claire", "claude"),
-                none.on_model("Claire", "claude", "opus")
+                none.on_model("Claire", "claude", "opus", "")
             ),
             (String::new(), String::new())
         );
