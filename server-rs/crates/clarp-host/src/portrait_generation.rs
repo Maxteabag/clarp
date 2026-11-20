@@ -103,16 +103,20 @@ async fn start(
                 .unwrap_or_else(|| clarp_kernel::python::repr(v))
         })
         .unwrap_or_default();
-    let Some(member) = session(&app, &sid) else {
-        return Err(ApiError::new(StatusCode::CONFLICT, "unknown Agent session"));
-    };
-    let cap = capability(&app, Some(&member)).await?;
-    if cap["available"] != true {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            cap["reason"].as_str().unwrap_or_default(),
-        ));
+    let member = session(&app, &sid);
+    let cap = capability(&app, member.as_deref()).await?;
+    match rules::start(member.is_some(), &cap) {
+        rules::Start::Refused(why) => return Err(ApiError::new(StatusCode::CONFLICT, why)),
+        rules::Start::Reuse => {
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(json!({"job":cap["job"],"capability":cap})),
+            ));
+        }
+        rules::Start::Begin => {}
     }
+    let member =
+        member.ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "unknown Agent session"))?;
     let id = member.record.agent_id.clone();
     let job = match app.fleet.begin_portraits(id.clone()).await? {
         Admission::Existing(job) => job,

@@ -64,3 +64,43 @@ fn the_edits_and_capability_match_the_reference() {
         }
     }
 }
+
+#[test]
+fn portrait_start_matches_the_reference_admission_after_the_http_guards() {
+    use clarp_kernel::portrait_generation::{Start, start};
+    use serde_json::json;
+    let v: Value = serde_json::from_str(include_str!("fixtures/portrait-generation.json")).unwrap();
+    let mut counts = [0; 4];
+    for row in v["starts"].as_array().unwrap() {
+        let body = &row[0];
+        if !body.is_object() || body["session"] == "janitor" {
+            // These checks are exercised at the Host's HTTP boundary.
+            assert!(matches!(row[3].as_u64(), Some(400 | 403)));
+            counts[0] += 1;
+            continue;
+        }
+        let cap = json!({"available":row[2],"reason":"Add or select a primary portrait first","job":{"status":row[1]}});
+        match start(body["session"] != "missing", &cap) {
+            Start::Begin => {
+                assert_eq!(row[3], 202);
+                assert_eq!(row[5], true);
+                assert_eq!(row[6], true);
+                counts[1] += 1;
+            }
+            Start::Reuse => {
+                assert_eq!(row[3], 202);
+                assert_eq!(row[5], false);
+                assert_eq!(row[6], false);
+                counts[2] += 1;
+            }
+            Start::Refused(why) => {
+                assert_eq!(row[3], 409);
+                assert_eq!(row[4], why);
+                assert_eq!(row[5], false);
+                assert_eq!(row[6], false);
+                counts[3] += 1;
+            }
+        }
+    }
+    assert_eq!(counts, [36, 8, 4, 24]);
+}
