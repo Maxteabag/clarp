@@ -973,6 +973,8 @@ fn cloud_models(ears: &Ears) -> Vec<Value> {
                 "model": model.model, "weight": "cloud", "available": available,
                 "credential": provider.credential, "turn_detection": provider.turn_detection,
                 "biasing": model.biasing,
+                // Whether it can be handed an agent's set of languages ("no,en").
+                "accepts_language_set": languages::SET_PROVIDERS.contains(&provider.id),
                 "budget": { "unit": "terms", "capacity": model.capacity,
                             "max_term_chars": model.max_term_chars },
             }));
