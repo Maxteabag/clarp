@@ -28,9 +28,14 @@ pub struct Clip {
 }
 
 pub fn blob_name(name: &str) -> bool {
-    name.strip_prefix("phrase-").and_then(|s| s.strip_suffix(".mp3")).is_some_and(|digest| {
-        digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    })
+    name.strip_prefix("phrase-")
+        .and_then(|s| s.strip_suffix(".mp3"))
+        .is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
 }
 
 /// Rows are in fill order. Return the oldest prefix to discard.
