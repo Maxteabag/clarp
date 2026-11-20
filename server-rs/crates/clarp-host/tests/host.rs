@@ -45,6 +45,8 @@ mod pictures;
 mod provider_tasks;
 #[path = "host/remote_action.rs"]
 mod remote_action;
+#[path = "host/source_trace.rs"]
+mod source_trace;
 #[path = "host/stand_ins.rs"]
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
