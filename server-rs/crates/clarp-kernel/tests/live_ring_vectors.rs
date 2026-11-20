@@ -463,7 +463,11 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                         ticket: &minted.3,
                     };
                     let called = rings.user_call(
-                        (&principal, &step["agent"], step.get("client").and_then(Value::as_str)),
+                        (
+                            &principal,
+                            &step["agent"],
+                            step.get("client").and_then(Value::as_str),
+                        ),
                         (&step["request_id"], &step["client_nonce"]),
                         &known,
                         &world,

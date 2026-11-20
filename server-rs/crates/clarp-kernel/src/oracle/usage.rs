@@ -56,7 +56,10 @@ impl LiveUsage {
         if number(seconds) {
             self.seconds = seconds.clone();
             // A replacement snapshot: an older breakdown is never kept beside newer seconds.
-            let (active, paused) = (&event["usage"]["active_seconds"], &event["usage"]["paused_seconds"]);
+            let (active, paused) = (
+                &event["usage"]["active_seconds"],
+                &event["usage"]["paused_seconds"],
+            );
             (self.active, self.paused) = if number(active) && number(paused) {
                 (active.clone(), paused.clone())
             } else {
