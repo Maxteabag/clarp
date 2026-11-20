@@ -21,7 +21,6 @@ from abc import ABC, abstractmethod
 
 from .clock import now_ms as _now_ms
 from .eleven_http import synthesize_to_file
-from .voice_markup import strip_emotion_tags
 
 
 # VP-10 changes preview only. Heralds, rings and context announcements retain
@@ -114,33 +113,6 @@ class ElevenLabsEngine(TTSEngine):
         self.speed = speed
         self.timeout = timeout
 
-    def _synthesize_cartesia(self, text, voice_id, out_path, session) -> bool:
-        """Try Cartesia for a one-off clip. Returns True on success, False if
-        Cartesia isn't the active provider, has no voice for this persona, no
-        key, or errors — in which case the caller falls back to ElevenLabs."""
-        from .config import load as _load
-        from . import voice as _voice
-        cfg = _load()
-        if cfg.tts_provider != _voice.CARTESIA or not cfg.cartesia_key():
-            return False
-        persona = ""
-        if session:
-            from . import agents as _agents
-            ag = _agents.get_by_session(session)
-            persona = (ag or {}).get("persona", "")
-        cart_voice = (_voice.resolve_voice(voice_id, _voice.CARTESIA)
-                      or cfg.cartesia_voice_for(persona))
-        if not cart_voice:
-            return False
-        from .cartesia_tts import CartesiaError
-        from .cartesia_tts import synthesize as _cart
-        try:
-            _cart(text=text, voice_id=cart_voice, out_path=out_path,
-                  api_key=cfg.cartesia_key(), model=cfg.cartesia_model)
-            return True
-        except CartesiaError:
-            return False
-
     def _synthesize_provider(self, text, voice_id, out_path, session, cfg, agent, route=None,
                              *, file_eleven=False, purpose="one-off"):
         from . import tts_mode
@@ -167,20 +139,16 @@ class ElevenLabsEngine(TTSEngine):
             return self._synthesize_provider(
                 text, voice_id, out_path, session, cfg, agent or {}, route,
                 file_eleven=cfg.tts_provider in {"cartesia", "elevenlabs"}, purpose="preview")
-        # LEGACY_ONE_OFF_LADDER: effective agent overrides and non-legacy
-        # providers already use configured fallback; preserve that distinction.
-        agent = agents.get_by_session(session) if session else None
+        # LEGACY_ONE_OFF_LADDER (announcements, heralds, lines outside a turn): the turn's
+        # own route and the configured fallback (ruling O). It used to try Cartesia and then
+        # always ElevenLabs, also when the configuration said fallback = none.
+        agent = (agents.get_by_session(session) if session else None) or {}
         route = tts_mode.route(cfg, agent) if agent else None
-        if route is not None and (route.provider != cfg.tts_provider or route.voice):
-            return self._synthesize_provider(text, voice_id, out_path, session, cfg, agent, route)
-        if cfg.tts_provider not in {"cartesia", "elevenlabs"}:
-            agent = agents.get_by_session(session) if session else {}
-            return self._synthesize_provider(text, voice_id, out_path, session, cfg, agent or {})
-        if not self._synthesize_cartesia(strip_emotion_tags(text), voice_id, out_path, session):
-            from .voice import ELEVENLABS, resolve_voice
-            return synthesize_to_file(
-                strip_emotion_tags(text), resolve_voice(voice_id, ELEVENLABS) or voice_id, out_path,
-                api_key=self.api_key, model=self.model, speed=self.speed, timeout=self.timeout)
+        overridden = route is not None and (route.provider != cfg.tts_provider or route.voice)
+        return self._synthesize_provider(
+            text, voice_id, out_path, session, cfg, agent, route,
+            # The ElevenLabs file transport these lines always used, where they used it.
+            file_eleven=not overridden and cfg.tts_provider in {"cartesia", "elevenlabs"})
 
     def synthesize_herald(self, text, voice_id, *, session=None) -> pathlib.Path:
         return self.synthesize(
