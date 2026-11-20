@@ -61,6 +61,47 @@ def open_current(ident):
         raise
 
 
+class NotExportable(ValueError):
+    """An artifact of a kind the export does not carry yet."""
+
+
+def export(ident):
+    """What moving a render_spec to another Host needs (R137), independent of any client's display
+    negotiation: the public row, the stored payload as kept (the spec, its catalog and schema
+    identity, its content identity), and the accepted submission or None, with its answers, its
+    audio preference as accepted, its payload hash, its delivery status and when it was delivered.
+    None for no such artifact; NotExportable for another kind. One read snapshot. Nothing here is
+    logged: the answers are the user's."""
+    from . import artifacts
+    con = db.conn()
+    owned = not con.in_transaction
+    if owned:
+        con.execute("BEGIN")
+    try:
+        row = artifacts.get(ident)
+        if row is None:
+            return None
+        if row["type"] != "render_spec":
+            raise NotExportable(row["type"])
+        stored = json.loads(con.execute("SELECT payload_json FROM artifacts WHERE artifact_id=?",
+                                        (ident,)).fetchone()["payload_json"])
+        found = con.execute(
+            "SELECT submission_id,version,answers_json,payload_hash,synthesize_audio,status,created_at,delivered_at "
+            "FROM form_submissions WHERE artifact_id=? ORDER BY created_at, submission_id LIMIT 1", (ident,)).fetchone()
+        submission = None if found is None else {
+            "submission_id": found["submission_id"], "version": found["version"],
+            "answers": json.loads(found["answers_json"]), "accepted_at": found["created_at"],
+            "payload_hash": found["payload_hash"], "synthesize_audio": bool(found["synthesize_audio"]),
+            "delivery_status": found["status"], "delivered_at": found["delivered_at"]}
+        if owned:
+            con.execute("COMMIT")
+        return {"kind": "render_spec", "render_spec": {"artifact": dict(row), "stored": stored, "submission": submission}}
+    except BaseException:
+        if owned and con.in_transaction:
+            con.execute("ROLLBACK")
+        raise
+
+
 def publish(agent, ident, title, summary_text, status, reference, payload, expected, *, validate_only=False,
             source_trace_id=""):
     from . import artifacts
