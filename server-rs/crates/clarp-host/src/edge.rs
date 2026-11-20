@@ -2173,6 +2173,7 @@ async fn route_delegation(
 /// A message from an app: one that carries its call goes to the agent of the call that can
 /// take speech, whoever it names; then it is a message like any other.
 async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -> Response {
+    let voice = crate::voice_timeline::Sent::read(&request);
     let call_id: String = python::strip(request.call_id.as_deref().unwrap_or(""))
         .chars()
         .take(64)
@@ -2242,6 +2243,9 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         }
         return match sent {
             Ok(answer) => {
+                if let Some(voice) = &voice {
+                    voice.posted(app, &answer);
+                }
                 let mut body = json!(answer);
                 body["opening"] = result["opening"].clone();
                 Json(body).into_response()
@@ -2301,13 +2305,21 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
                         let _ = desk.routed(app, to).await;
                     }
                 }
+                if let Some(voice) = &voice {
+                    voice.posted(app, &answer);
+                }
                 return (status, Json(answer)).into_response();
             }
             Err(refused) => return refused.into_response(),
         }
     }
     match send_message(app, request).await {
-        Ok(sent) => Json(sent).into_response(),
+        Ok(sent) => {
+            if let Some(voice) = &voice {
+                voice.posted(app, &sent);
+            }
+            Json(sent).into_response()
+        }
         Err(refused) => refused.into_response(),
     }
 }

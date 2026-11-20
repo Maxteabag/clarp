@@ -51,6 +51,8 @@ mod stand_ins;
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
+#[path = "host/voice_timeline.rs"]
+mod voice_timeline;
 
 /// This file holds no more tests than it held when the pieces were given files of their own
 /// (172 `#[test]`, 2 `#[tokio::test]`, and this one): two pieces that both add tests at its
@@ -18098,7 +18100,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     assert_eq!(response.status, 200);
     let ack: Value = serde_json::from_slice(&response.body).unwrap();
     assert_eq!(ack["ok"], true);
-    assert_eq!(ack["stored"], 0);
+    assert_eq!(ack["stored"], 500);
     drop(bytes);
     let too_many = post(
         "/voice-events",
@@ -21382,7 +21384,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }
 
     // An app's record of what its microphone and player did: taken, read as the Python Host
-    // reads it, and not kept on this Host yet.
+    // reads it, and kept on the corrected timeline.
     let report = |said: Value| host.ask("POST", "/voice-events", Some(&said));
     let (status, told) = report(json!({
         "source": "ios", "sent_at": now_ms(),
@@ -21390,7 +21392,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }));
     assert_eq!(
         (status, &told["ok"], &told["stored"]),
-        (200, &json!(true), &json!(0))
+        (200, &json!(true), &json!(1))
     );
     assert!(
         told["clock_offset_ms"]

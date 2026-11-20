@@ -555,16 +555,52 @@ const NAMED_CHAT: &str = "x-transcription-session";
 async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
-    let length = header_text(headers, "content-length")
-        .parse::<usize>()
+    let uid = header_text(headers, "x-utterance-id");
+    let uid = if uid.is_empty() {
+        header_text(headers, "x-transcription-id")
+    } else {
+        uid
+    };
+    let uid = clarp_kernel::python::first(clarp_kernel::python::strip(&uid), 128);
+    let client_ts = header_text(headers, "x-client-ts")
+        .trim()
+        .parse::<f64>()
         .ok()
-        .filter(|length| (1..=heard::LARGEST_CLIP).contains(length))
-        .ok_or_else(|| refuse(StatusCode::BAD_REQUEST, heard::BAD_SIZE))?;
-    let audio = axum::body::to_bytes(body, length)
-        .await
-        .ok()
-        .filter(|audio| audio.len() == length)
-        .ok_or_else(|| refuse(StatusCode::REQUEST_TIMEOUT, "incomplete audio upload"))?;
+        .filter(|t| t.is_finite())
+        .map(|t| t as i64);
+    let corrupt = |detail: Value| {
+        crate::voice_timeline::record(
+            app,
+            "corrupt",
+            json!({"utterance_id":uid,"client_ts":client_ts,"detail":detail}),
+        )
+    };
+    let length = header_text(headers, "content-length");
+    let n = if length.is_empty() {
+        Some(0)
+    } else {
+        length.parse::<i64>().ok()
+    };
+    let Some(n) = n else {
+        corrupt(json!({"reasons":["bad_content_length"]}));
+        return Err(refuse(StatusCode::BAD_REQUEST, heard::BAD_SIZE));
+    };
+    if !(1..=heard::LARGEST_CLIP as i64).contains(&n) {
+        corrupt(json!({"reasons":["bad_size"],"bytes":n}));
+        return Err(refuse(StatusCode::BAD_REQUEST, heard::BAD_SIZE));
+    }
+    let length = n as usize;
+    let audio = axum::body::to_bytes(body, length).await.map_err(|_| {
+        corrupt(json!({"reasons":["upload_read_error"],"expected":length}));
+        refuse(StatusCode::REQUEST_TIMEOUT, "incomplete audio upload")
+    })?;
+    if audio.len() != length {
+        corrupt(json!({"reasons":["incomplete_upload"],"expected":length,"received":audio.len()}));
+        return Err(refuse(
+            StatusCode::REQUEST_TIMEOUT,
+            "incomplete audio upload",
+        ));
+    }
     let requested = header_text(headers, "x-transcription-model");
     let content_type = match header_text(headers, "content-type") {
         none if none.is_empty() => "audio/webm".to_string(),
@@ -636,7 +672,15 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         let (asked, named, print) = (ears.clone(), job.clone(), fingerprint.clone());
         let before = tokio::task::spawn_blocking(move || asked.answered(&named, &print)).await;
         match before {
-            Ok(Ok(Some(answer))) => return Ok(heard::again(answer)),
+            Ok(Ok(Some(answer))) => {
+                crate::voice_timeline::record(
+                    app,
+                    "retry",
+                    json!({"utterance_id":uid,"client_ts":client_ts,
+                    "trace_id":answer["trace_id"],"text":answer["text"],"detail":{"bytes":length,"content_type":content_type}}),
+                );
+                return Ok(heard::again(answer));
+            }
             Ok(Err(why)) => return Err(refuse(StatusCode::CONFLICT, why)),
             Ok(Ok(None)) | Err(_) => {}
         }
@@ -679,6 +723,23 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         .map(|s| s.session.as_str())
         .or_else(|| recorded_for.map(|m| m.record.session.as_str()))
         .unwrap_or("");
+    let failed = |err: Told| {
+        let details = match err.0 {
+            StatusCode::TOO_MANY_REQUESTS => Some(json!({"message":"whisper busy"})),
+            StatusCode::INTERNAL_SERVER_ERROR => Some(
+                json!({"message":clarp_kernel::python::first(err.1["error"].as_str().unwrap_or(""),300),"stage":"stt"}),
+            ),
+            _ => None,
+        };
+        if let Some(detail) = details {
+            crate::voice_timeline::record(
+                app,
+                "error",
+                json!({"utterance_id":uid,"client_ts":client_ts,"detail":detail}),
+            );
+        }
+        err
+    };
     let (said, report, run_id) = if scope.is_some() {
         let (said, report, id) = call::hear(
             app,
@@ -688,7 +749,8 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
             &trace,
             (&audio, &content_type),
         )
-        .await?;
+        .await
+        .map_err(failed)?;
         (said, Some(report), id)
     } else {
         let (own, language) = spoken_to(&directory, recorded_for, &ears.language);
@@ -712,7 +774,8 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
             &audio,
             &content_type,
         )
-        .await?;
+        .await
+        .map_err(failed)?;
         (said, None, id)
     };
     let retained_model = report
@@ -723,6 +786,29 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     // What the engine was sure was speech, unless it is something engines invent on silence.
     let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
     let mut answer = heard::answer(&text, &trace, hands_free);
+    // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
+    // the app is told, and sends nothing.
+    if !text.is_empty() && app.mouth.heard(&text).await {
+        answer["herald_consumed"] = json!(true);
+    }
+    let duration = (said.seconds != 0.0).then(|| (said.seconds * 10000.0).round_ties_even() / 10.0);
+    crate::voice_timeline::record(
+        app,
+        "transcript",
+        json!({"session":session,"trace_id":trace,"utterance_id":uid,
+        "client_ts":client_ts,"duration_ms":duration,"text":text,"detail":{"bytes":length,"content_type":content_type,
+        "hands_free":hands_free,"ends_terminal":answer["ends_terminal"],"herald_consumed":answer["herald_consumed"],
+        "model":if requested.is_empty(){"server-default"}else{requested.as_str()}}}),
+    );
+    crate::voice_timeline::metrics(
+        app,
+        audio.clone(),
+        &content_type,
+        session,
+        &trace,
+        uid,
+        text.trim().is_empty(),
+    );
     if run_id > 0 {
         let finished = app
             .ears
@@ -762,11 +848,6 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     }
     if let Some(report) = report {
         answer["stt"] = report;
-    }
-    // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
-    // the app is told, and sends nothing.
-    if !text.is_empty() && app.mouth.heard(&text).await {
-        answer["herald_consumed"] = json!(true);
     }
     if !job.is_empty() {
         let (keeps, kept) = (ears.clone(), answer.clone());

@@ -511,6 +511,11 @@ pub struct Works {
 }
 
 enum Ask {
+    AppendVoice {
+        rows: Vec<serde_json::Value>,
+        answer: Option<Answer<usize>>,
+    },
+
     DelegationMismatch(delegations::Mismatch),
     GoalDelegation {
         request: delegations::Request,
@@ -723,6 +728,27 @@ pub struct FleetHandle {
 }
 
 impl FleetHandle {
+    pub async fn append_voice(&self, rows: Vec<serde_json::Value>) -> Result<usize, Unavailable> {
+        self.ask(|answer| Ask::AppendVoice {
+            rows,
+            answer: Some(answer),
+        })
+        .await
+    }
+
+    pub fn record_voice(&self, row: serde_json::Value) {
+        if self
+            .tx
+            .send(Ask::AppendVoice {
+                rows: vec![row],
+                answer: None,
+            })
+            .is_err()
+        {
+            self.unkept("voice-events", "the fleet is closed");
+        }
+    }
+
     /// The fleet as it is now.
     pub fn directory(&self) -> Arc<Directory> {
         self.directory.borrow().clone()
@@ -1775,6 +1801,14 @@ impl Fleet {
                 } => {
                     let _ = answer.send(Ok(self.keep(kind, &key, value)));
                 }
+                Ask::AppendVoice { rows, answer } => {
+                    let result = self.append_voice(rows);
+                    if let Some(answer) = answer {
+                        let _ = answer.send(result);
+                    } else if let Err(error) = result {
+                        self.works.log.unkept("voice-events", &error.0);
+                    }
+                }
                 Ask::KeepTogether { writes, answer } => {
                     let result = self
                         .store
@@ -1838,6 +1872,44 @@ impl Fleet {
                 Ok(Ok(()))
             }
         }
+    }
+
+    fn append_voice(&mut self, rows: Vec<serde_json::Value>) -> Result<usize, Unavailable> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        // The high-water mark is committed with the batch. A failed write consumes no IDs,
+        // and a restart never reads the owner's transcripts just to discover the next one.
+        let cursor = shelf("voice-event-sequence");
+        let table = shelf("voice-events");
+        let stored = self
+            .store
+            .get(&cursor, "last")
+            .map_err(|e| Unavailable(e.to_string()))?;
+        let mut last = match stored {
+            None => 0,
+            Some(bytes) => u64::from_be_bytes(
+                bytes
+                    .try_into()
+                    .map_err(|_| Unavailable("invalid voice event sequence".into()))?,
+            ),
+        };
+        let count = rows.len();
+        let mut writes = Vec::with_capacity(count + 1);
+        for mut row in rows {
+            last = last
+                .checked_add(1)
+                .ok_or_else(|| Unavailable("voice event sequence exhausted".into()))?;
+            row["event_id"] = serde_json::json!(last);
+            let bytes = serde_json::to_vec(&row)
+                .map_err(|_| Unavailable("cannot encode voice event".into()))?;
+            writes.push((table.clone(), format!("{last:020}"), Some(bytes)));
+        }
+        writes.push((cursor, "last".into(), Some(last.to_be_bytes().to_vec())));
+        self.store
+            .put_together(&writes)
+            .map_err(|e| Unavailable(e.to_string()))?;
+        Ok(count)
     }
 
     fn now_ms(&self) -> i64 {

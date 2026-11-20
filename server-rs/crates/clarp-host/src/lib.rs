@@ -93,6 +93,7 @@ pub mod unkept;
 pub mod usage;
 mod usage_provider;
 pub mod voice;
+pub(crate) mod voice_timeline;
 pub mod voices;
 pub mod wire;
 

@@ -18,6 +18,8 @@ pub struct SendRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utterance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synthesize_audio: Option<bool>,
     /// Dictated hands-free: the Host then looks whom it is for, unless `force_session` says
     /// it is for the agent it names.

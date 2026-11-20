@@ -2376,6 +2376,17 @@ removal and publication, and an orphan older than seven days is swept. The insta
 available models. The warm default remains the model named at Host installation. A newly installed
 variant is selectable by name or as the configured engine for clips.
 
+**The voice timeline.** A client batch adds at most 500 rows to the owner's permanent
+timeline. Each row keeps its raw timestamp alongside the time corrected by the batch offset.
+An offset more than six hours from the receipt clock uses receipt time instead.
+The fleet commits each batch and its event sequence together through the storage port.
+Server producers enqueue their events. A subsequent read through the fleet observes earlier
+messages in order. A failed fire-and-forget write is reported through the coalescing store logger.
+The event query returns the newest matching window in chronological order. Utterance summaries
+also join trace-only events before filtering by session. Audio measurements run outside the
+transcription request using the speech environment, with a bounded decoding time. Podcast history
+has no producer here. The wire vectors use synthetic event names, measurements and text.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

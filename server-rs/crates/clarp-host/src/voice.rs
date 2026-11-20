@@ -1844,6 +1844,19 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
         },
         Meant::NoClip => None,
     };
+    let played_event = match status {
+        "play-start" => Some("play_start"),
+        "play-ok" => Some("play_end"),
+        "play-fail" => Some("play_fail"),
+        _ => None,
+    };
+    let identity = if matches!(meant, Meant::Clip(_)) {
+        found
+            .as_ref()
+            .map(|(m, line)| (m.record.session.clone(), line.trace_id.clone()))
+    } else {
+        None
+    };
     let updated = match found.and_then(|(member, line)| Some((member, line.clip_id?, line.turn))) {
         Some((member, clip, turn)) => {
             let error = error.map(str::to_string);
@@ -1857,6 +1870,19 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
         }
         None => false,
     };
+    if let Some(event) = played_event {
+        let trace = said
+            .get("trace_id")
+            .filter(|v| clarp_kernel::python::truthy(v))
+            .cloned()
+            .unwrap_or_else(|| json!(identity.as_ref().and_then(|(_, t)| t.as_ref())));
+        crate::voice_timeline::record(
+            &app,
+            event,
+            json!({"trace_id":trace,"session":identity.as_ref().map(|(s,_)|s),
+            "detail":{"clip_id":said.get("clip_id").and_then(|v| v.as_i64().or_else(||v.as_str()?.parse().ok())),"url":Some(text("url")).filter(|u|!u.is_empty()),"error":error}}),
+        );
+    }
     Ok(Json(json!({ "ok": true, "updated": updated })))
 }
 
