@@ -762,7 +762,7 @@ def test_an_agent_that_cannot_leave_a_note_is_never_hidden(tmp_path, backend, hi
     agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-boss",
                                text="Report", trace_id="t-boss", origin="agent", sender_agent_id=boss)
     assert db.conn().execute("SELECT audience FROM coordination_traces WHERE trace_id='t-boss'").fetchone()[0] \
-        == "agents"
+        == ("agents" if hidden else "mixed")
     assert coordination.can_leave_note(agent_id) is hidden
     rows = agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50)
     assert [row["audience"] for row in rows] == ["agents" if hidden else "user"]
@@ -874,3 +874,23 @@ def test_the_working_state_and_live_turn_read_a_mark_on_the_users_turn_as_the_us
     db.close_local()
     assert coordination.audience_of(world.id, "t-user") == "user"
     assert coordination.sender_of(world.id, "t-user") is None
+
+
+
+def test_a_turn_from_a_period_without_notes_stays_shown_after_a_backend_switch(tmp_path):
+    """F6B: the agent was on Codex (no turn token, no note possible) when the turn was marked;
+    it moves to Claude. Its old turn stays shown under 'hide'; a new turn on Claude hides."""
+    from lib import settings_store
+    settings_store.set_text(coordination.GLOBAL_KEY, "hide")
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="codex")
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    agents.bind_backend_session(agent_id, "native")
+    agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-old",
+                               text="Report", trace_id="t-codex", origin="agent", sender_agent_id=boss)
+    agents.update_agent(agent_id, backend="claude")
+    agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-new",
+                               text="Report again", trace_id="t-claude", origin="agent", sender_agent_id=boss)
+    assert coordination.audience_of(agent_id, "t-codex") == "user"
+    assert coordination.audience_of(agent_id, "t-claude") == "agents"
+    shown = agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50, hide_coordination=True)
+    assert [row["id"] for row in shown] == ["u-c-old"]

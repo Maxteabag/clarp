@@ -96,12 +96,16 @@ def mark(database, *, agent_id: str, trace_id: str, sender_agent_id: str | None,
     if not agent_id or not trace or holds_user_word(database, agent_id, trace):
         return
     stamp = int(at if at is not None else now_ms())
+    # A turn in which the agent could not leave a note is recorded but shown for good
+    # ('mixed'): moving the agent to a backend with turn tokens later must not hide a turn
+    # from which nothing could reach the user (the reviewer's F6B).
+    audience = AGENTS if can_leave_note(agent_id) else MIXED
     database.execute(
         """INSERT INTO coordination_traces
                (agent_id, trace_id, sender_agent_id, audience, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(agent_id, trace_id) DO NOTHING""",
-        (agent_id, trace, (sender_agent_id or "").strip(), AGENTS, stamp, stamp))
+        (agent_id, trace, (sender_agent_id or "").strip(), audience, stamp, stamp))
 
 
 def carry(database, *, agent_id: str, from_trace: str | None, to_trace: str | None) -> None:
@@ -122,8 +126,8 @@ def can_leave_note(agent_id: str) -> bool:
     """Whether the agent can leave a note for the user (POST /agent-notes needs its turn
     token): its backend gives every turn one (turn_identity.IDENTITY_BACKENDS). The one place
     this is decided. An agent that cannot is never hidden (F6-b): the failure mode of this
-    feature is shown, never lost. Its turns are still marked, so they hide without a
-    migration on the day its backend gets a turn token."""
+    feature is shown, never lost. Its turns are recorded as 'mixed' (shown for good), so a
+    later move to a backend with turn tokens does not hide a turn that could leave no note."""
     if not agent_id:
         return False
     from . import agents, backends
