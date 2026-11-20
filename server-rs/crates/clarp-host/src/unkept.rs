@@ -412,7 +412,7 @@ pub(crate) mod at_the_port {
         pub(crate) notice: Arc<tokio::sync::Notify>,
         refused_read: Refused,
         dir: PathBuf,
-        fleet: FleetHandle,
+        pub(crate) fleet: FleetHandle,
         hub: Arc<Hub>,
         refused: Refused,
         pub(crate) said: Arc<Mutex<Vec<String>>>,
@@ -478,6 +478,7 @@ pub(crate) mod at_the_port {
                 pusher: crate::pusher::pusher().0,
                 blobs: MemBlobs::new().open(&self.dir).unwrap(),
                 form_event_writer: Arc::default(),
+                skill_links: Arc::default(),
                 turns: Arc::default(),
                 server_id: "test-host".into(),
                 revisions: Arc::default(),
@@ -499,6 +500,7 @@ pub(crate) mod at_the_port {
                 limits: Arc::default(),
                 pools: Vec::new(),
                 models: Arc::default(),
+                sign_ins: Arc::default(),
                 door: Arc::default(),
             }
         }

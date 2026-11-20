@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
 #[path = "host/agent_portraits.rs"]
 mod agent_portraits;
+#[path = "host/backend_auth.rs"]
+mod backend_auth;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
@@ -29,6 +31,8 @@ mod diagnostics;
 mod goal_ledger;
 #[path = "host/harness.rs"]
 mod harness;
+#[path = "host/harness_providers.rs"]
+mod harness_providers;
 #[path = "host/import_render_specs.rs"]
 mod import_render_specs;
 #[path = "host/installer.rs"]
@@ -37,6 +41,8 @@ mod installer;
 mod janitor_attention;
 #[path = "host/launch_directories.rs"]
 mod launch_directories;
+#[path = "host/managed_skills.rs"]
+mod managed_skills;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
 #[path = "host/pictures.rs"]
@@ -45,6 +51,8 @@ mod pictures;
 mod provider_tasks;
 #[path = "host/remote_action.rs"]
 mod remote_action;
+#[path = "host/router_phrases.rs"]
+mod router_phrases;
 #[path = "host/source_trace.rs"]
 mod source_trace;
 #[path = "host/stand_ins.rs"]
@@ -23081,7 +23089,18 @@ fn the_owner_turns_the_desk_of_the_seats_off_and_its_doors_are_no_routes() {
 fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_no_route() {
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("action-doors");
-    let host = place.start_with_token(ADMIN);
+    // A home of its own: no Host of a test reads the machine's tools' stores.
+    let home = place.root.join("home");
+    let homes = [
+        ("HOME", home.clone()),
+        ("XDG_CACHE_HOME", home.join(".cache")),
+        ("XDG_DATA_HOME", home.join(".local/share")),
+    ];
+    let world: Vec<(&str, &str)> = homes
+        .iter()
+        .map(|(name, path)| (*name, path.to_str().unwrap()))
+        .collect();
+    let host = place.start_in(ADMIN, &[], &world);
     let echo = host.new_agent("Echo");
     let change = |path: &str| {
         let body = json!({ "session": echo, "backend": "claude", "harness": "opencode" });
@@ -23097,26 +23116,6 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
     };
     // What the Python Host registers and this Host has not built: refused in words.
     for (path, what) in [
-        (
-            "/backend-auth/login",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/backend-auth/login-code",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/backend-auth/logout",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/harness-providers/login",
-            "Signing a harness in to a provider of models is",
-        ),
-        (
-            "/harness-providers/logout",
-            "Signing a harness in to a provider of models is",
-        ),
         ("/agent-goal/pause", "A goal of this kind is"),
         ("/agent-goal/clear", "A goal of this kind is"),
         ("/oracle/calls", "The Oracle is"),
@@ -23134,6 +23133,17 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
             (501, Some(words.as_str())),
             "{path}"
         );
+    }
+    // A Host that does not keep this machine's tools refuses to sign a harness in or out.
+    for path in [
+        "/harness-providers/login",
+        "/harness-providers/login-code",
+        "/harness-providers/logout",
+    ] {
+        let (status, said) = change(path);
+        let words = clarp_kernel::harness_providers::NOT_KEPT;
+        let error = serde_json::from_str::<Value>(&said).unwrap()["error"].clone();
+        assert_eq!((status, error), (409, json!(words)), "{path}");
     }
     // Anything else under those doors is no route, as there: the plain 404.
     for path in [
@@ -23156,7 +23166,19 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
 #[test]
 fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refused_in_words() {
     let place = Place::new("screens");
-    let host = place.start();
+    // A home of its own: what is read of OpenCode is empty on every machine, and no Host of a
+    // test reads the machine's own catalogue or store (found on the build machine, 20 Nov 2026).
+    let home = place.root.join("home");
+    let homes = [
+        ("HOME", home.clone()),
+        ("XDG_CACHE_HOME", home.join(".cache")),
+        ("XDG_DATA_HOME", home.join(".local/share")),
+    ];
+    let world: Vec<(&str, &str)> = homes
+        .iter()
+        .map(|(name, path)| (*name, path.to_str().unwrap()))
+        .collect();
+    let host = place.start_in("", &[], &world);
     let echo = host.new_agent("Echo");
 
     // What is read: nothing of the kind is here, said in the Python Host's own fields.
@@ -23442,19 +23464,9 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     for (path, body) in [
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
-        ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
-        (
-            "/harness-providers/login",
-            json!({ "harness": "opencode", "provider": "p" }),
-        ),
         ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
         ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
-        (
-            "/managed-skills",
-            json!({ "id": "clarp-media", "enabled": true }),
-        ),
-        ("/backend-auth/logout", json!({ "backend": "claude" })),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));
         let why = said["error"].as_str().unwrap_or("");

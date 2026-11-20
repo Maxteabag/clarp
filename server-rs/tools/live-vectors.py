@@ -68,7 +68,11 @@ def at(ms, call, **args):
 
 
 def a_hub():
+    from lib import live_core
     from lib.live_core import LiveHub
+    # Whom a turn is for (`audience`, the Python Host's PR 482) is asked of its database: here a
+    # stand-in answers, so that no hub of this script ever opens one.
+    live_core._turn_audience = lambda _agent_id, _turn_id: 'user'
     now = {'ms': 0}
     sent: list = []
     manual = Manual(lambda: now['ms'])
@@ -676,6 +680,22 @@ def text_pairs():
     yield '\n'.join(block), '\n'.join(changed)
 
 
+# What the Rust Host does not have yet: a turn's `audience` (coordination between agents, the
+# Python Host's PR 482, its contract 108). Left out of what is written, here and nowhere else;
+# the port of PR 482 puts it back.
+NOT_YET_KEYS = frozenset({'audience'})
+
+
+def without_not_yet(value):
+    """`value` without the keys of NOT_YET_KEYS on a turn (a dict that names its `turn_id`)."""
+    if isinstance(value, list):
+        return [without_not_yet(item) for item in value]
+    if isinstance(value, dict):
+        turn = 'turn_id' in value
+        return {key: without_not_yet(item) for key, item in value.items() if not (turn and key in NOT_YET_KEYS)}
+    return value
+
+
 def written(vectors: dict) -> str:
     """The vectors as a file: one case on a line, so that a change to one case is a change to one line."""
     out = ['{']
@@ -727,6 +747,7 @@ def main() -> int:
         'claude': [claude_case(name, steps) for name, steps in claude_streams()],
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    vectors = without_not_yet(vectors)
     OUT.write_text(written(vectors))
     events = sum(len(step['events']) for case in vectors['hub'] + vectors['claude'] for step in case['steps'])
     print(f'{OUT.relative_to(REPO)}: {len(fixtures)} recorded streams, {len(vectors["titles"])} titles, '

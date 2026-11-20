@@ -75,11 +75,14 @@ fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
     let actions = app.config.accounts == clarp_kernel::recovery::Accounts::Select && seats;
     let chip = app.chip.pushes();
     let fcm = app.android.configured();
+    let skills = crate::managed_skills::keeps(&app.config);
     FEATURES.iter().filter(move |(feature, _)| {
         (*feature != CHIP || chip)
             && (*feature != SEATS || seats)
             && (*feature != "hotseat_desk_actions" || actions)
+            && (*feature != "backend_auth" || crate::logins::sign_in::keeps(app))
             && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
+            && (*feature != "managed_skills" || skills)
     })
 }
 
@@ -215,6 +218,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // for Codex by what Codex writes of its account and by a turn that failed for a usage
     // limit, for Claude by what Claude Code says as it runs. No provider is asked.
     ("backend_quota", 3),
+    // A tool signed in and out from an app (`/backend-auth/login`, `/login-code`, `/logout`).
+    // Listed only by the Host that keeps the machine's tools (`--accounts select`): every
+    // other refuses the change.
+    ("backend_auth", 1),
     // The desk of the machine's account seats (`GET /hotseat/desk`): every saved account of
     // the agents' tools with its windows, its state and its clocks, read with the owner's
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
@@ -224,6 +231,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `clarp.hotseat-status/1`): served from what was kept, nothing read for it. Listed by
     // every Host, as there: the strict answer of a Host without the owner's tool says so.
     ("accounts_hotseat", 78),
+    // Signing OpenCode and DeepSeek in to their providers of models from an app
+    // (`/harness-providers`); with it an app lists every harness's login
+    // (`/backend-auth?harnesses=all`). A change is made only by a Host that keeps this
+    // machine's tools (`--accounts select`); any other refuses it in words.
+    ("harness_model_providers", 75),
     ("transcription", 1),
     // What an agent says aloud (`/tts/providers`, `/voices`, `/voice-catalog`,
     // `/voice-preview`, the clips): five built-in engines, among them Google's Chirp 3 HD
@@ -272,6 +284,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("herald", 1),
     // How the agents speak: the owner's personalities and the humanness of a spoken reply.
     ("personalities", 1),
+    // The skills kept installed for the tools (`/managed-skills`): listed only by a Host that
+    // keeps them, one started with `--accounts select` and a tree of skills.
+    ("managed_skills", 1),
     ("agent_portraits", 1),
     ("voice_humanness", 46),
     // The router of spoken messages (`/orchestrator/*`).
@@ -309,6 +324,9 @@ pub struct App {
     pub capture: Arc<crate::diagnostics::Capture>,
     pub controller_actions: Arc<crate::controller_actions::Desk>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
+    /// Held by a change to the skills this Host keeps installed, from its reading of the
+    /// tools' folders to its keeping of the chosen list.
+    pub skill_links: Arc<tokio::sync::Mutex<()>>,
     pub config: Arc<Config>,
     /// What makes and reads the token each turn is given, which tells whose turn calls.
     pub turns: Arc<crate::turn_identity::Signer>,
@@ -366,6 +384,8 @@ pub struct App {
     pub pools: Vec<Arc<crate::pool::Service>>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
+    /// The sign-ins of the tools started from an app, where this Host keeps the tools.
+    pub sign_ins: Arc<crate::logins::sign_in::Desk>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
     /// speak was taken away.
     pub door: Arc<Door>,
@@ -600,6 +620,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::portrait_generation::routes())
+        .merge(crate::managed_skills::routes())
         .merge(crate::contacts::routes())
         .merge(crate::places::routes())
         .merge(crate::oracle::routes())
