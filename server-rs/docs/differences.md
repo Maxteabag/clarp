@@ -37,9 +37,10 @@ one of these:
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
 | `managed_skills` on a Host that does not keep the machine's tools | one Host keeps a machine's tools (the lead's ruling of 20 Nov 2026): it is listed by a Host started with `--accounts select` and the tree of skills the install tool ships, and by no other |
-| `backend_auth`, `harness_model_providers` | to be built |
+| `harness_model_providers` | to be built |
 | `compaction_outcome` | to be built: the port of the Python Host's PR 483 (R148), what the user's last compaction of an agent did, on its row (`last_compaction`). The Python Host's contract is 107 with it; this Host's stays 106 until the port |
 | `voice_profile`, `speech_outcome` | to be built: the port of the Python Host's PR 485, what an agent sounds like and how it is heard as the Host resolves them (`voice_profile` on an agent's row, the creation answer and the roster's events, `voice_defaults` and `voice_profile_version` on the snapshot's head, the roster's `voice-changed` and `voice-profile` events, `accepts_language_set` on the hosted transcription models) and why a reply was not spoken (`reason`, `provider` and `trace_id` on `tts-error`, once a turn). The Python Host's contract is 109 with them; this Host's stays 106 until the port |
+| `backend_auth` | listed only by the Host that keeps its machine's tools (`--accounts select`); every other refuses a sign-in or sign-out from an app |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
@@ -81,7 +82,7 @@ Host's first day says there what this Host must not say of itself.
 | Banked Claude resets on account exhaustion | When no saved account can serve, the account switcher reports exhaustion and the affected turns wait. | The Python switcher can offer a configured banked reset after both its filtered and raw readings show exhaustion. Automatic redemption and reconciliation need separate owner authorization on this Host. |
 | Podcasts (`GET /podcast-history`, `/podcast-history/sources`) | none: podcasts are left out for now by the owner's decision of 19 Nov 2026 | none |
 | The Oracle (`GET /oracle/status`, `/oracle/calls/status`) | the status says what this Host holds: calls of the second kind (`v2`) where the owner's OpenAI key is there, in the thread of their owner and contact or anew, also to the contact alone, on GPT-Live or, with a Gemini key, Gemini Live (`voice_providers` then lists both). Not claimed: the first kind of call (`available` is false whatever key there is) and detours into a podcast, both left out for now by the owner's decision of 19 Nov 2026; and, because not built, WebRTC and the other engine of the second kind (`v2_tinkered`). No call of the first kind is held (`/oracle/calls/status`) | a call of the first kind and a call that asks for a podcast detour are refused in words. Built: the Oracle's contact, the choice of its voice, what it hands to agents, its calls, and a call put through to an agent and back (`/oracle/contact`, `/oracle/voice-provider`, `/oracle/delegations`, `GET /oracle/v2`, `/oracle/connect`, `/oracle/handoff`, `/oracle/handoffs/ack`) |
-| The tools' logins (`GET /backend-auth`) | reports the installed tools and the presence and expiry of their credentials. A successful usage query verifies the credential that answered for one minute. | Sign-in and sign-out take place in the tool. The Host returns no account name. |
+| The tools' logins (`GET /backend-auth`) | reports the installed tools and the presence and expiry of their credentials. A successful usage query verifies the credential that answered for one minute. The Host that keeps its machine's tools (`--accounts select`) also says, as there, that Claude Code, Codex and Grok can be signed in from an app (`can_login`), that a login that is there can be signed out (`can_logout`), and the last sign-in of each (`tasks`) | The Host returns no account name. Signing in and out from an app is described below |
 | How much of an account is used (`GET /backend-usage`) | the Host counts its own turns and listens for limits in their streams. With `--ask-usage`, it also refreshes Claude and Codex account windows and Antigravity model-group windows on demand. | Asking is opt-in. The legacy rows include this Host's turn totals for Antigravity as well. Provider failures use credential-free error messages. |
 | The Host's software (`GET /server-update`) | who it is, that nobody looked for a newer one, and that it is not updated from an app | refused: whoever installed it updates it with the installer |
 | The skills kept installed for the tools (`GET /managed-skills`) on a Host started with `--accounts follow` or with no mode, or installed without a tree of skills | none: such a Host keeps no skills, and reads no tool's folder | refused, 409, with `skills_kept_elsewhere` (or `skills_not_shipped`) and one sentence; nothing is written, at a change or at a start. One Host keeps a machine's tools (the lead's ruling of 20 Nov 2026) |
@@ -89,9 +90,17 @@ Host's first day says there what this Host must not say of itself.
 Refused in words, 501, as not built: a tool's own servers (`POST /agent-mcp`), signing a harness in to a
 provider of models (`/harness-providers`: none is listed); and nudging a team (`POST /team-nudging`),
 in the same words, teams being left out for now by the owner's decision of 19 Nov 2026.
-Under `/backend-auth/`, `/harness-providers/`, `/agent-goal/` and `/oracle/` a change is refused so only
+Under `/harness-providers/`, `/agent-goal/` and `/oracle/` a change is refused so only
 where the Python Host has a route for it (its exact table: `clarp_kernel::doors`, by 480 requests of its own
 dispatcher); any other is no route, its plain 404 `not found`, as there.
+
+| Signing a tool in and out from an app (`POST /backend-auth/login`, `/login-code`, `/logout`) | Python Host | Rust Host | Why |
+|---|---|---|---|
+| Which Host does it | every Host | only the Host started with `--accounts select`. One beside it (`follow`) or with no mode refuses each of the three, 409 `This Host does not keep this machine's tools; sign the tool in or out on the Host that does.`, before it reads the request, starts nothing, lists no `backend_auth` and says `supports_auth: false`; what it reads is as before | Two Hosts may share a machine, and its tools keep one login each: one Host keeps them (the lead's ruling of 20 Nov 2026). Anything else under `/backend-auth/` is no route on either, as there |
+| A sign-out while a sign-in of the same tool still runs, then a sign-in | a second sign-in of the tool is started beside the first | the one that runs is answered | Two of a tool's sign-ins at once write the same login |
+| Why a code could not be handed to the tool, or a tool could not be started | Python's words for the failure of the system (`[Errno 32] Broken pipe`) | Rust's (`Broken pipe (os error 32)`) | The words are the language's |
+| A sign-out the tool does not end within thirty seconds | no answer of its own: the request fails | 409 `Sign-out timed out.` | The reference does not catch it |
+| After a sign-in or sign-out of Codex | the app servers of Codex that run are ended, so that the next turn reads the new login | nothing | This Host runs no app server of Codex: each turn is a `codex exec` of its own, which reads the login as it starts |
 
 | A conversation made shorter from an app (`POST /compact`) | Python Host | Rust Host | Why |
 |---|---|---|---|

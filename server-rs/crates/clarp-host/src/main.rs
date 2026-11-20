@@ -291,6 +291,7 @@ async fn serve(config: Config) -> Result<(), String> {
             config.accounts == clarp_kernel::recovery::Accounts::Select,
         )),
         models: Arc::default(),
+        sign_ins: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
         ears: {

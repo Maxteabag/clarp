@@ -27,7 +27,8 @@ for label,old,new in [
     ('the %XX read before the list','if clarp_kernel::doors::registered(uri.path()) {','if clarp_kernel::doors::registered(&uri.path().replace("%69", "i")) {'),
     ('no route in JSON','ApiError::plain(StatusCode::NOT_FOUND, "not found")\n    }\n}','ApiError::new(StatusCode::NOT_FOUND, "not found")\n    }\n}'),
     ('the Oracle not asked','not_built_at(&uri, "The Oracle is")','not_built("The Oracle is")'),
-    ('the logins not asked','not_built_at(&uri, "Signing a tool in or out from an app is")','not_built("Signing a tool in or out from an app is")'),
+    # 'the logins not asked' lives in backend-auth.py since the sign-ins were built ('every way under the door is a
+    # change'): /backend-auth/ answers only its three changes, and anything else under it is no route.
     ('the harness not asked','not_built_at(&uri, "Signing a harness in to a provider of models is")','not_built("Signing a harness in to a provider of models is")'),
     ('the old goal not asked','not_built_at(&uri, "A goal of this kind is")','not_built("A goal of this kind is")'),
 ]:
