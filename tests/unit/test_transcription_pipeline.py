@@ -537,3 +537,57 @@ def test_the_own_engine_is_judged_by_its_declared_languages(monkeypatch):
         raise custom_stt_adapters.AdapterError("adapter gone")
     monkeypatch.setattr(custom_stt_adapters, "models", down)
     assert "unavailable: adapter gone" in refusal(config.load(), ["no", "en"])
+
+
+# F2: the fallback never sends the recording again to an engine that already failed for it.
+def test_the_fallback_never_resends_to_an_engine_that_already_failed(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["elevenlabs:scribe_v2", "deepgram:nova-3"])
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_model(monkeypatch, "small.en")
+    stt = PerModelSTT({"elevenlabs:scribe_v2": RuntimeError("elevenlabs 503"),
+                       "deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v2", "deepgram:nova-3"]
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"][0] == "elevenlabs:scribe_v2 already failed for this recording"
+
+
+def test_after_a_failed_set_engine_the_own_engine_still_takes_over(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["elevenlabs:scribe_v2", "deepgram:nova-3"])
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"elevenlabs:scribe_v2": RuntimeError("elevenlabs 503"),
+                       "deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"]["to"] == "server-default"
+    assert [c[0] for c in stt.calls] == ["model", "model", "bytes"]
+
+
+def test_the_own_engine_that_already_failed_is_not_asked_again(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["server-default", "deepgram:nova-3"])
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"server-default": RuntimeError("whisper worker crashed"),
+                       "deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 422
+    assert out.payload["reasons"] == ["the Host's own engine already failed for this recording"]
+    assert [c[0] for c in stt.calls if c[0] == "bytes"] == []
+
+
+def test_the_engine_that_just_refused_the_set_is_not_asked_again(monkeypatch):
+    # Even were it the Host's selection, the engine that refused is never sent the recording again.
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "deepgram:nova-3")
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"]["to"] == "server-default"
+    assert [c[0] for c in stt.calls] == ["model", "bytes"]
+

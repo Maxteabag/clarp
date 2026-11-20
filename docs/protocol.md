@@ -602,7 +602,8 @@ When the engine cannot be handed the agent's language set (a set such as `no,en`
 to Google Chirp or ElevenLabs Scribe), the Host stays within what the owner chose for
 transcription: its selected engine when that one takes the set, else its own engine when its
 model declares the agent's languages (a model that declares none: unless it is a `.en`
-model). The response then adds `engine_fallback`:
+model). An engine this recording already went to and that failed is not sent it again.
+The response then adds `engine_fallback`:
 `{"from", "to", "reason": "language_set", "languages"}` (`languages`: the codes the engine was
 handed, or `"detected"`). Otherwise it answers `422`
 `{"error": "language_set_unsupported", "message", "engine", "languages", "engines", "reasons"}`,

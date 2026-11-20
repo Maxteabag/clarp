@@ -273,7 +273,7 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
     (text, ends_terminal, duration, model that ran, engine_fallback or None) or the
     error outcome."""
     engine_fallback = None
-    from .stt_providers import LanguageSetRefused
+    from .stt_providers import LanguageSetRefused, LanguageSetUnsupported
     try:
         # Authoritative transcript: wait for the whisper lock rather than
         # 429 — best-effort live-transcription partials must yield to it.
@@ -289,6 +289,7 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                 # The agent's fallback engines are tried in order when its
                 # first engine fails, so one provider outage does not lose
                 # the user's recording.
+                failed: list[str] = []      # engines this recording went to and that failed
                 for index, engine in enumerate([requested_model, *agent_fallbacks]):
                     # Only an engine with a fallback after it gives up on a
                     # variant another request is warming (VP-08).
@@ -300,19 +301,21 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                         break
                     except Exception as e:  # noqa: BLE001 - busy, loading or missing too (VP-09)
                         if index == len(agent_fallbacks):
-                            from .stt_providers import LanguageSetUnsupported
                             if not isinstance(e, LanguageSetUnsupported):
                                 raise
                             # R152: the engine (often one the device chose) cannot take the
                             # agent's language set. A choice made in another screen must not
                             # lose the recording: the Host's chain hears it, and says which.
                             text, ends_terminal, _dur, ran, heard_in = _language_set_fallback(
-                                stt, model_transcribe, engine, audio_bytes, ctype, prompt, focus)
+                                stt, model_transcribe, engine, audio_bytes, ctype, prompt, focus,
+                                failed=failed)
                             engine_fallback = {"from": engine, "to": ran, "reason": "language_set",
                                                "languages": heard_in}
                             requested_model = ran
                             break
                         log_exception("sttAgentEngineFallback", e, detail=engine)
+                        if not isinstance(e, LanguageSetUnsupported):
+                            failed.append(engine)
         elif requested_model and requested_model != "server-default":
             raise STTUnknownModelError(
                 f"transcription model not installed: {requested_model}")
@@ -362,16 +365,24 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
 
 
 def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: bytes, ctype: str,
-                           prompt, focus: str):
+                           prompt, focus: str, *, failed: list[str] = ()):
     """Hear a recording whose engine cannot take the agent's language set, within what
     the owner chose for transcription (R152): the Host's selected engine when it can take
     the set, else the Host's own engine when its model detects the language, else refuse
-    (stt_providers.LanguageSetRefused). Returns (text, ends_terminal, duration, engine,
-    the languages it was handed or "detected")."""
+    (stt_providers.LanguageSetRefused). An engine this recording already went to and
+    that failed (`failed`) is not sent it again. Returns (text, ends_terminal, duration,
+    engine, the languages it was handed or "detected")."""
     from . import stt_language, stt_providers
     from .config import load
+    reasons = []
     target = stt_providers.language_set_engine()
-    if target and target != engine:
+    if target and any(stt_providers.provider_of(f) == stt_providers.provider_of(target)
+                      for f in [*failed, engine]):
+        # Never a second time to an engine this recording already went to (or the one
+        # that just refused it).
+        reasons.append(f"{target} already failed for this recording")
+        target = ""
+    if target:
         log("sttLanguageSetFallback", f"session={focus or '-'} {engine} -> {target}")
         with stt_language.capturing_handed() as handed:
             text, ends_terminal, dur = model_transcribe(target, audio_bytes, ctype, prompt, wait=10.0)
@@ -381,6 +392,9 @@ def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: byte
     languages = (stt_language.current_language() or stt_language.language_for(focus)).split(",")
     # Whether the own engine hears it is read from its model's declared languages.
     own_refusal = stt_providers.own_engine_refusal(load(), languages)
+    own_ids = {"", "server-default", "local", getattr(stt, "default_model_id", None)}
+    if not own_refusal and any(f.strip() in own_ids for f in failed):
+        own_refusal = "the Host's own engine already failed for this recording"
     if not own_refusal:
         log("sttLanguageSetFallback", f"session={focus or '-'} {engine} -> server-default")
         text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
@@ -389,7 +403,7 @@ def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: byte
         f" own={own_refusal}")
     raise stt_providers.LanguageSetRefused(engine=engine, languages=languages,
                                            engines=stt_providers.language_set_engines(),
-                                           reasons=[own_refusal])
+                                           reasons=[*reasons, own_refusal])
 
 
 def _after_transcript(ctx, *, text: str, ends_terminal: bool, dur, requested_model: str,
