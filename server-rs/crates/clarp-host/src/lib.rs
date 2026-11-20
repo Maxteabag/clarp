@@ -66,6 +66,7 @@ pub mod pairing;
 pub mod past;
 pub mod peers;
 pub mod personas;
+pub mod pictures;
 pub mod places;
 pub mod plans;
 pub mod pool;

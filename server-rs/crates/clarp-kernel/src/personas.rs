@@ -257,7 +257,7 @@ pub fn told(made: &Made) -> Value {
         "voice_id": made.voice_id,
         "avatar_symbol": made.avatar_symbol,
         "avatar_url": avatar_url,
-        // Nothing makes pictures here: none is ever on its way.
+        // Said by the Host where the picture is under way (`pictures::under_way`).
         "avatar_generation_status": null,
         "personality": made.personality,
         "tier": tier(&made.name),

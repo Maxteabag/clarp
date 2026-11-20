@@ -1049,6 +1049,12 @@ pub fn roster_contact_assigned(session: &str, name: &str) -> Value {
     json!({ "type": "agent-roster", "kind": "contact-assigned", "session": session, "name": name })
 }
 
+/// A contact was given its picture, or the making of it ended either way: the apps read the
+/// list again, and the contact's name says which (`background_job_watcher`).
+pub fn roster_persona_updated(persona: &str) -> Value {
+    json!({ "type": "agent-roster", "kind": "persona-updated", "persona": persona })
+}
+
 /// The personas changed (`persona-created`, `persona-updated`, `persona-deleted`): the apps
 /// read the list again.
 pub fn roster_personas(kind: &str) -> Value {

@@ -1317,6 +1317,34 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
             roster.push(name);
         }
     }
+    // A contact's picture under way, said on the contact and on its agents that have neither a
+    // picture nor a symbol of their own (`avatar_generation_status_for_agent`).
+    let under_way = crate::pictures::under_way(&app).await;
+    let mut personas = personas.clone();
+    if !under_way.is_empty() {
+        let mut by_name = HashMap::new();
+        for persona in &mut personas {
+            let id = persona["id"].as_str().unwrap_or("").to_string();
+            if let Some(status) = under_way.get(&id) {
+                persona["avatar_generation_status"] = json!(status);
+                let name = persona["name"].as_str().unwrap_or("").to_lowercase();
+                by_name.insert(name, status.clone());
+            }
+        }
+        for row in &mut agents {
+            let bare = row["avatar_symbol"].as_str().unwrap_or("").is_empty()
+                && row["is_janitor"] != true
+                && directory.members.iter().any(|member| {
+                    member.record.session == row["session"].as_str().unwrap_or("")
+                        && member.record.avatar.is_none()
+                        && member.record.avatar_symbol.is_empty()
+                });
+            let name = row["persona"].as_str().unwrap_or("").to_lowercase();
+            if let Some(status) = by_name.get(&name).filter(|_| bare) {
+                row["avatar_generation_status"] = json!(status);
+            }
+        }
+    }
     let mut body = json!({
         "agents": agents,
         "focus": directory.focus,
@@ -1614,6 +1642,13 @@ pub(crate) async fn make_agent(
             record
         }
     };
+    // A contact without a picture is asked one, where the request gave the agent neither a
+    // picture nor a symbol of its own (`agent_lifecycle.create`); nothing waits for it.
+    let given = |key: &str| plain(key).is_some_and(|said| !said.trim().is_empty());
+    if !record.is_janitor && !given("avatar_base64") && !given("avatar_symbol") {
+        let (app, name, backend) = (app.clone(), record.persona.clone(), record.backend.clone());
+        tokio::spawn(async move { crate::pictures::ask(&app, &name, "", &backend).await });
+    }
     Ok(made_as(app, &record))
 }
 

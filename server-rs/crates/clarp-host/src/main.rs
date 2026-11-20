@@ -349,6 +349,12 @@ async fn serve(config: Config) -> Result<(), String> {
     ));
     clarp_host::chip::run(&app, is_limited);
     tokio::spawn(clarp_host::android_chip::run(app.clone()));
+    // A contact's picture that was being made when the Host stopped ends failed, as a try:
+    // nothing is asked of a provider at a start.
+    {
+        let app = app.clone();
+        tokio::spawn(async move { clarp_host::pictures::interrupted(&app).await });
+    }
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
     // And a handoff of the Oracle's that a phone does not get on with is not waited for.

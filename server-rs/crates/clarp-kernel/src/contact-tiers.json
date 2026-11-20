@@ -44,6 +44,17 @@
    "Personality: analytical and approachable — hypothesis-driven, plainspoken, and focused on leaving everything cleaner than you found it.",
    "Personality: reflective and resourceful — you connect the big picture to concrete next steps without fuss.",
    "Personality: pragmatic and personable — calm under pressure, transparent about uncertainty, and thorough in verification."
+  ],
+  "portrait_template": "A photorealistic candid 35mm portrait photograph of {name}, {detail}. Captured at a natural three-quarter angle in a sunlit architectural studio with soft natural bokeh. Authentic human skin texture, warm editorial window lighting, centered 1:1 head-and-shoulders framing, one person only, no CGI plastic sheen, no text, no logos, no borders, no watermarks.",
+  "portrait_varieties": [
+   "a woman in her late twenties with warm dark eyes and wavy chestnut hair, wearing a soft oatmeal knit crew-neck",
+   "a man in his early thirties with short curls, light stubble, and a relaxed smile, wearing an olive linen overshirt",
+   "a South Asian woman in her thirties with expressive dark eyes and shoulder-length black hair, wearing a clean slate studio jacket",
+   "an East Asian man in his late twenties with neat tousled hair and wire-rimmed glasses, wearing a charcoal merino sweater",
+   "a woman in her mid-thirties with freckles, copper-auburn hair tied loosely back, wearing a warm navy cotton shirt",
+   "a Black man in his thirties with a close-cropped fade and warm confident expression, wearing a minimalist sand overshirt",
+   "a Mediterranean man in his late twenties with dark wavy hair and warm hazel eyes, wearing a stone-grey henley",
+   "a Nordic woman in her early thirties with windswept blonde bob hair and bright blue-grey eyes, wearing a forest-green wool top"
   ]
  },
  {
@@ -91,6 +102,13 @@
    "Personality: a composed execution android — zero fluff, clear status updates, and careful attention to invariants.",
    "Personality: an agile architecture android — perceptive, adaptable, and swift to turn intent into working software.",
    "Personality: a dependable workshop android — practical, low-ego, and meticulous about real runtime proof."
+  ],
+  "portrait_template": "A photorealistic candid 35mm portrait photograph of {name}, a sleek humanoid android engineer featuring {detail}. Captured at a three-quarter angle in a calm modern workshop with soft ambient bokeh. Subtle cybernetic micro-seams and expressive synthetic optics, natural cinematic lighting, centered 1:1 head-and-shoulders framing, one character only, no green matrix rain, no text, no logos, no borders, no watermarks.",
+  "portrait_varieties": [
+   "brushed warm titanium cranial plates, soft amber ring-lit optical irises, and a matte charcoal composite collar",
+   "porcelain-white ceramic faceplates with delicate gold micro-seams, calm cyan optical irises, and a slate acoustic collar",
+   "anodized slate-blue alloy cheek seams, warm silver-blue synthetic optics, and sculpted carbon-weave shoulder armour",
+   "satin bronze-and-obsidian facial geometry, luminous seafoam optical sensors, and precision telemetry ear vanes"
   ]
  },
  {
@@ -138,6 +156,13 @@
    "Personality: energetic punk builder — playful attitude, crisp answers, and strong follow-through.",
    "Personality: dry-witted pragmatist — allergic to ceremony, fast to test assumptions, and loyal to the mission.",
    "Personality: spirited rogue engineer — candid, resourceful, and always ready to turn a tricky problem around."
+  ],
+  "portrait_template": "Bold graphic-novel character portrait illustration of {name}, an edgy cyberpunk rebel engineer with {detail}. Expressive ink linework and painterly neon rim lighting, centered 1:1 head-and-shoulders framing, one character only, no text, no speech bubbles, no logos, no borders, no watermarks.",
+  "portrait_varieties": [
+   "messy hair with electric magenta highlights, leather moto jacket, neon rain reflections behind",
+   "undercut silver-streaked hair, vintage denim vest with patches, amber alley neon bokeh behind",
+   "tousled jet-black hair with cyan tips, scarred brow and wry grin, dark synthwave rooftop lights behind",
+   "cropped crimson-tinted hair, aviator collar jacket and confident smirk, industrial neon glow behind"
   ]
  },
  {
@@ -185,6 +210,13 @@
    "Personality: an expressive astral guide — vivid, friendly, and grounded in practical execution.",
    "Personality: a cozy, patient lantern spirit — soothing under pressure and crisp when explaining how things fit together.",
    "Personality: a spirited nebula explorer — energetic, synthesizing wide context into clean, actionable steps."
+  ],
+  "portrait_template": "Stylized high-craft digital character portrait of {name}, a warm whimsical cosmic genie spirit with {detail}. Majestic celestial lighting, expressive friendly face, centered 1:1 head-and-shoulders framing, one character only, no text, no logos, no borders, no watermarks.",
+  "portrait_varieties": [
+   "luminous indigo stardust skin, warm golden eyes, and a floating crystalline Gemini spark star",
+   "soft celestial violet-and-amber aura, joyful eyes, and swirling twilight nebula light",
+   "warm sunlit cloud-and-gold genie aesthetic, friendly grin, and shimmering astral particles",
+   "turquoise-and-starlight cosmic sage aesthetic, gentle expression, and radiant constellation bokeh"
   ]
  },
  {
@@ -232,6 +264,13 @@
    "Personality: a resourceful trench pilot — pragmatic, resilient, and focused on reliable outcomes.",
    "Personality: a perceptive Pelagic scout — crisp observations, zero wasted motion, and steady follow-through.",
    "Personality: a thoughtful subsea engineer — deliberate, calm, and exact about every invariant."
+  ],
+  "portrait_template": "Cinematic underwater portrait photograph of {name}, a calm deep-sea explorer with {detail}. Realistic skin texture, shallow depth of field, centered 1:1 head-and-shoulders framing, no goggles covering the eyes, one person only, no text, no logos, no borders, no watermarks.",
+  "portrait_varieties": [
+   "matte charcoal technical dive collar, cold electric-blue bioluminescence on damp hair, drifting abyssal plankton",
+   "brushed brass-and-slate submersible suit collar, cyan deep-sea glow across cheek, distant whale silhouette in dark water",
+   "navy expedition drysuit collar with silver whale pin, soft aquamarine underwater light, tranquil deep-ocean bokeh",
+   "darktitanium oceanographer collar, bioluminescent teal rim light and tiny suspended water droplets"
   ]
  }
 ]

@@ -6,7 +6,7 @@
 #   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH]
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
 #                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
-#                                [--push-keys FILE|off]
+#                                [--push-keys FILE|off] [--contact-pictures on|off]
 #                                [--seats-tool PATH|off] [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
@@ -74,12 +74,17 @@
 #                  as the Python Host is named while that Host runs or can come back by itself.
 #                  `off`: the Host is told of no file at all. Never the Python Host's file by
 #                  default, though the keys of speech are read there
+#   --contact-pictures whether a contact that has no picture is drawn one by the provider of
+#                  pictures (OpenAI's gpt-image-2, with the owner's [openai] api_key, twenty a rolling
+#                  day at most): `on` or `off` (the default). It spends, so it is said here and
+#                  nowhere else: the Host starts with --contact-pictures only where this says on
 #   --start        enable the unit and start it, or restart it when it runs (turns that are running
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
 # What an installation was told (--listen, --name, --claude, --codex, --push-relay, --whisper,
-# --speech-keys, --push-keys, --transcription-engine, --relay, --relay-config, --seats-tool) is kept with
+# --speech-keys, --push-keys, --transcription-engine, --relay, --relay-config, --seats-tool,
+# --contact-pictures) is kept with
 # it, in ~/.config/clarp-host/install.conf, so that an update is this command with no more than
 # --start: a relay that was turned off stays off. What is said now replaces what was kept, and
 # `default` forgets it (--push-relay default).
@@ -102,10 +107,10 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--agy|--opencode|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--agy|--opencode|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool|--contact-pictures) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -120,7 +125,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|agy|opencode|push-relay|accounts|whisper|speech-keys|push-keys|transcription-engine|relay|relay-config|seats-tool) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|agy|opencode|push-relay|accounts|whisper|speech-keys|push-keys|transcription-engine|relay|relay-config|seats-tool|contact-pictures) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -223,6 +228,13 @@ push_keys="${chosen[push-keys]:-off}"
 [ "$push_keys" = off ] && push_keys=""
 if [ -n "$push_keys" ] && [ ! -f "$push_keys" ]; then echo "install-host: --push-keys $push_keys: no such file" >&2; exit 2; fi
 speech="$speech${push_keys:+ --push-keys \"$push_keys\"}"
+# The making of a contact's picture spends: only where this installation was told on.
+contact_pictures="${chosen[contact-pictures]:-off}"
+case "$contact_pictures" in
+    on) speech="$speech --contact-pictures" ;;
+    off) ;;
+    *) echo "install-host: --contact-pictures $contact_pictures: on or off" >&2; exit 2 ;;
+esac
 # Whether phones reach this Host through the connection relay, and under which name there. The
 # name a file gives a Host, when the file turns the relay on: nothing else of it is read here.
 relay_name() {
@@ -551,6 +563,11 @@ elif [ -n "$relay_config" ]; then
     echo "the connection relay is off (--relay on turns it on): this Host dials no relay for the phones"
 else
     echo "the connection relay: none (this Host is told of no file that could turn it on)"
+fi
+if [ "$contact_pictures" = on ]; then
+    echo "contact pictures: on: a contact with no picture is drawn one by OpenAI, with the owner's key (--contact-pictures off turns it off)"
+else
+    echo "contact pictures: off (--contact-pictures on turns it on): nothing is drawn, nothing is spent"
 fi
 [ -s "$kept" ] && echo "kept with the installation: $(tr '\n' ' ' < "$kept")"
 echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}, agy = ${agy:-not found}, opencode/deepseek = ${opencode:-not found}"

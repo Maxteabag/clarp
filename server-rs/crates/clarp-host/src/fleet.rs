@@ -672,6 +672,14 @@ enum Ask {
         announce: bool,
         answer: Answer<Result<serde_json::Value, String>>,
     },
+    /// A picture made for a contact (`persona_avatar_generation.generate_for_persona`): kept
+    /// on it where it still has neither picture nor symbol, and on the agents that go by it
+    /// with none of their own. Answers its name where it was kept.
+    PictureMade {
+        persona_id: String,
+        picture: Vec<u8>,
+        answer: Answer<Option<String>>,
+    },
     /// The owner removes a persona of his own. Answers whether there was one to remove.
     PersonaRemove {
         name: String,
@@ -1014,6 +1022,21 @@ impl FleetHandle {
             said,
             fetched,
             announce: false,
+            answer,
+        })
+        .await
+    }
+
+    /// Keeps a picture made for a contact ([`Ask::PictureMade`]). Its name where it was kept;
+    /// `None`: the contact is gone, built in, or has a picture or symbol of its own by now.
+    pub async fn picture_made(
+        &self,
+        persona_id: String,
+        picture: Vec<u8>,
+    ) -> Result<Option<String>, Unavailable> {
+        self.ask(|answer| Ask::PictureMade {
+            persona_id,
+            picture,
             answer,
         })
         .await
@@ -1637,6 +1660,13 @@ impl Fleet {
                         self.persona_write(original.as_deref(), &said, &fetched, announce);
                     let _ = answer.send(written);
                 }
+                Ask::PictureMade {
+                    persona_id,
+                    picture,
+                    answer,
+                } => {
+                    let _ = answer.send(self.picture_made(&persona_id, &picture));
+                }
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));
                 }
@@ -1815,6 +1845,66 @@ impl Fleet {
                 .publish(wire::roster_personas(kind), self.now_ms());
         }
         Ok(Ok(told))
+    }
+
+    /// A picture made for a contact, kept in this turn: on the contact where it is still the
+    /// owner's own and has neither picture nor symbol (looked at again now: one may have come
+    /// meanwhile, `generate_for_persona`), and on every agent that goes by its name with
+    /// neither of its own (`agents.sync_contact_avatar`). The apps are told the contact
+    /// changed, with its name.
+    fn picture_made(
+        &mut self,
+        persona_id: &str,
+        picture: &[u8],
+    ) -> Result<Option<String>, Unavailable> {
+        let listed = self.personas_listed();
+        let Some(persona) = listed
+            .iter()
+            .find(|persona| persona["id"] == persona_id && persona["builtin"] == false)
+        else {
+            return Ok(None);
+        };
+        let text = |key: &str| persona[key].as_str().unwrap_or("").to_string();
+        if !text("avatar_url").is_empty() || !text("avatar_symbol").is_empty() {
+            return Ok(None);
+        }
+        let name = text("name");
+        let said = PersonaSaid {
+            name: name.clone(),
+            voice_id: text("voice_id"),
+            avatar_symbol: String::new(),
+            personality: text("personality"),
+            picture: clarp_kernel::python::b64encode(picture),
+        };
+        if self.persona_write(Some(&name), &said, &[], false)?.is_err() {
+            return Ok(None);
+        }
+        let [named, cartesia, gemini] = self.works.telling.owner_tables();
+        let owner = Owner {
+            roster: &named,
+            cartesia: &cartesia,
+            gemini: &gemini,
+        };
+        let digest = self.book.picture_of(&owner, persona_id);
+        let bare: Vec<usize> = (0..self.members.len())
+            .filter(|at| {
+                let record = &self.members[*at].record;
+                !record.is_janitor
+                    && record.avatar.is_none()
+                    && record.avatar_symbol.is_empty()
+                    && record.persona.eq_ignore_ascii_case(&name)
+            })
+            .collect();
+        for at in bare {
+            let mut record = self.members[at].record.clone();
+            record.avatar.clone_from(&digest);
+            let (took, _taken) = oneshot::channel();
+            self.replace(at, record, took)?;
+        }
+        self.works
+            .hub
+            .publish(wire::roster_persona_updated(&name), self.now_ms());
+        Ok(Some(name))
     }
 
     /// The owner removes a persona of his own. Its picture stays where it is kept: an agent

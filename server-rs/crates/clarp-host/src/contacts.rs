@@ -151,6 +151,9 @@ async fn assign(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
             }
         }
     };
+    // The reference asks a picture after an assignment that made a contact: `create`, and
+    // `auto` where it minted one; a contact with a picture of its own is left by the asking.
+    let asks_picture = mode == "create" || mode == "auto";
     let change = if mode == "auto" {
         Amend::ContactAuto(app.mouth.cartesia_known())
     } else {
@@ -168,6 +171,11 @@ async fn assign(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
             return Ok((StatusCode::CONFLICT, Json(told)).into_response());
         }
     };
+    // A contact minted or made here is asked its picture (`needs_avatar`); nothing waits for it.
+    if asks_picture {
+        let (app, name, backend) = (app.clone(), record.persona.clone(), record.backend.clone());
+        tokio::spawn(async move { crate::pictures::ask(&app, &name, "", &backend).await });
+    }
     let told = crate::wire::roster_contact_assigned(&record.session, &record.persona);
     app.hub.publish(told, app.clock.now_ms());
     Ok(Json(json!({

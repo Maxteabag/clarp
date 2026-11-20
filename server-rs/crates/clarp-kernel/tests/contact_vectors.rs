@@ -6,6 +6,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use clarp_kernel::contacts::portrait_prompt;
 use clarp_kernel::contacts::{
     Assigned, Assignee, Contact, Launch, Wearer, allows, assign, given_name, launch, personality,
     pool, tier_of_tool, tool_of_tier,
@@ -107,6 +108,20 @@ fn a_minted_contact_has_the_name_and_the_way_of_speaking_the_python_host_gives_i
         assert_eq!(
             (json!(name), json!(tier)),
             (case["name"].clone(), case["tier"].clone()),
+            "{case}"
+        );
+    }
+    let prompts = vectors["prompts"].as_array().unwrap();
+    assert!(prompts.len() >= 13);
+    for case in prompts {
+        let (name, tier, backend) = (
+            case["name"].as_str().unwrap(),
+            case["tier"].as_str().unwrap(),
+            case["backend"].as_str().unwrap(),
+        );
+        assert_eq!(
+            portrait_prompt(name, tier, backend),
+            case["prompt"],
             "{case}"
         );
     }
@@ -249,5 +264,46 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
                 assert_eq!(json!(name), case["answer"]["name"], "{case}");
             }
         }
+    }
+}
+
+#[test]
+fn the_making_of_pictures_is_bounded_by_the_python_hosts_own_numbers() {
+    use clarp_kernel::contacts::picture;
+    let vectors = vectors();
+    let theirs = &vectors["picture_bounds"];
+    let ours = json!({
+        "daily_limit": picture::DAILY_LIMIT,
+        "daily_window_ms": picture::DAILY_WINDOW_MS,
+        "max_attempts": picture::MAX_ATTEMPTS,
+        "retry_backoff_ms": picture::RETRY_BACKOFF_MS,
+        "heartbeat_timeout_ms": picture::HEARTBEAT_TIMEOUT_MS,
+        "answer_most": picture::ANSWER_MOST,
+        "made_most": picture::MADE_MOST,
+        "kept_most": picture::KEPT_MOST,
+        "model": picture::MODEL,
+    });
+    assert_eq!(&ours, theirs);
+}
+
+#[test]
+fn a_pictures_job_is_begun_as_the_python_host_begins_it() {
+    use clarp_kernel::contacts::picture::{Tried, admitted};
+    let vectors = vectors();
+    let cases = vectors["admissions"].as_array().unwrap();
+    assert_eq!(cases.len(), 15);
+    for case in cases {
+        let before = &case["before"];
+        let tried = before.as_object().map(|_| Tried {
+            status: before["status"].as_str().unwrap(),
+            generation: before["generation"].as_u64().unwrap(),
+            ended_ago_ms: before["ended_ago_ms"].as_i64(),
+        });
+        let begun_today = u32::try_from(case["begun_today"].as_u64().unwrap()).unwrap();
+        assert_eq!(
+            json!(admitted(tried, begun_today)),
+            case["generation"],
+            "{case}"
+        );
     }
 }
