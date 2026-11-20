@@ -70,7 +70,8 @@ FULL_SAMPLES = {
         agent_id="a", session="s", backend_session_id="b"),
     SSEType.QUEUE_UPDATED: lambda: events.queue_updated(
         session="s", agent_id="a", queue_depth=0, queue_paused=False,
-        queue_started=False, queue_revision=1, client_msg_id="m"),
+        queue_started=False, queue_revision=1, client_msg_id="m",
+        queue_change="edited", text="t"),
     SSEType.ARTIFACT_UPDATED: lambda: events.artifact_updated(
         session="s", agent_id="a", artifact_id="x"),
     SSEType.ATTENTION_UPDATED: lambda: events.attention_updated(attention_count=0),

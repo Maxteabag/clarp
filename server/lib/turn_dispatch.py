@@ -197,6 +197,38 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         return in_flight, (_slot_is_spawning(spec.agent_id)
                            or self._has_live_turn(spec))
 
+    def _waits_on_arrival(self, spec: _TurnSpec, slot: tuple[str, bool]) -> bool:
+        """Whether a send that did not ask to wait will wait for the agent:
+        read before its admission writes anything, so that a send that waits is
+        admitted as a queue item and its conversation row is written only by
+        the write that starts its turn (issue 491). The same reading
+        _claim_or_queue makes, without its effects: a Stop, a compaction or an
+        attached terminal holds every send; a running or starting turn holds a
+        user's send (a steerable backend is offered it first, below) and the
+        release drain's fence holds every send behind a live turn; a free slot
+        whose process still runs holds it too. A send of another origin to a
+        live turn preempts it and keeps its row at admission, as before. A
+        second send being admitted for the agent at the same moment leans
+        towards waiting: if the agent is idle after all, the item starts at
+        once, its row written then. ``slot`` is _slot_snapshot's reading."""
+        if _is_call_opening(spec):
+            return False
+        agent_id = spec.agent_id
+        current = _SLOTS.get(agent_id)
+        if current in (_STOPPING_SENTINEL, _COMPACTING_SENTINEL) or _terminal_live(agent_id):
+            return True
+        in_flight, live = slot
+        if in_flight:
+            if not live:
+                return _SLOTS.fenced          # a stale slot is taken over, unless fenced
+            if (current.startswith(_PROCESS_OWNER_PREFIX) or _slot_is_spawning(agent_id)
+                    or _SLOTS.fenced):
+                return True
+            return spec.origin == "user"
+        if _SLOTS.admitting_count(agent_id) > 1:
+            return True
+        return bool(self._running_processes(spec))
+
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
                         park_id: str, queue_user: list,
                         preempt: list | None = None,
@@ -433,10 +465,11 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
             self._steered_into(spec, active_trace)
             if spec.queue_id:
-                # Delivered into the running turn: its durable queue
-                # receipt is spent and the visible user row is due now.
+                # Delivered into the running turn: the visible user row is due
+                # now, written with the item shown in one transaction (the
+                # words the backend was given), then its receipt is spent.
+                self._start_queued_row(spec, steered=True)
                 turn_queue.mark_started(spec.queue_id)
-                self._record_user_message(spec)
                 self._broadcast_queue_state(spec, started=True)
             team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
             eventlog.emit("server", "turnSteered", context=spec.context,

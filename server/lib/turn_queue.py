@@ -211,20 +211,43 @@ def _cas(events, where: str, params=(), *, values=None, returning: str = "", con
                                     params=params, now=db.now_ms(), values=values,
                                     returning=returning)
 
+# What a queue item is (``queued_turns.kind``, issue 491). ``later``: its sender
+# asked for it to wait for the agent's current turn (``queue_if_busy``).
+# ``waiting``: a send that did not ask to wait met a busy agent and waits for
+# the running turn. Both are shown in the queue and run in order; the kind only
+# says why it waits.
+KIND_LATER = "later"
+KIND_WAITING = "waiting"
+
+
+def _row_shown(con, client_msg_id: str, trace_id: str) -> bool:
+    """Whether the conversation already holds this message's user row."""
+    from .message_import_common import _client_message_id
+    key = client_msg_id or trace_id
+    return bool(key) and con.execute(
+        "SELECT 1 FROM messages WHERE message_id = ?", (_client_message_id(key),)
+    ).fetchone() is not None
+
+
 def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
             trace_id: str, client_msg_id: str, synthesize_audio: bool,
             origin: str, sender_agent_id: str,
-            prompt_admission_id: str = "") -> bool:
+            prompt_admission_id: str = "", kind: str = KIND_LATER,
+            allow_paused: bool = False, shown: bool = False) -> bool:
+    """A queue item. ``shown``: the message's conversation row exists already
+    (written by an older admission): the item is kept for the dispatcher but is
+    not shown in the queue, so a message is never both (``show``)."""
+    now = db.now_ms()
     cursor = db.conn().execute(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, enqueued_at,
-               prompt_admission_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               prompt_admission_id, kind, allow_paused, shown_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
-         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id),
+         int(synthesize_audio), origin, sender_agent_id, now,
+         prompt_admission_id, kind, int(allow_paused), now if shown else None),
     )
     inserted = cursor.rowcount == 1
     if inserted:
@@ -244,16 +267,21 @@ def park(*, queue_id: str, agent_id: str, session: str, text: str,
          trace_id: str, client_msg_id: str, synthesize_audio: bool,
          origin: str, sender_agent_id: str,
          prompt_admission_id: str = "", allow_paused: bool = False) -> bool:
-    cursor = db.conn().execute(
+    # A parked send keeps the row it was admitted with: when a restart makes it
+    # queued again it is not also shown in the queue (issue 491).
+    con = db.conn()
+    now = db.now_ms()
+    cursor = con.execute(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?)
+               prompt_admission_id, allow_paused, shown_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
-         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id, int(allow_paused)),
+         int(synthesize_audio), origin, sender_agent_id, now,
+         prompt_admission_id, int(allow_paused),
+         now if _row_shown(con, client_msg_id, trace_id) else None),
     )
     return cursor.rowcount == 1
 
@@ -315,15 +343,17 @@ def park_at_head(*, queue_id: str, agent_id: str, session: str, text: str,
     has open, keeping their order behind it. The caller holds the write
     transaction (the release drain's hand-over writes this, the turn's end
     and its state together)."""
-    cursor = db.conn().execute(
+    con = db.conn()
+    now = db.now_ms()
+    cursor = con.execute(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0)""",
+               prompt_admission_id, allow_paused, shown_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0, ?)""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
-         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id))
+         int(synthesize_audio), origin, sender_agent_id, now,
+         prompt_admission_id, now if _row_shown(con, client_msg_id, trace_id) else None))
     if cursor.rowcount != 1:
         raise RuntimeError(f"could not park {queue_id}")
     _move_behind(agent_id, queue_id)
@@ -1030,7 +1060,23 @@ def fail_refused_launch(row, *, failures: int, error: str) -> bool:
     return True
 
 
-def remove(queue_id: str) -> bool:
+def _may_have_left(row) -> bool:
+    """A waiting item a steer is being handed to (its launch receipt says the
+    prompt may have left): neither edited nor deleted, so the row its turn
+    writes never holds other words than the backend was given (issue 491)."""
+    if not row["trace_id"]:
+        return False
+    from . import launch_receipts
+    receipt = launch_receipts.get(str(row["trace_id"])) or {}
+    return receipt.get("state") == launch_receipts.ATTEMPTED
+
+
+def remove(queue_id: str, *, withdraw_shown: bool = False) -> bool:
+    """Delete a queued item, never one already shown in the conversation (its
+    row was written: the message is the conversation's, not the queue's) or one
+    whose prompt may have left (``_may_have_left``). ``withdraw_shown``: the
+    Host itself withdraws work whose start failed after its row was written
+    (the hotseat desk's prompt): the row stays, the item goes, as before."""
     if not queue_id:
         return False
     row = get(queue_id)
@@ -1039,8 +1085,15 @@ def remove(queue_id: str) -> bool:
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
+        shown = "" if withdraw_shown else " AND shown_at IS NULL"
+        current = con.execute(
+            "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'" + shown,
+            (queue_id,)).fetchone()
+        if current is None or (_may_have_left(current) and not withdraw_shown):
+            con.execute("COMMIT")
+            return False
         cursor = con.execute(
-            "DELETE FROM queued_turns WHERE queue_id = ? AND status = 'queued'",
+            "DELETE FROM queued_turns WHERE queue_id = ? AND status = 'queued'" + shown,
             (queue_id,),
         )
         if cursor.rowcount:
@@ -1081,6 +1134,36 @@ def cancel(queue_id: str) -> bool:
     return row is not None
 
 
+def show(queue_id: str, *, con=None) -> bool:
+    """The message's conversation row is written: from now on it is the
+    conversation's, not the queue's. Called inside the transaction that writes
+    the row (``TurnDispatchService._start_queued_row``), so a reader never
+    finds it in both or in neither. The item stays for the dispatcher (its
+    launch and its retries read it) but is no longer shown, edited or
+    deleted. Idempotent."""
+    if not queue_id:
+        return False
+    con = con or db.conn()
+    cursor = con.execute(
+        "UPDATE queued_turns SET shown_at = ? WHERE queue_id = ? AND shown_at IS NULL",
+        (db.now_ms(), queue_id))
+    if cursor.rowcount:
+        row = con.execute("SELECT agent_id FROM queued_turns WHERE queue_id = ?",
+                          (queue_id,)).fetchone()
+        if row is not None:
+            _bump_revision(str(row["agent_id"]))
+    return bool(cursor.rowcount)
+
+
+def waiting_items(agent_id: str) -> list[dict]:
+    """What a client reads as the agent's queue (GET /turn-queue): the queued
+    items whose conversation row is not written yet, in order."""
+    return [dict(row) for row in db.conn().execute(
+        """SELECT * FROM queued_turns
+            WHERE status = 'queued' AND agent_id = ? AND shown_at IS NULL
+            ORDER BY queue_seq""", (agent_id,))]
+
+
 def get(queue_id: str) -> dict | None:
     row = db.conn().execute(
         "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'",
@@ -1116,15 +1199,16 @@ def update_text(queue_id: str, text: str) -> bool:
     con.execute("BEGIN IMMEDIATE")
     try:
         row = con.execute(
-            "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'",
+            "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'"
+            " AND shown_at IS NULL",
             (queue_id,),
         ).fetchone()
-        if row is None:
+        if row is None or _may_have_left(row):
             con.execute("COMMIT")
             return False
         cursor = con.execute(
             """UPDATE queued_turns SET text = ?
-                WHERE queue_id = ? AND status = 'queued'""",
+                WHERE queue_id = ? AND status = 'queued' AND shown_at IS NULL""",
             (value, queue_id),
         )
         if cursor.rowcount:
@@ -1434,7 +1518,8 @@ def state(agent_id: str) -> dict[str, int | bool]:
     row = db.conn().execute(
         """SELECT
                (SELECT COUNT(*) FROM queued_turns
-                 WHERE agent_id = ? AND status = 'queued') AS pending_count,
+                 WHERE agent_id = ? AND status = 'queued'
+                   AND shown_at IS NULL) AS pending_count,
                COALESCE((SELECT revision FROM queue_state_revisions
                           WHERE agent_id = ?), 0) AS revision,
                COALESCE((SELECT paused FROM queue_state_revisions
@@ -1464,7 +1549,7 @@ def states() -> dict[str, dict[str, int | bool]]:
                  LEFT JOIN (
                      SELECT agent_id, COUNT(*) AS pending_count
                        FROM queued_turns
-                      WHERE status = 'queued'
+                      WHERE status = 'queued' AND shown_at IS NULL
                       GROUP BY agent_id
                  ) q ON q.agent_id = r.agent_id""")
     }

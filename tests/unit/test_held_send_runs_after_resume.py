@@ -120,9 +120,11 @@ def test_a_send_held_by_the_users_stop_runs_after_the_resume(tmp_path, queue):
         f"the held send never ran after the resume (delivery before it read {held!r}; "
         f"steers asked: {world.provider.steers})")
     if not queue:
-        assert world.before_stop[0] == "pending_launch" and held[0] == "stopped"
-        after = _delivery(world, "quebec")
-        assert after[0] == "handed_over" and after[1] > held[1] > world.before_stop[1]
+        # Since issue 491 a send that waits has no conversation row (so no delivery on one)
+        # until the write that starts its turn: before the Stop and while the paused queue
+        # holds it, it is a queue item; the row its turn writes reads handed_over.
+        assert world.before_stop is None and held is None
+        assert _delivery(world, "quebec")[0] == "handed_over"
 
 
 def test_what_a_queue_if_busy_send_reads_in_the_same_walk(tmp_path):
@@ -149,9 +151,10 @@ def test_a_resend_of_a_held_send_answers_from_the_first_and_runs_it_once(tmp_pat
     assert _queue_rows("quebec") == [("quebec", "t-quebec", "queued")]
     world.send("quebec", trace="t-quebec-again")         # the resend, under a new trace
     assert _queue_rows("quebec") == [("quebec", "t-quebec", "queued")]
-    assert message_writes.client_message_trace("quebec") == "t-quebec"
+    assert message_writes.client_message_trace("quebec") == ""   # no row while it waits (issue 491)
     _resume(world)
     assert world.started.count("quebec") == 1, world.started
+    assert message_writes.client_message_trace("quebec") == "t-quebec"
 
 
 # ---- (B) Codex can be steered: a receipt says ATTEMPTED only once the steer can have left ----
