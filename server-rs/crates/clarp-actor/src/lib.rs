@@ -2820,7 +2820,7 @@ impl Actor {
             let owner = serde_json::to_vec(&trace_owner_of(message)).map_err(|error| {
                 ActorError::Corrupt(format!("a trace could not be written: {error}"))
             })?;
-            with.push(NewItem::new(kind::TRACE, now_ms, owner).keyed(&trace_key(trace)));
+            with.push(NewItem::new(kind::TRACE, now_ms, owner).keyed(trace_key(trace)));
         }
         let encoded = if let Some(reservation) = reservation {
             serde_json::to_value(message).and_then(|mut row| {
