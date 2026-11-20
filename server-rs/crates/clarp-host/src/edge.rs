@@ -2564,7 +2564,10 @@ async fn run_tool(State(app): State<App>, Json(call): Json<ToolCall>) -> Json<To
 }
 
 /// Every job the Host knows that is worth showing, with the agent it belongs to.
-async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job, bool)>, ApiError> {
+async fn shown_jobs(
+    app: &App,
+    now: i64,
+) -> Result<Vec<(Option<Arc<Member>>, Job, bool)>, ApiError> {
     let directory = app.fleet.directory();
     let mut jobs: Vec<(Option<Arc<Member>>, Job, bool)> = directory
         .members
@@ -2573,7 +2576,13 @@ async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job
             let view = member.agent.view();
             view.jobs
                 .iter()
-                .map(|job| (Some(member.clone()), job.clone(), view.mirrored_provider(&job.id)))
+                .map(|job| {
+                    (
+                        Some(member.clone()),
+                        job.clone(),
+                        view.mirrored_provider(&job.id),
+                    )
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
