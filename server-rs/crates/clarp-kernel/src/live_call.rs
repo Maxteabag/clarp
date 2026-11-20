@@ -84,7 +84,7 @@ pub fn live_model(named: Option<&str>) -> Result<&'static str, &'static str> {
 
 /// The model an agent's live call runs on for the client that answers it (or asks for it):
 /// the owner's where the client says exactly a name of `minimums` and a contract at least its
-/// number; else [`MODEL`], as every app has always been given. No header, or one that says
+/// number (0 for a name: never); else [`MODEL`], as every app has always been given. No header, or one that says
 /// nothing exactly ([`crate::client::named`]), is the latter.
 pub fn agent_live_model(
     client: Option<&str>,
@@ -95,7 +95,7 @@ pub fn agent_live_model(
     let accepts = named.is_some_and(|(platform, contract)| {
         minimums
             .iter()
-            .any(|(name, minimum)| name == platform && contract >= *minimum)
+            .any(|(name, minimum)| name == platform && *minimum >= 1 && contract >= *minimum)
     });
     if accepts { configured } else { MODEL }
 }
@@ -1353,6 +1353,25 @@ mod live_models {
             assert_eq!(
                 agent_live_model(client, "gpt-live-1", &minimums),
                 "gpt-live-1",
+                "{client:?}"
+            );
+        }
+        // The owner's table may name any client, and 0 for a name is never for that name.
+        let owned = vec![
+            ("ios".to_string(), 0),
+            ("android".to_string(), 29),
+            ("desktop".to_string(), 3),
+        ];
+        for (client, runs) in [
+            ("ios/2985 contract=99", "gpt-live-1"),
+            ("desktop/1 contract=3", "gpt-live-1.1"),
+            ("desktop/1 contract=2", "gpt-live-1"),
+            ("android/1 contract=29", "gpt-live-1.1"),
+            ("windows/1 contract=99", "gpt-live-1"),
+        ] {
+            assert_eq!(
+                agent_live_model(Some(client), "gpt-live-1.1", &owned),
+                runs,
                 "{client:?}"
             );
         }

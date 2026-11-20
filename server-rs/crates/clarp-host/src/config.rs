@@ -336,9 +336,9 @@ fn owners_of(owners: Option<&Path>) -> Option<toml::Table> {
 }
 
 /// From which client contract an agent's live call runs on the owner's model, by the client's
-/// exact name: the two the apps named, and what the owner's file says of a name (`[openai]
-/// live_model_min_client`); a number that is no whole number of at least 1 is refused in one
-/// line, and that name keeps what it had.
+/// exact name: the two the apps named, and what the owner's file says of any name (`[openai]
+/// live_model_min_client`; 0 for a name is never for it); a value that is no whole number of at
+/// least 0 is refused in one line, and that name keeps what it had.
 fn live_model_min_client_of(file: Option<&toml::Table>) -> Vec<(String, i64)> {
     let mut minimums: Vec<(String, i64)> = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT
         .iter()
@@ -349,7 +349,7 @@ fn live_model_min_client_of(file: Option<&toml::Table>) -> Vec<(String, i64)> {
         .and_then(|openai| openai.get("live_model_min_client"))
         .and_then(toml::Value::as_table);
     for (name, value) in table.into_iter().flatten() {
-        match value.as_integer().filter(|minimum| *minimum >= 1) {
+        match value.as_integer().filter(|minimum| *minimum >= 0) {
             Some(minimum) => match minimums.iter_mut().find(|(known, _)| known == name) {
                 Some(known) => known.1 = minimum,
                 None => minimums.push((name.clone(), minimum)),
