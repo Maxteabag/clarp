@@ -1663,6 +1663,9 @@ pub fn summary(
         "compacting": kind == AgentStateKind::Compacting,
         "context_tokens": status.context_tokens,
         "context_window": clarp_backend::context_window(&record.backend),
+        // What the user's last compaction did, from numbers: null until the first
+        // (compaction_outcome).
+        "last_compaction": status.last_compaction,
         "queued_turn_count": status.waiting.len(),
         "queued_turn_revision": status.queue_revision,
         "queue_paused": status.paused,
@@ -1778,6 +1781,7 @@ mod tests {
             label_at_ms: None,
             resting: None,
             context_tokens: None,
+            last_compaction: None,
             completed_at_ms: None,
             answered_by: None,
             arrived: false,
@@ -2316,9 +2320,11 @@ mod tests {
             (&row["model"], &row["context_tokens"]),
             (&json!("fable"), &json!(5))
         );
+        // Nothing compacted yet: the row says so (compaction_outcome).
+        assert_eq!(row["last_compaction"], serde_json::Value::Null);
         assert_eq!(
             row.as_object().unwrap().len(),
-            54,
+            55,
             "the fields of the Python Host's row"
         );
         let typed: AgentSummary = serde_json::from_value(row).unwrap();

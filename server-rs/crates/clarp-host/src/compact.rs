@@ -5,7 +5,9 @@
 //! ([`clarp_backend::Backend::shortens_with`]: Claude Code's `/compact`), this Host asks for
 //! it in a turn of the agent's own: the turn waits its turn like any other, is nobody's
 //! message and says nothing, and is left out of the chat an app reads. While it runs the
-//! agent's row says `compacting`; afterwards it says how much the conversation holds.
+//! agent's row says `compacting`; afterwards it says how much the conversation holds, and what
+//! the compaction did (`last_compaction`, decided in `clarp_kernel::compaction` when the turn
+//! has ended).
 //!
 //! The answers are the Python Host's (`lib/compaction.py`, `routes/send.py`
 //! `_handle_compact`): started, already at it, or refused in words. How it is done is not:
@@ -37,8 +39,8 @@ fn bad(why: &str) -> Response {
 }
 
 /// `POST /compact {"session": ...}`: the agent's tool is asked to make its conversation
-/// shorter. Answered at once; an app watches the agent's row (`compacting`,
-/// `context_tokens`).
+/// shorter. Answered at once; an app watches the agent's row (`compacting`, then
+/// `last_compaction`).
 async fn compact(State(app): State<App>, body: Bytes) -> Response {
     let Ok(Value::Object(asked)) = serde_json::from_slice::<Value>(&body) else {
         return bad("bad json");
@@ -67,8 +69,11 @@ async fn compact(State(app): State<App>, body: Bytes) -> Response {
         return Json(told).into_response();
     }
     // Not while a turn runs or waits: the conversation is made shorter between turns.
-    if status.live.is_some() || !status.waiting.is_empty() {
+    if status.live.is_some() {
         return refused("agent is busy \u{2014} try again when idle");
+    }
+    if !status.waiting.is_empty() {
+        return refused("messages are waiting for this agent \u{2014} try again when they have run");
     }
     let request = ids::hex(8);
     let (id, marked) = Message::filed(&format!("compact-{request}"));
