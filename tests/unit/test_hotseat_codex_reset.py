@@ -140,9 +140,51 @@ def test_one_verified_redemption_a_day_and_a_restart_does_not_forget_it(tmp_path
     assert len(_requests(requests)) == 2
 
 
-def test_an_unverified_redemption_does_not_count_against_the_cap(tmp_path, monkeypatch, keeper_owns):
+def test_a_claimed_redemption_counts_once_even_unverified_and_no_second_is_asked(tmp_path, monkeypatch, keeper_owns):
+    """(F6) The receipt claims a redemption for an account the read did not list ('renamed'): it is
+    unverified, so it is reconciled; the reconcile finds nothing pending. Counted once, so with a
+    cap of one the Host asks for no second redemption that day."""
     receipt, requests = _broker(tmp_path, monkeypatch)
-    receipt.write_text(json.dumps({"status": "redeemed", "verified": True, "account": "not-saved"}))
+    receipt.write_text(json.dumps({"status": "redeemed", "verified": True, "account": "renamed"}))
+    clock = [db.now_ms()]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    worker = janitor_reset.ResetWorker(SimpleNamespace(is_set=lambda: False))
+    def offer(**kwargs):
+        return worker.offer("codex", "codex_reset_command", [], _owner(), accounts=("work",),
+                            cap_field="codex_reset_max_per_day", **kwargs)
+    assert offer() == "checking"
+    _run(worker)
+    assert len(worker.spent_today("codex")) == 1                         # counted, though unverified
+    clock[0] += 11 * 60_000
+    receipt.write_text(json.dumps({"status": "no_pending", "verified": False}))
+    assert offer(reconcile_only=True) == "checking"                     # the reconcile it owes, as the keeper offers it
+    _run(worker)
+    assert _requests(requests) == [{"models": []}, {"models": [], "reconcile_only": True}]
+    clock[0] += 11 * 60_000
+    assert offer() == "daily_cap"                                        # no second redemption
+    assert len(_requests(requests)) == 2 and len(worker.spent_today("codex")) == 1
+
+
+def test_a_redemption_counted_unverified_is_not_counted_again_when_its_reconcile_verifies_it(
+        tmp_path, monkeypatch, keeper_owns):
+    receipt, requests = _broker(tmp_path, monkeypatch, cap=5)
+    receipt.write_text(json.dumps({"status": "redeemed", "verified": True, "account": "renamed"}))
+    clock = [db.now_ms()]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    worker = janitor_reset.ResetWorker(SimpleNamespace(is_set=lambda: False))
+    worker.offer("codex", "codex_reset_command", [], _owner(), accounts=("work",), cap_field="codex_reset_max_per_day")
+    _run(worker)
+    clock[0] += 11 * 60_000
+    receipt.write_text(json.dumps({"status": "reconciled", "verified": True, "account": "work"}))
+    worker.offer("codex", "codex_reset_command", [], _owner(), accounts=("work",), cap_field="codex_reset_max_per_day",
+                 reconcile_only=True)
+    _run(worker)
+    assert len(_requests(requests)) == 2 and len(worker.spent_today("codex")) == 1
+
+
+def test_an_answer_that_claims_nothing_counts_nothing(tmp_path, monkeypatch, keeper_owns):
+    receipt, requests = _broker(tmp_path, monkeypatch)
+    receipt.write_text(json.dumps({"status": "no_eligible_grant", "verified": False}))
     worker = janitor_reset.ResetWorker(SimpleNamespace(is_set=lambda: False))
     worker.offer("codex", "codex_reset_command", [], _owner(), accounts=("work",), cap_field="codex_reset_max_per_day")
     _run(worker)
@@ -377,3 +419,4 @@ def test_a_reset_count_that_cannot_be_read_redeems_nothing_and_is_told_once(
     assert [n["preview"] for n in sent].count(wanted) == 1
     assert logged.count("bankedResetLedgerUnreadable") == 1
     assert settings_store.get_text("hotseat-reset.codex.redeemed") == ledger   # left for repair
+
