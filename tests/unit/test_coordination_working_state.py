@@ -142,3 +142,42 @@ def test_a_coordination_turn_of_an_agent_that_cannot_leave_a_note_reads_user(cha
     _running(chat, "c1", monkeypatch)
     row = _row(chat)
     assert row["working_audience"] == "user" and row["working_with"] is None
+
+
+class _Stream:
+    def __init__(self):
+        self.events = []
+
+    def broadcast(self, event):
+        self.events.append(event)
+
+    def broadcast_ephemeral(self, event):
+        self.events.append(event)
+
+
+def test_the_state_stream_of_a_hidden_turn_names_the_partner_not_the_work(chat):
+    """After 558 the state watcher's agent-activity and agent-state still carried the tool, its
+    input and summary of a coordination turn a chat hides; clients draw the row from them."""
+    chat.coordination_turn("c1")
+    coordination.set_global("hide")
+    stream = _Stream()
+    watcher = StateLogWatcher(stream)
+    agents.record_state(chat.id, "tool", {"trace_id": "c1", "tool": "Bash",
+                                          "input": {"command": "cat secret-plan.md"}})
+    watcher._poll_once()
+    mine = [e for e in stream.events if (e.get("agent_id") if isinstance(e, dict) else None) == chat.id]
+    assert mine and "secret-plan" not in repr(mine)
+    activity = next(e for e in mine if e.get("type") == "agent-activity")
+    assert activity["summary"] == "Working with Boss" and activity["tool"] == ""
+    state = next(e for e in mine if e.get("type") == "agent-state")
+    assert state["audience"] == "agents" and state["sender_name"] == "Boss"
+
+
+def test_the_state_stream_of_a_shown_turn_is_unchanged(chat):
+    chat.coordination_turn("c1")                       # 'show': nothing veiled
+    stream = _Stream()
+    watcher = StateLogWatcher(stream)
+    agents.record_state(chat.id, "tool", {"trace_id": "c1", "tool": "Bash",
+                                          "input": {"command": "cat secret-plan.md"}})
+    watcher._poll_once()
+    assert "secret-plan" in repr([e for e in stream.events if isinstance(e, dict) and e.get("agent_id") == chat.id])
