@@ -21,8 +21,6 @@ from .turn_dispatch_state import (
     _INFLIGHT, _PROCESS_OWNER_PREFIX, _SLOTS, _TURN_LOCK, _alive,
 )
 
-CLAUDE = "claude"
-AGY = "agy"
 
 
 def _first_message(agent_id: str, trace_id: str):
@@ -38,7 +36,15 @@ def _first_message(agent_id: str, trace_id: str):
 def take_over_if_silent(service, spec):
     """Freeze, judge, end. Returns the spec to launch as the takeover (the running turn is
     ended, the slot is this spec's), or None: nothing changed and the message waits."""
-    if spec.backend not in (CLAUDE, AGY) or spec.origin not in origins.USER_WORD_ORIGINS:
+    if spec.origin not in origins.USER_WORD_ORIGINS:
+        return None
+    from .backend.registry import by_id
+    try:
+        backend = by_id(spec.backend)
+    except Exception as exc:  # noqa: BLE001 - an unknown backend never takes over
+        log_exception("takeoverBackendUnknown", exc, detail=spec.backend)
+        return None
+    if not getattr(backend, "takeover_strategy", ""):
         return None
     agent_id = spec.agent_id
     with _TURN_LOCK:
@@ -48,7 +54,8 @@ def take_over_if_silent(service, spec):
             return None
     try:
         handles = _alive(list(service.backends.active_handles(spec.backend, agent_id) or ()))
-    except Exception:  # noqa: BLE001 - unknown: the message waits
+    except Exception as exc:  # noqa: BLE001 - unknown: the message waits
+        log_exception("takeoverHandlesFail", exc, detail=agent_id)
         return None
     if len(handles) != 1:
         return None
@@ -63,27 +70,12 @@ def take_over_if_silent(service, spec):
     session_id = agents_db.live_backend_session(agent_id) or spec.backend_session_id
     if not session_id:
         return None
-    from .backend.registry import by_id
-    from .backend.claude import prompt_uuid
-    from . import config
-    backend = by_id(spec.backend)
     try:
-        if spec.backend == CLAUDE:
-            if not takeover.claude_version_ok(backend.executable(config.load())):
-                return None
-            path = backend.find_transcript(session_id, service.home, cwd=str(spec.cwd))
-        else:
-            # agy: only an agent with a conversation (history it must keep), resumed in it.
-            from . import agy_transcript
-            if not takeover.agy_version_ok(backend.required_binary):
-                return None
-            path = agy_transcript.find_latest_jsonl(session_id)
-            if path is None:
-                return None
+        if not backend.takeover_ready():
+            return None
     except Exception as exc:  # noqa: BLE001 - unknown: the message waits
         log_exception("takeoverPrepareFail", exc, detail=agent_id)
         return None
-    drops_turn = prompt_uuid(running)
     key = takeover.record_freeze(agent_id=agent_id, trace_id=running,
                                  pgid=handle.process_group, pid=handle.pid)
     plan = None
@@ -92,13 +84,15 @@ def take_over_if_silent(service, spec):
         if not takeover.freeze(handle):
             return None
         if takeover.drained(handle) and not handle.output_seen:
-            if spec.backend == CLAUDE:
-                plan = takeover.takeover_plan(takeover.session_facts(path, drops_turn),
-                                              drops_turn, str(first["text"] or ""))
-            else:
-                # Judged while frozen, before any kill: message 1 already in agy's
-                # conversation means no takeover (the turn is thawed and runs on).
-                plan = takeover.agy_plan(path, str(first["text"] or ""))
+            # Judged while frozen, before any kill: the backend reads its own session
+            # (Claude: the resume point; agy: message 1 must not be there yet).
+            try:
+                plan = backend.takeover_plan(
+                    session_id=session_id, home=service.home, cwd=str(spec.cwd),
+                    running_trace=running, first_text=str(first["text"] or ""))
+            except Exception as exc:  # noqa: BLE001 - unreadable: no takeover
+                log_exception("takeoverJudgeFail", exc, detail=agent_id)
+                plan = None
         if plan is not None:
             with _TURN_LOCK:
                 if _INFLIGHT.get(agent_id) != running:
