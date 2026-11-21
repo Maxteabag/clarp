@@ -38,15 +38,17 @@ def run(root):
     ivy = agent('ivy')
     boss = agent('boss')
     choices = []
-    for global_choice in ('show', 'hide'):
-        coordination.set_global(global_choice)
+    for global_choice in (None, 'show', 'hide'):
+        if global_choice is not None:
+            coordination.set_global(global_choice)
+        global_effective = coordination.global_visibility()
         for own in ('default', 'show', 'hide'):
             stored = coordination.set_chat(ivy, own)
             for mode in ('auto', 'show', 'hide'):
                 choices.append(dict(global_choice=global_choice, own=own, mode=mode,
                                     policy=coordination.read_policy(ivy, mode),
                                     snapshot=coordination.snapshot_fields(
-                                        ivy, {ivy: stored}, global_choice)))
+                                        ivy, {ivy: stored}, global_effective)))
     invalid = []
     for raw in ('', 'sometimes', 'DEFAULT', ' Hide ', ' show ', None):
         found = dict(raw=raw, normalized=coordination.normalize_visibility(raw))

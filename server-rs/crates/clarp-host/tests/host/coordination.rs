@@ -1158,7 +1158,11 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
     }
     assert_eq!(
         host.get("/coordination-settings"),
-        json!({"coordination_visibility":"show"})
+        json!({"coordination_visibility":"hide"})
+    );
+    assert_eq!(
+        host.get("/log?session=oak&coordination=auto")["coordination"],
+        json!({"visibility":"hide","hidden":true,"source":"global"})
     );
     assert_eq!(
         host.ask_as(&limited, "GET", "/coordination-settings", None)
@@ -1189,6 +1193,13 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
         400
     );
     let heard = host.listen_at(&format!("/events?token={admin}"));
+    assert_eq!(
+        host.post(
+            "/coordination-settings",
+            json!({"coordination_visibility":"show"})
+        ),
+        json!({"coordination_visibility":"show"})
+    );
     host.send("oak", "visible before", "visible-first");
     wait_for("the first visible reply", || host.state("oak") == "done");
     let path = "/log?session=oak";
@@ -1321,7 +1332,7 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
         .replace(
             "read message\n",
             &format!(
-                "read message\nprintf '%s' \"$CLARP_PROVIDER_TURN\" > '{}/'\"$CLARP_SESSION\"\n",
+                "read message\nprintf '%s' \"$message\" > '{0}/'\"$CLARP_SESSION.prompt\"\nprintf '%s' \"$CLARP_PROVIDER_TURN\" > '{0}/'\"$CLARP_SESSION\"\n",
                 tokens.display()
             )
         )
@@ -1356,14 +1367,12 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
             .cloned()
             .unwrap()
     };
-    host.post(
-        "/agent-coordination",
-        json!({"session":"oak","visibility":"hide"}),
-    );
     host.send("oak", "one visible turn", "first-visible");
     wait_for("the visible turn to finish", || host.state("oak") == "done");
     let before = row("oak");
     assert!(before["working_audience"].is_null());
+    assert_eq!(before["coordination_visibility"], "hide");
+    assert!(before["coordination_override"].is_null());
     let heard = host.listen_at(&format!("/events?token={admin}"));
     wait_for("the event stream to subscribe", || {
         heard
@@ -1384,12 +1393,25 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
     });
     let hidden = row("oak");
     assert_eq!(hidden["last_message_id"], before["last_message_id"]);
+    let page = host.get("/log?session=oak&coordination=auto");
+    assert_eq!(
+        page["coordination"],
+        json!({"visibility":"hide","hidden":true,"source":"global"})
+    );
+    assert!(
+        page["hidden_after"]["messages"]
+            .as_u64()
+            .is_some_and(|count| count > 0)
+    );
     assert_eq!(
         hidden["last_completed_message"],
         before["last_completed_message"]
     );
     assert_eq!(hidden["last_activity"], before["last_activity"]);
     assert_eq!(hidden["working_audience"], "agents");
+    let prompt = std::fs::read_to_string(tokens.join("oak.prompt")).unwrap();
+    assert!(prompt.contains("Coordination: this turn answers a message from another agent"));
+
     assert_eq!(
         hidden["working_with"],
         json!({"agent_id":ids_of(&host)["boss"],"name":"Boss"})
