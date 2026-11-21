@@ -265,3 +265,28 @@ def test_a_request_whose_turn_ran_and_failed_is_not_settled_as_undelivered(pair)
     assert pr.unrun_reason(request_id) == ''
     assert pr.settle_failed_waits() == 0
     assert task_plans.get(plan_id)['goal']['continuation']['state'] == 'waiting'
+
+
+def test_a_tick_racing_the_answer_gives_one_result_and_one_wake(pair, monkeypatch):
+    """The tick reads the waiting goal, then the answer (or the deadline) lands before its write:
+    the tick writes through the same conditional mutation (the goal's revision it read, and a
+    dependency that still names this key), so its write is refused, it reads again, finds the
+    goal no longer waiting and settles nothing. One result: the answer's."""
+    from lib import turn_queue
+    pip, avana = pair
+    plan_id, request_id, row = _waiting_on_queue(pip, avana)
+    assert turn_queue.fail_refused_launch(row, failures=8, error='no seat')
+    real = task_plans._goal_mutate
+    raced = []
+
+    def mutate(target, *, revision, action, data=None):
+        if action == 'dependency' and not raced:
+            raced.append(1)                                    # the answer lands first
+            current = task_plans.get(target)
+            real(target, revision=current['revision'], action='dependency',
+                 data={'key': pr.dependency_key(request_id), 'outcome': 'succeeded', 'evidence': 'answered'})
+        return real(target, revision=revision, action=action, data=data)
+    monkeypatch.setattr(task_plans, '_goal_mutate', mutate)
+    assert pr.settle_failed_waits() == 0
+    result = _result(plan_id)
+    assert result['outcome'] == 'succeeded' and result['evidence'] == 'answered'
