@@ -258,6 +258,7 @@ impl State {
                 turn: turn.0,
                 closes: separate.closes,
                 status: status.to_string(),
+                never_ran: None,
                 replaced_by: None,
                 started_at_ms: Some(read_at),
                 ended_at_ms: now_ms,
