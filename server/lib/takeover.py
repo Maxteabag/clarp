@@ -170,6 +170,18 @@ def freeze(handle) -> bool:
         return False
 
 
+def stopped(pid: int) -> bool:
+    """The process is in the stopped state (/proc/<pid>/stat field 3 is T)."""
+    try:
+        stat = pathlib.Path(f"/proc/{int(pid)}/stat").read_text()
+    except (OSError, ValueError, TypeError):
+        return False
+    try:
+        return stat.rsplit(")", 1)[1].split()[0] == "T"
+    except IndexError:
+        return False
+
+
 def thaw(handle) -> None:
     try:
         os.killpg(handle.process_group, signal.SIGCONT)
