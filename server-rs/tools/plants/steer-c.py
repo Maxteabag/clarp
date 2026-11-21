@@ -27,7 +27,7 @@ O = "clarp-actor/src/orphan.rs"
 PLANTS = [
     (S, "shim", "the initial prompt closes streaming stdin", "if args.stdin_until.is_none() {", "if args.stdin_until.is_some() {"),
     (S, "shim", "no result closes stdin", 'event.get("type").and_then(serde_json::Value::as_str) == Some(kind)', 'event.get("type").and_then(serde_json::Value::as_str) != Some(kind)'),
-    (S, "ack", "queue admission is success even with a broken pipe", "if let Some(receipt) = after_write && receipt.recv() != Ok(true)", "if let Some(receipt) = after_write && receipt.recv() == Ok(true)"),
+    (S, "ack", "queue admission is success even with a broken pipe", "&& receipt.recv() != Ok(true)", "&& receipt.recv() == Ok(true)"),
     (K, "stream", "text-only turns also take input", "!self.input_ended && !self.tools.is_empty()", "!self.input_ended"),
     (K, "stream", "the input fence can be reopened", "!self.input_ended && !self.tools.is_empty()", "!self.tools.is_empty()"),
     (K, "stream", "the first tool result clears every running tool", "self.tools.remove(id);", "self.tools.remove(id); self.tools.clear();"),
