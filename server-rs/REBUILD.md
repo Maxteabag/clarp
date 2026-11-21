@@ -1334,6 +1334,13 @@ its other process cannot take, and for what it missed while it was away, has no 
 and their explainer are one process. The switch and the janitor stay off as installed: what is asked of a
 model, on whose account, is the owner's to decide, and comes over with the owner's settings.
 
+**A shell call without its command (R184, 21 Nov 2026).** The explanation desk returns
+`failed` with reason `unexplained` when an enabled shell call brings only its name or
+description. The live reader waits until the command arrives. Such calls create no shape,
+model request or learned row. Templates with fixed call-specific values are kept for the exact
+call. A reusable row learned earlier is served only when the new call carries the values the
+sentence names.
+
 One part of the Python Host's explainer is left out on purpose: its memory of each agent's recent commands
 (`tool_explanation_commands`). That Host shows a command of Codex as the name of its row, cut at 80 signs,
 and remembers the whole commands to complete a cut name an app asks about. This Host shows such a command
