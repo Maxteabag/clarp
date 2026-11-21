@@ -268,6 +268,8 @@ pub enum Amend {
         model: Option<String>,
         effort: Option<String>,
     },
+    /// The MCP server names this agent's next turn may use.
+    McpServers(Vec<String>),
     /// The tool it runs on: for a member that has no conversation with the tool it had.
     /// Whoever asks has seen to that.
     Tool(String),
@@ -3682,6 +3684,7 @@ impl Fleet {
         let before = &self.members[at].record;
         let mut record = before.clone();
         let assigned = matches!(change, Amend::Contact(..) | Amend::ContactAuto(_));
+        let edits_mcp = matches!(change, Amend::McpServers(_));
         match change {
             Amend::Mute(muted) => record.muted = muted,
             Amend::Heartbeat(on) => record.heartbeat_enabled = on,
@@ -3720,6 +3723,7 @@ impl Fleet {
                 }
             }
             Amend::Tool(backend) => record.backend = backend,
+            Amend::McpServers(names) => record.mcp_servers = Some(names),
             Amend::Voice { provider, voice } => {
                 let occupied = self
                     .members
@@ -3798,7 +3802,8 @@ impl Fleet {
             return Ok(Ok(Amended { record, taken }));
         }
         let renamed = record.persona != before.persona && !assigned;
-        let put_away = record.archived_at_ms.is_some();
+        // An MCP edit to an archived agent changes only its tool selection.
+        let put_away = record.archived_at_ms.is_some() && !edits_mcp;
         self.replace(at, record.clone(), took)?;
         if renamed {
             self.works.hub.publish(
