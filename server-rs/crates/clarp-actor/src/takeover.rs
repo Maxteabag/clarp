@@ -114,10 +114,14 @@ impl Actor {
     pub fn select_takeover(
         &mut self,
         offer: &Offer,
+        fence: u64,
         session: String,
         input: Input,
         now_ms: i64,
-    ) -> Result<(), ActorError> {
+    ) -> Result<bool, ActorError> {
+        if !self.takeover_quiet(offer, fence)? {
+            return Ok(false);
+        }
         let sequence = self
             .recorder
             .agent()
@@ -131,6 +135,7 @@ impl Actor {
                 selected: Selection {
                     into: offer.into,
                     attempt: offer.attempt,
+                    fence,
                     trace,
                     start: Start {
                         from: offer.from,
@@ -141,7 +146,7 @@ impl Actor {
             },
             now_ms,
         )?;
-        Ok(())
+        Ok(true)
     }
 
     pub fn selected_takeover(&self) -> Option<&Selection> {

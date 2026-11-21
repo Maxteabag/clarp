@@ -728,7 +728,11 @@ fn a_takeover_reads_every_record_at_the_fence_before_it_consumes_the_hold() {
         // The actor has not been told of the appended record. It must judge the actual
         // fence, which can be ahead of the last notification it received.
         assert!(actor.takeover_quiet(&offer, before).unwrap());
-        assert_eq!(actor.takeover_quiet(&offer, after).unwrap(), quiet, "{record:?}");
+        assert_eq!(
+            actor.takeover_quiet(&offer, after).unwrap(),
+            quiet,
+            "{record:?}"
+        );
         assert!(!actor.takeover_quiet(&offer, after - 1).unwrap());
         assert!(!actor.takeover_quiet(&offer, after + 1).unwrap());
 
@@ -751,21 +755,47 @@ fn a_confirmed_takeover_closes_the_first_row_and_leaves_the_third_message_waitin
         .unwrap();
     world.send(&mut actor, "u-third", "third text", Admission::Queue);
     let offer = actor.takeover_offer(TurnId(2)).unwrap().unwrap();
-    actor
-        .select_takeover(
-            &offer,
-            "new-provider-session".to_string(),
-            clarp_kernel::takeover::Input::ClaudeFresh { first: offer.first.clone() },
-            world.tick(),
-        )
-        .unwrap();
+    let fence = std::fs::metadata(world.profile.spool_path(TurnId(1)))
+        .unwrap()
+        .len();
+    let input = clarp_kernel::takeover::Input::ClaudeFresh {
+        first: offer.first.clone(),
+    };
+    assert!(
+        !actor
+            .select_takeover(
+                &offer,
+                fence - 1,
+                "new-provider-session".to_string(),
+                input.clone(),
+                world.tick(),
+            )
+            .unwrap()
+    );
+    assert!(actor.selected_takeover().is_none());
+    assert!(
+        actor
+            .select_takeover(
+                &offer,
+                fence,
+                "new-provider-session".to_string(),
+                input,
+                world.tick(),
+            )
+            .unwrap()
+    );
+    assert_eq!(actor.selected_takeover().unwrap().fence, fence);
 
     world.exits(1, None, Some(9));
     let out = actor.finish_takeover(TurnId(1), world.tick()).unwrap();
-    let order = out.actions.iter().find_map(|action| match action {
-        Action::Launch(order) => Some(order),
-        _ => None,
-    }).unwrap();
+    let order = out
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Launch(order) => Some(order),
+            _ => None,
+        })
+        .unwrap();
     assert_eq!(order.turn, TurnId(2));
     assert_eq!(order.named_session.as_deref(), Some("new-provider-session"));
     let stdin = std::fs::read_to_string(&order.stdin_file).unwrap();
@@ -775,9 +805,14 @@ fn a_confirmed_takeover_closes_the_first_row_and_leaves_the_third_message_waitin
         prompt["message"]["content"],
         json!([{"type":"text","text":"first text"}, {"type":"text","text":"second text"}])
     );
-    assert_eq!(ids(&actor), ["u-first", "u-second"]);
     let chat = actor.tail(10).unwrap();
-    let first = chat.entries.iter().find(|row| row.entry.id() == "u-first").unwrap();
+    let ids: Vec<_> = chat.entries.iter().map(|row| row.entry.id()).collect();
+    assert_eq!(ids, ["u-first", "u-second"]);
+    let first = chat
+        .entries
+        .iter()
+        .find(|row| row.entry.id() == "u-first")
+        .unwrap();
     let end = first.turn.as_ref().unwrap();
     assert_eq!(end.status, "replaced");
     assert_eq!(end.replaced_by.as_deref(), Some("trace-second"));

@@ -22,6 +22,8 @@ pub struct Start {
 pub struct Selection {
     pub into: TurnId,
     pub attempt: u32,
+    /// The exact final byte of the spool window the actor judged.
+    pub fence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<String>,
     pub start: Start,
