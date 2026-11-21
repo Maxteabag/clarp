@@ -69,8 +69,8 @@ So a model release means a release here:
 
 1. Bump `CLAUDE_CODE_VERSION` (and `CODEX_VERSION` while you are there) in the
    `Dockerfile`.
-2. Tag it — `git tag vX.Y.Z && git push origin vX.Y.Z`. A push to `main` only
-   publishes `edge`; `stable` needs the tag.
+2. Tag it — `git tag vX.Y.Z && git push origin vX.Y.Z`. `edge` is published only by a
+   Docker run started by hand on `main`; `stable` needs the tag.
 3. On each deployment: `docker compose pull && docker compose up -d`.
 4. **Relaunch the running agents.** A live agent keeps the CLI process it
    started with, so it keeps failing until it is relaunched — updating the

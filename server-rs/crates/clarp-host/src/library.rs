@@ -38,7 +38,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::agent::View;
-use crate::edge::{ApiError, App, Principal};
+use crate::edge::{ApiError, App, Presented, Principal};
 use crate::fleet::{AgentRecord, Member};
 use crate::ids;
 use crate::pairing::Scope;
@@ -702,6 +702,7 @@ async fn get_artifact(
     Path(rest): Path<String>,
     Query(query): Params,
     Extension(principal): Extension<Principal>,
+    Extension(presented): Extension<Presented>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let rest = rest.trim_matches('/');
@@ -744,10 +745,14 @@ async fn get_artifact(
         };
     }
     if let Some(artifact_id) = rest.strip_suffix("/html") {
-        return page_for_a_browser(&app, artifact_id.trim_matches('/'), &principal, &headers).await;
+        return page_for_a_browser(&app, artifact_id.trim_matches('/'), &principal, presented)
+            .await;
     }
     if let Some(artifact_id) = rest.strip_suffix("/revisions") {
         return revisions(&app, artifact_id.trim_matches('/'), &query).await;
+    }
+    if let Some(artifact_id) = rest.strip_suffix("/export") {
+        return export(&app, artifact_id.trim_matches('/'), &principal, presented);
     }
     let Some(row) = find(&app, rest) else {
         return Err(refused(StatusCode::NOT_FOUND, "artifact not found"));
@@ -770,6 +775,56 @@ async fn get_artifact(
     Ok(Json(json!({ "artifact": row })).into_response())
 }
 
+/// `GET /artifacts/<id>/export` (R137, the Python Host's PR 474): what a move to another Host
+/// needs of a render spec, whatever the caller's display negotiation, for the administrator
+/// only: any device is refused, limited or full. `{kind: "render_spec", render_spec: {artifact,
+/// stored, submission}}`: the row as it is listed, the payload as it is kept, and the answer
+/// that was accepted with what became of it, or none (`render_spec_store.export`). Another kind
+/// is refused in words, its kind beside them, so that a kind can be added later.
+fn export(
+    app: &App,
+    artifact_id: &str,
+    principal: &Principal,
+    presented: Presented,
+) -> Result<Response, ApiError> {
+    // The administrator's token from the Authorization header only: never one an address
+    // carries, nor a browser's cookie, for a route that hands out a user's answers.
+    let by_header = matches!(presented, Presented::Header | Presented::Nowhere);
+    if *principal != Principal::Administrator || !by_header {
+        return Err(refused(StatusCode::FORBIDDEN, "administrator only"));
+    }
+    let Some(row) = find(app, artifact_id) else {
+        return Err(refused(StatusCode::NOT_FOUND, "not found"));
+    };
+    let Some(artifact) = spec_of(app, artifact_id) else {
+        let kind = row["type"].as_str().unwrap_or_default().to_string();
+        let said = json!({ "error": format!("export is not available for {kind} artifacts"), "kind": kind });
+        return Ok((StatusCode::CONFLICT, Json(said)).into_response());
+    };
+    // The first answer that was taken: a spec is answered once.
+    let accepted = artifact
+        .submissions
+        .iter()
+        .min_by(|a, b| (a.created_at, &a.submission_id).cmp(&(b.created_at, &b.submission_id)));
+    let submission = accepted.map_or(Value::Null, |taken| {
+        json!({
+            "submission_id": taken.submission_id,
+            "version": taken.version,
+            "answers": taken.answers.clone().unwrap_or(Value::Null),
+            "accepted_at": taken.created_at,
+            "payload_hash": taken.payload_hash,
+            "synthesize_audio": taken.synthesize_audio,
+            "delivery_status": taken.status(),
+            "delivered_at": taken.delivered_at,
+        })
+    });
+    let body = json!({
+        "kind": spec::KIND,
+        "render_spec": { "artifact": row, "stored": artifact.payload, "submission": submission },
+    });
+    Ok(Json(body).into_response())
+}
+
 /// `GET /artifacts/<id>/html`: a report's page as a browser is given it, behind the policy
 /// that keeps it from reaching anything the artifact does not name. The page's own scripts
 /// can read the address it was fetched by, so a token in the address is refused; and a
@@ -778,7 +833,7 @@ async fn page_for_a_browser(
     app: &App,
     artifact_id: &str,
     principal: &Principal,
-    headers: &HeaderMap,
+    presented: Presented,
 ) -> Result<Response, ApiError> {
     let limited = matches!(
         principal,
@@ -793,10 +848,8 @@ async fn page_for_a_browser(
             "full device access required",
         ));
     }
-    let said = |name| headers.get(name).and_then(|value| value.to_str().ok());
-    let in_a_header = said(header::AUTHORIZATION).is_some_and(|value| value.starts_with("Bearer "))
-        || said(header::COOKIE).is_some_and(|cookies| cookies.contains("claude_pwa_token="));
-    if !in_a_header && !app.config.auth_token.is_empty() {
+    // Where the token that let the request in was found, not which headers came with it.
+    if presented == Presented::Address {
         return Err(refused(
             StatusCode::FORBIDDEN,
             "send the credential in a header or cookie, not the URL",

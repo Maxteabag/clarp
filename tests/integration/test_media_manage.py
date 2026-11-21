@@ -364,15 +364,23 @@ def test_a_full_device_may_and_is_recorded(host):
     assert media_store.lookup(aid)["deleted_by"].startswith("device_")
 
 
-def test_a_request_carrying_a_turn_token_is_refused(host):
+@pytest.mark.parametrize("agent", [{"X-Clarp-Turn": "any-turn-token"},
+                                   {"X-Clarp-Peer": "laptopstudio"}], ids=["turn-token", "peer"])
+def test_a_request_from_an_agent_is_refused(host, agent):
+    """An agent's own turn, or a peer Host's (R178): 403 agents_may_not on all three writes,
+    nothing written, no media-changed."""
     aid = host.publish(_png(1))["asset_id"]
-    turn = {"X-Clarp-Turn": "any-turn-token"}
+    events = len(host.media_events())
     refused = (403, {"error": "agents_may_not"})
-    assert host.call("POST", f"/media/{aid}/favorite", {"favorite": True}, headers=turn) == refused
-    assert host.call("DELETE", f"/media/{aid}", headers=turn) == refused
-    assert host.call("POST", "/media/delete", {"asset_ids": [aid]}, headers=turn) == refused
+    assert host.call("POST", f"/media/{aid}/favorite", {"favorite": True}, headers=agent) == refused
+    assert host.call("DELETE", f"/media/{aid}", headers=agent) == refused
+    assert host.call("POST", "/media/delete", {"asset_ids": [aid]}, headers=agent) == refused
     assert media_store.lookup(aid)["deleted_at"] is None
     assert media_store.lookup(aid)["favorite_at"] is None
+    assert len(host.media_events()) == events
+    # The same request without the agent's header is the user's, and goes through.
+    status, asset = host.call("POST", f"/media/{aid}/favorite", {"favorite": True})
+    assert status == 200 and asset["favorite"] is True
 
 
 # ---- the list --------------------------------------------------------------------

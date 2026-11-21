@@ -367,21 +367,25 @@ pub fn hearing(view: &HostView, who: Who<'_>) -> Value {
         .map(languages::engines)
         .unwrap_or_default();
     let plan = heard::plan("", &own_engines, &view.cloud_engine, "", false);
-    let first = if plan.model.is_empty() {
-        view.own_engine.clone()
-    } else {
-        plan.model
-    };
-    let engines: Vec<String> = std::iter::once(first)
-        .chain(plan.fallbacks)
+    let own_language = languages::of_agent(&view.agent_languages, who);
+    let set = own_language.unwrap_or(&view.language);
+    let engines: Vec<&str> = plan
+        .chat_order(set, Some(&view.own_engine))
+        .into_iter()
+        .enumerate()
+        .map(|(place, engine)| {
+            if place == 0 && engine.is_empty() {
+                view.own_engine.as_str()
+            } else {
+                engine
+            }
+        })
         .filter(|engine| !engine.is_empty())
         .collect();
     let engine_origin = if own_engines.is_empty() { DEFAULT } else { OWN };
-    let own_language = languages::of_agent(&view.agent_languages, who);
     let mut language_origin = if own_language.is_some() { OWN } else { DEFAULT };
-    let set = own_language.unwrap_or(&view.language);
     let mut spoken = codes(set);
-    let first = engines.first().map_or("", String::as_str);
+    let first = engines.first().copied().unwrap_or("");
     if !first.is_empty() && !heard::is_cloud(first) {
         // A local model's language is fixed when it loads: English for a .en model, found
         // by the model otherwise; the agent's is not used.

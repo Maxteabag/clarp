@@ -13,9 +13,7 @@ use super::*;
 fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
     let place = Place::new("launch-refused");
     let nowhere = place.root.join("no-shim-here");
-    let world = sealed(&place);
-    let world: Vec<(&str, &str)> = world.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let host = place.start_in("secret", &["--shim", nowhere.to_str().unwrap()], &world);
+    let host = place.start_with("secret", &["--shim", nowhere.to_str().unwrap()]);
     let session = host.new_agent("Refused");
     let heard = host.listen_at("/events?token=secret");
     host.send(&session, "go", "r1");
@@ -56,19 +54,20 @@ fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
         "Reconnecting… Your message is saved."
     );
 
-    // Its row shows it handed over; a send behind it waits for its launch.
+    // Its row shows it handed over; a send behind it has a receipt but no row yet.
     host.send(&session, "next", "r2");
-    let log = host.get(&format!("/log?session={session}"));
-    let delivery = |id: &str| {
-        let turns = log["turns"].as_array().unwrap();
-        let row = turns.iter().find(|turn| turn["id"] == id);
-        row.map_or(Value::Null, |row| row["delivery"]["state"].clone())
-    };
-    assert_eq!(
-        (delivery("u-r1"), delivery("u-r2")),
-        (json!("handed_over"), json!("pending_launch")),
-        "{log}"
-    );
+    let log = host.get(&format!("/log?session={session}&delivery_since=0"));
+    let turns = log["turns"].as_array().unwrap();
+    let first = turns.iter().find(|turn| turn["id"] == "u-r1").unwrap();
+    assert_eq!(first["delivery"]["state"], "handed_over", "{log}");
+    assert!(turns.iter().all(|turn| turn["id"] != "u-r2"), "{log}");
+    let waiting = log["delivery_updates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["message_id"] == "u-r2")
+        .unwrap();
+    assert_eq!(waiting["delivery"]["state"], "pending_launch", "{log}");
 
     // The user's Stop ends the wait at once, and nothing of it is tried again.
     host.post("/stop", json!({ "session": session }));
@@ -78,33 +77,4 @@ fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
     let tries = reconnects().len();
     std::thread::sleep(std::time::Duration::from_millis(2_500));
     assert_eq!(reconnects().len(), tries, "nothing is tried after the Stop");
-}
-
-/// What a Host of these tests sees of the machine: a home of its own in its place, and every
-/// tool a person installs pinned to a path where there is none. Its agent's tool is the
-/// scripted stand-in, built into the Host.
-fn sealed(place: &Place) -> Vec<(&'static str, String)> {
-    let home = place.root.join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    let at = |path: PathBuf| path.to_str().unwrap().to_string();
-    let absent = at(place.root.join("no-such-tool"));
-    let mut world = vec![
-        ("HOME", at(home.clone())),
-        ("XDG_CONFIG_HOME", at(home.join(".config"))),
-        ("XDG_DATA_HOME", at(home.join(".local/share"))),
-        ("XDG_CACHE_HOME", at(home.join(".cache"))),
-        ("XDG_STATE_HOME", at(home.join(".local/state"))),
-    ];
-    for tool in [
-        "CLARP_CLAUDE_PROGRAM",
-        "CLARP_CODEX_PROGRAM",
-        "CLARP_AGY_PROGRAM",
-        "CLARP_GROK_PROGRAM",
-        "CLARP_MUSE_PROGRAM",
-        "CLARP_OPENCODE_PROGRAM",
-        "CLARP_ZOXIDE_PROGRAM",
-    ] {
-        world.push((tool, absent.clone()));
-    }
-    world
 }
