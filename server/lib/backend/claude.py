@@ -95,10 +95,13 @@ def note_output(handle, ev: dict) -> None:
 
 
 # Steering a running Claude turn (issue 491, part C; recordings 2, 9, 10, 11): a follow-up
-# is written to the turn's stdin and is read by the CLI when the running tool call returns,
-# inside the same turn; one answer covers both. The CLI's replay echo (--replay-user-messages)
-# of that line says when it was read: that is the moment its row is due. Written only while a
-# tool call is open; a turn that only writes would answer it as a second turn of its own.
+# is written to the turn's stdin whenever that stdin is open (the turn has not ended), and the
+# CLI reads it at its next boundary: after the running or next tool call, inside the same turn,
+# one answer covering both; or, when the turn ends without another tool call, right after its
+# result, answering it in the same process (recording 9). The CLI's replay echo
+# (--replay-user-messages) of that line says when it was read: that is when its row is due.
+# Most of a turn is the model generating between short tool calls, so a follow-up written
+# only while a tool call ran was refused most of the time and waited for the turn to end.
 STEER_MIN_VERSION = (2, 1, 321)
 
 
@@ -599,10 +602,11 @@ class ClaudeBackend(Backend):
     def steer(self, agent_id: str, text: str, *, client_msg_id: str = "",
               synthesize_audio: bool = False, trace_id: str = "",
               on_read=None, on_unread=None) -> bool:
-        """Write a follow-up into the agent's running turn while one of its tool calls is
-        open (issue 491, part C). True: written; ``on_read(joined)`` runs when the CLI echoes
-        it (``joined``: inside the running turn), ``on_unread()`` when the process ends first.
-        False: nothing was written (no turn, no open tool call, stdin closed)."""
+        """Write a follow-up into the agent's running turn while its stdin is open (issue 491,
+        part C). True: written; ``on_read(joined)`` runs when the CLI echoes it (``joined``:
+        inside the running turn), ``on_unread()`` when the process ends first. False: nothing
+        was written (no turn launched to take one, or the turn has ended: it then runs as the
+        next turn at once)."""
         if on_read is None or on_unread is None:
             # Without a way to tell when the CLI read it, a follow-up cannot be
             # placed: Claude is not steerable that way (the Backend contract).
@@ -611,16 +615,20 @@ class ClaudeBackend(Backend):
         line = json.dumps({"type": "user", "uuid": uid,
                            "message": {"role": "user",
                                        "content": [{"type": "text", "text": text}]}})
-        for handle in self.active_handles(agent_id):
+        handles = list(self.active_handles(agent_id))
+        for handle in handles:
             state = getattr(handle, "steer_state", None)
             if state is None:
                 continue
             with state.lock:
-                if not state.open or not state.tools:
+                if not state.open:
+                    log("claudeSteerRefused", f"agent={agent_id} trace={trace_id} reason=ended")
                     return False
                 state.pending[uid] = _Follow(on_read, on_unread, state.results)
                 state.send(uid, line + "\n")          # written outside the lock
             return True
+        log("claudeSteerRefused", f"agent={agent_id} trace={trace_id} "
+                                  f"reason={'not_steerable' if handles else 'no_turn'}")
         return False
 
     # --- the runner -------------------------------------------------------

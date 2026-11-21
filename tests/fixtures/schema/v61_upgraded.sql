@@ -1,4 +1,4 @@
--- user_version 136
+-- user_version 137
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -143,6 +143,9 @@ CREATE INDEX idx_html_form_events_artifact_seq ON html_form_events(artifact_id, 
 
 -- index idx_janitor_attachments_agent on janitor_attachments
 CREATE INDEX idx_janitor_attachments_agent ON janitor_attachments(agent_id, retired_at);
+
+-- index idx_janitor_demand_claims_open on janitor_demand_claims
+CREATE INDEX idx_janitor_demand_claims_open ON janitor_demand_claims(run_id) WHERE finished_at IS NULL;
 
 -- index idx_janitor_runs_agent on janitor_runs
 CREATE INDEX idx_janitor_runs_agent ON janitor_runs(agent_id, created_at DESC);
