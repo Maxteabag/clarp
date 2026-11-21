@@ -11418,7 +11418,11 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     wait_for("the helper's turn", || host.state(helper) == "done");
     assert_eq!(state(helper), "running");
     assert_eq!(roster_told(helper), 0);
-    assert_eq!(row(helper)["queued_turn_revision"], 2);
+    assert_eq!(
+        row(helper)["queued_turn_revision"],
+        3,
+        "the send joins the queue, gets a conversation row, and starts"
+    );
     // The helper's answer says whom it answers, and is its own: it names no sender.
     let rows = host.turns(helper);
     assert_eq!(
