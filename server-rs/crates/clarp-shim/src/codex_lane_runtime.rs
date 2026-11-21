@@ -110,6 +110,9 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         loaded: false,
         known_goal: false,
         fenced: false,
+        deferred_goal: false,
+        rejected_turn: None,
+        fence_pause: None,
         uncertain_goal: false,
         stale_login: false,
         login,
@@ -154,6 +157,9 @@ struct Lane {
     loaded: bool,
     known_goal: bool,
     fenced: bool,
+    deferred_goal: bool,
+    rejected_turn: Option<String>,
+    fence_pause: Option<u64>,
     uncertain_goal: bool,
     stale_login: bool,
     login: Login,
@@ -174,6 +180,8 @@ impl Lane {
             instance: std::process::id(),
             revision: self.revision,
             known_goal: self.known_goal,
+            deferred_goal: self.deferred_goal,
+            available: self.slot.claim().is_none() && self.rejected_turn.is_none(),
             goal: self.goal.clone(),
             claim: self.slot.claim().cloned(),
             native_turn: self.slot.native_turn().map(str::to_owned),
@@ -254,7 +262,11 @@ impl Lane {
             Request::Goal { action, objective } => self.goal(action, objective),
             Request::Recover => self.recover(),
             Request::Stop { turn, attempt } => self.stop((turn, attempt)),
-            Request::Retire if self.slot.claim().is_none() && !self.may_continue() => {
+            Request::Retire
+                if self.slot.claim().is_none()
+                    && self.rejected_turn.is_none()
+                    && !self.may_continue() =>
+            {
                 self.retire_reply = Some(stream);
                 return Ok(true);
             }
@@ -286,7 +298,7 @@ impl Lane {
         if self.slot.claim() == Some(&claim) {
             return Ok(());
         }
-        if self.slot.claim().is_some() {
+        if self.slot.claim().is_some() || self.rejected_turn.is_some() {
             return Err(io::Error::other("the Codex lane is already reserved"));
         }
         let socket = Socket::turn(&claim, self.send.clone())?;
@@ -306,7 +318,7 @@ impl Lane {
         if self.slot.claim() == Some(&claim) {
             return Ok(());
         }
-        if self.slot.claim().is_some() {
+        if self.slot.claim().is_some() || self.rejected_turn.is_some() {
             return Err(io::Error::other("the Codex lane cannot start a prompt now"));
         }
         let socket = Socket::turn(&claim, self.send.clone())?;
@@ -366,11 +378,9 @@ impl Lane {
                 "a goal activation needs an admitted actor slot",
             ));
         }
-        if activating {
-            self.fenced = false;
-        } else if action == GoalAction::Pause {
-            self.fenced = true;
-        }
+        self.deferred_goal = false;
+        self.fence_pause = None;
+        self.fenced = !activating;
         self.use_login()?;
         self.load()?;
         let (method, params) = action.request(&self.thread, objective);
@@ -399,10 +409,11 @@ impl Lane {
         self.probe()?;
         if already_loaded
             && self.slot.is_goal_reserved()
-            && self
-                .goal
-                .as_ref()
-                .is_some_and(|goal| goal["status"] == "active")
+            && (self.deferred_goal
+                || self
+                    .goal
+                    .as_ref()
+                    .is_some_and(|goal| goal["status"] == "active"))
         {
             self.goal(GoalAction::Resume, String::new())?;
         }
@@ -459,7 +470,11 @@ impl Lane {
             return;
         }
         self.known_goal = true;
+        if goal.is_null() || goal["status"] == "complete" {
+            self.deferred_goal = false;
+        }
         if self.slot.is_goal_reserved()
+            && !self.deferred_goal
             && (goal.is_null() || matches!(goal["status"].as_str(), Some("paused" | "complete")))
         {
             let _ = self.clear_slot();
@@ -473,6 +488,8 @@ impl Lane {
             return Ok(());
         }
         self.fenced = true;
+        self.deferred_goal = false;
+        self.fence_pause = None;
         let native = self.slot.native_turn().map(str::to_owned);
         // Pause before interrupting. Even on a refusal, attempt the interrupt
         // and keep the fence against the next unsolicited notification.
@@ -549,7 +566,17 @@ impl Lane {
         match frame {
             Frame::Notification { method, params } => self.notice(&method, &params, starting),
             Frame::Request { id } => self.server.refuse_server_request(id),
-            Frame::Reply { .. } => Ok(()), // acknowledgement of a fence
+            Frame::Reply { id, result } => {
+                if self.fence_pause == Some(id) {
+                    self.fence_pause = None;
+                    if let Ok(reply) = result
+                        && let Some(goal) = reply.get("goal")
+                    {
+                        self.apply_goal(goal);
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
@@ -592,31 +619,48 @@ impl Lane {
                     .slot
                     .bind(None, &self.thread, native, self.server.pid(), now)?;
             if !admitted {
-                self.fenced = true;
-                if !self.loaded
-                    || self
-                        .goal
-                        .as_ref()
-                        .is_some_and(|goal| goal["status"] == "active")
-                {
-                    self.server.request(
-                        "thread/goal/set",
-                        json!({"threadId": self.thread, "status": "paused"}),
-                    )?;
-                }
-                self.server.request(
-                    "turn/interrupt",
-                    json!({"threadId": self.thread, "turnId": native}),
-                )?;
+                self.reject_start(native)?;
             } else {
                 self.show();
             }
+        }
+        if method == "turn/completed"
+            && self.rejected_turn.as_deref() == params["turn"]["id"].as_str()
+            && self.rejected_turn.take().is_some()
+        {
+            self.show();
+            return Ok(());
         }
         if self.slot.notification(method, params, now)? {
             self.clear_slot()?;
         } else {
             self.hint();
         }
+        Ok(())
+    }
+
+    fn reject_start(&mut self, native: &str) -> io::Result<()> {
+        if self.rejected_turn.as_deref() == Some(native) {
+            return Ok(());
+        }
+        let active = self
+            .goal
+            .as_ref()
+            .is_some_and(|goal| goal["status"] == "active");
+        self.deferred_goal |= active && !self.fenced;
+        self.fenced = true;
+        self.rejected_turn = Some(native.to_owned());
+        if (!self.loaded || active) && self.fence_pause.is_none() {
+            self.fence_pause = Some(self.server.request(
+                "thread/goal/set",
+                json!({"threadId": self.thread, "status": "paused"}),
+            )?);
+        }
+        self.server.request(
+            "turn/interrupt",
+            json!({"threadId": self.thread, "turnId": native}),
+        )?;
+        self.show();
         Ok(())
     }
 }

@@ -25,6 +25,8 @@ pub enum Ownership {
     Stopping,
     /// The account pool paused execution. Its next allowed claim can resume the native goal.
     AccountHold,
+    /// A provider continuation tried to run before the actor could grant a claim.
+    SchedulerHold,
     /// The provider child has exited and released the thread.
     Exec,
 }
