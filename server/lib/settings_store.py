@@ -47,13 +47,20 @@ def get(key: str) -> str | None:
     return str(row["value"]) if row is not None else None
 
 
-def get_many(keys: list[str]) -> dict[str, str]:
-    """The stored values of several keys in one read (absent keys omitted)."""
-    if not keys:
+def get_many(keys: list[str], *, prefixes: tuple[str, ...] = ()) -> dict[str, str]:
+    """The stored values of several keys, and of every key under ``prefixes``, in one read
+    (absent keys omitted). A prefix is a key range on the primary key, as in json_prefix_items."""
+    if not keys and not prefixes:
         return {}
-    rows = conn().execute(
-        f"SELECT key, value FROM settings WHERE key IN ({','.join('?' * len(keys))})",
-        tuple(keys)).fetchall()
+    where, params = [], []
+    if keys:
+        where.append(f"key IN ({','.join('?' * len(keys))})")
+        params += keys
+    for prefix in prefixes:
+        where.append("(key >= ? AND key < ?)")
+        params += _prefix_range(prefix)
+    rows = conn().execute(f"SELECT key, value FROM settings WHERE {' OR '.join(where)}",
+                          tuple(params)).fetchall()
     return {str(row["key"]): str(row["value"]) for row in rows}
 
 

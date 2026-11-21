@@ -435,8 +435,6 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     except agent_ring_live.CallError:
         call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
     agent_rows = agents_db.list_agents(with_moves=True)
-    # The user's last compaction of each agent and what it did (R148).
-    last_compactions = compaction.last_outcomes([str(r["agent_id"]) for r in agent_rows])
     # Agents that moved to another Host (lib.agent_moves): {to: {host, id}, at} or None,
     # read with the roster in its one statement (list_agents(with_moves=True)).
     from . import agent_moves
@@ -451,13 +449,18 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     # One settings read for the whole build; voice profiles resolve from it and
     # from the configuration, with no query per agent (voice_profile).
     from . import settings_store
+    # The user's last compaction of each agent and what it did (R148) is read with them: a key
+    # range, so the statement names no agent.
     projected_settings = settings_store.get_many(
-        [avatar_settings.KEY, *tool_explanation_settings.KEYS, *voice_profile.TRANSCRIPTION_KEYS])
+        [avatar_settings.KEY, *tool_explanation_settings.KEYS, *voice_profile.TRANSCRIPTION_KEYS],
+        prefixes=(compaction.OUTCOME_PREFIX,))
+    last_compactions = compaction.outcomes_from(projected_settings)
     voice_host = voice_profile.HostView.build(cfg, stored=projected_settings)
     voices = voice_profile.Projection(voice_host, agent_rows)
     if messages is None:
         messages = message_store.dashboard_messages(agent_ids={a["agent_id"] for a in selected})
-    coordination_hiding = coordination.hiding_agents()
+    coordination_view = coordination.roster_view()
+    coordination_hiding = coordination_view.hiding
     tree = helper_tree(agent_rows, states, visible_labels, hiding=coordination_hiding)
     child_count = tree.child_count
     running_children = tree.running_children
@@ -476,8 +479,7 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if select is not None and reconcile_available:
         _reconcile_unlisted(agent_rows, selected, states, runtimes, runtime_status)
     # Read once for every row (lib.coordination): the Host's choice and the chats' own.
-    coordination_host = coordination.global_visibility()
-    coordination_chosen = coordination.overrides()
+    coordination_host, coordination_chosen = coordination_view.host, coordination_view.chosen
     for a in selected:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
