@@ -87,6 +87,18 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     );
     assert!(second_page["next_before"].is_null());
 
+    for rejected in [
+        json!({}),
+        json!({"asset_ids": []}),
+        json!({"asset_ids": [""]}),
+        json!({"asset_ids": [true]}),
+        json!({"asset_ids": vec![first.clone(); 201]}),
+    ] {
+        assert_eq!(host.ask("POST", "/media/delete", Some(&rejected)).0, 400);
+    }
+    assert_eq!(host.ask("GET", "/media/deleted", None).0, 400);
+    assert_eq!(host.ask("GET", "/media/deleted?since=-1", None).0, 400);
+    assert_eq!(host.ask("GET", "/media/deleted?since=0&limit=bad", None).0, 400);
     let batch = host.post(
         "/media/delete",
         json!({"asset_ids": [first, "unknown", text, first]}),

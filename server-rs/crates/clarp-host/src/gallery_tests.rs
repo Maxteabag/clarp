@@ -159,3 +159,34 @@ fn media_gallery_storage_cost_at_300_and_30000_assets() {
         assert!(to.1 <= (from.1 * 2).max(from.1 + 1000));
     }
 }
+
+#[tokio::test]
+async fn a_media_request_times_out_and_a_queued_mutation_is_skipped() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let path = std::path::Path::new("gallery-timeout");
+    let db = MemKeyValue::new().open(path).unwrap();
+    let blobs = MemBlobs::new().open(path).unwrap();
+    let writer = Writer::start(Store::open(db, blobs).unwrap()).unwrap();
+    let (entered, waiting) = oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::sync_channel(1);
+    let busy = writer.clone();
+    let stalled = tokio::spawn(async move {
+        busy.ask(move |_| {
+            let _ = entered.send(());
+            let _ = blocked.recv_timeout(WAIT * 3);
+            Ok(())
+        }).await
+    });
+    waiting.await.unwrap();
+    let ran = Arc::new(AtomicBool::new(false));
+    let marked = ran.clone();
+    let refused = writer.ask(move |_| {
+        marked.store(true, Ordering::SeqCst);
+        Ok(())
+    }).await;
+    assert!(matches!(refused, Err(Failure::TimedOut)));
+    release.send(()).unwrap();
+    let _ = stalled.await.unwrap();
+    writer.ask(|_| Ok(())).await.unwrap();
+    assert!(!ran.load(Ordering::SeqCst));
+}

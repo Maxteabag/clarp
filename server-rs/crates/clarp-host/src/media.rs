@@ -216,11 +216,7 @@ async fn list(
     State(app): State<App>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Value>, Denied> {
-    let session = query
-        .session
-        .filter(|session| !session.is_empty())
-        .unwrap_or_else(|| clarp_kernel::addressed::DEFAULT_SESSION.to_owned());
-    let session = session.trim().to_owned();
+    let session = query.session.unwrap_or_default().trim().to_owned();
     let limit = media::page_size(query.limit.as_deref());
     let favorites = matches!(query.favorites.trim(), "1" | "true");
     let directory = app.fleet.directory();

@@ -32,14 +32,20 @@ impl IntoResponse for Denied {
             Self::Gone { id, at } => (
                 StatusCode::GONE,
                 Json(json!({"error": "removed", "asset_id": id, "deleted_at": at})),
-            ).into_response(),
+            )
+                .into_response(),
         }
     }
 }
 
 pub(crate) fn error(id: &str, failure: Failure) -> Denied {
     let status = match failure {
-        Failure::Refused(Refusal::Removed(at)) => return Denied::Gone { id: id.to_owned(), at },
+        Failure::Refused(Refusal::Removed(at)) => {
+            return Denied::Gone {
+                id: id.to_owned(),
+                at,
+            };
+        }
         Failure::Refused(Refusal::Unknown) => StatusCode::NOT_FOUND,
         Failure::Refused(Refusal::NotImage) => StatusCode::UNPROCESSABLE_ENTITY,
         Failure::Refused(_) => StatusCode::BAD_REQUEST,
@@ -249,7 +255,9 @@ pub(crate) async fn journal(
 ) -> Result<(), crate::agent::Unavailable> {
     let id = asset.asset_id.clone();
     if member.agent.view().books.media.get(&id) != Some(&asset) {
-        member.agent.publish(asset).await?;
+        tokio::time::timeout(std::time::Duration::from_secs(3), member.agent.publish(asset))
+            .await
+            .map_err(|_| crate::agent::Unavailable("the media publication journal did not answer in time".into()))??;
     }
     let agent_id = member.record.agent_id.clone();
     app.gallery
