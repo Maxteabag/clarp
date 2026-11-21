@@ -685,7 +685,10 @@ language_adapted, requested_model}`, sources `agent | call_policy | device |
 global`; `attempts[].language` is the language the Host handed at that
 engine's boundary (`auto` = no constraint handed, not a detection; `null`, or
 no `language` on a skip = the boundary was unobserved, never a statement that
-the engine was or was not invoked). With a call policy configured, when no
+the engine was or was not invoked). `attempts[].outcome` (`ok`, `error`, `skipped`) and a
+skip's `reason` (such as `language_incompatible` or `provider_already_sent`) are open sets: a
+client shows a value it does not know as plain words and keeps the answer. With a call policy
+configured, when no
 engine can take the call language the clip is refused, with no provider call:
 409 `{"ok": false, "error": "no compatible engine", "language", "engines",
 "attempts"}`. A stored call policy that can never work is refused the same
