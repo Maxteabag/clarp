@@ -997,10 +997,9 @@ mod tests {
             Box::new(|r, t| {
                 r.handle(
                     Command::TurnEnded {
-                        turn: TurnId(3),
-                        outcome: RunOutcome::Failed {
-                            reason: "limit".to_string(),
-                        },
+                        // The user's "carry on" starts before the agent's message.
+                        turn: TurnId(4),
+                        outcome: RunOutcome::Completed,
                     },
                     t,
                 )
@@ -1008,8 +1007,10 @@ mod tests {
             Box::new(|r, t| {
                 r.handle(
                     Command::TurnEnded {
-                        turn: TurnId(4),
-                        outcome: RunOutcome::Completed,
+                        turn: TurnId(3),
+                        outcome: RunOutcome::Failed {
+                            reason: "limit".to_string(),
+                        },
                     },
                     t,
                 )
