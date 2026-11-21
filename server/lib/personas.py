@@ -37,7 +37,8 @@ def _sync_builtins() -> None:
         }
         if cfg.gemini_voice_for(name):
             voices["gemini"] = cfg.gemini_voice_for(name)
-        voice = json.dumps(voices, separators=(",", ":"))
+        from .voice import canonical
+        voice = canonical(json.dumps(voices))      # the one stored shape (issue 476)
         db.conn().execute(
             """INSERT OR IGNORE INTO personas
                  (persona_id,name,voice_id,personality,builtin,created_at)
@@ -87,6 +88,9 @@ def create(*, name: str, voice_id: str = "", avatar_symbol: str = "",
     if not voice_id:
         from . import contact_minting
         voice_id = contact_minting.pick_available_voice()
+    else:
+        from .voice import canonical
+        voice_id = canonical(voice_id)          # the one stored shape (issue 476)
     persona_id = "persona-" + secrets.token_hex(8)
     avatar_path = ""
     if avatar_base64:
@@ -155,7 +159,10 @@ def update_avatar(*, original_name: str, avatar_symbol: str = "",
 
 def update(*, original_name: str, name: str, voice_id: str,
            avatar_symbol: str = "", personality: str = "",
-           avatar_base64: str = "") -> dict:
+           avatar_base64: str = "", base_voice_id: str | None = None) -> dict:
+    """``voice_id`` is merged into the stored map per provider (voice.merge_provider_maps):
+    with ``base_voice_id``, the map the client last read, a stale read never wipes
+    another app's entry; without it, nothing is removed by its absence."""
     current = get(original_name)
     if not current:
         raise ValueError("Only saved custom Contacts can be edited.")
@@ -174,6 +181,9 @@ def update(*, original_name: str, name: str, voice_id: str,
     if not voice_id:
         from . import contact_minting
         voice_id = str(current.get("voice_id") or "") or contact_minting.pick_available_voice()
+    else:
+        from .voice import merge_provider_maps
+        voice_id = merge_provider_maps(current.get("voice_id"), voice_id, base_voice_id)
     avatar_path = _store_avatar(current, avatar_base64)
     db.conn().execute(
         """UPDATE personas
@@ -184,6 +194,13 @@ def update(*, original_name: str, name: str, voice_id: str,
          personality[:4000], current["persona_id"]),
     )
     return get(name) or {}
+
+
+def set_stored_voice(persona_id: str, voice_id: str) -> None:
+    """Rewrite a saved contact's stored voice value (the voice migration's --apply,
+    only for a value that sounds the same in the one stored shape)."""
+    db.conn().execute("UPDATE personas SET voice_id = ? WHERE persona_id = ? AND builtin = 0",
+                      (voice_id, persona_id))
 
 
 def delete(name: str) -> bool:

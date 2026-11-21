@@ -2133,6 +2133,54 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
             os.close(owner)
 
 
+def cmd_voice(args) -> int:
+    """`voice migrate [--apply DIGEST] [--json]`: the one stored voice shape (issue 476).
+
+    Reports, for every agent and contact whose stored voice is not yet in the one shape,
+    the old and the new value and what it is heard with today and after, under the
+    configured provider and its fallback and per provider; and the transcription settings
+    copied under agent ids. --apply DIGEST writes only the rows with no audible change and
+    names the others, and only when the plan is still the dry run's with that digest."""
+    server_root = SHARE
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
+    sys.path.insert(0, str(server_root))
+    from lib import voice_migration
+    report = voice_migration.plan()
+    if args.apply:
+        try:
+            result = voice_migration.apply(report, reviewed=args.apply)
+        except voice_migration.PlanChanged as exc:
+            print(f"nothing written: {exc}; run the dry run again and read it", file=sys.stderr)
+            return 3
+        print(json.dumps(result, indent=2) if args.json else
+              f"written {len(result['written'])}; refused as audible {len(result['refused_audible'])}"
+              + "".join(f"\n  refused: {name}" for name in result["refused_audible"]))
+        return 0
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0
+    rows = report["voices"]
+    audible = [r for r in rows if r["audible"]]
+    print(f"provider {report['provider']}, fallback {report['fallback']}: "
+          f"{len(rows)} stored voice(s) to bring to the one shape, {len(audible)} would sound different")
+    for r in rows:
+        mark = "AUDIBLE" if r["audible"] else "same   "
+        print(f"  {mark} {r['kind']:7} {r['name']}: {r['old'] or '(empty)'} -> {r['new']}"
+              + (f"\n          today {r['today']}\n          after {r['after']}" if r["audible"] else "")
+              + "".join(f"\n          {p}: today {v['today']}, after {v['after']}"
+                        for p, v in r["per_provider"].items()))
+    t = report["transcription"]
+    print(f"transcription: {len(t['engines'])} engine and {len(t['languages'])} language setting(s) "
+          f"to copy under agent ids; {len(t['shared_keys'])} shared key(s), "
+          f"{len(t['agents_with_several_keys'])} agent(s) with several keys")
+    for item in t["shared_keys"] + t["agents_with_several_keys"]:
+        print(f"  listed: {item}")
+    print(f"dry run {report['digest']}: nothing written (clarp-admin voice migrate --apply "
+          f"{report['digest']} writes the rows marked same, if the plan is still this one)")
+    return 0
+
+
 def cmd_tts(args) -> int:
     server_root = SHARE
     if not (server_root / "lib").is_dir():
@@ -3335,6 +3383,15 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         "mode", choices=("tailscale", "lan", "manual", "off"))
     network_use.add_argument("--url", default="")
     network_use.set_defaults(func=cmd_network)
+
+    voice = sub.add_parser("voice").add_subparsers(dest="voice_command", required=True)
+    voice_migrate = voice.add_parser(
+        "migrate", help="bring stored voices to the one shape: a report; --apply writes only "
+                        "rows that sound the same")
+    voice_migrate.add_argument("--apply", metavar="DIGEST", default="",
+                               help="write the plan of the dry run whose digest this is")
+    voice_migrate.add_argument("--json", action="store_true")
+    voice_migrate.set_defaults(func=cmd_voice)
 
     tts = sub.add_parser("tts").add_subparsers(
         dest="tts_command", required=True)
