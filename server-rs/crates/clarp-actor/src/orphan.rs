@@ -201,4 +201,51 @@ mod tests {
         assert!(ended(&owner).unwrap());
         assert!(process(tool_pid).unwrap().is_none_or(|seen| seen.ended));
     }
+
+    #[test]
+    fn a_group_that_cannot_be_fenced_leaves_the_follow_up_unjudged() {
+        let code = r#"
+import os, subprocess, sys
+os.setsid()
+tool_code = "import subprocess, time; child=subprocess.Popen(['sleep','30']); print(child.pid, flush=True); time.sleep(30)"
+tool = subprocess.Popen([sys.executable, "-c", tool_code], process_group=0,
+                        stdout=subprocess.PIPE, text=True)
+print(tool.pid, tool.stdout.readline().strip(), flush=True)
+sys.stdin.readline()
+tool.kill()
+tool.wait()
+"#;
+        let mut shim = Command::new("python3")
+            .args(["-c", code])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(shim.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let (tool, survivor) = line.trim().split_once(' ').unwrap();
+        let tool = process(tool.parse().unwrap()).unwrap().unwrap();
+        let survivor = process(survivor.parse().unwrap()).unwrap().unwrap();
+        let shim_process = process(shim.id()).unwrap().unwrap();
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+        let token = |start| format!("{}:{start}", boot.trim());
+        let owner = InputOwner {
+            shim_pid: shim_process.pid,
+            shim_start: token(shim_process.start),
+            tool_pid: tool.pid,
+            tool_start: token(tool.start),
+            group: tool.group,
+            projects: "/fixture/projects".into(),
+        };
+        drop(shim.stdin.take());
+        assert!(shim.wait().unwrap().success());
+        let deferred = ended(&owner);
+        let still_alive = process(survivor.pid).unwrap().is_some_and(|seen| !seen.ended);
+        kill_exact(survivor).unwrap();
+        assert_eq!(deferred.unwrap_err().kind(), ErrorKind::TimedOut);
+        assert!(still_alive);
+        assert!(ended(&owner).unwrap());
+    }
 }
