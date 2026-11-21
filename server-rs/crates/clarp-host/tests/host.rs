@@ -10300,11 +10300,34 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
          there was nothing to bring. If another Host has it, `clarp-host import --files --from \
          {old} --session {session} --files-from ADDR:PORT` brings it from there.\nIt is heard \
          here as it was there: in no,en, by elevenlabs:scribe_v2, then google:chirp_3.\nIt is \
-         still on the Host at",
+         marked moved on the Host at {old}. Its turn-start doors there now refuse it. It is resumed here.",
         old = old_host.address
     );
     assert!(told.contains(&said_of_it), "{told}");
     assert!(!told.contains("did not arrive"), "{told}");
+    let identity = new_host.get("/pairing/identity");
+    let (status, refused) = old_host.ask(
+        "POST",
+        "/send",
+        Some(&json!({
+            "session": session, "text": "This must run on the destination",
+            "client_msg_id": "after-move-on-source",
+        })),
+    );
+    let moved_at = refused["moved_at"].as_i64().unwrap();
+    assert!(moved_at > 0);
+    assert_eq!(
+        (status, refused),
+        (
+            409,
+            json!({
+                "ok": false, "error": "agent_moved",
+                "moved_to": {"host": identity["name"], "id": identity["server_id"]},
+                "moved_at": moved_at,
+            })
+        )
+    );
+    assert_eq!(old_host.conversation(&session), before);
     let heard_here = new_host.get("/transcription-providers");
     let heard_by_both = |text: &str| json!({(&session):text, (&agent_id):text});
     assert_eq!(
@@ -10377,11 +10400,9 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let waiting = new_host.get("/attention");
     assert_eq!(waiting["count"], 1, "{waiting}");
     assert_eq!(waiting["items"][0]["decision_id"], decision_id.as_str());
-    // It arrived held: until its owner resumes it here, nothing starts by itself, because
-    // until then it is on the first Host too. Its goals are as they were, not paused.
-    assert!(told.contains("Here it is held until then"), "{told}");
+    // Marking the source lets the imported mailbox resume. Its goals are as they were.
     let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
+    assert_eq!(queue["paused"], false, "{queue}");
     assert_eq!(plan_here["status"], "active");
     // And the agent goes on with it here: the next step follows the revision it had.
     let revision = plan_before["revision"].as_i64().unwrap().to_string();
@@ -10574,14 +10595,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         new_host.conversation(&session)[5],
         said("assistant", "and now?")
     );
-    // What its user said ran, and it is still held; a resume lets it go.
-    let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
-    let resumed = new_host.post("/turn-queue/resume", json!({ "session": session }));
-    assert_eq!(resumed["paused"], false, "{resumed}");
-    let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], false, "{queue}");
-    // The first Host was read, not changed; and an agent arrives once.
+    // The source mark leaves its conversation intact. The destination imports it once.
     assert_eq!(old_host.conversation(&session), before);
     let again = third_place
         .host_command()
@@ -10609,7 +10623,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     assert!(
         told.contains(
-            "with the 2 rows of its conversation and the one file it published or shows.\nIt is still"
+            "with the 2 rows of its conversation and the one file it published or shows.\nIt is marked moved"
         ),
         "{told}"
     );

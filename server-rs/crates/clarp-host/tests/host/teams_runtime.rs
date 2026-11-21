@@ -112,13 +112,18 @@ fn teams_runtime_broadcasts_durable_team_blocks_and_acknowledges_the_exact_promp
                 .as_str()
                 .is_some_and(|text| text.starts_with("Private update "))
     }));
-    let chat = host.conversation(&sender);
+    let raw = (1..=8).fold(
+        "<speak>Visible result.</speak>".to_owned(),
+        |mut text, index| {
+            text.push_str(&format!(
+                "<team><speak>Private update {index}</speak></team>"
+            ));
+            text
+        },
+    );
     assert_eq!(
-        chat,
-        [
-            said("user", "Publish updates"),
-            said("assistant", "<speak>Visible result.</speak>")
-        ]
+        host.conversation(&sender),
+        [said("user", "Publish updates"), said("assistant", &raw)]
     );
     send(&host, &solo, "Solo input", "solo-input");
     wait_for("the solo turn", || host.state(&solo) == "done");
