@@ -34,7 +34,7 @@ one of these:
 
 | Not listed here | Why |
 |---|---|
-| `teams` | Team management is available. The capability will be listed after broadcast, inbox and leader runtime integration. |
+| Leader decision memory | A Teams leader receives standing orders, member states and the team digest. The Python Host also inserts its separate decision-memory CLI and its compact user-values document into the ordinary leadership brief. Those inputs are pending the leader-memory port. |
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
