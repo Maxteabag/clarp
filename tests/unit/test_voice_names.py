@@ -423,3 +423,24 @@ def test_a_file_from_the_old_format_is_refreshed_at_the_next_start(names_file):
     assert voice_names.start_due() is True                          # format 1, written just now
     _refresh(_cfg("cartesia"), names_file, pages=[_api_row("v1")])
     assert voice_names.start_due() is False
+
+
+def test_a_refresh_without_a_cartesia_catalogue_still_writes_the_format(names_file):
+    """Reviewer 4 on 562: with no Cartesia key, or a failed catalogue fetch, the file must still
+    get the current format, or every start would refresh again (up to 100 ElevenLabs lookups)."""
+    old_file = {"cartesia": {"v1": "One"},
+                "_catalogue": {"cartesia": {"v1": {"language": "en", "public": False, "owner": False}}}}
+    names_file.write_text(json.dumps(old_file))                    # format 1, written just now
+    assert voice_names.start_due() is True
+    _refresh(_cfg("cartesia", cartesia_api_key=""), names_file, pages=[],
+             by_id={ELEVEN: {"id": ELEVEN, "name": "Brian"}}, eleven_in_use={ELEVEN})
+    assert json.loads(names_file.read_text())["_format"] == voice_names.FORMAT
+    assert voice_names.start_due() is False
+    # A failed Cartesia fetch on an old-format file: the stale rows (all read not public) are
+    # dropped, not trusted for another day; the names stay.
+    names_file.write_text(json.dumps(old_file))
+    done, _ = _refresh(_cfg("cartesia", eleven_api_key=""), names_file, pages=[], fail=True)
+    stored = json.loads(names_file.read_text())
+    assert stored["_format"] == voice_names.FORMAT and "cartesia" not in stored.get("_catalogue", {})
+    assert stored["cartesia"] == {"v1": "One"}
+    assert voice_names.catalogue("cartesia") is None and voice_names.start_due() is False
