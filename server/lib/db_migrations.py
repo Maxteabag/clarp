@@ -1179,7 +1179,7 @@ def _migrate_to_v132(con: sqlite3.Connection) -> None:
     if columns and "shown_at" not in columns:
         con.execute("ALTER TABLE queued_turns ADD COLUMN shown_at INTEGER")
         con.execute("""UPDATE queued_turns SET shown_at = enqueued_at
-                        WHERE status IN ('queued', 'claimed', 'parked')
+                        WHERE status IN ('queued', 'claimed', 'parked', 'started')
                           AND EXISTS (SELECT 1 FROM messages m
                                        WHERE m.message_id IN (
                                              'u-' || COALESCE(NULLIF(TRIM(queued_turns.client_msg_id), ''),

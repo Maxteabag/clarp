@@ -28,7 +28,9 @@ def test_durable_turn_queue_round_trip():
         "SELECT text,prompt_admission_id FROM queued_turns WHERE queue_id = 'u-1'"
     ).fetchone()
     assert row is not None
-    assert row["text"] == ""
+    # Since issue 491 the words are kept until the message's conversation row is written
+    # (here none is): they are its only copy until then. A shown item's start drops them.
+    assert row["text"] == "later"
     assert row["prompt_admission_id"] == "padm-1"
     turn_queue.remove("u-1")
     assert turn_queue.pending() == []

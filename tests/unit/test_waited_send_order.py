@@ -610,3 +610,207 @@ def test_a_steer_whose_item_start_fails_keeps_its_row_and_never_runs_again(
     assert turn_queue.status("two") != "queued"
     assert db.conn().execute(
         "SELECT COUNT(*) FROM queued_turns WHERE status = 'queued'").fetchone()[0] == 0
+
+
+# ---- review 2's surviving mutants of 5d52daa0 (each test names the one it kills) ----------
+
+def test_m11_an_accepted_steer_is_started_by_the_time_its_row_commits(tmp_path, clock):
+    """M11: the row and the item's start are one transaction. A crash right after the row's
+    commit (its transcript-updated broadcast) finds the item already started, before any
+    restart could repair it."""
+    world = _SteeredWorld(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    armed = {"on": False}
+
+    def crash_on_the_row(event):
+        if armed["on"] and str(event.get("type")) == "transcript-updated":
+            raise _Crash()
+
+    world.service.ctx.stream.broadcast = crash_on_the_row
+    armed["on"] = True
+    clock.at(7_600)
+    with pytest.raises(_Crash):
+        _send(world, "two")
+    assert _row(_tail(), "two") is not None
+    assert turn_queue.status("two") == "started"
+
+
+def test_m20_m18_a_shown_item_is_neither_deletable_nor_counted(tmp_path, clock, monkeypatch):
+    """M20: an item whose row exists is the conversation's: DELETE refuses (so no 'deleted'
+    event drops a bubble whose row stands). M18: the queue count leaves it out."""
+    world = _World(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    monkeypatch.setattr(td.TurnDispatchService, "_waits_on_arrival", lambda self, spec, slot: False)
+    clock.at(7_600)
+    _send(world, "two")                       # admitted with its row, then found busy
+    assert turn_queue.status("two") == "queued" and _row(_tail(), "two") is not None
+    assert turn_queue.remove("two") is False and turn_queue.status("two") == "queued"
+    assert turn_queue.state(world.agent)["count"] == 0
+
+
+def test_m6_m7_an_item_being_handed_to_a_steer_is_neither_edited_nor_deleted(tmp_path, clock):
+    """M6, M7: once its launch receipt says the prompt may have left, edit and delete refuse:
+    never a row with one text and a turn run on another (ruling e)."""
+    from lib import launch_receipts
+    world = _World(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    clock.at(7_600)
+    _send(world, "two")
+    launch_receipts.mark_attempted("t-two")
+    assert turn_queue.update_text("two", "other words") is False
+    assert turn_queue.remove("two") is False
+    assert [t for c, t, _k in _queue(world) if c == "two"] == ["two"]
+
+
+def test_m13_a_parked_send_with_its_row_is_in_one_read_after_a_restart(tmp_path, clock):
+    """M13: a park row written for a send that already has its row is marked shown, so when a
+    restart makes it queued again it is not also in the queue read."""
+    world = _World(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    message_store.record_user_message(
+        agent_id=world.agent, backend_session_id=agents_db.live_backend_session(world.agent),
+        client_msg_id="p1", text="p1", trace_id="t-p1")
+    assert turn_queue.park(queue_id="stop-park-t-p1", agent_id=world.agent, session="mike",
+                           text="p1", trace_id="t-p1", client_msg_id="p1",
+                           synthesize_audio=False, origin="user", sender_agent_id="")
+    turn_queue.requeue_parked(world.agent)
+    assert turn_queue.status("stop-park-t-p1") == "queued"
+    assert _where(world, "p1") == "log"
+    assert turn_queue.state(world.agent)["count"] == 0
+
+
+def test_m16_a_waiting_send_is_not_held_by_a_pause_that_already_existed(tmp_path, clock):
+    """M16: a plain send is fresh intent: a Stop's pause that existed when it arrived does not
+    hold it, also across a restart (its item carries allow_paused)."""
+    world = _World(tmp_path)
+    clock.at(0)
+    turn_queue.set_paused(world.agent, True)
+    _send(world, "one")
+    world._collect()
+    assert world.started == ["one"]
+    clock.at(7_600)
+    _send(world, "two")
+    clock.at(10_500)
+    world.restart()                           # memory gone: only the item's own flag remains
+    assert world.started.count("two") == 1
+
+
+@pytest.fixture
+def ticking_clock(monkeypatch):
+    c = _Clock()
+
+    def tick():
+        c.ms += 1
+        return c.ms / 1000
+
+    monkeypatch.setattr(time, "time", tick)
+    return c
+
+
+def test_m9_a_queue_request_that_starts_at_once_has_no_sent_at(tmp_path, ticking_clock):
+    """M9: sent_at only on a row whose message waited: a queue request to an idle agent starts
+    at once (its row a few ms after its item), and carries none."""
+    world = _World(tmp_path)
+    _send(world, "one", queue=True)
+    world._collect()
+    assert world.started == ["one"]
+    assert "sent_at" not in _row(_tail(), "one")
+
+
+def test_m14_sent_at_is_kept_only_when_earlier_than_the_row(tmp_path, clock):
+    """M14: a message that waited but started within the same millisecond keeps no sent_at
+    (it would not be earlier than its row's time)."""
+    world = _World(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    _send(world, "two")                       # same instant as one's start
+    _finish_running(world)                    # and two starts in that instant too
+    row = _row(_tail(), "two")
+    assert row is not None and "sent_at" not in row
+
+
+def test_m4_a_send_admitted_beside_another_leans_towards_waiting(tmp_path, clock):
+    """M4: while another send for the agent is being admitted, a send is admitted as a queue
+    item even if the agent looks idle; idle after all, it starts at once from that item."""
+    world = _World(tmp_path)
+    clock.at(0)
+    with td._SLOTS.admitting_send(world.agent):
+        _send(world, "one")
+    world._collect()
+    assert world.started == ["one"]
+    item = db.conn().execute("SELECT kind, shown_at FROM queued_turns WHERE queue_id='one'").fetchone()
+    assert item is not None and item["kind"] == turn_queue.KIND_WAITING and item["shown_at"]
+    assert _where(world, "one") == "log"
+
+
+def test_m19_an_item_retired_as_its_turn_starts_never_runs(tmp_path, clock, monkeypatch):
+    """M19: an item cancelled between the handoff's read and the write that starts its turn is
+    not run and gets no row."""
+    world = _World(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    clock.at(7_600)
+    _send(world, "two")
+    real = td.TurnDispatchService._start_queued_row
+
+    def cancelled_first(self, spec, **kwargs):
+        if spec.client_msg_id == "two":
+            turn_queue.cancel("two")
+        return real(self, spec, **kwargs)
+
+    monkeypatch.setattr(td.TurnDispatchService, "_start_queued_row", cancelled_first)
+    clock.at(10_500)
+    _finish_running(world)
+    assert world.started == ["one"] and _row(_tail(), "two") is None
+
+
+# ---- the on_init window (review 2's forced probe) ------------------------------------------
+
+@pytest.mark.parametrize("then", ["init arrives", "crash before init"])
+def test_a_turn_with_no_session_at_its_handoff_keeps_its_message_in_one_read(
+        tmp_path, clock, monkeypatch, then):
+    """A turn handed off with no backend session id yet writes its row at the CLI's init.
+    Between spawn and init the message stays in the queue read (started, not shown); the init
+    writes the row and moves it to the conversation; a crash before the init leaves recovery
+    to write the row. Either way: in exactly one read, never lost, never run twice."""
+    world = _World(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    clock.at(7_600)
+    _send(world, "two")
+    real_record = agents_db.record_user_message
+    no_session = {"on": True}
+
+    def no_backend_id_yet(**kwargs):
+        if no_session["on"] and kwargs.get("client_msg_id") == "two":
+            return None                       # as for a session with no backend id yet
+        return real_record(**kwargs)
+
+    monkeypatch.setattr(agents_db, "record_user_message", no_backend_id_yet)
+    clock.at(10_500)
+    _finish_running(world)
+    assert world.started == ["one", "two"]
+    assert turn_queue.status("two") == "started"
+    assert _where(world, "two") == "queue"            # between spawn and init: still queued
+    no_session["on"] = False
+    if then == "init arrives":
+        call = [c for c in world.provider.spawned if c["text"] == "two"][0]
+        call["on_session_init"](agents_db.live_backend_session(world.agent))
+        assert _where(world, "two") == "log"
+        return
+    world.restart()                                    # the Host dies before the init
+    assert world.started.count("two") == 1             # never run twice
+    assert _where(world, "two") == "log"
+    row = _row(_tail(), "two")
+    assert row["text"] == "two" and row["sent_at"] == _iso(7_600)

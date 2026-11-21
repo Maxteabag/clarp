@@ -55,6 +55,10 @@ class RecoveryMixin:
         except Exception as exc:  # noqa: BLE001 - recovery must still run
             log_exception("shownAttemptedStartPassFail", exc)
         try:
+            self._show_started_unshown()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("startedUnshownPassFail", exc)
+        try:
             # A listen-first claim left by an earlier process: a process
             # boundary is never proof of what it sent, whatever its age.
             from . import agent_rings
@@ -85,6 +89,39 @@ class RecoveryMixin:
                 f"adopted={len(result['adopted'])} "
                 f"requeued_parked={result['requeued_parked']}")
         self._settle_unsent_held_sends()
+
+    def _show_started_unshown(self) -> None:
+        """Once per runtime start (issue 491): an item started on a session with no
+        backend id at its handoff had its row due at the CLI's init, and the previous
+        process died first. Its row is written now, in the agent's live session, with
+        the item shown in the same transaction: the message is in the conversation
+        (whether the backend read it is not known; it is never run again)."""
+        from . import message_store
+        for item in turn_queue.started_unshown():
+            agent_id = str(item["agent_id"])
+            session_id = agents_db.live_backend_session(agent_id)
+            if not session_id:
+                log("startedUnshownNoSession", f"agent={agent_id} queue={item['queue_id']}")
+                continue
+            database = db.conn()
+            database.execute("BEGIN IMMEDIATE")
+            try:
+                written = message_store.record_user_message(
+                    agent_id=agent_id, backend_session_id=session_id,
+                    client_msg_id=str(item["client_msg_id"] or item["trace_id"]),
+                    text=str(item["text"]), origin=str(item["origin"] or "user"),
+                    sender_agent_id=str(item["sender_agent_id"] or "") or None,
+                    prompt_admission_id=str(item["prompt_admission_id"] or ""),
+                    trace_id=str(item["trace_id"]),
+                    sent_at=int(item["enqueued_at"]) if item["enqueued_at"] else None)
+                if written is not None:
+                    turn_queue.show(str(item["queue_id"]), con=database)
+                database.execute("COMMIT")
+            except BaseException:
+                if database.in_transaction:
+                    database.execute("ROLLBACK")
+                raise
+            log("startedUnshownShown", f"agent={agent_id} queue={item['queue_id']}")
 
     def _settle_unsent_held_sends(self) -> None:
         """Once per runtime start: the held sends R120's defect left (turn_queue)."""
