@@ -787,3 +787,32 @@ def test_quiet_bind_save_failure_wakes_the_cursor_retry(streamer_env, monkeypatc
     assert written.is_set()
     assert retried.wait(2), 'a quiet bind tick must wake the dispatcher to retry its failed cursor save'
     assert not streamer.pool.watcher_for(agent_id).save_pending
+
+
+def test_a_pass_reads_no_agents_while_nothing_was_committed_and_a_change_is_seen_at_once(
+        streamer_env, monkeypatch):
+    """The bindings follow the agents and runtimes rows alone: while the database's change
+    stamp stands, a pass reads neither, and asks no backend for its executable (a
+    configuration read per agent, every second). A commit is seen on the next pass."""
+    from lib import backends, db
+    streamer, tmp_path = streamer_env
+    first, _ = _build_agent_with_transcript(tmp_path, session="one", backend_session_id="cs-one")
+    monkeypatch.setattr(backends, "capabilities",
+                        lambda *_a: pytest.fail("a pass needs only the runner's streaming flag"))
+    streamer.reconcile_once()
+    assert streamer.pool.has(first)
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        for _ in range(5):
+            streamer.reconcile_once()
+    finally:
+        db.conn().set_trace_callback(None)
+    assert not [s for s in statements if "FROM agents" in s or "FROM runtimes" in s], statements
+    second, _ = _build_agent_with_transcript(tmp_path, persona="Ross", session="two",
+                                             backend_session_id="cs-two")
+    streamer.reconcile_once()
+    assert streamer.pool.has(second)
+    agents_db.soft_delete(first)
+    streamer.reconcile_once()
+    assert not streamer.pool.has(first) and streamer.pool.has(second)
