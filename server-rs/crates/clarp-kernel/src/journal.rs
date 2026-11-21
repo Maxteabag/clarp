@@ -1403,6 +1403,7 @@ mod tests {
             body: serde_json::to_vec(&serde_json::json!({ "id": key, "text": text })).unwrap(),
             origin,
             admission,
+            coordination: None,
         };
         let items = |r: &Recorder, key: &str| {
             let all = r.log().read_after(0, Kinds::ALL, 1_000).unwrap();
@@ -1703,6 +1704,7 @@ mod tests {
             message_seq,
             origin: Origin::User,
             admission: Admission::Queue,
+            coordination: None,
         };
         batch.command(accept, now_ms).unwrap();
         batch.commit().unwrap();

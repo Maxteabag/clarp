@@ -54,19 +54,20 @@ fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
         "Reconnecting… Your message is saved."
     );
 
-    // Its row shows it handed over; a send behind it waits for its launch.
+    // Its row shows it handed over; a send behind it has a receipt but no row yet.
     host.send(&session, "next", "r2");
-    let log = host.get(&format!("/log?session={session}"));
-    let delivery = |id: &str| {
-        let turns = log["turns"].as_array().unwrap();
-        let row = turns.iter().find(|turn| turn["id"] == id);
-        row.map_or(Value::Null, |row| row["delivery"]["state"].clone())
-    };
-    assert_eq!(
-        (delivery("u-r1"), delivery("u-r2")),
-        (json!("handed_over"), json!("pending_launch")),
-        "{log}"
-    );
+    let log = host.get(&format!("/log?session={session}&delivery_since=0"));
+    let turns = log["turns"].as_array().unwrap();
+    let first = turns.iter().find(|turn| turn["id"] == "u-r1").unwrap();
+    assert_eq!(first["delivery"]["state"], "handed_over", "{log}");
+    assert!(turns.iter().all(|turn| turn["id"] != "u-r2"), "{log}");
+    let waiting = log["delivery_updates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["message_id"] == "u-r2")
+        .unwrap();
+    assert_eq!(waiting["delivery"]["state"], "pending_launch", "{log}");
 
     // The user's Stop ends the wait at once, and nothing of it is tried again.
     host.post("/stop", json!({ "session": session }));
