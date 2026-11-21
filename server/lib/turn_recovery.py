@@ -201,6 +201,7 @@ class RecoveryMixin:
                     allow_paused_queue=pause_exempt,
                     janitor_run_id=_recovered_janitor_run(row),
                     user_word=bool(row.get("user_word")),
+                    taken=turn_queue.row_taken(row),
                 ))
                 recovered += 1
                 readmitted.setdefault(row["agent_id"], []).append(str(row["queue_id"]))

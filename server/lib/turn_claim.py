@@ -66,7 +66,7 @@ class ClaimMixin:
                 prompt_admission_id=str(row["prompt_admission_id"]),
                 queue_if_busy=True, skip_admission=True,
                 durable_queue_id=queue_id, allow_paused_queue=True,
-                user_word=bool(row["user_word"]),
+                user_word=bool(row["user_word"]), taken=turn_queue.row_taken(row),
             ))
         except GoalWakeDispatchError as exc:
             if exc.permanent:

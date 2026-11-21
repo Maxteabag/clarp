@@ -186,7 +186,7 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
             prompt_admission_id=spec.prompt_admission_id,
             allow_paused=(prefix in {"drain-park", "preempt-park"}
                           and spec.bypass_pause),
-            user_word=spec.user_word)
+            user_word=spec.user_word, taken=spec.taken)
     except Exception as exc:  # noqa: BLE001 - memory still holds the send
         log_exception(f"{prefix.split('-')[0]}ParkPersistFail",
                       exc, detail=spec.agent_id)
@@ -611,6 +611,9 @@ class DispatchCommand:
     # the user answered in the app, or a queue row stamped so at admission):
     # it goes first in the agent's queue (issue 481). Never from a payload.
     user_word: bool = False
+    # A re-admitted row that was chosen once (``turn_queue.row_taken``): its
+    # memory spec is taken too, so both stores place the user's word alike.
+    taken: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.unheard_audio_sessions, tuple):
@@ -627,6 +630,8 @@ class DispatchCommand:
             values.pop("janitor_run_id")
         if not self.user_word:
             values.pop("user_word")
+        if not self.taken:
+            values.pop("taken")
         return values
 
     def to_wire(self) -> dict[str, Any]:
