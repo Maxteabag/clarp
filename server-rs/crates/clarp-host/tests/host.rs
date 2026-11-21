@@ -77,6 +77,8 @@ mod start_tolerance;
 mod transcription_inventory;
 #[path = "host/voice_events.rs"]
 mod voice_events;
+#[path = "host/voice_names.rs"]
+mod voice_names;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
 
@@ -247,6 +249,7 @@ impl Place {
             .args(more)
             .env("CLARP_ZOXIDE_PROGRAM", self.root.join("no-zoxide"))
             .env("CLARP_OPENCODE_PROGRAM", self.root.join("no-opencode"))
+            .env("CLARP_VOICE_NAMES_WORKER", "0")
             .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)
             .stdin(Stdio::null())

@@ -3387,6 +3387,15 @@ provider fails. Cartesia auditions, narration and cached router phrases include 
 language in their cache identity, so a language change can produce its own audio. The
 reference's model, request and session rules are held by `cartesia-language-vectors.py`.
 
+**Names for the voice profile (21 Nov 2026, PR 498).** The profile gives the configured
+language set alongside the language arguments of the first hearing engine. Archived rows,
+creation replies and roster events omit the profile. Cartesia and ElevenLabs names are
+read from the Host's published names file, with the Cartesia picker overlay. Gemini names
+use its picker labels and the configured Vertex aliases. The background refresher lists
+Cartesia's catalogue and looks up missing voices in use, handling at most 100 by-ID
+lookups per provider. A check advances the checked date. Only changed names change
+the file content and its digest; a provider failure keeps its earlier names.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |

@@ -95,6 +95,7 @@ pub mod turn_identity;
 pub mod usage;
 pub mod usage_ask;
 pub mod vocabulary;
+pub mod voice_names;
 pub mod voice_profile;
 pub mod voice_timeline;
 pub mod voices;

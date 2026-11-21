@@ -34,8 +34,18 @@ pub const CARRIED_BY: [&str; 6] = [
 pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory, owners: &toml::Table) -> HostView {
     let mut view = mouth.speech_view(owners);
     let mut labels = voice_profile::shipped_labels();
-    labels.insert(clarp_kernel::said::CARTESIA.into(), mouth.cartesia_names());
+    let (saved, signature) = mouth.cached_voice_names();
+    clarp_kernel::voice_names::merge(&mut labels, saved);
+    labels
+        .entry(clarp_kernel::said::CARTESIA.into())
+        .or_default()
+        .extend(mouth.cartesia_names());
+    labels.insert(
+        clarp_kernel::said::GEMINI.into(),
+        clarp_kernel::voices::gemini_labels(&view.voices),
+    );
     view.labels = labels;
+    view.names_version = signature;
     let (cloud, own, language) = ears.as_profiled(directory);
     view.cloud_engine = cloud;
     view.own_engine = own;
@@ -100,9 +110,9 @@ pub fn of_session(
         .iter()
         .chain(&directory.janitors)
         .collect();
-    let member = members
-        .iter()
-        .find(|member| member.record.session == session)?;
+    let member = members.iter().find(|member| {
+        member.record.session == session && member.record.archived_at_ms.is_none()
+    })?;
     let rows: Vec<Row<'_>> = members.iter().map(|member| row(member)).collect();
     let view = view(mouth, ears, directory, &mouth.owners_from(directory));
     Some(voice_profile::profile_among(

@@ -94,6 +94,7 @@ def run(root) -> dict:
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
     from lib import config, google_tts, stt_language, stt_providers, tts_providers, voice_profile
+    from lib.voice_catalog import gemini_voices
     from lib.tts_worker import _GOOGLE_WORDS
 
     # The names of voices a Host has in memory: a stand-in catalogue, with a name that is empty
@@ -108,9 +109,15 @@ def run(root) -> dict:
     def host_view(made: dict):
         seen = view(made)
         cfg = config.Config(**seen['settings'])
+        # Labels for the stand-in voices come from this run's tables. The Gemini catalogue
+        # is the reference's own picker, with this case's configuration.
+        gemini = {vid: label for vid, label, _ in gemini_voices(cfg)}
+        for persona, vertex in cfg.gemini_vertex_voices.items():
+            if vertex and vertex not in gemini:
+                gemini[vertex] = gemini.get(cfg.gemini_voices.get(persona, ''), f'{persona} (designed)')
         return voice_profile.HostView(
             cfg=cfg, keys=dict(seen['keys']), google_refusal=seen['google_refusal'], adapters={},
-            labels=labels, engine=seen['engine'],
+            labels={**labels, 'gemini': gemini}, engine=seen['engine'],
             language=stt_language.parse_language(seen['language']),
             agent_engines={str(k).strip().lower(): v for k, v in seen['agent_engines'].items()},
             agent_languages={str(k).strip().lower(): v for k, v in seen['agent_languages'].items()})
@@ -192,8 +199,15 @@ def run(root) -> dict:
     spoken('gemini by the owner of its cartesia voice', {'settings': settings(
         'gemini', cartesia_voices={'Ada': ADA_CARTESIA, 'Bea': 'ca-bea'}, gemini_voices={'Bea': 'Aoede'})},
         agent_of('Zed', json.dumps({'cartesia': 'ca-bea'})))
-    spoken('gemini through the api names a voice of its own', {'settings': settings('gemini')},
+    designed = {'settings': settings(
+        'gemini', gemini_voices={'Ada': 'Puck', 'Other': 'voice_api_max'},
+        gemini_vertex_voices={'Other': 'voice_vertex_max'})}
+    spoken('gemini through the api names a voice of its own', designed,
            agent_of('Zed', json.dumps({'gemini': 'voice_api_max'})))
+    spoken('gemini through Vertex keeps the designed label', designed,
+           agent_of('Zed', json.dumps({'gemini': 'voice_vertex_max'})))
+    spoken('an unregistered Gemini design is nameless', {'settings': settings('gemini')},
+           agent_of('Zed', json.dumps({'gemini': 'voice_unregistered'})))
 
     # 2. Whether ElevenLabs can take a text as a voice id.
     texts = [None, '', ' ', ELEVEN_ID, ' ' + ELEVEN_ID + ' ', '{}', '{"a": 1}', ' {"a": 1}', 'two words',
