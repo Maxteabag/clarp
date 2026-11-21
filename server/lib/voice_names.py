@@ -38,6 +38,7 @@ def names_path() -> pathlib.Path:
 
 
 REFRESH_SECONDS = 24 * 3600
+RETRY_SECONDS = 15 * 60          # after a pass that left the file due (a keyed fetch failed)
 FIRST_AFTER_SECONDS = 60.0
 # 2: catalogue rows read public from access/visibility (21 Nov 2026: Cartesia sends no
 # is_public, so every row of a format-1 file reads not public).
@@ -243,8 +244,16 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
     cfg = cfg or config_module.load()
     cartesia_key, eleven_key = cfg.cartesia_key(), cfg.eleven_key()
     if not cartesia_key and not eleven_key:
+        # Nothing to ask, and nothing will be until a key is configured: final. The file is
+        # marked current (an older format's catalogue dropped), so starts stop refreshing.
+        current = _read(path) if path.exists() else {}
+        if not path.exists() or current.get("_format", 1) < FORMAT:
+            current.pop("_catalogue", None)
+            current["_format"] = FORMAT
+            _write(path, current)
         return []
     used = (voices_in_use or in_use)(cfg)
+    failed = False                       # a provider with a key could not be read: retry soon
     fresh: dict[str, dict[str, str]] = {}
     gone_now: dict[str, set[str]] = {}
     today: dict[str, dict[str, dict]] = {}
@@ -253,6 +262,7 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
             rows = (cartesia_all or cartesia_voices.all_voices)(cartesia_key)
         except Exception as exc:  # noqa: BLE001 - the file keeps Cartesia's old names
             log_exception("voiceNamesFetchFail", exc, detail=CARTESIA)
+            failed = True
         else:
             today[CARTESIA] = {str(r.get("id")): {"language": str(r.get("language") or ""),
                                                    "public": _public(r), "owner": _owned(r)}
@@ -268,16 +278,26 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
     if eleven_key and eleven_ids:
         fresh[ELEVENLABS], gone_now[ELEVENLABS] = _lookup(
             eleven_key, eleven_ids, eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS)
-    if not fresh:
-        return []
     current = _read(path) if path.exists() else {}
+    old_format = path.exists() and current.get("_format", 1) < FORMAT
+    if not fresh and not old_format:
+        return []
     before = json.dumps(current, sort_keys=True, separators=(",", ":"))
     for provider, found in fresh.items():
         current[provider] = {k: v for k, v in {**current.get(provider, {}), **found}.items()
                              if k not in gone_now.get(provider, ())}
+    if old_format:
+        # Catalogue rows of an older format read wrongly (format 1: every row not public);
+        # one not fetched again now is dropped rather than kept for another day.
+        for provider in list((current.get("_catalogue") or {})):
+            if provider not in today:
+                current["_catalogue"].pop(provider)
     for provider, ids in today.items():
         current.setdefault("_catalogue", {})[provider] = ids
-    if today:
+    # A refresh writes the current format whatever it could fetch, unless a provider that
+    # has a key failed: that is not a refresh for it, so the file keeps its older format and
+    # the next start (or the worker within RETRY_SECONDS) asks again.
+    if not failed:
         current["_format"] = FORMAT
     for provider, ids in gone_now.items():
         current.setdefault("_gone", {})[provider] = sorted(ids)
@@ -288,12 +308,16 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
     if path.exists() and body == before:
         os.utime(path)                 # checked today; same names: the version stays
         return sorted(fresh)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(body, encoding="utf-8")
-    os.replace(tmp, path)
+    _write(path, current)
     log("voiceNamesRefreshed", " ".join(f"{p}={len(current[p])}" for p in sorted(fresh)))
     return sorted(fresh)
+
+
+def _write(path: pathlib.Path, current: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(current, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 class VoiceNamesWorker:
@@ -337,5 +361,9 @@ class VoiceNamesWorker:
         if self._stop.wait(self.first_after):
             return
         self.start_pass()
-        while not self._stop.wait(self.interval):
+        while not self._stop.wait(self.next_wait()):
             self._once()
+
+    def next_wait(self) -> float:
+        """A day, or RETRY_SECONDS while the file is still due (a keyed fetch failed)."""
+        return min(self.interval, RETRY_SECONDS) if start_due() else self.interval
