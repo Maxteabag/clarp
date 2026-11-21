@@ -26,6 +26,8 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[
 pub(crate) struct Publication {
     pub agent_id: String,
     pub assets: [Asset; 2],
+    #[serde(default)]
+    pub media_window: Option<rules::MediaWindow>,
 }
 
 pub(crate) enum Admission {
@@ -90,11 +92,11 @@ impl Fleet {
         publication: &Publication,
         bytes: [Vec<u8>; 2],
     ) -> Result<bool, Unavailable> {
-        if !self.computer_jobs.get(id).is_some_and(|row| {
+        let Some(current) = self.computer_jobs.get(id).filter(|row| {
             row.job.status == JobStatus::Running && row.job.generation == generation
-        }) {
+        }) else {
             return Ok(false);
-        }
+        };
         let Some(at) = self.place_of(&publication.agent_id) else {
             return Err(Unavailable("unknown Agent session".into()));
         };
@@ -137,6 +139,11 @@ impl Fleet {
                 created_at: asset.created_at,
             });
         }
+        let now = self.now_ms();
+        let mut staged = publication.clone();
+        let mut window = rules::MediaWindow::of(&current.job);
+        window.until = now;
+        staged.media_window = Some(window);
         let encode_err = |e: serde_json::Error| Unavailable(e.to_string());
         let mut writes = vec![
             (
@@ -147,7 +154,7 @@ impl Fleet {
             (
                 shelf(PENDING),
                 publication.assets[0].asset_id.clone(),
-                Some(serde_json::to_vec(publication).map_err(encode_err)?),
+                Some(serde_json::to_vec(&staged).map_err(encode_err)?),
             ),
         ];
         for (asset, raw) in publication.assets.iter().zip(&bytes) {
@@ -160,7 +167,7 @@ impl Fleet {
             failed: None,
         };
         let change = self
-            .change_computer_job(finish, writes)?
+            .change_computer_job_at(finish, writes, now)?
             .map_err(|e| Unavailable(e.to_string()))?;
         if change.record.is_none() {
             return Ok(false);

@@ -120,6 +120,7 @@ async fn a_portrait_pair_is_atomic_on_refusal_and_recovered_without_another_requ
     let publication = Publication {
         agent_id: made.agent_id.clone(),
         assets,
+        media_window: None,
     };
     let keep = || {
         fleet.accept_portraits(
@@ -195,7 +196,7 @@ async fn a_portrait_pair_is_atomic_on_refusal_and_recovered_without_another_requ
             .is_err()
     );
     assert!(
-        crate::portrait_generation::deliver(&fleet, &local, &gallery, &publication)
+        crate::portrait_generation::deliver(&fleet, &local, &gallery, &publication, None)
             .await
             .is_err()
     );
@@ -209,7 +210,7 @@ async fn a_portrait_pair_is_atomic_on_refusal_and_recovered_without_another_requ
     let fleet = boot();
     let receipts = fleet.kept_all(PENDING).await.unwrap();
     let restored: Publication = serde_json::from_slice(&receipts[0].1).unwrap();
-    crate::portrait_generation::deliver(&fleet, &local, &gallery, &restored)
+    crate::portrait_generation::deliver(&fleet, &local, &gallery, &restored, None)
         .await
         .unwrap();
     let member = fleet.directory().named(&made.agent_id).unwrap().clone();

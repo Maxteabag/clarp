@@ -129,6 +129,18 @@ pub(crate) async fn favorite(
     Ok(Json(image.row(used_as(&app.fleet.directory(), &image))))
 }
 
+fn remember(
+    store: &mut crate::gallery::Store, image: &Image, change: &str,
+) -> bool {
+    match store.remember_hint(&image.asset.asset_id, change) {
+        Ok(()) => true,
+        Err(why) => {
+            eprintln!("clarp-host: gallery change not announced: {}", why.words());
+            false
+        }
+    }
+}
+
 fn removed(app: &App, image: &Image, is_new: bool) -> Result<Value, Failure> {
     let deletion = image.deletion.as_ref().ok_or(Refusal::Unknown)?;
     if is_new {
@@ -158,7 +170,8 @@ pub(crate) async fn delete(
     app.gallery
         .ask(move |store| {
             let (image, is_new) = store.delete(&key, &by, operation.clock.now_ms())?;
-            removed(&operation, &image, is_new)
+            let tell = is_new && remember(store, &image, "deleted");
+            removed(&operation, &image, tell)
         })
         .await
         .map(Json)
@@ -185,7 +198,10 @@ pub(crate) async fn delete_batch(
             let mut results = Vec::with_capacity(ids.len());
             for id in ids {
                 let value = match store.delete(&id, &by, operation.clock.now_ms()) {
-                    Ok((row, is_new)) => removed(&operation, &row, is_new)?,
+                    Ok((row, is_new)) => {
+                        let tell = is_new && remember(store, &row, "deleted");
+                        removed(&operation, &row, tell)?
+                    }
                     Err(Failure::Refused(why)) => json!({
                         "asset_id": id, "deleted": false, "error": why.words(),
                     }),
@@ -240,6 +256,7 @@ pub(crate) async fn publish(app: &App, image: Image, bytes: Bytes) -> Result<Ima
             if is_new
                 && !kept.asset.named_only
                 && clarp_kernel::media::is_image(&kept.asset.mime_type)
+                && remember(store, &kept, "created")
             {
                 changed(&operation, &kept, "created", kept.asset.created_at, None);
             }

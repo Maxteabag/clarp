@@ -64,6 +64,7 @@ pub mod listening;
 pub mod logins;
 pub mod managed_skills;
 pub mod media;
+pub mod media_created;
 pub mod media_manage;
 pub mod model_fallbacks;
 pub mod models;
