@@ -163,16 +163,19 @@ impl Actor {
         let Some(selection) = self.selected_takeover() else {
             return Ok(false);
         };
-        let spool = self.profile.spool_path_of(selection.start.from, selection.attempt);
+        let spool = self
+            .profile
+            .spool_path_of(selection.start.from, selection.attempt);
         let read = SpoolReader::new(&spool)
             .read_window(selection.fence, u64::MAX, 1)
             .map_err(|error| super::io_error(&spool, error))?;
         Ok(read.damaged.is_empty()
             && read.records.first().is_some_and(|record| {
-                record.entry == Entry::Shim(ShimEvent::Takeover {
-                    fence: selection.fence,
-                    replaced_by: selection.into.0,
-                })
+                record.entry
+                    == Entry::Shim(ShimEvent::Takeover {
+                        fence: selection.fence,
+                        replaced_by: selection.into.0,
+                    })
             }))
     }
 
