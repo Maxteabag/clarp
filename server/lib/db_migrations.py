@@ -311,6 +311,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v135(con)
         if version < 136:
             _migrate_to_v136(con)
+        if version < 137:
+            _migrate_to_v137(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1133,6 +1135,29 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v137(con: sqlite3.Connection) -> None:
+    """Open demand claims by themselves (janitor_store.pending_demand_claim): the janitor
+    lanes asked several times a pass whether an agent had one, and the only way there was
+    every run of that agent (over 100,000 on one Host). A claim stays open after its run is
+    cancelled until the provider's process finishes (a release or re-enable waits for it);
+    one whose process died never closed, so the open ones grew. Those of runs that ended and
+    whose expiry has passed (or was never set) are closed here: pending_demand_claim, the
+    only reader of open claims, never counted them. Created if missing and a no-op on rerun.
+    Older code ignores the index and reads those claims as it always did (expired), so a
+    rollback needs no down-step."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_janitor_demand_claims_open"
+                " ON janitor_demand_claims(run_id) WHERE finished_at IS NULL")
+    con.execute("""UPDATE janitor_demand_claims
+        SET finished_at = COALESCE((SELECT r.finished_at FROM janitor_runs r
+                                    WHERE r.run_id = janitor_demand_claims.run_id), claimed_at)
+        WHERE finished_at IS NULL AND run_id IN (
+            SELECT run_id FROM janitor_runs
+             WHERE status NOT IN ('queued', 'running')
+               AND NOT COALESCE(CASE WHEN json_valid(configuration_json)
+                                     THEN json_extract(configuration_json, '$.expires_at') END
+                                > CAST(strftime('%s', 'now') AS INTEGER) * 1000, 0))""")
 
 
 def _migrate_to_v136(con: sqlite3.Connection) -> None:
