@@ -50,3 +50,5 @@ fn run_with_fixture_host_token(test: &str) -> bool {
     assert!(String::from_utf8_lossy(&out.stdout).contains("1 passed"));
     true
 }
+
+mod voice_names;
