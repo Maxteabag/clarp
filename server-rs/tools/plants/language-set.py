@@ -64,7 +64,7 @@ rules(HOST, 'host', [
     ('An earlier incompatible engine overrides the planned chain', 'AttemptError::LanguageSet if !more =>', 'AttemptError::LanguageSet =>'),
     ('The selected engine is taken from the original request', 'selected: &plan.selected,', 'selected: model,'),
     ('The selected hosted provider is told only English', 'chat_attempt(app, ears, target, language, listen_for, clip, false).await;\n            let heard', 'chat_attempt(app, ears, target, "en", listen_for, clip, false).await;\n            let heard'),
-    ('The fallback records requested languages even for Scribe', 'language_set::receipt(plan.from, target, handed.as_deref())', 'language_set::receipt(plan.from, target, Some(language))'),
+    ('The fallback records requested languages even for Scribe', 'observed.handed.as_deref(),', 'Some(language),'),
     ('The fallback receipt is never sent to the client', 'answer["engine_fallback"] = fallback;', 'let _ = fallback;'),
     ('The refusal is a 500', 'StatusCode::UNPROCESSABLE_ENTITY,\n            language_set::refusal', 'StatusCode::INTERNAL_SERVER_ERROR,\n            language_set::refusal'),
     ('The own engine raw failure reaches the client', 'reasons.push(language_set::OWN_FAILED.into());', 'reasons.push(body["error"].as_str().unwrap_or_default().into());'),
