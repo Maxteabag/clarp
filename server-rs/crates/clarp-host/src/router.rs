@@ -642,11 +642,9 @@ fn reply(outcome: Outcome, trace_id: &str) -> Routed {
         ok: outcome.ok,
         session: outcome.session,
         dispatch: outcome.dispatch,
-        trace_id: if outcome.trace_id.is_empty() {
-            trace_id.to_string()
-        } else {
-            outcome.trace_id
-        },
+        // The Python HTTP adapter echoes this request's trace. R134 restores the
+        // first decision and trace in the router outcome itself.
+        trace_id: trace_id.to_string(),
         error: Some(outcome.error).filter(|error| !error.is_empty()),
         orchestrator: Some(decided),
         ..SendResponse::default()
