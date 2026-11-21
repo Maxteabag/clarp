@@ -53,7 +53,8 @@ log = d / f"read-{n}.jsonl"
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 def echo(line):
-    out({"type": "user", "isReplay": True, "uuid": line["uuid"], "message": line["message"]})
+    if "--replay-user-messages" in args:    # the real CLI echoes only when asked to
+        out({"type": "user", "isReplay": True, "uuid": line["uuid"], "message": line["message"]})
 def answer(text):
     out({"type": "assistant", "message": {"id": f"m-{n}-{text[:6]}", "role": "assistant",
          "content": [{"type": "text", "text": text}]}})
@@ -225,6 +226,10 @@ def test_a_follow_up_during_a_tool_is_read_into_the_same_turn(world):
     assert _queued(w) == []
     time.sleep(0.5)
     assert _calls(w) == 1                                      # never run as its own turn
+    # The steering launch asks for the echo: without it nothing says a follow-up was read,
+    # and the real CLI's process end would run it again (reviewer 4).
+    argv = json.loads((w.dir / "call-1.json").read_text())["argv"]
+    assert "--replay-user-messages" in argv and "stream-json" in argv
 
 
 def test_two_follow_ups_during_one_tool_are_read_in_the_order_sent(world):
