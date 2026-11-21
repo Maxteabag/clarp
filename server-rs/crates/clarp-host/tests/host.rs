@@ -23729,50 +23729,79 @@ fn agent_creation_followup_uses_cli_model_defaults_and_explicit_session_spelling
     std::fs::write(
         codex.join("config.toml"),
         "model = 'top-model'\nprofile = 'picked'\n[profiles.picked]\nmodel = 'profile-model'\n",
-    ).unwrap();
-    std::fs::write(claude.join("settings.json"), br#"{"model":"claude-settings"}"#).unwrap();
-    let host = place.start_in("", &[], &[
-        ("CODEX_HOME", codex.to_str().unwrap()),
-        ("CLAUDE_CONFIG_DIR", claude.to_str().unwrap()),
-        ("ANTHROPIC_MODEL", "claude-environment"),
-    ]);
-    let codex = host.post("/agents", json!({
-        "name":"Codex fixture", "backend":"codex", "session":"ré sumé",
-    }));
+    )
+    .unwrap();
+    std::fs::write(
+        claude.join("settings.json"),
+        br#"{"model":"claude-settings"}"#,
+    )
+    .unwrap();
+    let host = place.start_in(
+        "",
+        &[],
+        &[
+            ("CODEX_HOME", codex.to_str().unwrap()),
+            ("CLAUDE_CONFIG_DIR", claude.to_str().unwrap()),
+            ("ANTHROPIC_MODEL", "claude-environment"),
+        ],
+    );
+    let codex = host.post(
+        "/agents",
+        json!({
+            "name":"Codex fixture", "backend":"codex", "session":"ré sumé",
+        }),
+    );
     assert_eq!(codex["session"], "résumé");
     assert_eq!(codex["agent"]["model"], "profile-model");
-    let claude = host.post("/agents", json!({"name":"Claude fixture","backend":"claude"}));
+    let claude = host.post(
+        "/agents",
+        json!({"name":"Claude fixture","backend":"claude"}),
+    );
     assert_eq!(claude["agent"]["model"], "claude-environment");
-    let reset = host.post("/agents", json!({
-        "name":"Codex fixture", "replace_sid":"résumé", "model":null,
-    }));
+    let reset = host.post(
+        "/agents",
+        json!({
+            "name":"Codex fixture", "replace_sid":"résumé", "model":null,
+        }),
+    );
     assert_eq!(reset["agent"]["model"], "profile-model");
 }
 
 #[test]
-fn agent_creation_followup_relaunch_uses_persona_presentation_and_refuses_custom_voice_collisions() {
+fn agent_creation_followup_relaunch_uses_persona_presentation_and_refuses_custom_voice_collisions()
+{
     let place = Place::new("creation-presentation");
     let host = place.start();
     host.post("/personas", json!({
         "name":"Presentation fixture", "avatar_symbol":"persona-symbol", "generate_avatar":false,
     }));
     let voice = r#"{"cartesia":"fixture-cartesia"}"#;
-    let made = host.post("/agents", json!({
-        "name":"Presentation fixture", "backend":"scripted", "avatar_symbol":"own-symbol",
-        "avatar_base64":clarp_kernel::python::b64encode(b"synthetic picture"), "voice_id":voice,
-    }));
+    let made = host.post(
+        "/agents",
+        json!({
+            "name":"Presentation fixture", "backend":"scripted", "avatar_symbol":"own-symbol",
+            "avatar_base64":clarp_kernel::python::b64encode(b"synthetic picture"), "voice_id":voice,
+        }),
+    );
     assert_eq!(made["agent"]["avatar_symbol"], "own-symbol");
     assert!(!made["agent"]["avatar_url"].as_str().unwrap().is_empty());
     let (status, error) = host.ask(
-        "POST", "/agents",
+        "POST",
+        "/agents",
         Some(&json!({"name":"Different fixture", "backend":"scripted", "voice_id":voice})),
     );
     assert_eq!(status, 409);
-    assert_eq!(error, json!({"error":"voice_in_use", "message":"That voice is already used by Presentation fixture."}));
-    let changed = host.post("/agents", json!({
-        "name":"Presentation fixture", "replace_sid":made["session"],
-        "avatar_symbol":null, "avatar_path":"/synthetic/ignored",
-    }));
+    assert_eq!(
+        error,
+        json!({"error":"voice_in_use", "message":"That voice is already used by Presentation fixture."})
+    );
+    let changed = host.post(
+        "/agents",
+        json!({
+            "name":"Presentation fixture", "replace_sid":made["session"],
+            "avatar_symbol":null, "avatar_path":"/synthetic/ignored",
+        }),
+    );
     assert_eq!(changed["agent"]["avatar_symbol"], "persona-symbol");
     assert_eq!(changed["agent"]["avatar_url"], "");
     assert_eq!(changed["agent"]["voice_id"], made["agent"]["voice_id"]);
