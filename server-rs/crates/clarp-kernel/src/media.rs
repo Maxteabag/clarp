@@ -672,6 +672,9 @@ impl Asset {
             "url": format!("/media/{}", self.asset_id),
             "uri": format!("clarp-media://asset/{}", self.asset_id),
             "markdown": markdown,
+            "favorite": false,
+            "favorite_at": null,
+            "used_as": [],
         })
     }
 }
