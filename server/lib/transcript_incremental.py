@@ -41,6 +41,7 @@ import re
 import sys
 import threading
 import time
+from time import thread_time as _thread_time  # bound once: tests replace the module's `time`
 import types
 from dataclasses import dataclass, replace
 from contextvars import ContextVar
@@ -1893,7 +1894,7 @@ def _digest_and_log(path, digests, second_read, earlier, before, backend, cpu_st
     finally:
         _second_read_log(second_read, backend, before.size, read_bytes=read_bytes,
                          cpu_ms=None if cpu_started is None
-                         else (time.thread_time() - cpu_started) * 1000)
+                         else (_thread_time() - cpu_started) * 1000)
 
 
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
@@ -2176,7 +2177,7 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                     earlier = _imported_before(diagnostic.get("imported"), before, agent_id,
                                                backend_session_id, path)
                     parse_path._full_read["mark"] = earlier[0] if earlier else None
-            cpu_started = time.thread_time()
+            cpu_started = _thread_time()
             turns = parse(parse_path)
             parsed_evidence = None
             parsed_read = None
@@ -2400,7 +2401,7 @@ class _Shadow:
     def _timed(self, step: str, work: Callable[[], Any]) -> Any:
         if self.failed:
             return None
-        cpu, wall = time.thread_time(), time.perf_counter()
+        cpu, wall = _thread_time(), time.perf_counter()
         try:
             return work()
         except Exception as exc:  # noqa: BLE001 - logged; the full import goes on
@@ -2410,7 +2411,7 @@ class _Shadow:
             self.verdict = f"error:{step}"
             return None
         finally:
-            self.cpu += time.thread_time() - cpu
+            self.cpu += _thread_time() - cpu
             self.wall += time.perf_counter() - wall
             self.detail[f"{step}_ms"] = round((time.perf_counter() - wall) * 1000, 3)
 
