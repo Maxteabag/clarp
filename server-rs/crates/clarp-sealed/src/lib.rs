@@ -112,6 +112,9 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_DELEGATION_TOKEN_FILE", "home"),
     ("CLARP_ORACLE_VOICE_CONTEXT_FILE", "home"),
     ("CLARP_QA_PROVIDER_ROOT", "home"),
+    ("CLARP_CLAUDE_SKILLS", "home"),
+    ("CLARP_CODEX_SKILLS", "home"),
+    ("CLARP_AGY_SKILLS", "home"),
     ("USER", "home"),
     ("LOGNAME", "home"),
     // A provider's key or credential.
@@ -180,6 +183,8 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_HEARTBEATS_DISABLED", "switch"),
     ("CLARP_OPENCODE_LIVE", "switch"),
     ("CLARP_IMAGE_VERSION", "switch"),
+    ("CLARP_SIGN_IN_MOST_MS", "switch"),
+    ("CLARP_SIGN_IN_TIMEOUT_MS", "switch"),
     ("OPENCODE_PERMISSION", "switch"),
     ("LC_ALL", "switch"),
     ("TERM", "switch"),

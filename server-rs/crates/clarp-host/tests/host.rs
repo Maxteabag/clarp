@@ -803,7 +803,7 @@ fn a_job_registered_between_turns_names_no_trace_and_one_in_a_turn_names_that_tu
     let dir = place.root.clone();
     host.send(&session, "hello", "m1");
     wait_for("the turn to be done", || host.state(&session) == "done");
-    let mut worker = Command::new("sleep").arg("60").spawn().unwrap();
+    let mut worker = place.command("sleep").arg("60").spawn().unwrap();
     let pid = worker.id();
     let register = |id: &str| {
         let args = [
@@ -947,7 +947,7 @@ fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see
     };
 
     // A worker is a process the agent left running. It names itself, and registers its job.
-    let mut worker = Command::new("sleep").arg("60").spawn().unwrap();
+    let mut worker = place.command("sleep").arg("60").spawn().unwrap();
     let pid = worker.id();
     let (code, handle, _) = tool(
         &host,
@@ -1102,7 +1102,7 @@ fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see
     assert_eq!(count(&host), 0);
 
     // The id is used again: a new run, and the Host that is started again still knows it.
-    let mut second = Command::new("sleep").arg("60").spawn().unwrap();
+    let mut second = place.command("sleep").arg("60").spawn().unwrap();
     let (code, handle, _) = tool(
         &host,
         &dir,
@@ -2904,9 +2904,6 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
     // that was waited for. That is what `POST /repair-slot` gives back there. Here a turn is the
     // agent's log, followed through its shim's socket: each of those ways ends the turn, and what
     // waits runs, with nobody's hand.
-    let kill = |pid: &str| {
-        let _ = Command::new("kill").args(["-9", pid]).status();
-    };
     // The message was answered: each stand-in below answers with the letters of the line it was
     // handed (the message, written as the tool reads it), so its answer holds the message's words.
     let answered = |host: &Host, session: &str, text: &str| {
@@ -2924,6 +2921,9 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
     // A stand-in whose turn, told to hold, writes down its shim's number and its own and runs on
     // while that note is there (a test that fails leaves no tool behind it); tried again (the Host may try a turn whose tool died again), it answers.
     let place = Place::new("no-slot");
+    let kill = |pid: &str| {
+        let _ = place.command("kill").args(["-9", pid]).status();
+    };
     let pids = place.root.join("pids");
     let script = [
         "#!/bin/sh\nread -r message\n",
@@ -7957,7 +7957,8 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
     // A paired Android phone registers its own token and subscribes to the
     // summary. Only the phone can register it, and a deliverable token comes first.
     let place = Place::new("android-push");
-    let private = Command::new("openssl")
+    let private = place
+        .command("openssl")
         .args([
             "genpkey",
             "-algorithm",
@@ -8305,7 +8306,8 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
     let held_account: Value = serde_json::from_slice(&std::fs::read(&account).unwrap()).unwrap();
     let pem = place.root.join("fixture.pem");
     std::fs::write(&pem, held_account["private_key"].as_str().unwrap()).unwrap();
-    let public = Command::new("openssl")
+    let public = place
+        .command("openssl")
         .args([
             "rsa",
             "-in",
@@ -13358,7 +13360,7 @@ fn row_id(host: &Host, session: &str) -> String {
 /// One command of git in a directory, for a repository a test makes for itself: under a
 /// name of its own, and with nothing of the settings of whoever runs the tests.
 fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = sealed_command(dir, "git")
         .arg("-C")
         .arg(dir)
         .args([
@@ -15953,13 +15955,11 @@ fn program(path: &std::path::Path, text: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// The first program of this name on the path the tests run with.
+/// The first system utility of this name on the test harness's fixed path.
 fn on_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|dir| dir.join(name))
-            .find(|candidate| candidate.is_file())
-    })
+    std::env::split_paths(sealed::PATH)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 /// What a stand-in for Claude Code prints for a turn: it began, it answered one line, it ended.
@@ -17154,11 +17154,11 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     .unwrap();
     let kept = place.root.join("sub-agents");
     let run = |args: &[&str]| -> (i32, String, String) {
-        let out = Command::new(&python)
+        let out = place
+            .command(&python)
             .arg(script)
             .args(args)
             .current_dir(&place.root)
-            .env_clear()
             .env("PATH", &tools)
             .env("HOME", &place.root)
             .env("CLARP_CONFIG_DIR", &config)
@@ -17461,11 +17461,11 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
     std::fs::write(work.join("run.sh"), "#!/bin/sh\necho hello\n").unwrap();
     let door = format!("http://{}/tools", host.address);
     let run = |world: &[(String, String)], args: &[&str]| -> (i32, String, String) {
-        let out = Command::new(&python)
+        let out = place
+            .command(&python)
             .arg(script)
             .args(args)
             .current_dir(&work)
-            .env_clear()
             .env("HOME", &place.root)
             .envs(world.iter().map(|(name, value)| (name, value)))
             .output()
