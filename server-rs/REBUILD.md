@@ -226,7 +226,9 @@ DELETE are refused with 403 `full device access required`. The existing POST all
 pairing and avatar routes keep their separate auth rules. A limited `/server-info` builds
 its reply from fixed identity, compatibility and connection keys. It omits `default_cwd`
 and reduces a local connection error to `failed`. The scope and identity vectors are
-generated from the Python Host's PR 544 merge, which includes PR 529.
+generated from the Python Host's PR 544 merge, which includes PR 529. A limited snapshot also
+returns an empty required `cwd` string on each agent row, including archived agents and
+janitors (the Python Host's PR 550). Full callers still receive the stored path.
 
 **Provider message identity** (21 Nov 2026, R108). A modern Codex assistant item keeps its provider id,
 including when its rollout tells the same words in a legacy record. Native-session seed imports name the

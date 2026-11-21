@@ -1389,7 +1389,11 @@ struct SnapshotQuery {
 
 /// Every agent of the Host. With `include_archived=0` the ones that are put away are left
 /// out and counted: `GET /agents/archived` pages them.
-async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) -> Json<Value> {
+async fn snapshot(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Query(query): Query<SnapshotQuery>,
+) -> Json<Value> {
     let directory = app.fleet.directory();
     let without_archived = query.include_archived.as_deref() == Some("0");
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
@@ -1497,6 +1501,15 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         {
             row["voice_profile"] = profile;
         }
+    }
+    if matches!(
+        principal,
+        Principal::Device {
+            scope: Scope::Limited,
+            ..
+        }
+    ) {
+        clarp_kernel::devices::limit_snapshot_cwd(&mut agents);
     }
     let (voice_defaults, voice_profile_version) = crate::profile::head(&voices);
     let mut body = json!({

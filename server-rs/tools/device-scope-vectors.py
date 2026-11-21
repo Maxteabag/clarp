@@ -95,10 +95,33 @@ def run(root) -> dict:
         {**info, 'local_connection': {**connection, 'error': ''}},
         {**info, 'local_connection': None},
     ]
+    from lib import snapshot
+    from unittest.mock import patch
+
+    active = [{'agent_id': 'a1', 'cwd': '/synthetic/active', 'persona': 'Ada'},
+              {'agent_id': 'missing-cwd'}, 'not an agent row']
+    archived = {'agent_id': 'a2', 'cwd': '/synthetic/archived', 'archived_at': 1}
+    janitor = {'agent_id': 'j1', 'cwd': '/synthetic/janitor', 'is_janitor': True}
+
+    def build(_ctx, *, include_archived=True):
+        agents = [*active, archived, janitor] if include_archived else [*active, janitor]
+        return {'agents': agents, 'roster': ['Ada']}
+
+    snapshots = []
+    with patch.object(snapshot, 'build_agent_snapshot', build):
+        body = snapshot.SharedSnapshot().body
+        context = object()
+        for include_archived in (True, False):
+            snapshots.append({
+                'include_archived': include_archived,
+                'full': json.loads(body(context, include_archived=include_archived)),
+                'limited': json.loads(body(context, include_archived=include_archived, limited=True)),
+            })
     return {'what': 'server/server.py: Handler._device_forbidden, as do_GET, do_POST, do_PUT, do_DELETE and do_PATCH '
                     'ask it; the refusal is 403 {"error": "full device access required"}',
             'cases': cases,
-            'server_info': [{'full': full, 'limited': limited_server_info(full)} for full in projections]}
+            'server_info': [{'full': full, 'limited': limited_server_info(full)} for full in projections],
+            'snapshots': snapshots}
 
 
 
@@ -119,6 +142,10 @@ def main() -> int:
     projections = said['server_info']
     lines.extend('  ' + json.dumps(one) + (',' if n < len(projections) - 1 else '')
                  for n, one in enumerate(projections))
+    lines += [' ],', ' "snapshots": [']
+    snapshots = said['snapshots']
+    lines.extend('  ' + json.dumps(one) + (',' if n < len(snapshots) - 1 else '')
+                 for n, one in enumerate(snapshots))
     lines += [' ]', '}']
     OUT.write_text('\n'.join(lines) + '\n', encoding='ascii')
     refused = sum(1 for one in cases if one['refused'])
