@@ -8,6 +8,7 @@ from lib import eventlog
 from lib import voice_events
 from lib.log import log_exception
 from lib.routes.helpers import _PLAY_EVENTS, _clip_session_and_trace
+from lib.request_texts import body_text
 
 
 class VoiceTimelineRoutes:
@@ -15,14 +16,14 @@ class VoiceTimelineRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        status = (data.get("status") or "").strip()
+        status = body_text(data, "status")
         clip_id = data.get("clip_id")
         try:
             clip_id = int(clip_id) if clip_id not in (None, "") else None
         except (TypeError, ValueError):
             return self._json_error(400, "bad clip_id")
-        url = (data.get("url") or "").strip()
-        error = (data.get("error") or "").strip() or None
+        url = body_text(data, "url")
+        error = body_text(data, "error") or None
         trace_id = (data.get("trace_id") or None)
         self._trace_id = trace_id
         try:
