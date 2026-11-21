@@ -36,6 +36,33 @@ const NOT_JSON: &[u8] = b"not json at all";
 const TOKEN: &str = "0123456789abcdefghijklmnopqrstuv";
 
 #[test]
+fn startup_preserves_the_quota_key_and_sets_aside_invalid_bytes() {
+    let place = Place::new("start-quota-text");
+    drop(place.start());
+
+    let key = b"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    let invalid = b"\xffquota";
+    put_bytes(&place, "kept.quota", "key", key);
+    put_bytes(&place, "kept.quota", "invalid", invalid);
+
+    let host = place.start();
+    let said = started(&host);
+    assert_eq!(said["left_out"]["quota"], 1, "{said}");
+    drop(host);
+
+    assert_eq!(
+        stored_bytes(&place, "kept.quota", "key").as_deref(),
+        Some(key.as_slice())
+    );
+    assert_eq!(stored_bytes(&place, "kept.quota", "key.unreadable"), None);
+    assert_eq!(stored_bytes(&place, "kept.quota", "invalid"), None);
+    assert_eq!(
+        stored_bytes(&place, "kept.quota", "invalid.unreadable").as_deref(),
+        Some(invalid.as_slice())
+    );
+}
+
+#[test]
 fn a_host_starts_past_what_it_cannot_read_and_its_own_door_counts_it() {
     let place = Place::new("start-tolerance");
     let host = place.start();

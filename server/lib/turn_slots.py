@@ -213,6 +213,13 @@ class TurnSlots:
         with self.lock:
             return sorted(self.admitting)
 
+    def admitting_count(self, agent_id: str) -> int:
+        """How many sends for the agent are being admitted here right now. The
+        dispatcher reads it only to lean towards waiting (issue 491): a send
+        admitted beside another one for the same agent may find it busy."""
+        with self.lock:
+            return int(self.admitting.get(agent_id, 0))
+
     def is_admitting(self, agent_id: str) -> bool:
         """A send for the agent is being admitted here (TP-05b): for observers
         such as the reconciler, never for the dispatcher's own decisions."""
@@ -319,6 +326,16 @@ class TurnSlots:
                     f"{self.MAX_AGENTS} agents already hold turn slots")
             self.inflight[agent_id] = trace_id
             self.claimed_at[agent_id] = self._clock()
+
+    def hand_back(self, agent_id: str, trace_id: str, previous: str) -> bool:
+        """Undo a claim that took a running turn's slot (an abandoned takeover, issue
+        491): the slot is ``previous``'s again, as it was, not spawning."""
+        with self.lock:
+            if self.inflight.get(agent_id) != trace_id:
+                return False
+            self.inflight[agent_id] = previous
+            self.claimed_at.pop(agent_id, None)
+            return True
 
     def mark_spawned(self, agent_id: str, trace_id: str) -> bool:
         """The backend accepted the turn: it is no longer spawning."""

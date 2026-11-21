@@ -148,7 +148,15 @@ _OTHER_OWNER_SQL = """
                                  q.prompt_admission_id=messages.prompt_admission_id)
                                 OR (q.client_msg_id<>'' AND messages.message_id=
                                     CASE WHEN q.client_msg_id LIKE 'u-%'
-                                         THEN q.client_msg_id ELSE 'u-'||q.client_msg_id END)))))
+                                         THEN q.client_msg_id ELSE 'u-'||q.client_msg_id END))))
+                       -- A user's send that waited as a queue item and was steered into this
+                       -- turn (started, no turn of its own) is this turn's, as it was when a
+                       -- plain send had no queue item (issue 491).
+                       AND NOT (q.status<>'queued' AND q.status<>'claimed' AND q.status<>'parked'
+                                AND COALESCE(NULLIF(TRIM(messages.origin), ''), 'user')='user'
+                                AND NOT EXISTS (SELECT 1 FROM turns o
+                                                 WHERE o.agent_id=q.agent_id
+                                                   AND o.trace_id=q.trace_id)))
 """
 
 

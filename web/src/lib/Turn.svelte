@@ -49,6 +49,9 @@
     <!-- The whole point of the delivery log: a message that did not arrive
          says so, instead of sitting here looking identical to one that did. -->
     <span class="turn-delivery">not delivered · press ↑ to resend</span>
+  {:else if turn.optimistic && turn.waiting}
+    <!-- Accepted and waiting in the agent's queue: its row comes when its turn starts. -->
+    <span class="turn-delivery">queued · waits for the current turn</span>
   {/if}
 </div>
 {/if}

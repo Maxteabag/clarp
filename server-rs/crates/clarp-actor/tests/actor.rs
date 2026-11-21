@@ -8,7 +8,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clarp_actor::conversation::Which;
-use clarp_actor::{Action, Actor, ImportedRow, Outputs, Profile, ShimOrder, TurnFate};
+use clarp_actor::{
+    Action, Actor, ImportedRow, Marks, Noted, Outputs, Profile, ShimOrder, TRACE_TAKEN, TraceTaken,
+    TurnFate,
+};
 use clarp_backend::Backend;
 use clarp_backend::claude::Claude;
 use clarp_backend::scripted::Scripted;
@@ -27,7 +30,7 @@ static WORLDS: AtomicU64 = AtomicU64::new(0);
 /// Everything around one agent's actor: its disk, its shims, and the clock.
 struct World {
     root: PathBuf,
-    engine: MemEngine,
+    engine: Box<dyn LogEngine>,
     profile: Profile,
     backend: Arc<dyn Backend>,
     now_ms: i64,
@@ -62,10 +65,11 @@ impl World {
             keep_spools: false,
             accounts: clarp_kernel::recovery::Accounts::None,
             epoch: "epoch-test".to_string(),
+            hides_coordination: true,
         };
         Self {
             root,
-            engine: MemEngine::new(),
+            engine: Box::new(MemEngine::new()),
             profile,
             backend: Arc::new(Scripted::echo()),
             now_ms: 1_000,
@@ -200,6 +204,7 @@ fn shown(actor: &Actor) -> Vec<(String, String)> {
                 Entry::Notice(notice) => format!("notice: {}", notice.code),
                 Entry::TurnEnd(end) => format!("end: {}", end.status),
                 Entry::Commentary(part) => format!("along the way: {}", part.reply),
+                Entry::Note(note) => format!("note: {}", note.text),
                 Entry::Imported(imported) => format!(
                     "from before, {}: {}",
                     imported.row["role"].as_str().unwrap_or("?"),
@@ -495,7 +500,7 @@ fn a_turn_whose_shim_is_gone_without_a_word_is_interrupted_and_the_next_one_runs
 }
 
 #[test]
-fn a_shim_that_cannot_be_started_fails_the_turn_with_the_reason() {
+fn a_shim_that_cannot_be_started_leaves_the_turn_waiting_with_the_reason() {
     let mut world = World::new("nostart");
     let mut actor = world.open();
     let now = world.tick();
@@ -503,39 +508,41 @@ fn a_shim_that_cannot_be_started_fails_the_turn_with_the_reason() {
         .send(&message("u-1", "go"), Admission::Queue, now)
         .unwrap();
     assert!(matches!(&out.actions[..], [Action::Launch(_)]));
-    // The world could not start the shim at all.
+    // The world could not start the shim at all: nothing was given to the tool, and the turn
+    // waits to be tried again (R121), with the reason.
     let now = world.tick();
     let out = actor
         .launch_failed(TurnId(1), 1, "clarp-shim: no such file", now)
         .unwrap();
     assert!(out.actions.is_empty());
+    let parked = actor.status().live.unwrap().parked.unwrap();
     assert_eq!(
-        actor.status().last.unwrap().outcome,
-        Outcome::not_started("clarp-shim: no such file".to_string())
+        (parked.kind.as_str(), parked.reason.as_str()),
+        ("not_started", "clarp-shim: no such file")
     );
-    // A shim that started and could not start the tool says so in the spool.
+    // A shim that started and could not start the tool says so in the spool: the same.
+    let mut world = World::new("nostart-tool");
+    let mut actor = world.open();
     let now = world.tick();
     let (_, out) = actor
         .send(&message("u-2", "again"), Admission::Queue, now)
         .unwrap();
     let Action::Launch(order) = &out.actions[0] else {
-        panic!("the next message launches");
+        panic!("the message launches");
     };
     let mut spool = SpoolWriter::create(&order.spool).unwrap();
     spool
         .append(&Record {
-            t: 5,
+            t: now,
             entry: Line::Shim(ShimEvent::SpawnFailed {
                 error: "claude: not found".to_string(),
             }),
         })
         .unwrap();
     world.hint(&mut actor);
-    assert_eq!(
-        actor.status().last.unwrap().outcome,
-        Outcome::not_started("claude: not found".to_string())
-    );
-    assert_eq!(actor.status().live, None);
+    let parked = actor.status().live.unwrap().parked.unwrap();
+    assert_eq!(parked.reason, "claude: not found");
+    assert_eq!(actor.retry_at(), Some(now + 1_000));
 }
 
 #[test]
@@ -2694,6 +2701,7 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
             body: serde_json::to_vec(&said).unwrap(),
             origin: Origin::User,
             admission: Admission::Queue,
+            coordination: None,
         }
     };
     let ended = |recorder: &mut Recorder, turn: TurnId, now: i64| {
@@ -4584,4 +4592,716 @@ fn a_quiet_listener_keeps_its_heartbeat_without_growing_the_principals_ledger() 
     let reopened = world.open();
     assert!(row(&reopened)["last_heartbeat_at"].is_null());
     assert_eq!(row(&reopened)["job_handle"], "bg1:1:quiet");
+}
+
+// ---- R121: a send whose tool could not be started is tried again, as the Python Host tries it
+// (`clarp_kernel::launch_refused`, held to that Host by its vectors), and ends with its sender
+// told at the eighth of one refusal.
+
+/// The launch the actor asks for in `out`, where it asks for one.
+fn r121_launch(out: &Outputs) -> Option<&ShimOrder> {
+    out.actions.iter().find_map(|action| match action {
+        Action::Launch(order) => Some(order),
+        _ => None,
+    })
+}
+
+/// The shim of `order` could not start the tool: it says so in its spool, at `t`.
+fn r121_no_tool(actor: &mut Actor, order: &ShimOrder, t: i64) -> Outputs {
+    let mut spool = SpoolWriter::create(&order.spool).unwrap();
+    spool
+        .append(&Record {
+            t,
+            entry: Line::Shim(ShimEvent::SpawnFailed {
+                error: "claude: not found".to_string(),
+            }),
+        })
+        .unwrap();
+    actor.spool_changed(t).unwrap()
+}
+
+/// The launcher could not start the shim of `order`, at `t`.
+fn r121_no_shim(actor: &mut Actor, order: &ShimOrder, t: i64) -> Outputs {
+    actor
+        .launch_failed(order.turn, order.attempt, "clarp-shim: no such file", t)
+        .unwrap()
+}
+
+/// Every launch the actor asks for is refused by `refuse`, each as its wait ends, until nothing
+/// is tried any more: answers which turn was tried when, from `from`. No more than fifty tries.
+fn r121_refuse_all(
+    world: &mut World,
+    actor: &mut Actor,
+    mut out: Outputs,
+    from: i64,
+    refuse: fn(&mut Actor, &ShimOrder, i64) -> Outputs,
+) -> Vec<(u64, i64)> {
+    let mut tried = Vec::new();
+    loop {
+        if let Some(order) = r121_launch(&out).cloned() {
+            assert!(tried.len() < 50, "tried without end: {tried:?}");
+            tried.push((order.turn.0, world.now_ms - from));
+            out = refuse(actor, &order, world.now_ms);
+            continue;
+        }
+        let Some(at) = actor.retry_at() else {
+            return tried;
+        };
+        world.now_ms = world.now_ms.max(at);
+        out = actor.retry_due(world.now_ms).unwrap();
+    }
+}
+
+/// What the agent's conversation says of turns that failed.
+fn r121_told(actor: &Actor) -> Vec<String> {
+    actor
+        .tail(100)
+        .unwrap()
+        .entries
+        .into_iter()
+        .filter_map(|version| match version.entry {
+            Entry::Notice(notice) => Some(notice.text),
+            _ => None,
+        })
+        .collect()
+}
+
+fn r121_never_run(error: &str) -> String {
+    format!(
+        "A message you sent was never run.\n\nThe agent could not be started for it 8 times in a \
+         row: {error}. It will not be tried again; send it again once the agent can start."
+    )
+}
+
+#[test]
+fn r121_a_send_refused_every_time_is_tried_as_the_python_host_tries_it_and_its_sender_is_told() {
+    let mut world = World::new("r121-refused");
+    let mut actor = world.open();
+    let sent_at = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "go"), Admission::Queue, sent_at)
+        .unwrap();
+    // A second send waits behind it.
+    let (sent, more) = actor
+        .send(&message("u-2", "next"), Admission::Queue, sent_at)
+        .unwrap();
+    assert!(sent.queued && r121_launch(&more).is_none());
+    let tried = r121_refuse_all(&mut world, &mut actor, out, sent_at, r121_no_tool);
+    let of = |turn: u64| -> Vec<i64> {
+        tried
+            .iter()
+            .filter(|(t, _)| *t == turn)
+            .map(|(_, at)| *at)
+            .collect()
+    };
+    // Its own try, a second, then waits of 1, 2, 4 ... 60 s, and the eighth counted one ends it.
+    assert_eq!(
+        of(1),
+        [
+            0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 124_000
+        ]
+    );
+    // The next is tried when it is over, on a count of its own: its first try is counted.
+    assert_eq!(
+        of(2),
+        [
+            124_000, 125_000, 127_000, 131_000, 139_000, 155_000, 187_000, 247_000
+        ]
+    );
+    let status = actor.status();
+    assert_eq!(status.live, None);
+    assert_eq!(
+        status.last.unwrap().outcome,
+        Outcome::not_started("claude: not found".to_string())
+    );
+    let never = r121_never_run("claude: not found");
+    assert_eq!(r121_told(&actor), [never.clone(), never]);
+}
+
+#[test]
+fn r121_a_launcher_that_cannot_start_the_shim_is_tried_the_same_and_its_sender_is_told() {
+    let mut world = World::new("r121-no-shim-end");
+    let mut actor = world.open();
+    let sent_at = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "go"), Admission::Queue, sent_at)
+        .unwrap();
+    let tried = r121_refuse_all(&mut world, &mut actor, out, sent_at, r121_no_shim);
+    let at: Vec<i64> = tried.iter().map(|(_, at)| *at).collect();
+    assert_eq!(
+        at,
+        [
+            0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 124_000
+        ]
+    );
+    assert_eq!(
+        r121_told(&actor),
+        [r121_never_run("clarp-shim: no such file")]
+    );
+}
+
+#[test]
+fn r121_a_refused_turn_is_the_agents_turn_a_users_send_asks_for_it_again_and_a_stop_ends_it() {
+    let mut world = World::new("r121-behind");
+    let mut actor = world.open();
+    let now = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "first"), Admission::Queue, now)
+        .unwrap();
+    let order = r121_launch(&out).cloned().unwrap();
+    r121_no_tool(&mut actor, &order, now);
+    // Refused at its own try: it waits a second, and holds the agent; refused again, counted.
+    assert_eq!(actor.retry_at(), Some(now + 1_000));
+    let out = actor.retry_due(now + 1_000).unwrap();
+    let second = r121_launch(&out).cloned().unwrap();
+    r121_no_tool(&mut actor, &second, now + 1_000);
+    assert_eq!(actor.retry_at(), Some(now + 2_000));
+    // A user's send in the meantime waits behind it, and asks for the agent again: the first is
+    // tried at once, and its count begins anew.
+    let later = now + 1_400;
+    let (sent, out) = actor
+        .send(&message("u-2", "second"), Admission::Queue, later)
+        .unwrap();
+    assert!(sent.queued, "nothing overtakes the turn that waits");
+    let again = r121_launch(&out)
+        .cloned()
+        .expect("the first is tried at once");
+    assert_eq!((again.turn, again.attempt), (TurnId(1), 3));
+    r121_no_tool(&mut actor, &again, later);
+    assert_eq!(
+        actor.retry_at(),
+        Some(later + 1_000),
+        "the first refusal of a count begun anew waits a second"
+    );
+    assert_eq!(actor.status().waiting, [TurnId(2)]);
+    // The user's Stop ends the wait at once; nothing is tried again.
+    let stop_at = later + 500;
+    let (_, out) = actor.stop("user", stop_at).unwrap();
+    assert!(r121_launch(&out).is_none());
+    assert!(matches!(
+        actor.status().last.unwrap().outcome,
+        Outcome::Stopped { .. }
+    ));
+    assert_eq!(actor.retry_at(), None);
+}
+
+#[test]
+fn r121_a_restart_in_the_middle_keeps_the_turn_and_counts_from_nothing() {
+    let mut world = World::new("r121-restart");
+    let mut actor = world.open();
+    let now = world.tick();
+    let (_, out) = actor
+        .send(&message("u-1", "go"), Admission::Queue, now)
+        .unwrap();
+    let order = r121_launch(&out).cloned().unwrap();
+    r121_no_shim(&mut actor, &order, now);
+    let out = actor.retry_due(now + 1_000).unwrap();
+    let second = r121_launch(&out).cloned().unwrap();
+    r121_no_shim(&mut actor, &second, now + 1_000);
+    let out = actor.retry_due(now + 2_000).unwrap();
+    let third = r121_launch(&out).cloned().unwrap();
+    r121_no_shim(&mut actor, &third, now + 2_000);
+    assert_eq!(
+        actor.retry_at(),
+        Some(now + 4_000),
+        "the second counted one: two seconds"
+    );
+
+    // The Host starts again while the turn waits: the turn is still the agent's, tried at once,
+    // and counted from nothing, as the Python Host's queue tries it when it starts.
+    drop(actor);
+    world.now_ms = now + 3_000;
+    let mut actor = world.open();
+    let reopened = world.now_ms;
+    assert!(actor.retry_at().is_some_and(|at| at <= reopened));
+    let out = actor.retry_due(reopened).unwrap();
+    let fourth = r121_launch(&out).cloned().unwrap();
+    assert_eq!((fourth.turn, fourth.attempt), (TurnId(1), 4));
+    r121_no_shim(&mut actor, &fourth, reopened);
+    assert_eq!(actor.retry_at(), Some(reopened + 1_000));
+}
+
+/// A turn whose launch was refused waits for a retry, not for an account (R121): it is the same
+/// turn going on in a moment, so it names its trace while it waits, as a turn between two
+/// attempts after a dropped connection does; and none once its refusals end it.
+#[test]
+fn r121_a_turn_that_waits_on_a_refused_launch_names_its_trace() {
+    let mut world = World::new("r121-trace");
+    let mut actor = world.open();
+    let sent_at = world.tick();
+    let traced = Message {
+        trace_id: Some("trace-r".to_string()),
+        ..message("u-1", "go")
+    };
+    let (_, out) = actor.send(&traced, Admission::Queue, sent_at).unwrap();
+    let order = r121_launch(&out).cloned().unwrap();
+    assert_eq!(actor.running_trace(1).unwrap(), Some("trace-r".to_string()));
+    // The shim could not start the tool: the turn waits a second for its next try.
+    r121_no_tool(&mut actor, &order, sent_at);
+    assert_eq!(actor.retry_at(), Some(sent_at + 1_000));
+    assert_eq!(actor.waits_for_an_account(), None, "not for an account");
+    assert_eq!(
+        actor.running_trace(1).unwrap(),
+        Some("trace-r".to_string()),
+        "a turn that waits on a refused launch of the tool"
+    );
+    // The launcher could not start the shim of the next try: the same.
+    world.now_ms = sent_at + 1_000;
+    let out = actor.retry_due(world.now_ms).unwrap();
+    let second = r121_launch(&out).cloned().unwrap();
+    assert_eq!((second.turn, second.attempt), (TurnId(1), 2));
+    r121_no_shim(&mut actor, &second, world.now_ms);
+    assert!(actor.retry_at().is_some());
+    assert_eq!(
+        actor.running_trace(1).unwrap(),
+        Some("trace-r".to_string()),
+        "a turn that waits on a refused launch of the shim"
+    );
+    // Refused until its count ends it, at the eighth refusal of the tool in a row (the shim's
+    // was another refusal): it runs no more, and names no trace.
+    let tried = r121_refuse_all(
+        &mut world,
+        &mut actor,
+        Outputs::default(),
+        sent_at,
+        r121_no_tool,
+    );
+    assert_eq!(tried.len(), 8, "{tried:?}");
+    assert_eq!(actor.status().live, None);
+    assert_eq!(actor.running_trace(1).unwrap(), None);
+}
+
+/// A message another agent sent, under a trace its caller named.
+fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
+    let message = Message {
+        trace_id: Some(trace.to_string()),
+        origin: Origin::Agent {
+            agent_id: "a-boss".to_string(),
+        },
+        sender: Some(clarp_kernel::conversation::Sender {
+            agent_id: "a-boss".to_string(),
+            name: "Boss".to_string(),
+            session: "boss".to_string(),
+        }),
+        ..message(id, "from an agent")
+    };
+    let marks = Marks {
+        coordination: Some("a-boss".to_string()),
+        trace_named: true,
+    };
+    (message, marks)
+}
+
+#[test]
+fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_are_counted_into_its_end()
+ {
+    let mut world = World::new("coordination");
+    let mut actor = world.open();
+    let (asked, marks) = from_an_agent("u-a1", "tr-1");
+    let now = world.tick();
+    let (sent, out) = actor
+        .send_marked(&asked, Admission::Queue, None, &marks, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(sent.turn, Some(TurnId(1)));
+    world.carry_out(&mut actor, out);
+    // The mark is the acceptance's, found by its key: one item, written with the turn.
+    assert_eq!(actor.mark(1).unwrap().as_deref(), Some("a-boss"));
+    // What the log holds under a key, as the agent's own log finds it.
+    let found = |world: &World, key: &str| {
+        let log = world
+            .engine
+            .open(&world.profile.dir, standard_set("zstd").unwrap())
+            .unwrap();
+        log.find(key).unwrap().map(|item| (item.kind, item.turn))
+    };
+    assert_eq!(
+        found(&world, "coordination-1"),
+        Some((kind::AGENT_EVENT, Some(1))),
+        "the acceptance of a marked turn has its key"
+    );
+
+    // A note from the running turn: a row of its own in the turn's trace.
+    let now = world.tick();
+    let (noted, out) = actor.leave_note(1, "note-a1-green", "Green.", now).unwrap();
+    assert_eq!(
+        noted,
+        Noted::Written {
+            id: "note-a1-green".to_string(),
+            trace_id: "tr-1".to_string()
+        }
+    );
+    assert!(out.changed.conversation);
+    // The same note again is the same note; the same id with other words is refused; a turn
+    // that is not the running one leaves none.
+    let now = world.tick();
+    let (again, out) = actor.leave_note(1, "note-a1-green", "Green.", now).unwrap();
+    assert_eq!(
+        again,
+        Noted::Again {
+            id: "note-a1-green".to_string(),
+            trace_id: "tr-1".to_string()
+        }
+    );
+    assert!(!out.changed.conversation);
+    let (other, _) = actor.leave_note(1, "note-a1-green", "Red.", now).unwrap();
+    assert_eq!(other, Noted::OtherWords);
+    let (elsewhere, _) = actor.leave_note(2, "note-a1-blue", "Blue.", now).unwrap();
+    assert_eq!(elsewhere, Noted::NotRunning);
+    let (second, _) = actor.leave_note(1, "note-a1-blue", "Blue.", now).unwrap();
+    assert!(matches!(second, Noted::Written { .. }));
+
+    // A send that names the trace another message has is refused; the same message again is
+    // the same message; a trace the Host minted is not asked about.
+    let now = world.tick();
+    let theirs = Message {
+        trace_id: Some("tr-1".to_string()),
+        ..message("u-mine", "mine")
+    };
+    let named = Marks {
+        trace_named: true,
+        ..Marks::default()
+    };
+    assert_eq!(
+        actor
+            .send_marked(&theirs, Admission::Queue, None, &named, now)
+            .unwrap()
+            .unwrap_err(),
+        TraceTaken
+    );
+    let posing = Message {
+        origin: Origin::User,
+        ..asked.clone()
+    };
+    assert_eq!(
+        actor
+            .send_marked(&posing, Admission::Queue, None, &named, now)
+            .unwrap()
+            .unwrap_err(),
+        TraceTaken,
+        "the same id with another origin is another message"
+    );
+    // The same id and origin from another sender: another message too, no retry.
+    let another = Message {
+        sender: Some(clarp_kernel::conversation::Sender {
+            agent_id: "a-other".to_string(),
+            name: "Other".to_string(),
+            session: "other".to_string(),
+        }),
+        origin: Origin::Agent {
+            agent_id: "a-other".to_string(),
+        },
+        ..asked.clone()
+    };
+    assert_eq!(
+        actor
+            .send_marked(&another, Admission::Queue, None, &named, now)
+            .unwrap()
+            .unwrap_err(),
+        TraceTaken,
+        "the same id and origin from another sender is another message"
+    );
+    let (retried, _) = actor
+        .send_marked(&asked, Admission::Queue, None, &marks, now)
+        .unwrap()
+        .unwrap();
+    assert!(retried.duplicate);
+    assert!(TRACE_TAKEN.starts_with("trace_id already belongs to another message"));
+
+    // A restart in the middle of the turn loses neither the mark nor the count.
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(actor.mark(1).unwrap().as_deref(), Some("a-boss"));
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let page = actor.tail(100).unwrap();
+    let rows: Vec<(String, Option<String>)> = page
+        .entries
+        .iter()
+        .map(|row| (row.entry.id().to_string(), row.coordination.clone()))
+        .collect();
+    let boss = Some("a-boss".to_string());
+    assert_eq!(
+        rows,
+        vec![
+            ("u-a1".to_string(), boss.clone()),
+            ("note-a1-green".to_string(), boss.clone()),
+            ("note-a1-blue".to_string(), boss.clone()),
+        ]
+    );
+    let end = page
+        .entries
+        .iter()
+        .find_map(|row| row.turn.clone())
+        .expect("the turn ended");
+    assert_eq!(end.note_count, 2);
+
+    // The user's turn after it is not marked, and its end counts no note.
+    world.send(&mut actor, "u-2", "and you?", Admission::Queue);
+    assert_eq!(actor.mark(2).unwrap(), None);
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    let page = actor.tail(100).unwrap();
+    let mine = page
+        .entries
+        .iter()
+        .find(|row| row.entry.id() == "u-2")
+        .unwrap();
+    assert_eq!(mine.coordination, None);
+    assert_eq!(mine.turn.as_ref().map(|end| end.note_count), Some(0));
+    assert_eq!(
+        found(&world, "coordination-2"),
+        None,
+        "an unmarked turn's acceptance has no key"
+    );
+    assert_eq!(
+        found(&world, "trace-tr-1").map(|(kind, _)| kind),
+        Some(kind::TRACE)
+    );
+    // A trusted Host trace follows the ordinary admission path even if the supplied ID
+    // already exists. The original caller-named trace keeps its owner.
+    let now = world.tick();
+    let (trusted, _) = actor
+        .send_marked(&theirs, Admission::Queue, None, &Marks::default(), now)
+        .unwrap()
+        .unwrap();
+    assert!(!trusted.duplicate);
+    let (again, _) = actor
+        .send_marked(&asked, Admission::Queue, None, &marks, now)
+        .unwrap()
+        .unwrap();
+    assert!(again.duplicate);
+}
+
+/// Fills an agent's log with `turns` turns that are over, as a long conversation's log holds them:
+/// each its acceptance, its message, its reply, how it ended (a part of the reply's row) and its
+/// settling; another agent's mark on every 87th turn and on the newest `marked_newest`. Written
+/// straight into the log in large appends: the shape the actor reads, without running a turn.
+fn fill(world: &World, turns: u64, marked_newest: u64) {
+    use clarp_kernel::agent::AgentEvent;
+    use clarp_kernel::conversation::{Reply, TurnEnd};
+    use clarp_kernel::journal::coordination_key;
+    use clarp_kernel::turn::TurnEvent;
+    use clarp_ports::log::NewItem;
+    let mut log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let mut items = Vec::new();
+    for turn in 1..=turns {
+        let marked = turn % 87 == 0 || turn + marked_newest > turns;
+        let origin = if marked {
+            Origin::Agent {
+                agent_id: "a-boss".to_string(),
+            }
+        } else {
+            Origin::User
+        };
+        let at = 1_000 + i64::try_from(turn).unwrap();
+        let message_seq = (turn - 1) * 5 + 2;
+        let event = |change: TurnEvent| {
+            serde_json::to_vec(&AgentEvent::Turn {
+                turn: TurnId(turn),
+                change,
+            })
+            .unwrap()
+        };
+        let accepted = TurnEvent::Accepted {
+            turn: TurnId(turn),
+            message_seq,
+            origin: origin.clone(),
+            admission: Admission::Queue,
+            at_ms: at,
+            coordination: marked.then(|| "a-boss".to_string()),
+        };
+        let mut item = NewItem::new(kind::AGENT_EVENT, at, event(accepted)).in_turn(turn);
+        if marked {
+            item.key = Some(coordination_key(turn));
+        }
+        items.push(item);
+        let trace = Some(format!("tp{turn}"));
+        let said = Entry::Message(Message {
+            trace_id: trace.clone(),
+            origin: origin.clone(),
+            ..message(&format!("u-p{turn}"), &format!("message {turn}"))
+        });
+        items.push(said.to_item(at).unwrap().in_turn(turn));
+        let reply = Entry::Reply(Reply {
+            id: format!("r-p{turn}"),
+            turn,
+            text: format!("reply {turn}"),
+            trace_id: trace.clone(),
+            origin,
+            tools: Vec::new(),
+        });
+        items.push(reply.to_item(at).unwrap());
+        let end = Entry::TurnEnd(TurnEnd {
+            id: format!("t-{turn}"),
+            turn,
+            closes: format!("r-p{turn}"),
+            status: "completed".to_string(),
+            started_at_ms: Some(at),
+            ended_at_ms: at,
+            tool_count: 0,
+            trace_id: trace,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
+            context_tokens: None,
+            cost_micros: None,
+            cost_so_far: None,
+            total: None,
+            limits: None,
+            note_count: 0,
+        });
+        items.push(end.to_item(at).unwrap());
+        let settled = TurnEvent::Settled {
+            outcome: Outcome::Withdrawn {
+                by: "filled".to_string(),
+            },
+            at_ms: at,
+        };
+        items.push(NewItem::new(kind::AGENT_EVENT, at, event(settled)).in_turn(turn));
+        if items.len() >= 10_000 {
+            log.append(&items).unwrap();
+            items.clear();
+        }
+    }
+    if !items.is_empty() {
+        log.append(&items).unwrap();
+    }
+}
+
+/// One of the two SQLite conversations sampled by the coordination benchmark.
+struct CostFixture {
+    // Close the SQLite actor before the world removes its scratch directory.
+    actor: Actor,
+    world: World,
+    turns: u64,
+    middle: String,
+}
+
+impl CostFixture {
+    fn new(rows: u64) -> Self {
+        let mut world = World::new(&format!("costs-{rows}"));
+        world.engine = Box::new(clarp_store_sqlite::SqliteEngine::new());
+        let turns = rows / 2;
+        fill(&world, turns, 2_500.min(turns / 2));
+        let actor = world.open();
+        let middle = format!("u-p{}", turns / 2);
+        Self {
+            actor,
+            world,
+            turns,
+            middle,
+        }
+    }
+}
+
+/// Sample both sizes in each round, alternating the order so they see the same
+/// stretch of runner load. Return the median microseconds for each size.
+fn paired_medians<const N: usize>(
+    fixtures: &mut [CostFixture; 2],
+    mut work: impl FnMut(&mut CostFixture, usize),
+) -> [u128; 2] {
+    let mut samples = [[0; N]; 2];
+    let [small, big] = &mut samples;
+    for (round, (small, big)) in small.iter_mut().zip(big.iter_mut()).enumerate() {
+        let mut pair = [(0, small), (1, big)];
+        pair.rotate_left(round % 2);
+        for (size, sample) in pair {
+            let began = std::time::Instant::now();
+            work(&mut fixtures[size], round);
+            *sample = began.elapsed().as_micros();
+        }
+    }
+    samples.map(|mut times| {
+        times.sort_unstable();
+        times[N / 2]
+    })
+}
+
+#[test]
+fn coordination_costs_the_same_in_a_conversation_of_300_000_rows_as_in_one_of_3_000() {
+    const READS: usize = 31;
+    const SENDS_AND_NOTES: usize = 15;
+    const SETTLES: usize = 9;
+    let mut fixtures = [CostFixture::new(3_000), CostFixture::new(300_000)];
+    let tail_marked = paired_medians::<READS>(&mut fixtures, |fixture, _| {
+        let page = fixture.actor.tail(100).unwrap();
+        assert!(page.entries.iter().all(|row| row.coordination.is_some()));
+    });
+    let before_unmarked = paired_medians::<READS>(&mut fixtures, |fixture, _| {
+        let page = fixture.actor.before(&fixture.middle, 100).unwrap().unwrap();
+        assert_eq!(page.entries.len(), 100);
+    });
+    let send = paired_medians::<SENDS_AND_NOTES>(&mut fixtures, |fixture, at| {
+        let (asked, marks) = from_an_agent(&format!("u-s{at}"), &format!("ts{at}"));
+        let now = fixture.world.tick();
+        let (sent, out) = fixture
+            .actor
+            .send_marked(&asked, Admission::Queue, None, &marks, now)
+            .unwrap()
+            .unwrap();
+        assert!(!sent.duplicate);
+        fixture.world.carry_out(&mut fixture.actor, out);
+    });
+    let note = paired_medians::<SENDS_AND_NOTES>(&mut fixtures, |fixture, at| {
+        let now = fixture.world.tick();
+        let (noted, _) = fixture
+            .actor
+            .leave_note(fixture.turns + 1, &format!("note-a1-n{at}"), "Noted.", now)
+            .unwrap();
+        assert!(matches!(noted, Noted::Written { .. }));
+    });
+    let settle = paired_medians::<SETTLES>(&mut fixtures, |fixture, at| {
+        let turn = fixture.turns + 1 + u64::try_from(at).unwrap();
+        fixture.world.exits(turn, Some(0), None);
+        fixture.world.hint(&mut fixture.actor);
+    });
+    for fixture in &mut fixtures {
+        let end = fixture
+            .actor
+            .tail(200)
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|row| row.entry.id() == "u-s0")
+            .and_then(|row| row.turn)
+            .expect("the first send's turn ended");
+        assert_eq!(end.note_count, u32::try_from(SENDS_AND_NOTES).unwrap());
+    }
+    let measurements = [
+        ("a page of marked rows", READS, tail_marked),
+        ("a page of unmarked rows", READS, before_unmarked),
+        ("a send's acceptance", SENDS_AND_NOTES, send),
+        ("a note", SENDS_AND_NOTES, note),
+        ("a turn's end", SETTLES, settle),
+    ];
+    let mut said =
+        String::from("coordination costs, interleaved median us, 3,000 -> 300,000 rows:\n");
+    for (what, samples, [small, big]) in measurements {
+        use std::fmt::Write as _;
+        writeln!(
+            said,
+            "  {what} ({samples} samples per size): {small} -> {big}"
+        )
+        .unwrap();
+    }
+    // Written past the test harness's capture, so that a passing run shows the numbers too.
+    std::io::Write::write_all(&mut std::io::stderr(), said.as_bytes()).unwrap();
+    // Keep the original scaling bound, including its allowance for millisecond noise.
+    let bound = |small: u128| (small * 2).max(small + 1_000);
+    for (what, _, [small, big]) in measurements {
+        assert!(
+            big <= bound(small),
+            "{what}: {small} us -> {big} us\n{said}"
+        );
+    }
+    assert!(
+        tail_marked[1] <= bound(before_unmarked[1]),
+        "marked {} us, unmarked {} us",
+        tail_marked[1],
+        before_unmarked[1]
+    );
 }

@@ -431,6 +431,25 @@ export function addOptimisticTurn(session, id, text) {
   conv.appendSeq++;
 }
 
+/** A waiting send (queued behind the running turn): its bubble says so until its row arrives. */
+export function markTurnWaiting(session, id) {
+  if (!session || !id) return;
+  const conv = conversations.bySession[session];
+  if (!conv) return;
+  const wait = t => (t.id === id ? { ...t, waiting: true } : t);
+  conv.optimistic = conv.optimistic.map(wait);
+  conv.turns = conv.turns.map(wait);
+}
+
+/** A waiting send deleted from the queue: it will never arrive, so its bubble goes. */
+export function dropOptimisticTurn(session, id) {
+  if (!session || !id) return;
+  const conv = conversations.bySession[session];
+  if (!conv) return;
+  conv.optimistic = conv.optimistic.filter(t => t.id !== id);
+  conv.turns = conv.turns.filter(t => !(t.id === id && t.optimistic));
+}
+
 export function markTurnFailed(session, id) {
   if (!session || !id) return;
   const conv = conversations.bySession[session];
