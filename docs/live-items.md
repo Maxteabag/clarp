@@ -366,7 +366,11 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
   event as the tool start.
 - A `failed` explanation carries `reason`. `skipped` means the Host stopped
   waiting: the item fell off a full backlog (the newest items go first), waited
-  45 s, or its turn ended 15 s ago. Render every `failed` as no explanation (the
+  45 s, or its turn ended 15 s ago. `unexplained` means a shell tool's call came
+  without the command it runs (only its description, or its own name where the
+  command belongs): there is nothing to explain, so no model is asked and nothing
+  is learned. A live item whose command is still its tool's name is not asked at
+  all until its real command arrives. Render every `failed` as no explanation (the
   raw command, or nothing), never as `Explaining…`. No item stays `pending`:
   each settles `ready` or `failed` within 45 s, and within 15 s of its turn
   ending. The Host asks the model for up to 8 of an agent's items at once.
