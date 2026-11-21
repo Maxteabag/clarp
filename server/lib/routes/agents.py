@@ -452,7 +452,9 @@ class AgentRoutes:
         other value, the answer is every agent, as it has always been."""
         from lib import snapshot
         include_archived = self._query().get("include_archived", [""])[0] != "0"
-        self._send(200, snapshot.SHARED.body(self.ctx, include_archived=include_archived),
+        limited = getattr(self, "_request_device_scope", "") == "limited"
+        self._send(200, snapshot.SHARED.body(self.ctx, include_archived=include_archived,
+                                              limited=limited),
                    "application/json")
 
     def _handle_archived_agents(self):
