@@ -688,6 +688,7 @@ impl ClaudeInterpreter {
                     is_error: event["is_error"].as_bool().unwrap_or(false),
                     text: text_of(&event["result"]).to_string(),
                 });
+                out.push(Signal::Concluded);
             }
             "rate_limit_event" => {
                 let info = &event["rate_limit_info"];
@@ -738,6 +739,9 @@ impl ClaudeInterpreter {
                 // from here on, until an answer says otherwise.
                 if let Some(held) = event["compact_metadata"]["post_tokens"].as_u64() {
                     out.push(Signal::Context { tokens: held });
+                }
+                if let Some(record) = clarp_kernel::compaction::boundary(event) {
+                    out.push(Signal::Compacted(record));
                 }
             }
             _ => {}
@@ -1088,6 +1092,8 @@ mod tests {
                         | Signal::Model(_)
                         | Signal::Usage { .. }
                         | Signal::Context { .. }
+                        | Signal::Compacted(_)
+                        | Signal::Concluded
                         | Signal::Cost { .. }
                 )
             })
@@ -1114,7 +1120,7 @@ mod tests {
             for (place, step) in case["steps"].as_array().unwrap().iter().enumerate() {
                 let now = step["at"].as_i64().unwrap();
                 let events = if let Some(turn) = step["begin"].as_str() {
-                    hub.begin_turn("claire", "conv-1", turn, None, now)
+                    hub.begin_turn("claire", "conv-1", turn, None, "user", now)
                 } else if let Some(status) = step["end"].as_str() {
                     hub.end_turn(status, None, now)
                 } else if step.get("fire").is_some() {
