@@ -163,6 +163,11 @@ from lib.turn_launcher import LauncherMixin  # noqa: E402  (s3_apply)
 from lib.turn_admission import AdmissionMixin  # noqa: E402  (s3_apply)
 
 
+def _steer_refused(spec: _TurnSpec, reason: str) -> None:
+    """Which condition kept a send to a busy agent from being steered (it then waits)."""
+    log("steerRefused", f"agent={spec.agent_id} trace={spec.trace_id or '-'} reason={reason}")
+
+
 class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixin, RecoveryMixin, RetryMixin, DrainMixin):
     def __init__(self, ctx, *, backend_registry=backends,
                  home: pathlib.Path | None = None,
@@ -399,6 +404,8 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             active_trace = _INFLIGHT.get(spec.agent_id, "")
             busy = bool(active_trace)
         if not busy or _terminal_live(spec.agent_id):
+            if busy:
+                _steer_refused(spec, "terminal")
             return False
         steer = getattr(self.backends, "steer_turn", None)
         if steer is None or not _can_steer(self.backends, spec.backend):
@@ -406,11 +413,13 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             # no launch attempt is recorded for it, so the send that then waits
             # behind the turn keeps a PENDING receipt and runs from the queue
             # after a Stop or a restart (R120).
+            _steer_refused(spec, "backend")
             return False
         # A claimed slot with no live process is a phantom (a launch that
         # died before the backend started). Steering into it loses the
         # message; fall through so the busy path reclaims the slot instead.
         if not self._has_live_turn(spec):
+            _steer_refused(spec, "no_live_turn")
             return False
         # A steer hands the prompt to the provider too. Raised past the
         # fall-through below: a failed receipt write must not turn into a
