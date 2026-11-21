@@ -279,6 +279,13 @@ class _Rows:
         """One digest per kind, over every column of every row of that kind.
         With ``boundary_seq`` the transcript rows from it on are a kind of
         their own (``row_tail``)."""
+        return self.hashed(self.grouped(values, source_file, backend_session_id, boundary_seq))
+
+    def hashed(self, groups: dict[str, list]) -> dict[str, str]:
+        return {kind: _digest((self.names, found)) for kind, found in groups.items()}
+
+    def grouped(self, values, source_file, backend_session_id, boundary_seq=None) -> dict[str, list]:
+        """The rows by kind, as ``digests`` hashes them."""
         by_kind: dict[str, list] = {kind: [] for kind in KINDS}
         if values:
             source, session = self.at["source_file"], self.at["backend_session_id"]
@@ -292,7 +299,11 @@ class _Rows:
                 else:
                     by_kind[_kind_of(row[source], row[session], source_file,
                                      backend_session_id)].append(row)
-        return {kind: _digest((self.names, found)) for kind, found in by_kind.items()}
+        return by_kind
+
+
+def _counted(groups: dict[str, list]) -> dict[str, int]:
+    return {kind: len(found) for kind, found in groups.items()}
 
 
 def _turn_values(turn_rows) -> list[tuple]:
@@ -381,13 +392,14 @@ def record(raw_inputs, *, carry=None, source_file: str = "", backend_session_id:
     revision = table.at.get("revision")
     mark = max((int(row[revision] or 0) for row in table.values), default=0) \
         if revision is not None else 0
-    base, digests, since = mark, None, []
+    base, digests, counts, since = mark, None, None, []
     if witness is not None and witness[0] <= mark:
         kept, since = table.split(witness[0])
         if kept == witness[1]:
-            base, digests = witness[0], {
-                "base": witness[2],
-                "since": table.digests(since, source_file, backend_session_id, boundary_seq)}
+            groups = table.grouped(since, source_file, backend_session_id, boundary_seq)
+            base, digests = witness[0], {"base": witness[2], "since": table.hashed(groups)}
+            counts = {"base": witness[3], "since": _counted(groups)} \
+                if len(witness) > 3 and witness[3] is not None else None
         else:
             since = []
     if digests is None:
@@ -399,8 +411,10 @@ def record(raw_inputs, *, carry=None, source_file: str = "", backend_session_id:
             base = min([base] + [int(row[revision] or 0) - 1 for row in table.values if table.kind(
                 row, source_file, backend_session_id, boundary_seq) == "row_tail"])
         kept, since = table.split(base)
-        digests = {"base": table.digests(kept, source_file, backend_session_id),
-                   "since": table.digests(since, source_file, backend_session_id, boundary_seq)}
+        kept_groups = table.grouped(kept, source_file, backend_session_id)
+        since_groups = table.grouped(since, source_file, backend_session_id, boundary_seq)
+        digests = {"base": table.hashed(kept_groups), "since": table.hashed(since_groups)}
+        counts = {"base": _counted(kept_groups), "since": _counted(since_groups)}
     turn_values = _turn_values(turns)
     trace = table.at.get("trace_id")
     ident = table.at.get("message_id")
@@ -412,6 +426,9 @@ def record(raw_inputs, *, carry=None, source_file: str = "", backend_session_id:
         # Where ``row_tail`` begins among the rows since the base (None: nowhere).
         "boundary": boundary_seq,
         "rows": digests,
+        # How many rows of each kind those digests are over: only to say, when
+        # a kind is refused, how its rows changed (``changed``'s ``why``).
+        "counts": counts,
         # Each live row of this session by itself (there are few): LIVE_ROWS
         # asks only those that are not as they were.
         "live": {str(row[ident]): _digest((table.names, row))
@@ -450,19 +467,19 @@ def _restampable(table: _Rows, turn_values: list[tuple]) -> dict[str, int]:
     return {str(row[ident]): int(row[revision] or 0) for row in rows}
 
 
-def _put_back(table: _Rows, recorded: dict) -> int:
+def _put_back(table: _Rows, recorded: dict) -> set[str]:
     """Put every row of the record's ``restamp`` that has moved above the mark
-    back at its recorded revision, in ``table``. How many were put back."""
+    back at its recorded revision, in ``table``. The ids put back."""
     kept = recorded.get("restamp") or {}
     ident, revision = table.at.get("message_id"), table.at.get("revision")
     if not kept or ident is None or revision is None:
-        return 0
-    moved = 0
+        return set()
+    moved: set[str] = set()
     for index, row in enumerate(table.values):
         was = kept.get(str(row[ident]))
         if was is not None and int(row[revision] or 0) > recorded["mark"]:
             table.values[index] = row[:revision] + (was,) + row[revision + 1:]
-            moved += 1
+            moved.add(str(row[ident]))
     return moved
 
 
@@ -499,7 +516,8 @@ def loads(text) -> dict | None:
 def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: int = 0,
             source_file: str = "", backend_session_id: str = "",
             session_rows: bool = False, witness: dict | None = None,
-            pending_tail: dict | None = None, accepted_tail: dict | None = None) -> str:
+            pending_tail: dict | None = None, accepted_tail: dict | None = None,
+            why: dict | None = None) -> str:
     """'' when the turns before the boundary would be replayed as they stand.
     Otherwise what stands in the way: fixed words, comma separated, for the
     log (no ids, no text).
@@ -516,7 +534,10 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     digest of their unstamped values are put there, for the caller to check
     against the tail's plan. With ``accepted_tail`` (that dict, once the plan
     has reproduced every one of them line for line) they pass only while they
-    are still exactly those rows."""
+    are still exactly those rows.
+
+    ``why``, when given, receives under "how" how the rows of each refused
+    kind changed, for the log (``_how``)."""
     if recorded is None or current[3] is None:
         return "not_recorded"
     if recorded["scope"] != ("session" if session_rows else "agent"):
@@ -527,7 +548,7 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     table = _Rows(rows)
     # Rows a coordination turn's restamp moved above the mark go back to their
     # recorded revision: then they are judged, like every old row, by the digests.
-    _put_back(table, recorded)
+    put_back = _put_back(table, recorded)
     base, since, new = table.split(recorded["base"], recorded["mark"])
     # Every row the frontier was published with is at or below the mark. They
     # are all there and unchanged exactly when each kind hashes as recorded,
@@ -537,17 +558,25 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     tail_differs = False
     # The kinds are told apart as the record told them: by its own boundary.
     tail_from = recorded["boundary"]
+    counted = dict.fromkeys(KINDS, 0)
+    refused_kinds: set[str] = set()
     for part, values in (("base", base), ("since", since)):
-        now = table.digests(values, source_file, backend_session_id,
-                            tail_from if part == "since" else None)
+        groups = table.grouped(values, source_file, backend_session_id,
+                               tail_from if part == "since" else None)
+        now = table.hashed(groups)
+        for kind, found_rows in groups.items():
+            counted[kind] += len(found_rows)
         differing = [kind for kind in KINDS if now[kind] != recorded["rows"][part][kind]]
+        refused_kinds.update(kind for kind in differing
+                             if kind != "row_tail" and not (live_rows and kind == "row_live"))
         # Under LIVE_ROWS the live rows are asked one by one below; the rows
         # from the boundary on are asked together, next.
         tail_differs = tail_differs or "row_tail" in differing
         found.update(kind for kind in differing
                      if kind != "row_tail" and not (live_rows and kind == "row_live"))
         if part == "base" and not differing and witness is not None:
-            witness["base"] = (recorded["base"], base, recorded["rows"]["base"])
+            witness["base"] = (recorded["base"], base, recorded["rows"]["base"],
+                               (recorded.get("counts") or {}).get("base"))
     # The transcript rows from the boundary on, written since the base: a
     # tail writes them again from the transcript, as a full import does.
     restamped = [row for row in new
@@ -657,7 +686,51 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
         found.add("latest_user_row")
     if _oracle(oracle) != recorded["oracle"]:
         found.add("oracle_rows")
+    if why is not None and refused_kinds:
+        why["how"] = _how(table, recorded, refused_kinds, counted, new, turns,
+                          source_file, backend_session_id, tail_from, put_back)
     return ",".join(sorted(found))
+
+
+def _how(table, recorded, kinds, counted, new, turns, source_file, backend_session_id,
+         tail_from, put_back=frozenset()) -> str:
+    """For the log: how the old rows of each refused kind changed, told by their
+    count against the record's (no ids, no text). ``in_place``: as many rows
+    as recorded, at or below the mark, one of them different. ``rewritten``:
+    fewer, and rows of that kind above the mark to account for them;
+    ``rewritten_settled`` when every one of those is of a turn that settled
+    since. ``removed``: fewer, with nothing above the mark to account for them.
+    ``old_revision``: more than recorded. ``uncounted``: a record without counts.
+    A row put back at its recorded revision (``_put_back``) moved above the
+    mark: it counts among the rows above it."""
+    counts = recorded.get("counts")
+    settled = {str(row[0]) for row in _turn_values(turns)
+               if row[0] and isinstance(row[2], int) and row[2] > recorded["settled"]}
+    trace, ident = table.at.get("trace_id"), table.at.get("message_id")
+    returned = [row for row in table.values if str(row[ident]) in put_back] \
+        if put_back and ident is not None else []
+    words = []
+    for kind in sorted(kinds):
+        if not isinstance(counts, dict) or not all(
+                isinstance(part, dict) and isinstance(part.get(kind), int) for part in counts.values()):
+            words.append(f"{kind}:uncounted")
+            continue
+        was = sum(part[kind] for part in counts.values())
+        moved = [row for row in returned if table.kind(row, source_file, backend_session_id) == kind]
+        now = counted[kind] - len(moved)
+        above = moved + [row for row in new if table.kind(
+            row, source_file, backend_session_id, tail_from) == kind]
+        if now == was:
+            how = "in_place"
+        elif now > was:
+            how = "old_revision"
+        elif now + len(above) >= was:
+            how = "rewritten_settled" if trace is not None and above and all(
+                str(row[trace] or "") in settled for row in above) else "rewritten"
+        else:
+            how = "removed"
+        words.append(f"{kind}:{how}")
+    return ",".join(words)
 
 
 def stored_size(text: str) -> int:
