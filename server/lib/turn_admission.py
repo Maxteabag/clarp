@@ -154,6 +154,12 @@ class AdmissionMixin:
         agent = agents_db.get_by_session(session)
         if not agent:
             raise DispatchError(404, "unknown agent")
+        from . import agent_moves
+        if agent_moves.moved(agent["agent_id"]) is not None:
+            # The agent moved to another Host, which now writes its session:
+            # no turn of it starts here, by any door (lib.agent_moves). Its
+            # queued items stay queued; the way back releases them.
+            raise DispatchError(409, agent_moves.AGENT_MOVED)
         from . import task_goal_recovery, task_plans
         if origin == "heartbeat" and task_plans.recovery_owns_agent(agent["agent_id"]):
             raise DispatchError(409, "Durable goal owns continuation")

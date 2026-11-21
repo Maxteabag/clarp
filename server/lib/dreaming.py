@@ -386,6 +386,9 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
     session = str(agent.get("session") or "")
     if not agent_id or not session:
         return False
+    from . import agent_moves
+    if agent_moves.moved(agent_id) is not None:
+        return False  # moved to another Host (lib.agent_moves): it dreams there
     backend = backends.normalize(
         get_settings().backend or agent.get("backend"))
     backend_session_id = str(uuid.uuid4())

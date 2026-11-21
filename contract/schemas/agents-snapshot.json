@@ -46,6 +46,7 @@
           "queued_turn_count": {"type": "integer"},
           "queued_turn_revision": {"type": "integer"},
           "queue_paused": {"type": "boolean"},
+          "moved": {"type": ["object", "null"], "description": "agent_moved: the agent moved to another Host ({to: {host, id}, at}); no turn of it starts here. null otherwise.", "properties": {"to": {"type": "object", "properties": {"host": {"type": "string"}, "id": {"type": "string"}}}, "at": {"type": "integer"}}},
           "muted": {"type": "boolean"},
           "coordination_visibility": {"enum": ["show", "hide"], "description": "Host contract (piece 3 of issue 478): the chat's effective visibility of coordination between agents."},
           "coordination_override": {"type": ["string", "null"], "description": "The chat's own choice, or null when it follows the Host."},

@@ -92,6 +92,10 @@ def serve_terminal(handler, session: str) -> None:
         # Inspection-only, as /send, /stop and /repair-slot treat it (HTTP-01b).
         return _send_http_error(
             handler, 403, "Janitors are inspection-only. Use their Pause or Configure controls.")
+    from . import agent_moves
+    if agent_moves.moved(agent["agent_id"]) is not None:
+        # Its session is the other Host's now (lib.agent_moves).
+        return _send_http_error(handler, 409, agent_moves.AGENT_MOVED)
     backend = backends.by_id(agent.get("backend"))
     agent_id = agent["agent_id"]
     bsid = agents_db.live_backend_session(agent_id)
