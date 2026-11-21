@@ -125,7 +125,9 @@ Rules:
   {"session": …}` is the only way the Host compacts an agent: it never does so
   by itself, on a timer, at a threshold or at launch. It answers at once
   (`{"ok": true, "status": "started"}`, `"already_compacting"`, or
-  `{"ok": false, "error": "<reason in words>"}`); `compacting` is true while it
+  `{"ok": false, "error": "<reason in words>"}`; 409). When it cannot start
+  at all it still answers in that shape: 503 with `"retryable": true` while
+  the runtime is unreachable, 500 otherwise; `compacting` is true while it
   runs, and a send that arrives meanwhile waits and runs after it, in order.
   When it ends, `last_compaction` is `{"outcome", "before_tokens",
   "after_tokens", "after_is_estimate", "detail", "backend", "at"}` (`at` in
@@ -1197,7 +1199,7 @@ advances. `since` is a Host time: when `next_since` is `null`, keep the answer's
 `server_now` for the next time (use `since=0` on the very first call). Every image deleted
 after `server_now` comes in a later answer; one deleted in the millisecond of the read may
 come twice. The Host keeps the record of a deleted image for good. `400` for a missing or
-negative `since` or a `limit` that is not a number. Any device that may read `GET /media`
+negative `since` or a `limit` that is not a number from 1 to 1,000. Any device that may read `GET /media`
 may read this.
 
 **Freshness.** `media-changed` (see the event table) is sent for an image published

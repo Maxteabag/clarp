@@ -45,3 +45,19 @@ def test_a_later_start_never_moves_the_boundary(monkeypatch):
     rows = db.conn().execute("SELECT COUNT(*) FROM settings WHERE key=?",
                              (heartbeat.KEY_ACCOUNTING_ACTIVATION,)).fetchone()[0]
     assert rows == 1
+
+
+def test_a_set_boundary_is_read_without_taking_the_write_lock(monkeypatch):
+    """Every settled heartbeat turn asks for the boundary. Once it is set, the
+    answer is a read: no write statement, so a writer holding the database
+    (BEGIN IMMEDIATE elsewhere) cannot make turn accounting wait for it."""
+    patch_shared(monkeypatch, heartbeat, "now_ms", lambda: 5_000)
+    assert heartbeat.activate_accounting() == 5_000
+    statements: list[str] = []
+    db.conn().set_trace_callback(lambda sql: statements.append(" ".join(sql.upper().split())))
+    try:
+        patch_shared(monkeypatch, heartbeat, "now_ms", lambda: 9_000)
+        assert heartbeat.activate_accounting() == 5_000
+    finally:
+        db.conn().set_trace_callback(None)
+    assert statements and all(sql.startswith("SELECT") for sql in statements), statements
