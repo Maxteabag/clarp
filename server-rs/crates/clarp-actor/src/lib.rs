@@ -465,6 +465,8 @@ pub struct Status {
     pub last: Option<Settled>,
     /// The turns that wait, in the order they will run.
     pub waiting: Vec<TurnId>,
+    /// How many of the waiting turns have yet to put a row in the conversation.
+    pub queue_depth: usize,
     pub paused: bool,
     pub queue_revision: u64,
     pub stop_generation: u64,
@@ -1714,6 +1716,7 @@ impl Actor {
             live,
             last: agent.last().cloned(),
             waiting: agent.waiting().map(|queued| queued.id).collect(),
+            queue_depth: self.recorder.unshown_waiting().count(),
             paused: agent.is_paused(),
             queue_revision: agent.queue_revision(),
             stop_generation: agent.stop_generation(),
@@ -2027,7 +2030,7 @@ impl Actor {
     pub fn queue_state(&self) -> QueueState {
         let agent = self.recorder.agent();
         QueueState {
-            waiting: agent.waiting().count(),
+            waiting: self.recorder.unshown_waiting().count(),
             paused: agent.is_paused(),
             revision: agent.queue_revision(),
         }
@@ -2036,8 +2039,7 @@ impl Actor {
     /// The messages that wait, in the order they will run.
     pub fn queue(&self) -> Result<Vec<Waiting>, ActorError> {
         self.recorder
-            .agent()
-            .waiting()
+            .unshown_waiting()
             .map(|queued| {
                 self.queue_message(
                     queued.id,
@@ -2052,8 +2054,7 @@ impl Actor {
     /// The item a user can edit or withdraw while it is waiting.
     pub fn queue_item(&self, turn: TurnId) -> Result<Option<Waiting>, ActorError> {
         self.recorder
-            .agent()
-            .waiting()
+            .unshown_waiting()
             .find(|queued| queued.id == turn)
             .map(|queued| {
                 self.queue_message(
@@ -2064,21 +2065,6 @@ impl Actor {
                 )
             })
             .transpose()
-    }
-
-    /// The item that left the queue to become the current turn.
-    pub fn started_queue_item(&self) -> Result<Option<Waiting>, ActorError> {
-        let agent = self.recorder.agent();
-        let Some(admission) = agent.live_queue_admission() else {
-            return Ok(None);
-        };
-        let (turn, seq, sent_at) = match agent.live() {
-            Some(Turn::Starting(turn)) => (turn.id, turn.message_seq, turn.accepted_at_ms),
-            Some(Turn::Running(turn)) => (turn.id, turn.message_seq, turn.accepted_at_ms),
-            Some(Turn::Parked(turn)) => (turn.id, turn.message_seq, turn.accepted_at_ms),
-            _ => return Ok(None),
-        };
-        self.queue_message(turn, seq, sent_at, admission).map(Some)
     }
 
     fn queue_message(

@@ -174,14 +174,6 @@ pub struct AgentFocus {
     pub agent_id: Option<String>,
 }
 
-/// How the message came to be in the queue.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum QueueKind {
-    Waiting,
-    Later,
-}
-
 /// An agent's queue of waiting messages changed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueueUpdated {
@@ -196,10 +188,6 @@ pub struct QueueUpdated {
     pub client_msg_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sent_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<QueueKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_change: Option<String>,
 }
