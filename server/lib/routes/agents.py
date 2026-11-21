@@ -107,10 +107,10 @@ class AgentRoutes:
         header) or a limited device is refused. Taking it back runs the queue again, so
         the items held while it was moved are released in their order."""
         from lib import agent_moves
-        from lib.http_utils import from_an_agent, principal_of
+        from lib.http_utils import from_an_agent
         if from_an_agent(self.headers):
             return self._json(403, {"error": "agents_may_not"})
-        if not principal_of(self).full_scope:
+        if getattr(self, "_request_device_scope", "") == "limited":
             return self._json_error(403, "full device access required")
         data = self._read_json()
         if not isinstance(data, dict):

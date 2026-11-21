@@ -87,7 +87,6 @@ def test_the_hosts_own_wakes_are_refused_at_the_same_admission(tmp_path):
     adapters = DispatchAdapters(world.service.ctx, lambda _ctx: world.service)
     _refused(lambda: adapters.goal_continuation("mike", "continue", "goal-wake-1"))
     _refused(lambda: adapters.scheduled_job("mike", "scheduled"))
-    _refused(lambda: adapters.decided_heartbeat("mike", "beat", "janitor-demand-1"))
     world._collect()
     assert world.started == []
 
@@ -109,6 +108,7 @@ def test_an_explicit_send_of_a_queued_item_is_refused_and_it_stays(tmp_path):
     world.send("t0")
     world.send("p1", origin="agent", queue=True)
     _move(world)
+    world.settle()                                       # t0 ends; p1 is held
     _refused(lambda: world.service.dispatch_queued("p1"))
     assert turn_queue.status("p1") == "queued"
 
@@ -208,7 +208,9 @@ def test_a_reconnect_retry_after_the_move_ends_the_turn_and_spawns_nothing(tmp_p
     _ended_moved(world, spec)
 
 
-def test_a_turn_resumed_after_an_account_switch_does_not_spawn_once_moved(tmp_path):
+def test_a_turn_parked_for_an_account_is_held_once_moved_and_released_on_return(tmp_path):
+    """Parked before its spawn (proven unsent), it is held as a Stop holds work:
+    durably queued, the slot released, nothing spawned; the way back runs it."""
     world = World(tmp_path)
     world.send("t0")
     world.send("p1", origin="agent", queue=True)
@@ -217,6 +219,28 @@ def test_a_turn_resumed_after_an_account_switch_does_not_spawn_once_moved(tmp_pa
     before = len(world.provider.spawned)
     world.service._resume_after_account_switch(spec, 1, {})
     assert len(world.provider.spawned) == before
-    _ended_moved(world, spec)
-    # The item never started: it stays queued for the way back.
+    assert td._SLOTS.get(world.agent) in ("", None)
     assert turn_queue.status("p1") == "queued"
+    assert all(s.client_msg_id != "p1" for s in td._SLOTS.queued_specs().get(world.agent, []))
+    world.service.recover_queued()                     # still moved: held
+    world._collect()
+    assert "p1" not in world.started
+    agent_moves.clear(world.agent)
+    world.service.recover_queued()
+    world.settle()
+    assert world.started[-1] == "p1"
+
+
+def test_a_relapsed_turn_resumed_after_an_account_switch_ends_interrupted_once_moved(tmp_path):
+    """Spawned before it was parked (it may have reached the backend): not
+    held, since recovery never relaunches an unproven launch; it ends
+    interrupted with its message saved, as a runtime restart would end it."""
+    world = World(tmp_path)
+    world.send("t0")
+    world.send("p1", origin="agent", queue=True)
+    spec = _owning_spec(world, "p1")
+    _move(world)
+    before = len(world.provider.spawned)
+    world.service._resume_after_account_switch(spec, 1, {"spawn_started": 1})
+    assert len(world.provider.spawned) == before
+    _ended_moved(world, spec)

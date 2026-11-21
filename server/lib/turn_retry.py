@@ -152,7 +152,7 @@ class RetryMixin:
                         f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
                         f"preempted during backoff")
                     return
-            if self._moved_before_spawn(next_spec, next_attempt):
+            if self._held_for_move(next_spec, next_attempt, unsent=False):
                 return
             try:
                 self._spawn_attempt(next_spec, attempt=next_attempt)
@@ -161,22 +161,49 @@ class RetryMixin:
 
         self.retry_scheduler(delay, _retry_spawn)
 
-    def _moved_before_spawn(self, spec: _TurnSpec, attempt: int) -> bool:
+    def _held_for_move(self, spec: _TurnSpec, attempt: int, *, unsent: bool) -> bool:
         """A continuation about to start a new process on the agent's native
         session (a turn resumed after an account switch, a reconnect retry)
         finds the agent moved to another Host since it was admitted: that Host
-        writes the session now (lib.agent_moves). The turn ends here,
-        interrupted with reason ``agent_moved``, and its slot is released. Its
-        queue item, if it never started, stays queued for the way back.
-        True when it ended the turn."""
+        writes the session now (lib.agent_moves), so nothing spawns here.
+
+        ``unsent``: the Host has proof nothing of this turn reached the backend
+        (a turn parked for an account before its spawn). It is held as a Stop
+        holds the work that took the slot (``_hold_stopped_queue``): durably
+        queued, the slot released, with the proof recorded (UNLAUNCHED,
+        dispatch_not_started) so that taking the move back runs it.
+
+        Without that proof (a retry after an attempt the backend may have run,
+        a turn that relapsed mid-run) it ends interrupted with reason
+        ``agent_moved`` and its message saved, as a runtime restart ends it:
+        recovery never relaunches work whose launch is unproven, so a held copy
+        could never be released. True when it took the turn."""
         from . import agent_moves
         if agent_moves.moved(spec.agent_id) is None:
             return False
-        log("spawnRefusedMoved", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
-        self._mark_interrupted(
-            spec, agent_moves.AGENT_MOVED,
-            "The agent moved to another Host; this turn does not continue here",
-            attempts=attempt)
+        if not unsent:
+            log("spawnRefusedMoved", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
+            self._mark_interrupted(
+                spec, agent_moves.AGENT_MOVED,
+                "The agent moved to another Host; this turn does not continue here",
+                attempts=attempt)
+            return True
+        log("heldForMove", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
+        try:
+            from . import db
+            row = db.conn().execute(
+                """SELECT turn_id FROM turns WHERE agent_id = ? AND trace_id = ?
+                     AND ended_at IS NULL ORDER BY turn_id DESC LIMIT 1""",
+                (spec.agent_id, spec.trace_id)).fetchone()
+            if row is not None:
+                turn_lifecycle.try_transition(spec.agent_id, TurnEvent.UNLAUNCHED, {
+                    "trace_id": spec.trace_id, "dispatch_not_started": True,
+                    "dispatch_not_started_turn_id": int(row["turn_id"]),
+                    "reason": agent_moves.AGENT_MOVED,
+                    "message": "The agent moved to another Host; this message waits for its return"})
+        except Exception as exc:  # noqa: BLE001 - the hold below still keeps the work
+            log_exception("heldForMoveStateFail", exc, detail=spec.agent_id)
+        self._hold_stopped_queue(spec.agent_id, spec)
         return True
 
     def _mark_interrupted(self, spec: _TurnSpec, category: str,
