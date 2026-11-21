@@ -202,7 +202,7 @@ pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorErr
     original_mark(log, turn)
 }
 
-fn original_mark(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
+pub(super) fn original_mark(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
     let Some(stored) = log.find(&coordination_key(turn))? else {
         return Ok(None);
     };
@@ -237,28 +237,34 @@ pub(super) fn loosen(batch: &mut Batch<'_>, turn: TurnId, at: i64) -> Result<boo
     }) else {
         return Ok(false);
     };
-    loosen_from(batch, turn, Some(message_seq), at)
+    let items = loosen_from(batch.log(), turn, Some(message_seq), at)?;
+    let revealed = !items.is_empty();
+    for item in items {
+        batch.item(item);
+    }
+    Ok(revealed)
 }
 
-/// Reveal an already accepted relay on retry. A waiting message has no rows to restamp.
+/// The writes that reveal an existing turn with the input that revealed it.
+/// A waiting message still has no rows to restamp.
 pub(super) fn loosen_from(
-    batch: &mut Batch<'_>,
+    log: &dyn AgentLog,
     turn: TurnId,
     first: Option<Seq>,
     at: i64,
-) -> Result<bool, ActorError> {
-    if mark_of(batch.log(), turn.0)?.is_none() {
-        return Ok(false);
+) -> Result<Vec<NewItem>, ActorError> {
+    let mut items = Vec::new();
+    if mark_of(log, turn.0)?.is_none() {
+        return Ok(items);
     }
     if let Some(first) = first {
-        let end = batch
-            .log()
+        let end = log
             .find(&format!("t-{}", turn.0))?
             .map_or(Seq::MAX, |row| row.seq);
         let mut after = first.saturating_sub(1);
         let mut stamped = HashSet::new();
         while after < end {
-            let rows = batch.log().read_after(after, kind::ROWS, CHUNK)?;
+            let rows = log.read_after(after, kind::ROWS, CHUNK)?;
             let Some(last) = rows.last() else { break };
             after = last.seq;
             for row in rows
@@ -272,7 +278,7 @@ pub(super) fn loosen_from(
                 };
                 let id = entry.id();
                 if stamped.insert(id.to_owned()) {
-                    batch.item(
+                    items.push(
                         NewItem::new(kind::AUDIENCE_ROW, at, id.as_bytes().to_vec())
                             .in_turn(turn.0)
                             .keyed(restamp_key(id)),
@@ -281,8 +287,8 @@ pub(super) fn loosen_from(
             }
         }
     }
-    batch.item(mixed_turn(turn.0, at));
-    Ok(true)
+    items.push(mixed_turn(turn.0, at));
+    Ok(items)
 }
 
 /// Reads rows as they are now: each with the parts that name it.
