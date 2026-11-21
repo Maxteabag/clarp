@@ -791,6 +791,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         # request that reached parse_request() this iteration is logged.
         self._request_started_wall = None
         self._status_code = 0
+        # Who called, for the access line: set by authentication and by a route
+        # that resolves the turn token; never carried over from the previous request.
+        self._request_principal = ""
+        self._request_device_name = ""
+        self._request_turn_agent = ""
         self._request_started_monotonic = time.perf_counter()
         self._response_phases = {}
         from lib import diagnostics_settings
@@ -827,6 +832,38 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         super().send_response(code, message)
 
     # --- HTTP helpers -----------------------------------------------------
+
+    def log_request(self, code="-", size="-"):
+        """The access line, with the client build (the strict X-Clarp-Client form, else
+        '-') and who called, as authentication already resolved it: device:<name>,
+        admin, agent:<agent id> (or 'agent' for a turn token no route resolved), peer,
+        or '-'. Never a token, a hash or a free-form header value; no read of its own."""
+        code = getattr(code, "value", code)
+        self.log_message('"%s" %s %s %s %s', self.requestline, str(code), str(size),
+                         self._access_client(), self._access_caller())
+
+    def _access_client(self) -> str:
+        from lib import server_identity
+        header = (getattr(self, "headers", None) or {}).get(server_identity.CLIENT_HEADER)
+        if server_identity.strict_client(header) is None:
+            return "-"
+        return str(header).replace(" ", ";")
+
+    def _access_caller(self) -> str:
+        headers = getattr(self, "headers", None) or {}
+        principal = str(getattr(self, "_request_principal", "") or "")
+        if (headers.get("X-Clarp-Turn") or "").strip():
+            agent = str(getattr(self, "_request_turn_agent", "") or "")
+            return f"agent:{agent}" if agent else "agent"
+        if (headers.get("X-Clarp-Peer") or "").strip():
+            return "peer"
+        if principal == "administrator":
+            return "admin"
+        if principal:
+            name = str(getattr(self, "_request_device_name", "") or "")
+            name = "".join(c if c.isalnum() or c in "._-" else "_" for c in name)[:32]
+            return f"device:{name or 'unnamed'}"
+        return "-"
 
     def log_message(self, format, *args):
         # BaseHTTPRequestHandler's stock logger; forward to journal.
@@ -1197,6 +1234,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         self._request_auth_validated = True
         self._request_device_scope = str(device["scope"])
         self._request_principal = str(device["device_id"])
+        self._request_device_name = str(device.get("name") or "")
         if hasattr(self.server, "register_device_connection"):
             if not self.server.register_device_connection(self.connection, self._request_principal):
                 self._request_auth_validated = False
@@ -2328,8 +2366,10 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         from lib import turn_identity
         from lib.provider_background_jobs import TURN_ENV
         try:
-            return turn_identity.caller_agent_id(
+            caller = turn_identity.caller_agent_id(
                 {TURN_ENV: (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")})
+            self._request_turn_agent = caller
+            return caller
         except Exception as exc:  # noqa: BLE001 - fail closed: refused, logged and retryable
             log_exception("turnCallerLookupFail", exc)
             raise turn_identity.TurnIdentityUnavailable() from exc
