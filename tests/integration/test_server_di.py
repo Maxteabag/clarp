@@ -3258,10 +3258,20 @@ def test_the_names_go_by_the_latest_turn_both_ways_and_a_tie_by_creation(running
     assert _names(base) == ["Mike", "Rachel"]                       # same ms: the older first
     _recency(ids, created={"Mike": 2_000, "Rachel": 1_000}, started={"Mike": 50_000, "Rachel": 50_000})
     assert _names(base) == ["Rachel", "Mike"]                       # ... whichever that is
-    _recency(ids, created={"Mike": 1_000, "Rachel": 1_000}, started={})
+    # A full tie goes by agent id. Two agents whose ids the test chooses, the one made first
+    # sorting last, so an order that left the id out (insertion order) cannot pass by chance:
+    # Mike's and Rachel's ids are random (R131 follow-up).
+    from lib import db
+    for agent_id, name in (("tie-b", "Tie B"), ("tie-a", "Tie A")):
+        db.conn().execute(
+            "INSERT INTO agents (agent_id, persona, voice_id, cwd, session, backend, created_at)"
+            " VALUES (?, ?, 'V', ?, ?, 'claude', 1000)", (agent_id, name, str(ctx.root), agent_id))
+        ids[name] = agent_id
+    _recency(ids, created={name: 1_000 for name in ids}, started={})
     first = _names(base)
     by_id = sorted(ids, key=ids.get)
     assert first == by_id and all(_names(base) == first for _ in range(3))  # full tie: by id, stable
+    assert first.index("Tie A") < first.index("Tie B")                     # made second, sorts first
 
 
 def test_signed_notification_avatar_serves_custom_agent_without_app_auth(
