@@ -46,6 +46,7 @@ pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory, owners: &toml::Ta
     );
     view.labels = labels;
     view.names_version = signature;
+    view.gone = saved.gone;
     let (cloud, own, language) = ears.as_profiled(directory);
     view.cloud_engine = cloud;
     view.own_engine = own;

@@ -1,4 +1,66 @@
 {
+  "deleted": {
+    "current": {
+      "_catalogue": {
+        "cartesia": {
+          "retired": {
+            "language": "no",
+            "owner": true,
+            "public": false
+          }
+        }
+      },
+      "cartesia": {
+        "missing": "Former name",
+        "retired": "Keep the old label"
+      }
+    },
+    "fetched": {
+      "_catalogue": {
+        "cartesia": {
+          "c1": {
+            "language": "en",
+            "owner": false,
+            "public": true
+          }
+        }
+      },
+      "_gone": {
+        "cartesia": [
+          "missing"
+        ]
+      },
+      "cartesia": {
+        "c1": "Current voice"
+      }
+    },
+    "logged": [
+      [
+        "voiceGone",
+        "provider=cartesia id=missing agents=Fixture"
+      ]
+    ],
+    "result": {
+      "_catalogue": {
+        "cartesia": {
+          "c1": {
+            "language": "en",
+            "owner": false,
+            "public": true
+          }
+        }
+      },
+      "_gone": {
+        "cartesia": [
+          "missing"
+        ]
+      },
+      "cartesia": {
+        "c1": "Current voice",
+        "retired": "Keep the old label"
+      }
+    }
+  },
   "lookup": {
     "asked": [
       "voice000",
@@ -231,6 +293,24 @@
         }
       },
       "fetched": {
+        "_catalogue": {
+          "cartesia": {
+            "c1": {
+              "language": "",
+              "owner": false,
+              "public": false
+            },
+            "c2": {
+              "language": "",
+              "owner": false,
+              "public": false
+            }
+          }
+        },
+        "_gone": {
+          "cartesia": [],
+          "elevenlabs": []
+        },
         "cartesia": {
           "c1": "New Cartesia",
           "c2": "New second"
@@ -244,6 +324,24 @@
         "elevenlabs"
       ],
       "result": {
+        "_catalogue": {
+          "cartesia": {
+            "c1": {
+              "language": "",
+              "owner": false,
+              "public": false
+            },
+            "c2": {
+              "language": "",
+              "owner": false,
+              "public": false
+            }
+          }
+        },
+        "_gone": {
+          "cartesia": [],
+          "elevenlabs": []
+        },
         "cartesia": {
           "c1": "New Cartesia",
           "c2": "New second",
@@ -267,6 +365,9 @@
         }
       },
       "fetched": {
+        "_gone": {
+          "elevenlabs": []
+        },
         "elevenlabs": {
           "e1": "New Eleven"
         }
@@ -275,6 +376,9 @@
         "elevenlabs"
       ],
       "result": {
+        "_gone": {
+          "elevenlabs": []
+        },
         "cartesia": {
           "c1": "Old Cartesia",
           "missing": "Former name"
@@ -321,6 +425,18 @@
         }
       },
       "fetched": {
+        "_catalogue": {
+          "cartesia": {
+            "c1": {
+              "language": "",
+              "owner": false,
+              "public": false
+            }
+          }
+        },
+        "_gone": {
+          "cartesia": []
+        },
         "cartesia": {
           "c1": "Old Cartesia"
         }
@@ -329,6 +445,18 @@
         "cartesia"
       ],
       "result": {
+        "_catalogue": {
+          "cartesia": {
+            "c1": {
+              "language": "",
+              "owner": false,
+              "public": false
+            }
+          }
+        },
+        "_gone": {
+          "cartesia": []
+        },
         "cartesia": {
           "c1": "Old Cartesia",
           "missing": "Former name"
@@ -337,7 +465,7 @@
           "e1": "Old Eleven"
         }
       },
-      "same_bytes": true
+      "same_bytes": false
     }
   ],
   "startup": [

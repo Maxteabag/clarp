@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use clarp_kernel::said::{self, CARTESIA, ELEVENLABS};
-use clarp_kernel::voice_names::{self, Names, Snapshot};
+use clarp_kernel::voice_names::{self, CatalogueVoice, Snapshot};
+use clarp_speech::LookupError;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -17,7 +18,21 @@ use super::Mouth;
 use crate::ids;
 
 type ProviderNames = BTreeMap<String, String>;
-type Used = BTreeMap<String, BTreeSet<String>>;
+type Used = BTreeMap<String, BTreeMap<String, BTreeSet<String>>>;
+
+fn record(used: &mut Used, provider: &str, id: String, holder: &str) {
+    if id.is_empty() {
+        return;
+    }
+    let holders = used
+        .entry(provider.into())
+        .or_default()
+        .entry(id)
+        .or_default();
+    if !holder.is_empty() {
+        holders.insert(holder.into());
+    }
+}
 
 #[derive(Default)]
 struct Stored {
@@ -89,7 +104,11 @@ impl Desk {
                 Snapshot::default()
             }
         };
-        self.publish(Stored { stamp, snapshot, hash });
+        self.publish(Stored {
+            stamp,
+            snapshot,
+            hash,
+        });
         Ok(())
     }
 
@@ -108,13 +127,13 @@ impl Desk {
             return Ok(());
         };
         let fetched = sources.fetch(used);
-        if fetched.is_empty() {
+        if fetched.names.is_empty() {
             return Ok(());
         }
         self.read()?;
         let (before, old_hash) = self.snapshot();
         let mut snapshot = before.clone();
-        voice_names::merge(&mut snapshot.names, fetched);
+        let newly_gone = snapshot.apply(fetched);
         let hash = if old_hash.is_some() && snapshot == before {
             File::open(&self.path)?.set_modified(SystemTime::now())?;
             old_hash
@@ -129,6 +148,17 @@ impl Desk {
             snapshot,
             hash,
         });
+        for (provider, id) in newly_gone {
+            let holders = used
+                .get(&provider)
+                .and_then(|voices| voices.get(&id))
+                .into_iter()
+                .flatten()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(",");
+            eprintln!("voiceGone provider={provider} id={id} agents={holders}");
+        }
         Ok(())
     }
 
@@ -158,13 +188,33 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 impl Sources {
-    fn fetch(&self, used: &Used) -> Names {
-        let mut fetched = Names::new();
-        let empty = BTreeSet::new();
-        let ids = |provider: &str| used.get(provider).unwrap_or(&empty);
+    fn fetch(&self, used: &Used) -> Snapshot {
+        let mut fetched = Snapshot::default();
+        let ids = |provider: &str| {
+            used.get(provider)
+                .into_iter()
+                .flat_map(|voices| voices.keys().cloned())
+        };
         if let Some(source) = &self.cartesia {
             match clarp_speech::cartesia::all_voices(&source.key, &source.endpoint) {
                 Ok(rows) => {
+                    let today: BTreeMap<_, _> = rows
+                        .iter()
+                        .filter_map(|row| {
+                            let id = row["id"].as_str().filter(|id| !id.is_empty())?;
+                            Some((
+                                id.to_owned(),
+                                CatalogueVoice {
+                                    language: row["language"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_owned(),
+                                    public: clarp_kernel::python::truthy(&row["is_public"]),
+                                    owner: clarp_kernel::python::truthy(&row["is_owner"]),
+                                },
+                            ))
+                        })
+                        .collect();
                     let mut listed: ProviderNames = rows
                         .iter()
                         .filter_map(|row| {
@@ -173,23 +223,30 @@ impl Sources {
                             (!name.is_empty()).then(|| (id.to_owned(), name.to_owned()))
                         })
                         .collect();
-                    lookup(ids(CARTESIA), &mut listed, CARTESIA, |id| {
+                    let missing = ids(CARTESIA).filter(|id| !today.contains_key(id)).collect();
+                    let gone = lookup(&missing, &mut listed, CARTESIA, |id| {
                         clarp_speech::cartesia::voice_by_id(&source.key, &source.endpoint, id)
                             .map(|row| row["name"].as_str().unwrap_or("").trim().to_owned())
                     });
-                    fetched.insert(CARTESIA.into(), listed);
+                    fetched.names.insert(CARTESIA.into(), listed);
+                    fetched.catalogue.insert(CARTESIA.into(), today);
+                    fetched.gone.insert(CARTESIA.into(), gone);
                 }
                 Err(why) => eprintln!("voiceNamesFetchFail {CARTESIA}: {why}"),
             }
         }
+        let eleven_ids: BTreeSet<_> = ids(ELEVENLABS)
+            .filter(|id| clarp_kernel::voice_profile::elevenlabs_id_usable(Some(id)))
+            .collect();
         if let Some(source) = &self.elevenlabs
-            && !ids(ELEVENLABS).is_empty()
+            && !eleven_ids.is_empty()
         {
             let mut found = ProviderNames::new();
-            lookup(ids(ELEVENLABS), &mut found, ELEVENLABS, |id| {
+            let gone = lookup(&eleven_ids, &mut found, ELEVENLABS, |id| {
                 clarp_speech::eleven_voice::voice_by_id(&source.key, &source.endpoint, id)
             });
-            fetched.insert(ELEVENLABS.into(), found);
+            fetched.names.insert(ELEVENLABS.into(), found);
+            fetched.gone.insert(ELEVENLABS.into(), gone);
         }
         fetched
     }
@@ -199,17 +256,22 @@ fn lookup(
     used: &BTreeSet<String>,
     found: &mut ProviderNames,
     provider: &str,
-    mut fetch_one: impl FnMut(&str) -> Result<String, clarp_speech::LookupError>,
-) {
+    mut fetch_one: impl FnMut(&str) -> Result<String, LookupError>,
+) -> BTreeSet<String> {
+    let mut gone = BTreeSet::new();
     for id in voice_names::lookups(used, found) {
         match fetch_one(id) {
             Ok(name) if !name.is_empty() => {
                 found.insert(id.to_owned(), name);
             }
+            Err(LookupError::Http(404)) => {
+                gone.insert(id.to_owned());
+            }
             Err(why) => eprintln!("voiceNamesLookupFail {provider} {id}: {why}"),
             Ok(_) => {}
         }
     }
+    gone
 }
 
 impl Mouth {
@@ -268,33 +330,45 @@ impl Mouth {
         }
 
         let mut used = Used::new();
-        let listed = used.entry(CARTESIA.into()).or_default();
-        listed.extend(
-            crate::owner::texts_at(&owners, &["cartesia", "voices"])
-                .into_iter()
-                .map(|(_, id)| id),
-        );
+        for (holder, id) in crate::owner::texts_at(&owners, &["cartesia", "voices"]) {
+            record(&mut used, CARTESIA, id, &holder);
+        }
         let pool = owners
             .get("cartesia")
             .and_then(toml::Value::as_table)
             .and_then(|cartesia| cartesia.get("pool"))
             .and_then(toml::Value::as_array);
-        listed.extend(
-            pool.into_iter()
-                .flatten()
-                .filter_map(toml::Value::as_str)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned),
-        );
-        let mut collect = |raw: &str| {
+        for id in pool.into_iter().flatten().filter_map(toml::Value::as_str) {
+            record(&mut used, CARTESIA, id.to_owned(), "");
+        }
+        let overrides = owners
+            .get("tts")
+            .and_then(|tts| tts.get("agents"))
+            .and_then(toml::Value::as_table);
+        for (holder, table) in overrides.into_iter().flatten() {
+            for (provider, key) in [
+                (CARTESIA, "cartesia_voice"),
+                (ELEVENLABS, "elevenlabs_voice"),
+            ] {
+                if let Some(id) = table.get(key).and_then(toml::Value::as_str) {
+                    record(&mut used, provider, id.trim().to_owned(), holder);
+                }
+            }
+        }
+        let mut collect = |raw: &str, holder: &str| {
             for (provider, id) in said::voice_map(Some(raw)) {
                 if matches!(provider.as_str(), CARTESIA | ELEVENLABS) && !id.is_empty() {
-                    used.entry(provider).or_default().insert(id);
+                    record(&mut used, &provider, id, holder);
                 }
             }
         };
         for member in directory.members.iter().chain(&directory.janitors) {
-            collect(&member.record.voice_id);
+            let holder = if member.record.persona.is_empty() {
+                &member.record.session
+            } else {
+                &member.record.persona
+            };
+            collect(&member.record.voice_id, holder);
         }
         let [roster, cartesia, gemini] = crate::owner::personas(&owners);
         for persona in directory.personas.listed(&clarp_kernel::personas::Owner {
@@ -303,7 +377,8 @@ impl Mouth {
             gemini: &gemini,
         }) {
             if let Some(raw) = persona["voice_id"].as_str() {
-                collect(raw);
+                let holder = persona["name"].as_str().unwrap_or_default();
+                collect(raw, holder);
             }
         }
         self.voice_names.refresh(&sources, &used)
@@ -373,13 +448,17 @@ mod tests {
                     let (status, body) = if failures == 1 || (failures == 2 && !elevenlabs) {
                         (503, json!({}))
                     } else if path.contains("starting_after=next%2Fpage") {
-                        (200, json!({"data":[{"id":"c2","name":"Second"}]}))
+                        (
+                            200,
+                            json!({"data":[{"id":"c2","name":"Second","language":"no","is_owner":true}]}),
+                        )
                     } else if path.starts_with("/voices?") {
                         (
                             200,
-                            json!({"data":[{"id":"c1","name":"Updated"}],"has_more":true,"next_page":"next/page"}),
+                            json!({"data":[{"id":"c1","name":"Updated","language":"en","is_public":true}],
+                            "has_more":failures != 3,"next_page":"next/page"}),
                         )
-                    } else if path == "/voices/c%2Bmissing" {
+                    } else if path == "/voices/c%2Bmissing" && failures != 3 {
                         (200, json!({"name":"Looked Up"}))
                     } else if elevenlabs {
                         let name = if failures == 2 {
@@ -435,18 +514,25 @@ mod tests {
         desk.read().unwrap();
         assert!(desk.start_due());
         assert_eq!(desk.snapshot().1, Some(digest(initial)));
-        let used = Used::from([
-            (
-                CARTESIA.into(),
-                ["c1".to_string(), "c+missing".to_string()]
-                    .into_iter()
-                    .collect(),
-            ),
-            (
-                ELEVENLABS.into(),
-                (0..109).map(|id| format!("e{id:03}")).collect(),
-            ),
-        ]);
+        let mut used = Used::new();
+        for id in ["c1", "c+missing"] {
+            record(&mut used, CARTESIA, id.into(), "Fixture");
+        }
+        for id in 0..109 {
+            record(&mut used, ELEVENLABS, format!("e{id:03}"), "");
+        }
+        record(
+            &mut used,
+            ELEVENLABS,
+            "01234567-0123-0123-0123-012345678901".into(),
+            "",
+        );
+        record(
+            &mut used,
+            ELEVENLABS,
+            r#"{"cartesia":"fixture"}"#.into(),
+            "",
+        );
         desk.refresh(&Sources::default(), &used).unwrap();
         assert!(server.asked.lock().unwrap().is_empty());
         assert_eq!(fs::read(&path).unwrap(), initial);
@@ -481,6 +567,14 @@ mod tests {
         assert_eq!(names.names[CARTESIA]["c1"], "Updated");
         assert_eq!(names.names[CARTESIA]["c2"], "Second");
         assert_eq!(names.names[CARTESIA]["c+missing"], "Looked Up");
+        assert_eq!(
+            names.catalogue[CARTESIA]["c1"],
+            CatalogueVoice {
+                language: "en".into(),
+                public: true,
+                owner: false
+            }
+        );
         assert_eq!(names.names[ELEVENLABS]["old"], "Keep this too");
         assert_eq!(names.names[ELEVENLABS]["e000"], "Eleven Name");
         assert_ne!(signature, Some(digest(initial)));
@@ -511,5 +605,15 @@ mod tests {
         assert_eq!(after_partial.names[ELEVENLABS]["old"], "Keep this too");
         assert_ne!(changed, signature);
         assert_eq!(server.asked.lock().unwrap().len(), 408);
+
+        server.failures.store(3, Ordering::SeqCst);
+        desk.refresh(&sources, &used).unwrap();
+        let (deleted, digest) = desk.snapshot();
+        assert_eq!(deleted.gone[CARTESIA], BTreeSet::from(["c+missing".into()]));
+        assert!(!deleted.names[CARTESIA].contains_key("c+missing"));
+        assert_eq!(deleted.names[CARTESIA]["c2"], "Second");
+        assert!(!deleted.catalogue[CARTESIA].contains_key("c2"));
+        desk.refresh(&sources, &used).unwrap();
+        assert_eq!(desk.snapshot(), (deleted, digest));
     }
 }

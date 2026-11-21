@@ -47,7 +47,7 @@ rules(KERNEL, 'vectors', [
     ('Cartesia and Gemini without a voice report a configuration failure', 'CARTESIA | GEMINI if !voiced => Some(NO_VOICE)', 'CARTESIA | GEMINI if !voiced => Some(NOT_CONFIGURED)'),
     ('Cartesia, Gemini and Deepgram speak without a key', 'CARTESIA | GEMINI | DEEPGRAM => (!keyed).then_some(NOT_CONFIGURED)', 'CARTESIA | GEMINI | DEEPGRAM => None'),
     ('ElevenLabs reports a missing key as no voice', 'ELEVENLABS if !keyed => Some(NOT_CONFIGURED)', 'ELEVENLABS if !keyed => Some(NO_VOICE)'),
-    ('ElevenLabs has no silence gate for an unusable id', '(!elevenlabs_id_usable(choice.voice.as_deref())).then_some(NO_VOICE)', 'None'),
+    ('ElevenLabs has no silence gate for an unusable id', 'ELEVENLABS if !elevenlabs_id_usable(choice.voice.as_deref()) => Some(NO_VOICE),', ''),
     ('Google disregards a credential refusal', 'GOOGLE if view.google_refusal.is_some() => Some(NOT_CONFIGURED),', ''),
     ('Google accepts an id off the allowlist', 'GOOGLE if !choice.voice.as_deref().is_some_and(voices::google_has) => Some(NO_VOICE),', ''),
     ('Google uses a voice even without a key', 'GOOGLE => (!keyed).then_some(NOT_CONFIGURED)', 'GOOGLE => None'),

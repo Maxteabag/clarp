@@ -36,10 +36,6 @@ pub fn start_due(age: Option<Duration>) -> bool {
     age.is_none_or(|age| age >= REFRESH_EVERY)
 }
 
-pub fn from_file(raw: &Value) -> Names {
-    Snapshot::from_file(raw).names
-}
-
 impl Snapshot {
     pub fn from_file(raw: &Value) -> Self {
         let mut names = Names::new();
@@ -83,10 +79,17 @@ impl Snapshot {
             .flatten()
             .filter_map(|(provider, ids)| {
                 let ids = ids.as_array()?.iter().filter_map(Value::as_str);
-                Some((provider.clone(), ids.filter(|id| !id.is_empty()).map(str::to_owned).collect()))
+                Some((
+                    provider.clone(),
+                    ids.filter(|id| !id.is_empty()).map(str::to_owned).collect(),
+                ))
             })
             .collect();
-        Self { names, catalogue, gone }
+        Self {
+            names,
+            catalogue,
+            gone,
+        }
     }
 
     /// Publish each refreshed provider's latest facts and return newly deleted voices.

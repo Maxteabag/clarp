@@ -99,6 +99,7 @@ fn host(view: &Value, labels: &BTreeMap<String, BTreeMap<String, String>>) -> Ho
         google_refusal: view["google_refusal"].as_str().map(str::to_string),
         labels,
         names_version: None,
+        gone: serde_json::from_value(view["gone"].clone()).unwrap_or_default(),
         cloud_engine: if heard::is_cloud(engine) {
             engine.to_string()
         } else {

@@ -76,6 +76,8 @@ pub struct HostView {
     pub labels: BTreeMap<String, BTreeMap<String, String>>,
     /// Content digest of the background names file, from the same snapshot as its labels.
     pub names_version: Option<String>,
+    /// By provider, voices the catalogue refresh confirmed deleted.
+    pub gone: crate::voice_names::Gone,
     /// The engine that stands in for the Host's own on a clip nobody named one for. Empty:
     /// none does.
     pub cloud_engine: String,
@@ -230,11 +232,18 @@ pub fn attempt(view: &HostView, agent: Agent<'_>, route: &Route, provider: &str)
     let choice = provider_voice(view, agent, route, provider);
     let keyed = view.keys.iter().any(|key| key == provider);
     let voiced = choice.voice.is_some();
+    let deleted = choice.voice.as_ref().is_some_and(|id| {
+        view.gone
+            .get(provider)
+            .is_some_and(|gone| gone.contains(id))
+    });
     let silent = match provider {
         CARTESIA | GEMINI if !voiced => Some(NO_VOICE),
+        CARTESIA if deleted => Some("voice_unavailable"),
         CARTESIA | GEMINI | DEEPGRAM => (!keyed).then_some(NOT_CONFIGURED),
         ELEVENLABS if !keyed => Some(NOT_CONFIGURED),
-        ELEVENLABS => (!elevenlabs_id_usable(choice.voice.as_deref())).then_some(NO_VOICE),
+        ELEVENLABS if !elevenlabs_id_usable(choice.voice.as_deref()) => Some(NO_VOICE),
+        ELEVENLABS => deleted.then_some("voice_unavailable"),
         GOOGLE if view.google_refusal.is_some() => Some(NOT_CONFIGURED),
         GOOGLE if !choice.voice.as_deref().is_some_and(voices::google_has) => Some(NO_VOICE),
         GOOGLE => (!keyed).then_some(NOT_CONFIGURED),

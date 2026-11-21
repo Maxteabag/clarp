@@ -64,5 +64,7 @@ pub(crate) fn get(
         return serde_json::from_str(&said)
             .map_err(|error| LookupError::Request(format!("request failed: {error}")));
     }
-    Err(LookupError::Request("voice catalogue credentials are unavailable".into()))
+    Err(LookupError::Request(
+        "voice catalogue credentials are unavailable".into(),
+    ))
 }

@@ -3575,6 +3575,15 @@ Cartesia's catalogue and looks up missing voices in use, handling at most 100 by
 lookups per provider. A check advances the checked date. Only changed names change
 the file content and its digest; a provider failure keeps its earlier names.
 
+**Current catalogue and deleted voices (PR 531).** The same names file keeps the last successful
+Cartesia catalogue, including language and the public and owner flags. A successful list
+replaces the catalogue even when a voice has no label. By-ID results do not extend the
+catalogue. The refresh includes per-agent overrides and skips IDs ElevenLabs cannot use.
+A provider's 404 removes the cached label and records the voice as gone. A new deletion
+logs `voiceGone` with the holders after the file is published. The profile reads that same
+snapshot and reports a matching deleted voice as `voice_unavailable`, subject to the existing
+provider-specific choice and credential rules.
+
 **The user's word goes first in an agent's queue (issue 481, PR 506).** An authenticated
 user or Oracle send, a form submission, and a delivered decision answer by the user or on the
 user's behalf take priority. The Host also recognizes a message from a verified local turn of a
