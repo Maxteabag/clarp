@@ -1,0 +1,271 @@
+{
+  "agents": [
+    {
+      "agent_id": "a1",
+      "persona": "One",
+      "session": "first",
+      "voice_id": "e-example"
+    },
+    {
+      "agent_id": "a2",
+      "persona": "Two",
+      "session": "second",
+      "voice_id": "f0000000-0000-4000-8000-000000000000"
+    },
+    {
+      "agent_id": "a3",
+      "persona": "Two",
+      "session": "third",
+      "voice_id": "{}"
+    }
+  ],
+  "canonical": [
+    {
+      "input": "",
+      "output": "{}"
+    },
+    {
+      "input": "{}",
+      "output": "{}"
+    },
+    {
+      "input": "{}",
+      "output": "{}"
+    },
+    {
+      "input": "  unknown  ",
+      "output": "{\"elevenlabs\":\"unknown\"}"
+    },
+    {
+      "input": "f0000000-0000-4000-8000-000000000000",
+      "output": "{\"cartesia\":\"f0000000-0000-4000-8000-000000000000\"}"
+    },
+    {
+      "input": "en-US-Chirp3-HD-Kore",
+      "output": "{\"google\":\"en-US-Chirp3-HD-Kore\"}"
+    },
+    {
+      "input": "0123456789abcdefghij",
+      "output": "{\"elevenlabs\":\"0123456789abcdefghij\"}"
+    },
+    {
+      "input": "{\"gemini\":\"Kore\",\"cartesia\":\"x\",\"google\":null,\"empty\":\"\"}",
+      "output": "{\"cartesia\":\"x\",\"gemini\":\"Kore\"}"
+    },
+    {
+      "input": "{\"x\":1}",
+      "output": "{\"x\":\"1\"}"
+    },
+    {
+      "input": "{invalid",
+      "output": "{\"elevenlabs\":\"{invalid\"}"
+    }
+  ],
+  "contacts": [
+    {
+      "builtin": false,
+      "name": "Contact",
+      "persona_id": "p1",
+      "voice_id": ""
+    }
+  ],
+  "merges": [
+    {
+      "base": "{\"cartesia\":\"old\",\"elevenlabs\":\"original\"}",
+      "incoming": "{\"cartesia\":\"old\",\"elevenlabs\":\"edited\"}",
+      "output": "{\"cartesia\":\"new\",\"elevenlabs\":\"edited\",\"gemini\":\"Kore\"}",
+      "stored": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}"
+    },
+    {
+      "base": "{\"cartesia\":\"old\",\"elevenlabs\":\"original\"}",
+      "incoming": "{\"cartesia\":\"old\"}",
+      "output": "{\"cartesia\":\"new\",\"gemini\":\"Kore\"}",
+      "stored": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}"
+    },
+    {
+      "base": null,
+      "incoming": "{\"cartesia\":null,\"gemini\":\"\"}",
+      "output": "{\"elevenlabs\":\"later\"}",
+      "stored": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}"
+    },
+    {
+      "base": null,
+      "incoming": "{}",
+      "output": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}",
+      "stored": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}"
+    },
+    {
+      "base": "",
+      "incoming": "{}",
+      "output": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}",
+      "stored": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}"
+    },
+    {
+      "base": null,
+      "incoming": "{\"gemini\":\"Kore\"}",
+      "output": "{\"elevenlabs\":\"f0000000-0000-4000-8000-000000000000\",\"gemini\":\"Kore\"}",
+      "stored": "f0000000-0000-4000-8000-000000000000"
+    },
+    {
+      "base": null,
+      "incoming": "f0000000-0000-4000-8000-000000000000",
+      "output": "{\"cartesia\":\"f0000000-0000-4000-8000-000000000000\"}",
+      "stored": ""
+    },
+    {
+      "base": null,
+      "incoming": "en-US-Chirp3-HD-Kore",
+      "output": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\",\"google\":\"en-US-Chirp3-HD-Kore\"}",
+      "stored": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}"
+    }
+  ],
+  "report": {
+    "digest": "62cdedb2ffd4cf01",
+    "fallback": "elevenlabs",
+    "provider": "cartesia",
+    "transcription": {
+      "agents_with_several_keys": [
+        {
+          "agent_id": "a2",
+          "keys": [
+            "Two",
+            "second"
+          ],
+          "setting": "languages"
+        }
+      ],
+      "engines": {
+        "a1": "elevenlabs:scribe_v2"
+      },
+      "languages": {
+        "a2": "no,en",
+        "a3": "no,en"
+      },
+      "shared_keys": [
+        {
+          "agents": [
+            "a2",
+            "a3"
+          ],
+          "key": "two",
+          "setting": "languages"
+        }
+      ]
+    },
+    "voices": [
+      {
+        "after": {
+          "fallback": [
+            "elevenlabs",
+            "e-example",
+            null
+          ],
+          "provider": [
+            "elevenlabs",
+            "e-example",
+            null
+          ]
+        },
+        "agent_id": "a1",
+        "audible": false,
+        "kind": "agent",
+        "name": "One",
+        "new": "{\"elevenlabs\":\"e-example\"}",
+        "old": "e-example",
+        "per_provider": {},
+        "session": "first",
+        "today": {
+          "fallback": [
+            "elevenlabs",
+            "e-example",
+            null
+          ],
+          "provider": [
+            "elevenlabs",
+            "e-example",
+            null
+          ]
+        }
+      },
+      {
+        "after": {
+          "fallback": [
+            "elevenlabs",
+            null,
+            "no_voice"
+          ],
+          "provider": [
+            "cartesia",
+            "f0000000-0000-4000-8000-000000000000",
+            null
+          ]
+        },
+        "agent_id": "a2",
+        "audible": true,
+        "kind": "agent",
+        "name": "Two",
+        "new": "{\"cartesia\":\"f0000000-0000-4000-8000-000000000000\"}",
+        "old": "f0000000-0000-4000-8000-000000000000",
+        "per_provider": {
+          "cartesia": {
+            "after": [
+              "f0000000-0000-4000-8000-000000000000",
+              null
+            ],
+            "today": [
+              null,
+              "no_voice"
+            ]
+          }
+        },
+        "session": "second",
+        "today": {
+          "fallback": [
+            "elevenlabs",
+            null,
+            "no_voice"
+          ],
+          "provider": [
+            "cartesia",
+            null,
+            "no_voice"
+          ]
+        }
+      },
+      {
+        "after": {
+          "fallback": [
+            "elevenlabs",
+            null,
+            "no_voice"
+          ],
+          "provider": [
+            "cartesia",
+            null,
+            "no_voice"
+          ]
+        },
+        "audible": false,
+        "builtin": false,
+        "kind": "contact",
+        "name": "Contact",
+        "new": "{}",
+        "old": "",
+        "per_provider": {},
+        "persona_id": "p1",
+        "today": {
+          "fallback": [
+            "elevenlabs",
+            null,
+            "no_voice"
+          ],
+          "provider": [
+            "cartesia",
+            null,
+            "no_voice"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -116,6 +116,7 @@ fn agent(row: &Value) -> Agent<'_> {
     let named = |key: &str| row.get(key).and_then(Value::as_str).unwrap_or("");
     Agent {
         who: Who {
+            agent_id: "",
             name: named("name"),
             persona: named("persona"),
             session: named("session"),

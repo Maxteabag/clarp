@@ -171,7 +171,7 @@ pub fn builtins(owner: &Owner<'_>) -> Vec<Value> {
             json!({
                 "id": format!("builtin-{}", folded(name)),
                 "name": name,
-                "voice_id": python::compact_ascii(&voices),
+                "voice_id": crate::said::canonical_voice(&python::compact_ascii(&voices)),
                 "avatar_symbol": "",
                 "avatar_url": "",
                 "avatar_generation_status": null,
@@ -409,6 +409,16 @@ impl Book {
             (a.created_at_ms, &a.persona_id).cmp(&(b.created_at_ms, &b.persona_id))
         });
         Self { made, looks }
+    }
+
+    /// Apply a reviewed migration to a saved contact.
+    pub fn set_stored_voice(&mut self, id: &str, voice: &str) -> Option<&Made> {
+        let contact = self
+            .made
+            .iter_mut()
+            .find(|contact| contact.persona_id == id)?;
+        contact.voice_id = voice.to_owned();
+        Some(contact)
     }
 
     /// A built-in persona as an app is told it, with the look its owner gave it.

@@ -3592,6 +3592,14 @@ mailbox, so it does not re-admit or reconcile a second store's copy of waiting i
 acceptance event's optional field supports replay of old journals. The Python Host can also
 retry without the priority fields when a separately installed older runtime refuses them.
 
+**Provider voice maps (PR 487, contract 122).** Agent voice edits infer the provider
+from the supplied ID when the caller leaves it out. The fleet merges the change and checks
+whether the voice is taken in one turn. Contact edits use the client's optional
+`base_voice_id` to preserve later writes to providers it did not change. Transcription
+overrides look up the agent ID first. `clarp-admin voice migrate` reports the changes and
+requires a matching reviewed digest before applying them. The fleet saves only rows that
+sound the same under the speaker's resolver, along with the new transcription aliases.
+
 ## 7. Stages and gates
 
 Since 21 Nov 2026 at 12:39, stages, trains and pieces have no test gate of their own. A train lands when

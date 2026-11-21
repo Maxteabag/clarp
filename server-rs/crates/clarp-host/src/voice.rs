@@ -467,6 +467,9 @@ impl Mouth {
                 .map_or("", |m| m.record.persona.as_str())
         };
         let who = Who {
+            agent_id: directory
+                .named(session)
+                .map_or("", |m| m.record.agent_id.as_str()),
             name: persona,
             persona,
             session,
@@ -902,6 +905,7 @@ pub(crate) fn speech_view(
 pub(crate) fn speaker(record: &AgentRecord) -> voice_profile::Agent<'_> {
     voice_profile::Agent {
         who: Who {
+            agent_id: &record.agent_id,
             name: &record.persona,
             persona: &record.persona,
             session: &record.session,
@@ -968,6 +972,7 @@ pub(crate) fn phrase_voices(
 ) -> Vec<(clarp_kernel::router::phrases::Voice, bool, Option<Language>)> {
     let voices = owner::voices(file);
     let who = Who {
+        agent_id: &record.agent_id,
         name: &record.persona,
         persona: &record.persona,
         session: &record.session,

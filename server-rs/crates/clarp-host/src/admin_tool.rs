@@ -1951,11 +1951,35 @@ async fn bookkeeping(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+async fn voice_migrate(app: &App, args: &[String]) -> ToolAnswer {
+    let Some((action, args)) = args.split_first() else {
+        return ToolAnswer::said(
+            2,
+            "usage: clarp-admin voice migrate [--apply DIGEST] [--json]",
+        );
+    };
+    if action != "migrate" {
+        return not_here(&format!("voice {action}"));
+    }
+    let args = match parse(args, &["--apply"], &["--json"], &[]) {
+        Ok(args) => args,
+        Err(why) => return ToolAnswer::said(2, why),
+    };
+    let view = app.mouth.speech_view(&app.mouth.owners());
+    let reviewed = args.option("--apply").map(str::to_owned);
+    match app.fleet.migrate_voices(view, reviewed).await {
+        Ok(Ok(report)) => shown(&report),
+        Ok(Err(why)) => ToolAnswer::said(3, why),
+        Err(why) => ToolAnswer::said(1, why.0),
+    }
+}
+
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
         Some((command, rest)) if command == "controller-action" => {
             crate::controller_action_tool::run(app, call, rest).await
         }
+        Some((command, rest)) if command == "voice" => voice_migrate(app, rest).await,
         Some((command, rest)) if command == "bookkeeping" => bookkeeping(app, rest).await,
         Some((command, rest)) if command == "prompt" => prompt(app, call, rest).await,
         Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,

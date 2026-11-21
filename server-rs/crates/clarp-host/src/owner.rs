@@ -458,6 +458,7 @@ enabled = true
         );
         // An agent's own entry, whatever letters its name is written in.
         let ingrid = Who {
+            agent_id: "",
             name: "",
             persona: "INGRID",
             session: "ingrid-1",
@@ -472,6 +473,7 @@ enabled = true
             ("gemini", Some("Charon"), "cartesia")
         );
         let spaced = Who {
+            agent_id: "",
             name: "Name With Space",
             ..Who::default()
         };

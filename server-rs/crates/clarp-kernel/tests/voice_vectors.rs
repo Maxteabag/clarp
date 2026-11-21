@@ -35,6 +35,7 @@ fn sorted(mut pairs: Vec<(String, String)>) -> Vec<(String, String)> {
 fn who(agent: &Value) -> Who<'_> {
     let named = |key: &str| agent.get(key).and_then(Value::as_str).unwrap_or("");
     Who {
+        agent_id: "",
         name: named("name"),
         persona: named("persona"),
         session: named("session"),
@@ -179,6 +180,7 @@ fn a_persona_has_the_voice_the_python_host_would_give_it() {
         let persona = case["persona"].as_str().unwrap();
         let session = persona.to_lowercase();
         let agent = Who {
+            agent_id: "",
             name: "",
             persona,
             session: &session,
@@ -246,6 +248,7 @@ fn the_voices_of_one_clip_are_the_ones_the_python_host_would_work_out() {
         let persona = case["persona"].as_str().unwrap();
         let session = persona.to_lowercase();
         let agent = Who {
+            agent_id: "",
             name: "",
             persona,
             session: &session,
