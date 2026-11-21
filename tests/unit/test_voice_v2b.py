@@ -196,7 +196,7 @@ def test_seventy_new_agents_get_seventy_voices_none_a_built_in_contacts(host, tm
     built_in = {v for v in host.cartesia_voices.values() if v}
     assert len(built_in) >= 60
     catalogue = sorted(built_in | {f"cat-{i:03d}" for i in range(120)})
-    monkeypatch.setattr(voice_pool, "_cartesia_catalogue", lambda: catalogue)
+    monkeypatch.setattr(voice_pool, "_cartesia_catalogue", lambda language="en": catalogue)
     logged = []
     monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a[0]))
     personas.list_all()                                         # the built-in contacts exist
@@ -216,7 +216,7 @@ def test_seventy_new_agents_get_seventy_voices_none_a_built_in_contacts(host, tm
 def test_without_a_catalogue_the_built_in_list_and_no_false_alarm(monkeypatch):
     """No catalogue fetched yet: today's list; the log line only when active agents and
     custom contacts really use every pool voice."""
-    monkeypatch.setattr(voice_pool, "_cartesia_catalogue", lambda: [])
+    monkeypatch.setattr(voice_pool, "_cartesia_catalogue", lambda language="en": [])
     logged = []
     monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a[0]))
     cfg = config.Config(tts_provider="cartesia")
@@ -298,12 +298,35 @@ def test_the_pool_hands_out_only_todays_catalogue(tmp_path, monkeypatch):
     by name but missing from today's catalogue, or answered 404, is never handed out."""
     names_file = tmp_path / "voice-names.json"
     monkeypatch.setenv("CLARP_VOICE_NAMES", str(names_file))
+    public_en = {"language": "en", "public": True, "owner": False}
     names_file.write_text(json.dumps({
         "cartesia": {"old-deleted": "Old", "today-1": "One", "today-2": "Two", "gone-1": "Gone"},
-        "_catalogue": {"cartesia": ["today-1", "today-2", "gone-1"]},
+        "_catalogue": {"cartesia": {"today-1": public_en, "today-2": public_en, "gone-1": public_en}},
         "_gone": {"cartesia": ["gone-1"]}}))
     cfg = config.Config(tts_provider="cartesia", cartesia_voices={})
     assert voice_pool.pool(cfg, "cartesia") == ["today-1", "today-2"]
     picks = {json.loads(voice_pool.assign(cfg, f"Name{i}", "{}", agents=[], contacts=[]))["cartesia"]
              for i in range(20)}
     assert picks <= {"today-1", "today-2"}
+
+
+def test_never_the_owners_own_voice_nor_another_languages_and_norwegian_gets_norwegian(tmp_path, monkeypatch):
+    """Review 4 of 515 (second pass): the pool takes only public catalogue rows that are not the
+    account's own (a voice Peter cloned is never handed out), in the agent's speech language
+    (its language set first, R168): an agent set to Norwegian gets a Norwegian voice."""
+    from lib import settings_store, stt_language
+    names_file = tmp_path / "voice-names.json"
+    monkeypatch.setenv("CLARP_VOICE_NAMES", str(names_file))
+    row = lambda language, public=True, owner=False: {"language": language, "public": public, "owner": owner}
+    names_file.write_text(json.dumps({"cartesia": {}, "_catalogue": {"cartesia": {
+        "en-public": row("en"), "en-owned": row("en", owner=True), "en-private": row("en", public=False),
+        "no-public": row("no"), "nb-public": row("nb"), "de-public": row("de")}}}))
+    cfg = config.Config(tts_provider="cartesia", cartesia_voices={})
+    assert voice_pool.pool(cfg, "cartesia", "en") == ["en-public"]
+    assert voice_pool.pool(cfg, "cartesia", "no") == ["nb-public", "no-public"]
+    english = {json.loads(voice_pool.assign(cfg, f"Name{i}", "{}", agents=[], contacts=[]))["cartesia"]
+               for i in range(10)}
+    assert english == {"en-public"}                                 # never owned, private or German
+    settings_store.set_text(stt_language.AGENT_LANGUAGES_KEY, json.dumps({"ola": "no,en"}))
+    ola = json.loads(voice_pool.assign(cfg, "Ola", "{}", agents=[], contacts=[]))["cartesia"]
+    assert ola in {"no-public", "nb-public"}
