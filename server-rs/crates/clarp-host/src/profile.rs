@@ -35,7 +35,7 @@ pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory, owners: &toml::Ta
     let mut view = mouth.speech_view(owners);
     let mut labels = voice_profile::shipped_labels();
     let (saved, signature) = mouth.cached_voice_names();
-    clarp_kernel::voice_names::merge(&mut labels, saved);
+    clarp_kernel::voice_names::merge(&mut labels, saved.names);
     labels
         .entry(clarp_kernel::said::CARTESIA.into())
         .or_default()

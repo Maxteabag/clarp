@@ -3,9 +3,29 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::Value;
 
 pub type Names = BTreeMap<String, BTreeMap<String, String>>;
+pub type Catalogue = BTreeMap<String, BTreeMap<String, CatalogueVoice>>;
+pub type Gone = BTreeMap<String, BTreeSet<String>>;
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+pub struct CatalogueVoice {
+    pub language: String,
+    pub public: bool,
+    pub owner: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+pub struct Snapshot {
+    #[serde(flatten)]
+    pub names: Names,
+    #[serde(rename = "_catalogue", skip_serializing_if = "BTreeMap::is_empty")]
+    pub catalogue: Catalogue,
+    #[serde(rename = "_gone", skip_serializing_if = "BTreeMap::is_empty")]
+    pub gone: Gone,
+}
 
 pub const FIRST_AFTER: Duration = Duration::from_secs(60);
 pub const REFRESH_EVERY: Duration = Duration::from_secs(24 * 3600);
@@ -17,22 +37,76 @@ pub fn start_due(age: Option<Duration>) -> bool {
 }
 
 pub fn from_file(raw: &Value) -> Names {
-    let mut names = Names::new();
-    for (provider, rows) in raw.as_object().into_iter().flatten() {
-        let Some(rows) = rows.as_object() else {
-            continue;
-        };
-        let provider_names = rows
-            .iter()
-            .filter_map(|(id, name)| {
-                let name = name.as_str()?;
-                (!id.is_empty() && !crate::python::strip(name).is_empty())
-                    .then(|| (id.clone(), name.to_string()))
+    Snapshot::from_file(raw).names
+}
+
+impl Snapshot {
+    pub fn from_file(raw: &Value) -> Self {
+        let mut names = Names::new();
+        for (provider, rows) in raw.as_object().into_iter().flatten() {
+            let Some(rows) = rows.as_object().filter(|_| !provider.starts_with('_')) else {
+                continue;
+            };
+            let provider_names = rows
+                .iter()
+                .filter_map(|(id, name)| {
+                    let name = name.as_str()?;
+                    (!id.is_empty() && !crate::python::strip(name).is_empty())
+                        .then(|| (id.clone(), name.to_string()))
+                })
+                .collect();
+            names.insert(provider.clone(), provider_names);
+        }
+        let catalogue = raw["_catalogue"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(provider, rows)| {
+                let voices = rows.as_object()?.iter().filter_map(|(id, row)| {
+                    (!id.is_empty() && row.is_object()).then(|| {
+                        (
+                            id.clone(),
+                            CatalogueVoice {
+                                language: row["language"].as_str().unwrap_or_default().to_owned(),
+                                public: crate::python::truthy(&row["public"]),
+                                owner: crate::python::truthy(&row["owner"]),
+                            },
+                        )
+                    })
+                });
+                Some((provider.clone(), voices.collect()))
             })
             .collect();
-        names.insert(provider.clone(), provider_names);
+        let gone = raw["_gone"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(provider, ids)| {
+                let ids = ids.as_array()?.iter().filter_map(Value::as_str);
+                Some((provider.clone(), ids.filter(|id| !id.is_empty()).map(str::to_owned).collect()))
+            })
+            .collect();
+        Self { names, catalogue, gone }
     }
-    names
+
+    /// Publish each refreshed provider's latest facts and return newly deleted voices.
+    pub fn apply(&mut self, fetched: Self) -> Vec<(String, String)> {
+        merge(&mut self.names, fetched.names);
+        self.catalogue.extend(fetched.catalogue);
+        let mut newly_gone = Vec::new();
+        for (provider, ids) in fetched.gone {
+            let previous = self.gone.entry(provider.clone()).or_default();
+            let names = self.names.entry(provider.clone()).or_default();
+            for id in &ids {
+                names.remove(id);
+                if !previous.contains(id) {
+                    newly_gone.push((provider.clone(), id.clone()));
+                }
+            }
+            *previous = ids;
+        }
+        newly_gone
+    }
 }
 
 /// Missing in-use IDs, in the provider-independent order of the lookup budget.

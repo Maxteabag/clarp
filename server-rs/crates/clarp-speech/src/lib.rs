@@ -54,3 +54,4 @@ fn run_with_fixture_host_token(test: &str) -> bool {
 }
 
 mod voice_names;
+pub use voice_names::LookupError;
