@@ -69,6 +69,8 @@ mod pairing_identity;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/queue_provenance.rs"]
+mod queue_provenance;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
 #[path = "host/r175_engine_order.rs"]
@@ -85,12 +87,16 @@ mod source_trace;
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
+#[path = "host/takeover_b.rs"]
+mod takeover_b;
 #[path = "host/transcription_errors.rs"]
 mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
 #[path = "host/voice_events.rs"]
 mod voice_events;
+#[path = "host/voice_names.rs"]
+mod voice_names;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
 
@@ -573,7 +579,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 115);
+    assert_eq!(info["contract"]["host"], 116);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["speech_outcome"], 109);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
@@ -9137,7 +9143,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 115);
+    assert_eq!(info["contract"]["host"], 116);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its

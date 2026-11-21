@@ -3932,8 +3932,10 @@
     "started_at": null,
     "status": "claimed",
     "synthesize_audio": 1,
+    "taken": 0,
     "text": "hello",
-    "trace_id": "t-1"
+    "trace_id": "t-1",
+    "user_word": 0
    },
    "rows": [
     [
