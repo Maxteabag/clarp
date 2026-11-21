@@ -438,7 +438,7 @@ def test_memory_and_durable_order_agree_over_random_sequences(tmp_path, seed):
     for step in range(rng.randint(10, 22)):
         action = rng.choice(["agent", "agent", "agent", "user", "card", "desk", "end", "end",
                              "stop", "resume", "fence", "lift", "handover", "restart",
-                             "fail", "retry"])
+                             "fail", "retry", "prepfail", "legacy"])
         count += 1
         cid = f"{action[0]}{count}"
         if action in ("agent", "user", "card", "desk"):
@@ -477,6 +477,13 @@ def test_memory_and_durable_order_agree_over_random_sequences(tmp_path, seed):
             _arm(world); world.provider.fail_next = True
         elif action == "retry":
             world.service._retry_handoff(world.agent)
+        elif action == "prepfail" and not running() and not fenced:
+            _fail_before_the_turn_opens(world)
+        elif action == "legacy":
+            # Rows stamped by no release before this one: only a turn row says
+            # one was chosen. A restart re-admits them by that judgement.
+            agents_db.conn().execute("UPDATE queued_turns SET taken = 0")
+            world._collect(); td.reset_for_tests(); world._new_process(); fenced = False
         world._collect()
         _agree(world, (seed, step, action))
     # Let everything run: lift the fence, resume, finish every turn.
@@ -539,3 +546,76 @@ def test_the_users_word_admitted_during_a_stop_starts_first_and_the_rest_is_held
     assert turn_queue.is_paused(world.agent)
     _resume(world)
     assert world.started == ["t0", "u_mid", "p_pre", "p_pre2"]
+
+
+def _fail_before_the_turn_opens(world):
+    """The head of the memory queue takes the free slot and its launch fails
+    in the 'prepare' phase, before any turn row: the dispatcher puts it back
+    at the head (requeue_front)."""
+    with td._TURN_LOCK:
+        if td._SLOTS.get(world.agent) or not td._SLOTS.queue_depth(world.agent):
+            return None
+        head = td._SLOTS.pop_next(world.agent)
+    if head is None:
+        return None
+    world.service._requeue_failed_handoff(
+        world.agent, head, RuntimeError("prepare failed"), phase="prepare")
+    return head
+
+
+def test_a_launch_that_failed_before_its_turn_is_taken_in_both_stores(tmp_path):
+    """Review lead L5: requeue_front marks it taken in memory; the durable row
+    is stamped too, so a user's word arriving meanwhile goes behind it on both
+    sides, and still after a restart."""
+    world = World(tmp_path)
+    world.send("t0")
+    world.send("p1", origin="agent", queue=True)
+    world.send("p2", origin="agent", queue=True)
+    td._SLOTS.release(world.agent, "t-t0")     # t0's slot is free; its process is not ours
+    world.provider.live.discard(world.agent)
+    head = _fail_before_the_turn_opens(world)
+    assert head is not None and head.client_msg_id == "p1"
+    assert turn_queue.get("p1")["taken"] == 1
+    assert not turn_queue._has_turn(turn_queue.get("p1"))
+    world.send("t-busy")                        # the agent is busy again
+    world.send("u1", queue=True)
+    assert _memory(world) == ["p1", "u1", "p2"]
+    assert _waiting(world) == ["p1", "u1", "p2"]
+    world.restart()
+    assert world.started[-3:] == ["p1", "u1", "p2"]
+
+
+def test_a_re_admitted_row_whose_turn_opened_is_taken_in_memory(tmp_path):
+    """Review lead L1: a row whose launch had begun (a turn row) is taken by
+    the durable judgement. Re-admitted by recovery while the agent is busy, its
+    memory spec is taken too, so a later user's word lands after it on both
+    sides. Its taken stamp is cleared first: only the turn row speaks, as for
+    a row written by the release before this one."""
+    world = World(tmp_path)
+    con = agents_db.conn()
+    world.send("t0")
+    world.send("a1", origin="agent", queue=True)
+    _arm(world)
+    world.provider.fail_next = True
+    _end_running(world)                       # a1's launch begins and fails
+    assert not world.provider.fail_next
+    row = turn_queue.get("a1")
+    assert row["status"] == "queued" and turn_queue._has_turn(row), row
+    con.execute("UPDATE queued_turns SET taken = 0 WHERE queue_id = 'a1'")
+    td._SLOTS.drop_queued(world.agent, lambda spec: spec.queue_id == "a1")   # memory lost it
+    world.send("b1")                          # busy with a turn this runtime owns
+    world.send("q1", origin="agent", queue=True)
+    world.service.recover_queued()            # re-admits a1 behind b1, durable order
+    assert _memory(world) == ["a1", "q1"]
+    world.send("u1", queue=True)
+    assert _memory(world) == ["a1", "u1", "q1"]
+    assert _waiting(world) == ["a1", "u1", "q1"]
+
+
+def test_an_agent_withdrawing_its_card_is_not_the_users_word():
+    """Review lead L3: the only other writer of resolved_by writes 'agent'
+    (no session) with choice 'withdrawn'; neither is an answer."""
+    assert not origins.is_user_word("automation", card_answered_by="agent", card_choice="withdrawn")
+    assert not origins.is_user_word("automation", card_answered_by="agent:desk",
+                                    card_choice="withdrawn")
+    assert not origins.is_user_word("automation", card_answered_by="agent", card_choice="answered")

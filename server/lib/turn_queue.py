@@ -225,6 +225,21 @@ def user_word_slot(items, *, is_user: Callable[[Any], bool],
     return slot
 
 
+def row_taken(row) -> bool:
+    """Whether a waiting row was chosen once as the next item (its launch
+    began, or it was parked back at the head): the user's word never
+    overtakes it. The one judgement, for placement and for the memory spec a
+    re-admitted row becomes (``DispatchCommand.taken``)."""
+    return bool(row["taken"]) or _has_turn(row)
+
+
+def mark_taken(row_id: str) -> None:
+    """A row put back at the head after it was chosen (a launch that failed
+    before the backend started) keeps that in the durable store too."""
+    if row_id:
+        db.conn().execute("UPDATE queued_turns SET taken = 1 WHERE queue_id = ?", (row_id,))
+
+
 def _place(con, row_id: str) -> None:
     """Put the user's word ``row_id`` (just inserted, so the newest) at its
     slot among the agent's other waiting rows: the rows from the slot on are
@@ -238,7 +253,7 @@ def _place(con, row_id: str) -> None:
             WHERE agent_id = ? AND status IN ('queued', 'parked') AND queue_id <> ?
             ORDER BY queue_seq""", (row["agent_id"], row_id)).fetchall()
     slot = user_word_slot(waiting, is_user=lambda item: bool(item["user_word"]),
-                          started=lambda item: bool(item["taken"]) or _has_turn(item))
+                          started=row_taken)
     for behind in waiting[slot:]:
         _reinsert_at_back(con, behind)
 
@@ -296,17 +311,17 @@ def park(*, queue_id: str, agent_id: str, session: str, text: str,
          trace_id: str, client_msg_id: str, synthesize_audio: bool,
          origin: str, sender_agent_id: str,
          prompt_admission_id: str = "", allow_paused: bool = False,
-         user_word: bool = False) -> bool:
+         user_word: bool = False, taken: bool = False) -> bool:
     return _insert_placed(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused, user_word
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?, ?)
+               prompt_admission_id, allow_paused, user_word, taken
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
          int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id, int(allow_paused), int(user_word)),
+         prompt_admission_id, int(allow_paused), int(user_word), int(taken)),
         queue_id=queue_id, user_word=user_word)
 
 

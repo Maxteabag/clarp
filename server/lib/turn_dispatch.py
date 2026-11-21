@@ -874,6 +874,7 @@ def finish_compaction(service, agent_id: str) -> None:
             if _SLOTS.get(agent_id) == next_spec.trace_id:
                 _SLOTS.requeue_front(agent_id, next_spec)
                 _SLOTS.release(agent_id, next_spec.trace_id)
+        turn_queue.mark_taken(next_spec.queue_id or next_spec.park_id)
         log("compactionQueueLeft", f"agent={agent_id} — no dispatcher; queue kept")
         return
     service._spawn_next(agent_id, next_spec)
