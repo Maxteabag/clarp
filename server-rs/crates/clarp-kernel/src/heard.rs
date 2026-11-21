@@ -22,6 +22,7 @@ pub use clarp_speech::listen::{Segment, file_name, suffix, terms};
 
 pub mod duration;
 pub mod inventory;
+pub mod language_set;
 
 /// The largest clip that is taken: 64 MiB.
 pub const LARGEST_CLIP: usize = 64 * 1024 * 1024;
@@ -153,6 +154,19 @@ pub struct Plan {
     pub fallbacks: Vec<String>,
     /// The engine a long recording took the place of, when it took one's place.
     pub escalated_from: Option<String>,
+}
+
+impl Plan {
+    /// The ordinary engine order, shared by the upload path and the voice profile.
+    pub fn chat_order(&self, language: &str, own_id: Option<&str>) -> Vec<&str> {
+        let mut seen = std::collections::HashSet::new();
+        std::iter::once(self.model.as_str())
+            .chain(self.fallbacks.iter().map(String::as_str))
+            .filter(|model| {
+                !language.contains(',') || seen.insert(language_set::identity(model, own_id))
+            })
+            .collect()
+    }
 }
 
 /// Whether the cloud engine chosen in the settings could stand in for the Host's own: so,

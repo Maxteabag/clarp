@@ -44,10 +44,29 @@ def whole(path: pathlib.Path) -> dict:
     return vars(module)
 
 
+def standard_imports(body: list[ast.stmt]) -> list[ast.stmt]:
+    """Keep the file's standard-library imports and its compiler directives."""
+    future = []
+    imports = []
+    for node in body:
+        if isinstance(node, ast.ImportFrom) and node.level == 0:
+            root = (node.module or '').split('.', 1)[0]
+            if root == '__future__':
+                future.append(node)
+            elif root in sys.stdlib_module_names:
+                imports.append(node)
+        elif isinstance(node, ast.Import):
+            names = [name for name in node.names if name.name.split('.', 1)[0] in sys.stdlib_module_names]
+            if names:
+                imports.append(ast.copy_location(ast.Import(names=names), node))
+    return future + imports
+
+
 def taken(path: pathlib.Path, names: list[str], given: dict | None = None, inside: str | None = None) -> dict:
-    """The named functions and values of a file, by themselves. With `inside`, they are the
-    methods of that class, taken out as plain functions that are handed what they call self."""
+    """Take named definitions with the file's standard-library imports. With `inside`,
+    take class methods as plain functions that are handed what they call self."""
     body = ast.parse(path.read_text()).body
+    imports = standard_imports(body)
     if inside:
         body = next(node.body for node in body if isinstance(node, ast.ClassDef) and node.name == inside)
     wanted = []
@@ -64,7 +83,7 @@ def taken(path: pathlib.Path, names: list[str], given: dict | None = None, insid
     missing = set(names) - found
     assert not missing, f'{path.name} has no {sorted(missing)}'
     room = {'re': re, '__name__': 'taken', **(given or {})}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=wanted, type_ignores=[])), str(path), 'exec'), room)  # noqa: S102
+    exec(compile(ast.fix_missing_locations(ast.Module(body=imports + wanted, type_ignores=[])), str(path), 'exec'), room)  # noqa: S102
     return room
 
 
