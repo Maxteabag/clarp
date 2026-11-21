@@ -3,6 +3,19 @@ use super::*;
 #[test]
 fn a_loading_or_busy_transcription_has_fixed_client_and_call_words() {
     let place = Place::new("speech-loading-busy");
+    // The normal settings endpoint admits cloud engines only. Seed an existing per-agent
+    // chain using the store port, so a call can exercise its local attempt and cloud fallback.
+    use clarp_ports::kv::KeyValueEngine as _;
+    std::fs::create_dir(place.root.join("data")).unwrap();
+    clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap()
+        .put(
+            "setting",
+            clarp_kernel::languages::AGENT_ENGINES_KEY,
+            br#"{"listener":"faster-whisper:small.en,deepgram:nova-3"}"#,
+        )
+        .unwrap();
     let worker = place.root.join("worker.sh");
     let ready = place.root.join("allow-load");
     let began = place.root.join("clip-started");
@@ -85,15 +98,6 @@ done
     });
 
     let agent = host.new_agent("Listener");
-    let made = host.ask_as(
-        &phone,
-        "POST",
-        "/transcription-providers",
-        Some(&json!({
-            "call_engines":"faster-whisper:small.en,deepgram:nova-3"
-        })),
-    );
-    assert_eq!(made.0, 200, "{}", made.1);
     let call = host
         .ask_as(&phone, "POST", "/calls", Some(&json!({"agents":[agent]})))
         .1;
