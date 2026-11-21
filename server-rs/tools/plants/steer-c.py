@@ -6,7 +6,7 @@ import runner
 RUNS = {
     "shim": ["test", "-p", "clarp-shim", "--test", "shim", "--", "streaming_input_closes_at_the_first_top_level_stdout_result"],
     "ack": ["test", "-p", "clarp-shim", "--test", "shim", "--", "stdin_refuses_a_write_when_the_tool_has_closed_its_read_end"],
-    "stream": ["test", "-p", "clarp-kernel", "--lib", "an_open_claude_turn_takes_input_until_its_first_top_level_result"],
+    "stream": ["test", "-p", "clarp-kernel", "--lib", "a_nested_result_closes_offers_and_only_a_top_level_result_settles"],
     "journal": ["test", "-p", "clarp-kernel", "--lib", "a_follow_up_enters_on_its_echo_and_an_unread_one_still_obeys_stop"],
     "reveal": ["test", "-p", "clarp-actor", "--lib", "revealing_a_turn_sends_its_old_rows_through_a_delta"],
     "receipt": ["test", "-p", "clarp-kernel", "--lib", "a_read_follow_up_is_a_user_entry_or_a_queued_command_attachment"],
@@ -24,7 +24,7 @@ H = "clarp-host/src/agent.rs"
 D = "clarp-actor/src/conversation.rs"
 O = "clarp-actor/src/orphan.rs"
 
-# PR 607 removes tool-window tracking. The first top-level result still fences input.
+# PR 607 removes tool-window tracking. The kernel fences offers on any result.
 PLANTS = [
     (S, "shim", "the initial prompt closes streaming stdin", "if args.stdin_until.is_none() {", "if args.stdin_until.is_some() {"),
     (S, "shim", "no result closes stdin", 'event.get("type").and_then(serde_json::Value::as_str) == Some(kind)', 'event.get("type").and_then(serde_json::Value::as_str) != Some(kind)'),
