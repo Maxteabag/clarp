@@ -510,7 +510,9 @@ one `/log` gives the turn's rows: a turn of an agent that cannot leave a note re
 first one. While such a chat runs a coordination turn, its row's `activity` and
 `live_activity`, the `agent-activity` and `agent-state` events of that turn (its `detail` keeps
 only `trace_id`, `phase` and the words) and the agents-working push say "Working with <Name>"
-and carry no tool, input, label or reasoning title of that turn. Under `show` nothing is veiled.
+and carry no tool, input, label or reasoning title of that turn. A turn waiting for an account
+still says so (`account_recovery` is kept). The agent's own `status_text` is not veiled: like a
+note, it is what the agent chose to tell the user. Under `show` nothing is veiled.
 
 A **note** is an agent's words to the user from its own turn:
 `role: assistant`, `kind: "note"`, `origin: "note"`, no `sender_*`,
