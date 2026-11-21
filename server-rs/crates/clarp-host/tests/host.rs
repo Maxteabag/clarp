@@ -21951,11 +21951,19 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
         "fork-seed",
     );
     wait_for("the parent's native session and conversation", || {
-        host.state(&maximus) == "done"
-            && host
-                .conversation(&maximus)
-                .contains(&said("assistant", "A conversation to fork."))
+        let parent = row_of(&snapshot(), &maximus);
+        parent["backend_session_id"] == "profile-parent"
+            && host.turns(&maximus).iter().any(|row| {
+                row["role"] == "assistant"
+                    && row["text"] == "A conversation to fork."
+                    && row["turn"]["status"] == "completed"
+            })
     });
+    // Stranger is still a running helper, so the parent's roster row stays in background
+    // after the seed turn settles, as in the Python snapshot.
+    let parent = row_of(&snapshot(), &maximus);
+    assert_eq!(parent["latest_state"], "background");
+    assert_eq!(parent["background_jobs"]["sub_agents"], 1);
     let children = host.post(
         &format!("/agents/{maximus}/fork"),
         json!({ "backend": "scripted", "children": [{ "name": "Profile Fork", "task": "read" }] }),
