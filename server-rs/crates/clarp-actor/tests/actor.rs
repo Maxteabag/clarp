@@ -3278,6 +3278,8 @@ mod follow_by_revision {
             let which = match self.which {
                 Which::All => "all",
                 Which::WithoutAutomated => "without automated",
+                Which::WithoutCoordination => "without coordination",
+                Which::WithoutAutomatedOrCoordination => "without automated or coordination",
             };
             let cursor = if self.by_rows {
                 ", the newest row's revision its cursor"

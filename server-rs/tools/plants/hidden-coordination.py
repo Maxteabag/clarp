@@ -63,7 +63,7 @@ PLANTS = [
     (C, 'counts', 'the sender set excludes the known sender',
      'if !sender.is_empty() {', 'if sender.is_empty() {'),
     (C, 'host', 'only delta pages have tail counts',
-     'before == Seq::MAX', 'before != Seq::MAX'),
+     'span, which, before == Seq::MAX', 'span, which, before != Seq::MAX'),
     (H, 'host', 'a visible note carries no count for the gap',
      'row["hidden_before"] = public(run);', 'let _ = run;'),
     (H, 'host', 'an answer does not describe the hidden tail',
