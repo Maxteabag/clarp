@@ -3224,7 +3224,7 @@ impl Fleet {
         file: &toml::Table,
         persona: &str,
         voice_id: &str,
-        definition: Option<&Value>,
+        definition: Option<&serde_json::Value>,
         before: Option<&AgentRecord>,
     ) -> Result<(), NotMade> {
         let Some(selected) = personas::cartesia_of(voice_id) else {
