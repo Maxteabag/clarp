@@ -112,6 +112,10 @@ pub struct CreateAgentRequest {
     /// persona has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_base64: Option<String>,
+    /// A relaunch that includes this field reselects the persona's picture. Its value is
+    /// never read as a file path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_path: Option<Value>,
 }
 
 pub(crate) fn present_value<'de, D: serde::Deserializer<'de>>(
