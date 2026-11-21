@@ -1773,7 +1773,7 @@
      "at": 1794710011000,
      "exit": 1,
      "stdout": null,
-     "stderr": "agent_tasks: completion requires evidence for every acceptance criterion (or the owner's waiver of it, with a reason)",
+     "stderr": "agent_tasks: completion requires evidence for every acceptance criterion (or the owner's waiver of it, with a reason); missing: criterion-1, criterion-2. Record it with `clarp-goal checkpoint 0001aaaabbbbcccc:ship:00000002 6 '{\"progress\":\"...\",\"next_work\":\"...\",\"evidence\":{\"criterion-1\":\"...\", \"criterion-2\":\"...\"}}'`, then `clarp-goal complete 0001aaaabbbbcccc:ship:00000002 REVISION` with the revision it answers",
      "note": "refused: the criteria have no evidence"
     },
     {
@@ -3171,14 +3171,14 @@
      "at": 1794720019000,
      "exit": 2,
      "stdout": null,
-     "stderr": "usage: agent_tasks.py create SESSION PLAN_ID TITLE JSON_ITEMS | update RETURNED_PLAN_ID ITEM_ID STATUS [DETAIL] | finish RETURNED_PLAN_ID [STATUS] | show SESSION | list SESSION | goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | act PLAN_ID REVISION ACTION JSON_DATA | step PLAN_ID REVISION ITEM STATUS [DETAIL] | subgoal PLAN_ID add|update JSON | ledger PLAN_ID [AFTER_EVENT] | receipts PLAN_ID [LIMIT] | bookkeeping observe DELEGATION [JSON_OPTIONS] | bookkeeping record DELEGATION PLAN_ID WAKE_ID JSON_BATCH"
+     "stderr": "usage: agent_tasks.py create SESSION PLAN_ID TITLE JSON_ITEMS | update RETURNED_PLAN_ID ITEM_ID STATUS [DETAIL] | finish RETURNED_PLAN_ID [STATUS] (a plan without a goal) | show SESSION | list SESSION | goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | get PLAN_ID | complete PLAN_ID REVISION (finishes a goal) | checkpoint|replan|pause|resume|cancel|block|supersede|dependency|enroll|add_step|document|rebind PLAN_ID REVISION JSON_DATA | read PLAN_ID NAME [REVISION] | act PLAN_ID REVISION ACTION JSON_DATA | step PLAN_ID REVISION ITEM STATUS [DETAIL] | subgoal PLAN_ID add|update JSON | ledger PLAN_ID [AFTER_EVENT] | receipts PLAN_ID [LIMIT] | bookkeeping observe DELEGATION [JSON_OPTIONS] | bookkeeping record DELEGATION PLAN_ID WAKE_ID JSON_BATCH"
     },
     {
      "argv": [],
      "at": 1794720020000,
      "exit": 2,
      "stdout": null,
-     "stderr": "usage: agent_tasks.py create SESSION PLAN_ID TITLE JSON_ITEMS | update RETURNED_PLAN_ID ITEM_ID STATUS [DETAIL] | finish RETURNED_PLAN_ID [STATUS] | show SESSION | list SESSION | goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | act PLAN_ID REVISION ACTION JSON_DATA | step PLAN_ID REVISION ITEM STATUS [DETAIL] | subgoal PLAN_ID add|update JSON | ledger PLAN_ID [AFTER_EVENT] | receipts PLAN_ID [LIMIT] | bookkeeping observe DELEGATION [JSON_OPTIONS] | bookkeeping record DELEGATION PLAN_ID WAKE_ID JSON_BATCH"
+     "stderr": "usage: agent_tasks.py create SESSION PLAN_ID TITLE JSON_ITEMS | update RETURNED_PLAN_ID ITEM_ID STATUS [DETAIL] | finish RETURNED_PLAN_ID [STATUS] (a plan without a goal) | show SESSION | list SESSION | goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | get PLAN_ID | complete PLAN_ID REVISION (finishes a goal) | checkpoint|replan|pause|resume|cancel|block|supersede|dependency|enroll|add_step|document|rebind PLAN_ID REVISION JSON_DATA | read PLAN_ID NAME [REVISION] | act PLAN_ID REVISION ACTION JSON_DATA | step PLAN_ID REVISION ITEM STATUS [DETAIL] | subgoal PLAN_ID add|update JSON | ledger PLAN_ID [AFTER_EVENT] | receipts PLAN_ID [LIMIT] | bookkeeping observe DELEGATION [JSON_OPTIONS] | bookkeeping record DELEGATION PLAN_ID WAKE_ID JSON_BATCH"
     }
    ]
   },
@@ -4697,7 +4697,7 @@
      "at": 1794730010000,
      "exit": 1,
      "stdout": null,
-     "stderr": "agent_tasks: resume goal before checkpointing",
+     "stderr": "agent_tasks: resume goal before checkpointing: it is blocked; `clarp-goal resume 0003aaaabbbbcccc:ship:00000002 6 '{\"reason\":\"...\"}'`",
      "note": "refused: resume first"
     },
     {
@@ -11466,7 +11466,7 @@
      "at": 1794760015000,
      "exit": 1,
      "stdout": null,
-     "stderr": "unknown goal action",
+     "stderr": "unknown goal action 'frobnicate': use one of add_step, block, cancel, checkpoint, dependency, document, enroll, pause, rebind, replan, resume, supersede, unwaive, waive (and `clarp-goal complete PLAN REVISION` to finish a goal)",
      "note": "no such action"
     },
     {

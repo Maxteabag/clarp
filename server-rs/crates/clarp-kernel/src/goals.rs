@@ -50,6 +50,22 @@ const ITEM_STATUSES: [&str; 7] = [
     "removed",
 ];
 const TERMINAL_ITEM_STATUSES: [&str; 4] = ["completed", "skipped", "deferred", "removed"];
+const GOAL_ACTIONS: [&str; 14] = [
+    "add_step",
+    "block",
+    "cancel",
+    "checkpoint",
+    "dependency",
+    "document",
+    "enroll",
+    "pause",
+    "rebind",
+    "replan",
+    "resume",
+    "supersede",
+    "unwaive",
+    "waive",
+];
 
 /// A command that is refused, in the words the tool prints.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -521,9 +537,18 @@ fn generation(state: &Map<String, Value>) -> i64 {
     state.get("generation").and_then(Value::as_i64).unwrap_or(0)
 }
 
-fn check_revision(plan: &Plan, revision: Option<i64>) -> Result<(), Refused> {
+fn check_revision(
+    plan: &Plan,
+    revision: Option<i64>,
+    next_command: impl FnOnce() -> String,
+) -> Result<(), Refused> {
     match revision {
-        None if plan.goal.is_some() => refuse("revision required for durable goal"),
+        None if plan.goal.is_some() => Err(Refused(format!(
+            "revision required for durable goal {} (now revision {}): run `clarp-goal {}`",
+            plan.plan_id,
+            plan.revision,
+            next_command()
+        ))),
         Some(revision) if revision != plan.revision => {
             refuse("plan changed; reload before editing")
         }
@@ -606,27 +631,75 @@ fn close_running(plan: &mut Plan, plan_status: &str, now: i64) {
     }
 }
 
+fn step_name<'a>(plan_id: &str, item_id: &'a str) -> &'a str {
+    item_id
+        .strip_prefix(plan_id)
+        .and_then(|suffix| suffix.strip_prefix(':'))
+        .unwrap_or(item_id)
+}
+
+fn step_names(plan_id: &str, mut items: Vec<&Item>) -> String {
+    items.sort_by_key(|item| item.position);
+    items
+        .iter()
+        .map(|item| step_name(plan_id, &item.item_id))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn require_completion(plan: &Plan) -> Result<(), Refused> {
+    let Plan {
+        plan_id, revision, ..
+    } = plan;
     let unresolved = |item: &Item| {
         item.required != 0 && !matches!(item.status.as_str(), "completed" | "removed")
     };
-    if plan.items.iter().any(unresolved) {
-        return refuse("required work remains unresolved");
+    let required: Vec<_> = plan.items.iter().filter(|item| unresolved(item)).collect();
+    if !required.is_empty() {
+        let items = step_names(plan_id, required);
+        return Err(Refused(format!(
+            "required work remains unresolved: {items}; settle each with `clarp-goal step \
+             {plan_id} {revision} ITEM completed` (or removed, with a reason)"
+        )));
     }
-    if plan.items.iter().any(|item| item.status == "in_progress") {
-        return refuse("running work must be resolved or deferred before completion");
+    let running: Vec<_> = plan
+        .items
+        .iter()
+        .filter(|item| item.status == "in_progress")
+        .collect();
+    if !running.is_empty() {
+        let items = step_names(plan_id, running);
+        return Err(Refused(format!(
+            "running work must be resolved or deferred before completion: {items}; \
+             `clarp-goal step {plan_id} {revision} ITEM completed` (or deferred, with a reason)"
+        )));
     }
     match &plan.goal {
         Some(goal) => {
             let criteria = goal.fields.get("criteria").and_then(Value::as_array);
-            let open = criteria.into_iter().flatten().any(|criterion| {
-                stripped(criterion.get("evidence")).is_empty() && !truthy(criterion.get("waived"))
-            });
-            if open {
-                return refuse(
+            let missing: Vec<_> = criteria
+                .into_iter()
+                .flatten()
+                .filter(|criterion| {
+                    stripped(criterion.get("evidence")).is_empty()
+                        && !truthy(criterion.get("waived"))
+                })
+                .map(|criterion| plain(criterion.get("id")))
+                .collect();
+            if !missing.is_empty() {
+                let names = missing.join(", ");
+                let example = missing
+                    .iter()
+                    .map(|id| format!("\"{id}\":\"...\""))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(Refused(format!(
                     "completion requires evidence for every acceptance criterion \
-                     (or the owner's waiver of it, with a reason)",
-                );
+                     (or the owner's waiver of it, with a reason); missing: {names}. Record it with \
+                     `clarp-goal checkpoint {plan_id} {revision} \
+                     '{{\"progress\":\"...\",\"next_work\":\"...\",\"evidence\":{{{example}}}}}'`, \
+                     then `clarp-goal complete {plan_id} REVISION` with the revision it answers"
+                )));
             }
         }
         None => {
@@ -1281,7 +1354,10 @@ impl GoalBook {
         if !active && !(plan.status == "paused" && plan.goal.is_some()) {
             return refuse("task plan is no longer active");
         }
-        check_revision(plan, revision)?;
+        check_revision(plan, revision, || {
+            let step = step_name(&plan.plan_id, item_id);
+            format!("step {} {} {step} {status}", plan.plan_id, plan.revision)
+        })?;
         let mut plan = plan.clone();
         let before = plan
             .items
@@ -1481,7 +1557,16 @@ impl GoalBook {
         else {
             return refuse("task plan is no longer active");
         };
-        check_revision(plan, revision)?;
+        check_revision(plan, revision, || {
+            let Plan {
+                plan_id, revision, ..
+            } = plan;
+            match status {
+                "blocked" => format!("block {plan_id} {revision} '{{\"reason\":\"...\"}}'"),
+                "cancelled" => format!("cancel {plan_id} {revision} '{{\"reason\":\"...\"}}'"),
+                _ => format!("complete {plan_id} {revision}"),
+            }
+        })?;
         if status == "completed" {
             require_completion(plan)?;
         }
@@ -1594,7 +1679,7 @@ impl GoalBook {
         let Some(known) = self.plans.get(plan_id) else {
             return refuse("task plan not found");
         };
-        check_revision(known, Some(revision))?;
+        check_revision(known, Some(revision), || format!("get {plan_id}"))?;
         let mut plan = known.clone();
         let mut data = if is_true(data) && data.is_object() {
             data.clone()
@@ -1774,7 +1859,15 @@ impl GoalBook {
             "checkpoint" => {
                 let paused = plan.status == "paused";
                 if !matches!(plan.status.as_str(), "active" | "paused") {
-                    return refuse("resume goal before checkpointing");
+                    return Err(Refused(if plan.status == "blocked" {
+                        format!(
+                            "resume goal before checkpointing: it is blocked; \
+                             `clarp-goal resume {plan_id} {} '{{\"reason\":\"...\"}}'`",
+                            plan.revision
+                        )
+                    } else {
+                        format!("the goal is {} and takes no checkpoint", plan.status)
+                    }));
                 }
                 if paused && truthy(data.get("continuation")) {
                     return refuse(
@@ -2118,7 +2211,14 @@ impl GoalBook {
                 plan.items
                     .push(new_item(plan_id, key, None, position, raw, now)?);
             }
-            _ => return refuse("unknown goal action"),
+            _ => {
+                return Err(Refused(format!(
+                    "unknown goal action {}: use one of {} \
+                 (and `clarp-goal complete PLAN REVISION` to finish a goal)",
+                    crate::python::text(action),
+                    GOAL_ACTIONS.join(", ")
+                )));
+            }
         }
         if plan.recovery_enabled == 0 {
             let now_state = goal.state().to_string();
@@ -2212,6 +2312,80 @@ mod tests {
             .unwrap();
         keep(book, &change, 1_000);
         change.plan.plan_id
+    }
+
+    #[test]
+    fn a_goal_refusal_names_the_next_command_at_its_current_revision() {
+        let mut ids = counter();
+        let mut book = GoalBook::new();
+        let made = book
+            .create(
+                VERA,
+                "ship",
+                "Ship it",
+                &json!([
+                    { "id": "build", "title": "Build" },
+                    { "id": "note", "title": "Write a note", "required": false },
+                ]),
+                Some(
+                    &json!({ "outcome": "It is done", "criteria": ["It runs"], "limits": "None" }),
+                ),
+                &mut world(1_000, &mut ids),
+            )
+            .unwrap();
+        keep(&mut book, &made, 1_000);
+        let Plan {
+            plan_id, revision, ..
+        } = &made.plan;
+        let build = format!("{plan_id}:build");
+        assert_eq!(
+            book.step(&build, None, "completed", None, 2_000)
+                .unwrap_err()
+                .0,
+            format!(
+                "revision required for durable goal {plan_id} (now revision {revision}): run `clarp-goal step {plan_id} {revision} build completed`"
+            ),
+        );
+        assert_eq!(
+            book.finish(plan_id, "completed", "", None, 2_000)
+                .unwrap_err()
+                .0,
+            format!(
+                "revision required for durable goal {plan_id} (now revision {revision}): run `clarp-goal complete {plan_id} {revision}`"
+            ),
+        );
+        assert_eq!(
+            book.finish(plan_id, "completed", "", Some(*revision), 2_000)
+                .unwrap_err()
+                .0,
+            format!(
+                "required work remains unresolved: build; settle each with `clarp-goal step {plan_id} {revision} ITEM completed` (or removed, with a reason)"
+            ),
+        );
+        let built = book
+            .step(&build, Some(*revision), "completed", None, 2_000)
+            .unwrap();
+        keep(&mut book, &built, 2_000);
+        let running = book
+            .step(
+                &format!("{plan_id}:note"),
+                Some(built.plan.revision),
+                "in_progress",
+                None,
+                3_000,
+            )
+            .unwrap();
+        keep(&mut book, &running, 3_000);
+        let current = running.plan.revision;
+        assert_eq!(
+            book.finish(plan_id, "completed", "", Some(current), 4_000)
+                .unwrap_err()
+                .0,
+            format!(
+                "running work must be resolved or deferred before completion: note; `clarp-goal step {plan_id} {current} ITEM completed` (or deferred, with a reason)"
+            ),
+        );
+        assert_eq!(book.plan(plan_id).unwrap().revision, current);
     }
 
     #[test]
