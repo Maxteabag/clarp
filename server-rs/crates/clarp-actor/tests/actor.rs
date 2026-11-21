@@ -5172,126 +5172,133 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
     }
 }
 
-/// The median of what `work` took, in microseconds, over `times` runs.
-fn median_us(times: usize, mut work: impl FnMut(usize)) -> u128 {
-    let mut took: Vec<u128> = (0..times)
-        .map(|at| {
-            let began = std::time::Instant::now();
-            work(at);
-            began.elapsed().as_micros()
-        })
-        .collect();
-    took.sort_unstable();
-    took[times / 2]
+/// One of the two SQLite conversations sampled by the coordination benchmark.
+struct CostFixture {
+    // Close the SQLite actor before the world removes its scratch directory.
+    actor: Actor,
+    world: World,
+    turns: u64,
+    middle: String,
 }
 
-/// What the reads and writes of coordination cost in a conversation of `rows` rows.
-#[derive(Debug, Clone, Copy)]
-struct Costs {
-    /// A page of 100 of the newest rows, every turn marked.
-    tail_marked: u128,
-    /// A page of 100 rows from the middle, one turn in 87 marked.
-    before_unmarked: u128,
-    /// A send of another agent under a trace its caller named: the trace looked up by key, the
-    /// mark written with the acceptance.
-    send: u128,
-    /// A note from the running turn: the turn's state and the note's id, by key.
-    note: u128,
-    /// The end of a turn that left notes, its count kept as they were written.
-    settle: u128,
-}
-
-fn costs(rows: u64) -> Costs {
-    let mut world = World::new(&format!("costs-{rows}"));
-    world.engine = Box::new(clarp_store_sqlite::SqliteEngine::new());
-    let turns = rows / 2;
-    fill(&world, turns, 2_500.min(turns / 2));
-    let mut actor = world.open();
-    let middle = format!("u-p{}", turns / 2);
-    let tail_marked = median_us(31, |_| {
-        let page = actor.tail(100).unwrap();
-        assert!(page.entries.iter().all(|row| row.coordination.is_some()));
-    });
-    let before_unmarked = median_us(31, |_| {
-        let page = actor.before(&middle, 100).unwrap().unwrap();
-        assert_eq!(page.entries.len(), 100);
-    });
-    let mut sends = 0;
-    let send = median_us(9, |at| {
-        let (asked, marks) = from_an_agent(&format!("u-s{at}"), &format!("ts{at}"));
-        let now = world.tick();
-        let (sent, out) = actor
-            .send_marked(&asked, Admission::Queue, None, &marks, now)
-            .unwrap()
-            .unwrap();
-        assert!(!sent.duplicate);
-        world.carry_out(&mut actor, out);
-        sends += 1;
-    });
-    let first = turns + 1;
-    let note = median_us(9, |at| {
-        let now = world.tick();
-        let (noted, _) = actor
-            .leave_note(first, &format!("note-a1-n{at}"), "Noted.", now)
-            .unwrap();
-        assert!(matches!(noted, Noted::Written { .. }));
-    });
-    let settle = median_us(5, |at| {
-        let turn = first + u64::try_from(at).unwrap();
-        world.exits(turn, Some(0), None);
-        world.hint(&mut actor);
-    });
-    let end = actor
-        .tail(200)
-        .unwrap()
-        .entries
-        .into_iter()
-        .find(|row| row.entry.id() == "u-s0")
-        .and_then(|row| row.turn)
-        .expect("the first send's turn ended");
-    assert_eq!((sends, end.note_count), (9, 9));
-    Costs {
-        tail_marked,
-        before_unmarked,
-        send,
-        note,
-        settle,
+impl CostFixture {
+    fn new(rows: u64) -> Self {
+        let mut world = World::new(&format!("costs-{rows}"));
+        world.engine = Box::new(clarp_store_sqlite::SqliteEngine::new());
+        let turns = rows / 2;
+        fill(&world, turns, 2_500.min(turns / 2));
+        let actor = world.open();
+        let middle = format!("u-p{}", turns / 2);
+        Self {
+            actor,
+            world,
+            turns,
+            middle,
+        }
     }
+}
+
+/// Sample both sizes in each round, alternating the order so they see the same
+/// stretch of runner load. Return the median microseconds for each size.
+fn paired_medians<const N: usize>(
+    fixtures: &mut [CostFixture; 2],
+    mut work: impl FnMut(&mut CostFixture, usize),
+) -> [u128; 2] {
+    let mut samples = [[0; N]; 2];
+    for round in 0..N {
+        for size in [round % 2, (round + 1) % 2] {
+            let began = std::time::Instant::now();
+            work(&mut fixtures[size], round);
+            samples[size][round] = began.elapsed().as_micros();
+        }
+    }
+    samples.map(|mut times| {
+        times.sort_unstable();
+        times[N / 2]
+    })
 }
 
 #[test]
 fn coordination_costs_the_same_in_a_conversation_of_300_000_rows_as_in_one_of_3_000() {
-    let small = costs(3_000);
-    let big = costs(300_000);
+    const READS: usize = 31;
+    const SENDS_AND_NOTES: usize = 15;
+    const SETTLES: usize = 9;
+    let mut fixtures = [CostFixture::new(3_000), CostFixture::new(300_000)];
+    let tail_marked = paired_medians::<READS>(&mut fixtures, |fixture, _| {
+        let page = fixture.actor.tail(100).unwrap();
+        assert!(page.entries.iter().all(|row| row.coordination.is_some()));
+    });
+    let before_unmarked = paired_medians::<READS>(&mut fixtures, |fixture, _| {
+        let page = fixture.actor.before(&fixture.middle, 100).unwrap().unwrap();
+        assert_eq!(page.entries.len(), 100);
+    });
+    let send = paired_medians::<SENDS_AND_NOTES>(&mut fixtures, |fixture, at| {
+        let (asked, marks) = from_an_agent(&format!("u-s{at}"), &format!("ts{at}"));
+        let now = fixture.world.tick();
+        let (sent, out) = fixture
+            .actor
+            .send_marked(&asked, Admission::Queue, None, &marks, now)
+            .unwrap()
+            .unwrap();
+        assert!(!sent.duplicate);
+        fixture.world.carry_out(&mut fixture.actor, out);
+    });
+    let note = paired_medians::<SENDS_AND_NOTES>(&mut fixtures, |fixture, at| {
+        let now = fixture.world.tick();
+        let (noted, _) = fixture
+            .actor
+            .leave_note(fixture.turns + 1, &format!("note-a1-n{at}"), "Noted.", now)
+            .unwrap();
+        assert!(matches!(noted, Noted::Written { .. }));
+    });
+    let settle = paired_medians::<SETTLES>(&mut fixtures, |fixture, at| {
+        let turn = fixture.turns + 1 + u64::try_from(at).unwrap();
+        fixture.world.exits(turn, Some(0), None);
+        fixture.world.hint(&mut fixture.actor);
+    });
+    for fixture in &mut fixtures {
+        let end = fixture
+            .actor
+            .tail(200)
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|row| row.entry.id() == "u-s0")
+            .and_then(|row| row.turn)
+            .expect("the first send's turn ended");
+        assert_eq!(end.note_count, u32::try_from(SENDS_AND_NOTES).unwrap());
+    }
+    let measurements = [
+        ("a page of marked rows", READS, tail_marked),
+        ("a page of unmarked rows", READS, before_unmarked),
+        ("a send's acceptance", SENDS_AND_NOTES, send),
+        ("a note", SENDS_AND_NOTES, note),
+        ("a turn's end", SETTLES, settle),
+    ];
+    let mut said =
+        String::from("coordination costs, interleaved median us, 3,000 -> 300,000 rows:\n");
+    for (what, samples, [small, big]) in measurements {
+        use std::fmt::Write as _;
+        writeln!(
+            said,
+            "  {what} ({samples} samples per size): {small} -> {big}"
+        )
+        .unwrap();
+    }
     // Written past the test harness's capture, so that a passing run shows the numbers too.
-    let said = format!(
-        "coordination costs, median microseconds, 3,000 rows -> 300,000 rows: {small:?} -> {big:?}\n"
-    );
     std::io::Write::write_all(&mut std::io::stderr(), said.as_bytes()).unwrap();
-    // Nothing of it grows with the conversation: at most twice the small one's, and a
-    // millisecond of room for a machine that is busy with other tests.
+    // Keep the original scaling bound, including its allowance for millisecond noise.
     let bound = |small: u128| (small * 2).max(small + 1_000);
-    for (what, small, big) in [
-        ("a page of marked rows", small.tail_marked, big.tail_marked),
-        (
-            "a page of unmarked rows",
-            small.before_unmarked,
-            big.before_unmarked,
-        ),
-        ("a send's acceptance", small.send, big.send),
-        ("a note", small.note, big.note),
-        ("a turn's end", small.settle, big.settle),
-    ] {
+    for (what, _, [small, big]) in measurements {
         assert!(
             big <= bound(small),
             "{what}: {small} us -> {big} us\n{said}"
         );
     }
-    // And a page of marked rows costs no more than twice one of unmarked rows.
     assert!(
-        big.tail_marked <= bound(big.before_unmarked),
+        tail_marked[1] <= bound(before_unmarked[1]),
         "marked {} us, unmarked {} us",
-        big.tail_marked,
-        big.before_unmarked
+        tail_marked[1],
+        before_unmarked[1]
     );
 }
