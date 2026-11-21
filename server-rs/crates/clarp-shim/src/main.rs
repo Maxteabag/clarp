@@ -330,8 +330,9 @@ fn pump(
     let mut chunk = vec![0; READ_AT_ONCE];
     let record = |line: String| {
         if let Some((input, kind)) = close_stdin
-            && serde_json::from_str::<serde_json::Value>(&line)
-                .is_ok_and(|event| event.get("type").and_then(serde_json::Value::as_str) == Some(kind))
+            && serde_json::from_str::<serde_json::Value>(&line).is_ok_and(|event| {
+                event.get("type").and_then(serde_json::Value::as_str) == Some(kind)
+            })
         {
             input.close();
         }
@@ -2019,7 +2020,7 @@ mod tests {
     fn output_is_recorded_a_line_at_a_time_and_what_is_left_at_the_end() {
         let (to_spool, entries) = mpsc::channel();
         let printed = b"one\ntwo\r\nthree".to_vec();
-        pump(printed.as_slice(), &to_spool, Entry::Out, None);
+        pump(printed.as_slice(), &to_spool, Entry::Out, None, None);
         drop(to_spool);
         let lines: Vec<Entry> = entries
             .into_iter()

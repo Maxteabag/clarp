@@ -621,7 +621,9 @@ impl Recorder {
             )
             .map_err(JournalError::Refused)?;
         if let Some(join) = join {
-            batch.command(Command::Join { turn, join }, now_ms).map_err(JournalError::Refused)?;
+            batch
+                .command(Command::Join { turn, join }, now_ms)
+                .map_err(JournalError::Refused)?;
         }
         let committed = batch.commit()?;
         Ok(Accepted {
@@ -2084,46 +2086,91 @@ mod tests {
         let engine = MemEngine::new();
         let mut recorder = open(&engine);
         recorder.accept(b"first".to_vec(), Origin::User, 1).unwrap();
-        recorder.handle(Command::TurnStarted { turn: TurnId(1) }, 2).unwrap();
+        recorder
+            .handle(Command::TurnStarted { turn: TurnId(1) }, 2)
+            .unwrap();
         for (key, uuid) in [("u-two", "read"), ("u-three", "unread")] {
-            let accepted = recorder.accept_message_with_join(
-                message(key, Admission::Queue),
-                Vec::new(),
-                Some(crate::steering::Join { into: TurnId(1), uuid: uuid.to_string() }),
-                3,
-            ).unwrap();
+            let accepted = recorder
+                .accept_message_with_join(
+                    message(key, Admission::Queue),
+                    Vec::new(),
+                    Some(crate::steering::Join {
+                        into: TurnId(1),
+                        uuid: uuid.to_string(),
+                    }),
+                    3,
+                )
+                .unwrap();
             assert!(!accepted.entered);
         }
         drop(recorder);
         let mut recorder = open(&engine);
         assert_eq!(recorder.agent().joins().len(), 2);
         assert_eq!(
-            recorder.log().read_after(0, Kinds::only(kind::MESSAGE), 10).unwrap().len(),
+            recorder
+                .log()
+                .read_after(0, Kinds::only(kind::MESSAGE), 10)
+                .unwrap()
+                .len(),
             1,
         );
 
-        recorder.handle(Command::JoinRead { turn: TurnId(2) }, 6).unwrap();
-        assert!(recorder.handle(Command::JoinRead { turn: TurnId(2) }, 7).is_err());
-        recorder.handle(Command::JoinSettled { turn: TurnId(2) }, 8).unwrap();
-        let rows = recorder.log().read_after(0, Kinds::only(kind::MESSAGE), 10).unwrap();
+        recorder
+            .handle(Command::JoinRead { turn: TurnId(2) }, 6)
+            .unwrap();
+        assert!(
+            recorder
+                .handle(Command::JoinRead { turn: TurnId(2) }, 7)
+                .is_err()
+        );
+        recorder
+            .handle(Command::JoinSettled { turn: TurnId(2) }, 8)
+            .unwrap();
+        let rows = recorder
+            .log()
+            .read_after(0, Kinds::only(kind::MESSAGE), 10)
+            .unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1].turn, Some(2));
         assert_eq!(rows[1].ts_ms, 6);
 
-        recorder.handle(Command::Stop { by: Control::by("user") }, 9).unwrap();
-        let effects = recorder.handle(
-            Command::TurnEnded { turn: TurnId(1), outcome: RunOutcome::Completed },
-            10,
-        ).unwrap();
+        recorder
+            .handle(
+                Command::Stop {
+                    by: Control::by("user"),
+                },
+                9,
+            )
+            .unwrap();
+        let effects = recorder
+            .handle(
+                Command::TurnEnded {
+                    turn: TurnId(1),
+                    outcome: RunOutcome::Completed,
+                },
+                10,
+            )
+            .unwrap();
         assert!(effects.is_empty(), "Stop holds the follow-up left unread");
         assert!(recorder.agent().joins().is_empty());
         assert!(recorder.agent().holds(TurnId(3)));
         drop(recorder);
 
         let mut recorder = open(&engine);
-        let effects = recorder.handle(Command::Resume { by: "user".into() }, 11).unwrap();
-        assert!(matches!(effects.as_slice(), [Effect::StartTurn { turn: TurnId(3), .. }]));
-        let rows = recorder.log().read_after(0, Kinds::only(kind::MESSAGE), 10).unwrap();
+        let effects = recorder
+            .handle(Command::Resume { by: "user".into() }, 11)
+            .unwrap();
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::StartTurn {
+                turn: TurnId(3),
+                ..
+            }]
+        ));
+        let rows = recorder
+            .log()
+            .read_after(0, Kinds::only(kind::MESSAGE), 10)
+            .unwrap();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[2].turn, Some(3));
     }
