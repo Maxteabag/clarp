@@ -6,12 +6,18 @@ use serde_json::Value;
 #[test]
 #[allow(clippy::unwrap_used)]
 fn claudes_tool_windows_and_replay_echoes_follow_the_reference() {
-    let fixture: Value = serde_json::from_str(include_str!("fixtures/steer-c-vectors.json")).unwrap();
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/steer-c-vectors.json")).unwrap();
     let mut records = 0;
     for case in fixture["classifier"].as_array().unwrap() {
         let changed = tool_changes(&case["event"]);
         let expected = |key| {
-            case[key].as_array().unwrap().iter().map(|id| id.as_str().unwrap()).collect::<Vec<_>>()
+            case[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap())
+                .collect::<Vec<_>>()
         };
         assert_eq!(changed.opened, expected("opened"), "{case}");
         assert_eq!(changed.answered, expected("answered"), "{case}");
@@ -27,7 +33,12 @@ fn claudes_tool_windows_and_replay_echoes_follow_the_reference() {
                 _ => None,
             };
             assert_eq!(echo, step["echo"].as_str(), "{}: {step}", case["name"]);
-            assert_eq!(Some(stream.can_join()), step["can_offer"].as_bool(), "{}: {step}", case["name"]);
+            assert_eq!(
+                Some(stream.can_join()),
+                step["can_offer"].as_bool(),
+                "{}: {step}",
+                case["name"]
+            );
             steps += 1;
         }
         streams += 1;
