@@ -568,3 +568,45 @@ def test_an_accepted_steer_starts_its_item_with_its_row_so_a_crash_leaves_nothin
             if t["id"] == "u-two"]
     assert len(rows) == 1
     assert not any(c == "two" for c, _t, _k in _queue(world))
+
+
+@pytest.mark.parametrize("retry", ["retry succeeds", "retry fails too"])
+def test_a_steer_whose_item_start_fails_keeps_its_row_and_never_runs_again(
+        tmp_path, clock, monkeypatch, retry):
+    """Review C5: once the backend has the words, the row must stand. The receipt's start fails
+    inside the accepted steer's write: only the start is undone (a savepoint), the row and the
+    show commit, /send answers as a successful steer, and the start is tried again after the
+    commit, or, when that fails too, by recovery at the next start. Nothing stays 'queued', and
+    the item is never run again, after turn one or after a restart."""
+    import sqlite3
+    world = _SteeredWorld(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    real = turn_queue.start_receipt
+    fails = {"left": 1 if retry == "retry succeeds" else 2}
+
+    def failing_start(queue_id):
+        if queue_id == "two" and fails["left"]:
+            fails["left"] -= 1
+            raise sqlite3.OperationalError("database is locked")
+        return real(queue_id)
+
+    monkeypatch.setattr(turn_queue, "start_receipt", failing_start)
+    clock.at(7_600)
+    answer = _send(world, "two")
+    monkeypatch.setattr(turn_queue, "start_receipt", real)
+    assert answer.queued is False and world.provider.steered == ["two"]
+    assert sum(1 for t in _tail()["turns"] if t["id"] == "u-two") == 1
+    assert not any(c == "two" for c, _t, _k in _queue(world))
+    if retry == "retry succeeds":
+        assert turn_queue.status("two") == "started"
+    clock.at(10_500)
+    _finish_running(world)
+    world.settle(recover=True)
+    assert "two" not in world.started
+    world.restart()
+    assert "two" not in world.started
+    assert turn_queue.status("two") != "queued"
+    assert db.conn().execute(
+        "SELECT COUNT(*) FROM queued_turns WHERE status = 'queued'").fetchone()[0] == 0

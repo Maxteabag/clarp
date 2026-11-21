@@ -955,6 +955,34 @@ def start_receipt(queue_id: str):
     return None
 
 
+def start_shown_attempted() -> list[str]:
+    """At a runtime's start: an item still 'queued' whose row is written (shown) and whose
+    launch receipt says the prompt may have left was handed to a backend (an accepted steer,
+    or a launch that crashed before its start was recorded). It is never run again; its
+    receipt is started here so nothing is left 'queued' for good (issue 491, review C5).
+    Returns the queue ids started."""
+    from . import launch_receipts
+    started = []
+    rows = db.conn().execute(
+        """SELECT queue_id, trace_id FROM queued_turns
+            WHERE status = 'queued' AND shown_at IS NOT NULL""").fetchall()
+    for row in rows:
+        receipt = launch_receipts.get(str(row["trace_id"] or "")) or {}
+        if receipt.get("state") != launch_receipts.ATTEMPTED:
+            continue
+        try:
+            moved = start_receipt(str(row["queue_id"]))
+        except Exception as exc:  # noqa: BLE001 - tried again at the next start
+            log_exception("shownAttemptedStartFail", exc, detail=str(row["queue_id"]))
+            continue
+        if moved is not None:
+            started.append(str(row["queue_id"]))
+            after_start(str(row["queue_id"]), moved)
+    if started:
+        log("shownAttemptedStarted", " ".join(started))
+    return started
+
+
 def after_start(queue_id: str, row) -> None:
     """After a committed start: a Stop's pause ends when nothing is held any more."""
     if row:

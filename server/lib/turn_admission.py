@@ -790,7 +790,23 @@ class AdmissionMixin:
             appended = self._record_user_message(spec, deferred=deferred, sent_at=sent_at)
             if appended is not None:
                 turn_queue.show(spec.queue_id, con=database)
-            started_row = turn_queue.start_receipt(spec.queue_id) if start_item else None
+            started_row = None
+            start_failed = False
+            if start_item:
+                # The backend already has the words: the row must stand whatever
+                # happens to the receipt's start (issue 491, review C5). The start
+                # gets a savepoint of its own; if it fails only it is undone, and it
+                # is tried again after the commit (and by recovery at the next start:
+                # turn_queue.start_shown_attempted).
+                database.execute("SAVEPOINT steered_item_start")
+                try:
+                    started_row = turn_queue.start_receipt(spec.queue_id)
+                    database.execute("RELEASE SAVEPOINT steered_item_start")
+                except Exception as exc:  # noqa: BLE001 - logged; retried below
+                    database.execute("ROLLBACK TO SAVEPOINT steered_item_start")
+                    database.execute("RELEASE SAVEPOINT steered_item_start")
+                    log_exception("steeredItemStartFail", exc, detail=spec.queue_id)
+                    start_failed = True
             database.execute("COMMIT")
         except BaseException:
             if database.in_transaction:
@@ -801,6 +817,11 @@ class AdmissionMixin:
                 events.broadcast(self.ctx.stream, events.as_event(event))
             except Exception as e:  # noqa: BLE001 - a projection of a durable row
                 log_exception("queuedRowBroadcastFail", e, detail=spec.session)
+        if start_failed:
+            try:
+                started_row = turn_queue.start_receipt(spec.queue_id)
+            except Exception as exc:  # noqa: BLE001 - recovery settles it at the next start
+                log_exception("steeredItemStartRetryFail", exc, detail=spec.queue_id)
         if start_item:
             turn_queue.after_start(spec.queue_id, started_row)
         return spec
