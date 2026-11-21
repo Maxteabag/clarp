@@ -1632,7 +1632,11 @@ impl Worker {
                 .actor
                 .as_ref()
                 .is_some_and(|actor| actor.selected_takeover().is_none());
-            let queued = if resolved { self.takeover_wait.pop_front() } else { None };
+            let queued = if resolved {
+                self.takeover_wait.pop_front()
+            } else {
+                None
+            };
             let request = queued.map_or_else(|| mailbox.next(rx, due, Instant::now()), Ok);
             let ask = match request {
                 Ok(ask) => ask,
@@ -2435,8 +2439,14 @@ impl Worker {
                 | Ask::Withdraw { .. }
                 | Ask::Reword { .. }
                 | Ask::SendNow { .. }
-                | Ask::Send { admission: Admission::Direct, .. }
-        ) && let Some((from, socket)) = self.actor.as_ref().and_then(Actor::selected_takeover_socket)
+                | Ask::Send {
+                    admission: Admission::Direct,
+                    ..
+                }
+        ) && let Some((from, socket)) = self
+            .actor
+            .as_ref()
+            .and_then(Actor::selected_takeover_socket)
         {
             // Release is ordered against the consume in the shim. Once it replies, a
             // missing marker means the old tool was never committed for takeover. If
