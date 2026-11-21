@@ -251,3 +251,17 @@ def test_the_agent_schedulers_tick_settles_a_failed_peer_wait(pair):
     runner = scheduler.AgentScheduleRunner(dispatch_turn=lambda *a, **k: None)
     runner.tick()
     assert _result(plan_id)['outcome'] == 'failed'
+
+
+def test_a_request_whose_turn_ran_and_failed_is_not_settled_as_undelivered(pair):
+    """A queue row ends 'failed' also when the message ran and the recipient's turn failed
+    (settle_receipt maps a failed outcome to 'failed'): the request was delivered, so the wait
+    stays open for its answer or its deadline (reviewer 3 on PR 535)."""
+    from lib import db
+    pip, avana = pair
+    plan_id, request_id, row = _waiting_on_queue(pip, avana)
+    db.conn().execute("UPDATE queued_turns SET status='failed', started_at=? WHERE queue_id=?",
+                      (now_ms(), row['queue_id']))
+    assert pr.unrun_reason(request_id) == ''
+    assert pr.settle_failed_waits() == 0
+    assert task_plans.get(plan_id)['goal']['continuation']['state'] == 'waiting'

@@ -166,10 +166,13 @@ _UNRUN_NOTICES = ("launch_refused", "held_send_not_run")
 
 def unrun_reason(request_id: str) -> str:
     """Why this request's queued message was never run, or "" while it may still run or has
-    run: its queue row ended ``failed`` (refused launches, a held send). The reason is the detail
-    of the Host notice that failure wrote to the recipient's chat."""
+    run. Only a row that ended ``failed`` WITHOUT starting (refused launches, a held send: the
+    queue's fail_unrun, which leaves started_at empty) or that carries one of those failures'
+    Host notices is unrun. A row that started and then ended ``failed`` ran: the recipient's turn
+    failed, the message was delivered, and the wait stays open (reviewer 3 on PR 535). The reason
+    is the detail of the notice the failure wrote to the recipient's chat."""
     row = conn().execute(
-        """SELECT queue_id, status FROM queued_turns WHERE client_msg_id = ?
+        """SELECT queue_id, status, started_at FROM queued_turns WHERE client_msg_id = ?
             ORDER BY queue_seq DESC LIMIT 1""", (request_client_id(request_id),)).fetchone()
     if row is None or row["status"] != "failed":
         return ""
@@ -179,7 +182,9 @@ def unrun_reason(request_id: str) -> str:
         if notice and notice["text"]:
             parts = str(notice["text"]).split("\n\n", 1)
             return (parts[1] if len(parts) == 2 else parts[0]).strip()
-    return "its queued message ended failed and was never run"
+    if row["started_at"] is None:
+        return "its queued message ended failed and was never run"
+    return ""
 
 
 def settle_failed_waits() -> int:
