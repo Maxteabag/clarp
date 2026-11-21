@@ -70,7 +70,11 @@ fn roster(directory: &Directory) -> Vec<Candidate> {
         let mut jobs: Vec<_> = view
             .jobs
             .iter()
-            .filter(|j| j.status.is_active() && wire::mirrored_helper(j, &names).is_none())
+            .filter(|j| {
+                j.status.is_active()
+                    && !view.mirrored_provider(&j.id)
+                    && wire::mirrored_helper(j, &names).is_none()
+            })
             .collect();
         jobs.sort_by_key(|j| j.started_at_ms);
         let processes: Vec<_> = jobs
@@ -362,6 +366,20 @@ mod site_tests {
 
 use crate::edge::App;
 use clarp_kernel::janitors::{adaptive, label_audit, quota};
+
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(DIAGNOSTIC, crate::kept::Key::Plain, crate::kept::json),
+    crate::kept::Kind::book(CURSOR, crate::kept::Key::Plain, crate::kept::fits::<u64>),
+    crate::kept::Kind::book(
+        CADENCE,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<quota::Lane>,
+    ),
+    crate::kept::Kind::book(LAST, crate::kept::Key::Plain, crate::kept::fits::<i64>),
+    crate::kept::Kind::book(MARK, crate::kept::Key::Plain, crate::kept::fits::<String>),
+];
+
 const ROLE: &str = "label-auditor";
 const CADENCE: &str = "label-checker-cadence";
 const LAST: &str = "label-checker-last-check";
@@ -446,7 +464,14 @@ async fn pass(app: &App, now: i64) -> Result<i64, Unavailable> {
                 ),
             ))
         })
-        .await?;
+        .await;
+    let owner = match owner {
+        Ok(owner) => owner,
+        Err(why) => {
+            app.fleet.unread(ROLE, &why.0);
+            return Ok(now + 15_000);
+        }
+    };
     when_enabled(owner, |owner| active_pass(app, now, owner)).await
 }
 

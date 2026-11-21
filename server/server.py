@@ -187,6 +187,9 @@ class ContextHTTPServer(ThreadingHTTPServer):
         self._device_connections_lock = threading.Lock()
         from lib.request_security import FailureLimiter
         self.auth_failures = FailureLimiter()
+        # GET /pairing/identity answers without a token: its own budget per
+        # source, so reading it never spends the pairing exchange's failures.
+        self.identity_reads = FailureLimiter(limit=30)
         super().__init__(addr, handler_cls)
 
     def register_device_connection(self, connection, principal: str = "") -> bool:
@@ -517,6 +520,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-events": "_handle_voice_events_get",
         "/voice-events/utterances": "_handle_voice_utterances_get",
         "/server-info": "_handle_server_info",
+        "/pairing/identity": "_handle_pairing_identity",
         "/paired-devices": "_handle_paired_devices",
         "/devices/push-tokens": "_handle_push_tokens",
         "/server-update": "_handle_server_update_status",
@@ -564,6 +568,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/remote-action": "_handle_remote_action_get",
         "/location": "_handle_get_location",
         "/media": "_handle_media_list",
+        # Exact, so it is matched before the /media/<asset_id> content route.
+        "/media/deleted": "_handle_media_deleted",
         "/agent-portraits": "_handle_agent_portraits_list",
         "/agent-portrait-generation": "_handle_agent_portrait_generation_status",
         "/teams": "_handle_teams_list",
@@ -634,6 +640,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/managed-skills": "_handle_managed_skills_update",
         "/upload": "_handle_upload",
         "/media": "_handle_media_publish",
+        "/media/delete": "_handle_media_delete_batch",
         "/agent-portraits": "_handle_agent_portraits_update",
         "/agent-portrait-generation": "_handle_agent_portrait_generation_start",
         "/select": "_handle_select",
@@ -659,6 +666,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
+        "/agent-notes": "_handle_agent_note",
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
@@ -1106,7 +1114,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     # is intentionally public so the client can bootstrap and pick up the
     # token from the URL on first visit.
     _PUBLIC_EXACT = {"/", "/sw.js", "/manifest.json",
-                     "/styles.css", "/icon.png", "/pairing/exchange"}
+                     "/styles.css", "/icon.png", "/pairing/exchange", "/pairing/identity"}
     _PUBLIC_PREFIXES = ("/static/", "/notification-avatars/")
 
     def principal(self) -> Principal:
@@ -1209,6 +1217,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     def _device_forbidden(self, path: str, method: str) -> bool:
         if getattr(self, "_request_device_scope", "") != "limited":
             return False
+        if path == "/paired-devices/revoke" and method == "POST":
+            return False    # the handler lets a limited device revoke itself, no other (R172)
         if any(
             path == prefix.rstrip("/") or path.startswith(prefix)
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
@@ -1508,6 +1518,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         except ValueError as exc:
             return self._json_error(400, str(exc))
         payload["ok"] = True
+        # Every agent's hearing may have changed: open apps re-read the agents.
+        from lib import events
+        events.broadcast(self.ctx.stream, events.agent_roster("voice-profile"))
         self._json_ok(payload)
 
     # ---- vocabulary: packs, terms, profiles, assignments, preview, runs ----
@@ -3029,9 +3042,14 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     def _handle_media_content(self, asset_id: str):
         if not asset_id or "/" in asset_id or "." in pathlib.PurePath(asset_id).parts:
             return self._send(400, b"bad asset id")
-        row = media_store.get(asset_id)
+        row = media_store.lookup(asset_id)
         if not row:
             return self._send(404, b"not found")
+        if row["deleted_at"] is not None:
+            # Removed for ever: 410, so an app shows "Image removed" and offers no retry;
+            # 404 stays an id this Host never had (feature media_manage).
+            return self._json(410, {"error": "removed", "asset_id": asset_id,
+                                    "deleted_at": row["deleted_at"]})
         path = pathlib.Path(row["storage_path"]).resolve()
         root = (self.ctx.media_dir or _runtime_paths().media_dir).resolve()
         if not path.is_file() or (path != root and root not in path.parents):

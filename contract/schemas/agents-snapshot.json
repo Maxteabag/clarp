@@ -22,6 +22,7 @@
           "model": {"type": "string"},
           "effort": {"type": "string"},
           "voice_id": {"type": "string"},
+          "voice_profile": {"$ref": "#/$defs/voice_profile"},
           "avatar_symbol": {"type": "string"},
           "avatar_url": {"type": "string"},
           "model_avatar_url": {"type": "string"},
@@ -76,6 +77,60 @@
     "focus": {"type": ["string", "null"]},
     "roster": {"type": "array", "items": {"type": "string"}},
     "personas": {"type": "array"},
-    "available_mcp_servers": {"type": "array", "items": {"type": "string"}}
+    "available_mcp_servers": {"type": "array", "items": {"type": "string"}},
+    "voice_defaults": {"$ref": "#/$defs/voice_profile"},
+    "voice_profile_version": {"type": "string"}
+  },
+  "$defs": {
+    "voice_profile": {
+      "description": "Feature voice_profile (Host contract 109): the agent's voice and hearing as the Host resolves them. origin, engine_origin, language_origin and silent_reason are open sets.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["speech", "hearing"],
+      "properties": {
+        "speech": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["provider", "voice_id", "origin", "silent_reason"],
+          "properties": {
+            "provider": {"type": "string"},
+            "provider_label": {"type": "string"},
+            "voice_id": {"type": ["string", "null"]},
+            "voice_label": {"type": ["string", "null"]},
+            "origin": {"type": ["string", "null"]},
+            "streaming": {"type": "boolean"},
+            "silent_reason": {"type": ["string", "null"]},
+            "shared_with": {"type": "integer", "minimum": 0},
+            "assignment": {"type": "string"}
+          }
+        },
+        "hearing": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["engines", "engine_origin", "languages", "language_origin"],
+          "properties": {
+            "engines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": ["id"],
+                "properties": {
+                  "id": {"type": "string"},
+                  "provider": {"type": "string"},
+                  "model": {"type": "string"},
+                  "label": {"type": "string"}
+                }
+              }
+            },
+            "engine_origin": {"type": "string"},
+            "device_may_override": {"type": "boolean"},
+            "device_cloud_languages": {"type": ["array", "null"], "items": {"type": "string"}},
+            "languages": {"type": "array", "items": {"type": "string"}},
+            "language_origin": {"type": "string"}
+          }
+        }
+      }
+    }
   }
 }

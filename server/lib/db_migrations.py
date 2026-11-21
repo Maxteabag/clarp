@@ -295,6 +295,12 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
 
         if version < 128:
             _migrate_to_v128(con)
+        if version < 129:
+            _migrate_to_v129(con)
+        if version < 130:
+            _migrate_to_v130(con)
+        if version < 131:
+            _migrate_to_v131(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1095,6 +1101,65 @@ def _migrate_to_v125(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
     if "supported_conversation_modes" not in columns:
         con.execute("ALTER TABLE device_tokens ADD COLUMN supported_conversation_modes TEXT NOT NULL DEFAULT ''")
+
+def _migrate_to_v129(con: sqlite3.Connection) -> None:
+    """``provider_turns.trace_id``: the trace of the turn a turn token was issued to, so an
+    artifact a turn publishes can name it (R102). Additive with an empty default: a token
+    issued before knows no trace, older code ignores the column and rolling back needs no
+    down-migration; guarded, so a rerun is a no-op."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(provider_turns)")}
+    if columns and "trace_id" not in columns:
+        con.execute("ALTER TABLE provider_turns ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v130(con: sqlite3.Connection) -> None:
+    """Coordination between agents (issue 478): the ``coordination_traces`` table and the
+    per-chat ``agents.coordination_visibility``. Both are created if missing, so a rerun is a
+    no-op; older code reads neither, so a rollback needs no down-migration. Nothing is
+    backfilled: history before this step stays shown (a later, batched step marks it)."""
+    from .persistence.schema_parts.coordination import SCHEMA
+    for statement in SCHEMA.split(";"):
+        if statement.strip():
+            con.execute(statement)
+    if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
+        con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v131(con: sqlite3.Connection) -> None:
+    """Delete and favourite gallery images (issue 489): ``media_assets.favorite_at`` (ms the
+    favourite mark was set, NULL when not a favourite), ``media_assets.deleted_by`` (who deleted
+    the image), the per-chat favourites index, the two tombstone indexes that GET
+    /media/deleted reads (every chat, one chat), and the gallery page index
+    ``(session, created_at DESC, asset_id DESC, mime_type, deleted_at)`` in place of
+    ``idx_media_assets_session_created``: a page ordered with its ``asset_id`` tie-break is read
+    from the cursor without sorting the chat, and the chat's image count is read from the index
+    alone. Columns NULL by default, so every existing image is a non-favourite nobody deleted;
+    older code reads neither column. No code names the old index (no INDEXED BY), and the new
+    one has the old one's leading columns (session, created_at DESC) under the same condition,
+    so the list query of code from before this step is served by it after a rollback
+    (tests/unit/test_media_plans.py); a rollback needs no down-migration. Guarded, so a rerun
+    is a no-op."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(media_assets)")}
+    if "favorite_at" not in columns:
+        con.execute("ALTER TABLE media_assets ADD COLUMN favorite_at INTEGER")
+    if "deleted_by" not in columns:
+        con.execute("ALTER TABLE media_assets ADD COLUMN deleted_by TEXT")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_media_assets_session_favorite"
+                " ON media_assets(session, favorite_at DESC, asset_id DESC, deleted_at)"
+                " WHERE deleted_at IS NULL AND favorite_at IS NOT NULL")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_media_assets_deleted"
+                " ON media_assets(deleted_at, asset_id, session, mime_type)"
+                " WHERE deleted_at IS NOT NULL")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_media_assets_session_deleted"
+                " ON media_assets(session, deleted_at, asset_id, mime_type)"
+                " WHERE deleted_at IS NOT NULL")
+    # The new page index first, the old one dropped after: a crash between the two leaves
+    # both, which is harmless, and the rerun finishes the step.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_media_assets_session_page"
+                " ON media_assets(session, created_at DESC, asset_id DESC, mime_type, deleted_at)"
+                " WHERE deleted_at IS NULL")
+    con.execute("DROP INDEX IF EXISTS idx_media_assets_session_created")
+
 
 def _migrate_to_v128(con: sqlite3.Connection) -> None:
     """Start Claude delta accounting at installation. Preserve historical charges."""

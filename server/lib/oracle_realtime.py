@@ -153,19 +153,19 @@ def _release(principal: str) -> None:
 
 def capability() -> dict:
     cfg = config.load()
-    from .oracle_live_wire import LiveWire
+    from .oracle_live_wire import API_VOICE, LiveWire, live_model, oracle_wire
     from .oracle_live_provider import available as voice_available
     mode = getattr(cfg, "oracle_voice_backend", "api")
     try:
-        live_wire = LiveWire(mode)
+        live_wire = oracle_wire(cfg)
         direct_available = voice_available(mode, cfg)
         live_available = direct_available and (getattr(cfg, "oracle_router_backend", "api") == "codex" or bool(cfg.openai_key()))
     except ValueError:
-        live_wire, live_available, direct_available = LiveWire(), False, False
+        live_wire, live_available, direct_available = LiveWire("api", model=live_model(cfg)), False, False
     from . import oracle_voice_provider
     provider = oracle_voice_provider.effective(cfg)
     v2_voice = ({"model": oracle_voice_provider.gemini_model(cfg), "voice": oracle_voice_provider.gemini_voice(cfg)}
-                if provider == "gemini" else {"model": "gpt-live-1", "voice": "marin"})
+                if provider == "gemini" else {"model": live_model(cfg), "voice": API_VOICE})
     return {
         "available": bool(cfg.openai_key()),
         "model": cfg.openai_realtime_model,

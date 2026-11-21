@@ -3,6 +3,13 @@
 use super::*;
 use clarp_kernel::jobs::{Job, JobBook, JobChange, JobCommand, JobRecord};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    "computer-jobs",
+    crate::kept::Key::Plain,
+    crate::kept::fits::<ComputerJob>,
+)];
+
 const TABLE: &str = "kept.computer-jobs";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,13 +57,21 @@ impl ComputerJobs {
         store: &dyn KeyValue,
         computer_id: String,
         revisions: &Revisions,
-        log: &crate::unkept::Log,
+        left: &crate::kept::LeftOut,
     ) -> Result<Self, String> {
         let mut jobs = Self {
             computer_id,
             ..Self::default()
         };
         for (id, raw) in store.list(TABLE).map_err(|e| e.to_string())? {
+            // A copy set aside, known by the count, is no job (`kept.rs`); the record it was moved
+            // from keeps its id taken.
+            if left.is_left_out(TABLE, &id) {
+                if let Some(moved_from) = crate::kept::copy_of(&id) {
+                    jobs.unreadable.insert(moved_from.to_string());
+                }
+                continue;
+            }
             let Ok(row) = serde_json::from_slice::<ComputerJob>(&raw) else {
                 jobs.unreadable.insert(id);
                 continue;
@@ -74,17 +89,27 @@ impl ComputerJobs {
             });
             jobs.timelines.insert(id, row.timeline);
         }
-        if !jobs.unreadable.is_empty() {
-            log.line(&format!(
-                "clarp-host: skipped {} unreadable computer job records; original bytes retained",
-                jobs.unreadable.len()
-            ));
-        }
+        // What could not be read was set aside, counted and said by the start's walk; one whose id
+        // is not its key is kept out too, and its id stays taken.
         Ok(jobs)
     }
     pub(super) fn list(&self) -> Vec<Job> {
         self.book.jobs().cloned().collect()
     }
+    pub(super) fn begun_since(&self, kind: &str, since: i64) -> u32 {
+        let count = self
+            .timelines
+            .values()
+            .flatten()
+            .filter(|r| {
+                r.job.kind == kind
+                    && r.job.status == clarp_kernel::jobs::JobStatus::Queued
+                    && r.at_ms >= since
+            })
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
     pub(super) fn contains(&self, id: &str) -> bool {
         self.book.get(id).is_some() || self.unreadable.contains(id)
     }
@@ -195,5 +220,51 @@ impl Fleet {
             self.computer_jobs.book.beat(beat);
         }
         Ok(Ok(change))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod portrait_count_tests {
+    use super::*;
+    use clarp_kernel::jobs::Worker;
+    #[test]
+    fn portrait_attempts_count_their_own_kind_at_both_edges_of_the_day() {
+        let mut jobs = ComputerJobs::default();
+        let cutoff = 10_000;
+        for (id, kind, now, queued) in [
+            ("earlier", "portrait-generation", cutoff - 1, true),
+            ("boundary", "portrait-generation", cutoff, true),
+            ("later", "portrait-generation", cutoff + 1, true),
+            ("contact", "persona-avatar", cutoff + 1, true),
+            ("other-event", "portrait-generation", cutoff + 1, false),
+        ] {
+            let command = JobCommand::Register {
+                queued,
+                id: id.to_string(),
+                kind: kind.to_string(),
+                title: String::new(),
+                detail: String::new(),
+                worker: Worker::none(),
+                restart_cancelled: true,
+                started_trace_id: String::new(),
+                heartbeat_timeout_ms: None,
+                metadata: serde_json::Value::Null,
+            };
+            let change = jobs.book.decide(command, now, 1).unwrap();
+            jobs.timelines
+                .entry(id.to_string())
+                .or_default()
+                .push(change.record.unwrap());
+        }
+        for (since, count) in [
+            (cutoff - 1, 3),
+            (cutoff, 2),
+            (cutoff + 1, 1),
+            (cutoff + 2, 0),
+        ] {
+            assert_eq!(jobs.begun_since("portrait-generation", since), count);
+        }
+        assert_eq!(jobs.begun_since("persona-avatar", cutoff), 1);
     }
 }

@@ -45,6 +45,47 @@ use crate::agent::Unavailable;
 use crate::edge::App;
 use crate::fleet::{Amend, Directory, JanitorSeed, NotMade};
 use crate::ids;
+use crate::unkept::RecordFailure;
+
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(KIND, crate::kept::Key::Plain, crate::kept::fits::<Book>),
+    crate::kept::Kind::book(
+        "janitor-config",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::book::Config>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-trigger",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::book::Trigger>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-builtin",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<String>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-run",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::runs::Run>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-progress",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::runs::Progress>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-creation",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::janitors::creation::Creation>,
+    ),
+    crate::kept::Kind::book(
+        "janitor-alert",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<clarp_kernel::artifacts::Artifact>,
+    ),
+];
 
 /// The kind of thing the janitors' book is, among what is left with the fleet: what is left
 /// of it once its tables are kept apart.
@@ -277,7 +318,9 @@ impl Desk {
     ) -> Result<tokio::sync::MutexGuard<'_, Option<Book>>, Unavailable> {
         let mut held = self.book.lock().await;
         if held.is_none() {
-            let kept = app.fleet.kept(KIND, ALL.to_string()).await?;
+            // The book's own document, through the loader: one that is not the book's is set
+            // aside first, and the book starts from its tables (`kept.rs`).
+            let kept = app.fleet.kept_book(KIND, ALL.to_string()).await?;
             let mut whole: Value = kept
                 .and_then(|kept| serde_json::from_slice(&kept).ok())
                 .filter(Value::is_object)
@@ -288,14 +331,22 @@ impl Desk {
                     .is_some_and(|rows| !rows.is_empty())
             };
             let kept_whole = TABLES.iter().any(|(table, _)| filled(table, &whole));
+            // Each row alone: one that is not its table's is carried through, left out of the
+            // book and kept as it came (the book's writes touch only rows it holds, and delete
+            // none it does not), counted and said once (`kept.rs`).
             for (table, kind) in TABLES {
                 for (key, row) in app.fleet.kept_all(kind).await? {
-                    if let Ok(row) = serde_json::from_slice::<Value>(&row) {
-                        whole[table][key] = row;
+                    let alone = serde_json::from_slice::<Value>(&row).ok().filter(|row| {
+                        let mut book = json!({});
+                        book[table] = json!({ key.as_str(): row });
+                        serde_json::from_value::<Book>(book).is_ok()
+                    });
+                    match alone {
+                        Some(row) => whole[table][key] = row,
+                        None => app.fleet.leave_out(kind, &key),
                     }
                 }
             }
-            // What cannot be read is a book with nothing in it.
             let mut book: Book = serde_json::from_value(whole).unwrap_or_default();
             if kept_whole {
                 keep(app, None, &mut book, Default::default()).await?;
@@ -661,15 +712,17 @@ async fn take_back(app: &App, agent: &str, run_id: &str) {
 
 /// One look of the runner at every trigger of a scheduled task that may act. The apps are
 /// told nothing by it, as on the Python Host: what a run's turn does is told like any turn.
-async fn look(app: &App) -> Result<(), Unavailable> {
+async fn look(app: &App) -> Result<(), RecordFailure> {
     let desk = &app.janitors;
     let ids = desk
         .read(app, |book, world, _| book.scheduled(world))
-        .await?;
+        .await
+        .map_err(RecordFailure::Read)?;
     for id in ids {
         let out = desk
             .read(app, |book, _, _| book.out_for(&id).cloned())
-            .await?;
+            .await
+            .map_err(RecordFailure::Read)?;
         let (started, ended) = out.as_ref().map_or((None, None), |run| turn_of(app, run));
         let (hand, _) = desk
             .update(app, |book, world, now_ms| {
@@ -683,7 +736,8 @@ async fn look(app: &App) -> Result<(), Unavailable> {
                 }
                 book.look(&id, ended.as_ref(), world, now_ms)
             })
-            .await?;
+            .await
+            .map_err(RecordFailure::Write)?;
         let Some(hand) = hand else {
             continue;
         };
@@ -691,11 +745,19 @@ async fn look(app: &App) -> Result<(), Unavailable> {
         let handed = desk.update(app, |book, world, now_ms| {
             book.handed(&id, &how, world, now_ms)
         });
-        let (taken, _) = handed.await?;
+        let (taken, _) = handed.await.map_err(RecordFailure::Write)?;
         if how == Delivery::Taken && !taken {
             // The run was cut off between the look and the hand-over.
             take_back(app, &hand.session, &hand.run_id).await;
         }
+    }
+    Ok(())
+}
+
+/// Each keeper gets its look even when another could not read its records.
+async fn tick(app: &App) {
+    if let Err(why) = look(app).await {
+        why.report(&app.fleet, KIND);
     }
     // After every look, what was seen of clips is written down: the bookkeeper asks no
     // model and has no turn of its own.
@@ -703,7 +765,6 @@ async fn look(app: &App) -> Result<(), Unavailable> {
     // And the Quota keeper looks where its look is due, beside the runner.
     crate::quota_keeper::look(app);
     crate::label_checker::look(app);
-    Ok(())
 }
 
 /// Only bound runtimes enter the rotation. A live turn shares its own
@@ -767,9 +828,7 @@ pub fn run(app: &App) {
         loop {
             tokio::time::sleep(every).await;
             visit_idle_bindings(&app, &mut after);
-            if let Err(why) = look(&app).await {
-                eprintln!("clarp-host: the janitors were not looked at: {}", why.0);
-            }
+            tick(&app).await;
         }
     });
 }
@@ -1529,6 +1588,41 @@ pub fn routes() -> Router<App> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_refused_janitor_book_still_gives_each_keeper_its_pass() {
+        let place = crate::unkept::at_the_port::place("janitor-passes");
+        let app = place.app().await;
+        place.refuse_reads("janitors");
+        tick(&app).await;
+        // Quota and labels do their work beside the tick. Wait for their actual reports.
+        let lines = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let lines = place.said.lock().unwrap().clone();
+                if lines.len() >= 4 {
+                    break lines;
+                }
+                place.notice.notified().await;
+            }
+        })
+        .await
+        .expect("each obligation reports the refusal");
+        let mut kinds = Vec::new();
+        for line in &lines {
+            let (kind, why) = line
+                .strip_prefix("clarp-host: the records of the kind ")
+                .unwrap()
+                .split_once(" could not be read: ")
+                .unwrap();
+            assert!(why.ends_with("storage failed: read refused here"));
+            kinds.push(kind);
+        }
+        kinds.sort_unstable();
+        assert_eq!(
+            kinds,
+            ["audio-facts", "janitors", "label-auditor", "quota-monitor"]
+        );
+    }
 
     #[test]
     fn a_revision_is_read_as_the_python_host_reads_it() {

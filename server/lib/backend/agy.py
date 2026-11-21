@@ -25,7 +25,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from ..backend_catalogue import AGY
-from .base import CatalogueDefault, BackendBrand, CompactionStrategy
+from .base import CatalogueDefault, BackendBrand, CliMissing, CompactionStrategy, LaunchRefused
 from .stream_json import StreamJsonBackend, make_handle, popen_turn
 from .long_prompt import ARGV_TEXT_LIMIT
 
@@ -38,6 +38,15 @@ _SECRET_VALUE = re.compile(
 _CONV_RE = re.compile(
     r"conversation[=\s]+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})")
+
+
+class AgyLaunchInvalid(LaunchRefused, ValueError):
+    """The turn's command could not be built (model and effort): refused
+    before any process (R121)."""
+
+
+class AgyOwnershipLost(LaunchRefused, RuntimeError):
+    """The turn lost its slot before the process was spawned (R121)."""
 
 
 @dataclass
@@ -704,17 +713,17 @@ class AgyBackend(StreamJsonBackend):
                "--output-format", "stream-json",
                "--print-timeout", self.print_timeout]
         if model and effort:
-            raise ValueError(
+            raise AgyLaunchInvalid(
                 "AGY model-specific effort compatibility is unknown; "
                 "use effort only with the provider-default model")
         if model:
             if not provider_capabilities.is_dispatchable_agy_model(model):
-                raise ValueError(f"unavailable AGY model: {model!r}")
+                raise AgyLaunchInvalid(f"unavailable AGY model: {model!r}")
             cmd += ["--model", model]
         if effort:
             effort = effort.strip().lower()
             if effort not in {"low", "medium", "high"}:
-                raise ValueError(f"invalid AGY effort: {effort!r}")
+                raise AgyLaunchInvalid(f"invalid AGY effort: {effort!r}")
             cmd += ["--effort", effort]
         if conversation_id and not is_new_session:
             cmd += ["--conversation", conversation_id]
@@ -744,7 +753,7 @@ class AgyBackend(StreamJsonBackend):
         """Spawn one AGY turn and normalize its NDJSON stream asynchronously."""
         agy_bin = self.required_binary
         if shutil.which(agy_bin) is None:
-            raise FileNotFoundError(
+            raise CliMissing(
                 f"`{agy_bin}` not on PATH — install the antigravity CLI to run "
                 f"agy-backed agents")
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))
@@ -807,11 +816,11 @@ class AgyBackend(StreamJsonBackend):
             process.append(popen_turn(cmd, cwd=cwd, session=session,
                                       env_extra={**identity, "CLARP_AGY_MANAGED_TURN": "1"}))
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                          provider=self.id, pid=process[0].pid)
+                                          provider=self.id, pid=process[0].pid, trace_id=trace_id)
         try:
             admitted = owner_gate(admit_spawn)
             if not admitted or not process:
-                raise RuntimeError("AGY turn ownership lost before process spawn")
+                raise AgyOwnershipLost("AGY turn ownership lost before process spawn")
             proc = process[0]
         except Exception:
             try:

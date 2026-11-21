@@ -375,6 +375,22 @@ DEFAULT_CATALOG: list[dict[str, str]] = [
 ]
 
 
+# The public GPT-Live models (OpenAI API reference, Live: `session.model` is
+# "gpt-live-1" or "gpt-live-1.1"). BASELINE_LIVE_MODEL is the one every shipped
+# phone accepts on an agent Live call; DEFAULT_LIVE_MODEL the Host's default.
+LIVE_MODELS = ("gpt-live-1", "gpt-live-1.1")
+BASELINE_LIVE_MODEL = "gpt-live-1"
+DEFAULT_LIVE_MODEL = "gpt-live-1.1"
+# An agent Live call runs on the configured model only for a client whose
+# X-Clarp-Client contract reaches its number here (the name exactly as sent;
+# absent or 0 = never); every other client runs on BASELINE_LIVE_MODEL.
+# `[openai] live_model_min_client` overrides a number or names another client.
+# The first builds that accept both names: iOS sends contract 75 (TestFlight
+# 2986); Android 29 (0.1.0, build 993). Kept here, beside its override table's
+# reader; agent_ring_live uses it.
+AGENT_LIVE_MODEL_MIN_CLIENT: dict[str, int] = {"ios": 75, "android": 29}
+
+
 @dataclass(frozen=True)
 class Config:
     _config_path: str = field(default="", repr=False, compare=False)
@@ -448,7 +464,7 @@ class Config:
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
     janitor_read_diagnostics: bool = False
-    render_spec_min_client: int | None = None
+    render_spec_min_contract: dict[str, int] | None = None
     oracle_diagnostics: bool = False
     oracle_router_backend: str = "api"
     oracle_delegation_strategy: str = "operator"
@@ -456,6 +472,15 @@ class Config:
     oracle_voice_context_file: str = ""
     oracle_voice_backend: str = "api"
     oracle_live_webrtc: bool = False
+    # [openai] live_model: the GPT-Live model of every API-key Live session
+    # (Oracle and agent rings); only the names in oracle_live_wire.LIVE_MODELS.
+    live_model: str = DEFAULT_LIVE_MODEL
+    # [openai] live_idle_timeout_s: standby on the Oracle WebRTC create (API
+    # mode only); 0 = off, else 5 to 60 seconds. Off until a real call shows it.
+    live_idle_timeout_s: int = 0
+    # [openai] live_model_min_client: {platform: client contract} from which an
+    # agent Live call may run on live_model rather than gpt-live-1.
+    live_model_min_client: dict = field(default_factory=dict)
     # [oracle] earcons: short sound cues in Oracle v2 calls (oracle_earcons).
     oracle_earcons: bool = True
     # [oracle] voice_provider: the voice model of Oracle v2 calls, "openai"
@@ -519,6 +544,10 @@ class Config:
     claude_account_switch_command: tuple[str, ...] = ()
     # Opt-in banked-reset adapter; empty means no automated redemption.
     claude_reset_command: tuple[str, ...] = ()
+    codex_reset_command: tuple[str, ...] = ()
+    # At most this many automatic Codex reset redemptions in a rolling 24 hours (R145); unset is
+    # 1, 0 switches the Codex reset step off, and a value that is not a whole number is refused as 0.
+    codex_reset_max_per_day: int = 1
     codex_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = "high"          # "" (CLI default) | low | medium | high | xhigh | max
@@ -809,6 +838,53 @@ def _oracle_languages(raw: Any) -> tuple[str, ...]:
     return tuple(codes)
 
 
+def _live_model(raw: Any) -> str:
+    """`[openai] live_model`: one of the documented GPT-Live models; anything else is refused."""
+    if raw is None:
+        return DEFAULT_LIVE_MODEL
+    if isinstance(raw, str) and raw.strip() in LIVE_MODELS:
+        return raw.strip()
+    from .log import log
+    log("config.live_model", f"refused {raw!r}: allowed {', '.join(LIVE_MODELS)}; using {DEFAULT_LIVE_MODEL}")
+    return DEFAULT_LIVE_MODEL
+
+
+def _live_idle_timeout(raw: Any) -> int:
+    """`[openai] live_idle_timeout_s`: 0 (off) or whole seconds 5 to 60; anything else is refused (off)."""
+    if raw is None or (type(raw) is int and (raw == 0 or 5 <= raw <= 60)):
+        return raw or 0
+    from .log import log
+    log("config.live_idle_timeout_s", f"refused {raw!r}: 0 or a whole number from 5 to 60; standby stays off")
+    return 0
+
+
+def _live_model_min_client(raw: Any) -> dict[str, int]:
+    """`[openai] live_model_min_client`: {client name: client contract}. A key has the X-Clarp-Client name's own
+    form ([A-Za-z][A-Za-z0-9_-]{0,31}) and matches that name exactly as sent; 0 = never for it (as the
+    render_spec table has it); a negative number, a bool, a float or a string is refused with the log line."""
+    if raw is None:
+        return {}
+    from .log import log
+    if not isinstance(raw, dict):
+        log("config.live_model_min_client", f"refused {raw!r}: expected a table of platform = contract")
+        return {}
+    kept = {key: value for key, value in raw.items()
+            if isinstance(key, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", key) and type(value) is int and value >= 0}
+    if len(kept) != len(raw):
+        log("config.live_model_min_client", "refused entries: " + ", ".join(
+            repr(key) for key in raw if key not in kept))
+    # A key that differs from a built-in name only in its case is well formed and is another client: said once
+    # per read, so a slip ('Ios' for 'ios') does not hide.
+    near = [(key, builtin) for key in kept for builtin in AGENT_LIVE_MODEL_MIN_CLIENT
+            if key != builtin and key.lower() == builtin.lower()]
+    if near:
+        log("config.live_model_min_client", "; ".join(
+            f"{key!r} is taken as its own client: it admits only a client that names itself exactly {key!r}; "
+            f"the built-in {builtin!r} keeps its own number ({AGENT_LIVE_MODEL_MIN_CLIENT[builtin]})"
+            for key, builtin in near))
+    return kept
+
+
 # "Claude-5628": the anonymous-launch name suffix (agent_lifecycle mints token_hex(2)).
 _ANONYMOUS_SUFFIX = re.compile(r"-[0-9a-f]{4}$")
 
@@ -830,6 +906,20 @@ def _resolve_config_path() -> pathlib.Path:
         "CLAUDE_PWA_CONFIG",
         str(xdg.config_dir() / "config.toml"),
     ))
+
+
+def _reset_cap(section: dict, key: str) -> int:
+    """A cap on automatic banked-reset redemptions (R145): unset is 1. A value that is not a whole
+    number of 0 or more (true, 1.5, 0.0, -1, "2") is refused with a log line and becomes 0, the
+    step off: a redemption cannot be undone, and off loses only a convenience."""
+    if key not in section:
+        return 1
+    raw = section[key]
+    if type(raw) is int and raw >= 0:
+        return raw
+    from .log import log
+    log(f"config.{key}", f"refused {raw!r}: not a whole number of 0 or more; the automatic reset is off")
+    return 0
 
 
 def _non_negative_float(raw: Any, default: float) -> float:
@@ -879,6 +969,45 @@ def _resolve_contact_avatar_generation(data: dict[str, Any]) -> bool:
             return _parse_contact_avatar_switch(raw_openai.get("contact_avatar_generation"))
     return DEFAULT_CONTACT_AVATAR_GENERATION
 
+
+def _controller_action_urls(raw) -> tuple[str, ...]:
+    """[controller_actions] allowed_urls, each parsed once (lib.url_destination.prefix): one
+    that carries user information, a query or a fragment, or does not parse, is refused here,
+    with one line saying how many (R133)."""
+    from . import url_destination
+    from .log import log
+    texts = [str(url).strip() for url in (raw or []) if str(url).strip()]
+    kept = tuple(text for text in texts if url_destination.prefix(text) is not None)
+    if len(kept) != len(texts):
+        log("config.controller_action_urls", f"refused {len(texts) - len(kept)} allowed URL(s) that do not parse "
+                                             "as a plain http(s) destination")
+    return kept
+
+def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
+    """[artifacts] overrides of render_spec's minimum client contract, per client (issue 428):
+    ``render_spec_min_contract = {ios = 74, android = 30}``, laid over the default; 0 switches a
+    client off, so ``ios = 0`` switches the kind off on this Host. The old single number
+    (``render_spec_min_client``) is iOS's minimum, never every client's; a line says so. The
+    table's keys follow server_identity.client_minimums: a name as the client sends it."""
+    from .log import log
+    out: dict[str, int] = {}
+    single = artifacts.get("render_spec_min_client")
+    if single is not None:
+        if type(single) is int and single >= 0:
+            out["ios"] = single
+            log("config.render_spec_min_client", "applies to iOS only; name other clients in "
+                "[artifacts] render_spec_min_contract")
+        else:
+            log("config.render_spec_min_client", "ignored: not a whole number")
+    table = artifacts.get("render_spec_min_contract")
+    if isinstance(table, dict):
+        if "ios" in table and "ios" in out:
+            log("config.render_spec_min_client", "ignored: render_spec_min_contract names ios")
+        from .server_identity import client_minimums
+        out.update(client_minimums(table, setting="config.render_spec_min_contract"))
+    elif table is not None:
+        log("config.render_spec_min_contract", "ignored: expected a table of client = number")
+    return out or None
 
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
@@ -1019,9 +1148,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         local_tls_port  = int(network.get("local_tls_port", 7683)),
         relay_enabled   = bool(network.get("relay_enabled", False)),
         relay_config_path = str(path.parent / "relay.json"),
-        controller_action_urls = tuple(
-            str(url).strip() for url in controller_actions.get("allowed_urls", []) or []
-            if str(url).strip()),
+        controller_action_urls = _controller_action_urls(controller_actions.get("allowed_urls", [])),
         # Only a literal `false` turns the desk off: a typo must not remove it.
         hotseat_desk_enabled = hotseat.get("desk", True) is not False,
         default_session = str(server.get("default_session", "claude")),
@@ -1062,7 +1189,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
         janitor_read_diagnostics = (data.get("diagnostics", {}).get("janitor_autonomy_reads") is True),
-        render_spec_min_client = (data.get("artifacts") or {}).get("render_spec_min_client"),
+        render_spec_min_contract = _render_spec_minimums(data.get("artifacts") or {}),
         oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
         oracle_router_backend = str(openai.get("oracle_router_backend", "api")).strip(),
         oracle_delegation_strategy = str(openai.get("oracle_delegation_strategy", "operator")).strip(),
@@ -1070,6 +1197,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         oracle_voice_context_file = str(openai.get("oracle_voice_context_file", "")).strip(),
         oracle_voice_backend = str(openai.get("oracle_voice_backend", "api")).strip(),
         oracle_live_webrtc = bool(openai.get("oracle_live_webrtc", False)),
+        live_model = _live_model(openai.get("live_model")),
+        live_idle_timeout_s = _live_idle_timeout(openai.get("live_idle_timeout_s")),
+        live_model_min_client = _live_model_min_client(openai.get("live_model_min_client")),
         oracle_earcons = (data.get("oracle") or {}).get("earcons", True) is not False
             if isinstance(data.get("oracle"), dict) else True,
         oracle_voice_provider = str(_oracle.get("voice_provider", "openai")).strip().lower() or "openai",
@@ -1105,6 +1235,10 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         claude_reset_command = tuple(agents.get("claude_reset_command", ()))
             if isinstance(agents.get("claude_reset_command", ()), (list, tuple))
             and all(isinstance(arg, str) and arg for arg in agents.get("claude_reset_command", ())) else (),
+        codex_reset_command = tuple(agents.get("codex_reset_command", ()))
+            if isinstance(agents.get("codex_reset_command", ()), (list, tuple))
+            and all(isinstance(arg, str) and arg for arg in agents.get("codex_reset_command", ())) else (),
+        codex_reset_max_per_day = _reset_cap(agents, "codex_reset_max_per_day"),
         claude_effort   = str(agents.get("claude_effort", "high")),
         helper_archive_grace_hours=_non_negative_float(
             agents.get("helper_archive_grace_hours"), 24.0),

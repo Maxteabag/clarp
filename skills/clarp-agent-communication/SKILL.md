@@ -68,3 +68,13 @@ a peer server use `prompt`.
 A helper agent (one created with `--parent`) reports to its parent the same
 way. That message moves the helper to `reported`; a message from the parent
 back to it moves it to `running` again. See `clarp-sub-agents`.
+
+## When the user does not see the turn
+
+A turn another agent's message started is coordination: the user may choose to
+keep it out of the chat, and then nothing you write in it, your final reply
+included, reaches the user (the Host adds one line to such a turn's prompt
+when that is so). To tell the user something from any turn, run
+`clarp-admin tell-user --from "$ME" --text "..."`: it puts a note in your own
+chat that is always shown and notifies the user. It works only from your own
+running turn. Decision cards and artifacts are shown as always.

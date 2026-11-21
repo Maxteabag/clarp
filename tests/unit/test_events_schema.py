@@ -49,7 +49,8 @@ FULL_SAMPLES = {
     SSEType.AGENT_STATE: lambda: events.agent_state(
         session="s", agent_id="a", kind="thinking", persona="P", ts=1,
         detail={}, status_text="", trace_id="t", client_msg_id="m",
-        queue_started=False, queue_remaining=0, origin="janitor"),
+        queue_started=False, queue_remaining=0, origin="janitor",
+        audience="agents", sender_agent_id="b", sender_name="B"),
     SSEType.AGENT_ACTIVITY: lambda: events.agent_activity(
         agent_id="a", session="s", persona="P", kind="tool", phase="tool",
         status="running", tool="Read", action="read", summary="x",
@@ -63,7 +64,7 @@ FULL_SAMPLES = {
         server_now_ms=1, ops=[{"op": "status", "conv": "c", "activity": {"state": "idle"}}]),
     SSEType.AGENT_ROSTER: lambda: events.agent_roster(
         "created", session="s", persona="P", voice_id="v", backend="claude",
-        name="N"),
+        name="N", voice_profile={"speech": {}, "hearing": {}}),
     SSEType.AGENT_FOCUS: lambda: events.agent_focus(session="s", agent_id="a"),
     SSEType.TRANSCRIPT_UPDATED: lambda: events.transcript_updated(
         agent_id="a", session="s", backend_session_id="b"),
@@ -72,6 +73,8 @@ FULL_SAMPLES = {
         queue_started=False, queue_revision=1, client_msg_id="m"),
     SSEType.ARTIFACT_UPDATED: lambda: events.artifact_updated(
         session="s", agent_id="a", artifact_id="x"),
+    SSEType.MEDIA_CHANGED: lambda: events.media_changed(
+        session="s", agent_id="a", asset_id="x", change="favorite", favorite=True, at=1),
     SSEType.ATTENTION_UPDATED: lambda: events.attention_updated(attention_count=0),
     SSEType.BACKGROUND_JOB_UPDATED: lambda: events.background_job_updated(
         change_revision=1, observed_at=1, job_id="j", session="s",
@@ -88,7 +91,8 @@ FULL_SAMPLES = {
         origin="pwa", push=True, badge=True, unread=True, muted=False,
         preview="hi", reason="done"),
     SSEType.TTS_ERROR: lambda: events.tts_error(
-        session="s", agent_id="a", persona="P", message="m", error="e"),
+        session="s", agent_id="a", persona="P", message="m", error="e",
+        reason="no_voice", provider="cartesia", trace_id="t"),
     SSEType.LOCATION_REQUEST: lambda: events.location_request(session="s"),
     SSEType.CALENDAR_REQUEST: lambda: events.calendar_request(
         request_id="r", session="s", title="t", start="x", end="y",

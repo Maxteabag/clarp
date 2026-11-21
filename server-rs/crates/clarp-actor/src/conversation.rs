@@ -14,9 +14,10 @@
 
 use std::collections::HashMap;
 
+use clarp_kernel::agent::AgentEvent;
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
-use clarp_kernel::journal::kind;
-use clarp_kernel::turn::{Origin, left_out_of_chats};
+use clarp_kernel::journal::{coordination_key, kind};
+use clarp_kernel::turn::{Origin, TurnEvent, left_out_of_chats};
 use clarp_ports::log::{AgentLog, Item, Seq};
 
 use crate::ActorError;
@@ -71,6 +72,9 @@ pub struct Versioned {
     pub tools: Vec<ToolCall>,
     /// Tool work came after this reply in the same turn: it was said along the way.
     pub commentary: bool,
+    /// The turn it belongs to answers another agent: that agent's id, empty for an agent of a
+    /// peer Host. `None`: the user's turn, or no turn.
+    pub coordination: Option<String>,
 }
 
 impl Versioned {
@@ -85,6 +89,7 @@ impl Versioned {
             turn: None,
             tools: Vec::new(),
             commentary: false,
+            coordination: None,
         }
     }
 }
@@ -104,6 +109,18 @@ pub struct Page {
     /// The revision the conversation begins after: 0, or where the agent was last started
     /// again. A reader that holds a revision up to this one holds a conversation that ended.
     pub begins_after: u64,
+}
+
+impl Page {
+    /// Whether a reader that holds the revision `held` (the cursor an earlier page gave it)
+    /// holds a conversation that has ended: a revision this conversation never reached, above
+    /// its head, or one at or below where it begins, since the agent was started again after
+    /// it. Such a reader is told to drop what it has and read the conversation anew: a page of
+    /// changes cannot say that a row is gone. A reader that holds nothing (0) asks for the
+    /// newest page, and is not asked this.
+    pub fn ended_for(&self, held: u64) -> bool {
+        held > self.head_revision || held <= self.begins_after
+    }
 }
 
 /// A reply that is being written.
@@ -151,11 +168,30 @@ fn corrupt(item: &Item, error: serde_json::Error) -> ActorError {
     ))
 }
 
+/// Whether a turn answers another agent: its acceptance, found by its key when it was marked
+/// so. One look by key, whatever the size of the conversation.
+pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
+    let Some(stored) = log.find(&coordination_key(turn))? else {
+        return Ok(None);
+    };
+    let event: AgentEvent =
+        serde_json::from_slice(&stored.body).map_err(|error| corrupt(&stored, error))?;
+    Ok(match event {
+        AgentEvent::Turn {
+            change: TurnEvent::Accepted { coordination, .. },
+            ..
+        } => coordination,
+        _ => None,
+    })
+}
+
 /// Reads rows as they are now: each with the parts that name it.
 struct Reader<'a> {
     log: &'a dyn AgentLog,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
+    /// Whether the turns asked about answer another agent ([`mark_of`]).
+    marks: HashMap<u64, Option<String>>,
 }
 
 impl<'a> Reader<'a> {
@@ -163,7 +199,18 @@ impl<'a> Reader<'a> {
         Self {
             log,
             ends: HashMap::new(),
+            marks: HashMap::new(),
         }
+    }
+
+    /// Whether this turn answers another agent: looked up once per turn.
+    fn mark(&mut self, turn: u64) -> Result<Option<String>, ActorError> {
+        if let Some(known) = self.marks.get(&turn) {
+            return Ok(known.clone());
+        }
+        let found = mark_of(self.log, turn)?;
+        self.marks.insert(turn, found.clone());
+        Ok(found)
     }
 
     /// How this turn ended, when it has.
@@ -236,6 +283,9 @@ impl<'a> Reader<'a> {
                 newest = newest.max(stored.seq);
                 row.commentary = true;
             }
+        }
+        if let Some(turn) = row.turn_number {
+            row.coordination = self.mark(turn)?;
         }
         if let Some(turn) = row.turn_number
             && let Some((end, seq)) = self.end(turn)?
@@ -403,8 +453,9 @@ pub(crate) fn older(
     let mut entries = rows(log, &items, Place::First, which)?;
     // A reply being written is shown where its finished version will be: at the end.
     for draft in drafts {
-        let shown = draft.versioned();
+        let mut shown = draft.versioned();
         if which.keeps(&shown.entry) && !entries.iter().any(|known| known.entry.id() == draft.id) {
+            shown.coordination = mark_of(log, draft.turn)?;
             entries.push(shown);
         }
     }
@@ -435,6 +486,41 @@ pub(crate) fn revision_at(log: &dyn AgentLog, span: Span, ts_ms: i64) -> Result<
     Ok(low * REVISION_STEP)
 }
 
+/// The items after position `from` that a page of up to `limit` things reads, oldest first;
+/// whether there are more after them; and the cursor where reading stopped. What this reader
+/// does not get is passed over, and the cursor passes over it too: it is not read again.
+fn items_after(
+    log: &dyn AgentLog,
+    mut from: Seq,
+    limit: usize,
+    which: Which,
+) -> Result<(Vec<Item>, bool, Option<u64>), ActorError> {
+    let mut items: Vec<Item> = Vec::new();
+    let mut cursor = None;
+    let at_a_time = if which == Which::All {
+        limit.saturating_add(1)
+    } else {
+        CHUNK.max(limit.saturating_add(1))
+    };
+    loop {
+        let chunk = log.read_after(from, kind::CONVERSATION, at_a_time)?;
+        let whole = chunk.len() == at_a_time;
+        for item in chunk {
+            from = item.seq;
+            if which.keeps_item(&item)? {
+                if items.len() == limit {
+                    return Ok((items, true, cursor));
+                }
+                items.push(item);
+            }
+            cursor = Some(from * REVISION_STEP);
+        }
+        if !whole {
+            return Ok((items, false, cursor));
+        }
+    }
+}
+
 /// Up to `limit` things that are newer than `revision`, in the order they changed.
 pub(crate) fn after(
     log: &dyn AgentLog,
@@ -445,51 +531,39 @@ pub(crate) fn after(
     which: Which,
 ) -> Result<Page, ActorError> {
     let head_revision = span.head_revision;
-    // Read on until the page is full or the log ends. What this reader does not get is
-    // passed over, and the cursor passes over it too: it is not read again. A reader that
-    // was last told of a conversation that has ended since is told all of the one there is.
-    let mut items: Vec<Item> = Vec::new();
     let mut from = (revision / REVISION_STEP).max(span.floor);
-    let mut cursor = None;
-    let mut has_more = false;
-    let at_a_time = if which == Which::All {
-        limit.saturating_add(1)
-    } else {
-        CHUNK.max(limit.saturating_add(1))
-    };
-    'reading: loop {
-        let chunk = log.read_after(from, kind::CONVERSATION, at_a_time)?;
-        let whole = chunk.len() == at_a_time;
-        for item in chunk {
-            from = item.seq;
-            if which.keeps_item(&item)? {
-                if items.len() == limit {
-                    has_more = true;
-                    break 'reading;
+    let (mut entries, latest_revision, has_more) = loop {
+        let (items, has_more, cursor) = items_after(log, from, limit, which)?;
+        let mut entries = rows(log, &items, Place::Newest, which)?;
+        if !has_more {
+            for draft in drafts {
+                let mut shown = draft.versioned();
+                if draft.revision > revision && which.keeps(&shown.entry) {
+                    shown.coordination = mark_of(log, draft.turn)?;
+                    entries.push(shown);
                 }
-                cursor = Some(item.seq * REVISION_STEP);
-                items.push(item);
-            } else {
-                cursor = Some(item.seq * REVISION_STEP);
             }
+            break (entries, head_revision.max(revision), false);
         }
-        if !whole {
-            break;
+        // There is more in the log than this page: the cursor stops at what was read. A row
+        // is read as it is now; one whose newest part lies beyond what this page read is
+        // left out of it, and comes once, on the page that reaches that part. So no row of a
+        // page is newer than its cursor, and whoever takes a row's revision for a cursor
+        // passes over nothing.
+        let cursor = cursor.unwrap_or(revision);
+        entries.retain(|row| row.revision <= cursor);
+        // A page that says there is more is never empty: a reader could take it for the end.
+        // Where every row it read was left for a later page (the parts of one long reply),
+        // it reads on from its cursor, as far as the head at the most.
+        if entries.is_empty() && cursor / REVISION_STEP > from {
+            from = cursor / REVISION_STEP;
+            continue;
         }
-    }
-    let mut entries = rows(log, &items, Place::Newest, which)?;
-    let latest_revision = if has_more {
-        // There is more in the log than this page: the cursor stops at what was read.
-        cursor.unwrap_or(revision)
-    } else {
-        for draft in drafts {
-            let shown = draft.versioned();
-            if draft.revision > revision && which.keeps(&shown.entry) {
-                entries.push(shown);
-            }
-        }
-        head_revision.max(revision)
+        break (entries, cursor, true);
     };
+    // Changes in the order of their revisions: a reply being written took its revision when
+    // it last grew, and what was stored since stands above it.
+    entries.sort_by_key(|row| row.revision);
     Ok(Page {
         entries,
         latest_revision,
@@ -533,5 +607,35 @@ pub(crate) fn delegation_baseline(
         if part.len() < CHUNK {
             return Ok(0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reader_is_told_its_conversation_ended_above_the_head_and_at_or_below_where_it_begins() {
+        let page = Page {
+            head_revision: 9 * REVISION_STEP,
+            begins_after: 4 * REVISION_STEP,
+            ..Page::default()
+        };
+        assert!(page.ended_for(9 * REVISION_STEP + 1), "above the head");
+        assert!(!page.ended_for(9 * REVISION_STEP), "at the head");
+        assert!(
+            !page.ended_for(4 * REVISION_STEP + 1),
+            "just after the floor"
+        );
+        assert!(page.ended_for(4 * REVISION_STEP), "at the floor");
+        assert!(page.ended_for(REVISION_STEP), "below the floor");
+        // An agent that was never started again: only above the head.
+        let page = Page {
+            head_revision: 3 * REVISION_STEP,
+            ..Page::default()
+        };
+        assert!(!page.ended_for(1));
+        assert!(!page.ended_for(3 * REVISION_STEP));
+        assert!(page.ended_for(3 * REVISION_STEP + 1));
     }
 }

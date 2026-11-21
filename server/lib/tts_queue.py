@@ -16,4 +16,6 @@ from .tts_queue_records import (
     prune_old,
     recent,
     reset_in_flight,
+    turn_already_told,
+    turn_partly_spoken,
 )

@@ -513,6 +513,33 @@ pub(crate) fn movable(agent: &Value) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The source's ordinary read is insufficient to recreate this kind. Keep that
+/// decision here so a source with a migration export can supply it instead.
+fn left_on_source(artifact: &Value) -> Option<String> {
+    if artifact["type"] != "render_spec" {
+        return None;
+    }
+    let id = artifact["artifact_id"].as_str().unwrap_or("");
+    let title = artifact["title"].as_str().unwrap_or("");
+    Some(format!("  {id:?} — {title:?}"))
+}
+
+fn skipped_report(left: &[String]) -> String {
+    if left.is_empty() {
+        return String::new();
+    }
+    let count = left.len();
+    let kind = if count == 1 {
+        "render spec"
+    } else {
+        "render specs"
+    };
+    format!(
+        "Left on the source Host: {count} {kind}.\n{}\n",
+        left.join("\n")
+    )
+}
+
 pub fn import(
     mut args: impl Iterator<Item = String>,
     source_token: &str,
@@ -628,16 +655,22 @@ pub fn import(
     // What it made and asked: its library, a page of it at a time, and for a report what
     // it was, version by version.
     let mut library: Vec<Value> = Vec::new();
+    let mut left = Vec::new();
+    let mut offset = 0;
     loop {
         let path = format!(
-            "/artifacts?session={}&order=created&limit=500&offset={}",
-            ids::in_a_link(&session),
-            library.len()
+            "/artifacts?session={}&order=created&limit=500&offset={offset}",
+            ids::in_a_link(&session)
         );
         let page = get(&from, &path, source_token)?;
         let rows = page["artifacts"].as_array().cloned().unwrap_or_default();
         let count = rows.len();
+        offset += count;
         for artifact in rows {
+            if let Some(line) = left_on_source(&artifact) {
+                left.push(line);
+                continue;
+            }
             let mut revisions: Vec<Value> = Vec::new();
             if artifact["type"] == "html_form" && artifact["read_only"] == true {
                 let id = ids::in_a_link(artifact["artifact_id"].as_str().unwrap_or(""));
@@ -672,6 +705,7 @@ pub fn import(
         source_token,
     )?;
     let gallery = gallery["assets"].as_array().cloned().unwrap_or_default();
+    let skipped = skipped_report(&left);
     let wants = wanted(&gallery, &library, &plans, &turns);
     let way = Way {
         from: &from,
@@ -684,7 +718,7 @@ pub fn import(
     if only_files {
         let followed = files(&way, &wants);
         let (came, more) = followed.told(&way);
-        return Ok(format!("{session} has {came} here.\n{more}")
+        return Ok(format!("{session} has {came} here.\n{skipped}{more}")
             .trim_end()
             .to_string());
     }
@@ -768,7 +802,7 @@ pub fn import(
     let heard = bring_hearing(&way, &agent);
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {came}.\n\
-         {more}{heard}\
+         {skipped}{more}{heard}\
          It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns.\n\
          Here it is held until then: it answers what you say to it, and what would start by itself \
          (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, \
@@ -871,16 +905,115 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     let started_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
-    let asked = json!({
+    let argv: Vec<String> = args.collect();
+    let tell_user = name == "clarp-admin" && argv.first().is_some_and(|arg| arg == "tell-user");
+    // Read the capability in the invoking tool's process. The server never
+    // opens an arbitrary path supplied by an HTTP tool caller.
+    let mut credential = String::new();
+    if matches!(name.as_str(), "clarp-goal" | "clarp-agent-tasks")
+        && argv.first().is_some_and(|s| s == "bookkeeping")
+        && match argv.get(1).map(String::as_str) {
+            Some("observe") => {
+                argv.len() == 3
+                    || (argv.len() == 4 && serde_json::from_str::<Value>(&argv[3]).is_ok())
+            }
+            Some("record") => argv.len() == 6 && serde_json::from_str::<Value>(&argv[5]).is_ok(),
+            _ => false,
+        }
+        && let Some(id) = argv.get(2)
+    {
+        let explicit = std::env::var_os("CLARP_DELEGATION_TOKEN_FILE")
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let valid_id = id.len() == 18
+            && id.starts_with("dg")
+            && id[2..].bytes().all(|b| b.is_ascii_hexdigit());
+        if !valid_id {
+            return ToolOutcome {
+                exit: 4,
+                stdout: String::new(),
+                stderr: "agent_tasks: unknown delegation or wrong credential\n".into(),
+            };
+        }
+        let path = explicit.unwrap_or_else(|| {
+            let dir = std::env::var_os("CLARP_DELEGATION_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::env::var_os("XDG_DATA_HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| crate::config::home().join(".local/share"))
+                        .join("clarp-host/delegations")
+                });
+            dir.join(format!("{id}.token"))
+        });
+        let read = || -> std::io::Result<String> {
+            use std::io::Read as _;
+            let mut text = String::new();
+            use std::os::unix::fs::OpenOptionsExt as _;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(nix::libc::O_NONBLOCK)
+                .open(&path)?;
+            if !file.metadata()?.is_file() {
+                return Err(std::io::ErrorKind::InvalidInput.into());
+            }
+            file.take(66).read_to_string(&mut text)?;
+            if text.len() >= 66 {
+                return Err(std::io::ErrorKind::InvalidData.into());
+            }
+            Ok(text)
+        };
+        match read() {
+            Ok(value) => {
+                let value = value.trim();
+                if value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    credential = value.into();
+                }
+            }
+            Err(e) => {
+                return ToolOutcome {
+                    exit: 4,
+                    stdout: String::new(),
+                    stderr: format!("agent_tasks: cannot read the delegation credential: {e}\n"),
+                };
+            }
+        }
+    }
+    let mut asked = json!({
         "tool": name,
-        "argv": args.collect::<Vec<_>>(),
+        "argv": argv,
         "cwd": cwd,
         "env": env,
         "ppid": std::os::unix::process::parent_id(),
         "started_ms": started_ms,
     });
+    if !credential.is_empty() {
+        asked["bookkeeping_credential"] = json!(credential);
+    }
+    if tell_user {
+        // Each attempt carries the same id, including when the Host wrote the note but
+        // the connection closed before the tool received the answer.
+        asked["note_id"] = json!(format!("tell-{}", ids::hex(8)));
+    }
+    let mut retries = if tell_user { 6 } else { 0 };
+    let mut delay = Duration::from_secs(1);
     loop {
-        let answer = match post(&address, "/tools/run", token, &asked) {
+        let result = post(&address, "/tools/run", token, &asked);
+        let retryable = match &result {
+            Err(_) | Ok((502..=504, _)) => true,
+            Ok((200, answer)) => answer.is_null(),
+            _ => false,
+        };
+        if retryable && retries > 0 {
+            retries -= 1;
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(Duration::from_secs(16));
+            continue;
+        }
+        let answer = match result {
+            Ok((200, answer)) if tell_user && answer.is_null() => {
+                return unavailable(format!("{name}: the Host at {address} sent no tool answer"));
+            }
             Ok((200, answer)) => answer,
             Ok((status, answer)) => {
                 return unavailable(format!(

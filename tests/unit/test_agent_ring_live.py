@@ -166,7 +166,8 @@ def test_the_snapshot_is_complete_pinned_and_digested(sander):
     assert snapshot["texts"] == {key: text for key, (_name, text) in FILES.items()}
     assert snapshot["profile"]["files"] == {k: hashlib.sha256(t.encode()).hexdigest() for k, (_n, t) in FILES.items()}
     assert snapshot["event_context"] == _context() and snapshot["opening_text"] == OPENING
-    assert (snapshot["provider"], snapshot["model"], snapshot["voice"]) == ("openai", "gpt-live-1", "marin")
+    # The model is not frozen with the ring: it is chosen when the grant is made, for the answering client.
+    assert (snapshot["provider"], snapshot["voice"]) == ("openai", "marin") and "model" not in snapshot
     stored = next(r for r in rings._load() if r["ring_id"] == ring["ring_id"])
     assert stored["_live_context_digest"] == hashlib.sha256(live.canonical(snapshot)).hexdigest()
 

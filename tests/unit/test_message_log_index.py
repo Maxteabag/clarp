@@ -66,8 +66,14 @@ def test_log_pages_read_the_newest_rows_from_the_index(page, include_automated):
     inner = next(r for r in plan if r[3].startswith("CO-ROUTINE"))
     inner_plan = _subtree(plan, inner[0])
     assert any("USING INDEX idx_messages_log_order" in d for d in inner_plan), plan
-    # Only the outer re-sort of the page itself may use a temporary B-tree.
-    assert not any("TEMP B-TREE" in d for d in inner_plan), plan
+    if page == "before":
+        # The cursor is a range of the index, not a walk down from the newest row: an OR of the
+        # three tie cases alone made an older page cost more the further back it was.
+        assert any("idx_messages_log_order" in d and "<expr><?" in d for d in inner_plan), plan
+    # Only the outer re-sort of the page itself may sort the page. The inner read may order rows
+    # that tie on (timestamp, seq) by message_id ("FOR LAST TERM": rows still come in index order,
+    # so LIMIT stops early); a sort of the whole conversation is what this test forbids.
+    assert not any("TEMP B-TREE" in d and "LAST TERM" not in d for d in inner_plan), plan
 
 
 def test_finalized_reply_lookups_read_only_the_final_rows():

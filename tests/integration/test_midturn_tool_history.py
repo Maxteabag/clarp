@@ -56,6 +56,21 @@ def _active_turn(running_server, monkeypatch, tmp_path, backend):
     return base, agent, transcript, source, spawned, steered, active_trace
 
 
+def _written_now(source):
+    """The corpus stamps its records on a fixed day in the past. A provider
+    writes its copy of a prompt after the prompt was sent, and the importer
+    links a copy only to a send it could be the copy of (a copy written
+    before a send is another message). Move the records to now, in order."""
+    stamps = [dt.datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+              for group in [source.header, *source.groups] for r in group if "timestamp" in r]
+    shift = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=1) - min(stamps)
+    for group in [source.header, *source.groups]:
+        for record in group:
+            if "timestamp" in record:
+                moved = dt.datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")) + shift
+                record["timestamp"] = moved.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _log(base, after=0):
     status, raw = _get(base + "/log?session=rachel&limit=100&include_automated=0"
                       + f"&after_revision={after}")
@@ -141,6 +156,7 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
     monkeypatch.setattr(message_writes, "_keyed_line_id", lambda *a, **k: "")
     base, agent, transcript, source, spawned, steered, trace = _active_turn(
         running_server, monkeypatch, tmp_path, backend)
+    _written_now(source)
     first = source.groups[0]
     if backend == "claude":
         commentary = json.loads(json.dumps(first[1]))
@@ -170,12 +186,24 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
     assert before["turns"] and not any(r["tools"] or r["display_cells"] for r in before["turns"])
 
     # A streamed commentary row can overlap commentary already imported.
-    # The next real import retracts that duplicate and raises the replace
-    # watermark, even though this provider turn is still running.
+    # Once the provider has finished that message, the next real import
+    # retracts the duplicate and raises the replace watermark, even though
+    # this provider turn is still running. (Since #411 a row still streaming
+    # is kept while it may be a new reply that begins with the same words;
+    # test_live_import_identity covers that rule.)
     streamed = message_store.upsert_live_assistant_message(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
         trace_id=trace, text="Looking at 0.", item_key=own_id)
     assert streamed is not None
+    assert message_store.mark_live_message_final(
+        agent_id=agent["agent_id"], backend_session_id="synthetic-native",
+        trace_id=trace, item_key="overlapping-commentary")
+    # The provider has already begun its next reply, other words, still
+    # streaming: an import of the commentary must leave it where it is shown.
+    next_reply = message_store.upsert_live_assistant_message(
+        agent_id=agent["agent_id"], backend_session_id="synthetic-native",
+        trace_id=trace, text="Running the probe now", item_key="next-reply")
+    assert next_reply is not None
     transcript_incremental.import_transcript(
         backend=backend, path=transcript, agent_id=agent["agent_id"],
         backend_session_id="synthetic-native")
@@ -183,6 +211,13 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         "SELECT replace_revision FROM conversation_heads WHERE agent_id=? AND backend_session_id=?",
         (agent["agent_id"], "synthetic-native")).fetchone()[0]
     assert head > before["latest_revision"]
+    imported = _log(base)["turns"]
+    # One copy of the commentary, under the id the client already holds.
+    assert [r["id"] for r in imported if r["role"] == "assistant"
+            and r["text"].strip() == "Looking at 0."] == [streamed["id"]]
+    # The reply still streaming is kept, once, with its words.
+    assert [(r["id"], r["text"]) for r in imported if r["id"] == next_reply["id"]] == [
+        (next_reply["id"], "Running the probe now")]
 
     with _held_import(monkeypatch, transcript) as (entered, release):
         # Hold the real background import queue: live activity can reach the
@@ -236,8 +271,8 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         refreshed = _log(base)
         imported_calls = [t.get("id") for r in refreshed["turns"]
                           for t in r["tools"] + r["display_cells"]]
-        assert call in imported_calls
-        assert call in calls, "a replacement snapshot must retain the tool already shown live"
+        assert imported_calls.count(call) == 1
+        assert calls.count(call) == 1, "a replacement snapshot must retain the tool already shown live"
 
 
 @pytest.mark.parametrize("queue", [True, False])

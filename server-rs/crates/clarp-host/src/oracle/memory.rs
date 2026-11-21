@@ -7,11 +7,28 @@
 //! for, asked by one question at a time, and what a question changed is written before
 //! anybody is told.
 
-use clarp_kernel::oracle::threads::{BEGUN, LINKED, Memory, THREADS, TOLD};
+use clarp_kernel::oracle::threads::{
+    BEGUN, Begun, LINKED, Linked, Memory, THREADS, TOLD, Thread, Told,
+};
 use serde_json::Value;
 
 use crate::agent::Unavailable;
 use crate::edge::App;
+
+/// What this desk keeps, declared once (`kept.rs`). Listed whole at the first question, not at
+/// the start (the threads are kept for ever): judged when read, each as the row the memory reads.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(
+        THREADS,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Thread>,
+    )
+    .when_read(),
+    crate::kept::Kind::book(BEGUN, crate::kept::Key::Plain, crate::kept::fits::<Begun>).when_read(),
+    crate::kept::Kind::book(LINKED, crate::kept::Key::Plain, crate::kept::fits::<Linked>)
+        .when_read(),
+    crate::kept::Kind::book(TOLD, crate::kept::Key::Plain, crate::kept::fits::<Told>).when_read(),
+];
 
 /// The memory, read from what was kept the first time it is asked for.
 async fn opened<'a>(
@@ -21,7 +38,7 @@ async fn opened<'a>(
     if held.is_none() {
         let mut rows: Vec<(&'static str, Value)> = Vec::new();
         for kind in [THREADS, BEGUN, LINKED, TOLD] {
-            for (_, row) in app.fleet.kept_all(kind).await? {
+            for (_, row) in app.fleet.kept_listed(kind).await? {
                 rows.extend(
                     serde_json::from_slice::<Value>(&row)
                         .ok()

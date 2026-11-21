@@ -445,7 +445,8 @@ EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
 # fields and events are left out of both sides before the Rust Host is compared: they are not
 # differences to explain one by one, they are one feature that is not there yet. The register
 # of what is not there yet is server-rs/docs/differences.md.
-NOT_YET: dict = {}
+NOT_YET = {
+}
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
 NOT_BUILT = {
@@ -508,10 +509,8 @@ def in_any_order(path, body):
 # compared of such an answer is what an app's reader needs of it: the status, and every field
 # with its kind. What the fields hold is in server-rs/docs/differences.md as not built.
 NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/agent-model-options',
-                      # Screens of what this Host has not, where the Python Host's first day says something
-                      # this Host must not: that a picture could be made with a key, what the Oracle
-                      # could do. Compared as their fields.
-                      '/agent-portrait-generation', '/oracle/status'})
+                      # The Oracle's available functions depend on the installed providers.
+                      '/oracle/status'})
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
@@ -678,6 +677,15 @@ def own_particulars(body):
     if out.get('clarp_version'):
         out['clarp_version'] = '<version>'
     return out
+
+
+def own_version_of_voices(body):
+    """A snapshot with the version of the Host's part of its agents' voices as just that: each
+    Host makes its own from what it reads (docs/differences.md); what it is held to is that it
+    is a text, and when it moves (crates/clarp-host/tests/host.rs)."""
+    if isinstance(body, dict) and isinstance(body.get('voice_profile_version'), str):
+        return {**body, 'voice_profile_version': '<version>'}
+    return body
 
 
 def conversation_of(value: dict, otherwise: str) -> str:
@@ -908,7 +916,8 @@ def core(raw: dict) -> dict:
     janitors_made = made_new(raw['http'], {}, nameless=raw.get('scenario') in NAMELESS)
     if janitors_made:
         raw = {**raw, 'http': by_name(raw['http'], janitors_made), 'sse': by_name(raw['sse'], janitors_made)}
-    http = [{**exchange, 'body': own_particulars(without_features(exchange['body']))} for exchange in raw['http']]
+    http = [{**exchange, 'body': own_version_of_voices(own_particulars(without_features(exchange['body'])))}
+            for exchange in raw['http']]
     http = [{**exchange, 'body': outline(exchange['body'])} if exchange.get('path') in NOT_KEPT and exchange.get('status') == 200
             else exchange for exchange in http]
     http = [{**exchange, 'body': kept_where(exchange['body'])} if exchange.get('path') == '/upload' else exchange
@@ -919,7 +928,7 @@ def core(raw: dict) -> dict:
     for frame in raw['sse']:
         data = frame.get('data')
         if isinstance(data, dict):
-            if data.get('type') in NOT_YET_EVENTS:
+            if data.get('type') in NOT_YET_EVENTS or f"{data.get('type')}/{data.get('kind')}" in NOT_YET_EVENTS:
                 continue
             data = without_features(data)
             if data.get('type') == 'server-version' and 'version' in data:

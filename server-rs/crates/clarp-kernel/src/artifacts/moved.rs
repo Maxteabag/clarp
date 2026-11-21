@@ -174,6 +174,8 @@ impl ArtifactBook {
             // What users answered where it was is in its conversation; a form that arrives
             // takes answers anew.
             submissions: Vec::new(),
+            // Only this Host's own proof of a turn names one: none for what came.
+            source_trace_id: String::new(),
         };
         // A report that came without what it was is at least what it is.
         if reports::is_report(&artifact) {

@@ -10,11 +10,12 @@ use clarp_actor::{LiveStatus, LiveTool, Status};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::control;
 use clarp_kernel::conversation::{Entry, Notice, ToolCall, ToolStatus, TurnEnd};
+use clarp_kernel::coordination;
 use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
+use clarp_kernel::launch_refused;
 use clarp_kernel::notify;
 use clarp_kernel::recovery;
-use clarp_kernel::said;
 use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
@@ -156,8 +157,13 @@ pub fn transcript_updated(record: &AgentRecord) -> Value {
 
 /// A message was handed to the agent and its turn began: the answer to a send, for every
 /// client that did not send it.
-pub fn dispatched(record: &AgentRecord, live: &LiveStatus, waiting: usize) -> Value {
-    json!({
+pub fn dispatched(
+    record: &AgentRecord,
+    live: &LiveStatus,
+    waiting: usize,
+    with: &WorkingWith,
+) -> Value {
+    let mut told = json!({
         "type": "agent-state",
         "agent_id": record.agent_id,
         "session": record.session,
@@ -166,20 +172,50 @@ pub fn dispatched(record: &AgentRecord, live: &LiveStatus, waiting: usize) -> Va
         "trace_id": live.trace_id.clone().unwrap_or_default(),
         "queue_started": live.from_queue,
         "queue_remaining": waiting,
-    })
+        "audience": coordination::USER,
+    });
+    if let WorkingWith::Agents { sender } = with {
+        told["audience"] = json!(coordination::AGENTS);
+        if let Some((agent_id, name)) = sender {
+            told["sender_agent_id"] = json!(agent_id);
+            told["sender_name"] = json!(name);
+        }
+    }
+    told
+}
+
+/// Whom a turn that begins works for, as its working state says it (the Python Host's
+/// `turn_handoff._working_with`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum WorkingWith {
+    /// The user: the user's turn, or any turn of an agent that cannot leave a note.
+    #[default]
+    User,
+    /// Another agent, whose message began the turn: its id and name when it is an agent of
+    /// this Host, none for an agent of a peer Host.
+    Agents { sender: Option<(String, String)> },
 }
 
 /// What a turn that waits a moment for its next attempt shows.
 const RECONNECTING: &str = "Reconnecting… Your message is saved.";
 
-/// The attempt a live turn waits a moment for, and how long it waits: when it waits for one.
-fn reconnecting(live: &LiveStatus) -> Option<(u32, i64)> {
+/// The attempt a live turn waits a moment for, how long it waits, and of how many tries:
+/// when it waits for one. A turn whose launch was refused before its tool was given anything
+/// has the tries of R121 (its own, and eight of one refusal); another, those of a failure
+/// that passes.
+fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
     let parked = live.parked.as_ref()?;
+    let of = if parked.kind == failures::NOT_STARTED {
+        launch_refused::PARK_AFTER + 1
+    } else {
+        recovery::MAX_ATTEMPTS
+    };
     match parked.wait {
         Wait::Retry { until_ms } => Some((
             // Waits for an account are no tries against a bad line.
             parked.attempts - parked.account.count + 1,
             until_ms - parked.since_ms,
+            of,
         )),
         Wait::Account { .. } => None,
     }
@@ -296,12 +332,12 @@ pub fn state(
         }
         // Between two attempts: the turn is as busy as before, and reconnects.
         (Some(live), _) if reconnecting(live).is_some() => {
-            let (next, after_ms) = reconnecting(live).unwrap_or_default();
+            let (next, after_ms, of) = reconnecting(live).unwrap_or_default();
             json!({
                 "action": "reconnecting",
                 "after_ms": after_ms,
                 "dispatch": backend,
-                "of": recovery::MAX_ATTEMPTS,
+                "of": of,
                 "origin": live.origin.name(),
                 "reconnect": next,
                 "summary": RECONNECTING,
@@ -778,17 +814,32 @@ pub fn audio_kept(record: &AgentRecord, line: &Line) -> Option<Value> {
     }))
 }
 
-/// An agent could not be heard: a few words for the user, and what went wrong.
-pub fn tts_error(record: &AgentRecord, error: &str) -> Value {
-    let error: String = error.chars().take(300).collect();
-    json!({
+/// A reply that was not spoken (feature `speech_outcome`): words for the user made from the
+/// reason and the provider's name, the reason (also as `error`), the provider that was to
+/// speak and the turn whose reply it is, each left out when there is none.
+pub fn tts_error(
+    record: &AgentRecord,
+    message: &str,
+    reason: &str,
+    provider: &str,
+    trace: &str,
+) -> Value {
+    let mut told = json!({
         "type": "tts-error",
         "session": record.session,
         "agent_id": record.agent_id,
         "persona": record.persona,
-        "message": said::failure_told(&error),
-        "error": error,
-    })
+        "message": message,
+        "error": reason,
+        "reason": reason,
+    });
+    if !provider.is_empty() {
+        told["provider"] = json!(provider);
+    }
+    if !trace.is_empty() {
+        told["trace_id"] = json!(trace);
+    }
+    told
 }
 
 /// How many requests wait for the user changed, or may have.
@@ -873,15 +924,75 @@ pub fn notification_preview(reply: &str) -> Option<(String, &'static str)> {
     if !spoken.is_empty() {
         return Some((cut(spoken, NOTIFICATION_PREVIEW_MAX, false), "speak"));
     }
-    let mut written = reply.to_string();
+    let written = visible_preview(reply);
+    if written.is_empty() {
+        return None;
+    }
+    Some((written, "text-reply"))
+}
+
+/// What a notification shows of a written text: cleaned for display on one line and cut, and
+/// nothing when nothing is left for the user in it (the Python Host's `_visible_text_preview`).
+pub fn visible_preview(text: &str) -> String {
+    let mut written = text.to_string();
     for marker in ["HEARTBEAT_OK", "DREAMING_OK", "LEADER_NOOP"] {
         written = written.replace(marker, "");
     }
     let written = markup::clean_for_display(&written, true);
     if written.is_empty() || NOTHING_TO_DO.contains(&written.to_lowercase().as_str()) {
-        return None;
+        return String::new();
     }
-    Some((cut(written, NOTIFICATION_PREVIEW_MAX, false), "text-reply"))
+    cut(written, NOTIFICATION_PREVIEW_MAX, false)
+}
+
+/// What of an agent decides whether the user is told of what it says. A helper reports to the
+/// agent that made it: what it says is marked unread and pages nobody, as if it were muted. A
+/// quiet agent (a janitor) tells nobody, whatever began its turn. No setting treats automation
+/// specially on this Host yet.
+fn capabilities(record: &AgentRecord) -> notify::Capabilities {
+    notify::Capabilities {
+        muted: record.muted || record.is_helper(),
+        quiet: record.is_quiet(),
+        ..notify::Capabilities::default()
+    }
+}
+
+/// The user told of an agent's note (`POST /agent-notes`), as the apps are told it (the Python
+/// Host's `classify_note` and `event_payload`): a notification of its own, keyed by the note's
+/// row, at the note's millisecond. `Err` with the reason when the rule tells nobody (a quiet
+/// agent). The turn the note was left in does not silence it: the note is the agent's explicit
+/// act addressed to the user. Mute and the helper rule take only the push, as for a reply.
+pub fn note_notification(
+    record: &AgentRecord,
+    message_id: &str,
+    text: &str,
+    done_ms: i64,
+) -> Result<Value, String> {
+    match coordination::note_decision(&capabilities(record)) {
+        notify::Decision::Notify {
+            reason,
+            push,
+            muted,
+            ..
+        } => Ok(json!({
+            "type": "user-notification",
+            "notification_id": coordination::note_notification_id(message_id),
+            "agent_id": record.agent_id,
+            "session": record.session,
+            "persona": record.persona,
+            "done_ts": done_ms,
+            "source_message_id": message_id,
+            "cause_message_id": "",
+            "origin": coordination::NOTE_ORIGIN,
+            "push": push,
+            "badge": true,
+            "unread": true,
+            "muted": muted,
+            "preview": visible_preview(text),
+            "reason": reason,
+        })),
+        notify::Decision::Suppress { reason } => Err(reason),
+    }
 }
 
 /// The message a finished turn answered, as far as telling the user of the turn looks at it.
@@ -914,14 +1025,7 @@ pub fn user_notification(
         interrupted: false,
         client: asked.client,
     };
-    // A helper reports to the agent that made it: what it says is marked unread and pages
-    // nobody, as if it were muted. A quiet agent (a janitor) tells nobody, whatever began its
-    // turn. No setting treats automation specially on this Host yet.
-    let agent = notify::Capabilities {
-        muted: record.muted || record.is_helper(),
-        quiet: record.is_quiet(),
-        ..notify::Capabilities::default()
-    };
+    let agent = capabilities(record);
     let notify::Decision::Notify {
         reason,
         push,
@@ -1081,14 +1185,19 @@ pub fn focus(record: &AgentRecord) -> Value {
 /// How a turn ended, on the row that closed it. A turn is named by the trace its message was
 /// sent under, which is the name the apps already know it by.
 fn turn_end(end: &TurnEnd) -> Value {
-    json!({
+    let mut summary = json!({
         "turn_id": end.trace_id.clone().unwrap_or_else(|| end.turn.to_string()),
         "status": end.status,
         "started_at_ms": end.started_at_ms,
         "ended_at_ms": end.ended_at_ms,
         "worked_ms": end.started_at_ms.map(|started| end.ended_at_ms - started),
         "tool_count": end.tool_count,
-    })
+    });
+    // How often the turn spoke to its user from the side (`POST /agent-notes`), when it did.
+    if end.note_count > 0 {
+        summary["note_count"] = json!(end.note_count);
+    }
+    summary
 }
 
 /// What a chat shows in place of the prompt of an automated turn: the prompt is the Host's
@@ -1122,6 +1231,7 @@ pub fn previewed(version: &Versioned) -> bool {
         Entry::Message(message) => by_hand && !message.text.is_empty(),
         Entry::Reply(reply) => by_hand && !reply.text.is_empty(),
         Entry::Notice(notice) => !notice.text.is_empty(),
+        Entry::Note(note) => !note.text.is_empty(),
         Entry::Imported(imported) => {
             let row = &imported.row;
             let said = row["text"].as_str().is_some_and(|text| !text.is_empty());
@@ -1212,6 +1322,7 @@ pub fn row(version: &Versioned) -> Value {
         "reply_to_agent_id": "",
         "reply_to_name": "",
         "reply_to_session": "",
+        "audience": coordination::USER,
     });
     // What a watcher or the Host's own routine began is marked, for an app to fold away.
     let kind = automation_kind(version.entry.origin_name());
@@ -1303,6 +1414,13 @@ pub fn row(version: &Versioned) -> Value {
             row["text"] = json!(notice.text);
             row["trace_id"] = json!(notice.trace_id.clone().unwrap_or_default());
         }
+        // What the agent left for its user: an ordinary reply to every app, kind `note`.
+        Entry::Note(note) => {
+            row["kind"] = json!(clarp_kernel::coordination::NOTE_KIND);
+            row["origin"] = json!(clarp_kernel::coordination::NOTE_ORIGIN);
+            row["text"] = json!(note.text);
+            row["trace_id"] = json!(note.trace_id.clone().unwrap_or_default());
+        }
         // Served as it came, above.
         Entry::Imported(_) => {}
         // Never rows of their own: they are told on the row they belong to.
@@ -1311,6 +1429,10 @@ pub fn row(version: &Versioned) -> Value {
     if let Some(end) = &version.turn {
         row["turn"] = turn_end(end);
     }
+    // A row of a turn that answers another agent is for the agents; a note never is. Whether
+    // the agent's rows are shown so at all is its page's to say ([`log_response`]).
+    let marked = version.coordination.as_ref().map(|_| coordination::AGENTS);
+    row["audience"] = json!(coordination::row_audience(row["kind"].as_str(), marked));
     row
 }
 
@@ -1327,12 +1449,15 @@ pub fn conversation_id(record: &AgentRecord, status: &Status) -> String {
     }
 }
 
-/// A page of a conversation as `GET /log` answers it.
+/// A page of a conversation as `GET /log` answers it. `hides` says whether the agent's rows
+/// of turns that answer another agent are shown as such (`coordination::can_leave_note`): an
+/// agent that cannot leave a note for its user has every row the user's.
 pub fn log_response(
     record: &AgentRecord,
     status: &Status,
     page: &Page,
     replace_required: bool,
+    hides: bool,
 ) -> Value {
     // Claude Code keeps a transcript of its own under the session's name. The Python Host
     // names that file; so does this one, for what it is worth to whoever looks for it.
@@ -1341,7 +1466,15 @@ pub fn log_response(
         .then(|| format!("{conversation}.jsonl"));
     json!({
         "conversation_id": conversation,
-        "turns": page.entries.iter().map(row).collect::<Vec<_>>(),
+        "turns": page.entries.iter().map(|version| {
+            let mut row = row(version);
+            // A row brought from another Host is the user's here, as every row of an agent
+            // that cannot leave a note.
+            if row.is_object() && (!hides || row.get("audience").is_none()) {
+                row["audience"] = json!(coordination::USER);
+            }
+            row
+        }).collect::<Vec<_>>(),
         "latest_revision": page.latest_revision,
         "has_more": page.has_more,
         "missing": page.head_revision == 0,
@@ -1430,22 +1563,30 @@ pub fn without_tool_details(response: &mut Value) {
     }
 }
 
-/// Fills in whom the answers on a page are to: the name and the session, today, of each
-/// agent a row names by its id. An agent that is gone leaves both empty.
-pub fn reply_to(response: &mut Value, named: &dyn Fn(&str) -> Option<(String, String)>) {
+/// Fills in the other agents the rows on a page name: who wrote a user's row and whom an
+/// answer is to, by the name and the session the roster has for that agent's id when the page
+/// is read (`shown_as`), as the Python Host reads them (`provenance_fields`, with its roster
+/// joined in). An agent that was removed is named as it was last. An id the roster never had
+/// is an agent of another Host, which the Python Host does not take as a sender at all: its
+/// row keeps the name it gave when its message was taken. These change without the row's
+/// revision moving: whoever follows a conversation learns of a rename or a removal from the
+/// roster's events, not from the row.
+pub fn roster_names(response: &mut Value, shown_as: &dyn Fn(&str) -> Option<(String, String)>) {
     let Some(rows) = response["turns"].as_array_mut() else {
         return;
     };
     for row in rows {
-        let Some(agent_id) = row["reply_to_agent_id"]
-            .as_str()
-            .filter(|id| !id.is_empty())
-        else {
-            continue;
-        };
-        if let Some((name, session)) = named(agent_id) {
-            row["reply_to_name"] = json!(name);
-            row["reply_to_session"] = json!(session);
+        for (id, name, session) in [
+            ("sender_agent_id", "sender_name", "sender_session"),
+            ("reply_to_agent_id", "reply_to_name", "reply_to_session"),
+        ] {
+            let Some(agent_id) = row[id].as_str().filter(|id| !id.is_empty()) else {
+                continue;
+            };
+            if let Some((named, at)) = shown_as(agent_id) {
+                row[name] = json!(named);
+                row[session] = json!(at);
+            }
         }
     }
 }
@@ -1471,6 +1612,7 @@ fn preview(version: &Versioned) -> String {
         Entry::Message(message) => (true, message.text.as_str()),
         Entry::Reply(reply) => (false, reply.text.as_str()),
         Entry::Notice(notice) => (false, notice.text.as_str()),
+        Entry::Note(note) => (false, note.text.as_str()),
         Entry::Tool(call) => (false, call.name.as_str()),
         Entry::Imported(imported) => (
             imported.row["role"] == "user",
@@ -1645,6 +1787,9 @@ pub fn summary(
         "compacting": kind == AgentStateKind::Compacting,
         "context_tokens": status.context_tokens,
         "context_window": clarp_backend::context_window(&record.backend),
+        // What the user's last compaction did, from numbers: null until the first
+        // (compaction_outcome).
+        "last_compaction": status.last_compaction,
         "queued_turn_count": status.waiting.len(),
         "queued_turn_revision": status.queue_revision,
         "queue_paused": status.paused,
@@ -1760,6 +1905,7 @@ mod tests {
             label_at_ms: None,
             resting: None,
             context_tokens: None,
+            last_compaction: None,
             completed_at_ms: None,
             answered_by: None,
             arrived: false,
@@ -1861,6 +2007,7 @@ mod tests {
             cost_so_far: None,
             total: None,
             limits: None,
+            note_count: 0,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -1978,6 +2125,7 @@ mod tests {
             &status(None, Some(Outcome::Completed)),
             &page(),
             false,
+            true,
         );
         assert_eq!(answer["conversation_id"], "conv-1");
         assert_eq!(answer["latest_revision"], 7 << 20);
@@ -2019,8 +2167,10 @@ mod tests {
         for turn in turns {
             assert_eq!(fields(&turns[0]), fields(turn), "{}", turn["id"]);
         }
-        assert_eq!(fields(&turns[0]).len(), 20);
+        assert_eq!(fields(&turns[0]).len(), 21);
         assert_eq!(turns[0]["trace_id"], "t-1");
+        // None of them is of a turn another agent began: each is the user's.
+        assert!(turns.iter().all(|turn| turn["audience"] == "user"));
         assert_eq!(turns[0]["timestamp"], "1970-01-01T00:00:00.000Z");
         // A message of the agent is one row: what it said, and a card for each tool it calls.
         assert_eq!(
@@ -2142,6 +2292,7 @@ mod tests {
             cost_so_far: None,
             total: None,
             limits: None,
+            note_count: 0,
         }
     }
 
@@ -2298,9 +2449,11 @@ mod tests {
             (&row["model"], &row["context_tokens"]),
             (&json!("fable"), &json!(5))
         );
+        // Nothing compacted yet: the row says so (compaction_outcome).
+        assert_eq!(row["last_compaction"], serde_json::Value::Null);
         assert_eq!(
             row.as_object().unwrap().len(),
-            54,
+            55,
             "the fields of the Python Host's row"
         );
         let typed: AgentSummary = serde_json::from_value(row).unwrap();
@@ -2396,12 +2549,31 @@ mod tests {
     fn events_have_the_shapes_the_apps_read() {
         let thinking = status(Some(Activity::Thinking), None);
         let live = thinking.live.clone().unwrap();
-        let sent = dispatched(&record(), &live, 1);
+        let sent = dispatched(&record(), &live, 1, &WorkingWith::User);
         assert_eq!(
             sent,
             json!({"type": "agent-state", "agent_id": "a1", "session": "maximus", "kind": "thinking",
-                   "client_msg_id": "m2", "trace_id": "trace-2", "queue_started": false, "queue_remaining": 1})
+                   "client_msg_id": "m2", "trace_id": "trace-2", "queue_started": false, "queue_remaining": 1,
+                   "audience": "user"})
         );
+        // A turn another agent began works for the agents, and names that agent where this Host
+        // has it; an agent of a peer Host is not named.
+        let with = WorkingWith::Agents {
+            sender: Some(("a2".to_string(), "Boss".to_string())),
+        };
+        let for_agents = dispatched(&record(), &live, 1, &with);
+        assert_eq!(
+            (
+                &for_agents["audience"],
+                &for_agents["sender_agent_id"],
+                &for_agents["sender_name"]
+            ),
+            (&json!("agents"), &json!("a2"), &json!("Boss"))
+        );
+        let from_a_peer = dispatched(&record(), &live, 1, &WorkingWith::Agents { sender: None });
+        assert_eq!(from_a_peer["audience"], "agents");
+        assert!(from_a_peer.get("sender_agent_id").is_none());
+        assert!(from_a_peer.get("sender_name").is_none());
         // A turn that an answer or a goal began says so, and one that came through the queue.
         let woken = LiveStatus {
             origin: Origin::Trigger {
@@ -2410,7 +2582,10 @@ mod tests {
             from_queue: true,
             ..live.clone()
         };
-        assert_eq!(dispatched(&record(), &woken, 0)["queue_started"], true);
+        assert_eq!(
+            dispatched(&record(), &woken, 0, &WorkingWith::User)["queue_started"],
+            true
+        );
         let by_itself = Status {
             live: Some(woken),
             ..thinking.clone()
@@ -2693,6 +2868,7 @@ mod tests {
             cost_so_far: None,
             total: None,
             limits: None,
+            note_count: 0,
         };
         let asked = |origin: Origin| {
             let message = Message {
@@ -3013,5 +3189,80 @@ mod tests {
             rows[2]["tools"],
             json!([{ "id": "c-1", "name": "Edit", "summary": "notes.md" }])
         );
+    }
+
+    /// The other agents a row names are named as the roster has them when the row is read,
+    /// as the Python Host names them (`tools/roster-names-vectors.py`, from its `list_messages`
+    /// and `provenance_fields`): the same rows read as they were written, after their sender
+    /// was renamed, and after it was removed; and a row of an agent the roster never had.
+    #[test]
+    fn the_agents_a_row_names_are_named_as_the_python_hosts_roster_has_them_when_it_is_read() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/roster-names-vectors.json"
+        ))
+        .unwrap();
+        const FIELDS: [&str; 6] = [
+            "sender_agent_id",
+            "sender_name",
+            "sender_session",
+            "reply_to_agent_id",
+            "reply_to_name",
+            "reply_to_session",
+        ];
+        for state in vectors["states"].as_array().unwrap() {
+            let roster = &state["roster"];
+            let shown_as = |id: &str| -> Option<(String, String)> {
+                let agent = roster.get(id)?;
+                let text = |key: &str| agent[key].as_str().map(str::to_string);
+                Some((text("persona")?, text("session")?))
+            };
+            let expected = state["rows"].as_array().unwrap();
+            // The rows as this Host keeps them: a user's row with its sender as it was when the
+            // message was taken, an answer with the id of whom it answers.
+            let kept: Vec<Value> = expected
+                .iter()
+                .enumerate()
+                .map(|(n, said)| {
+                    let entry = if said["role"] == "user" {
+                        let agent_id = said["sender_agent_id"].as_str().unwrap().to_string();
+                        Entry::Message(Message {
+                            id: format!("u-{n}"),
+                            text: said["text"].as_str().unwrap().to_string(),
+                            origin: Origin::Agent {
+                                agent_id: agent_id.clone(),
+                            },
+                            sender: Some(clarp_kernel::conversation::Sender {
+                                agent_id,
+                                name: "as it was named when the message was taken".to_string(),
+                                session: "a session it had then".to_string(),
+                            }),
+                            ..Message::default()
+                        })
+                    } else {
+                        let agent_id = said["reply_to_agent_id"].as_str().unwrap().to_string();
+                        Entry::Reply(Reply {
+                            id: format!("r-{n}"),
+                            turn: 1,
+                            text: said["text"].as_str().unwrap().to_string(),
+                            trace_id: None,
+                            origin: Origin::Agent { agent_id },
+                            tools: Vec::new(),
+                        })
+                    };
+                    row(&version(entry, (n as u64 + 1) << 20, None))
+                })
+                .collect();
+            let mut answer = json!({ "turns": kept });
+            roster_names(&mut answer, &shown_as);
+            for (shown, expected) in answer["turns"].as_array().unwrap().iter().zip(expected) {
+                for field in FIELDS {
+                    assert_eq!(
+                        shown[field], expected[field],
+                        "{}: {field} of {}",
+                        state["state"], expected["text"]
+                    );
+                }
+            }
+        }
     }
 }

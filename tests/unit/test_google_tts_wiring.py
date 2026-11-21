@@ -182,7 +182,8 @@ def test_without_a_fallback_an_unknown_saved_voice_fails_and_nothing_speaks(monk
     ("google_auth_failed: HTTP 401", "Voice unavailable: Google Chirp 3 HD sign-in failed."),
     ("google_credentials_missing", "Voice unavailable: Google Chirp 3 HD is not configured."),
     ("voice_unavailable", "Voice unavailable: this Google Chirp 3 HD voice is not available."),
-    ("text_too_long", "Voice synthesis failed."),
+    # A Google failure without its own words: the reason table's sentence (speech_outcome).
+    ("text_too_long", "Not spoken: Google Chirp 3 HD did not make the clip."),
 ], ids=["quota", "auth-401", "not-configured", "unknown-voice", "other"])
 def test_a_google_failure_is_announced_as_google_not_elevenlabs(monkeypatch, code, message):
     published = []

@@ -152,6 +152,8 @@ fn rings_go_as_the_python_hosts_go_step_by_step() {
                 host_id: "host-1",
                 has_key: false,
                 runs_tools: false,
+                live_model: clarp_kernel::live_call::LIVE_MODEL_DEFAULT,
+                live_model_min_client: &[],
             };
             let before = made;
             let answered: Result<Value, calls::Refused> = match do_ {
@@ -221,6 +223,7 @@ fn rings_go_as_the_python_hosts_go_step_by_step() {
                         opening_mode: step.get("opening_mode"),
                         request_id: &Value::Null,
                         client_nonce: &Value::Null,
+                        client: None,
                     };
                     // No ring of these scripts is held live: nothing is minted for one.
                     let given = Given {

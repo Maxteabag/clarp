@@ -24,6 +24,8 @@
 //! words are shown of the twenty that were last active, and always of the agent the
 //! message was said to and of the one that is open.
 
+pub(crate) mod phrases;
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -54,6 +56,10 @@ use crate::edge::{self, ApiError, App};
 use crate::fleet::{AgentRecord, Member as Fellow};
 use crate::{ids, logins, once, wire};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits_book).by_entries(unfit_entries)];
+
 /// The kind of thing the router's book is, among what is left with the fleet.
 const KIND: &str = "router";
 const ALL: &str = "all";
@@ -77,7 +83,21 @@ const TOOLS: [(&str, &str); 7] = [
 /// The router of this Host: its book. `None` until it was read where it is kept.
 #[derive(Default)]
 pub struct Desk {
+    pub(crate) phrases: phrases::Desk,
     book: tokio::sync::Mutex<Option<Book>>,
+    /// The entries of its document that are not its book's, put back with every save.
+    carried: std::sync::Mutex<crate::kept::Carried>,
+}
+
+/// The fields of the router's book read entry by entry.
+const ENTRIES: &[&str] = &["decisions", "held", "given"];
+
+fn fits_book(stored: &[u8]) -> bool {
+    crate::kept::fits_carried::<Book, serde_json::Value>(stored, ENTRIES)
+}
+
+fn unfit_entries(stored: &[u8]) -> Vec<String> {
+    crate::kept::unfit::<Book, serde_json::Value>(stored, ENTRIES)
 }
 
 fn unread() -> Unavailable {
@@ -92,10 +112,16 @@ impl Desk {
     ) -> Result<tokio::sync::MutexGuard<'_, Option<Book>>, Unavailable> {
         let mut held = self.book.lock().await;
         if held.is_none() {
-            let kept = app.fleet.kept(KIND, ALL.to_string()).await?;
-            // What cannot be read is a book with nothing in it.
-            let book = kept.and_then(|kept| serde_json::from_slice(&kept).ok());
-            *held = Some(book.unwrap_or_default());
+            // Through the loader: a document that is not the book's is set aside, an entry that
+            // is not is carried through (`kept.rs`).
+            let (book, carried) = app
+                .fleet
+                .read_book::<Book, serde_json::Value>(KIND, ALL, ENTRIES)
+                .await?;
+            if let Ok(mut kept) = self.carried.lock() {
+                *kept = carried;
+            }
+            *held = Some(book);
         }
         Ok(held)
     }
@@ -132,8 +158,10 @@ impl Desk {
         });
         let done = stepped.await?;
         if *book != before {
-            let kept = serde_json::to_vec(book).unwrap_or_default();
+            let carried = self.carried.lock().map(|c| c.clone()).unwrap_or_default();
+            let kept = crate::kept::saved(&*book, &carried);
             app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+            app.fleet.written_over(KIND, ALL, &self.carried, &*book);
         }
         Ok(done)
     }
@@ -361,6 +389,20 @@ async fn say(app: &App, say: &Say) {
         }),
     };
     if let Some(speaker) = speaker {
+        if let Some(phrase) = clarp_kernel::router::flow::phrase_key(&say.text) {
+            let owners = app.mouth.owners();
+            for (voice, primary) in crate::voice::phrase_voices(&owners, &speaker) {
+                if !app
+                    .router
+                    .phrases
+                    .say(app, &speaker, &say.text, phrase, (voice, primary), &owners)
+                    .await
+                {
+                    break;
+                }
+            }
+            return;
+        }
         app.mouth.announce(&speaker, &say.text).await;
     }
 }

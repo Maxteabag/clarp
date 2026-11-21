@@ -29,6 +29,15 @@ use crate::agent::Unavailable;
 use crate::edge::{ApiError, App};
 use crate::fleet::{FleetHandle, Member};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits)];
+
+/// Whether bytes are the Host's key, as this desk reads it.
+fn fits(kept: &[u8]) -> bool {
+    key_of(kept).is_some()
+}
+
 /// The kind of record the key is, among what is kept with the fleet.
 pub const KIND: &str = "turn-identity";
 /// The key of the one record of that kind.
@@ -69,6 +78,15 @@ impl Signer {
         let table = crate::fleet::shelf(KIND);
         let (key, unkept) = match store.get(&table, KEY) {
             Ok(Some(kept)) => (key_of(&kept), None),
+            // Its record was moved aside, unreadable (`kept.rs`): never replaced either.
+            Ok(None)
+                if matches!(
+                    store.get(&table, &crate::kept::copy_name(KEY, 1)),
+                    Ok(Some(_))
+                ) =>
+            {
+                (None, None)
+            }
             Ok(None) => match made() {
                 // A key that is not kept is used by nobody: tokens given with it would name
                 // nobody after the next start.
@@ -145,6 +163,56 @@ pub async fn caller(app: &App, token: &str) -> Result<Option<Arc<Member>>, Unava
     let standing = standing.map_err(|_| Unavailable(UNAVAILABLE.to_string()))?;
     let current = turn_identity::current(standing, app.clock.now_ms());
     Ok(current.then(|| member.clone()))
+}
+
+/// The agent and the turn a presented token names, when it is a token this Host made: whatever
+/// became of the turn since, and whether or not the Host still has the agent (`None` for a
+/// token it did not make). A key that cannot be read is no answer ([`UNAVAILABLE`]).
+pub async fn claim(app: &App, token: &str) -> Result<Option<(String, u64)>, Unavailable> {
+    let key = app.turns.key_or_read(&app.fleet).await?;
+    Ok(turn_identity::read(&key, token).map(|claim| (claim.agent_id, claim.turn)))
+}
+
+/// The trace an artifact is published under (R102, the Python Host's `_publishing_trace`): the
+/// trace of the turn whose token the request presents, only when that turn is `agent_id`'s own
+/// and is that agent's running turn now; the empty text otherwise: no token, a token this Host
+/// did not make, another agent's, a turn that ended (a job it started that publishes later).
+/// Nothing the caller writes is taken: the token is the Host's own proof. A key or a log that
+/// cannot be read is answered so, and that it may be asked again (503), as the Python Host
+/// answers a lookup that failed.
+///
+/// The rule is the token's: every turn of every tool has its token on this Host, so what a Codex
+/// turn publishes names its trace here, where the Python Host's Codex agents, run through its
+/// shared app-server, have no token to name it by (a registered difference; its R102b).
+pub async fn publishing_trace(
+    app: &App,
+    token: Option<&str>,
+    agent_id: &str,
+) -> Result<String, ApiError> {
+    let unavailable =
+        |why: Unavailable| ApiError::retryable(StatusCode::SERVICE_UNAVAILABLE, why.0);
+    let Some(token) = token.filter(|token| !token.is_empty()) else {
+        return Ok(String::new());
+    };
+    let key = app
+        .turns
+        .key_or_read(&app.fleet)
+        .await
+        .map_err(unavailable)?;
+    let Some(claim) = turn_identity::read(&key, token) else {
+        return Ok(String::new());
+    };
+    if claim.agent_id != agent_id {
+        return Ok(String::new());
+    }
+    let directory = app.fleet.directory();
+    let mut everyone = directory.members.iter().chain(directory.janitors.iter());
+    let Some(member) = everyone.find(|member| member.record.agent_id == claim.agent_id) else {
+        return Ok(String::new());
+    };
+    let running = member.agent.running_trace(claim.turn).await;
+    let running = running.map_err(|_| unavailable(Unavailable(UNAVAILABLE.to_string())))?;
+    Ok(running.unwrap_or_default())
 }
 
 /// A new key from the system's source of randomness; none where it has none to give.
