@@ -132,3 +132,13 @@ def test_the_push_of_a_users_turn_is_unchanged_under_hide(chat):
     coordination.set_global("hide")
     activity = {"state": "thinking", "turn_id": "u1", "headline": "Thinking: the plan"}
     assert _pushed_lead(chat, activity)["headline"] == "Thinking: the plan"
+
+
+def test_a_coordination_turn_of_an_agent_that_cannot_leave_a_note_reads_user(chat, monkeypatch):
+    """The working audience is the one /log gives the turn's rows: such an agent's turns are
+    shown, so they read 'user' and name no partner (F6-b, F6B)."""
+    db.conn().execute("UPDATE agents SET backend = 'codex' WHERE agent_id = ?", (chat.id,))
+    chat.coordination_turn("c1")
+    _running(chat, "c1", monkeypatch)
+    row = _row(chat)
+    assert row["working_audience"] == "user" and row["working_with"] is None

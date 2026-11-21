@@ -130,10 +130,16 @@ def can_leave_note(agent_id: str) -> bool:
     later move to a backend with turn tokens does not hide a turn that could leave no note."""
     if not agent_id:
         return False
-    from . import agents, backends
+    from . import agents
+    return backend_leaves_notes((agents.get_by_agent_id(agent_id) or {}).get("backend"))
+
+
+def backend_leaves_notes(backend: str | None) -> bool:
+    """Whether an agent on ``backend`` can leave a note: the one rule can_leave_note and
+    hiding_agents both read."""
+    from . import backends
     from .turn_identity import IDENTITY_BACKENDS
-    agent = agents.get_by_agent_id(agent_id) or {}
-    return backends.normalize(agent.get("backend")) in IDENTITY_BACKENDS
+    return backends.normalize(backend) in IDENTITY_BACKENDS
 
 
 def audience_of(agent_id: str, trace_id: str | None, *, database=None) -> str:
@@ -288,13 +294,11 @@ def hiding_agents(*, database=None) -> set[str]:
     if database is None:
         from .db import conn
         database = conn()
-    from . import backends
-    from .turn_identity import IDENTITY_BACKENDS
     host = global_visibility()
     return {row["agent_id"] for row in database.execute(
                 "SELECT agent_id, backend, coordination_visibility FROM agents WHERE deleted_at IS NULL")
             if (normalize_visibility(row["coordination_visibility"]) or host) == HIDE
-            and backends.normalize(row["backend"]) in IDENTITY_BACKENDS}
+            and backend_leaves_notes(row["backend"])}
 
 
 def working_with(agent_id: str, trace_id: str | None) -> dict[str, Any]:
