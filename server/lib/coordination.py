@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .revisioned_cache import RevisionedCache
+
 from . import settings_store
 from .clock import now_ms
 
@@ -313,7 +315,9 @@ def hiding_from_rows(rows) -> set[str]:
     return out
 
 
-_HIDING_CACHE = None
+# Which chats hide, kept until the database's change stamp moves (revisioned_cache, as the
+# preview caches are: rule 2 of docs/architecture/state-and-boundaries.md).
+_HIDING_CACHE: RevisionedCache[str, frozenset[str]] = RevisionedCache("coordination.hiding", max_entries=1)
 
 
 def hiding_agents(*, database=None) -> set[str]:
@@ -321,13 +325,9 @@ def hiding_agents(*, database=None) -> set[str]:
     snapshot's previews and working state, the state stream and the push follow the same rule
     as GET /log. Kept until the database's change stamp moves (a setting change is a write), so
     a quiet Host answers from memory; read again inside a transaction."""
-    global _HIDING_CACHE
     from . import db
-    from .revisioned_cache import RevisionedCache
     if database is None:
         database = db.conn()
-    if _HIDING_CACHE is None:
-        _HIDING_CACHE = RevisionedCache("coordination.hiding", max_entries=1)
     stamp = None if database.in_transaction else db.change_stamp()
     if stamp is not None and stamp[0] >= 0:
         hit, cached = _HIDING_CACHE.get("all", stamp)
