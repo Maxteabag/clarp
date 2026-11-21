@@ -4,7 +4,7 @@
 
 use clarp_kernel::{
     call_transcription::{self as call, Attempts, Policy, Step},
-    heard::{self, engine_order as order},
+    heard::{self, Failure, engine_order as order},
     languages,
 };
 use serde_json::{Value, json};
@@ -113,16 +113,20 @@ fn call(case: &Value) -> Value {
             result = json!({"text":step.engine});
             break;
         }
-        let reason = match mode {
+        let internal_reason = match mode {
             "before-key" => "stand-in missing key",
             "before-model" => "stand-in unknown model",
             "before-language" => "stand-in unsupported set",
             _ => "stand-in provider error",
         };
-        attempts.failed(&step.engine, boundary, 0, reason);
+        let failure = match mode {
+            "before-model" => Failure::UnknownModel,
+            _ => Failure::Failed,
+        };
+        attempts.failed(&step.engine, boundary, 0, failure.client_words().1);
         contacted.failed(&step.engine, boundary.is_some());
         if !call::has_runnable_step(later, &contacted) {
-            result = json!({"error":reason});
+            result = json!({"error":internal_reason});
             break;
         }
     }
