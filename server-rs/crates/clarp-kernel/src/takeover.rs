@@ -9,16 +9,40 @@ use sha1::{Digest, Sha1};
 
 use crate::python;
 
-/// The UUID Claude stores for a user line. An empty trace needs a fresh UUID from the caller.
+/// A provider launch chosen while the first turn's tool stood still.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Input {
+    ClaudeResume {
+        first: String,
+        resume_at: String,
+        drops_turn: String,
+    },
+    ClaudeFresh {
+        first: String,
+    },
+    Agy {
+        first: String,
+    },
+}
+
+/// The UUID Claude stores for a user line. Callers without a trace use their turn identity.
 pub fn prompt_uuid(trace: &str) -> Option<String> {
+    let trace = python::strip(trace);
+    (!trace.is_empty()).then(|| named_uuid(trace))
+}
+
+/// A stable identity for a turn accepted before traces were kept, or without a client trace.
+/// A replay of that turn must still refer to its original Claude input line.
+pub fn untraced_uuid(agent: &str, turn: u64) -> String {
+    named_uuid(&format!("untraced:{agent}:{turn}"))
+}
+
+fn named_uuid(trace: &str) -> String {
     const NAMESPACE: [u8; 16] = [
         0x5f, 0x0e, 0x7c, 0x52, 0x9a, 0x5b, 0x4d, 0x9e, 0x8f, 0x53, 0x2f, 0x0b, 0x9b, 0x1d,
         0x49, 0x10,
     ];
-    let trace = python::strip(trace);
-    if trace.is_empty() {
-        return None;
-    }
     let mut hash = Sha1::new();
     hash.update(NAMESPACE);
     hash.update(trace.as_bytes());
@@ -28,14 +52,14 @@ pub fn prompt_uuid(trace: &str) -> Option<String> {
     uuid[6] = (uuid[6] & 0x0f) | 0x50;
     uuid[8] = (uuid[8] & 0x3f) | 0x80;
     let hex: String = uuid.iter().map(|byte| format!("{byte:02x}")).collect();
-    Some(format!(
+    format!(
         "{}-{}-{}-{}-{}",
         &hex[..8],
         &hex[8..12],
         &hex[12..16],
         &hex[16..20],
         &hex[20..]
-    ))
+    )
 }
 
 /// One Claude input envelope. Each text block remains distinct, including the original order.

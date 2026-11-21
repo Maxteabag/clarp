@@ -3736,6 +3736,8 @@ impl Actor {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
             turn: turn.0,
+            trace_id: message.trace_id.clone(),
+            takeover: None,
             cwd: self.profile.cwd.clone(),
             prompt,
             // The first turn starts the tool's session under the conversation's own name.

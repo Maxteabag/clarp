@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
+use clarp_kernel::takeover::Input;
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -179,13 +180,17 @@ impl Backend for Agy {
         }
         // What the Host says with the prompt comes before it, as for Codex: the Python Host
         // gives both the same words.
+        let prompt = match &spec.takeover {
+            Some(Input::Agy { first }) => format!("{first}\n\n{}", spec.prompt),
+            _ => spec.prompt.clone(),
+        };
         let prompt = match &spec.told {
             Some(told) => {
                 let head = told::at_head(&told.persona, &spec.session, told.spoken);
                 let head = told::in_call(head, told.call.as_deref());
-                told::headed(&head, None, &spec.prompt)
+                told::headed(&head, None, &prompt)
             }
-            None => spec.prompt.clone(),
+            None => prompt,
         };
         // Bound to its flag: a message that begins with a dash is no flag.
         args.push(format!("--print={prompt}"));
@@ -876,6 +881,8 @@ mod tests {
             agent_id: "a1".to_string(),
             session: "rachel".to_string(),
             turn: 3,
+            trace_id: None,
+            takeover: None,
             cwd: PathBuf::from("/work"),
             prompt: "-what is in here?".to_string(),
             backend_session: None,
@@ -933,6 +940,21 @@ mod tests {
             ..spec()
         });
         assert_eq!(effort.args[5..7], ["--effort", "high"]);
+        let taken = agy.launch(&TurnSpec {
+            backend_session: Some("conversation".to_string()),
+            takeover: Some(Input::Agy {
+                first: "the original words".to_string(),
+            }),
+            ..spec()
+        });
+        assert_eq!(
+            taken.args[5..],
+            [
+                "--conversation",
+                "conversation",
+                "--print=the original words\n\n-what is in here?",
+            ]
+        );
     }
 
     #[test]
