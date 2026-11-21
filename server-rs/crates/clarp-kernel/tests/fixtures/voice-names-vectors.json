@@ -1,0 +1,369 @@
+{
+  "lookup": {
+    "asked": [
+      "voice000",
+      "voice003",
+      "voice004",
+      "voice005",
+      "voice006",
+      "voice007",
+      "voice008",
+      "voice009",
+      "voice010",
+      "voice011",
+      "voice012",
+      "voice013",
+      "voice014",
+      "voice015",
+      "voice016",
+      "voice017",
+      "voice018",
+      "voice019",
+      "voice020",
+      "voice021",
+      "voice022",
+      "voice023",
+      "voice024",
+      "voice025",
+      "voice026",
+      "voice027",
+      "voice028",
+      "voice029",
+      "voice030",
+      "voice031",
+      "voice032",
+      "voice033",
+      "voice034",
+      "voice035",
+      "voice036",
+      "voice037",
+      "voice038",
+      "voice039",
+      "voice040",
+      "voice041",
+      "voice042",
+      "voice043",
+      "voice044",
+      "voice045",
+      "voice046",
+      "voice047",
+      "voice048",
+      "voice049",
+      "voice050",
+      "voice051",
+      "voice052",
+      "voice053",
+      "voice054",
+      "voice055",
+      "voice056",
+      "voice057",
+      "voice058",
+      "voice059",
+      "voice060",
+      "voice061",
+      "voice062",
+      "voice063",
+      "voice064",
+      "voice065",
+      "voice066",
+      "voice067",
+      "voice068",
+      "voice069",
+      "voice070",
+      "voice071",
+      "voice072",
+      "voice073",
+      "voice074",
+      "voice075",
+      "voice076",
+      "voice077",
+      "voice078",
+      "voice079",
+      "voice080",
+      "voice081",
+      "voice082",
+      "voice083",
+      "voice084",
+      "voice085",
+      "voice086",
+      "voice087",
+      "voice088",
+      "voice089",
+      "voice090",
+      "voice091",
+      "voice092",
+      "voice093",
+      "voice094",
+      "voice095",
+      "voice096",
+      "voice097",
+      "voice098",
+      "voice099",
+      "voice100",
+      "voice101"
+    ],
+    "listed": {
+      "voice001": "Listed",
+      "voice002": "Listed as well"
+    },
+    "used": [
+      "voice000",
+      "voice001",
+      "voice002",
+      "voice003",
+      "voice004",
+      "voice005",
+      "voice006",
+      "voice007",
+      "voice008",
+      "voice009",
+      "voice010",
+      "voice011",
+      "voice012",
+      "voice013",
+      "voice014",
+      "voice015",
+      "voice016",
+      "voice017",
+      "voice018",
+      "voice019",
+      "voice020",
+      "voice021",
+      "voice022",
+      "voice023",
+      "voice024",
+      "voice025",
+      "voice026",
+      "voice027",
+      "voice028",
+      "voice029",
+      "voice030",
+      "voice031",
+      "voice032",
+      "voice033",
+      "voice034",
+      "voice035",
+      "voice036",
+      "voice037",
+      "voice038",
+      "voice039",
+      "voice040",
+      "voice041",
+      "voice042",
+      "voice043",
+      "voice044",
+      "voice045",
+      "voice046",
+      "voice047",
+      "voice048",
+      "voice049",
+      "voice050",
+      "voice051",
+      "voice052",
+      "voice053",
+      "voice054",
+      "voice055",
+      "voice056",
+      "voice057",
+      "voice058",
+      "voice059",
+      "voice060",
+      "voice061",
+      "voice062",
+      "voice063",
+      "voice064",
+      "voice065",
+      "voice066",
+      "voice067",
+      "voice068",
+      "voice069",
+      "voice070",
+      "voice071",
+      "voice072",
+      "voice073",
+      "voice074",
+      "voice075",
+      "voice076",
+      "voice077",
+      "voice078",
+      "voice079",
+      "voice080",
+      "voice081",
+      "voice082",
+      "voice083",
+      "voice084",
+      "voice085",
+      "voice086",
+      "voice087",
+      "voice088",
+      "voice089",
+      "voice090",
+      "voice091",
+      "voice092",
+      "voice093",
+      "voice094",
+      "voice095",
+      "voice096",
+      "voice097",
+      "voice098",
+      "voice099",
+      "voice100",
+      "voice101",
+      "voice102",
+      "voice103",
+      "voice104",
+      "voice105",
+      "voice106",
+      "voice107",
+      "voice108"
+    ]
+  },
+  "merge": [
+    {
+      "case": "new names replace only matched ids",
+      "current": {
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "fetched": {
+        "cartesia": {
+          "c1": "New Cartesia",
+          "c2": "New second"
+        },
+        "elevenlabs": {
+          "e1": "New Eleven"
+        }
+      },
+      "providers": [
+        "cartesia",
+        "elevenlabs"
+      ],
+      "result": {
+        "cartesia": {
+          "c1": "New Cartesia",
+          "c2": "New second",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "New Eleven"
+        }
+      },
+      "same_bytes": false
+    },
+    {
+      "case": "a catalogue failure keeps every old Cartesia name",
+      "current": {
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "fetched": {
+        "elevenlabs": {
+          "e1": "New Eleven"
+        }
+      },
+      "providers": [
+        "elevenlabs"
+      ],
+      "result": {
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "New Eleven"
+        }
+      },
+      "same_bytes": false
+    },
+    {
+      "case": "no keys leave the file alone",
+      "current": {
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "fetched": {},
+      "providers": [],
+      "result": {
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "same_bytes": true
+    },
+    {
+      "case": "equal names leave file content unchanged",
+      "current": {
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "fetched": {
+        "cartesia": {
+          "c1": "Old Cartesia"
+        }
+      },
+      "providers": [
+        "cartesia"
+      ],
+      "result": {
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "same_bytes": true
+    }
+  ],
+  "startup": [
+    {
+      "age": null,
+      "due": true
+    },
+    {
+      "age": -60,
+      "due": false
+    },
+    {
+      "age": 0,
+      "due": false
+    },
+    {
+      "age": 86399,
+      "due": false
+    },
+    {
+      "age": 86400,
+      "due": true
+    },
+    {
+      "age": 86401,
+      "due": true
+    }
+  ]
+}
