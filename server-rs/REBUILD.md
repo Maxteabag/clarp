@@ -3523,6 +3523,15 @@ Call attempt outcomes and skip reasons are open sets. Clients can display an unf
 value as words and keep the rest of the response. The reference vectors cover both attempt
 loops with stand-in adapters, and the Host test verifies the provider requests and call report.
 
+**Names for the voice profile (21 Nov 2026, PR 498).** The profile gives the configured
+language set alongside the language arguments of the first hearing engine. Archived rows,
+creation replies and roster events omit the profile. Cartesia and ElevenLabs names are
+read from the Host's published names file, with the Cartesia picker overlay. Gemini names
+use its picker labels and the configured Vertex aliases. The background refresher lists
+Cartesia's catalogue and looks up missing voices in use, handling at most 100 by-ID
+lookups per provider. A check advances the checked date. Only changed names change
+the file content and its digest; a provider failure keeps its earlier names.
+
 ## 7. Stages and gates
 
 Since 21 Nov 2026 at 12:39, stages, trains and pieces have no test gate of their own. A train lands when

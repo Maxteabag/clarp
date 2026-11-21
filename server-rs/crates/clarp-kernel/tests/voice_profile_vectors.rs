@@ -68,6 +68,10 @@ fn host(view: &Value, labels: &BTreeMap<String, BTreeMap<String, String>>) -> Ho
         provider: text("tts_provider"),
         fallback: text("tts_fallback"),
         gemini_voices: pairs(&set["gemini_voices"]),
+        gemini_vertex_voices: set
+            .get("gemini_vertex_voices")
+            .map(pairs)
+            .unwrap_or_default(),
         cartesia_voices: pairs(&set["cartesia_voices"]),
         gemini_voice: text("gemini_voice"),
         ..Voices::default()
@@ -80,6 +84,11 @@ fn host(view: &Value, labels: &BTreeMap<String, BTreeMap<String, String>>) -> Ho
     } else {
         String::new()
     };
+    let mut labels = labels.clone();
+    labels.insert(
+        "gemini".into(),
+        clarp_kernel::voices::gemini_labels(&voices),
+    );
     HostView {
         voices,
         deepgram_model: text("deepgram_model"),
@@ -88,7 +97,8 @@ fn host(view: &Value, labels: &BTreeMap<String, BTreeMap<String, String>>) -> Ho
             .map(|(key, _)| key.clone())
             .collect(),
         google_refusal: view["google_refusal"].as_str().map(str::to_string),
-        labels: labels.clone(),
+        labels,
+        names_version: None,
         cloud_engine: if heard::is_cloud(engine) {
             engine.to_string()
         } else {
@@ -142,7 +152,7 @@ fn an_agent_speaks_with_the_voice_the_python_host_would_show() {
         }
         checked += 1;
     }
-    assert_eq!((checked, handed), (576, 2880));
+    assert_eq!((checked, handed), (578, 2890));
 }
 
 /// What the speaker hands over is the profile's voice, and it hands over nothing exactly when
@@ -186,7 +196,7 @@ fn the_speaker_hands_over_what_the_profile_shows_and_nothing_when_it_is_silent()
     assert_eq!((spoken, silent), (SPOKEN, SILENT));
 }
 
-const SPOKEN: usize = 410;
+const SPOKEN: usize = 412;
 const SILENT: usize = 166;
 
 /// ElevenLabs is handed only an id it can take. An agent that spoke with ElevenLabs before

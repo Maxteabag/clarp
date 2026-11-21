@@ -366,6 +366,7 @@ async fn serve(config: Config) -> Result<(), String> {
     app.mouth.held.recovered_by(Arc::new(recovering));
     app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
     app.mouth.bindings_ready.notify_one();
+    app.mouth.start_voice_names().await;
     clarp_host::calls::resume(&app);
     let staging = app.clone();
     tokio::spawn(async move {
