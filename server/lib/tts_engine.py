@@ -123,11 +123,12 @@ class ElevenLabsEngine(TTSEngine):
         cfg = _load()
         if cfg.tts_provider != _voice.CARTESIA or not cfg.cartesia_key():
             return False
-        persona = ""
+        persona, agent = "", None
         if session:
             from . import agents as _agents
             ag = _agents.get_by_session(session)
             persona = (ag or {}).get("persona", "")
+            agent = dict(ag or {}, session=session)
         cart_voice = (_voice.resolve_voice(voice_id, _voice.CARTESIA)
                       or cfg.cartesia_voice_for(persona))
         if not cart_voice:
@@ -135,8 +136,10 @@ class ElevenLabsEngine(TTSEngine):
         from .cartesia_tts import CartesiaError
         from .cartesia_tts import synthesize as _cart
         try:
+            from .tts_registry import cartesia_language
             _cart(text=text, voice_id=cart_voice, out_path=out_path,
-                  api_key=cfg.cartesia_key(), model=cfg.cartesia_model)
+                  api_key=cfg.cartesia_key(), model=cfg.cartesia_model,
+                  language=cartesia_language(cfg, agent))
             return True
         except CartesiaError:
             return False

@@ -5,6 +5,8 @@ policy and stream safety belong to tts_service.
 """
 from __future__ import annotations
 
+from functools import cached_property
+
 from .cartesia_tts import CartesiaError, synthesize as cartesia_synthesize
 from .eleven_ws import ElevenWSError, synthesize_streaming
 from . import tts_mode
@@ -20,6 +22,27 @@ def cartesia_synthesize_raw_pcm(**kwargs) -> int:
     """
     from .cartesia_ws import synthesize_raw_pcm
     return synthesize_raw_pcm(**kwargs)
+
+
+def agent_speech_language(agent: dict | None) -> str:
+    """The language an agent is spoken to in, as its replies should be spoken (R168): the
+    first code of its language set (transcription.agent_languages, matched as the hearing
+    path matches it), else the Host's default language. "en" when neither can be read."""
+    from . import stt_language
+    from .log import log_exception
+    try:
+        value = stt_language.match(stt_language.agent_languages(), agent) or stt_language.selected()
+    except Exception as e:  # noqa: BLE001 - a language never blocks speech
+        log_exception("ttsAgentLanguageFail", e)
+        return "en"
+    return (value or "en").split(",")[0].strip() or "en"
+
+
+def cartesia_language(cfg, agent: dict | None) -> str:
+    """The `language` every Cartesia request for this agent carries: its speech language
+    when the configured model speaks it, else "en" (cartesia_tts.language_for)."""
+    from .cartesia_tts import language_for
+    return language_for(agent_speech_language(agent), cfg.cartesia_model)
 
 
 def _google_voice(raw_voice: str | None, route_voice: str | None) -> str:
@@ -42,6 +65,11 @@ class ProviderRegistry:
         # The one resolver the profile also uses (voice_profile.provider_voice).
         self.cartesia_voice = self.provider_voice(CARTESIA)
         self.eleven_voice = self.provider_voice(ELEVENLABS)
+
+    @cached_property
+    def cartesia_language(self) -> str:
+        """Resolved once per clip, and only when Cartesia speaks it (R168)."""
+        return cartesia_language(self.cfg, self.agent)
 
     def provider_voice(self, selected, adapter_default=None):
         return provider_voice(self.cfg, self.raw_voice, self.agent, self.route, selected,
@@ -84,6 +112,7 @@ class ConfiguredProvider:
             return cartesia_synthesize(
                 text=text, voice_id=self.registry.cartesia_voice, out_path=out_path,
                 api_key=cfg.cartesia_key(), model=cfg.cartesia_model,
+                language=self.registry.cartesia_language,
                 on_chunk=on_chunk, trace_id=trace_id)
         if selected == ELEVENLABS:
             if not (self.registry.eleven_voice and cfg.eleven_key()):
