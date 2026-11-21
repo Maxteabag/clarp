@@ -62,6 +62,17 @@ def _unheard_audio_sessions(raw: Any) -> tuple[str, ...]:
     ))
 
 
+def _is_front_desk(caller_agent_id: str) -> bool:
+    """Whether the agent proven by a turn token is one of the owner's front
+    desks ([agents] front_desk_sessions, by session)."""
+    from . import config, identity
+    desks = config.load().front_desk_sessions
+    if not desks:
+        return False
+    caller = identity.lookup(caller_agent_id) or {}
+    return str(caller.get("session") or "") in desks
+
+
 @dataclass(frozen=True)
 class SendRequest:
     text: str
@@ -98,6 +109,10 @@ class SendRequest:
     call_id: str = ""
     # Whether the caller named the trace itself (else the Host minted it).
     trace_given: bool = False
+    # Sent from the own turn (verified turn token) of a session the owner
+    # named in [agents] front_desk_sessions: it carries the user's word and
+    # goes first in the agent's queue; its origin stays 'agent' (issue 481).
+    front_desk: bool = False
 
     @property
     def channel(self) -> str:
@@ -191,6 +206,7 @@ class SendRequest:
             # An agent waking itself from its own turn: not the user's word
             # (and not coordination), whatever origin it claims.
             origin = "automation"
+        front_desk = bool(own_turn_agent) and _is_front_desk(own_turn_agent)
         if synthesize_audio_raw is None:
             synthesize_audio = origin == "user"
         else:
@@ -212,6 +228,7 @@ class SendRequest:
             client=_client(data.get("client")),
             call_id=str(data.get("call_id") or "").strip()[:64],
             trace_given=bool((data.get("trace_id") or "").strip()),
+            front_desk=front_desk,
         )
 
     def admit(self) -> PromptAdmission:

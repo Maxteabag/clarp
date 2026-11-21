@@ -1465,6 +1465,12 @@ def test_stale_goal_queue_is_retired_once_without_losing_user_or_peer_work(
     elif path == "drain":
         backends.live = False
         backends.spawned[0][1]["on_result"]({"duration_ms": 5})
+        # The user's word goes first (issue 481): its turn runs, then the
+        # stale wake reaches the head and is retired.
+        for _, call in list(backends.spawned):
+            if call["text"] == "user-later":
+                backends.live = False
+                call["on_result"]({"duration_ms": 5})
     elif path == "manual":
         with pytest.raises(DispatchError):
             service.dispatch_queued(request)
@@ -1479,8 +1485,10 @@ def test_stale_goal_queue_is_retired_once_without_losing_user_or_peer_work(
     assert tuple(tombstone) == ("", "")
     assert not any(call["text"] == text for _, call in backends.spawned)
     assert not any(row["text"] == text for row in agents_db.list_messages(agent_id=plan["agent_id"]))
-    assert turn_queue.status("user-later") in {"queued", "started"}
-    assert turn_queue.status("peer-later") == "queued"
+    assert turn_queue.status("user-later") in ({"started", "done"} if path == "drain"
+                                               else {"queued", "started"})
+    assert turn_queue.status("peer-later") in ({"queued", "started"} if path == "drain"
+                                               else {"queued"})
     revision = turn_queue.revision(plan["agent_id"])
     backends.live = True
     service.recover_queued()

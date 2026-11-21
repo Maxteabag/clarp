@@ -36,7 +36,8 @@ class AdmissionMixin:
                  durable_queue_id: str = "",
                  unheard_audio_sessions: tuple[str, ...] = (),
                  allow_paused_queue: bool = False,
-                 janitor_run_id: str = "") -> DispatchResult:
+                 janitor_run_id: str = "",
+                 user_word: bool = False) -> DispatchResult:
         """Keyword form of :meth:`submit`, for tests and ad-hoc callers.
         Production entry points build the :class:`DispatchCommand` themselves."""
         return self.submit(DispatchCommand(
@@ -52,7 +53,7 @@ class AdmissionMixin:
             durable_queue_id=durable_queue_id,
             unheard_audio_sessions=tuple(unheard_audio_sessions),
             allow_paused_queue=allow_paused_queue,
-            janitor_run_id=janitor_run_id))
+            janitor_run_id=janitor_run_id, user_word=user_word))
 
     def submit(self, command: DispatchCommand) -> DispatchResult:
         """Run ``command`` where turns are owned: forward it unchanged over the
@@ -268,6 +269,7 @@ class AdmissionMixin:
                       or ((client_msg_id or trace_id) if queue_if_busy else "")),
             unheard_audio=unheard_audio,
             janitor_run_id=janitor_run_id,
+            user_word=command.user_word or origins.is_user_word(origin),
         )
         # Queue receipts and ordinary user admissions share one SQLite write
         # transaction, preserving client_msg_id idempotency even if concurrent
@@ -332,6 +334,7 @@ class AdmissionMixin:
                         origin=spec.origin,
                         sender_agent_id=spec.sender_agent_id,
                         prompt_admission_id=spec.prompt_admission_id,
+                        user_word=spec.user_word,
                     )
                     admission = True
                 else:

@@ -66,6 +66,7 @@ class ClaimMixin:
                 prompt_admission_id=str(row["prompt_admission_id"]),
                 queue_if_busy=True, skip_admission=True,
                 durable_queue_id=queue_id, allow_paused_queue=True,
+                user_word=bool(row["user_word"]),
             ))
         except GoalWakeDispatchError as exc:
             if exc.permanent:
@@ -98,7 +99,7 @@ class ClaimMixin:
                 session=spec.session, text=spec.text,
                 trace_id=spec.trace_id, client_msg_id=spec.client_msg_id,
                 synthesize_audio=spec.synthesize_audio, origin=spec.origin,
-                sender_agent_id=spec.sender_agent_id,
+                sender_agent_id=spec.sender_agent_id, user_word=spec.user_word,
             )
         park_id = ""
         if not spec.queue_id and _SLOTS.get(spec.agent_id) == _STOPPING_SENTINEL:
@@ -138,7 +139,8 @@ class ClaimMixin:
                     client_msg_id=spec.client_msg_id,
                     synthesize_audio=spec.synthesize_audio, origin=spec.origin,
                     sender_agent_id=spec.sender_agent_id,
-                    prompt_admission_id=spec.prompt_admission_id)
+                    prompt_admission_id=spec.prompt_admission_id,
+                    user_word=spec.user_word)
             except Exception as exc:  # noqa: BLE001 - never queue only in memory
                 log_exception("userBusyQueueFail", exc, detail=spec.agent_id)
                 raise DispatchError(503, "could not durably queue message") from exc
