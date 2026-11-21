@@ -759,7 +759,11 @@ pub(crate) fn older(
     };
     let (items, mut has_more) = items_before(log, (before, span.floor), stored_limit, which)?;
     let mut entries = rows(log, &items, Place::First, which)?;
-    live.retain(|shown| !entries.iter().any(|known| known.entry.id() == shown.entry.id()));
+    live.retain(|shown| {
+        !entries
+            .iter()
+            .any(|known| known.entry.id() == shown.entry.id())
+    });
     entries.extend(live);
     if which.hides() && entries.len() > limit {
         entries.drain(..entries.len() - limit);
@@ -855,7 +859,7 @@ pub(crate) fn after(
                 }
             }
             if which.hides() && entries.len() > limit {
-                entries.sort_by_key(|row| row.revision);
+                entries.sort_unstable_by_key(|row| row.revision);
                 entries.truncate(limit);
                 let last = entries.last().map_or(revision, |row| row.revision);
                 break (entries, last, true);
