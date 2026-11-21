@@ -56,9 +56,8 @@ def test_idle_snapshot_query_count_does_not_grow_with_roster():
     assert counts[1] == counts[0]
     # 20 roster-independent reads, two for the backend quota projection (which
     # must come from the database: the runtime process records limits and this
-    # process serves the snapshot), one for the agent-goal projection and one for
-    # the agents that moved to another Host (agent_moves, one read for all rows).
-    assert counts[1] <= 24
+    # process serves the snapshot), and one for the agent-goal projection.
+    assert counts[1] <= 23
 
 
 def test_cached_busy_state_cannot_overwrite_a_new_background_state():
