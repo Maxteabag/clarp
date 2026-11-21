@@ -133,6 +133,20 @@ def test_images_published_before_the_run_started_are_not_its(portrait_run, tmp_p
     assert _watch_until_end(portrait_run, "succeeded") == []
 
 
+def test_an_older_portrait_image_deleted_during_the_run_is_not_the_runs(portrait_run):
+    """The run's discarded set is the images it published and discarded, not every image of
+    its kind deleted while it ran: an older generated portrait image a device deletes during
+    the run gets its own deleted from that delete, never a second one from the run."""
+    older = portrait_run.publish(1)
+    db.conn().execute("UPDATE media_assets SET created_at = created_at - 60000 WHERE asset_id = ?",
+                      (older["asset_id"],))
+    own = portrait_run.publish(2)
+    media_store.delete(older["asset_id"], deleted_by="device_x")  # deleted while the run goes
+    portrait_generation._discard_assets([own])
+    sent = _watch_until_end(portrait_run, "failed", "image provider failed")
+    assert [(e["change"], e["asset_id"]) for e in sent] == [("deleted", own["asset_id"])]
+
+
 # ---- the podcast companion -------------------------------------------------------
 
 @pytest.fixture
