@@ -76,6 +76,10 @@ impl AppServer {
         Ok((server, frames))
     }
 
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     pub fn initialize(&mut self) -> io::Result<u64> {
         self.request(
             "initialize",
