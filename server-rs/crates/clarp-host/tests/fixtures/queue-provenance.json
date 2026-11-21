@@ -1,0 +1,165 @@
+{
+  "events": {
+    "deleted": {
+      "agent_id": "a",
+      "client_msg_id": "m1",
+      "origin": "user",
+      "queue_change": "deleted",
+      "queue_depth": 1,
+      "queue_paused": true,
+      "queue_revision": 7,
+      "queue_started": false,
+      "sender": null,
+      "session": "s",
+      "type": "queue-updated"
+    },
+    "edited": {
+      "agent_id": "a",
+      "client_msg_id": "m2",
+      "origin": "agent",
+      "queue_change": "edited",
+      "queue_depth": 1,
+      "queue_paused": true,
+      "queue_revision": 7,
+      "queue_started": false,
+      "sender": {
+        "agent_id": "mike",
+        "name": "Mike"
+      },
+      "session": "s",
+      "text": "changed",
+      "type": "queue-updated"
+    },
+    "mailbox": {
+      "agent_id": "a",
+      "queue_depth": 1,
+      "queue_paused": true,
+      "queue_revision": 7,
+      "queue_started": false,
+      "session": "s",
+      "type": "queue-updated"
+    },
+    "retired": {
+      "agent_id": "a",
+      "client_msg_id": "goal-wake",
+      "origin": "automation",
+      "queue_depth": 1,
+      "queue_paused": true,
+      "queue_revision": 7,
+      "queue_started": false,
+      "sender": null,
+      "session": "s",
+      "type": "queue-updated"
+    }
+  },
+  "rows": [
+    {
+      "name": null,
+      "origin": "user",
+      "provenance": {
+        "origin": "user",
+        "sender": null
+      },
+      "sender_agent_id": ""
+    },
+    {
+      "name": "Mike",
+      "origin": "agent",
+      "provenance": {
+        "origin": "agent",
+        "sender": {
+          "agent_id": "mike",
+          "name": "Mike"
+        }
+      },
+      "sender_agent_id": "mike"
+    },
+    {
+      "name": null,
+      "origin": "agent",
+      "provenance": {
+        "origin": "agent",
+        "sender": {
+          "agent_id": "gone",
+          "name": null
+        }
+      },
+      "sender_agent_id": "gone"
+    },
+    {
+      "name": null,
+      "origin": "agent",
+      "provenance": {
+        "origin": "agent",
+        "sender": {
+          "agent_id": "unnamed",
+          "name": null
+        }
+      },
+      "sender_agent_id": "unnamed"
+    },
+    {
+      "name": null,
+      "origin": "oracle",
+      "provenance": {
+        "origin": "oracle",
+        "sender": null
+      },
+      "sender_agent_id": ""
+    },
+    {
+      "name": null,
+      "origin": "automation",
+      "provenance": {
+        "origin": "automation",
+        "sender": null
+      },
+      "sender_agent_id": ""
+    },
+    {
+      "name": null,
+      "origin": "janitor",
+      "provenance": {
+        "origin": "janitor",
+        "sender": null
+      },
+      "sender_agent_id": ""
+    },
+    {
+      "name": null,
+      "origin": "heartbeat",
+      "provenance": {
+        "origin": "heartbeat",
+        "sender": null
+      },
+      "sender_agent_id": ""
+    },
+    {
+      "name": null,
+      "origin": "future-origin",
+      "provenance": {
+        "origin": "future-origin",
+        "sender": null
+      },
+      "sender_agent_id": ""
+    },
+    {
+      "name": null,
+      "origin": "",
+      "provenance": {
+        "origin": "user",
+        "sender": null
+      },
+      "sender_agent_id": ""
+    },
+    {
+      "name": null,
+      "origin": null,
+      "provenance": {
+        "origin": "user",
+        "sender": null
+      },
+      "sender_agent_id": null
+    }
+  ]
+}

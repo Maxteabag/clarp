@@ -190,6 +190,16 @@ pub struct QueueUpdated {
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_change: Option<String>,
+    /// The item's stored origin, when the event carries its provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// The item's sender, with explicit null distinct from an event without provenance.
+    #[serde(
+        default,
+        deserialize_with = "crate::requests::present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sender: Option<Value>,
 }
 
 /// A finished turn the user may want to know about, with what the Host decided to do about it.

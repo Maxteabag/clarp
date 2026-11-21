@@ -477,14 +477,19 @@ impl Directory {
     /// one that was removed: what a row that names another agent shows of it when it is read.
     /// By its id alone, as the Python Host joins its roster.
     pub fn shown_as(&self, agent_id: &str) -> Option<(String, String)> {
-        let member = self.members.iter().chain(&self.janitors);
-        match member
-            .into_iter()
-            .find(|member| member.record.agent_id == agent_id)
-        {
+        match self.by_id(agent_id) {
             Some(member) => Some((member.record.persona.clone(), member.record.session.clone())),
             None => self.gone.get(agent_id).cloned(),
         }
+    }
+
+    /// A current agent or janitor, by id without a session lookup or tombstone fallback.
+    pub(crate) fn by_id(&self, agent_id: &str) -> Option<&Member> {
+        self.members
+            .iter()
+            .chain(&self.janitors)
+            .find(|member| member.record.agent_id == agent_id)
+            .map(Arc::as_ref)
     }
 
     /// The device that presents this token, when it is paired and not revoked.
@@ -827,7 +832,7 @@ enum Ask {
 pub struct FleetHandle {
     pub(crate) delegation_view: delegations::Rejoin,
     tx: Arc<mpsc::Sender<Ask>>,
-    directory: watch::Receiver<Arc<Directory>>,
+    directory: Arc<watch::Receiver<Arc<Directory>>>,
     log: crate::unkept::Log,
     left_out: Arc<crate::kept::LeftOut>,
 }
@@ -1847,6 +1852,8 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         personas: book.clone(),
         gone: Arc::new(gone.clone()),
     }));
+    let read = Arc::new(read);
+    works.hub.queue_roster(&read);
     let log = works.log.clone();
     let delegation_view = delegation_desk.for_worker();
     let left_out = works.left_out.clone();

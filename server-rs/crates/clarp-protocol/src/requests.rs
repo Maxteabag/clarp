@@ -114,6 +114,8 @@ pub struct CreateAgentRequest {
     pub avatar_base64: Option<String>,
 }
 
-fn present_value<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<Option<Value>, D::Error> {
+pub(crate) fn present_value<'de, D: serde::Deserializer<'de>>(
+    decoder: D,
+) -> Result<Option<Value>, D::Error> {
     Value::deserialize(decoder).map(Some)
 }

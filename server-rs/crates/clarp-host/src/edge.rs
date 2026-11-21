@@ -3261,7 +3261,11 @@ async fn queue(
         .anyone(&query.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
     let (waiting, state) = member.agent.queue().await?;
-    let items: Vec<Value> = waiting.iter().map(wire::queue_item).collect();
+    let directory = app.fleet.directory();
+    let items: Vec<Value> = waiting
+        .iter()
+        .map(|item| wire::queue_item(item, &directory))
+        .collect();
     Ok(Json(json!({
         "items": items,
         "paused": state.paused,
