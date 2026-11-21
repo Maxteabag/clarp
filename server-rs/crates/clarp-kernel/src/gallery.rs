@@ -123,24 +123,23 @@ pub fn ids(body: &Value) -> Result<Vec<&str>, Refusal> {
         .collect()
 }
 
-pub fn deletion_query(since: &str, limit: &str) -> Result<(i64, usize), Refusal> {
+pub fn deletion_query(since: &str, limit: Option<&str>) -> Result<(i64, usize), Refusal> {
     let since = since
         .trim()
         .parse::<i64>()
         .ok()
         .filter(|since| *since >= 0)
         .ok_or(Refusal::BadSince)?;
-    let limit = if limit.trim().is_empty() {
-        1000
-    } else {
-        limit.trim().parse::<i64>().map_err(|_| Refusal::BadLimit)?
+    let limit = match limit {
+        None => 1000,
+        Some(raw) => crate::python::int(crate::python::strip(raw))
+            .filter(|limit| (1..=1000).contains(limit))
+            .ok_or(Refusal::BadLimit)?,
     };
-    let limit = if limit == 0 {
-        1000
-    } else {
-        limit.clamp(1, 1000)
-    };
-    Ok((since, usize::try_from(limit).unwrap_or(1000)))
+    Ok((
+        since,
+        usize::try_from(limit).map_err(|_| Refusal::BadLimit)?,
+    ))
 }
 
 type Key = (i64, String);

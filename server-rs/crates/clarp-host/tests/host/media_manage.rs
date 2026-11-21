@@ -102,6 +102,32 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
         host.ask("GET", "/media/deleted?since=0&limit=bad", None).0,
         400
     );
+    let limit_error = json!({"error": "limit must be a number from 1 to 1000"});
+    for limit in ["0", "-1", "1001", "1.5", "%20", "&limit=0"] {
+        assert_eq!(
+            host.ask(
+                "GET",
+                &format!("/media/deleted?since=0&limit={limit}"),
+                None
+            ),
+            (400, limit_error.clone()),
+            "{limit}"
+        );
+    }
+    for limit in [
+        "",
+        "1",
+        "1000",
+        "%201%20",
+        "%2B1",
+        "1_000",
+        "%D9%A1",
+        "&limit=1",
+        "1&limit=0",
+    ] {
+        let path = format!("/media/deleted?since=0&limit={limit}");
+        assert_eq!(host.ask("GET", &path, None).0, 200, "{path}");
+    }
     let batch = host.post(
         "/media/delete",
         json!({"asset_ids": [first, "unknown", text, first]}),
