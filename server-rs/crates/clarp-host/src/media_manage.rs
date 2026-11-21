@@ -2,12 +2,11 @@
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{Extension, Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use clarp_kernel::gallery::{self, Image, Refusal};
 use clarp_kernel::media::Asset;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::edge::{ApiError, App, Principal, principal_name};
@@ -201,27 +200,28 @@ pub(crate) async fn delete_batch(
         .map_err(|why| error("", why))
 }
 
-#[derive(Deserialize)]
-pub(crate) struct DeletedQuery {
-    #[serde(default)]
-    session: String,
-    #[serde(default)]
-    since: String,
-    #[serde(default)]
-    limit: String,
-}
-
 pub(crate) async fn deleted(
     State(app): State<App>,
-    Query(query): Query<DeletedQuery>,
+    RawQuery(query): RawQuery,
 ) -> Result<Json<Value>, Denied> {
-    let (since, limit) =
-        gallery::deletion_query(&query.since, &query.limit).map_err(|why| error("", why.into()))?;
+    let pairs: Vec<_> =
+        url::form_urlencoded::parse(query.as_deref().unwrap_or("").as_bytes()).collect();
+    // The reference drops empty values before selecting the first one. Whitespace is
+    // still a value here and is stripped only when it is parsed as a limit.
+    let first = |name: &str| {
+        pairs
+            .iter()
+            .find(|(key, value)| key == name && !value.is_empty())
+            .map(|(_, value)| value.as_ref())
+    };
+    let (since, limit) = gallery::deletion_query(first("since").unwrap_or(""), first("limit"))
+        .map_err(|why| error("", why.into()))?;
+    let session = clarp_kernel::python::strip(first("session").unwrap_or("")).to_owned();
     let clock = app.clock.clone();
     app.gallery
         .ask(move |store| {
             Ok(json!(store.index.deleted(
-                query.session.trim(),
+                &session,
                 since,
                 limit,
                 clock.now_ms()
