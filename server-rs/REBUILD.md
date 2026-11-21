@@ -139,8 +139,11 @@ returns the thread to exec after the last live turn and the lane have ended.
 
 The lane runs through the same launcher, with the same login and account rules.
 It feeds the actor the ordinary turn spool and uses the agent's journal for
-admission and recovery. A Stop pauses the native goal before interrupting the
-turn. A Host restart reconnects to the running lane or restores it for an active
+admission and recovery. Before activating a goal or yielding the lane for a
+continuation, the Host reserves the actor's claim through ordinary admission.
+If Codex announces a turn without that reservation, the lane fences it and
+interrupts its exact turn ID. A Stop pauses the native goal before interrupting
+the turn. A Host restart reconnects to the running lane or restores it for an active
 goal. The cost is one long-lived app-server and its supervisor per goal-enabled
 thread, plus retaining the spool and tracking ownership while the lane is idle.
 Host task plans keep their existing records and execution.
