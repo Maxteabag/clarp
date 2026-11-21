@@ -1,12 +1,12 @@
 //! `clarp-shim`: owns one tool process for as long as it lives.
 //!
-//!     clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] [--prompt-as-file] -- PROGRAM [ARGS...]
+//!     clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] [--stdin-until TYPE] [--prompt-as-file] -- PROGRAM [ARGS...]
 //!
 //! It makes the turn's spool, starts PROGRAM in its own process group, appends every line it
 //! prints to the spool, listens on the socket for the server's few requests, and when the program
 //! is gone writes how it went and exits with the same code. It knows nothing about any tool: the
-//! lines are opaque to it. It never exits before the program does, and it does not care whether
-//! a server is there.
+//! lines are opaque except for an optional record type that closes stdin. It never exits before
+//! the program does, and it does not care whether a server is there.
 //!
 //! The order of the first steps is what makes a turn start at most once:
 //!
@@ -66,6 +66,7 @@ struct Args {
     socket: PathBuf,
     cwd: Option<PathBuf>,
     stdin_file: Option<PathBuf>,
+    stdin_until: Option<String>,
     prompt_as_file: bool,
     named_session: Option<String>,
     program: String,
@@ -76,6 +77,7 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut before_stop = None;
     let (mut spool, mut socket, mut cwd, mut stdin_file) = (None, None, None, None);
     let mut named_session = None;
+    let mut stdin_until = None;
     let mut prompt_as_file = false;
     loop {
         match argv.next().as_deref() {
@@ -100,6 +102,9 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
             Some("--cwd") => cwd = argv.next().map(PathBuf::from),
             Some("--prompt-as-file") => prompt_as_file = true,
             Some("--stdin-file") => stdin_file = argv.next().map(PathBuf::from),
+            Some("--stdin-until") => {
+                stdin_until = Some(argv.next().ok_or("missing stdin closing record type")?)
+            }
             Some("--") => break,
             Some(other) => return Err(format!("unknown argument {other}")),
             None => return Err("missing -- PROGRAM".to_string()),
@@ -112,6 +117,7 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
         socket: socket.ok_or("missing --socket PATH")?,
         cwd,
         stdin_file,
+        stdin_until,
         prompt_as_file,
         named_session,
         program,
@@ -126,6 +132,45 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Name the owner of streaming input on this boot before releasing the first prompt.
+fn streaming_owner(tool_pid: u32, cwd: Option<&Path>) -> Option<ShimEvent> {
+    let shim_pid = std::process::id();
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let fields = |pid| {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let mut parts = stat.rsplit_once(')')?.1.split_whitespace();
+        let group = parts.nth(2)?.parse::<u32>().ok()?;
+        let session = parts.next()?.parse::<u32>().ok()?;
+        Some((group, session, parts.nth(15)?.parse::<u64>().ok()?))
+    };
+    let (group, session, tool) = fields(tool_pid)?;
+    let (_, shim_session, shim) = fields(shim_pid)?;
+    if group != tool_pid || session != shim_pid || shim_session != shim_pid {
+        return None;
+    }
+    let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claude")))?;
+    let projects = if config.is_absolute() {
+        config
+    } else {
+        let base = cwd
+            .map(Path::to_path_buf)
+            .or_else(|| std::env::current_dir().ok())?;
+        base.join(config)
+    }
+    .join("projects");
+    Some(ShimEvent::InputOpen {
+        shim_pid,
+        shim_start: format!("{}:{shim}", boot.trim()),
+        tool_pid,
+        tool_start: format!("{}:{tool}", boot.trim()),
+        group,
+        projects,
+    })
+}
+
 /// What the threads send to the one thread that owns the spool.
 enum ToSpool {
     Entry(Entry),
@@ -137,12 +182,35 @@ enum ToSpool {
     Follow(UnixStream),
     /// Say how far the spool goes, once everything sent before this is written.
     End(Sender<std::io::Result<u64>>),
+    /// Append the durable takeover marker only while the spool still ends at the held fence.
+    MarkTakeover {
+        fence: u64,
+        replaced_by: u64,
+        done: Sender<std::io::Result<bool>>,
+    },
 }
 
 /// What is sent to the one thread that owns the tool's standard input.
-enum ToStdin {
-    Data(Vec<u8>),
-    Close,
+struct ToStdin {
+    data: Vec<u8>,
+    written: Option<Sender<bool>>,
+}
+
+/// The sole sender. Taking it closes stdin once the writer drains the accepted requests.
+struct Input(Mutex<Option<Sender<ToStdin>>>);
+
+impl Input {
+    fn send(&self, data: Vec<u8>, written: Option<Sender<bool>>) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|send| send.send(ToStdin { data, written }).is_ok())
+    }
+
+    fn close(&self) {
+        let _ = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+    }
 }
 
 /// Appends one entry. A spool that cannot be written is a turn nobody will ever read; there is
@@ -181,6 +249,25 @@ fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
                     Err(std::io::Error::other("the spool has an unwritten record"))
                 };
                 let _ = answer.send(end);
+            }
+            ToSpool::MarkTakeover {
+                fence,
+                replaced_by,
+                done,
+            } => {
+                let mark = if complete {
+                    writer.append_at_and_sync(
+                        fence,
+                        &Record {
+                            t: now_ms(),
+                            entry: Entry::Shim(ShimEvent::Takeover { fence, replaced_by }),
+                        },
+                    )
+                } else {
+                    Ok(false)
+                };
+                complete &= mark.is_ok();
+                let _ = done.send(mark);
             }
         }
         // Whoever follows is told there is more to read. A follower that is not reading already
@@ -276,10 +363,20 @@ fn pump(
     to_spool: &Sender<ToSpool>,
     wrap: fn(String) -> Entry,
     printed: Option<&Printed>,
+    close_stdin: Option<(&Input, &str)>,
 ) {
     let mut held = Vec::new();
     let mut chunk = vec![0; READ_AT_ONCE];
-    let record = |line: String| to_spool.send(ToSpool::Entry(wrap(line))).is_ok();
+    let record = |line: String| {
+        if let Some((input, kind)) = close_stdin
+            && serde_json::from_str::<serde_json::Value>(&line).is_ok_and(|event| {
+                event.get("type").and_then(serde_json::Value::as_str) == Some(kind)
+            })
+        {
+            input.close();
+        }
+        to_spool.send(ToSpool::Entry(wrap(line))).is_ok()
+    };
     loop {
         // Waiting for the tool is done without the turn: a hook is not kept waiting by a
         // tool that prints nothing.
@@ -314,14 +411,13 @@ fn pump(
 }
 
 fn stdin_thread(mut stdin: ChildStdin, requests: mpsc::Receiver<ToStdin>) {
-    for request in requests {
-        match request {
-            ToStdin::Data(data) => {
-                if stdin.write_all(&data).and_then(|()| stdin.flush()).is_err() {
-                    break; // the tool closed its input; there is nothing left to feed
-                }
-            }
-            ToStdin::Close => break,
+    for ToStdin { data, written } in requests {
+        let ok = stdin.write_all(&data).and_then(|()| stdin.flush()).is_ok();
+        if let Some(written) = written {
+            let _ = written.send(ok);
+        }
+        if !ok {
+            break;
         }
     }
     // Dropping the handle closes the pipe.
@@ -355,7 +451,12 @@ enum Hold {
     #[default]
     Free,
     /// Every process of the tool's group is sent SIGSTOP, and is let go at `until` at the latest.
-    Held { until: Instant, timing: Timing },
+    Held {
+        until: Instant,
+        timing: Timing,
+        /// A confirmed hold with an intact fence and no incomplete output or reports.
+        fence: Option<u64>,
+    },
     /// Let go: by a release, or by the bound.
     Released,
     /// Killed while it was held, without running again.
@@ -376,6 +477,7 @@ impl Hold {
     fn held(until: Instant) -> Self {
         Self::Held {
             until,
+            fence: None,
             timing: Timing {
                 began: Instant::now(),
                 still: None,
@@ -489,7 +591,7 @@ struct Control {
     stage: Mutex<StopStage>,
     changed: Condvar,
     to_spool: Sender<ToSpool>,
-    to_stdin: Sender<ToStdin>,
+    input: Arc<Input>,
     /// The tool's standard output, when its order with the hooks can be kept.
     printed: Option<Arc<Printed>>,
     /// The tool's standard error, taken the same way.
@@ -508,20 +610,31 @@ struct Control {
 }
 
 impl Control {
-    fn handle(self: &Arc<Self>, request: Request, own: &Arc<Connection>) -> Reply {
+    fn handle(
+        self: &Arc<Self>,
+        request: Request,
+        own: &Arc<Connection>,
+        after_write: &mut Option<mpsc::Receiver<bool>>,
+    ) -> Reply {
         match request {
             Request::Hold { ms } => self.hold(ms, own),
+            Request::ConsumeHold { fence, replaced_by } => self.consume_hold(fence, replaced_by),
             Request::Release => Reply {
                 let_go: Some(self.let_go("let go by request")),
                 ..Reply::ok(Some(self.pid))
             },
             Request::Ping | Request::Follow => Reply::ok(Some(self.pid)),
-            Request::Stdin { data } => match self.to_stdin.send(ToStdin::Data(data.into_bytes())) {
-                Ok(()) => Reply::ok(Some(self.pid)),
-                Err(_) => Reply::failed("the tool's input is closed"),
-            },
+            Request::Stdin { data } => {
+                let (written, receipt) = mpsc::channel();
+                if self.input.send(data.into_bytes(), Some(written)) {
+                    *after_write = Some(receipt);
+                    Reply::ok(Some(self.pid))
+                } else {
+                    Reply::failed("the tool's input is closed")
+                }
+            }
             Request::CloseStdin => {
-                let _ = self.to_stdin.send(ToStdin::Close);
+                self.input.close();
                 Reply::ok(Some(self.pid))
             }
             Request::Hook { name, data } => {
@@ -652,9 +765,12 @@ impl Control {
             timing.drained = Some(stood.elapsed());
         }
         let left = until.saturating_duration_since(Instant::now());
-        match (counted, &*hold) {
+        match (counted, &mut *hold) {
             (_, Hold::Ended) => Reply::failed(ENDED_WHILE_HELD),
-            (Some(mut held), Hold::Held { .. }) if !left.is_zero() => {
+            (Some(mut held), Hold::Held { fence, .. }) if !left.is_zero() => {
+                if held.partial_out == 0 && held.partial_err == 0 && held.partial_reports == 0 {
+                    *fence = Some(held.spool);
+                }
                 held.left_ms = u64::try_from(left.as_millis()).unwrap_or(u64::MAX);
                 Reply {
                     held: Some(held),
@@ -667,6 +783,68 @@ impl Control {
                 self.let_go(&format!("refused: {why}"));
                 Reply::failed(why)
             }
+        }
+    }
+
+    /// With the locks that own expiry and release held, commit the marker before killing.
+    fn consume_hold(&self, fence: u64, replaced_by: u64) -> Reply {
+        let not_held = || Reply {
+            killed: Some(false),
+            ..Reply::ok(Some(self.pid))
+        };
+        let mut stage = lock(&self.stage);
+        if !stage.ready() || self.leader_exited.load(Ordering::SeqCst) || replaced_by == 0 {
+            return not_held();
+        }
+        let mut hold = lock(&self.hold);
+        let Hold::Held {
+            until,
+            timing,
+            fence: Some(held_at),
+        } = *hold
+        else {
+            return not_held();
+        };
+        if held_at != fence || Instant::now() >= until {
+            return not_held();
+        }
+
+        let (done, wait) = mpsc::channel();
+        if self
+            .to_spool
+            .send(ToSpool::MarkTakeover {
+                fence,
+                replaced_by,
+                done,
+            })
+            .is_err()
+        {
+            return Reply::failed("the takeover marker could not be written");
+        }
+        match wait.recv() {
+            Ok(Ok(true)) => {}
+            Ok(Ok(false)) => return not_held(),
+            _ => return Reply::failed("the takeover marker could not be written"),
+        }
+
+        // The expired timer cannot resume the group after this request has committed.
+        let signal = killpg(self.group(), Signal::SIGKILL);
+        if let Err(error) = signal {
+            log(&format!(
+                "clarp-shim: cannot end a held tool for takeover: {error}"
+            ));
+            return Reply::failed("the held tool could not be ended");
+        }
+        *hold = Hold::Ended;
+        // The usual observer may write Exited immediately. Keep it from leaving the shim
+        // until this connection has made its bounded attempt to return the commit result.
+        *stage = StopStage::Asked;
+        self.hold_changed.notify_all();
+        self.changed.notify_all();
+        log(&hold_line(Some(&timing), "taken over while held"));
+        Reply {
+            killed: Some(true),
+            ..Reply::ok(Some(self.pid))
         }
     }
 
@@ -865,15 +1043,32 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
             Ok(Request::Stop { grace_ms }) => Some(*grace_ms),
             _ => None,
         };
-        let reply = match request {
-            Ok(request) => control.handle(request, me),
+        let mut after_write = None;
+        let mut reply = match request {
+            Ok(request) => control.handle(request, me, &mut after_write),
             Err(error) => Reply::failed(format!("not a request: {error}")),
         };
         drop(turn);
+        if let Some(receipt) = after_write
+            && receipt.recv() != Ok(true)
+        {
+            reply = Reply::failed("the tool's input is closed");
+        }
         let text = serde_json::to_string(&reply).map(|text| text + "\n");
-        let written = text
-            .as_ref()
-            .is_ok_and(|text| write_half.write_all(text.as_bytes()).is_ok());
+        let consumed = reply.killed == Some(true);
+        let can_write = !consumed
+            || write_half
+                .set_write_timeout(Some(Duration::from_millis(100)))
+                .is_ok();
+        let written = can_write
+            && text
+                .as_ref()
+                .is_ok_and(|text| write_half.write_all(text.as_bytes()).is_ok());
+        if consumed {
+            *lock(&control.stage) = StopStage::Signalled;
+            control.changed.notify_all();
+            break;
+        }
         // Whether or not the answer could be given, what was asked is done.
         if let Some(grace_ms) = stop {
             control.stop(grace_ms);
@@ -1043,6 +1238,11 @@ fn run(args: Args) -> Result<u8, String> {
         }
     };
     record_now(Entry::Shim(ShimEvent::Spawned { pid }));
+    if args.stdin_until.is_some()
+        && let Some(owner) = streaming_owner(pid, args.cwd.as_deref())
+    {
+        record_now(Entry::Shim(owner));
+    }
     // Whoever started this shim may wait for this line: the turn is taken, the tool is up and
     // the socket answers. A shim that ends without saying it never had the turn, or said why
     // in the spool.
@@ -1052,12 +1252,15 @@ fn run(args: Args) -> Result<u8, String> {
     }
 
     let (to_stdin, stdin_requests) = mpsc::channel();
+    let input = Arc::new(Input(Mutex::new(Some(to_stdin))));
     if let Some(stdin) = child.stdin.take() {
         std::thread::spawn(move || stdin_thread(stdin, stdin_requests));
     }
     if let Some(message) = message {
-        let _ = to_stdin.send(ToStdin::Data(message));
-        let _ = to_stdin.send(ToStdin::Close);
+        input.send(message, None);
+        if args.stdin_until.is_none() {
+            input.close();
+        }
     }
     let mut pumps = Vec::new();
     let mut printed = None;
@@ -1070,8 +1273,11 @@ fn run(args: Args) -> Result<u8, String> {
             .ok()
             .map(|pipe| Arc::new(Printed::new(pipe)));
         let (to_spool, printed) = (to_spool.clone(), printed.clone());
+        let input = input.clone();
+        let stdin_until = args.stdin_until;
         pumps.push(std::thread::spawn(move || {
-            pump(stdout, &to_spool, Entry::Out, printed.as_deref());
+            let close = stdin_until.as_deref().map(|kind| (input.as_ref(), kind));
+            pump(stdout, &to_spool, Entry::Out, printed.as_deref(), close);
         }));
     }
     let mut errors = None;
@@ -1083,7 +1289,7 @@ fn run(args: Args) -> Result<u8, String> {
             .map(|pipe| Arc::new(Printed::new(pipe)));
         let (to_spool, errors) = (to_spool.clone(), errors.clone());
         pumps.push(std::thread::spawn(move || {
-            pump(stderr, &to_spool, Entry::Err, errors.as_deref());
+            pump(stderr, &to_spool, Entry::Err, errors.as_deref(), None);
         }));
     }
     let control = Arc::new(Control {
@@ -1095,7 +1301,7 @@ fn run(args: Args) -> Result<u8, String> {
         stage: Mutex::default(),
         changed: Condvar::new(),
         to_spool: to_spool.clone(),
-        to_stdin,
+        input,
         printed,
         errors,
         served: args.program_args.first().is_some_and(|word| word == SERVED),
@@ -1212,7 +1418,7 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("clarp-shim: {error}");
             eprintln!(
-                "usage: clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] [--prompt-as-file] -- PROGRAM [ARGS...]"
+                "usage: clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] [--stdin-until TYPE] [--prompt-as-file] -- PROGRAM [ARGS...]"
             );
             ExitCode::from(2)
         }
@@ -1261,7 +1467,6 @@ mod tests {
             .process_group(0)
             .spawn()
             .unwrap();
-        let (to_stdin, _) = mpsc::channel();
         let control = Arc::new(Control {
             before_stop: None,
             pid: sleeper.id(),
@@ -1269,7 +1474,7 @@ mod tests {
             stage: Mutex::default(),
             changed: Condvar::new(),
             to_spool,
-            to_stdin,
+            input: Arc::new(Input(Mutex::new(None))),
             printed: Some(Arc::new(Printed::new(
                 out_read.as_fd().try_clone_to_owned().unwrap(),
             ))),
@@ -1867,7 +2072,7 @@ mod tests {
     fn output_is_recorded_a_line_at_a_time_and_what_is_left_at_the_end() {
         let (to_spool, entries) = mpsc::channel();
         let printed = b"one\ntwo\r\nthree".to_vec();
-        pump(printed.as_slice(), &to_spool, Entry::Out, None);
+        pump(printed.as_slice(), &to_spool, Entry::Out, None, None);
         drop(to_spool);
         let lines: Vec<Entry> = entries
             .into_iter()

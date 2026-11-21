@@ -218,6 +218,18 @@ with limited access can revoke its own pairing using its token's exact device id
 requested text. Revocation invalidates the token and uses the existing stream and call teardown.
 The pairing and device-scope vectors hold these rules to the Python Host.
 
+**Limited-device reads** (21 Nov 2026, R123c). The device scope check applies before routing.
+Limited GETs allow only the reference's exact reads and route families, including the three
+speech reads added by PR 544: transcription capabilities, providers and retained audio.
+Artifact exports are excluded even with trailing slashes. Unknown paths, PATCH, PUT and
+DELETE are refused with 403 `full device access required`. The existing POST allowlist stays in force. The public
+pairing and avatar routes keep their separate auth rules. A limited `/server-info` builds
+its reply from fixed identity, compatibility and connection keys. It omits `default_cwd`
+and reduces a local connection error to `failed`. The scope and identity vectors are
+generated from the Python Host's PR 544 merge, which includes PR 529. A limited snapshot also
+returns an empty required `cwd` string on each agent row, including archived agents and
+janitors (the Python Host's PR 550). Full callers still receive the stored path.
+
 **Provider message identity** (21 Nov 2026, R108). A modern Codex assistant item keeps its provider id,
 including when its rollout tells the same words in a legacy record. Native-session seed imports name the
 row from that id and its occurrence in the session. A line whose provider gives no id follows its place
@@ -225,6 +237,11 @@ as before. A Claude reply still holds its message's text blocks and tools in one
 item grows from that same draft and names the row the actor writes when it settles. A nested stream has
 no reply row in the parent's log. This Host does not reconcile active replies against a provider
 transcript, so there is no live-import retraction to perform.
+
+**Claude text in a keyless reply (R143).** The growing row and its live item use the text blocks
+as paragraphs. Tool and thinking blocks are kept in their own projections. A block snapshot does
+not rewrite text already streamed into the active draft. The next keyless reply can still arrive
+whole.
 
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
@@ -256,7 +273,7 @@ answer that they are not here yet), and what an account's usage limit does to a 
 The Goal keeper and its receipts are there: below.
 
 **Developer diagnostics** (19 Nov 2026). A computer's capture preferences live in one fleet
-setting. A limited device may read settings and health; changing the setting requires full access.
+setting. Reading settings or health, and changing the setting, require full access.
 Capture goes to one private directory and uses a bounded nonblocking queue. Its writer drops new
 records at capacity and expires hour files even with capture off. Its resource sampler runs only
 when selected. The public retention numbers are upper bounds; this Host keeps no hourly rollups.
@@ -286,8 +303,7 @@ one Bash PreToolUse hook through inline settings. The shim reads at most 64 KiB 
 no permission decision and never contacts the Host. The hook attaches the exact agent, native
 session and tool-use id to a worker registration. A registration with that binding takes the native
 row's place in the list; its own detail and timeline remain available. Full devices can read
-the last 64 KiB of the receipted task's output with secrets redacted. A limited device sees only
-progress and history. Cancelling a native job gives a 409 receipt and leaves its state intact.
+the last 64 KiB of the receipted task's output with secrets redacted. Task detail requires full access. Cancelling a native job gives a 409 receipt and leaves its state intact.
 
 The hook's turn advice is held by `tools/provider-hook-vectors.py` and the Host test that runs
 the repository's `run_detached_job.sh --goal` against its own tools. A worker awaiting a refused
@@ -1333,6 +1349,13 @@ next turn is answered from what was learned, and nobody is asked. What the Pytho
 its other process cannot take, and for what it missed while it was away, has no counterpart here: the rows
 and their explainer are one process. The switch and the janitor stay off as installed: what is asked of a
 model, on whose account, is the owner's to decide, and comes over with the owner's settings.
+
+**A shell call without its command (R184, 21 Nov 2026).** The explanation desk returns
+`failed` with reason `unexplained` when an enabled shell call brings only its name or
+description. The live reader waits until the command arrives. Such calls create no shape,
+model request or learned row. Templates with fixed call-specific values are kept for the exact
+call. A reusable row learned earlier is served only when the new call carries the values the
+sentence names.
 
 One part of the Python Host's explainer is left out on purpose: its memory of each agent's recent commands
 (`tool_explanation_commands`). That Host shows a command of Codex as the name of its row, cut at 80 signs,
@@ -2427,7 +2450,7 @@ closes it; failing again, archived, failing once more, discarded; a restart keep
 
 **Transcription failure words (PR 518, 21 Nov 2026).** Missing models, loading, contention, and failed attempts
 map to fixed words and statuses. Upload voice events and call attempt reasons use the same words. Health keeps
-fixed subsystem error labels with its timestamps, including for limited devices. The Host logs the engine detail.
+fixed subsystem error labels with its timestamps for callers with full access. The Host logs the engine detail.
 The speech stream gives a fixed failure message when its provider reports an error. The reference vectors and
 the upload, call, stream and health tests hold the failure paths.
 
@@ -3028,6 +3051,12 @@ turns it on.
   names are two agents (its row names neither) or one (its row names her); and by the demand history's own
   vectors of what it takes (`fits_metadata`). On a Host, by the router's test: its question answers the
   session spoken to, and the same message sent again after a restart is answered what it was first.
+- **A replay also returns the first decision and trace** (21 Nov 2026, Python PR 533, R134).
+  The run's receipt keeps the decision id, the target session as the first answer named it,
+  and the first decision's control action when they fit. The router reads the other decision
+  fields and trace from the retained row. A missing row or a receipt without the stored target
+  falls back to the old answer without a decision. The replay neither asks a model nor repeats
+  an effect. A retryable dispatch still follows the separate delivery retry rule.
 - Not yet: phrases kept ready-spoken; a model's fallbacks; the two providers that are no tool. In a call,
   only those of the call who can take speech are shown, as there.
 
@@ -3397,12 +3426,33 @@ and how it ended: `let go by request`, `let go at the bound`, `ended while held`
 `refused: ` and why. Where the system shows no processes in `/proc` a hold is refused in words and nothing is
 signalled. Nothing of a hold is written in the spool: a turn never held is byte for byte as before, and a reader of today reads a held one. Not
 held: a process that left the tool's group (as it is not stopped today either), and the tool when the shim itself is
-killed while it holds it. No caller yet: the actor's side of a turn that produced nothing is a later piece. Held by
+killed while it holds it. Held by
 fifteen tests in `crates/clarp-shim/tests/shim.rs` with stand-in tools (printed before the hold, a pipe full at the
 hold, half a line, a child, the bound with nobody to let go, ended while held, input written while held, held twice,
 a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
 hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
+
+**A second user message can replace a quiet turn** (21 Nov 2026, issue 491 B, Python PR 521).
+Only the next plain user message can replace a running turn that another plain user message began.
+The actor checks the shim's bounded hold against the whole spool fence. An unfinished output line,
+an unfinished hook report, an answer or tool block that began, an observed call, or an unreadable
+fence leaves the follow-up waiting. Thinking by itself permits takeover. Claude Code 2.1.223 and
+Antigravity 1.5.13 are the minimum versions that support their respective paths.
+
+The actor writes the offer before asking the shim to freeze the tool, then records its selection
+before consuming the hold. An offer alone leaves the first turn in place. Under the same lock as release and
+expiry, the shim checks the exact acknowledged fence and writes the takeover marker durably before
+sending SIGKILL. Recovery uses the marker and the old process's exit to finish the selection.
+The actor writes the first turn's `replaced` end and the second turn's start together, keeping
+both user rows and the first delivery receipt. The new turn uses the second message's trace and
+cannot itself be replaced. A Stop that comes before the consume retains the ordinary Stop path.
+
+A resumed Claude turn reads the prior transcript entry and uses the CLI's resume and drop pair.
+Its input carries both user texts in one line, with a UUID derived from the current trace. A quiet
+first turn without prior provider history begins a new Claude session. Antigravity continues the
+same conversation with both texts after checking its transcript while held. An existing first
+message in that transcript causes release and an ordinary queued follow-up.
 
 **An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
 profile use the kernel's engine order. If the ordinary chain ends on a hosted engine that
@@ -3522,6 +3572,32 @@ remains. The R152 recovery's failed list contains the engines that reached their
 Call attempt outcomes and skip reasons are open sets. Clients can display an unfamiliar
 value as words and keep the rest of the response. The reference vectors cover both attempt
 loops with stand-in adapters, and the Host test verifies the provider requests and call report.
+
+**Names for the voice profile (21 Nov 2026, PR 498).** The profile gives the configured
+language set alongside the language arguments of the first hearing engine. Archived rows,
+creation replies and roster events omit the profile. Cartesia and ElevenLabs names are
+read from the Host's published names file, with the Cartesia picker overlay. Gemini names
+use its picker labels and the configured Vertex aliases. The background refresher lists
+Cartesia's catalogue and looks up missing voices in use, handling at most 100 by-ID
+lookups per provider. A check advances the checked date. Only changed names change
+the file content and its digest; a provider failure keeps its earlier names.
+
+**The user's word goes first in an agent's queue (issue 481, PR 506).** An authenticated
+user or Oracle send, a form submission, and a delivered decision answer by the user or on the
+user's behalf take priority. The Host also recognizes a message from a verified local turn of a
+session in `[agents] front_desk_sessions` in the owner's configuration. That relay retains its
+agent origin, sender and audience. A supplied sender name or a peer credential conveys no
+priority. The acceptance event persists the priority bit beside the turn. A new priority
+message queues behind the last earlier priority item, retaining the order of the other items.
+Older acceptances keep their original position on replay and their user or Oracle origin
+protects their position when a new priority message arrives.
+
+The order read by `GET /turn-queue` is the mailbox's dispatch order. Adding priority work advances
+the same queue revision as any enqueue, and a Stop still holds the same work. An attempt that has
+started holds its place through retries and restart. The Rust Host uses a single journal-backed
+mailbox, so it does not re-admit or reconcile a second store's copy of waiting items. The
+acceptance event's optional field supports replay of old journals. The Python Host can also
+retry without the priority fields when a separately installed older runtime refuses them.
 
 ## 7. Stages and gates
 

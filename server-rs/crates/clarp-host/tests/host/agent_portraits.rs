@@ -229,8 +229,8 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     let (limited, _) = pair(&host, "fixture reader", "limited");
     let cap_route = format!("/agent-portrait-generation?session={sid}");
     assert_eq!(
-        host.ask_as(&limited, "GET", &cap_route, None).1["available"],
-        true
+        host.ask_as(&limited, "GET", &cap_route, None),
+        (403, json!({"error":"full device access required"}))
     );
     assert_eq!(
         host.ask_as(

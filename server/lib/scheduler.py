@@ -388,6 +388,13 @@ class AgentScheduleRunner:
         except Exception as exc:  # noqa: BLE001 - a broken check stops no schedule
             task_goal_recovery.log_failure_throttled(
                 "strandedParkCheckFail", ("stranded-parks",), exc, now)
+        try:
+            # A peer request whose message ended unrun: its requester hears it now (R136).
+            from . import peer_requests
+            peer_requests.settle_failed_waits()
+        except Exception as exc:  # noqa: BLE001 - a broken check stops no schedule
+            task_goal_recovery.log_failure_throttled(
+                "peerWaitSettleFail", ("peer-waits",), exc, now)
         for item in due:
             sid = item["schedule_id"]
             session = item["session"]

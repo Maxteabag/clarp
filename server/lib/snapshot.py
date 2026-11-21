@@ -14,7 +14,7 @@ from . import (background_jobs, agent_goals, agents as agents_db, avatar_setting
                compaction, db,
                config, message_store, model_avatars, persona_avatar_generation, team_store,
                turn_queue, scheduler, janitors, quiet_agents)
-from . import reconcile, turn_lifecycle
+from . import coordination, reconcile, turn_lifecycle
 from .clock import now_ms
 from .session_models import agent_model
 from . import personas as persona_store
@@ -99,23 +99,36 @@ class SharedSnapshot:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._last: dict[bool, tuple[float, Any, bytes]] = {}
+        # include_archived -> (started, ctx, body, the limited body or None until asked)
+        self._last: dict[bool, tuple[float, Any, bytes, bytes | None]] = {}
         self._archived: _ArchivedListing | None = None
 
-    def body(self, ctx, *, include_archived: bool = True) -> bytes:
+    def body(self, ctx, *, include_archived: bool = True, limited: bool = False) -> bytes:
+        """The snapshot's JSON. ``limited``: for a limited device, each agent's ``cwd`` (a path
+        in the owner's home, the same kind of fact as /server-info's default_cwd) is empty; the
+        key stays, both apps decode it as a required string (R123). A build serves the requests
+        that arrived before it started, full or limited; the limited body is made from the full
+        one on the first limited request and kept under the same build, so a Host with no
+        limited device pays nothing for it."""
         arrived = time.monotonic()
         with self._lock:
             self._release_expired_listing(arrived)
             last = self._last.get(include_archived)
-            if last is not None and last[0] >= arrived and last[1] is ctx:
+            if last is None or last[0] < arrived or last[1] is not ctx:
+                started = time.monotonic()
+                # The default makes the very call it always made.
+                snapshot = (build_agent_snapshot(ctx) if include_archived
+                            else build_agent_snapshot(ctx, include_archived=False))
+                last = self._last[include_archived] = (started, ctx, json.dumps(snapshot).encode(), None)
+            if not limited:
                 return last[2]
-            started = time.monotonic()
-            # The default makes the very call it always made.
-            snapshot = (build_agent_snapshot(ctx) if include_archived
-                        else build_agent_snapshot(ctx, include_archived=False))
-            body = json.dumps(snapshot).encode()
-            self._last[include_archived] = (started, ctx, body)
-            return body
+            if last[3] is None:
+                view = json.loads(last[2])
+                for agent in view.get("agents") or []:
+                    if isinstance(agent, dict) and "cwd" in agent:
+                        agent["cwd"] = ""
+                last = self._last[include_archived] = (*last[:3], json.dumps(view).encode())
+            return last[3]
 
     def archived_page(self, ctx, *, limit: int = None, position=None) -> dict[str, Any]:
         """One page of the archived agents, cut from a shared listing.
@@ -429,6 +442,9 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 f"count={len(agent_rows)} error_type={type(exc).__name__}")
     if select is not None and reconcile_available:
         _reconcile_unlisted(agent_rows, selected, states, runtimes, runtime_status)
+    # Read once for every row (lib.coordination): the Host's choice and the chats' own.
+    coordination_host = coordination.global_visibility()
+    coordination_chosen = coordination.overrides()
     for a in selected:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -547,6 +563,9 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             "heartbeat_enabled": bool(a.get("heartbeat_enabled")),
             "dreaming_enabled": bool(a.get("dreaming_enabled")),
             "muted":          bool(a.get("muted")),
+            # Coordination between agents (lib.coordination): the chat's effective
+            # visibility and its own choice (None: it follows the Host).
+            **coordination.snapshot_fields(agent_id, coordination_chosen, coordination_host),
             "archived_at":    a.get("archived_at"),
             "backend_session_id": bsid,
             "alive":          True,

@@ -624,6 +624,7 @@ mod tests {
             admission,
             at_ms: 1_000,
             coordination: None,
+            user_word: None,
         }
     }
 
@@ -670,7 +671,15 @@ mod tests {
             1,
             accepted(1, 1, Origin::User, Admission::Queue),
         );
-        turn(&mut agent, 3, 1, TurnEvent::Started { at_ms: 1_100 });
+        turn(
+            &mut agent,
+            3,
+            1,
+            TurnEvent::Started {
+                at_ms: 1_100,
+                takeover: None,
+            },
+        );
         assert_eq!(
             told(&mut agent),
             [
@@ -715,7 +724,15 @@ mod tests {
         agent
             .apply(&AgentEvent::Resumed { by, at_ms: 3_000 })
             .unwrap();
-        turn(&mut agent, 14, 2, TurnEvent::Started { at_ms: 3_200 });
+        turn(
+            &mut agent,
+            14,
+            2,
+            TurnEvent::Started {
+                at_ms: 3_200,
+                takeover: None,
+            },
+        );
         assert_eq!(told(&mut agent), [(2, true, true, 3, revision(14, 0))]);
         assert_eq!(agent.deliveries_mut().take_launched(), [2]);
         // A send admitted while nothing runs and stopped before its tool is launched is fenced,
@@ -752,7 +769,15 @@ mod tests {
             1,
             accepted(1, 1, Origin::User, Admission::Queue),
         );
-        turn(&mut folded, 3, 1, TurnEvent::Started { at_ms: 1_100 });
+        turn(
+            &mut folded,
+            3,
+            1,
+            TurnEvent::Started {
+                at_ms: 1_100,
+                takeover: None,
+            },
+        );
         assert!(folded.deliveries_mut().take().is_empty());
         assert!(folded.deliveries_mut().take_launched().is_empty());
         assert_eq!(folded.deliveries().sends().count(), 1);

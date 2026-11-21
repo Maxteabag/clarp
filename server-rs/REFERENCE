@@ -1,2 +1,2 @@
-c2feb1486b109bb573541065008c9e2d4ca6bca5
-The merge of the Python Host's PR 504 (it holds every merge through PR 504: 517, the R175 rule): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+4441826b446f6edf8be8f11d07d95d9ac271f04e
+The merge of the Python Host's PR 547 (it holds every merge through PR 547: 506 contract 118, 532, 547): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.

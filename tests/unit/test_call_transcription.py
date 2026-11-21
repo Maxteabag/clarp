@@ -686,9 +686,10 @@ def _cloud(monkeypatch, *, fail_after=(), no_key=()):
     def recorder(provider):
         def run(**kwargs):
             handed.append((provider, kwargs["language"]))
-            if provider in fail_after:
-                raise RuntimeError(f"{provider} failed after the handoff")
-            return "hei", 1.0
+            with stt_language.sending_audio():       # stands where the audio leaves
+                if provider in fail_after:
+                    raise RuntimeError(f"{provider} failed after the handoff")
+                return "hei", 1.0
         return run
     for module, provider in ((eleven_stt, "elevenlabs"), (google_stt, "google"),
                              (deepgram_stt, "deepgram"), (cartesia_stt, "cartesia")):

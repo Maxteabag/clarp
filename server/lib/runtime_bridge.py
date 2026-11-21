@@ -197,9 +197,25 @@ class RuntimeClient:
         from .turn_dispatch import DispatchCommand
         return self.dispatch_command(DispatchCommand(**kwargs))
 
+    # Fields a runtime of an older release refuses as unknown, and what is lost
+    # by sending without them: only a place in line (issue 481). The Host is
+    # installed without restarting the runtime, so the two can differ for a while.
+    _DROPPABLE_FIELDS = ("user_word", "taken")
+
     def dispatch_command(self, command):
         """Send one DispatchCommand; the runtime admits and launches it."""
-        return self._dispatch_result(self._request("dispatch", command.to_wire()))
+        wire = command.to_wire()
+        response = self._request("dispatch", wire)
+        dropped = _refused_droppable(response, wire, self._DROPPABLE_FIELDS)
+        if dropped:
+            # Refused while parsing, so nothing was admitted: send it again
+            # without the fields; the item queues in arrival order until the
+            # runtime is restarted on this release.
+            from .log import log
+            log("runtimeDispatchFieldsDropped", f"fields={','.join(dropped)}")
+            response = self._request(
+                "dispatch", {k: v for k, v in wire.items() if k not in dropped})
+        return self._dispatch_result(response)
 
     def dispatch_queued(self, queue_id: str):
         return self._dispatch_result(self._request(
@@ -383,3 +399,19 @@ class RuntimeClient:
             return self.status().get("protocol_version") == PROTOCOL_VERSION
         except (RuntimeProtocolError, RuntimeUnavailable):
             return False
+
+
+def _refused_droppable(response: dict, wire: dict, droppable) -> list[str]:
+    """The droppable fields an older runtime refused as unknown, when that is
+    the whole refusal ("unknown dispatch fields: a, b"); else nothing."""
+    if response.get("ok") or int(response.get("status") or 0) != 400:
+        return []
+    prefix = "unknown dispatch fields: "
+    error = str(response.get("error") or "")
+    if not error.startswith(prefix):
+        return []
+    named = [field.strip() for field in error[len(prefix):].split(",") if field.strip()]
+    if not named or any(field not in droppable or field not in wire for field in named):
+        return []
+    return named
+

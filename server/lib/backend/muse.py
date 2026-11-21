@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import itertools
 import re
 import signal
 import socket
@@ -91,6 +92,9 @@ def _tool_name(payload: dict) -> str:
 # Serialize Muse spawn/registration with orphan verification. An in-progress
 # spawn must never look like a forgotten handle between launch and register.
 _RECOVERY_LOCK = threading.RLock()
+# The most open files of a lock holder the reclaim looks through (under
+# _RECOVERY_LOCK). A holder with more is unverifiable: fail closed.
+_FD_WALK_CAP = 4096
 _RECLAIM_GRACE = 2.0
 
 
@@ -135,17 +139,40 @@ class _MuseHandle(TurnHandle):
             return proc
 
 
-def _kernel_lock_holder(lock, pid):
-    """The file's informational pid is insufficient: require the actual flock."""
+def _kernel_lock_holder(lock, pid, *, locks_path='/proc/locks', proc='/proc'):
+    """The file's informational pid is insufficient: require the actual flock.
+
+    /proc/locks names a lock's file by device and inode, but its device is not
+    always the one stat() reports: on btrfs stat() gives the subvolume's
+    anonymous device and /proc/locks the superblock's (R135), so a device match
+    never found the holder there. The lock is matched by inode and holder pid,
+    and proven to be this file by the holder itself: one of its open files
+    stats to this file's (device, inode), the same stat() view on both sides.
+    Anything less is not proof: fail closed."""
     info = lock.stat()
-    device = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
-    for line in pathlib.Path('/proc/locks').read_text().splitlines():
+    held = False
+    for line in pathlib.Path(locks_path).read_text().splitlines():
         fields = line.split()
         if len(fields) < 6 or fields[1:4] != ['FLOCK', 'ADVISORY', 'WRITE']:
             continue
-        major, minor, inode = fields[5].split(':')
-        if (int(major, 16), int(minor, 16), int(inode)) == device:
-            return int(fields[4]) == pid
+        if int(fields[5].rsplit(':', 1)[1]) == info.st_ino and int(fields[4]) == pid:
+            held = True
+            break
+    if not held:
+        return False
+    # At most one name past the cap is read; a holder with more open files than
+    # the cap is unverifiable, whatever order its fd directory lists them in.
+    with os.scandir(os.path.join(proc, str(pid), 'fd')) as listing:
+        fds = list(itertools.islice(listing, _FD_WALK_CAP + 1))
+    if len(fds) > _FD_WALK_CAP:
+        return False
+    for fd in fds:
+        try:
+            opened = os.stat(fd.path)
+        except OSError:
+            continue
+        if (opened.st_dev, opened.st_ino) == (info.st_dev, info.st_ino):
+            return True
     return False
 
 

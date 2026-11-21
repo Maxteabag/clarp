@@ -46,6 +46,8 @@ ROLE = "tool-explainer"
 PROMPT_VERSION = 3
 # `explanation_sources` Janitor option values.
 SOURCES_ALL, SOURCES_SCRIPTED, SOURCES_MODEL = 0, 1, 2
+# The reason a shell tool's call without its command is answered with (R184).
+UNEXPLAINED = "unexplained"
 # Exact refined-low audience instructions selected from the paired lab.
 REFINED_PROMPTS = json.loads(Path(__file__).with_name("tool_explanation_prompts.json").read_text())
 POLICIES = (
@@ -269,6 +271,7 @@ class ToolExplanations:
         started = time.monotonic()
         entries = []
         ids = set()
+        unexplained = set()
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not 1 <= len(item["id"]) <= 128 or item["id"] in ids:
                 raise ValueError("items need unique short string IDs")
@@ -277,6 +280,12 @@ class ToolExplanations:
             if demand is not None and (not isinstance(demand, str) or not 1 <= len(demand) <= 128):
                 raise ValueError("invalid demand ID")
             activity = normalize_activity(commands.expand(item.get("activity"), target_agent_id))
+            if enabled and shapes.lacks_command(activity):
+                # A shell tool's call without its command: nothing to explain, no model, no
+                # learned row (R184). Answered at once; the client shows its own label.
+                unexplained.add(item["id"])
+                entries.append((item["id"], demand, activity, {}, []))
+                continue
             route = templates.classify(activity) if enabled else {}
             parts = []
             if enabled:
@@ -306,6 +315,8 @@ class ToolExplanations:
         synchronous = {}
         keys = {}
         for identifier, demand, activity, route, parts in entries:
+            if identifier in unexplained:
+                continue
             for entry in parts:
                 if entry[1] is None:
                     entry[1] = _learned(entry[0], entry[2], rows, level, sources)
@@ -333,6 +344,8 @@ class ToolExplanations:
                                              guard=unchanged) if prepared or release else []
             self._condition.notify()
         answers = {entry["id"]: entry for entry in response}
+        for identifier in unexplained:
+            answers[identifier] = {"id": identifier, "status": "failed", "reason": UNEXPLAINED}
         if synchronous:
             # The synchronous tiers need no model and no queue, but still
             # honour a paused Janitor and a viewer that released the row.
@@ -386,7 +399,7 @@ class ToolExplanations:
                 signature = next((p.signature for p, done, _ in part_list if done and done["tier"] == tier),
                                  part_list[0][0].signature if part_list else "")
                 self._ledger.record(tier, signature=signature, **common)
-            elif status in {"busy", "disabled"} or (status == "failed" and entry.get("reason") == "service_stopping"):
+            elif status in {"busy", "disabled"} or (status == "failed" and entry.get("reason") in {"service_stopping", UNEXPLAINED}):
                 if self._ledger.quieted(key, now):
                     continue
                 self._ledger.quiet(key, 60, now)
@@ -998,6 +1011,13 @@ def _tokens(part):
     return learning.words(text)
 
 
+def _foreign(row, evidence):
+    """A reusable row whose sentence states a value this call does not contain is
+    not served (R184): it would be wrong here, and it is another call's data. The
+    same check Jev's candidates get. An exact-only row serves its identical call."""
+    return bool(row["parameterised"]) and learning.foreign(row["template_text"], evidence)
+
+
 def _allowed(row, sources):
     if row["producer"] == "jev":
         return sources == SOURCES_ALL
@@ -1008,8 +1028,9 @@ def _allowed(row, sources):
 
 def _learned(part, route, rows, level, sources):
     """The learned tier for one part: its shape, its exact text, or a Jev pick."""
+    evidence = templates._evidence(part.activity)
     row = rows.get(part.signature)
-    if row and row["template_text"] and _allowed(row, sources):
+    if row and row["template_text"] and _allowed(row, sources) and not _foreign(row, evidence):
         text = shapes.render(row["template_text"], part.slots) if row["parameterised"] else row["template_text"]
         if text and len(text) <= 240:
             return _learned_value(text, row, part.signature)
@@ -1019,7 +1040,8 @@ def _learned(part, route, rows, level, sources):
     for old, new in part.legacy:
         # Learned by an earlier version under another key; the next write moves it.
         row = rows.get(old)
-        if row and row["template_text"] and not row["template_id"] and _allowed(row, sources):
+        if row and row["template_text"] and not row["template_id"] and _allowed(row, sources) \
+                and not _foreign(row, evidence):
             text = shapes.render(row["template_text"], part.slots) if row["parameterised"] else row["template_text"]
             if text and len(text) <= 240:
                 return {**_learned_value(text, row, old), "move": (old, new, part.program)}

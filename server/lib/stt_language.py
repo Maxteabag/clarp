@@ -11,6 +11,7 @@ has focus, the same agent the transcript is recorded against.
 from __future__ import annotations
 
 import contextlib
+import threading
 import contextvars
 import json
 import re
@@ -67,6 +68,7 @@ def current_language() -> str | None:
 # attempt (docs/group-calls.md): what the Host passed, not what a provider did
 # with it. An attempt whose boundary was not noted records null: unobserved,
 # never evidence that the engine was or was not invoked.
+_SENT_LOCK = threading.Lock()    # sends of one attempt may run on several threads
 _HANDED: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "transcription_language_handed", default=None)
 
@@ -80,6 +82,50 @@ def capturing_handed():
         yield seen
     finally:
         _HANDED.reset(token)
+
+
+@contextlib.contextmanager
+def sending_audio():
+    """Around the very call that sends a recording to a provider (R175): the attempt
+    counts as sent from here on, a reply or not, unless the request provably never left
+    (the connection was refused, the host name did not resolve). Whatever an adapter does
+    before this (decoding the clip, fetching a token, a missing project) sends nothing.
+    Only records, and only inside a capture. The capture counts the sends that left, so
+    pieces of one clip sent in parallel (Google) or a retry never undo another's send."""
+    seen = _HANDED.get()
+    if seen is not None:
+        with _SENT_LOCK:
+            seen["sent"] = seen.get("sent", 0) + 1
+    try:
+        yield
+    except BaseException as error:
+        if seen is not None and _never_left(error):
+            with _SENT_LOCK:
+                seen["sent"] = seen.get("sent", 1) - 1      # only this send never left
+        raise
+
+
+def _never_left(error: BaseException | None) -> bool:
+    """Whether a failure happened before the request could leave the Host."""
+    import socket
+    import urllib.error
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, urllib.error.HTTPError):
+            return False                                    # the provider answered
+        if isinstance(error, (ConnectionRefusedError, socket.gaierror)):
+            return True
+        if isinstance(error, urllib.error.URLError) and isinstance(
+                error.reason, (ConnectionRefusedError, socket.gaierror)):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
+def was_sent(capture: dict) -> bool:
+    """Whether the recording reached the provider in this captured attempt (R175)."""
+    return capture.get("sent", 0) > 0
 
 
 def note_handed(language: str | None) -> None:
@@ -135,11 +181,12 @@ def agent_engines() -> dict[str, str]:
 
 
 def match(overrides: dict[str, str], agent: dict | None) -> str | None:
-    """The override for this agent row: by name, then persona, then session.
+    """The override for this agent row: by its id, then name, persona and session.
     The hearing path and the profile (voice_profile) both use this."""
     if not overrides or not agent:
         return None
-    for key in (agent.get("name"), agent.get("persona"), agent.get("session")):
+    # By the agent's id first (issue 476: settings keyed by agent_id), then as before.
+    for key in (agent.get("agent_id"), agent.get("name"), agent.get("persona"), agent.get("session")):
         if key and str(key).strip().lower() in overrides:
             return overrides[str(key).strip().lower()]
     return None
@@ -200,6 +247,21 @@ def validate_agent(value) -> str:
     return ",".join(codes)
 
 
+def _agent_ids_for(key: str) -> list[str]:
+    """The ids of the agents a written key names (persona or session), so a value saved
+    under a name also lands under each agent's id and is never shadowed by an older one."""
+    try:
+        from . import agents as agents_db
+        return [str(a["agent_id"]).lower() for a in agents_db.list_agents()
+                if key in {str(a.get("persona") or "").strip().lower(),
+                           str(a.get("session") or "").strip().lower(),
+                           str(a.get("agent_id") or "").strip().lower()}]
+    except Exception as exc:  # noqa: BLE001 - a save never fails on the lookup
+        from .log import log_exception
+        log_exception("sttAgentIdLookupFail", exc, detail=key)
+        return []
+
+
 def merge_agent_engines(value, *, is_valid) -> str:
     """Apply `{agent: engine id}` changes (empty or null removes one)."""
     if not isinstance(value, dict):
@@ -211,6 +273,8 @@ def merge_agent_engines(value, *, is_valid) -> str:
             raise ValueError("agent_engines keys must be agent names")
         if engine in (None, ""):
             merged.pop(key, None)
+            for agent_id in _agent_ids_for(key):
+                merged.pop(agent_id, None)
         elif not isinstance(engine, str) or not all(
                 is_valid(e.strip()) for e in engine.split(",") if e.strip()) \
                 or not engine.strip(" ,"):
@@ -218,6 +282,8 @@ def merge_agent_engines(value, *, is_valid) -> str:
         else:
             # An engine listed twice is kept once, at its first place (R175).
             merged[key] = ",".join(dict.fromkeys(e.strip() for e in engine.split(",") if e.strip()))
+            for agent_id in _agent_ids_for(key):
+                merged[agent_id] = merged[key]
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))
 
 
@@ -232,6 +298,10 @@ def merge_agent_languages(value) -> str:
             raise ValueError("agent_languages keys must be agent names")
         if code in (None, ""):
             merged.pop(key, None)
+            for agent_id in _agent_ids_for(key):
+                merged.pop(agent_id, None)
         else:
             merged[key] = validate_agent(code)
+            for agent_id in _agent_ids_for(key):
+                merged[agent_id] = merged[key]
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))
