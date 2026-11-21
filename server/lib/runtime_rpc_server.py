@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import time
 import pathlib
 import socketserver
 import sys
@@ -40,15 +41,18 @@ class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
                           file=sys.stderr, flush=True)
 
     def handle(self) -> None:
+        started = time.monotonic()
+        method = ""
         raw = self.rfile.readline(MAX_MESSAGE_BYTES + 1)
         if not raw or len(raw) > MAX_MESSAGE_BYTES:
-            self._write({
+            self._answer({
                 "ok": False, "status": 400,
                 "error": "runtime request is empty or too large",
-            })
+            }, method, started)
             return
         try:
             request = decode_request(raw)
+            method = str(request["method"])
             if request["method"] == "live_stream":
                 self._live_stream()
                 return
@@ -64,7 +68,19 @@ class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
                 pass
             response = {"ok": False, "status": 500,
                         "error": "runtime request failed"}
-        self._write(response)
+        self._answer(response, method, started)
+
+    def _answer(self, value: dict[str, Any], method: str, started: float) -> None:
+        """Write the answer. A caller that hung up before it (its own timeout on a slow answer,
+        or its process gone) is an ordinary event: one line, with the method and how long the
+        answer took, which says which call outlives its caller's patience. Any other error keeps
+        its traceback (R147)."""
+        try:
+            self._write(value)
+        except (BrokenPipeError, ConnectionResetError) as gone:
+            from .log import log
+            log("runtimeRpcCallerGone", f"method={method or 'unknown'} error={type(gone).__name__} "
+                                        f"elapsed_ms={int((time.monotonic() - started) * 1000)}")
 
     def _write(self, value: dict[str, Any]) -> None:
         self.wfile.write((json.dumps(

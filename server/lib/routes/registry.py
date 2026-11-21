@@ -497,7 +497,11 @@ def dispatch(handler, method: str, path: str):
         return None
     for route in ROUTES[method]:
         if route.match(path):
-            result = route.adapter(handler, path)
+            try:
+                result = route.adapter(handler, path)
+            except request_texts.BodyValueNotText as wrong:
+                # A body value of the wrong JSON type: the ordinary answer, no traceback (R146).
+                return handler._json_error(400, str(wrong))
             if result is not NOT_HANDLED:
                 return result
     return handler._send(404, b"not found")
