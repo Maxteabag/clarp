@@ -58,7 +58,7 @@ impl Actor {
             session: agent.backend_session().map(str::to_owned),
             first: first.text,
             first_trace: first.trace_id,
-            first_turn: agent.settled() == 0 && !agent.arrived() && live.turn.0 == 1,
+            first_turn: agent.fresh_first_turn(),
         }))
     }
 
