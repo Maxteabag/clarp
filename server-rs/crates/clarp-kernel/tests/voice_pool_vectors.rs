@@ -152,13 +152,15 @@ fn cartesia_selection_uses_public_non_owner_catalogue_voices_in_the_agents_langu
     let case = &vectors["catalogue"];
     let catalogue = Snapshot::from_file(&case["file"]);
     for row in case["languages"].as_array().unwrap() {
-        assert_eq!(
-            json!(voice_pool::language_voices(
-                &catalogue,
-                text(row, "language")
-            )),
-            row["ids"]
-        );
+        let (ids, miss) = voice_pool::language_voices(&catalogue, text(row, "language"));
+        assert_eq!(json!(ids), row["ids"], "{row}");
+        assert_eq!(json!(miss), row["miss"], "{row}");
+    }
+    for row in case["quiet"].as_array().unwrap() {
+        let snapshot = Snapshot::from_file(&row["file"]);
+        let (ids, miss) = voice_pool::language_voices(&snapshot, text(row, "language"));
+        assert_eq!(json!(ids), row["ids"], "{row}");
+        assert_eq!(json!(miss), row["miss"], "{row}");
     }
     let view = HostView {
         voices: Voices {
@@ -175,5 +177,19 @@ fn cartesia_selection_uses_public_non_owner_catalogue_voices_in_the_agents_langu
         catalogue: &catalogue,
         roster: &[],
     };
-    assert_eq!(pool.assign("Ola", "{}", &[]).stored, case["ola"]);
+    let ola = pool.assign("Ola", "{}", &[]);
+    assert_eq!(ola.stored, case["ola"]);
+    assert!(ola.catalogue_miss.is_none());
+
+    let other_languages = HostView {
+        language: "zh".into(),
+        ..view.clone()
+    };
+    let pool = Pool {
+        host: &other_languages,
+        ..pool
+    };
+    let fallback = pool.assign("Fixture", "{}", &[]);
+    assert_ne!(fallback.stored, "{}");
+    assert_eq!(json!(fallback.catalogue_miss), case["languages"][4]["miss"]);
 }
