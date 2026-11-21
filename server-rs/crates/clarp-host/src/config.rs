@@ -34,6 +34,8 @@ pub struct Config {
     /// Where a new agent works when nobody says.
     pub default_cwd: PathBuf,
     pub keep_spools: bool,
+    /// `[mcp] strict` in the owner's file. Defaults to Claude receiving only selected servers.
+    pub(crate) mcp_strict: bool,
     /// Whether a turn whose account is out waits for one: `none`, or `follow` beside a Host
     /// that puts another login in place.
     pub accounts: clarp_kernel::recovery::Accounts,
@@ -656,6 +658,12 @@ impl Config {
             name,
             default_cwd,
             keep_spools,
+            mcp_strict: owners
+                .as_ref()
+                .and_then(|file| file.get("mcp"))
+                .and_then(|table| table.get("strict"))
+                .and_then(toml_edit::Item::as_bool)
+                .unwrap_or(true),
             accounts,
             ask_usage,
             contact_pictures,
