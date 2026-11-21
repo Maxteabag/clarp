@@ -3410,6 +3410,14 @@ Gallery pages seek by creation or favorite time and asset id. Tombstone pages re
 at or before their cursor, and include all rows that share the last millisecond of the
 page. They tell a reconnecting device what it must evict even when it missed the event.
 
+**Portrait gallery hints** (21 Nov 2026, the Python Host's PR 510). When a portrait job
+ends, its images are found by chat, producer prefix and the inclusive creation window.
+A durable successful delivery carries the exact terminal window, including across a restart.
+Other terminal changes give that window to the gallery after the fleet commit. The gallery
+writer claims each asset and change before broadcasting, in event-time and asset id order.
+The claim is advisory and takes nothing away from the committed images or portraits if it
+fails. Late updates and replays of a delivered job add no duplicate created hint.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
