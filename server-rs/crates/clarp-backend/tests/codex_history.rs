@@ -65,6 +65,25 @@ fn a_rollout_is_read_as_the_python_host_reads_it() {
 }
 
 #[test]
+fn codex_item_identity_survives_a_legacy_copy_without_naming_a_user() {
+    let rollout = r#"
+{"type":"event_msg","payload":{"type":"agent_message","message":"First"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"First","id":"item_0"}}
+{"type":"item.completed","item":{"type":"user_message","text":"Go on","id":"user_1"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Second","id":42}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"Second"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Second","id":"another-copy"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"No key","id":false}}
+"#;
+    let read = history::codex(rollout);
+    let ids: Vec<_> = read.iter().map(|row| row.get("provider_id")).collect();
+    assert_eq!(
+        ids,
+        [Some(&json!("item_0")), None, Some(&json!("42")), None]
+    );
+}
+
+#[test]
 fn a_cell_with_no_id_of_its_own_is_named_as_the_python_host_names_it() {
     let vectors = vectors();
     let ids = vectors["ids"].as_array().unwrap();

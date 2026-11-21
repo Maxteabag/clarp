@@ -83,14 +83,14 @@
     "{\"type\": \"turn.completed\", \"usage\": {\"input_tokens\": 1}}"
    ],
    "turns": [
-    {"role": "assistant", "text": "I will look.", "tools": [], "display_cells": [], "timestamp": ""},
+    {"role": "assistant", "text": "I will look.", "tools": [], "display_cells": [], "timestamp": "", "provider_id": "item_0"},
     {"role": "user", "text": "A user said this.", "tools": [], "display_cells": [], "timestamp": ""},
-    {"role": "assistant", "text": "From parts.\nSecond.", "tools": [], "display_cells": [], "timestamp": ""},
-    {"role": "assistant", "text": "Final.", "tools": [], "display_cells": [], "timestamp": "", "kind": "final_answer"},
-    {"role": "assistant", "text": "Written by the app server.", "tools": [], "display_cells": [], "timestamp": "2027-02-03T10:00:00.000Z"},
+    {"role": "assistant", "text": "From parts.\nSecond.", "tools": [], "display_cells": [], "timestamp": "", "provider_id": "item_2"},
+    {"role": "assistant", "text": "Final.", "tools": [], "display_cells": [], "timestamp": "", "kind": "final_answer", "provider_id": "item_3"},
+    {"role": "assistant", "text": "Written by the app server.", "tools": [], "display_cells": [], "timestamp": "2027-02-03T10:00:00.000Z", "provider_id": "m1"},
     {"role": "user", "text": "Asked there.", "tools": [], "display_cells": [], "timestamp": "2027-02-03T10:00:00.000Z"},
-    {"role": "assistant", "text": "Item in the payload.", "tools": [], "display_cells": [], "timestamp": ""},
-    {"role": "assistant", "text": "Item on the envelope.", "tools": [], "display_cells": [], "timestamp": "2027-02-03T10:00:00.000Z"}
+    {"role": "assistant", "text": "Item in the payload.", "tools": [], "display_cells": [], "timestamp": "", "provider_id": "p1"},
+    {"role": "assistant", "text": "Item on the envelope.", "tools": [], "display_cells": [], "timestamp": "2027-02-03T10:00:00.000Z", "provider_id": "m9"}
    ]
   },
   {"name": "commands", "what": "a command as it is printed: running, over, failed, with what it printed",

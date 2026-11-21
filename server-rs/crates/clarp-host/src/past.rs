@@ -149,20 +149,32 @@ fn owner_of(app: &App, session: &str) -> Option<(String, String)> {
 }
 
 /// The turns of a transcript as rows of the conversation of the agent that begins with
-/// them, in the shape this Host's own rows have. A row is named as the Python Host names
-/// the rows it reads from a transcript: `msg-` and twenty signs of a digest of the agent,
-/// the session and the row's place in it, so that a row keeps its name and no two agents
-/// have a row of one name. What each is in the conversation is the Python Host's rule
-/// ([`history::phases`]).
+/// them, in the shape this Host's own rows have. A keyed assistant row follows the provider's
+/// id. Codex reuses an item id in later turns, so count its occurrences under that id alone.
+/// An unkeyed row still follows its position in the transcript. Every id belongs to one agent
+/// and one native session. What each row is in the conversation follows [`history::phases`].
 pub(crate) fn rows_of(agent_id: &str, session: &str, turns: &[Value]) -> Vec<ImportedRow> {
     let phases = history::phases(turns);
+    let namespace = format!("{agent_id}\0{session}");
     let mut at_ms = 0;
     let mut rows = Vec::with_capacity(turns.len());
+    let mut seen = HashMap::<&str, usize>::new();
     for (number, (turn, phase)) in turns.iter().zip(phases).enumerate() {
         let said_at = turn["timestamp"].as_str().and_then(wire::from_iso);
         // A turn that does not say when it was said was said when the one before it was.
         at_ms = said_at.unwrap_or(at_ms).max(at_ms);
-        let digest = Sha256::digest(format!("{agent_id}\0{session}\0{number}").as_bytes());
+        let provider = turn["provider_id"]
+            .as_str()
+            .filter(|id| !id.is_empty() && turn["role"] == "assistant");
+        let key = if let Some(provider) = provider {
+            let occurrence = seen.entry(provider).or_default();
+            let key = format!("{namespace}\0provider\0{provider}\0{occurrence}");
+            *occurrence += 1;
+            key
+        } else {
+            format!("{namespace}\0{number}")
+        };
+        let digest = Sha256::digest(key.as_bytes());
         let digest: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         let id = format!("msg-{}", &digest[..20]);
         let row = json!({
@@ -454,6 +466,30 @@ pub fn routes() -> Router<App> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_provider_rows_keep_their_ids_when_unrelated_lines_move() {
+        let first = json!({"role":"assistant","text":"first","provider_id":"item_0"});
+        let second = json!({"role":"assistant","text":"second","provider_id":"item_0"});
+        let third = json!({"role":"assistant","text":"third","provider_id":"item_3"});
+        let user = json!({"role":"user","text":"user","provider_id":"item_0"});
+        let legacy = json!({"role":"assistant","text":"legacy"});
+        let rows = rows_of(
+            "agent",
+            "thread",
+            &[first.clone(), second.clone(), third.clone(), legacy.clone()],
+        );
+        let shifted = rows_of("agent", "thread", &[user, first, third, second, legacy]);
+        assert_eq!(rows[0].id, shifted[1].id);
+        assert_eq!(rows[1].id, shifted[3].id);
+        assert_eq!(rows[2].id, shifted[2].id);
+        assert_ne!(rows[0].id, rows[1].id, "Codex reuses item IDs");
+        assert_ne!(rows[0].id, shifted[0].id);
+        assert_ne!(
+            rows[3].id, shifted[4].id,
+            "an unkeyed row keeps its positional identity"
+        );
+    }
 
     #[test]
     fn the_turns_of_a_transcript_become_rows_that_came_from_elsewhere() {

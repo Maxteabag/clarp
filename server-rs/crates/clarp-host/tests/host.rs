@@ -65,6 +65,8 @@ mod pairing_identity;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/r108_stream_ids.rs"]
+mod r108_stream_ids;
 #[path = "host/remote_action.rs"]
 mod remote_action;
 #[path = "host/render_spec_export.rs"]
