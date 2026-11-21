@@ -65,6 +65,8 @@ mod launch_refused;
 mod live_model;
 #[path = "host/managed_skills.rs"]
 mod managed_skills;
+#[path = "host/mcp_selection.rs"]
+mod mcp_selection;
 #[path = "host/media_manage.rs"]
 mod media_manage;
 #[path = "host/move_janitors.rs"]
@@ -15563,8 +15565,9 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         ),
         (
             "claude",
-            vec!["supports_mcp", "supports_auth", "supports_usage"],
+            vec!["supports_auth", "supports_usage"],
             vec![
+                "supports_mcp",
                 "supports_fork",
                 "supports_resume",
                 "supports_routing",
@@ -23964,7 +23967,7 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
             json!({ "error": "fork_unsupported", "message": "Codex does not support session forks." })
         )
     );
-    // A tool is given no servers of its own here: none is known.
+    // The isolated home has no configured servers.
     let (status, why) =
         made(json!({ "name": "Zed", "mcp_servers": [" teams ", "outlook", "teams", ""] }));
     assert_eq!(

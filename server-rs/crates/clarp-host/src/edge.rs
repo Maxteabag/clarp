@@ -1625,6 +1625,9 @@ async fn snapshot(
         clarp_kernel::devices::limit_snapshot_cwd(&mut agents);
     }
     let (voice_defaults, voice_profile_version) = crate::profile::head(&voices);
+    let available_mcp_servers = tokio::task::spawn_blocking(crate::mcp::available)
+        .await
+        .unwrap_or_default();
     let mut body = json!({
         "agents": agents,
         "focus": directory.focus,
@@ -1632,7 +1635,7 @@ async fn snapshot(
         "voice_defaults": voice_defaults,
         "voice_profile_version": voice_profile_version,
         "personas": personas,
-        "available_mcp_servers": [],
+        "available_mcp_servers": available_mcp_servers,
         "model_avatars": clarp_kernel::portraits::model_avatars(directory.setting(clarp_kernel::portraits::MODEL_SETTING)),
         // Nothing explains a tool's use here, and an app is told so wherever it asks: it
         // then shows the tool's own command on the row.
@@ -1845,24 +1848,6 @@ pub(crate) async fn make_agent(
             _ => return Err(bad("invalid session id")),
         }
     }
-    // No tool is given servers of its own here: every one that is named is one this Host
-    // does not know, and is refused in the Python Host's words for that.
-    match asked.get("mcp_servers") {
-        None => {}
-        Some(Value::Array(names)) if names.iter().all(Value::is_string) => {
-            let mut unknown: Vec<&str> = Vec::new();
-            for name in names.iter().filter_map(Value::as_str).map(str::trim) {
-                if !name.is_empty() && !unknown.contains(&name) {
-                    unknown.push(name);
-                }
-            }
-            if !unknown.is_empty() {
-                let why = format!("Unknown MCP server: {}", unknown.join(", "));
-                return Err(refused(StatusCode::BAD_REQUEST, "unknown mcp server", &why));
-            }
-        }
-        Some(_) => return Err(bad("mcp_servers must be a list of names")),
-    }
     let mut request = CreateAgentRequest {
         name: plain("name").unwrap_or_default(),
         backend: plain("backend").map(|backend| creation_backend(&backend)),
@@ -1877,7 +1862,9 @@ pub(crate) async fn make_agent(
         avatar_symbol: presentation("avatar_symbol"),
         avatar_base64: presentation("avatar_base64"),
         avatar_path: asked.get("avatar_path").cloned(),
+        mcp_servers: None,
     };
+    let mcp_selection = || clarp_kernel::mcp::selection(asked.get("mcp_servers")).map_err(bad);
     let unavailable =
         |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
     // The agent it names is started again in place; with none named a new agent is made.
@@ -1930,9 +1917,12 @@ pub(crate) async fn make_agent(
         request.model = Some(default_model.clone().unwrap_or_default());
     }
     let record = match replaces {
-        Some(replaces) => started_again(app, replaces, request)
-            .await?
-            .map_err(not_made)?,
+        Some(replaces) => {
+            request.mcp_servers = mcp_selection()?;
+            started_again(app, replaces, request)
+                .await?
+                .map_err(not_made)?
+        }
         None => {
             if let Some(parent) = request.parent.as_deref()
                 && let Some(member) = app.fleet.directory().named(parent.trim())
@@ -1950,6 +1940,25 @@ pub(crate) async fn make_agent(
             let said_cwd = request.cwd.as_deref().unwrap_or("");
             let home = crate::config::home();
             let cwd = crate::config::working_dir(said_cwd, &home, &app.config.default_cwd);
+            let named_session =
+                |key| plain(key).is_some_and(|id| !clarp_kernel::python::strip(&id).is_empty());
+            let forks = named_session("fork_session_id");
+            // A fork can write its transcript while resolving the native session. Refuse a
+            // bad selection before it does. Reopening an existing agent leaves its row alone.
+            if forks && !named_session("resume_session_id") && asked.contains_key("mcp_servers") {
+                let selection = mcp_selection()?;
+                let backend = request
+                    .backend
+                    .as_deref()
+                    .and_then(crate::fleet::non_empty)
+                    .unwrap_or_else(|| "claude".into());
+                tokio::task::spawn_blocking(move || {
+                    crate::mcp::check(&backend, selection.as_deref())
+                })
+                .await
+                .map_err(|error| unavailable(Unavailable(error.to_string())))?
+                .map_err(|why| not_made(why.into()))?;
+            }
             let begins = crate::past::begins(app, asked, &cwd).await?;
             let taken = match begins {
                 crate::past::Begins::Afresh => {
@@ -1998,6 +2007,7 @@ pub(crate) async fn make_agent(
                     Some((session, turns, helpers))
                 }
             };
+            request.mcp_servers = mcp_selection()?;
             // Who it is when the request names no contact of its own: the first free one of
             // its tool's pool, or one minted for it (`agent_lifecycle`, `NeedsContact`). The
             // fleet chooses it in the turn that registers the agent, so that launches at once
@@ -2013,7 +2023,6 @@ pub(crate) async fn make_agent(
                     mint: asked.get("mint_contact") == Some(&Value::Bool(true)),
                 }),
             };
-            let forks = plain("fork_session_id").is_some_and(|said| !said.trim().is_empty());
             // An agent that takes a session up has a conversation of its own, under a name
             // of its own: the session may have been another agent's conversation before, and
             // whoever read that one counts from another place. A fork's conversation goes

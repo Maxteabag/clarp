@@ -1,0 +1,232 @@
+{
+  "catalog": {
+    "alpha": {},
+    "Beta": {},
+    "two words": {}
+  },
+  "cases": [
+    {
+      "asked": {},
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "selection": null
+      }
+    },
+    {
+      "asked": {
+        "replace_sid": "existing"
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "selection": null
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": []
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "selection": []
+      }
+    },
+    {
+      "asked": {
+        "replace_sid": "existing",
+        "mcp_servers": []
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "selection": []
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": [
+          "",
+          " ",
+          "\u001c"
+        ]
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "selection": []
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": [
+          "  Beta ",
+          "alpha",
+          "Beta",
+          "two words",
+          "\u001calpha"
+        ]
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "selection": [
+          "Beta",
+          "alpha",
+          "two words"
+        ]
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": [
+          "beta",
+          "alpha",
+          "other",
+          "beta"
+        ]
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "error": "unknown mcp server",
+        "message": "Unknown MCP server: beta, other"
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": null
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "error": "mcp_servers must be a list of names",
+        "message": "mcp_servers must be a list of names"
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": "alpha"
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "error": "mcp_servers must be a list of names",
+        "message": "mcp_servers must be a list of names"
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": {
+          "alpha": true
+        }
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "error": "mcp_servers must be a list of names",
+        "message": "mcp_servers must be a list of names"
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": [
+          "alpha",
+          3
+        ]
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "error": "mcp_servers must be a list of names",
+        "message": "mcp_servers must be a list of names"
+      }
+    },
+    {
+      "asked": {
+        "mcp_servers": [
+          null
+        ]
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "error": "mcp_servers must be a list of names",
+        "message": "mcp_servers must be a list of names"
+      }
+    },
+    {
+      "asked": {
+        "backend": "codex",
+        "mcp_servers": [
+          "alpha"
+        ]
+      },
+      "supports_mcp": false,
+      "label": "Codex",
+      "result": {
+        "error": "mcp servers unsupported for backend",
+        "message": "MCP server selection is unavailable for Codex."
+      }
+    },
+    {
+      "asked": {
+        "backend": "codex",
+        "mcp_servers": [
+          "other"
+        ]
+      },
+      "supports_mcp": false,
+      "label": "Codex",
+      "result": {
+        "error": "mcp servers unsupported for backend",
+        "message": "MCP server selection is unavailable for Codex."
+      }
+    },
+    {
+      "asked": {
+        "backend": "codex",
+        "mcp_servers": [
+          "",
+          " "
+        ]
+      },
+      "supports_mcp": false,
+      "label": "Codex",
+      "result": {
+        "selection": []
+      }
+    },
+    {
+      "asked": {
+        "backend": "codex",
+        "replace_sid": "existing",
+        "mcp_servers": [
+          "alpha"
+        ]
+      },
+      "supports_mcp": false,
+      "label": "Codex",
+      "result": {
+        "error": "mcp servers unsupported for backend",
+        "message": "MCP server selection is unavailable for Codex."
+      }
+    },
+    {
+      "asked": {
+        "replace_sid": "existing",
+        "mcp_servers": [
+          "alpha"
+        ]
+      },
+      "supports_mcp": true,
+      "label": "Claude",
+      "result": {
+        "selection": [
+          "alpha"
+        ]
+      }
+    }
+  ]
+}

@@ -152,6 +152,9 @@ pub struct AgentRecord {
     pub model: String,
     #[serde(default)]
     pub effort: String,
+    /// An explicit empty selection is kept apart from an agent that was never configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_servers: Option<Vec<String>>,
     /// Changes when the agent starts a new conversation: clients then drop what they cached.
     pub conversation_id: String,
     pub created_at_ms: i64,
@@ -1700,6 +1703,7 @@ fn setup(
         runtime: works.runtime.clone(),
         opening_gate: works.opening_gate.clone(),
         record: record.clone(),
+        mcp_strict: works.config.mcp_strict,
         profile,
         backend,
         engine: works.engine.clone(),
@@ -3081,6 +3085,7 @@ impl Fleet {
             None if efforts.contains(&before.effort.as_str()) => before.effort.clone(),
             None => String::new(),
         };
+        crate::mcp::check(&backend, request.mcp_servers.as_deref())?;
         let or_kept = |asked: String, kept: &str| {
             if asked.is_empty() {
                 kept.to_string()
@@ -3139,6 +3144,7 @@ impl Fleet {
             cwd,
             model,
             effort,
+            mcp_servers: request.mcp_servers.or(before.mcp_servers.clone()),
             voice_id,
             parent_agent_id,
             role: if role == "agent" {
@@ -3380,6 +3386,7 @@ impl Fleet {
             let why = "invalid effort for backend";
             return Err(Told::new(400, why, why).into());
         };
+        crate::mcp::check(&backend, request.mcp_servers.as_deref())?;
         // Who makes it, and as what.
         let Some(role) = helpers::parse_role(request.role.as_deref().unwrap_or("")) else {
             let why = "role must be 'agent' or 'helper'";
@@ -3458,6 +3465,7 @@ impl Fleet {
             cwd,
             model: request.model.unwrap_or_default().trim().to_string(),
             effort,
+            mcp_servers: request.mcp_servers,
             conversation_id: forked.unwrap_or_else(ids::uuid),
             created_at_ms: self.now_ms(),
             parent_agent_id: parent,

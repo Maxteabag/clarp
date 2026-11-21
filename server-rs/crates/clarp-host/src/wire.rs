@@ -1854,7 +1854,7 @@ pub fn summary(
         "avatar_url": "",
         "avatar_generation_status": null,
         "model_avatar_url": "",
-        "mcp_servers": [],
+        "mcp_servers": record.mcp_servers.as_deref().unwrap_or_default(),
         "heartbeat_enabled": record.heartbeat_enabled,
         "dreaming_enabled": false,
         "muted": record.muted,

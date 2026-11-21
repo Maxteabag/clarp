@@ -31,6 +31,9 @@ pub struct AgentSummary {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// The MCP server names kept for this agent, in the order it chose them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_servers: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
