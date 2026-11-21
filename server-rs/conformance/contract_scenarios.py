@@ -1817,16 +1817,16 @@ SCENARIOS.append({
         spoken('synthetic question [qa-status:nova]', 'routedelta'),
         spoken('synthetic noise', 'routeecho'),
         # A command not sure enough is refused, and never held: the yes that follows is given in its own
-        # words, and not the command's (the second agent's conversation, read at the end, shows which). No
-        # wait for its answer here: were the command held, the agent would be given it under its own id.
+        # words. The second agent's conversation, read at the end, shows which words it received.
         spoken('synthetic word stop [qa-unsure-stop:nova]', 'routekilo'),
         spoken('synthetic yes again [qa-yes:nova]', 'routelima'),
         # A name in the payload is the target: one that is another agent's than the one named, and one that
         # nobody has, are asked about, and no agent is made or started again.
         spoken('synthetic restart [qa-restart-as:nova:claire]', 'routemike'),
         spoken('synthetic restart [qa-restart-as:nova:nobody]', 'routenovember'),
-        # Nova's ordinary reply to the yes can finish while the two commands are being refused.
-        *given('routelima', NOVA),
+        # Wait for Nova to settle before sampling its state. If the command was held,
+        # Nova answers the command under routekilo instead of answering routelima.
+        {'op': 'quiesce', 'session': NOVA},
         SNAPSHOT,
         # The model fails: the message goes on as any other, to the agent that is open.
         spoken('synthetic word foxtrot [qa-router-fails]', 'routefoxtrot'),
