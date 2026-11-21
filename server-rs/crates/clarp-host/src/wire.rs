@@ -673,6 +673,7 @@ pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
         ("text".into(), json!(message.text)),
         ("sent_at".into(), json!(iso(message.accepted_at_ms))),
         ("kind".into(), json!(kind)),
+        ("status".into(), json!(message.status.name())),
     ]);
     item.insert("id".into(), json!(message.client_id));
     item.insert("enqueued_at".into(), json!(message.accepted_at_ms));
@@ -1938,6 +1939,7 @@ mod tests {
             speak: false,
             accepted_at_ms: 1,
             admission: clarp_kernel::turn::Admission::Later,
+            status: clarp_actor::QueueItemStatus::Queued,
             origin: Origin::Trigger {
                 name: origin.into(),
             },
