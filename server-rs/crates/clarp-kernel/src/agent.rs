@@ -17,12 +17,13 @@
 //!    waits its turn, and runs even while the mailbox is held, without lifting the hold. It never
 //!    ends a turn that has not started: two direct messages in a row both run, in order.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
 use crate::compaction::LastCompaction;
 use crate::control::Control;
+use crate::steering::{FollowUp, Join};
 
 use crate::turn::{
     Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued,
@@ -49,6 +50,12 @@ pub enum Command {
         /// user's ([`TurnEvent::Accepted`]).
         coordination: Option<String>,
     },
+    /// Reserve a queued message for input to the live turn.
+    Join { turn: TurnId, join: Join },
+    /// The live process echoed this follow-up.
+    JoinRead { turn: TurnId },
+    /// An answer settled this follow-up, or the process ended after reading it.
+    JoinSettled { turn: TurnId },
     /// Take a waiting message back.
     Withdraw { turn: TurnId, by: String },
     /// Let one waiting message run now, whatever holds the mailbox: its user sends it by
@@ -145,6 +152,9 @@ pub enum AgentEvent {
     TakeoverCleared {
         from: TurnId,
     },
+    Joined { turn: TurnId, join: Join },
+    JoinRead { turn: TurnId, at_ms: i64 },
+    JoinSettled { turn: TurnId },
     /// Someone asked the live turn to stop. It settles when the tool process is gone. Whether
     /// the Host knew who asked, and why, are absent from a log written before they were kept.
     StopRequested {
@@ -295,6 +305,7 @@ pub struct Agent {
     latest_turn_start: Option<i64>,
     next_turn: u64,
     mailbox: VecDeque<Queued>,
+    joins: BTreeMap<TurnId, FollowUp>,
     /// The turn that holds the agent: starting or running, never anything else.
     live: Option<Turn>,
     /// Who asked the live turn to stop and why, while it has not gone yet.
@@ -377,6 +388,7 @@ impl Default for Agent {
             latest_turn_start: None,
             next_turn: 1,
             mailbox: VecDeque::new(),
+            joins: BTreeMap::new(),
             live: None,
             stopping: None,
             note: None,
@@ -413,6 +425,10 @@ impl Agent {
 
     pub fn live(&self) -> Option<&Turn> {
         self.live.as_ref()
+    }
+
+    pub fn joins(&self) -> &BTreeMap<TurnId, FollowUp> {
+        &self.joins
     }
 
     /// The position in the log of the event applied next.
@@ -583,10 +599,25 @@ impl Agent {
     /// The waiting turn that runs when the agent is free: the first one no hold holds.
     fn next_to_run(&self) -> Option<&Queued> {
         self.mailbox.iter().find(|queued| {
-            !self.paused
+            !self.joins.contains_key(&queued.id) && (!self.paused
                 || queued.admission == Admission::Direct
-                || self.unheld.contains(&queued.id)
+                || self.unheld.contains(&queued.id))
         })
+    }
+
+    fn can_join(&self, turn: TurnId, join: &Join) -> bool {
+        self.live.as_ref().is_some_and(|live| {
+            live.id() == join.into && live.has_process()
+        }) && self.stopping.is_none()
+            && self.mailbox.iter().any(|waiting| {
+                waiting.id == turn
+                    && waiting.admission == Admission::Queue
+                    && waiting.origin.is_user()
+            })
+            && !self.holds(turn)
+            && !join.uuid.is_empty()
+            && !self.joins.contains_key(&turn)
+            && !self.joins.values().any(|held| held.join.uuid == join.uuid)
     }
 
     /// Whether a message admitted this way now would start at once, without waiting: and so
@@ -639,8 +670,29 @@ impl Agent {
                     work.stop_live(Control::by(preempted_by(turn)), now_ms);
                 }
             }
+            Command::Join { turn, join } => {
+                if !work.agent.can_join(turn, &join) {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::Joined { turn, join });
+            }
+            Command::JoinRead { turn } => {
+                if !work.agent.joins.get(&turn).is_some_and(|join| !join.read) {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::JoinRead { turn, at_ms: now_ms });
+                work.let_go_of_nothing(DRAINED, now_ms);
+            }
+            Command::JoinSettled { turn } => {
+                if !work.agent.joins.get(&turn).is_some_and(|join| join.read) {
+                    return Err(Refusal::NotLive(turn));
+                }
+                work.record(AgentEvent::JoinSettled { turn });
+            }
             Command::Withdraw { turn, by } => {
-                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                if work.agent.joins.contains_key(&turn)
+                    || !work.agent.mailbox.iter().any(|queued| queued.id == turn)
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::Turn {
@@ -653,7 +705,9 @@ impl Agent {
                 work.let_go_of_nothing(&by, now_ms);
             }
             Command::Reword { turn, message_seq } => {
-                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                if work.agent.joins.contains_key(&turn)
+                    || !work.agent.mailbox.iter().any(|queued| queued.id == turn)
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::Reworded {
@@ -941,6 +995,39 @@ impl Agent {
     /// Changes the state by one event. The only way the state changes.
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
+            AgentEvent::Joined { turn, join } => {
+                let invalid = IllegalTransition { turn: *turn, state: "unavailable", event: "joined" };
+                if !self.can_join(*turn, join) {
+                    return Err(invalid);
+                }
+                let waiting = self.mailbox.iter().find(|waiting| waiting.id == *turn).ok_or(invalid)?;
+                self.joins.insert(*turn, FollowUp {
+                    join: join.clone(),
+                    message_seq: waiting.message_seq,
+                    read: false,
+                });
+            }
+            AgentEvent::JoinRead { turn, at_ms } => {
+                let invalid = IllegalTransition { turn: *turn, state: "unavailable", event: "join-read" };
+                let position = self.mailbox.iter().position(|waiting| waiting.id == *turn).ok_or_else(|| invalid.clone())?;
+                let join = self.joins.get_mut(turn).filter(|join| !join.read).ok_or(invalid)?;
+                join.read = true;
+                self.mailbox.remove(position);
+                self.unheld.remove(turn);
+                if self.waited.remove(turn) {
+                    self.queue_revision += 1;
+                }
+                self.deliveries.hand(turn.0, crate::delivery::revision(self.at, 0), *at_ms);
+                self.deliveries.launch(turn.0);
+            }
+            AgentEvent::JoinSettled { turn } => {
+                if !self.joins.get(turn).is_some_and(|join| join.read) {
+                    return Err(IllegalTransition { turn: *turn, state: "unread", event: "join-settled" });
+                }
+                self.joins.remove(turn);
+                self.deliveries.over(turn.0);
+                self.settled += 1;
+            }
             AgentEvent::Paused {
                 by,
                 verified,
@@ -1210,6 +1297,7 @@ impl Agent {
             }
             match live.apply(change)? {
                 Turn::Settled(ended) => {
+                    self.joins.clear();
                     self.settled += 1;
                     self.stopping = None;
                     self.live_from_queue = false;
@@ -1219,7 +1307,12 @@ impl Agent {
                     self.selected_takeover = None;
                     self.last = Some(ended);
                 }
-                next => self.live = Some(next),
+                next => {
+                    if matches!(next, Turn::Parked(_)) {
+                        self.joins.clear();
+                    }
+                    self.live = Some(next);
+                }
             }
             return Ok(());
         }

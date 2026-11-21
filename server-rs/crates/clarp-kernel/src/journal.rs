@@ -262,6 +262,9 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     }
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
+        | AgentEvent::Joined { turn, .. }
+        | AgentEvent::JoinRead { turn, .. }
+        | AgentEvent::JoinSettled { turn, .. }
         | AgentEvent::StopRequested { turn, .. }
         | AgentEvent::SentNow { turn, .. }
         | AgentEvent::Reworded { turn, .. }
@@ -566,6 +569,17 @@ impl Recorder {
         with: Vec<NewItem>,
         now_ms: i64,
     ) -> Result<Accepted, JournalError> {
+        self.accept_message_with_join(message, with, None, now_ms)
+    }
+
+    /// Reserves a follow-up for the live tool in the same write as its queue item.
+    pub fn accept_message_with_join(
+        &mut self,
+        message: Incoming,
+        with: Vec<NewItem>,
+        join: Option<crate::steering::Join>,
+        now_ms: i64,
+    ) -> Result<Accepted, JournalError> {
         if let Some(key) = &message.key
             && let Some(earlier) = self.log.find(key)?
         {
@@ -606,6 +620,9 @@ impl Recorder {
                 now_ms,
             )
             .map_err(JournalError::Refused)?;
+        if let Some(join) = join {
+            batch.command(Command::Join { turn, join }, now_ms).map_err(JournalError::Refused)?;
+        }
         let committed = batch.commit()?;
         Ok(Accepted {
             message_seq,
@@ -673,6 +690,11 @@ impl Batch<'_> {
             if let Some(turn) = turn_sessions::affected(&event) {
                 self.turn_bindings
                     .push((turn, self.work.backend_session().map(str::to_owned)));
+            }
+            if let AgentEvent::JoinRead { turn, .. } = &event
+                && let Some(join) = self.work.joins().get(turn)
+            {
+                self.enter(*turn, join.message_seq, now_ms);
             }
             self.events.push(event);
         }
@@ -2050,6 +2072,55 @@ mod tests {
             4_096,
             "the cursor is rebuilt with the agent"
         );
+    }
+
+    #[test]
+    fn a_follow_up_enters_on_its_echo_and_an_unread_one_still_obeys_stop() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        recorder.accept(b"first".to_vec(), Origin::User, 1).unwrap();
+        recorder.handle(Command::TurnStarted { turn: TurnId(1) }, 2).unwrap();
+        for (key, uuid) in [("u-two", "read"), ("u-three", "unread")] {
+            let accepted = recorder.accept_message_with_join(
+                message(key, Admission::Queue),
+                Vec::new(),
+                Some(crate::steering::Join { into: TurnId(1), uuid: uuid.to_string() }),
+                3,
+            ).unwrap();
+            assert!(!accepted.entered);
+        }
+        drop(recorder);
+        let mut recorder = open(&engine);
+        assert_eq!(recorder.agent().joins().len(), 2);
+        assert_eq!(
+            recorder.log().read_after(0, Kinds::only(kind::MESSAGE), 10).unwrap().len(),
+            1,
+        );
+
+        recorder.handle(Command::JoinRead { turn: TurnId(2) }, 6).unwrap();
+        assert!(recorder.handle(Command::JoinRead { turn: TurnId(2) }, 7).is_err());
+        recorder.handle(Command::JoinSettled { turn: TurnId(2) }, 8).unwrap();
+        let rows = recorder.log().read_after(0, Kinds::only(kind::MESSAGE), 10).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].turn, Some(2));
+        assert_eq!(rows[1].ts_ms, 6);
+
+        recorder.handle(Command::Stop { by: Control::by("user") }, 9).unwrap();
+        let effects = recorder.handle(
+            Command::TurnEnded { turn: TurnId(1), outcome: RunOutcome::Completed },
+            10,
+        ).unwrap();
+        assert!(effects.is_empty(), "Stop holds the follow-up left unread");
+        assert!(recorder.agent().joins().is_empty());
+        assert!(recorder.agent().holds(TurnId(3)));
+        drop(recorder);
+
+        let mut recorder = open(&engine);
+        let effects = recorder.handle(Command::Resume { by: "user".into() }, 11).unwrap();
+        assert!(matches!(effects.as_slice(), [Effect::StartTurn { turn: TurnId(3), .. }]));
+        let rows = recorder.log().read_after(0, Kinds::only(kind::MESSAGE), 10).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[2].turn, Some(3));
     }
 
     /// A user's send admitted behind a turn that runs, and the user's Stop, in one write: each
