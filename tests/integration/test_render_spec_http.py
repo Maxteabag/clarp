@@ -526,3 +526,49 @@ def test_the_export_takes_the_administrators_token_from_the_header_only(host, en
     except urllib.error.HTTPError as exc:
         status = exc.code
     assert status == 200 if allowed else status in (401, 403)
+
+
+def test_the_export_reads_its_row_and_its_submission_in_one_snapshot(host, envelope, monkeypatch):
+    """A submission accepted between the export's read of the row and its read of the submission
+    is not in that export: both come from the one snapshot the row was read in."""
+    from lib import artifacts, render_spec_store
+    headers = {"X-Clarp-Client": "ios/12 contract=74"}
+    ident = envelope["artifact_id"]
+    assert _request(host, "/artifacts", envelope, headers=headers)[0] == 201
+    submission = {"submission_id": "snapshot-answer-01", "version": "build-1", "synthesize_audio": False,
+                  "answers": {"intent": "submit_decision", "state": {"choice": "send"}}}
+    real_get = artifacts.get
+
+    def read_then_answered_elsewhere(identifier):
+        row = real_get(identifier)
+        # Another connection (the Host's handler thread) accepts an answer now.
+        assert _request(host, f"/artifacts/{ident}/submit", submission, headers=headers)[0] == 200
+        return row
+    monkeypatch.setattr(artifacts, "get", read_then_answered_elsewhere)
+    exported = render_spec_store.export(ident)["render_spec"]
+    assert exported["submission"] is None and exported["artifact"]["artifact_id"] == ident
+    monkeypatch.setattr(artifacts, "get", real_get)
+    after = render_spec_store.export(ident)["render_spec"]["submission"]
+    assert after["submission_id"] == "snapshot-answer-01"
+
+
+@pytest.mark.parametrize("table,header,capable", [
+    ({"Desktop": 5}, "Desktop/1 contract=5", True),
+    ({"Desktop": 5}, "desktop/1 contract=5", False),
+    ({"ios": 0}, "ios/12 contract=999", False),
+    ({"android": 30}, "android/1 contract=30", True),
+])
+def test_the_route_answers_by_the_configured_per_client_table(host, envelope, monkeypatch, table, header, capable):
+    """[artifacts] render_spec_min_contract as the Host's config gives it changes what the routes
+    answer, through the same per-client rule as the default."""
+    import dataclasses
+    from lib import config
+    configured = dataclasses.replace(config.load(), render_spec_min_contract=table)
+    monkeypatch.setattr(config, "load", lambda *a, **k: configured)
+    headers = {"X-Clarp-Client": header}
+    assert _request(host, "/artifacts", envelope, headers=headers)[0] == 201
+    _, body = _request(host, "/artifacts/artifact-spec?representation=flat-v1", headers=headers)
+    assert ("spec" in body["artifact"]) is capable
+    data = {"version": "build-1", "submission_id": "b" * 32, "answers": {"intent": "submit_decision",
+                                                                          "state": {"choice": "send"}}}
+    assert _request(host, "/artifacts/artifact-spec/submit", data, headers=headers)[0] == (200 if capable else 403)

@@ -74,12 +74,14 @@ def strict_client(header) -> tuple[str, int] | None:
     return (found.group(1), int(found.group(2))) if found else None
 
 
-def client_minimums(table, *, setting: str) -> dict[str, int]:
+def client_minimums(table, *, setting: str, defaults=None) -> dict[str, int]:
     """The valid entries of a per-client table of minimum contracts (``setting`` names it in the
     log). A key is a client's name as it sends it (CLIENT_NAME) and a value a whole number of 0 or
     more (0: never; a TOML boolean is not a number). Every other entry is refused, all of them in
     one log line that names their keys. A valid key that differs from a built-in client's name only
-    in case is taken as another client, and one line says what that means."""
+    in case is taken as another client, and one line per read says what that means, with the
+    built-in's own number when ``defaults`` (the table's built-in minimums) names one. Every
+    per-client table of the Host is read through this one function."""
     from .log import log
     kept: dict[str, int] = {}
     refused: list[str] = []
@@ -91,11 +93,15 @@ def client_minimums(table, *, setting: str) -> dict[str, int]:
     if refused:
         log(setting, f"refused {', '.join(refused)}: a key is a client's name as it sends it "
                      f"({CLIENT_NAME}), a value a whole number of 0 or more")
-    cased = [f"{name!r} (not {builtin!r})" for name in kept for builtin in BUILT_IN_CLIENTS
-             if name != builtin and name.casefold() == builtin]
-    if cased:
-        log(setting, f"{', '.join(cased)}: names are matched exactly as clients send them, so each is "
-                     "another client and leaves the built-in one as it is")
+    near = [(name, builtin) for name in kept for builtin in BUILT_IN_CLIENTS
+            if name != builtin and name.casefold() == builtin]
+    if near:
+        own = defaults or {}
+        log(setting, "; ".join(
+            f"{name!r} is taken as its own client: it admits only a client that names itself exactly "
+            f"{name!r}; the built-in {builtin!r} keeps its own "
+            + (f"number ({own[builtin]})" if type(own.get(builtin)) is int else "setting")
+            for name, builtin in near))
     return kept
 
 
