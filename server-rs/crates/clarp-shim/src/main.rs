@@ -132,6 +132,42 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Name the owner of streaming input on this boot before releasing the first prompt.
+fn streaming_owner(tool_pid: u32, cwd: Option<&Path>) -> Option<ShimEvent> {
+    let shim_pid = std::process::id();
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let fields = |pid| {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let mut parts = stat.rsplit_once(')')?.1.split_whitespace();
+        let group = parts.nth(2)?.parse::<u32>().ok()?;
+        let session = parts.next()?.parse::<u32>().ok()?;
+        Some((group, session, parts.nth(15)?.parse::<u64>().ok()?))
+    };
+    let (group, session, tool) = fields(tool_pid)?;
+    let (_, shim_session, shim) = fields(shim_pid)?;
+    if group != tool_pid || session != shim_pid || shim_session != shim_pid {
+        return None;
+    }
+    let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claude")))?;
+    let projects = if config.is_absolute() {
+        config
+    } else {
+        let base = cwd.map(Path::to_path_buf).or_else(|| std::env::current_dir().ok())?;
+        base.join(config)
+    }.join("projects");
+    Some(ShimEvent::InputOpen {
+        shim_pid,
+        shim_start: format!("{}:{shim}", boot.trim()),
+        tool_pid,
+        tool_start: format!("{}:{tool}", boot.trim()),
+        group,
+        projects,
+    })
+}
+
 /// What the threads send to the one thread that owns the spool.
 enum ToSpool {
     Entry(Entry),
@@ -571,7 +607,12 @@ struct Control {
 }
 
 impl Control {
-    fn handle(self: &Arc<Self>, request: Request, own: &Arc<Connection>) -> Reply {
+    fn handle(
+        self: &Arc<Self>,
+        request: Request,
+        own: &Arc<Connection>,
+        after_write: &mut Option<mpsc::Receiver<bool>>,
+    ) -> Reply {
         match request {
             Request::Hold { ms } => self.hold(ms, own),
             Request::ConsumeHold { fence, replaced_by } => self.consume_hold(fence, replaced_by),
@@ -582,7 +623,8 @@ impl Control {
             Request::Ping | Request::Follow => Reply::ok(Some(self.pid)),
             Request::Stdin { data } => {
                 let (written, receipt) = mpsc::channel();
-                if self.input.send(data.into_bytes(), Some(written)) && receipt.recv() == Ok(true) {
+                if self.input.send(data.into_bytes(), Some(written)) {
+                    *after_write = Some(receipt);
                     Reply::ok(Some(self.pid))
                 } else {
                     Reply::failed("the tool's input is closed")
@@ -998,11 +1040,15 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
             Ok(Request::Stop { grace_ms }) => Some(*grace_ms),
             _ => None,
         };
-        let reply = match request {
-            Ok(request) => control.handle(request, me),
+        let mut after_write = None;
+        let mut reply = match request {
+            Ok(request) => control.handle(request, me, &mut after_write),
             Err(error) => Reply::failed(format!("not a request: {error}")),
         };
         drop(turn);
+        if let Some(receipt) = after_write && receipt.recv() != Ok(true) {
+            reply = Reply::failed("the tool's input is closed");
+        }
         let text = serde_json::to_string(&reply).map(|text| text + "\n");
         let consumed = reply.killed == Some(true);
         let can_write = !consumed
@@ -1187,8 +1233,10 @@ fn run(args: Args) -> Result<u8, String> {
         }
     };
     record_now(Entry::Shim(ShimEvent::Spawned { pid }));
-    if args.stdin_until.is_some() {
-        record_now(Entry::Shim(ShimEvent::InputOpen));
+    if args.stdin_until.is_some()
+        && let Some(owner) = streaming_owner(pid, args.cwd.as_deref())
+    {
+        record_now(Entry::Shim(owner));
     }
     // Whoever started this shim may wait for this line: the turn is taken, the tool is up and
     // the socket answers. A shim that ends without saying it never had the turn, or said why

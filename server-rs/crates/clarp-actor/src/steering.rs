@@ -1,9 +1,12 @@
 //! The actor's view of the extra user inputs of one Claude process.
 
+use std::collections::BTreeSet;
+use std::path::Path;
+
 use clarp_kernel::agent::{Agent, Command};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::journal::Batch;
-use clarp_kernel::steering::{self, Join, Observation, Stage};
+use clarp_kernel::steering::{self, InputOwner, Join, Observation, Recovery, Stage};
 use clarp_kernel::turn::{COMPACTION, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
@@ -15,7 +18,7 @@ use super::{
 
 #[derive(Default)]
 pub(super) struct State {
-    enabled: bool,
+    owner: Option<InputOwner>,
     stream: steering::Stream,
     primary_uuid: Option<String>,
     parent: Option<(RunOutcome, Facts, String)>,
@@ -41,8 +44,17 @@ pub(super) struct Separate {
 impl State {
     pub(super) fn record(&mut self, entry: &Line) -> Option<Value> {
         match entry {
-            Line::Shim(ShimEvent::InputOpen) => self.enabled = true,
-            Line::Out(line) if self.enabled => return serde_json::from_str(line).ok(),
+            Line::Shim(ShimEvent::InputOpen { shim_pid, shim_start, tool_pid, tool_start, group, projects }) => {
+                self.owner = Some(InputOwner {
+                    shim_pid: *shim_pid,
+                    shim_start: shim_start.clone(),
+                    tool_pid: *tool_pid,
+                    tool_start: tool_start.clone(),
+                    group: *group,
+                    projects: projects.clone(),
+                });
+            }
+            Line::Out(line) if self.owner.is_some() => return serde_json::from_str(line).ok(),
             _ => {}
         }
         None
@@ -115,18 +127,7 @@ impl State {
                 let message = message_at(batch.log(), follow.message_seq)?;
                 let into = follow.join.into;
                 if batch.command(Command::JoinRead { turn }, now_ms).is_ok() {
-                    out.changed.queue = true;
-                    let agent = batch.agent();
-                    let queue = QueueState {
-                        waiting: batch.queue_depth(),
-                        paused: agent.is_paused(),
-                        revision: agent.queue_revision(),
-                    };
-                    out.joined_reads.push(JoinedRead {
-                        turn,
-                        client_id: message.client_id().to_owned(),
-                        queue,
-                    });
+                    queue_started(batch, out, turn, &message);
                     let speak = message.speak;
                     if self.parent.is_some() {
                         if self.separate.is_none() {
@@ -269,6 +270,73 @@ fn contains_uuid(prompts: &[Value], uuid: &str) -> bool {
     prompts.iter().any(|prompt| prompt.as_str() == Some(uuid))
 }
 
+/// A vanished socket is insufficient evidence that the tool is done.
+pub(super) fn inactive_owner(agent: &Agent) -> Result<bool, ActorError> {
+    let Some(owner) = agent.joins().values().find_map(|follow| follow.join.recovery.as_ref()) else {
+        return Ok(true);
+    };
+    super::orphan::ended(&owner.owner)
+        .map_err(|error| ActorError::Io(format!("could not fence the follow-up's old tool: {error}")))
+}
+
+/// Recover input that Claude logged without a corresponding durable stdout echo. Only call
+/// after the shim recorded the tool's exit, or after its exact group was fenced.
+pub(super) fn recover_reads(
+    batch: &mut Batch<'_>,
+    cwd: &Path,
+    now_ms: i64,
+    out: &mut Outputs,
+) -> Result<bool, ActorError> {
+    let pending: Vec<_> = batch.agent().joins().iter()
+        .filter(|(_, follow)| follow.stage == Stage::Pending)
+        .filter_map(|(&turn, follow)| {
+            Some((turn, follow.join.into, follow.join.uuid.clone(), follow.message_seq, follow.join.recovery.clone()?))
+        })
+        .collect();
+    let Some((_, _, _, _, recovery)) = pending.first() else {
+        return Ok(false);
+    };
+    if pending.iter().any(|(_, _, _, _, other)| other != recovery) {
+        return Err(ActorError::Corrupt("follow-ups of the same turn name different tools".into()));
+    }
+    let uuids: BTreeSet<_> = pending.iter().map(|(_, _, uuid, _, _)| uuid.clone()).collect();
+    let Some(read) = clarp_backend::past::claude_read_followups(
+        &recovery.owner.projects, &cwd.to_string_lossy(), &recovery.session, &uuids,
+    ) else {
+        eprintln!("clarp-host: could not read Claude's follow-up receipts in its session file");
+        return Ok(false);
+    };
+    let mut revealed = false;
+    for (turn, into, uuid, message_seq, _) in pending {
+        if let Some(proof) = read.get(&uuid)
+            && batch.command(Command::JoinRead { turn }, proof.at_ms.unwrap_or(now_ms)).is_ok()
+        {
+            let message = message_at(batch.log(), message_seq)?;
+            queue_started(batch, out, turn, &message);
+            if proof.joined && !revealed {
+                revealed = conversation::loosen(batch, into, now_ms)?;
+            }
+            let _ = batch.command(Command::JoinSettled { turn }, now_ms);
+        }
+    }
+    Ok(revealed)
+}
+
+fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, message: &Message) {
+    out.changed.queue = true;
+    let agent = batch.agent();
+    let queue = QueueState {
+        waiting: batch.queue_depth(),
+        paused: agent.is_paused(),
+        revision: agent.queue_revision(),
+    };
+    out.joined_reads.push(JoinedRead {
+        turn,
+        client_id: message.client_id().to_owned(),
+        queue,
+    });
+}
+
 impl Actor {
     /// Reserve the already accepted row before handing its bytes to Claude's stdin. A restart
     /// replays echoes but never attempts an uncertain write a second time.
@@ -282,16 +350,22 @@ impl Actor {
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
-        if !live.steering.enabled
-            || !live.steering.stream.can_join()
+        if !live.steering.stream.can_join()
             || live.opening
             || live.origin.name() == COMPACTION
         {
             return Ok(None);
         }
+        let Some(owner) = live.steering.owner.clone() else {
+            return Ok(None);
+        };
+        let Some(session) = self.recorder.agent().backend_session() else {
+            return Ok(None);
+        };
         let join = Join {
             into: live.turn,
             uuid,
+            recovery: Some(Recovery { owner, session: session.to_owned() }),
         };
         let socket = self.profile.socket_path_of(live.turn, live.attempt);
         let mut batch = self.recorder.batch();

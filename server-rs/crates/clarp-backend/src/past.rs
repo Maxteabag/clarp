@@ -20,6 +20,7 @@
 //!   it after all, as a transcript the index does not name.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -542,6 +543,43 @@ pub fn claude_transcript(
     claude_source(projects, cwd, session, other_projects)
         .ok()
         .flatten()
+}
+
+/// Look only in the named session of this project. A missing or unreadable file leaves the
+/// delivery unknown. Malformed records (including a partial final line) prove nothing.
+#[derive(Clone, Copy)]
+pub struct ReadFollowup {
+    pub joined: bool,
+    pub at_ms: Option<i64>,
+}
+
+pub fn claude_read_followups(
+    projects: &Path,
+    cwd: &str,
+    session: &str,
+    waiting: &BTreeSet<String>,
+) -> Option<BTreeMap<String, ReadFollowup>> {
+    let path = claude_transcript(projects, cwd, session, false)?;
+    let file = std::fs::File::open(path).ok()?;
+    let mut read = BTreeMap::new();
+    for line in BufReader::new(file).split(b'\n') {
+        let line = line.ok()?;
+        let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if let Some((uuid, joined)) = clarp_kernel::steering::transcript_read_uuid(&entry)
+            && waiting.contains(uuid)
+        {
+            let at_ms = entry["timestamp"].as_str()
+                .and_then(|stamp| stamp.parse::<jiff::Timestamp>().ok())
+                .map(|stamp| stamp.as_millisecond());
+            read.entry(uuid.to_owned()).or_insert(ReadFollowup { joined, at_ms });
+            if read.len() == waiting.len() {
+                break;
+            }
+        }
+    }
+    Some(read)
 }
 
 /// A fork distinguishes a missing source from one the store boundary refuses.

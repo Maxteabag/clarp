@@ -12,6 +12,25 @@ use crate::turn::TurnId;
 pub struct Join {
     pub into: TurnId,
     pub uuid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<Recovery>,
+}
+
+/// What owns this stdin line, kept before attempting the write.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Recovery {
+    pub owner: InputOwner,
+    pub session: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputOwner {
+    pub shim_pid: u32,
+    pub shim_start: String,
+    pub tool_pid: u32,
+    pub tool_start: String,
+    pub group: u32,
+    pub projects: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +77,18 @@ pub struct ToolChanges<'a> {
 
 fn nonempty(value: &Value) -> Option<&str> {
     value.as_str().filter(|text| !text.is_empty())
+}
+
+/// A separate Claude turn records a user entry; a follow-up read inside a tool call is a
+/// queued-command attachment. Both use the UUID of the stdin message.
+pub fn transcript_read_uuid(entry: &Value) -> Option<(&str, bool)> {
+    match entry["type"].as_str() {
+        Some("user") => nonempty(&entry["uuid"]).map(|uuid| (uuid, false)),
+        Some("attachment") if entry["attachment"]["type"] == "queued_command" => {
+            nonempty(&entry["attachment"]["source_uuid"]).map(|uuid| (uuid, true))
+        }
+        _ => None,
+    }
 }
 
 fn tool_id(block: &Value) -> Option<&str> {
@@ -139,6 +170,25 @@ impl Stream {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_read_follow_up_is_a_user_entry_or_a_queued_command_attachment() {
+        for (entry, expected) in [
+            (json!({"type": "user", "uuid": "prompt"}), Some(("prompt", false))),
+            (json!({"type": "assistant", "uuid": "prompt"}), None),
+            (json!({"type": "attachment", "uuid": "entry", "attachment": {
+                "type": "queued_command", "source_uuid": "prompt"
+            }}), Some(("prompt", true))),
+            (json!({"type": "attachment", "attachment": {
+                "type": "background", "source_uuid": "same"
+            }}), None),
+            (json!({"type": "attachment", "uuid": "entry", "attachment": {
+                "type": "queued_command"
+            }}), None),
+        ] {
+            assert_eq!(transcript_read_uuid(&entry), expected);
+        }
+    }
 
     #[test]
     fn only_the_live_tool_window_takes_new_input() {

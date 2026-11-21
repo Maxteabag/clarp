@@ -161,7 +161,7 @@ fn streaming_input_closes_at_the_first_top_level_stdout_result() {
     assert!(
         records(&running.spool)
             .iter()
-            .any(|record| record.entry == Entry::Shim(ShimEvent::InputOpen))
+        .any(|record| matches!(record.entry, Entry::Shim(ShimEvent::InputOpen { .. })))
     );
     assert!(
         ask(
