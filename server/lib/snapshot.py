@@ -187,27 +187,27 @@ ARCHIVED_LISTING_TTL_S = 300.0
 _LIMIT_TEXT = re.compile(r"[1-9][0-9]{0,2}")
 
 
+# agent_id -> (trace_id, read at, working_with): a running turn's audience, read again after
+# WORKING_TTL_S (a turn the user steps into reads 'user' soon after), so a snapshot does not
+# query every busy agent's turn on every build.
+_WORKING_CACHE: dict[str, tuple[str, float, dict[str, Any]]] = {}
+WORKING_TTL_S = 5.0
+
+
 def _working_with(agent_id: str, trace_id: str | None) -> dict[str, Any]:
     """The running turn's audience for a snapshot row; {} when it cannot be read (a row is
     never lost for it)."""
+    trace = str(trace_id or "")
+    known = _WORKING_CACHE.get(agent_id)
+    if known and known[0] == trace and time.monotonic() - known[1] < WORKING_TTL_S:
+        return dict(known[2])
     try:
-        return coordination.working_with(agent_id, trace_id)
+        fields = coordination.working_with(agent_id, trace)
     except Exception as exc:  # noqa: BLE001
         log_exception("snapshotWorkingWithFail", exc, detail=agent_id)
         return {}
-
-
-def _veiled_activity(activity: dict[str, Any], veil: str) -> dict[str, Any]:
-    if not veil:
-        return activity
-    return {**activity, "tool": "", "action": "working", "summary": veil, "file_path": "",
-            "call_id": None}
-
-
-def _veiled_live(activity: Any, veil: str) -> Any:
-    if not veil or not isinstance(activity, dict):
-        return activity
-    return {**activity, "headline": veil, "tool": None}
+    _WORKING_CACHE[agent_id] = (trace, time.monotonic(), fields)
+    return dict(fields)
 
 
 def _not_archived(agent_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -649,7 +649,7 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             # Advisory only: a send is never refused, because an account
             # switch may still serve it.
             "backend_quota": _backend_quota(backend, exhausted),
-            "activity":       _veiled_activity(state_activity_event(
+            "activity":       coordination.veil_activity(state_activity_event(
                 agent_id=agent_id,
                 session=a["session"],
                 persona=a["persona"],
@@ -659,7 +659,7 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             ), veil) if state.get("kind") else None,
             # The live-items status line (docs/live-items.md §1.3), when the
             # hub has seen this agent since it started.
-            "live_activity":  _veiled_live(live_activities.get(agent_id), veil),
+            "live_activity":  coordination.veil_live(live_activities.get(agent_id), veil),
             # Who the running turn is for (feature coordination_working_state): 'agents' when
             # another agent's message started it, with that agent when this Host knows it, so
             # a client that connects mid-turn can say "Working with <Name>". None when idle.

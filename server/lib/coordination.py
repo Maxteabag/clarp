@@ -326,6 +326,30 @@ def veiled(working: dict[str, Any]) -> str:
     return f"Working with {name}" if name else "Working with another agent"
 
 
+def veil_activity(activity: dict[str, Any], veil: str) -> dict[str, Any]:
+    """An agent-activity (lib.activity.state_activity_event) of a turn its chat hides: who the
+    agent works with (``veil``), no tool, action, summary or path of that turn."""
+    if not veil:
+        return activity
+    return {**activity, "tool": "", "action": "working", "summary": veil, "file_path": "",
+            "call_id": None}
+
+
+def veil_live(activity: Any, veil: str) -> Any:
+    """A live status (docs/live-items.md §1.3) of a turn its chat hides."""
+    if not veil or not isinstance(activity, dict):
+        return activity
+    return {**activity, "headline": veil, "tool": None}
+
+
+def veil_detail(detail: Any, veil: str) -> Any:
+    """An agent-state's detail of a turn its chat hides: its trace and the veil, nothing the
+    turn did (a tool, its input, a message)."""
+    if not veil or not isinstance(detail, dict):
+        return detail
+    return {**{k: detail[k] for k in ("trace_id", "phase") if k in detail}, "summary": veil}
+
+
 ROSTER_KIND = "coordination-changed"
 DEFAULT_CHOICE = "default"   # POST /agent-coordination: follow the Host's setting again
 
