@@ -12,6 +12,7 @@ RUNS = {
     "journal": ["test", "-p", "clarp-kernel", "--lib", "a_selected_takeover_survives_reopen"],
     "fence": ["test", "--test", "actor", "a_takeover_reads_every_record_at_the_fence"],
     "spool-marker": ["test", "-p", "clarp-spool", "--lib", "a_marker_only_commits_at_the_exact_spool_fence"],
+    "history": ["test", "--test", "claude_history", "a_transcript_is_read_as_the_python_host_reads_it"],
     "finish": ["test", "--test", "actor", "a_confirmed_takeover_closes_the_first_row"],
     "first-turn": ["test", "-p", "clarp-kernel", "--lib", "a_first_turn_only_counts_as_fresh"],
     "claude": ["test", "-p", "clarp-backend", "--lib", "a_turn_is_started_with_the_message_on_standard_input"],
@@ -21,6 +22,8 @@ RUNS = {
 PLANTS = [
     ("clarp-spool/src/lib.rs", "spool-marker", "a takeover marker commits even after more output",
      'if self.file.metadata()?.len() != fence {', 'if self.file.metadata()?.len() < fence {'),
+    ("clarp-backend/src/history.rs", "history", "a two-block Claude prompt loses its component texts",
+     '                row["parts"] = json!(parts);', '                let _ = parts;'),
     (KERNEL, "vectors", "the Claude prompt UUID keeps trace padding",
      "let trace = python::strip(trace);", "let trace = trace.trim_matches(' ');"),
     (KERNEL, "vectors", "the Claude prompt UUID is in another namespace",
