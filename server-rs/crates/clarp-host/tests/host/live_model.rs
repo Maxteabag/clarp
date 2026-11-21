@@ -249,33 +249,27 @@ const NO_TABLE: &str = "[openai]\nlive_model_min_client = 3\n";
 
 /// The owner's table speaks when it is read, once, so that a slip in his file does not hide for
 /// weeks, in the words of the one reader of such tables (a render spec's speaks alike): one line
-/// names every entry refused, in the table's order of keys (each quoted, a long one cut short),
-/// and one line names each key taken that differs from a built-in name only in its letters. A
+/// names every refused key in the table's order, and one groups the keys whose case differs
+/// from a built-in name. Keys use Python's quoting. A
 /// value that is no table is ignored in one line. A table without a slip says nothing.
 #[test]
 fn the_owners_table_of_minimums_says_what_it_refused_and_what_is_a_name_in_other_letters() {
     const ADMIN: &str = "the-administrators-token";
     const TABLE: &str = "clarp-host: config.live_model_min_client: ";
     let refused = format!(
-        "{TABLE}refused entries (a client's name as its header sends it, and a whole number of at \
-         least 0): '', '1st', 'android', 'caf?', 'desktop', '{}', '{}...', 'my client', \
-         'phone', 'watch'",
+        "{TABLE}refused 'my client', 'desktop', '', 'android', '1st', 'caf\u{e9}', '{}', '{}', \
+         'phone', 'watch': a key is a client's name as it sends it ([A-Za-z][A-Za-z0-9_-]{{0,31}}), \
+         a value a whole number of 0 or more",
         "j".repeat(40),
-        "k".repeat(40)
+        "k".repeat(50)
     );
-    let cased = |key: &str| {
-        format!(
-            "{TABLE}'{key}' is taken as written: it counts for a client that sends '{key}', not \
-             for 'ios'"
-        )
-    };
-    let (upper, title) = (cased("IOS"), cased("Ios"));
+    let cased = format!(
+        "{TABLE}'Ios' (not 'ios'), 'IOS' (not 'ios'): names are matched exactly as clients send \
+         them, so each is another client and leaves the built-in one as it is"
+    );
     let no_table = format!("{TABLE}ignored: expected a table of client = number");
     for (file, lines) in [
-        (
-            SLIPS,
-            vec![refused.as_str(), upper.as_str(), title.as_str()],
-        ),
+        (SLIPS, vec![refused.as_str(), cased.as_str()]),
         (
             "[openai]\nlive_model_min_client = { ios = 80, desktop = 0 }\n",
             vec![],

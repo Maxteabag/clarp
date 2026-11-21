@@ -29,8 +29,8 @@ PLANTS = [
     (E, 'host', 'a waiting message is touched before the refusal', '                return Err(ApiError::new(StatusCode::CONFLICT, AMBIGUOUS_WAITING));', '                if let Some((first, turn)) = &named {\n                    let _ = first.agent.withdraw(*turn, "user".to_string()).await;\n                }\n                return Err(ApiError::new(StatusCode::CONFLICT, AMBIGUOUS_WAITING));'),
     (E, 'host', 'an agent with one message waiting is not looked at', '        if member.agent.view().status.waiting.is_empty() {', '        if member.agent.view().status.waiting.len() < 2 {'),
     (F, 'host', 'every agent keeps its conversation in one log', '        dir: works.config.data_dir.join("agents").join(&record.agent_id),', '        dir: works.config.data_dir.join("agents").join("all"),'),
-    (P, 'past', 'a taken-up row is named whoever took it up', '        let digest = Sha256::digest(format!("{agent_id}\\0{session}\\0{number}").as_bytes());', '        let digest = Sha256::digest(format!("{session}\\0{number}").as_bytes());'),
-    (P, 'past', 'a taken-up row is named whatever session it came from', '        let digest = Sha256::digest(format!("{agent_id}\\0{session}\\0{number}").as_bytes());', '        let digest = Sha256::digest(format!("{agent_id}\\0{number}").as_bytes());'),
+    (P, 'past', 'a taken-up row is named whoever took it up', '    let namespace = format!("{agent_id}\\0{session}");', '    let namespace = session.to_string();'),
+    (P, 'past', 'a taken-up row is named whatever session it came from', '    let namespace = format!("{agent_id}\\0{session}");', '    let namespace = agent_id.to_string();'),
 ]
 
 

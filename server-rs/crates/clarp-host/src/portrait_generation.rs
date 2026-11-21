@@ -168,7 +168,7 @@ pub(crate) fn asset(
         width,
         height,
         caption: format!("Generated portrait alternative {index}"),
-        created_by: "portrait_generation:openai".into(),
+        created_by: format!("{}openai", rules::CREATED_BY_PREFIX),
         created_at: now,
         named_only: false,
     })
@@ -247,6 +247,7 @@ async fn run(app: App, agent: String, generation: u64) {
                 asset(&member, &first, 1, now)?,
                 asset(&member, &second, 2, now)?,
             ],
+            media_window: None,
         };
         Ok::<_, String>(Some((publication, [first, second])))
     };
@@ -280,7 +281,15 @@ async fn run(app: App, agent: String, generation: u64) {
                     drop(_gallery);
                     let mut delay = 1;
                     loop {
-                        match deliver(&app.fleet, &app.blobs, &publication).await {
+                        match deliver(
+                            &app.fleet,
+                            &app.blobs,
+                            &app.gallery,
+                            &publication,
+                            Some(&announcer(&app)),
+                        )
+                        .await
+                        {
                             Ok(Delivery::Published) => break,
                             Ok(Delivery::MissingBytes) => {
                                 app.fleet.unread(PENDING, &publication.assets[0].asset_id)
@@ -326,30 +335,36 @@ pub(crate) enum Delivery {
 pub(crate) async fn deliver(
     fleet: &crate::fleet::FleetHandle,
     store: &Arc<dyn clarp_ports::blobs::Blobs>,
+    gallery: &crate::gallery::Writer,
     publication: &Publication,
+    announcer: Option<&crate::media_created::Announcer>,
 ) -> Result<Delivery, Unavailable> {
     let member = fleet.directory().named(&publication.agent_id).cloned();
     if let Some(member) = member {
+        let mut prepared = Vec::new();
         for asset in &publication.assets {
-            let blobs = store.clone();
-            let name = asset.blob();
-            let picture = picture_name(&asset.sha256);
-            // Normally the fleet has already filled both immutable names before the gallery changed.
-            let len = |key: &str| blobs.len(key).map_err(|e| Unavailable(e.to_string()));
-            if len(&name)? == Some(asset.bytes) && len(&picture)? == Some(asset.bytes) {
-                continue;
-            }
             let Some(raw) = fleet.kept_book(BYTES, asset.asset_id.clone()).await? else {
                 return Ok(Delivery::MissingBytes);
             };
-            tokio::task::spawn_blocking(move || {
-                blobs.put(&name, &raw)?;
-                blobs.put(&picture, &raw)
-            })
-            .await
-            .map_err(|_| Unavailable("portrait write interrupted".into()))?
-            .map_err(|e| Unavailable(e.to_string()))?;
+            let blobs = store.clone();
+            let picture = picture_name(&asset.sha256);
+            let copy = raw.clone();
+            tokio::task::spawn_blocking(move || blobs.put(&picture, &copy))
+                .await
+                .map_err(|_| Unavailable("portrait write interrupted".into()))?
+                .map_err(|why| Unavailable(why.to_string()))?;
+            prepared.push((
+                clarp_kernel::gallery::Image::new(asset.clone(), publication.agent_id.clone()),
+                raw,
+            ));
         }
+        let pair = prepared
+            .try_into()
+            .map_err(|_| Unavailable("portrait publication is missing an asset".into()))?;
+        gallery
+            .ask(move |store| store.publish_pair(pair))
+            .await
+            .map_err(|why| Unavailable(why.words().to_owned()))?;
         let view = member.agent.view();
         if !publication
             .assets
@@ -360,6 +375,37 @@ pub(crate) async fn deliver(
                 .agent
                 .publish_portraits(publication.assets.clone())
                 .await?;
+        }
+        for asset in &publication.assets {
+            let agent_id = publication.agent_id.clone();
+            let id = asset.asset_id.clone();
+            gallery
+                .ask(move |store| store.delivered(&agent_id, &id))
+                .await
+                .map_err(|why| Unavailable(why.words().to_owned()))?;
+        }
+    }
+    if let Some(announcer) = announcer {
+        let window = if let Some(window) = &publication.media_window {
+            Ok(Some(window.clone()))
+        } else {
+            // Live delivery has the candidate and the fleet kept the exact terminal
+            // window in its durable copy. Recovery already has that copy.
+            match fleet
+                .kept(PENDING, publication.assets[0].asset_id.clone())
+                .await
+            {
+                Ok(Some(raw)) => serde_json::from_slice::<Publication>(&raw)
+                    .map(|pending| pending.media_window)
+                    .map_err(|why| why.to_string()),
+                Ok(None) => Ok(None),
+                Err(why) => Err(why.0),
+            }
+        };
+        match window {
+            Ok(Some(window)) => announcer.tell(window).await,
+            Ok(None) => {}
+            Err(why) => announcer.failed(&why),
         }
     }
     let [first, second] = &publication.assets;
@@ -376,6 +422,15 @@ pub(crate) async fn deliver(
     Ok(Delivery::Published)
 }
 
+fn announcer(app: &App) -> crate::media_created::Announcer {
+    crate::media_created::Announcer {
+        writer: app.gallery.clone(),
+        hub: app.hub.clone(),
+        clock: app.clock.clone(),
+        log: crate::unkept::Log::stderr(app.clock.clone()),
+    }
+}
+
 pub async fn recover(app: &App) -> Result<(), Unavailable> {
     for (key, raw) in app.fleet.kept_all(PENDING).await? {
         let Ok(publication) = serde_json::from_slice::<Publication>(&raw) else {
@@ -385,7 +440,14 @@ pub async fn recover(app: &App) -> Result<(), Unavailable> {
         // Cleanup uses the first asset's id. A malformed receipt must never clear a neighbour.
         if publication.assets[0].asset_id != key
             || matches!(
-                deliver(&app.fleet, &app.blobs, &publication).await?,
+                deliver(
+                    &app.fleet,
+                    &app.blobs,
+                    &app.gallery,
+                    &publication,
+                    Some(&announcer(app))
+                )
+                .await?,
                 Delivery::MissingBytes
             )
         {

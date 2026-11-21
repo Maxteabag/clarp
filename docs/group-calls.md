@@ -219,7 +219,11 @@ other cloud engines take one code and get the first code of a set
 engines never receive the code, so they are skipped when a call policy is
 configured. An incompatible engine is skipped (`{engine, outcome: "skipped",
 reason: "language_incompatible"}`); the rest run in order, the next only on
-failure.
+failure. A clip is never sent to one provider twice: once an attempt reached a
+provider (it answered, or failed after the audio left), another model of that
+provider is skipped (`{engine, outcome: "skipped", reason:
+"provider_already_sent"}`); a refusal before any audio left does not use the
+provider up. An engine listed twice is tried once.
 
 Either way every attempt records, in `stt.attempts` and the `transcribe`
 event, the `language` the Host handed at that engine's boundary: a local model

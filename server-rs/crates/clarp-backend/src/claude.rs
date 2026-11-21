@@ -225,6 +225,9 @@ enum Block {
     Tool,
 }
 
+/// The row a standalone block reader associates with a text block's provider message.
+type BlockRow<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 /// What those who watch a turn are shown of it: every block of a message as an item of its
 /// own, a tool call from the moment its name is known, and what each tool returned.
 ///
@@ -261,9 +264,9 @@ impl Shown {
         }
     }
 
-    /// Takes one event of the stream. `row` names the row of the conversation that the
-    /// message with a given id is written into.
-    fn see(&mut self, event: &Value, row: &dyn Fn(&str) -> String, out: &mut Vec<Signal>) {
+    /// Takes one event of the stream. Root replies are shown from their draft instead.
+    /// A block reader can still show text from a nested stream, which has no parent row.
+    fn see(&mut self, event: &Value, row: Option<BlockRow<'_>>, out: &mut Vec<Signal>) {
         let piece = match text_of(&event["type"]) {
             "user" => {
                 self.returned(&event["message"]["content"], out);
@@ -299,7 +302,7 @@ impl Shown {
         &mut self,
         index: i64,
         block: &Value,
-        row: &dyn Fn(&str) -> String,
+        row: Option<BlockRow<'_>>,
         out: &mut Vec<Signal>,
     ) {
         let id = format!("{SHOWN}:{}:{index}", self.message);
@@ -311,11 +314,13 @@ impl Shown {
                 out.push(Signal::Glimpse(Glimpse::Reasoning { id, text }));
             }
             "text" => {
-                let text = text_of(&block["text"]).to_string();
-                self.begin(index, Block::Message, &id);
-                self.texts.insert(id.clone(), text.clone());
-                let row = Some(row(&self.message));
-                out.push(Signal::Glimpse(Glimpse::Message { id, text, row }));
+                if let Some(row) = row {
+                    let text = text_of(&block["text"]).to_string();
+                    self.begin(index, Block::Message, &id);
+                    self.texts.insert(id.clone(), text.clone());
+                    let row = row(&self.message);
+                    out.push(Signal::Glimpse(Glimpse::Message { id, text, row }));
+                }
             }
             "tool_use" | "server_tool_use" if !text_of(&block["id"]).is_empty() => {
                 let call_id = text_of(&block["id"]).to_string();
@@ -443,6 +448,9 @@ pub struct ClaudeInterpreter {
     ended: bool,
     /// What those who watch the turn are shown of it.
     shown: Shown,
+    /// A row's first visible item keeps its name even when an empty draft was discarded.
+    live_items: HashMap<String, String>,
+    nested_shown: HashMap<String, Shown>,
 }
 
 fn text_of(value: &Value) -> &str {
@@ -509,6 +517,8 @@ impl ClaudeInterpreter {
             stderr: ErrorTail::default(),
             ended: false,
             shown: Shown::default(),
+            live_items: HashMap::new(),
+            nested_shown: HashMap::new(),
         }
     }
 
@@ -538,15 +548,32 @@ impl ClaudeInterpreter {
         }
     }
 
-    /// Shows the message being written as it stands.
-    fn live(&self, out: &mut Vec<Signal>) {
+    /// The first text block names the live item. A later reply using an earlier provider id
+    /// has a different durable row and must therefore have a different item too.
+    fn message_item(&self, draft: &Draft, row: &str) -> Option<String> {
+        let (first, _) = draft.blocks.first()?;
+        if draft.id.is_empty() || self.told.contains_key(&draft.id) {
+            Some(format!("{SHOWN}:reply:{row}"))
+        } else {
+            Some(format!("{SHOWN}:{}:{first}", draft.id))
+        }
+    }
+
+    /// The live item and the provisional log row are two views of the same reply.
+    fn live(&mut self, out: &mut Vec<Signal>) {
         if let Some(draft) = &self.draft {
             let text = draft.text();
-            if !text.is_empty() {
-                out.push(Signal::Live(LiveReply {
-                    id: self.reply_id(draft),
-                    text,
+            let row = self.reply_id(draft);
+            if let Some(id) = self.message_item(draft, &row) {
+                let id = self.live_items.entry(row.clone()).or_insert(id).clone();
+                out.push(Signal::Glimpse(Glimpse::Message {
+                    id,
+                    text: text.clone(),
+                    row: Some(row.clone()),
                 }));
+            }
+            if !text.is_empty() {
+                out.push(Signal::Live(LiveReply { id: row, text }));
             }
         }
     }
@@ -563,6 +590,9 @@ impl ClaudeInterpreter {
             return;
         }
         let id = self.reply_id(&draft);
+        if let Some(item) = self.live_items.remove(&id) {
+            out.push(Signal::Glimpse(Glimpse::Done { id: item }));
+        }
         self.replies += 1;
         if !draft.id.is_empty() {
             *self.told.entry(draft.id).or_default() += 1;
@@ -621,15 +651,20 @@ impl ClaudeInterpreter {
         let Ok(event) = serde_json::from_str::<Value>(line) else {
             return;
         };
-        // Those who watch are shown every event that is the turn's own, a sub-agent's too.
-        if event["isMeta"].as_bool() != Some(true) {
-            let mut shown = std::mem::take(&mut self.shown);
-            shown.see(&event, &|message| self.row_of(message), out);
-            self.shown = shown;
-        }
-        // What a sub-agent says belongs to the tool call that started it, not to this reply.
-        if !text_of(&event["parent_tool_use_id"]).is_empty() {
+        // What a sub-agent says belongs to its own stream. It has no row in the parent's
+        // conversation, and its raw block indexes must not replace the parent's.
+        let parent = text_of(&event["parent_tool_use_id"]);
+        if !parent.is_empty() {
+            if event["isMeta"].as_bool() != Some(true) {
+                self.nested_shown
+                    .entry(parent.to_string())
+                    .or_default()
+                    .see(&event, Some(&|_| None), out);
+            }
             return;
+        }
+        if event["isMeta"].as_bool() != Some(true) {
+            self.shown.see(&event, None, out);
         }
         match text_of(&event["type"]) {
             "system" => self.on_system(&event, out),
@@ -764,9 +799,7 @@ impl ClaudeInterpreter {
                         self.moved(Activity::Responding, out);
                         let text = text_of(&block["text"]);
                         self.block(index).push_str(text);
-                        if !text.is_empty() {
-                            self.live(out);
-                        }
+                        self.live(out);
                     }
                     "thinking" | "redacted_thinking" => self.moved(Activity::Thinking, out),
                     "tool_use" | "server_tool_use" => {
@@ -1111,7 +1144,12 @@ mod tests {
         .unwrap();
         let cases = vectors["claude"].as_array().unwrap();
         assert!(cases.len() >= 4);
-        let row = |message: &str| format!("r-{}", message.strip_prefix("msg_").unwrap_or(message));
+        let row = |message: &str| {
+            Some(format!(
+                "r-{}",
+                message.strip_prefix("msg_").unwrap_or(message)
+            ))
+        };
         let mut held = 0;
         for case in cases {
             let name = case["name"].as_str().unwrap();
@@ -1127,7 +1165,7 @@ mod tests {
                     hub.fire(now)
                 } else {
                     let mut signals = Vec::new();
-                    shown.see(&step["event"], &row, &mut signals);
+                    shown.see(&step["event"], Some(&row), &mut signals);
                     let mut events = Vec::new();
                     for signal in &signals {
                         if let Signal::Glimpse(glimpse) = signal {
