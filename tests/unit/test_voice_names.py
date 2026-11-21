@@ -335,11 +335,14 @@ def test_the_same_names_keep_the_start_up_refresh_away(names_file):
 
 def test_todays_catalogue_is_replaced_and_names_are_kept(names_file):
     """The pool hands out only what the provider offers today."""
-    _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke"},
-                                                  {"id": NORSK, "name": "Ingrid"}])
-    assert voice_names.catalogue("cartesia") == sorted([ADA_CARTESIA, NORSK])
+    _refresh(_cfg("cartesia"), names_file, pages=[
+        {"id": ADA_CARTESIA, "name": "Brooke", "language": "en", "is_public": True, "is_owner": False},
+        {"id": NORSK, "name": "Ingrid", "language": "no", "is_public": False, "is_owner": True}])
+    assert voice_names.catalogue("cartesia") == {
+        ADA_CARTESIA: {"language": "en", "public": True, "owner": False},
+        NORSK: {"language": "no", "public": False, "owner": True}}      # as each row said
     _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke"}])
-    assert voice_names.catalogue("cartesia") == [ADA_CARTESIA]
+    assert list(voice_names.catalogue("cartesia")) == [ADA_CARTESIA]
     assert voice_names.names("cartesia")[NORSK] == "Ingrid"           # a name is still a name
     assert voice_names.catalogue("elevenlabs") is None
 
