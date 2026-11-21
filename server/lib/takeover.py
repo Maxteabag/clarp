@@ -121,6 +121,37 @@ def _start_ticks(pid: int) -> int | None:
         return None
 
 
+def start_ticks(pid: int) -> int | None:
+    """The process's start time, which tells it from a later process given the same pid."""
+    return _start_ticks(pid)
+
+
+def kill_group_if_same(pid: int, pgid: int, ticks, *, wait_s: float = 5.0) -> bool:
+    """SIGKILL the group ``pgid`` only while ``pid`` is still the process recorded (the same
+    start ticks: never a reused pid), and wait until it is gone. True: it was there and is
+    gone now."""
+    if not pid or not pgid or ticks is None or _start_ticks(pid) != ticks:
+        return False
+    try:
+        os.killpg(int(pgid), signal.SIGKILL)
+    except ProcessLookupError:
+        return False
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        if _start_ticks(pid) != ticks or _state(pid) == "Z":
+            return True
+        time.sleep(0.02)
+    log("takeoverGroupKillSlow", f"pid={pid} pgid={pgid}")
+    return False
+
+
+def _state(pid: int) -> str:
+    try:
+        return pathlib.Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (OSError, ValueError, IndexError):
+        return ""
+
+
 def record_freeze(*, agent_id: str, trace_id: str, pgid: int, pid: int) -> str:
     """Written BEFORE the SIGSTOP: a crash after it leaves this record for the next runtime."""
     key = f"{_RECORD_PREFIX}{agent_id}"
