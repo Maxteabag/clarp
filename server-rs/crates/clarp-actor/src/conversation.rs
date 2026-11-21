@@ -12,7 +12,7 @@
 //! as it is now, with its parts, and carries the revision of the newest of them: it changed
 //! when that part was written, and a client that asks what is newer is given the row again.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use clarp_kernel::agent::AgentEvent;
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
@@ -35,21 +35,31 @@ pub enum Which {
     /// a page is counted in what is left, so a busy heartbeat cannot fill one and make a
     /// chat look as if it ended days ago.
     WithoutAutomated,
+    WithoutCoordination,
+    WithoutAutomatedOrCoordination,
 }
 
 impl Which {
-    fn keeps(self, entry: &Entry) -> bool {
-        self == Self::All || !left_out_of_chats(entry.origin_name())
+    pub fn hide_coordination(self) -> Self {
+        match self {
+            Self::All => Self::WithoutCoordination,
+            Self::WithoutAutomated => Self::WithoutAutomatedOrCoordination,
+            _ => self,
+        }
     }
 
-    /// Whether a stored item is one this reader gets. An item that is no thing of a
-    /// conversation is passed on: what reads the items leaves it out itself.
-    fn keeps_item(self, item: &Item) -> Result<bool, ActorError> {
-        if self == Self::All {
-            return Ok(true);
-        }
-        let entry = Entry::from_item(item).map_err(|error| corrupt(item, error))?;
-        Ok(entry.is_none_or(|entry| self.keeps(&entry)))
+    fn hides(self) -> bool {
+        matches!(self, Self::WithoutCoordination | Self::WithoutAutomatedOrCoordination)
+    }
+
+    fn keeps(self, entry: &Entry) -> bool {
+        !matches!(self, Self::WithoutAutomated | Self::WithoutAutomatedOrCoordination)
+            || !left_out_of_chats(entry.origin_name())
+    }
+
+    fn keeps_row(self, row: &Versioned) -> bool {
+        self.keeps(&row.entry)
+            && (!self.hides() || row.coordination.is_none() || matches!(row.entry, Entry::Note(_)))
     }
 }
 
@@ -94,6 +104,14 @@ impl Versioned {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HiddenRun {
+    pub messages: usize,
+    pub exchanges: usize,
+    pub senders: BTreeSet<String>,
+    pub capped: bool,
+}
+
 /// A page of a conversation.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Page {
@@ -109,6 +127,8 @@ pub struct Page {
     /// The revision the conversation begins after: 0, or where the agent was last started
     /// again. A reader that holds a revision up to this one holds a conversation that ended.
     pub begins_after: u64,
+    pub hidden_before: HashMap<String, HiddenRun>,
+    pub hidden_after: Option<HiddenRun>,
 }
 
 impl Page {
@@ -298,6 +318,39 @@ impl<'a> Reader<'a> {
         Ok(self.ends.get(&turn).and_then(Option::as_ref))
     }
 
+    fn hidden(&mut self, item: &Item, entry: &Entry) -> Result<Option<String>, ActorError> {
+        if matches!(entry, Entry::Note(_)) {
+            return Ok(None);
+        }
+        match item.turn.or(entry.turn()) {
+            Some(turn) => self.mark(turn),
+            None => Ok(None),
+        }
+    }
+
+    fn allows(&mut self, item: &Item, entry: &Entry, which: Which) -> Result<bool, ActorError> {
+        Ok(which.keeps(entry) && (!which.hides() || self.hidden(item, entry)?.is_none()))
+    }
+
+    fn keeps_item(&mut self, item: &Item, which: Which) -> Result<bool, ActorError> {
+        if which == Which::All {
+            return Ok(true);
+        }
+        let entry = Entry::from_item(item).map_err(|why| corrupt(item, why))?;
+        if which.hides() {
+            let parent = super::helper_cells::parent(item)?;
+            if let Some(id) = parent.as_deref().or_else(|| entry.as_ref().and_then(Entry::part_of)) {
+                if let Some(row) = self.log.find(id)?
+                    && let Some(entry) = Entry::from_item(&row).map_err(|why| corrupt(&row, why))?
+                {
+                    return self.allows(&row, &entry, which);
+                }
+                return Ok(false);
+            }
+        }
+        entry.as_ref().map_or(Ok(true), |entry| self.allows(item, entry, which))
+    }
+
     /// The row this item is, as it is now.
     fn row(&mut self, item: &Item, entry: Entry) -> Result<Versioned, ActorError> {
         let mut row = Versioned {
@@ -385,10 +438,12 @@ impl<'a> Reader<'a> {
             return Ok(None);
         }
         let entry = Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?;
-        match entry.filter(|entry| which.keeps(entry)) {
-            Some(entry) => self.row(&stored, entry).map(Some),
-            None => Ok(None),
+        if let Some(entry) = entry
+            && self.allows(&stored, &entry, which)?
+        {
+            return self.row(&stored, entry).map(Some);
         }
+        Ok(None)
     }
 }
 
@@ -431,7 +486,7 @@ fn rows(
             }
             continue;
         }
-        if !which.keeps(&entry) {
+        if !reader.allows(item, &entry, which)? {
             continue;
         }
         let row = reader.row(item, entry)?;
@@ -469,6 +524,142 @@ pub(crate) struct Span {
     pub head_revision: u64,
 }
 
+const COUNT_CAP: usize = 100;
+const COUNT_ROW_CAP: usize = 400;
+
+#[derive(Default)]
+struct Counting {
+    run: HiddenRun,
+    rows: usize,
+    turns: BTreeSet<u64>,
+}
+
+impl Counting {
+    fn push(&mut self, entry: &Entry, turn: Option<u64>, sender: String) {
+        let text = match entry {
+            Entry::Message(message) => message.text.as_str(),
+            Entry::Reply(reply) => reply.text.as_str(),
+            Entry::Imported(row) if matches!(row.row["role"].as_str(), Some("user" | "assistant"))
+                && row.row["tool_name"].as_str().unwrap_or("").is_empty() =>
+                    row.row["text"].as_str().unwrap_or(""),
+            _ => "",
+        };
+        let counted = !text.trim().is_empty();
+        if self.rows == COUNT_ROW_CAP || (counted && self.run.messages == COUNT_CAP) {
+            self.run.capped |= counted;
+            return;
+        }
+        self.rows += 1;
+        self.run.messages += usize::from(counted);
+        if let Some(turn) = turn {
+            self.turns.insert(turn);
+        }
+        if !sender.is_empty() {
+            self.run.senders.insert(sender);
+        }
+    }
+
+    fn finish(mut self) -> Option<HiddenRun> {
+        self.run.exchanges = self.turns.len();
+        (self.rows > 0).then_some(self.run)
+    }
+}
+
+/// Nearest hidden rows until the next visible row of the chat. Read one key first so
+/// ordinary neighboring rows do not require reading another copy of the page.
+fn adjacent(
+    reader: &mut Reader<'_>,
+    floor: Seq,
+    mut cursor: Seq,
+    forward: bool,
+    which: Which,
+) -> Result<Counting, ActorError> {
+    let mut counted = Counting::default();
+    let mut size = 1;
+    loop {
+        let mut items = if forward {
+            reader.log.read_after(cursor, kind::ROWS, size)?
+        } else {
+            reader.log.read_before(cursor, kind::ROWS, size)?
+        };
+        let end = items.len() < size;
+        if !forward {
+            items.reverse();
+        }
+        for item in items {
+            cursor = item.seq;
+            if cursor <= floor {
+                return Ok(counted);
+            }
+            let Some(entry) = Entry::from_item(&item).map_err(|why| corrupt(&item, why))? else {
+                continue;
+            };
+            if let Some(sender) = reader.hidden(&item, &entry)? {
+                counted.push(&entry, item.turn.or(entry.turn()), sender);
+                if counted.run.capped {
+                    return Ok(counted);
+                }
+            } else if which.keeps(&entry) {
+                return Ok(counted);
+            }
+        }
+        if end {
+            return Ok(counted);
+        }
+        size = CHUNK;
+    }
+}
+
+type Gaps = (HashMap<String, HiddenRun>, Option<HiddenRun>);
+
+fn gaps(
+    log: &dyn AgentLog,
+    entries: &[Versioned],
+    drafts: &[Draft],
+    span: Span,
+    which: Which,
+    tail: bool,
+) -> Result<Gaps, ActorError> {
+    if !which.hides() {
+        return Ok((HashMap::new(), None));
+    }
+    let mut reader = Reader::new(log);
+    let mut before = HashMap::new();
+    let mut saw_draft = false;
+    for row in entries {
+        let position = if row.live {
+            if saw_draft {
+                continue;
+            }
+            saw_draft = true;
+            Seq::MAX
+        } else {
+            let Some(item) = log.find(row.entry.id())? else { continue };
+            item.seq
+        };
+        if let Some(run) = adjacent(&mut reader, span.floor, position, false, which)?.finish() {
+            before.insert(row.entry.id().to_owned(), run);
+        }
+    }
+    let after = if tail {
+        let (last, _) = items_before(log, (Seq::MAX, span.floor), 1, which)?;
+        let start = last.last().map_or(span.floor, |item| item.seq);
+        let mut counted = adjacent(&mut reader, span.floor, start, true, which)?;
+        for draft in drafts {
+            let visible = draft.versioned();
+            if let Some(sender) = reader.mark(draft.turn)? {
+                counted.push(&visible.entry, Some(draft.turn), sender);
+            } else if which.keeps(&visible.entry) {
+                counted = Counting::default();
+            }
+        }
+        counted.finish()
+    } else {
+        None
+    };
+    Ok((before, after))
+}
+
 /// The newest `limit` things, in the order a chat shows them, with the replies being written.
 pub(crate) fn tail(
     log: &dyn AgentLog,
@@ -500,6 +691,7 @@ fn items_before(
     // Some are left out: read back until the page is full, or there is nothing older.
     let mut kept: Vec<Item> = Vec::new(); // the newest first
     let mut cursor = before;
+    let mut judge = Reader::new(log);
     loop {
         let chunk = log.read_before(cursor, kind::ROWS, CHUNK)?;
         let Some(oldest) = chunk.first() else {
@@ -509,7 +701,7 @@ fn items_before(
         // The conversation begins after the floor: nothing older is read.
         let whole = chunk.len() == CHUNK && oldest.seq > floor;
         for item in chunk.into_iter().rev() {
-            if kept.len() <= limit && item.seq > floor && which.keeps_item(&item)? {
+            if kept.len() <= limit && item.seq > floor && judge.keeps_item(&item, which)? {
                 kept.push(item);
             }
         }
@@ -539,17 +731,20 @@ pub(crate) fn older(
     // A reply being written is shown where its finished version will be: at the end.
     for draft in drafts {
         let mut shown = draft.versioned();
-        if which.keeps(&shown.entry) && !entries.iter().any(|known| known.entry.id() == draft.id) {
-            shown.coordination = mark_of(log, draft.turn)?;
+        shown.coordination = mark_of(log, draft.turn)?;
+        if which.keeps_row(&shown) && !entries.iter().any(|known| known.entry.id() == draft.id) {
             entries.push(shown);
         }
     }
+    let (hidden_before, hidden_after) = gaps(log, &entries, drafts, span, which, before == Seq::MAX)?;
     Ok(Page {
         entries,
         latest_revision: head_revision,
         has_more,
         head_revision,
         begins_after: span.floor * REVISION_STEP,
+        hidden_before,
+        hidden_after,
     })
 }
 
@@ -582,6 +777,7 @@ fn items_after(
 ) -> Result<(Vec<Item>, bool, Option<u64>), ActorError> {
     let mut items: Vec<Item> = Vec::new();
     let mut cursor = None;
+    let mut judge = Reader::new(log);
     let at_a_time = if which == Which::All {
         limit.saturating_add(1)
     } else {
@@ -592,7 +788,7 @@ fn items_after(
         let whole = chunk.len() == at_a_time;
         for item in chunk {
             from = item.seq;
-            if which.keeps_item(&item)? {
+            if judge.keeps_item(&item, which)? {
                 if items.len() == limit {
                     return Ok((items, true, cursor));
                 }
@@ -623,8 +819,8 @@ pub(crate) fn after(
         if !has_more {
             for draft in drafts {
                 let mut shown = draft.versioned();
-                if draft.revision > revision && which.keeps(&shown.entry) {
-                    shown.coordination = mark_of(log, draft.turn)?;
+                shown.coordination = mark_of(log, draft.turn)?;
+                if draft.revision > revision && which.keeps_row(&shown) {
                     entries.push(shown);
                 }
             }
@@ -649,12 +845,15 @@ pub(crate) fn after(
     // Changes in the order of their revisions: a reply being written took its revision when
     // it last grew, and what was stored since stands above it.
     entries.sort_by_key(|row| row.revision);
+    let (hidden_before, hidden_after) = gaps(log, &entries, drafts, span, which, true)?;
     Ok(Page {
         entries,
         latest_revision,
         has_more,
         head_revision,
         begins_after: span.floor * REVISION_STEP,
+        hidden_before,
+        hidden_after,
     })
 }
 
@@ -782,6 +981,43 @@ mod tests {
             Some("sender")
         );
         assert!(!loosen(&mut recorder.batch(), TurnId(1), 400).unwrap());
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn counted_runs_match_the_python_host_at_both_caps() {
+        use clarp_kernel::conversation::Imported;
+        use serde_json::{Value, json};
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/hidden-coordination-vectors.json"
+        )).unwrap();
+        let cases = vectors["counts"].as_array().unwrap();
+        for case in cases {
+            let mut counting = Counting::default();
+            for (turn, kind) in (1..).zip(case["nearest"].as_str().unwrap().chars()) {
+                let entry = Entry::Imported(Imported {
+                    id: format!("row-{turn}"),
+                    row: json!({
+                        "role": "assistant",
+                        "text": if kind == 'm' { "words" } else { "" },
+                        "tool_name": if kind == 't' { "Bash" } else { "" },
+                    }),
+                });
+                counting.push(&entry, Some(turn), "agent-2".to_owned());
+                if counting.run.capped {
+                    break;
+                }
+            }
+            if let Some(run) = counting.finish() {
+                assert_eq!(json!(run.messages), case["answer"]["messages"]);
+                assert_eq!(json!(run.exchanges), case["answer"]["exchanges"]);
+                assert_eq!(json!(run.capped), case["answer"]["capped"]);
+                assert!(run.senders.contains("agent-2"));
+            } else {
+                assert!(case["answer"].is_null(), "{case}");
+            }
+        }
+        assert_eq!(cases.len(), 7);
     }
 
     #[test]

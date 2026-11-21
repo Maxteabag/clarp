@@ -629,6 +629,9 @@ pub fn router(app: App) -> Router {
         .route("/log", get(log))
         .route("/events", get(events))
         .route("/send", post(send))
+        .route("/agent-coordination", post(crate::hidden_coordination::set_chat))
+        .route("/coordination-settings",
+            get(crate::hidden_coordination::get).post(crate::hidden_coordination::set))
         .route("/agent-notes", post(crate::coordination::agent_note))
         .route("/orchestrator/route-delegation", post(route_delegation))
         .route("/stop", post(stop))
@@ -1334,6 +1337,9 @@ pub(crate) fn agent_row(
         view.ended.as_ref(),
         focused,
     );
+    let (global, choice) = crate::hidden_coordination::visibility(directory, &member.record.agent_id);
+    row["coordination_visibility"] = json!(choice.unwrap_or(global));
+    row["coordination_override"] = json!(choice);
     // Whether its tool's account is used up: advice for whoever is about to write to it.
     row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
     // The face it is shown with: the picture it has of its own; else, unless it has a
@@ -2184,6 +2190,8 @@ struct LogQuery {
     include_automated: Option<String>,
     /// `0`, `false` or `no`: with one header for a row's tools instead of every card whole.
     include_tool_details: Option<String>,
+    coordination: Option<String>,
+    coordination_read: Option<String>,
     /// What a client asks of its sends' delivery (send_delivery_state).
     delivery_since: Option<String>,
     delivery_until: Option<String>,
@@ -2197,6 +2205,9 @@ async fn log(
     State(app): State<App>,
     Query(query): Query<LogQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    let mode = clarp_kernel::hidden_coordination::Mode::parse(
+        query.coordination.as_deref().unwrap_or(""),
+    ).map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
     let Some(member) = app.anyone(&query.session) else {
         // An agent the Host does not have has no conversation: the answer is the one for an
         // agent that has not said anything yet, and not an error.
@@ -2213,6 +2224,20 @@ async fn log(
     } else {
         Which::WithoutAutomated
     };
+    // Only an agent that can leave a note for its user has rows for the agents.
+    let hides = coordination::can_leave_note(
+        &member.record.agent_id,
+        Some(&member.record.backend),
+        app.turns.has_key(),
+    );
+    let directory = app.fleet.directory();
+    let (global, chat) = crate::hidden_coordination::visibility(&directory, &member.record.agent_id);
+    let policy = mode.map(|mode| mode.policy(global, chat));
+    let which = if hides && policy.is_some_and(|policy| policy.hidden) {
+        which.hide_coordination()
+    } else {
+        which
+    };
     // "After revision 0" is how a client that has nothing yet asks: it gets the newest page.
     let after = query.after_revision.filter(|revision| *revision > 0);
     let (page, replace) = if let Some(revision) = after {
@@ -2222,18 +2247,22 @@ async fn log(
         (page, replace)
     } else if let Some(id) = query.before {
         let older = member.agent.before(id, limit, which).await?;
+        if policy.is_some() && older.is_none() {
+            return Err(ApiError::new(StatusCode::CONFLICT, "unknown history cursor"));
+        }
         (older.unwrap_or_default(), false)
     } else {
         (member.agent.tail(limit, which).await?, false)
     };
     let status = &member.agent.view().status;
-    // Only an agent that can leave a note for its user has rows for the agents.
-    let hides = coordination::can_leave_note(
-        &member.record.agent_id,
-        Some(&member.record.backend),
-        app.turns.has_key(),
-    );
+    let replace = replace || (after.is_some() && policy.is_some_and(|policy| {
+        policy.replaces(query.coordination_read.as_deref().unwrap_or(""))
+    }));
     let mut answer = wire::log_response(&member.record, status, &page, replace, hides);
+    if let Some(policy) = policy {
+        answer["coordination"] = json!(policy);
+    }
+    crate::hidden_coordination::gaps(&mut answer, &page, &directory);
     answer["includes_automated"] = json!(include_automated);
     let no = |said: &Option<String>| {
         let said = said.as_deref().map(str::to_lowercase);

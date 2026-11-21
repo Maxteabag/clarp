@@ -30,6 +30,7 @@ pub mod connector;
 pub mod contacts;
 pub mod controls;
 pub mod coordination;
+pub mod hidden_coordination;
 pub mod diagnostics;
 pub mod direct;
 pub mod edge;

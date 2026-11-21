@@ -294,6 +294,7 @@ pub struct Told {
     pub identity: Option<String>,
     /// How its spoken answers sound.
     pub sound: Sound,
+    pub coordination_hidden: bool,
 }
 
 /// What goes before the user's words when the app says its user began to speak before
