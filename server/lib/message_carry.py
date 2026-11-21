@@ -63,7 +63,7 @@ import pickle
 
 from .message_import_common import _PARKED_SEQ_BASE, _norm_text
 from .message_text import DELIVERY_CONTEXT_OPEN, _related, _strip_voice_markup
-from .message_turns import _SETTLED_REACH_MS, _START_SLACK_MS, _UNSETTLED_REACH_MS
+from .message_turns import _SETTLED_REACH_MS, _START_SLACK_MS, _UNSETTLED_REACH_MS, iso_ms
 
 # Message rows of the agent's other sessions do not count. The replay of one
 # transcript reads message rows by this session, by a row id of this session,
@@ -76,7 +76,14 @@ SESSION_ROWS = "carry_session_rows"
 # own time, and how the turn of a given trace ended.
 LATER_TURNS = "carry_later_turns"
 # A new /send row does not count when no turn before the boundary can be
-# linked to it: its words were not said before.
+# linked to it: its words were not said before, or they were and the row
+# cannot be any old turn's. The linker (message_import_rows._own_turns_row)
+# takes a row for a copy of a prompt only when it was sent for the turn
+# running at the copy's time, or no later than _START_SLACK_MS after the copy;
+# a retry's echo (_is_retry_echo) decides alike with or without a row sent
+# more than a second after it. So a row sent more than _START_SLACK_MS after
+# every turn before the boundary (``prefix_latest_ms``), for a trace no old
+# row carries and no turn that began by then has, is never an old turn's.
 NEW_SENDS = "carry_new_sends"
 # A live row of this session (the row a reply streams into) may be new,
 # rewritten or gone. It is a different kind of rule: such a row is rewritten
@@ -609,7 +616,7 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     old = base + since if since else base
     if restamped and rows_stand:
         old = old + restamped
-    said = None
+    said = early_traces = None
     for row in new:
         kind = table.kind(row, source_file, backend_session_id, tail_from)
         if kind == "row_live" and live_rows:
@@ -624,8 +631,13 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
         text = str(row[table.at["text"]] or "")
         # A row that begins with the delivery notice decides whether an old
         # copy of a prompt is stripped of its notice: said before, always.
-        if text.lstrip().startswith(DELIVERY_CONTEXT_OPEN) or _norm_text(text) in said:
+        if text.lstrip().startswith(DELIVERY_CONTEXT_OPEN):
             found.add("send_said_before")
+        elif _norm_text(text) in said:
+            if early_traces is None:
+                early_traces = _early_traces(table, old, turns, carry)
+            if not _sent_after_old_turns(table, row, carry, early_traces):
+                found.add("send_said_before")
     if live_rows:
         replied = None
         trace, ident = table.at.get("trace_id"), table.at.get("message_id")
@@ -731,6 +743,34 @@ def _how(table, recorded, kinds, counted, new, turns, source_file, backend_sessi
             how = "removed"
         words.append(f"{kind}:{how}")
     return ",".join(words)
+
+
+def _early_traces(table, old, turns, carry) -> set[str]:
+    """The traces an old turn's copy can be linked by: every old row's, and
+    every turn's that began by _START_SLACK_MS after the last turn before the
+    boundary (the turns running_at can name for an old time)."""
+    trace = table.at.get("trace_id")
+    found = {str(row[trace]) for row in old if row[trace]} if trace is not None else set()
+    latest = (carry or {}).get("prefix_latest_ms")
+    if latest is not None:
+        limit = int(latest) + _START_SLACK_MS
+        found.update(str(row[0]) for row in _turn_values(turns)
+                     if row[0] and isinstance(row[1], int) and row[1] <= limit)
+    return found
+
+
+def _sent_after_old_turns(table, row, carry, early_traces) -> bool:
+    """Whether a new /send row was sent too late for any old turn's copy to be
+    linked to it, for a trace none of them can name (NEW_SENDS)."""
+    latest = (carry or {}).get("prefix_latest_ms")
+    at = table.at.get("timestamp")
+    if latest is None or at is None:
+        return False
+    sent = iso_ms(row[at])
+    if sent is None or sent <= int(latest) + _START_SLACK_MS:
+        return False
+    trace = table.at.get("trace_id")
+    return trace is None or not row[trace] or str(row[trace]) not in early_traces
 
 
 def stored_size(text: str) -> int:
