@@ -1341,12 +1341,14 @@ def _only_grew(before: Identity, now: Identity) -> bool:
             and now.size > before.size and now.mtime_ns >= before.mtime_ns)
 
 
-def _tail_log(code, *, retention=False, reason=None, backend=None, size=None):
+def _tail_log(code, *, retention=False, reason=None, backend=None, size=None, extra=""):
     """Fixed codes and unit counts; no session, path, text or message IDs."""
     from .log import log
     detail = f"code={code} count=1"
     if reason is not None:
         detail += f" reason={reason}"
+    if extra:
+        detail += f" {extra}"
     if not retention:
         observed_backend, observed_size = _IMPORT_LOG_METADATA.get()
         if backend is None:
@@ -1365,7 +1367,12 @@ def _refuse_tail(code, *, reason=None, backend=None, size=None):
 def _checkpoint_refused(status):
     reasons = status.get("refused", ())
     for code in reasons:
-        _tail_log("checkpoint_" + code, retention=True)
+        # A foreign commit across a yield: whether this conversation's own head moved
+        # in it (a send, its live stream) or another writer's commit came. Counted
+        # only; the refusal is the same either way.
+        same = status.get("same_conversation") if code == "foreign_commit_yield" else None
+        _tail_log("checkpoint_" + code, retention=True,
+                  extra="" if same is None else f"same_conversation={'yes' if same else 'no'}")
     return bool(reasons)
 
 

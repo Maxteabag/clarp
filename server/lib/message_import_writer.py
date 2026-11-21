@@ -52,6 +52,24 @@ class _ImportWriter:
         self._awaiting_reacquire = False
         self._publication_refusals: set[str] = set()
         self._finalizing = False
+        # The conversation this import writes (agent_id, backend_session_id), set by
+        # the import: with it, a foreign commit seen across a yield is told apart as
+        # this conversation's own (its head moved) or another writer's, for the
+        # journal only. None until a foreign commit is seen; it decides nothing.
+        self.head_key = None
+        self.same_conversation: bool | None = None
+        self._released_head = None
+
+    def _head(self):
+        """This conversation's head (revision, replace_revision), or None when it has
+        none; False when it could not be read (then nothing is said)."""
+        try:
+            row = self._database.execute(
+                "SELECT revision, replace_revision FROM conversation_heads "
+                "WHERE agent_id = ? AND backend_session_id = ?", self.head_key).fetchone()
+        except Exception:  # noqa: BLE001 - a diagnostic only; publication is decided by the fence
+            return False
+        return None if row is None else (row[0], row[1])
 
     def _fence_version(self):
         """Dirty signal ONLY: a matching version never certifies any input."""
@@ -71,6 +89,8 @@ class _ImportWriter:
         if self._publication_refusals:
             if status is not None:
                 status["refused"] = tuple(sorted(self._publication_refusals))
+                if self.same_conversation is not None:
+                    status["same_conversation"] = self.same_conversation
             return False
         return True
 
@@ -105,6 +125,11 @@ class _ImportWriter:
                         and version is not None and self._released_version is not None
                         and version != self._released_version):
                     self._publication_refusals.add("foreign_commit_yield")
+                    if self.head_key is not None and self._released_head is not False:
+                        now = self._head()
+                        if now is not False:
+                            moved = now != self._released_head
+                            self.same_conversation = bool(self.same_conversation) or moved
                 self._awaiting_reacquire = False
         return self._database.execute(sql, parameters)
 
@@ -122,6 +147,8 @@ class _ImportWriter:
             if not self._finalizing:
                 self._released_connection = self._database
                 self._released_version = self._fence_version()
+                if self.head_key is not None:
+                    self._released_head = self._head()
             self._database.execute("COMMIT")
             self.held_since_fair_yield += time.monotonic() - self.began_at
             self.began_at = None

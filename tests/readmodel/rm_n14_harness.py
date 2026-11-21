@@ -413,6 +413,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 if event in ("transcriptTailDecision", "transcriptTailRetention", "transcriptTailFenceRead"):
                     import re
                     shape = r"code=[a-z0-9_]+ count=[1-9][0-9]*"
+                    if event == "transcriptTailRetention" and detail.startswith("code=checkpoint_foreign_commit_yield "):
+                        shape += r"(?: same_conversation=(?:yes|no))?"
                     if event == "transcriptTailRetention" and detail.startswith("code=checkpoint_not_written "):
                         shape += (r" reason=(?:no_capture|grew_during_store|moved_during_store|not_published"
                                   r"|nothing_written|snapshot_missing)")
