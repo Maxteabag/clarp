@@ -50,7 +50,7 @@ PLANTS = [
      'row["coordination_override"] = json!(choice);',
      'row["coordination_override"] = json!(choice.map_or("", |choice| choice.word()));'),
     ('clarp-actor/src/lib.rs', 'actor', 'a turn without notes can become hidden later',
-     'coordination: if self.profile.hides_coordination {',
+     'coordination: if self.profile.hides_coordination || marks.user_word {',
      'coordination: if true {'),
     (C, 'host', 'a note from a marked turn is hidden',
      'if matches!(entry, Entry::Note(_)) {',

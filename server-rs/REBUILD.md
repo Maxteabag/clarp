@@ -3607,8 +3607,9 @@ provider-specific choice and credential rules.
 user or Oracle send, a form submission, and a delivered decision answer by the user or on the
 user's behalf take priority. The Host also recognizes a message from a verified local turn of a
 session in `[agents] front_desk_sessions` in the owner's configuration. That relay retains its
-agent origin, sender and audience. A supplied sender name or a peer credential conveys no
-priority. The acceptance event persists the priority bit beside the turn. A new priority
+agent origin and sender. Its turn is recorded mixed in the acceptance append, so it remains
+visible under hide (Python PR 566). A read Claude follow-up of that kind makes its active
+turn visible as well. A supplied sender name or a peer credential conveys no priority. The acceptance event persists the priority bit beside the turn. A new priority
 message queues behind the last earlier priority item, retaining the order of the other items.
 Older acceptances keep their original position on replay and their user or Oracle origin
 protects their position when a new priority message arrives.

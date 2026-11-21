@@ -2647,10 +2647,14 @@ impl Worker {
                 marks,
                 answer,
             } => {
-                let can_offer_steering = reservation.is_none()
-                    && admission == Admission::Queue
+                let direct_user = admission == Admission::Queue
                     && message.origin.is_user()
-                    && marks.coordination.is_none()
+                    && marks.coordination.is_none();
+                let desk_relay = admission == Admission::Later
+                    && marks.user_word
+                    && marks.coordination.is_some();
+                let can_offer_steering = reservation.is_none()
+                    && (direct_user || desk_relay)
                     && self.setup.record.backend == "claude";
                 let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)

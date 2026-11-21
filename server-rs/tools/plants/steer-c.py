@@ -45,7 +45,7 @@ PLANTS = [
     (C, "host", "a read receipt need not make the row due", "batch.command(Command::JoinRead { turn }, now_ms)", "batch.command(Command::JoinRead { turn: TurnId(0) }, now_ms)"),
     (C, "host", "the queue is never told which follow-up was read", "out.joined_reads.push(JoinedRead", "drop(JoinedRead"),
     (H, "host", "several echoes in one batch all get its last queue revision", 'event["queue_revision"] = json!(read.queue.revision);', ''),
-    (C, "host", "a read user follow-up leaves the original turn hidden", "let revealed = !self.mixed && conversation::loosen(batch, into, now_ms)?;", "let revealed = false;"),
+    (C, "host", "a read user follow-up leaves the original turn hidden", "&& conversation::loosen(batch, into, now_ms)?;", "&& false;"),
     (D, "reveal", "revealed old rows are missing from the next delta", "if stamped.insert(id.to_owned()) {", "if !stamped.insert(id.to_owned()) {"),
     (R, "host", "the running turn stays hidden after its audience changes", ".set_turn_audience(clarp_kernel::coordination::USER, at)", ".set_turn_audience(clarp_kernel::coordination::AGENTS, at)"),
     (K, "receipt", "a queued-command receipt does not identify the follow-up", 'nonempty(&entry["attachment"]["source_uuid"])', 'nonempty(&entry["uuid"])'),

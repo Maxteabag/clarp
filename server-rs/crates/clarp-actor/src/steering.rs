@@ -147,7 +147,9 @@ impl State {
                         }
                         return Ok(None);
                     }
-                    let revealed = !self.mixed && conversation::loosen(batch, into, now_ms)?;
+                    let revealed = !self.mixed
+                        && conversation::mark_of(batch.log(), turn.0)?.is_none()
+                        && conversation::loosen(batch, into, now_ms)?;
                     self.mixed |= revealed;
                     return Ok(Some(Sharing { speak, revealed }));
                 }
@@ -351,7 +353,7 @@ pub(super) fn recover_reads(
         {
             let message = message_at(batch.log(), message_seq)?;
             queue_started(batch, out, turn, &message);
-            if proof.joined && !revealed {
+            if proof.joined && !revealed && conversation::mark_of(batch.log(), turn.0)?.is_none() {
                 revealed = conversation::loosen(batch, into, now_ms)?;
             }
             let _ = batch.command(Command::JoinSettled { turn }, now_ms);
