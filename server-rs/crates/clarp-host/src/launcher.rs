@@ -11,6 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use clarp_actor::ShimOrder;
+use clarp_kernel::steering::REPLAY_USER_MESSAGES;
 use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request};
 
 use crate::ids;
@@ -21,7 +22,6 @@ const STRIDE: Duration = Duration::from_millis(25);
 
 /// How long a shim is given to answer a request to stop its tool.
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
-const REPLAY_USER_MESSAGES: &str = "--replay-user-messages";
 
 /// How a shim is started.
 #[derive(Debug, Clone, PartialEq, Eq)]

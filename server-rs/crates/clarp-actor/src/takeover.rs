@@ -105,7 +105,7 @@ impl Actor {
         let mut spawned = false;
         for record in read.records {
             match record.entry {
-                Entry::Shim(ShimEvent::Session { .. }) => {}
+                Entry::Shim(ShimEvent::Session { .. } | ShimEvent::InputOpen { .. }) => {}
                 Entry::Shim(ShimEvent::Spawned { .. }) => spawned = true,
                 Entry::Out(line) if line.trim().is_empty() => {}
                 Entry::Out(line) => {

@@ -7,6 +7,8 @@ use serde_json::Value;
 
 use crate::turn::TurnId;
 
+pub const REPLAY_USER_MESSAGES: &str = "--replay-user-messages";
+
 /// An accepted message reserved for the process of another turn of the same agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Join {

@@ -2567,6 +2567,16 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
+        if self.setup.record.backend == "claude"
+            && let Ask::Send { message, admission: Admission::Queue, reservation: None, .. } = &ask
+            && message.origin.is_user()
+            && let Some(actor) = self.actor.as_mut()
+        {
+            // Read a tool call which reached the spool before this send, even if its wakeup
+            // is still behind the send in the mailbox.
+            let read = actor.spool_changed(now)?;
+            self.after(read);
+        }
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
@@ -2590,20 +2600,35 @@ impl Worker {
                 marks,
                 answer,
             } => {
-                let sent = actor
+                let can_offer_steering = reservation.is_none()
+                    && admission == Admission::Queue
+                    && message.origin.is_user()
+                    && marks.coordination.is_none()
+                    && self.setup.record.backend == "claude";
+                let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
                     .map(|sent| match sent {
                         Ok((sent, out)) => (Ok(sent), out),
                         Err(taken) => (Err(taken), Outputs::default()),
                     });
-                if let Ok((Ok(sent), _)) = &sent
+                if let Ok((Ok(sent), out)) = &mut sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
                 {
                     if let Some(c) = &self.setup.hub.capture {
                         c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
                     }
-                    if sent.queued
+                    let steer = if sent.queued
+                        && can_offer_steering
+                        && let Some(uuid) = message.trace_id.as_deref().and_then(clarp_kernel::takeover::prompt_uuid)
+                    {
+                        actor.steer_active(turn, uuid, &message.text, now)?
+                    } else {
+                        None
+                    };
+                    if let Some(action) = steer {
+                        out.actions.push(action);
+                    } else if sent.queued
                         && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
                         && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
                         && let Some(program) = clarp_backend::program(&self.setup.record.backend)
