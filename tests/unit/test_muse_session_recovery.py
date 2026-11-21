@@ -297,3 +297,53 @@ def test_retry_publication_protects_the_live_replacement(recovery, tmp_path, mon
             proc.wait(timeout=5)
         if handle is not None:
             handle.drain_thread.join(timeout=5)
+
+
+# ---- R135: the lock holder is found on btrfs, where /proc/locks and stat() name devices apart ----
+
+def _locks_file(tmp_path, *, device, inode, pid):
+    path = tmp_path / "locks"
+    path.write_text(f"1: FLOCK  ADVISORY  WRITE {pid} {device}:{inode} 0 EOF\n")
+    return str(path)
+
+
+def test_the_holder_is_found_when_proc_locks_names_another_device_than_stat(tmp_path):
+    """btrfs: stat() gives the subvolume's anonymous device, /proc/locks the superblock's."""
+    import fcntl
+    import os
+
+    from lib.backend import muse
+    lock = tmp_path / "session.lock"
+    lock.write_text("pid=1\n")
+    with open(lock, "r+") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        inode = lock.stat().st_ino
+        locks = _locks_file(tmp_path, device="00:99", inode=inode, pid=os.getpid())
+        assert muse._kernel_lock_holder(lock, os.getpid(), locks_path=locks)
+
+
+def test_a_lock_line_of_another_pid_is_not_the_holder(tmp_path):
+    import os
+
+    from lib.backend import muse
+    lock = tmp_path / "session.lock"
+    lock.write_text("pid=1\n")
+    with open(lock, "r+"):
+        locks = _locks_file(tmp_path, device="00:99", inode=lock.stat().st_ino, pid=os.getpid() + 1)
+        assert not muse._kernel_lock_holder(lock, os.getpid(), locks_path=locks)
+
+
+def test_a_pid_with_no_open_file_on_the_lock_is_not_the_holder(tmp_path):
+    """The same inode number on another file system: the holder's own files must include this one."""
+    import os
+
+    from lib.backend import muse
+    lock = tmp_path / "session.lock"
+    lock.write_text("pid=1\n")
+    other = tmp_path / "other"
+    other.write_text("x")
+    proc = tmp_path / "proc"
+    (proc / "4242" / "fd").mkdir(parents=True)
+    os.symlink(other, proc / "4242" / "fd" / "3")
+    locks = _locks_file(tmp_path, device="00:99", inode=lock.stat().st_ino, pid=4242)
+    assert not muse._kernel_lock_holder(lock, 4242, locks_path=locks, proc=str(proc))
