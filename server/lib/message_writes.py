@@ -1596,6 +1596,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     # carry this import started from did not record it), and whether a reply
     # came before any user turn and so read the conversation's latest user row.
     latest_ms: int | None = 0
+    # Whether a user turn so far had no timestamp (None: not known, a carry
+    # captured before this was kept). The linker bounds a copy by its time, so
+    # a copy without one can take a /send row sent at any time (NEW_SENDS).
+    untimed_user: bool | None = False
     user_turn_seen = initial_provenance_used = False
     if carry is not None:
         agy.resume(carry)
@@ -1604,6 +1608,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         adopted_final_ids = set(carry["adopted_final_ids"])
         newest_trace = carry["newest_trace"]
         latest_ms = carry.get("prefix_latest_ms")
+        untimed_user = carry.get("prefix_untimed_user")
         user_turn_seen = True
         initial_provenance_used = bool(carry.get("initial_provenance_used", True))
 
@@ -1630,6 +1635,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             "adopted_final_ids": sorted(adopted_final_ids),
             "newest_trace": newest_trace,
             "prefix_latest_ms": latest_ms,
+            "prefix_untimed_user": untimed_user,
             "initial_provenance_used": initial_provenance_used,
         })))
 
@@ -1669,6 +1675,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         turn_ms = iso_ms(turn.get("timestamp"))
         if turn_ms is not None and latest_ms is not None:
             latest_ms = max(latest_ms, turn_ms)
+        if turn_ms is None and role == "user" and untimed_user is False:
+            untimed_user = True
         if role == "assistant" and not user_turn_seen:
             initial_provenance_used = True
         reply_trace = ""
