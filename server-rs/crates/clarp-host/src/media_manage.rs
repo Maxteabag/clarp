@@ -1,10 +1,10 @@
 //! Gallery routes and recovery for the media writer.
 
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use clarp_kernel::gallery::{self, Image, Refusal};
 use clarp_kernel::media::Asset;
 use serde::Deserialize;
@@ -14,13 +14,32 @@ use crate::edge::{ApiError, App, Principal, principal_name};
 use crate::fleet::Directory;
 use crate::gallery::Failure;
 
-pub(crate) fn error(id: &str, failure: Failure) -> Response {
-    let status = match failure {
-        Failure::Refused(Refusal::Removed(at)) => {
-            return (StatusCode::GONE, Json(json!({
-                "error": "removed", "asset_id": id, "deleted_at": at,
-            }))).into_response();
+pub(crate) enum Denied {
+    Error(ApiError),
+    Gone { id: String, at: i64 },
+}
+
+impl From<ApiError> for Denied {
+    fn from(error: ApiError) -> Self {
+        Self::Error(error)
+    }
+}
+
+impl IntoResponse for Denied {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Error(error) => error.into_response(),
+            Self::Gone { id, at } => (
+                StatusCode::GONE,
+                Json(json!({"error": "removed", "asset_id": id, "deleted_at": at})),
+            ).into_response(),
         }
+    }
+}
+
+pub(crate) fn error(id: &str, failure: Failure) -> Denied {
+    let status = match failure {
+        Failure::Refused(Refusal::Removed(at)) => return Denied::Gone { id: id.to_owned(), at },
         Failure::Refused(Refusal::Unknown) => StatusCode::NOT_FOUND,
         Failure::Refused(Refusal::NotImage) => StatusCode::UNPROCESSABLE_ENTITY,
         Failure::Refused(_) => StatusCode::BAD_REQUEST,
@@ -28,19 +47,19 @@ pub(crate) fn error(id: &str, failure: Failure) -> Response {
         Failure::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         Failure::Busy | Failure::Stopped | Failure::TimedOut => StatusCode::SERVICE_UNAVAILABLE,
     };
-    ApiError::new(status, failure.words()).into_response()
+    ApiError::new(status, failure.words()).into()
 }
 
-fn allow(headers: &HeaderMap) -> Result<(), Response> {
+fn allow(headers: &HeaderMap) -> Result<(), Denied> {
     if !crate::media::header_text(headers, "x-clarp-turn").is_empty() {
-        return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not").into_response());
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not").into());
     }
     Ok(())
 }
 
-fn json_body(bytes: &Bytes) -> Result<Value, Response> {
+fn json_body(bytes: &Bytes) -> Result<Value, Denied> {
     serde_json::from_slice::<Value>(bytes)
-        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "bad json").into_response())
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "bad json").into())
 }
 
 pub(crate) fn used_as(directory: &Directory, image: &Image) -> Vec<Value> {
@@ -78,24 +97,30 @@ pub(crate) async fn favorite(
     Path(id): Path<String>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<Json<Value>, Response> {
-    let Some(id) = id.strip_suffix("/favorite").filter(|id| !id.is_empty() && !id.contains('/'))
+) -> Result<Json<Value>, Denied> {
+    let Some(id) = id
+        .strip_suffix("/favorite")
+        .filter(|id| !id.is_empty() && !id.contains('/'))
         .map(str::to_owned)
     else {
-        return Err(StatusCode::NOT_FOUND.into_response());
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found").into());
     };
     allow(&headers)?;
     let wanted = gallery::wanted(&json_body(&body)?).map_err(|why| error(&id, why.into()))?;
     let operation = app.clone();
     let key = id.clone();
-    let image = app.gallery.ask(move |store| {
-        let now = operation.clock.now_ms();
-        let (image, altered) = store.favorite(&key, wanted, now)?;
-        if altered {
-            changed(&operation, &image, "favorite", now, Some(wanted));
-        }
-        Ok(image)
-    }).await.map_err(|why| error(&id, why))?;
+    let image = app
+        .gallery
+        .ask(move |store| {
+            let now = operation.clock.now_ms();
+            let (image, altered) = store.favorite(&key, wanted, now)?;
+            if altered {
+                changed(&operation, &image, "favorite", now, Some(wanted));
+            }
+            Ok(image)
+        })
+        .await
+        .map_err(|why| error(&id, why))?;
     Ok(Json(image.row(used_as(&app.fleet.directory(), &image))))
 }
 
@@ -117,18 +142,22 @@ pub(crate) async fn delete(
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, Denied> {
     if id.is_empty() || id.contains('/') {
-        return Err(StatusCode::NOT_FOUND.into_response());
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found").into());
     }
     allow(&headers)?;
     let by = principal_name(&app, &principal);
     let operation = app.clone();
     let key = id.clone();
-    app.gallery.ask(move |store| {
-        let (image, is_new) = store.delete(&key, &by, operation.clock.now_ms())?;
-        removed(&operation, &image, is_new)
-    }).await.map(Json).map_err(|why| error(&id, why))
+    app.gallery
+        .ask(move |store| {
+            let (image, is_new) = store.delete(&key, &by, operation.clock.now_ms())?;
+            removed(&operation, &image, is_new)
+        })
+        .await
+        .map(Json)
+        .map_err(|why| error(&id, why))
 }
 
 pub(crate) async fn delete_batch(
@@ -136,27 +165,34 @@ pub(crate) async fn delete_batch(
     Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, Denied> {
     allow(&headers)?;
     let body = json_body(&body)?;
-    let ids: Vec<String> = gallery::ids(&body).map_err(|why| error("", why.into()))?
-        .into_iter().map(str::to_owned).collect();
+    let ids: Vec<String> = gallery::ids(&body)
+        .map_err(|why| error("", why.into()))?
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
     let by = principal_name(&app, &principal);
     let operation = app.clone();
-    app.gallery.ask(move |store| {
-        let mut results = Vec::with_capacity(ids.len());
-        for id in ids {
-            let value = match store.delete(&id, &by, operation.clock.now_ms()) {
-                Ok((row, is_new)) => removed(&operation, &row, is_new)?,
-                Err(Failure::Refused(why)) => json!({
-                    "asset_id": id, "deleted": false, "error": why.words(),
-                }),
-                Err(error) => return Err(error),
-            };
-            results.push(value);
-        }
-        Ok(json!({ "results": results }))
-    }).await.map(Json).map_err(|why| error("", why))
+    app.gallery
+        .ask(move |store| {
+            let mut results = Vec::with_capacity(ids.len());
+            for id in ids {
+                let value = match store.delete(&id, &by, operation.clock.now_ms()) {
+                    Ok((row, is_new)) => removed(&operation, &row, is_new)?,
+                    Err(Failure::Refused(why)) => json!({
+                        "asset_id": id, "deleted": false, "error": why.words(),
+                    }),
+                    Err(error) => return Err(error),
+                };
+                results.push(value);
+            }
+            Ok(json!({ "results": results }))
+        })
+        .await
+        .map(Json)
+        .map_err(|why| error("", why))
 }
 
 #[derive(Deserialize)]
@@ -172,28 +208,38 @@ pub(crate) struct DeletedQuery {
 pub(crate) async fn deleted(
     State(app): State<App>,
     Query(query): Query<DeletedQuery>,
-) -> Result<Json<Value>, Response> {
-    let (since, limit) = gallery::deletion_query(&query.since, &query.limit)
-        .map_err(|why| error("", why.into()))?;
+) -> Result<Json<Value>, Denied> {
+    let (since, limit) =
+        gallery::deletion_query(&query.since, &query.limit).map_err(|why| error("", why.into()))?;
     let clock = app.clock.clone();
-    app.gallery.ask(move |store| {
-        Ok(json!(store.index.deleted(query.session.trim(), since, limit, clock.now_ms())))
-    }).await.map(Json).map_err(|why| error("", why))
+    app.gallery
+        .ask(move |store| {
+            Ok(json!(store.index.deleted(
+                query.session.trim(),
+                since,
+                limit,
+                clock.now_ms()
+            )))
+        })
+        .await
+        .map(Json)
+        .map_err(|why| error("", why))
 }
 
-pub(crate) async fn publish(
-    app: &App,
-    image: Image,
-    bytes: Bytes,
-) -> Result<Image, Failure> {
+pub(crate) async fn publish(app: &App, image: Image, bytes: Bytes) -> Result<Image, Failure> {
     let operation = app.clone();
-    app.gallery.ask(move |store| {
-        let (kept, is_new) = store.publish(image, &bytes)?;
-        if is_new && !kept.asset.named_only && clarp_kernel::media::is_image(&kept.asset.mime_type) {
-            changed(&operation, &kept, "created", kept.asset.created_at, None);
-        }
-        Ok(kept)
-    }).await
+    app.gallery
+        .ask(move |store| {
+            let (kept, is_new) = store.publish(image, &bytes)?;
+            if is_new
+                && !kept.asset.named_only
+                && clarp_kernel::media::is_image(&kept.asset.mime_type)
+            {
+                changed(&operation, &kept, "created", kept.asset.created_at, None);
+            }
+            Ok(kept)
+        })
+        .await
 }
 
 pub(crate) async fn journal(
@@ -217,9 +263,12 @@ pub async fn import_history(app: &App) -> Result<(), Failure> {
     let mut images = Vec::new();
     for member in directory.members.iter().chain(&directory.janitors) {
         let view = member.agent.view();
-        images.extend(view.books.media.assets().map(|asset| {
-            Image::new(asset.clone(), member.record.agent_id.clone())
-        }));
+        images.extend(
+            view.books
+                .media
+                .assets()
+                .map(|asset| Image::new(asset.clone(), member.record.agent_id.clone())),
+        );
     }
     images.sort_by_key(|image| image.asset.named_only);
     app.gallery.ask(move |store| store.import(images)).await
@@ -233,7 +282,10 @@ pub async fn recover(app: &App) {
                 if let Some(member) = directory.named(&image.agent_id)
                     && let Err(why) = journal(app, member, image.asset).await
                 {
-                    eprintln!("clarp-host: a gallery publication awaits its journal: {}", why.0);
+                    eprintln!(
+                        "clarp-host: a gallery publication awaits its journal: {}",
+                        why.0
+                    );
                 }
             }
         }
@@ -242,12 +294,22 @@ pub async fn recover(app: &App) {
     let left = app.fleet.left_out();
     let safe = left.not_run_counts().is_empty()
         && !left.counts().contains_key("agent")
-        && directory.members.iter().chain(&directory.janitors)
+        && directory
+            .members
+            .iter()
+            .chain(&directory.janitors)
             .all(|member| member.agent.view().broken.is_none());
-    if let Err(why) = app.gallery.ask(move |store| {
-        store.recover(safe);
-        Ok(())
-    }).await {
-        eprintln!("clarp-host: gallery reclamation is pending: {}", why.words());
+    if let Err(why) = app
+        .gallery
+        .ask(move |store| {
+            store.recover(safe);
+            Ok(())
+        })
+        .await
+    {
+        eprintln!(
+            "clarp-host: gallery reclamation is pending: {}",
+            why.words()
+        );
     }
 }

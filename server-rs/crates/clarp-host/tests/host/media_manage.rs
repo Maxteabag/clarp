@@ -11,11 +11,19 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     let png = [
         b"\x89PNG\r\n\x1a\n".as_slice(),
         b"\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00",
-    ].concat();
+    ]
+    .concat();
     let publish = |host: &Host, mime, bytes: &[u8], name| -> String {
         let response = fetch(
-            host, admin, "POST", "/media",
-            &[("X-Session", session.as_str()), ("Content-Type", mime), ("X-File-Name", name)],
+            host,
+            admin,
+            "POST",
+            "/media",
+            &[
+                ("X-Session", session.as_str()),
+                ("Content-Type", mime),
+                ("X-File-Name", name),
+            ],
             bytes,
         );
         assert_eq!(response.status, 200, "{}", response.text());
@@ -34,16 +42,33 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     assert_eq!(host.ask_as(&phone, "GET", &list, None).0, 200);
     assert_eq!(host.ask_as(&phone, "POST", &mark, Some(&bookmark)).0, 403);
     assert_eq!(host.ask_as(&phone, "DELETE", &file, None).0, 403);
-    let turn = fetch(&host, admin, "DELETE", &file, &[("X-Clarp-Turn", "fixture-turn")], b"");
+    let turn = fetch(
+        &host,
+        admin,
+        "DELETE",
+        &file,
+        &[("X-Clarp-Turn", "fixture-turn")],
+        b"",
+    );
     assert_eq!(turn.status, 403);
-    assert_eq!(serde_json::from_slice::<Value>(&turn.body).unwrap()["error"], "agents_may_not");
-    assert_eq!(host.ask("POST", &mark, Some(&json!({"favorite": "true"}))).0, 400);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&turn.body).unwrap()["error"],
+        "agents_may_not"
+    );
+    assert_eq!(
+        host.ask("POST", &mark, Some(&json!({"favorite": "true"})))
+            .0,
+        400
+    );
     assert_eq!(host.ask("DELETE", &format!("/media/{text}"), None).0, 422);
     assert_eq!(host.ask("DELETE", "/media/unknown", None).0, 404);
 
-    let portrait = host.post("/agent-portraits", json!({
-        "session": session, "action": "add_media_asset", "asset_id": first,
-    }));
+    let portrait = host.post(
+        "/agent-portraits",
+        json!({
+            "session": session, "action": "add_media_asset", "asset_id": first,
+        }),
+    );
     let marked = host.post(&mark, bookmark.clone());
     assert_eq!(marked["favorite"], true);
     assert!(marked["favorite_at"].is_number());
@@ -56,10 +81,16 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     let first_page = host.get(&format!("{list}&limit=1"));
     let before = first_page["next_before"].as_str().unwrap();
     let second_page = host.get(&format!("{list}&limit=1&before={before}"));
-    assert_ne!(first_page["assets"][0]["asset_id"], second_page["assets"][0]["asset_id"]);
+    assert_ne!(
+        first_page["assets"][0]["asset_id"],
+        second_page["assets"][0]["asset_id"]
+    );
     assert!(second_page["next_before"].is_null());
 
-    let batch = host.post("/media/delete", json!({"asset_ids": [first, "unknown", text, first]}));
+    let batch = host.post(
+        "/media/delete",
+        json!({"asset_ids": [first, "unknown", text, first]}),
+    );
     let good = &batch["results"][0];
     assert_eq!(good["deleted"], true);
     assert_eq!(good["still_used_as"], marked["used_as"]);
@@ -68,7 +99,10 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     assert_eq!(batch["results"][2]["error"], "not_an_image");
     let gone = json!({"error": "removed", "asset_id": first, "deleted_at": good["deleted_at"]});
     assert_eq!(host.ask("GET", &file, None), (410, gone.clone()));
-    assert_eq!(host.ask("POST", &mark, Some(&bookmark)), (410, gone.clone()));
+    assert_eq!(
+        host.ask("POST", &mark, Some(&bookmark)),
+        (410, gone.clone())
+    );
     let range = fetch(&host, admin, "GET", &file, &[("Range", "bytes=0-2")], b"");
     assert_eq!(range.status, 410);
     let remaining = host.get(&list);
@@ -79,15 +113,33 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
         fetch(&host, admin, "GET", &format!("/media/{second}"), &[], b"").body,
         png
     );
-    assert_eq!(host.get(&format!("/agent-portraits?session={session}"))["portraits"], portrait["portraits"]);
-    let deleted = host.ask_as(&phone, "GET", &format!("/media/deleted?since=0&session={session}"), None);
+    assert_eq!(
+        host.get(&format!("/agent-portraits?session={session}"))["portraits"],
+        portrait["portraits"]
+    );
+    let deleted = host.ask_as(
+        &phone,
+        "GET",
+        &format!("/media/deleted?since=0&session={session}"),
+        None,
+    );
     assert_eq!(deleted.0, 200);
-    assert_eq!(deleted.1["deleted"], json!([{
-        "asset_id": first, "session": session, "deleted_at": good["deleted_at"],
-    }]));
+    assert_eq!(
+        deleted.1["deleted"],
+        json!([{
+            "asset_id": first, "session": session, "deleted_at": good["deleted_at"],
+        }])
+    );
     assert!(deleted.1["next_since"].is_null());
-    let events = || heard.lock().unwrap().iter().filter(|event| event["type"] == "media-changed")
-        .cloned().collect::<Vec<_>>();
+    let events = || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "media-changed")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     wait_for("gallery events to arrive", || events().len() >= 4);
     let events = events();
     assert_eq!(events.len(), 4, "{events:?}");
@@ -104,5 +156,16 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     assert_eq!(host.ask("DELETE", &file, None), (200, good.clone()));
     let replacement = publish(&host, "image/png", &png, "replacement.png");
     assert_ne!(replacement, first);
-    assert_eq!(fetch(&host, admin, "GET", &format!("/media/{replacement}"), &[], b"").body, png);
+    assert_eq!(
+        fetch(
+            &host,
+            admin,
+            "GET",
+            &format!("/media/{replacement}"),
+            &[],
+            b""
+        )
+        .body,
+        png
+    );
 }
