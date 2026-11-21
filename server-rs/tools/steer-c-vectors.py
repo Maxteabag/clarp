@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record the reference's Claude tool-call window and replay echoes for issue 491."""
+"""Record the reference's Claude input fence and replay echoes for issue 491."""
 
 from __future__ import annotations
 
@@ -43,25 +43,13 @@ def result(*uuids, failed=False):
     return {"type": "result", "is_error": failed, "user_message_uuids": list(uuids)}
 
 
-CLASSIFIER = [
-    {}, {"type": "stream_event"}, {"type": "stream_event", "event": None},
-    partial({"type": "text"}), partial(block("tool_use", "")),
-    partial(block("tool_use", "a")), partial(block("server_tool_use", "b")),
-    partial(block("tool_use", "c"), "parent"), assistant(),
-    assistant(None, False, "text", block("tool_use", "a"), block("server_tool_use", "b")),
-    assistant(block("tool_use", None), block("tool_use", ""), {"type": "tool_result", "tool_use_id": "b"}),
-    assistant(block("tool_use", "a"), block("tool_use", "a")),
-    {"type": "assistant", "message": {"content": "text"}},
-    returned("a"), returned("b", "parent"), returned(""), returned(None),
-    {"type": "user", "message": {"content": [None, block("tool_use", "a")]}},
-    {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "a"},
-                                             {"type": "tool_result", "tool_use_id": "b"}]}},
-    {"type": "system", "message": {"content": [block("tool_use", "a")]}},
-    echo("new"), result("one", "new"), result("one", failed=True),
-]
-
 STREAMS = {
     "ordinary answer": [echo("one"), partial({"type": "text"}), result("one")],
+    "between tools and a nested result": [
+        partial(block("tool_use", "first")), returned("first"),
+        {"type": "result", "parent_tool_use_id": "task"},
+        partial(block("tool_use", "next")), returned("next"), echo("two"), result("one", "two"),
+    ],
     "authoritative assistant repeats a partial call": [
         partial(block("tool_use", "bash")), assistant(block("tool_use", "bash")),
         returned("missing"), returned("bash"), result("one"),
@@ -93,11 +81,6 @@ def generate(root):
     sys.path.insert(0, str(ROOT / "server"))
     from lib.backend import claude
 
-    classifier = []
-    for event in CLASSIFIER:
-        opened, answered = claude._tool_ids(event)
-        classifier.append({"event": event, "opened": opened, "answered": answered})
-
     streams = []
     for name, script in STREAMS.items():
         state = claude.SteerState(io.StringIO())
@@ -105,10 +88,10 @@ def generate(root):
         steps = []
         for event in script:
             echo_seen = claude.note_steer(handle, event)
-            steps.append({"event": event, "can_offer": state.open and bool(state.tools),
+            steps.append({"event": event, "can_offer": state.open,
                           "echo": event.get("uuid") if echo_seen else None})
         streams.append({"name": name, "steps": steps})
-    return {"classifier": classifier, "streams": streams}
+    return {"streams": streams}
 
 
 if __name__ == "__main__":

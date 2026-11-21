@@ -129,3 +129,8 @@ fn queued_items_and_mutation_events_keep_their_origin_and_resolve_the_current_se
     );
     host.post("/stop", json!({"session": target}));
 }
+
+#[test]
+fn a_new_oracle_send_after_stop_runs_then_releases_what_waited() {
+    a_fresh_send_releases_the_held_queue("oracle", true);
+}

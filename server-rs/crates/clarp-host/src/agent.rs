@@ -534,6 +534,7 @@ pub struct View {
     pub last_real_message_ms: i64,
     pub(crate) native_goal: Option<clarp_kernel::agent_goal::Goal>,
     pub latest_turn_start: i64,
+    pub(crate) latest_turn_activity: Option<i64>,
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
     pub newest: Option<Versioned>,
@@ -1373,6 +1374,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         last_real_message_ms: 0,
         native_goal: None,
         latest_turn_start: 0,
+        latest_turn_activity: None,
         status: idle,
         newest: None,
         visible_previews: Default::default(),
@@ -2782,7 +2784,7 @@ impl Worker {
                     ..
                 } => {
                     let direct_user = *admission == Admission::Queue
-                        && message.origin.is_user()
+                        && message.origin.is_user_send()
                         && marks.coordination.is_none();
                     let desk_relay = *admission == Admission::Later
                         && marks.user_word
@@ -2792,8 +2794,8 @@ impl Worker {
                 _ => false,
             };
         if can_offer_steering && let Some(actor) = self.actor.as_mut() {
-            // Read a tool call which reached the spool before this send, even if its wakeup
-            // is still behind the send in the mailbox.
+            // Read any input fence that reached the spool before this send, even if its
+            // wakeup is still behind the send in the mailbox.
             let read = actor.spool_changed(now)?;
             self.after(read);
         }
@@ -4185,6 +4187,7 @@ impl Worker {
             last_real_message_ms,
             native_goal: self.native.goal(),
             latest_turn_start: actor.latest_turn_start(),
+            latest_turn_activity: actor.latest_turn_activity(),
             status,
             newest: self.newest.clone(),
             visible_previews: self.visible_previews.clone(),
@@ -4928,6 +4931,7 @@ mod mailbox_tests {
             last_real_message_ms: 0,
             native_goal: None,
             latest_turn_start: 0,
+            latest_turn_activity: None,
             status: never_ran(),
             newest: None,
             visible_previews: Default::default(),
