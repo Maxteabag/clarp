@@ -868,6 +868,7 @@ class AdmissionMixin:
                 prompt_admission_id=spec.prompt_admission_id,
                 trace_id=spec.trace_id,
                 sent_at=sent_at,
+                user_word=spec.user_word,
             )
             if appended and getattr(self.ctx, "stream", None) is not None:
                 event = {

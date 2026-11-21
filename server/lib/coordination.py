@@ -88,10 +88,16 @@ def holds_user_word(database, agent_id: str, trace_id: str) -> bool:
 
 
 def mark(database, *, agent_id: str, trace_id: str, sender_agent_id: str | None,
-         at: int | None = None) -> None:
+         at: int | None = None, relays_user_word: bool = False) -> None:
     """Record that ``trace_id`` was started by another agent. Joins the
     caller's transaction; a trace already recorded keeps its audience, and a
-    trace that holds the user's own word is never marked."""
+    trace that holds the user's own word is never marked.
+
+    ``relays_user_word``: the owner's front desk relaying the user's words, as
+    the Host verified it from the desk's own turn token ([agents]
+    front_desk_sessions, lib.send_request; issue 481). It stays an agent's
+    message with its sender, and its turn is recorded shown for good ('mixed'):
+    the user's own words are never hidden from the user."""
     trace = (trace_id or "").strip()
     if not agent_id or not trace or holds_user_word(database, agent_id, trace):
         return
@@ -99,7 +105,7 @@ def mark(database, *, agent_id: str, trace_id: str, sender_agent_id: str | None,
     # A turn in which the agent could not leave a note is recorded but shown for good
     # ('mixed'): moving the agent to a backend with turn tokens later must not hide a turn
     # from which nothing could reach the user (the reviewer's F6B).
-    audience = AGENTS if can_leave_note(agent_id) else MIXED
+    audience = AGENTS if can_leave_note(agent_id) and not relays_user_word else MIXED
     database.execute(
         """INSERT INTO coordination_traces
                (agent_id, trace_id, sender_agent_id, audience, created_at, updated_at)

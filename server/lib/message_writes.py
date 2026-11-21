@@ -224,6 +224,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                         prompt_admission_id: str = "",
                         trace_id: str = "",
                         sent_at: int | None = None,
+                        user_word: bool = False,
                         ) -> dict[str, Any] | None:
     """Record a user message the moment /send accepts it, keyed by the
     client-authored `client_msg_id` (idempotency key). A message that waited
@@ -312,13 +313,20 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                 prompt_admission_id=prompt_admission_id,
                 trace_id=trace_id,
                 sent_at=sent_at,
+                user_word=user_word,
             )
         if coordination.is_coordination(agent_id=agent_id, origin=origin,
                                         sender_agent_id=sender_agent_id):
             # In the row's own transaction: no reader sees the prompt, or a
-            # row of the turn it starts, before its mark.
+            # row of the turn it starts, before its mark. ``user_word``: the
+            # Host-stamped mark of the user's word (lib.origins.is_user_word);
+            # on another agent's message only a verified front-desk relay has it.
             coordination.mark(database, agent_id=agent_id, trace_id=trace_id,
-                              sender_agent_id=sender_agent_id, at=timestamp_ms)
+                              sender_agent_id=sender_agent_id, at=timestamp_ms,
+                              relays_user_word=user_word)
+            if user_word and (trace_id or "").strip():
+                # A trace marked before (a retry under the same trace): shown too.
+                coordination.loosen(agent_id, trace_id)
         elif origin in origins.USER_WORD_ORIGINS and (trace_id or "").strip():
             # The user's word in a trace that was marked: the turn is the
             # user's too from now on (it never reads 'agents' again).
