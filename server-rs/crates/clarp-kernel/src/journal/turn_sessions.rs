@@ -8,7 +8,8 @@ pub(super) fn affected(event: &AgentEvent) -> Option<u64> {
         AgentEvent::Turn {
             turn,
             change: TurnEvent::Accepted { .. } | TurnEvent::Started { .. } | TurnEvent::Bound { .. },
-        } => Some(turn.0),
+        }
+        | AgentEvent::JoinRead { turn, .. } => Some(turn.0),
         _ => None,
     }
 }

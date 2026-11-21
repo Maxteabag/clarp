@@ -34,6 +34,10 @@ fn start(name: &str, script: &str) -> Running {
 
 /// Starts a shim for `sh -c script`, with a message to feed the script when one is given.
 fn start_with(name: &str, message: Option<&str>, script: &str) -> Running {
+    start_with_flags(name, message, script, &[])
+}
+
+fn start_with_flags(name: &str, message: Option<&str>, script: &str, flags: &[&str]) -> Running {
     let dir = std::env::temp_dir().join(format!("clarp-shim-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -49,7 +53,9 @@ fn start_with(name: &str, message: Option<&str>, script: &str) -> Running {
     // The shim's own log, to be read by the tests of the hold.
     let log = std::fs::File::create(dir.join("shim.log")).unwrap();
     let shim = command
+        .args(flags)
         .args(["--", "sh", "-c", script])
+        .current_dir(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(log)
@@ -124,6 +130,93 @@ fn a_shim_a_test_starts_gives_its_tool_nothing_of_the_machine() {
         more.is_empty(),
         "the tool saw more than the test gave: {more:?}"
     );
+    std::fs::remove_dir_all(&running.dir).unwrap();
+}
+
+#[test]
+fn streaming_input_closes_at_the_first_top_level_stdout_result() {
+    let mut running = start_with_flags(
+        "stdin-result",
+        Some("first\n"),
+        r#"
+            read first || exit 1
+            echo '{"type":"assistant","event":{"type":"result"}}'
+            echo '{"type":"result"}' >&2
+            echo "ready:$first"
+            read second || exit 2
+            echo '{"type":"result"}'
+            if read extra; then exit 3; fi
+            echo "closed:$second"
+            for i in $(seq 1 1000); do
+                if [ -f release ]; then exit 0; fi
+                sleep 0.02
+            done
+            exit 4
+        "#,
+        &["--stdin-until", "result"],
+    );
+    wait_for("the initial prompt", || {
+        outs(&records(&running.spool)).contains(&"ready:first")
+    });
+    assert!(
+        records(&running.spool)
+            .iter()
+            .any(|record| matches!(record.entry, Entry::Shim(ShimEvent::InputOpen { .. })))
+    );
+    assert!(
+        ask(
+            &running.socket,
+            &Request::Stdin {
+                data: "second\n".into()
+            }
+        )
+        .ok
+    );
+    wait_for("EOF after the result", || {
+        outs(&records(&running.spool)).contains(&"closed:second")
+    });
+    assert!(
+        !ask(
+            &running.socket,
+            &Request::Stdin {
+                data: "late\n".into()
+            }
+        )
+        .ok
+    );
+    std::fs::write(running.dir.join("release"), "").unwrap();
+    assert!(running.shim.wait().unwrap().success());
+    std::fs::remove_dir_all(&running.dir).unwrap();
+}
+
+#[test]
+fn stdin_refuses_a_write_when_the_tool_has_closed_its_read_end() {
+    let mut running = start(
+        "stdin-broken",
+        r#"
+            exec 0<&-
+            echo closed
+            for i in $(seq 1 1000); do
+                if [ -f release ]; then exit 0; fi
+                sleep 0.02
+            done
+            exit 4
+        "#,
+    );
+    wait_for("the tool to close its pipe", || {
+        outs(&records(&running.spool)).contains(&"closed")
+    });
+    assert!(
+        !ask(
+            &running.socket,
+            &Request::Stdin {
+                data: "unread\n".into()
+            }
+        )
+        .ok
+    );
+    std::fs::write(running.dir.join("release"), "").unwrap();
+    assert!(running.shim.wait().unwrap().success());
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
