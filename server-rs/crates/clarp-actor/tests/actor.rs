@@ -836,6 +836,63 @@ fn a_confirmed_takeover_closes_the_first_row_and_leaves_the_third_message_waitin
     assert!(actor.takeover_offer(TurnId(3)).unwrap().is_none());
 }
 
+#[test]
+fn restart_resolves_a_takeover_only_with_its_marker_and_exit() {
+    for consumed in [false, true] {
+        let mut world = World::new("takeover-restart");
+        world.backend = Arc::new(Claude::new());
+        let mut actor = world.open();
+        world.send(&mut actor, "u-first", "first", Admission::Queue);
+        world.send(&mut actor, "u-second", "second", Admission::Queue);
+        let offer = actor.takeover_offer(TurnId(2)).unwrap().unwrap();
+        let fence = std::fs::metadata(world.profile.spool_path(TurnId(1)))
+            .unwrap()
+            .len();
+        assert!(
+            actor.select_takeover(
+                &offer,
+                fence,
+                "replacement-session".to_string(),
+                clarp_kernel::takeover::Input::ClaudeFresh {
+                    first: offer.first.clone(),
+                },
+                world.tick(),
+            ).unwrap()
+        );
+        drop(actor);
+        if consumed {
+            world.write(
+                1,
+                Line::Shim(ShimEvent::Takeover { fence, replaced_by: 2 }),
+            );
+            let actor = world.open();
+            assert!(actor.selected_takeover().is_some());
+            assert_eq!(world.took, [1], "the marker alone cannot resolve a restart");
+        }
+        world.exits(1, None, Some(9));
+
+        let actor = world.open();
+        assert!(actor.selected_takeover().is_none());
+        assert_eq!(world.took, [1, 2]);
+        let input: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(world.profile.stdin_path(TurnId(2))).unwrap(),
+        ).unwrap();
+        let parts: Vec<_> = input["message"]["content"]
+            .as_array().unwrap().iter().map(|block| block["text"].as_str().unwrap()).collect();
+        if consumed {
+            assert_eq!(parts, ["first", "second"]);
+            let page = actor.tail(10).unwrap();
+            let first = page.entries.iter().find(|row| row.entry.id()=="u-first").unwrap();
+            assert_eq!(first.turn.as_ref().unwrap().status, "replaced");
+        } else {
+            assert_eq!(parts, ["second"]);
+            assert!(!actor.tail(10).unwrap().entries.iter().any(|row| {
+                row.turn.as_ref().is_some_and(|end| end.status == "replaced")
+            }));
+        }
+    }
+}
+
 // ---- restarts -------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug)]
