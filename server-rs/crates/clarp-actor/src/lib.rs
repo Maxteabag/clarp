@@ -1278,8 +1278,7 @@ fn kept(text: String, origin: &Origin) -> String {
 }
 
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, origin: &Origin, live: LiveReply, ts_ms: i64) {
-    let display = clarp_kernel::teams::runtime::strip_team_blocks(&live.text);
-    let text = kept(display.into_owned(), origin);
+    let text = kept(live.text, origin);
     // An answer that is no answer is not shown while it is written.
     if text.is_empty()
         || text == clarp_kernel::heartbeat::NOTHING_TO_DO
@@ -4198,7 +4197,18 @@ impl Actor {
             prompt
         };
         let told = self.profile.told.as_ref().filter(|_| !bare);
-        let prompt = if self.profile.hides_coordination
+        let mut brief = if let Some(teams) = &self.teams
+            && !bare
+        {
+            teams.brief(
+                &self.profile.agent_id,
+                &self.profile.session,
+                message.origin.name(),
+            )
+        } else {
+            clarp_kernel::teams::runtime::Brief::default()
+        };
+        if self.profile.hides_coordination
             && told.is_some_and(|told| told.coordination_hidden)
             && let Ok(Some(agent_id)) = self.mark(turn.0)
         {
@@ -4215,28 +4225,17 @@ impl Actor {
                 });
             let reminder =
                 clarp_kernel::hidden_coordination::reminder(&self.profile.session, sender);
-            format!("{reminder}\n\n{prompt}")
-        } else {
-            prompt
-        };
-        let prompt = if let Some(teams) = &self.teams
-            && !bare
-        {
-            let brief = teams.brief(
-                &self.profile.agent_id,
-                &self.profile.session,
-                message.origin.name(),
-            );
+            brief.append_protocol(&reminder);
+        }
+        if self.teams.is_some() && !bare {
             let key = clarp_kernel::journal::team_transit::launch_key(turn, attempt);
             if !brief.ids.is_empty() || self.recorder.log().find(&key)?.is_some() {
                 let mut batch = self.recorder.batch();
                 batch.item(record_item(kind::TEAM_PROMPT, key, &brief.ids, 0)?);
                 batch.commit()?;
             }
-            brief.prompt(&prompt)
-        } else {
-            prompt
-        };
+        }
+        let prompt = brief.prompt(&prompt);
         let named_session = self
             .backend
             .binds_at_spawn()

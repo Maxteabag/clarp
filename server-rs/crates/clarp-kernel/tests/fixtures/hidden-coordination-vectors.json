@@ -432,6 +432,22 @@
     }
   ],
   "reminder": "Coordination: this turn answers a message from another agent (Boss). The user has chosen not to see such turns in this chat, so nothing you write in it, your final reply included, reaches the user. To tell the user something, run `clarp-admin tell-user --from ivy --text '...'`: it appears in this chat and notifies the user. Decision cards and artifacts are shown as always.",
+  "prompts": [
+    {
+      "text": "synthetic follow-up",
+      "protocol": "",
+      "digest": "",
+      "start": "--- Clarp team context ---\nCoordination: this turn answers a message from another agent (Boss). The user has chosen not to see such turns in this chat, so nothing you write in it, your final reply included, reaches the user. To tell the user something, run `clarp-admin tell-user --from ivy --text '...'`: it appears in this chat and notifies the user. Decision cards and artifacts are shown as always.\n--- End Clarp team context ---\n\nsynthetic follow-up",
+      "steer": "synthetic follow-up"
+    },
+    {
+      "text": "synthetic follow-up",
+      "protocol": "Team feed: you are on Ops. Share useful coordination as <team>short first-person update</team>; it is not spoken. Broadcast starts, finishes, blockers, handoffs, and decisions that affect others. Keep it short; skip routine noise. Recent team updates are injected below when present.",
+      "digest": "Team updates since your last turn:\n- [Ops] Boss: synthetic update\n\nThis is background awareness. Keep broadcasting your OWN progress with <team> as you work \u2014 that's expected. Just don't get pulled into back-and-forth replies to teammates unless the user asks or it directly affects your current task.",
+      "start": "--- Clarp team context ---\nTeam feed: you are on Ops. Share useful coordination as <team>short first-person update</team>; it is not spoken. Broadcast starts, finishes, blockers, handoffs, and decisions that affect others. Keep it short; skip routine noise. Recent team updates are injected below when present.\n\nCoordination: this turn answers a message from another agent (Boss). The user has chosen not to see such turns in this chat, so nothing you write in it, your final reply included, reaches the user. To tell the user something, run `clarp-admin tell-user --from ivy --text '...'`: it appears in this chat and notifies the user. Decision cards and artifacts are shown as always.\n\nTeam updates since your last turn:\n- [Ops] Boss: synthetic update\n\nThis is background awareness. Keep broadcasting your OWN progress with <team> as you work \u2014 that's expected. Just don't get pulled into back-and-forth replies to teammates unless the user asks or it directly affects your current task.\n--- End Clarp team context ---\n\nsynthetic follow-up",
+      "steer": "--- Clarp team context ---\nTeam feed: you are on Ops. Share useful coordination as <team>short first-person update</team>; it is not spoken. Broadcast starts, finishes, blockers, handoffs, and decisions that affect others. Keep it short; skip routine noise. Recent team updates are injected below when present.\n\nTeam updates since your last turn:\n- [Ops] Boss: synthetic update\n\nThis is background awareness. Keep broadcasting your OWN progress with <team> as you work \u2014 that's expected. Just don't get pulled into back-and-forth replies to teammates unless the user asks or it directly affects your current task.\n--- End Clarp team context ---\n\nsynthetic follow-up"
+    }
+  ],
   "counts": [
     {
       "nearest": "mttm",

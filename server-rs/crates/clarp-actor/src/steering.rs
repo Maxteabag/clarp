@@ -410,6 +410,8 @@ impl Actor {
         let Some(session) = self.recorder.agent().backend_session() else {
             return Ok(None);
         };
+        // The reference steers with team instructions and the inbox only. Its coordination
+        // reminder belongs to a new attempt's protocol.
         let brief = self.teams.as_ref().map(|teams| {
             let mut origin = "user".to_owned();
             if let Some(waiting) = self

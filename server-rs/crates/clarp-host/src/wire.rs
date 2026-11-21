@@ -1431,12 +1431,6 @@ pub fn row(version: &Versioned) -> Value {
         let mut row = imported.row.clone();
         if row.is_object() {
             row["revision"] = json!(version.revision);
-            if row["role"] == "assistant"
-                && let Some(text) = row["text"].as_str()
-                && let std::borrow::Cow::Owned(visible) = markup::strip_team_blocks(text)
-            {
-                row["text"] = json!(visible);
-            }
         }
         return row;
     }
@@ -1486,10 +1480,9 @@ pub fn row(version: &Versioned) -> Value {
             }
         }
         Entry::Reply(reply) => {
-            // Team broadcasts are private to their feed. Keep the voice markup that the
-            // app uses to speak the rest of the reply.
+            // The app gets the saved voice and team markup and hides it in its display.
+            // Internal metadata remains on the Host.
             let said = markup::strip_hidden_blocks(&reply.text);
-            let said = markup::strip_team_blocks(&said);
             row["text"] = match automated_reply(kind, &said) {
                 Some(shown) => json!(shown),
                 None => json!(said),
