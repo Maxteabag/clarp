@@ -304,6 +304,8 @@ pub struct Agent {
     /// The live turn came through the queue.
     live_from_queue: bool,
     live_takeover: Option<crate::takeover::Start>,
+    /// Whether the live turn started with an existing provider session to continue.
+    live_resumed_session: bool,
     selected_takeover: Option<crate::takeover::Selection>,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
@@ -374,6 +376,7 @@ impl Default for Agent {
             waited: BTreeSet::new(),
             live_from_queue: false,
             live_takeover: None,
+            live_resumed_session: false,
             selected_takeover: None,
             unheld: BTreeSet::new(),
             last: None,
@@ -460,6 +463,14 @@ impl Agent {
 
     pub fn live_takeover(&self) -> Option<&crate::takeover::Start> {
         self.live_takeover.as_ref()
+    }
+
+    /// A fresh first turn can be replaced without discarding any prior provider history.
+    pub fn fresh_first_turn(&self) -> bool {
+        self.live_id() == Some(TurnId(1))
+            && self.settled == 0
+            && !self.arrived
+            && !self.live_resumed_session
     }
 
     pub fn selected_takeover(&self) -> Option<&crate::takeover::Selection> {
@@ -1173,6 +1184,7 @@ impl Agent {
                     self.live_from_queue = false;
                     self.owe_compaction(&ended);
                     self.live_takeover = None;
+                    self.live_resumed_session = false;
                     self.selected_takeover = None;
                     self.last = Some(ended);
                 }
@@ -1212,6 +1224,7 @@ impl Agent {
             }
             next => {
                 if let TurnEvent::Started { at_ms, takeover } = change {
+                    self.live_resumed_session = self.backend_session.is_some();
                     self.live_takeover.clone_from(takeover);
                     if let Some(start) = takeover {
                         self.bind_session(Some(&start.session));
@@ -1384,6 +1397,28 @@ const _: fn(StartOutcome) = |_| {};
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_first_turn_only_counts_as_fresh_without_a_session_before_it() {
+        let mut fresh = Driven::new();
+        fresh.user(1);
+        fresh
+            .send(Command::TurnBound {
+                turn: TurnId(1),
+                backend_session: "the-new-session".to_string(),
+            })
+            .unwrap();
+        assert!(fresh.agent.fresh_first_turn());
+
+        let mut resumed = Driven::new();
+        resumed
+            .send(Command::TakeUp {
+                backend_session: "a-kept-session".to_string(),
+            })
+            .unwrap();
+        resumed.user(1);
+        assert!(!resumed.agent.fresh_first_turn());
+    }
 
     /// An agent with its whole history, driven the way the actor will drive it.
     struct Driven {

@@ -9,6 +9,7 @@ AGY = "clarp-backend/src/agy.rs"
 RUNS = {
     "vectors": ["test", "--test", "takeover_vectors"],
     "journal": ["test", "-p", "clarp-kernel", "--lib", "a_selected_takeover_survives_reopen"],
+    "first-turn": ["test", "-p", "clarp-kernel", "--lib", "a_first_turn_only_counts_as_fresh"],
     "claude": ["test", "-p", "clarp-backend", "--lib", "a_turn_is_started_with_the_message_on_standard_input"],
     "agy": ["test", "-p", "clarp-backend", "--lib", "a_turn_is_started_with_the_message_bound_to_its_flag"],
 }
@@ -77,6 +78,8 @@ PLANTS = [
      'work.start_next_with(now_ms, Some(selected.start));', 'work.start_next_with(now_ms, None);'),
     (AGENT, "journal", "the third message can take over again",
      '            && self.live_takeover.is_none()\n', ''),
+    (AGENT, "first-turn", "a seeded first turn is mistaken for an empty provider session",
+     '            && !self.live_resumed_session', '            && true'),
 ]
 
 if __name__ == "__main__":
