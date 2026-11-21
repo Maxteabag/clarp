@@ -113,6 +113,7 @@ def reference(root):
             if model == NOVA:
                 raise stt.LanguageSetUnsupported('language set')
             calls.append(model)
+            stt_language.note_handed(None)
             raise RuntimeError('stand-in outage')
 
         own = SimpleNamespace(transcribe_model_bytes=transcribe)

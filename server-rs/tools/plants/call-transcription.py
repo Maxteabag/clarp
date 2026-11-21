@@ -99,7 +99,7 @@ changes(H,'host',[
     ('"error":"call policy invalid"','"error":"no compatible engine"'),
     ('"call_policy_error":policy.error','"call_policy_error":policy.language'),
     ('policy.configured().then_some(language)','None'),
-    ('if Some(i) == last','if true'),
+    ('if !rules::has_runnable_step(later, &contacted)','if true'),
     ('report.skipped(&step.engine, reason);','report.skipped(&step.engine, "skipped");'),
     ('step.adapted == Some(true)','false'),
     ('report.failed(&step.engine, handed.as_deref(), elapsed, reason)', 'report.failed(&step.engine, None, elapsed, reason)'),

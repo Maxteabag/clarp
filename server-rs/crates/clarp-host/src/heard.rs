@@ -35,7 +35,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use clarp_kernel::heard::{self, OWN_PROVIDER, PROVIDERS, language_set};
+use clarp_kernel::heard::{self, OWN_PROVIDER, PROVIDERS, engine_order, language_set};
 use clarp_kernel::languages;
 use clarp_kernel::said::Who;
 use clarp_speech::chirp::Chirp;
@@ -834,6 +834,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
             app,
             &ears,
             &plan,
+            session,
             &language,
             audit["payload"].as_str().unwrap_or(""),
             (&audio, &content_type),
@@ -938,19 +939,38 @@ async fn hear_chat(
     app: &App,
     ears: &Arc<Ears>,
     plan: &ChatPlan,
+    session: &str,
     language: &str,
     listen_for: &str,
     clip: (&axum::body::Bytes, &str),
 ) -> Result<(Heard, Option<Value>), Told> {
     let own = ears.own_id();
-    let order = plan.order.chat_order(language, own.as_deref());
+    let (order, repeats) = plan.order.chat_order(own.as_deref());
+    for engine in repeats {
+        eprintln!(
+            "clarp-host: sttEngineRepeatSkipped {}",
+            engine_order::listed_before(session, engine)
+        );
+    }
+    let mut order = engine_order::ChatOrder::new(order);
     let mut attempted = Vec::new();
-    for (place, model) in order.iter().copied().enumerate() {
-        let more = place + 1 < order.len();
-        let (result, _) = chat_attempt(app, ears, model, language, listen_for, clip, more).await;
-        match result {
+    while let Some((model, has_fallback)) = order.attempt() {
+        let (result, handed) =
+            chat_attempt(app, ears, model, language, listen_for, clip, has_fallback).await;
+        let error = match result {
             Ok(heard) => return Ok((heard, None)),
-            Err(AttemptError::LanguageSet) if !more => {
+            Err(error) => error,
+        };
+        let failure = order.failed(model, handed.is_some());
+        for (engine, provider) in failure.skipped {
+            eprintln!(
+                "clarp-host: sttEngineRepeatSkipped {}",
+                engine_order::provider_already_had(session, engine, provider)
+            );
+        }
+        let more = failure.has_fallback;
+        match error {
+            AttemptError::LanguageSet if !more => {
                 let fallback = SetFallback {
                     from: model,
                     selected: &plan.selected,
@@ -959,8 +979,7 @@ async fn hear_chat(
                 };
                 return hear_language_set(app, ears, fallback, language, listen_for, clip).await;
             }
-            Err(error) => {
-                let failed = matches!(error, AttemptError::Failed(_));
+            error => {
                 let log = error.told();
                 if !more {
                     if log.0 == StatusCode::INTERNAL_SERVER_ERROR {
@@ -971,7 +990,7 @@ async fn hear_chat(
                     }
                     return Err(log);
                 }
-                if failed {
+                if failure.reached {
                     attempted.push(language_set::identity(model, own.as_deref()));
                 }
                 eprintln!(

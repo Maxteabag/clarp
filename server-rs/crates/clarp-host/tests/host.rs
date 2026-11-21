@@ -69,6 +69,8 @@ mod pictures;
 mod provider_tasks;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
+#[path = "host/r175_engine_order.rs"]
+mod r175_engine_order;
 #[path = "host/remote_action.rs"]
 mod remote_action;
 #[path = "host/render_spec_export.rs"]
