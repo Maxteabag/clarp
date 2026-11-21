@@ -117,7 +117,7 @@ fn provider_takeover_evidence_matches_the_reference() {
         );
         count += 1;
     }
-    assert_eq!(count, 63);
+    assert_eq!(count, 64);
     println!("{count} provider takeover reference cases");
 }
 

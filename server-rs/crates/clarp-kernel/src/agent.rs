@@ -83,6 +83,12 @@ pub enum Command {
     TurnMoved { turn: TurnId, activity: Activity },
     /// The shim: the tool process is gone, and this is how it went.
     TurnEnded { turn: TurnId, outcome: RunOutcome },
+    /// Record who is about to ask a shim to hold, before it can send SIGSTOP.
+    OfferTakeover {
+        from: TurnId,
+        into: TurnId,
+        attempt: u32,
+    },
     /// Reserve the next user's turn before asking the shim whether its hold can be consumed.
     SelectTakeover {
         selected: crate::takeover::Selection,
@@ -127,6 +133,11 @@ pub enum AgentEvent {
     Turn {
         turn: TurnId,
         change: TurnEvent,
+    },
+    TakeoverOffered {
+        from: TurnId,
+        into: TurnId,
+        attempt: u32,
     },
     TakeoverSelected {
         selected: crate::takeover::Selection,
@@ -810,6 +821,22 @@ impl Agent {
                     },
                 });
             }
+            Command::OfferTakeover {
+                from,
+                into,
+                attempt,
+            } => {
+                if work.agent.selected_takeover.is_some()
+                    || !work.agent.can_take_over(from, into, attempt)
+                {
+                    return Err(Refusal::TakeoverStale);
+                }
+                work.record(AgentEvent::TakeoverOffered {
+                    from,
+                    into,
+                    attempt,
+                });
+            }
             Command::SelectTakeover { selected } => {
                 if work.agent.selected_takeover.is_some()
                     || !work.agent.can_take_over(
@@ -1049,6 +1076,10 @@ impl Agent {
                 }
                 self.compaction_owed = None;
                 self.last_compaction = Some(said.clone());
+            }
+            AgentEvent::TakeoverOffered { .. } => {
+                // An offer never changes a turn's state. Its shim releases an unconsumed
+                // hold on its own, including when the Host dies between these events.
             }
             AgentEvent::TakeoverSelected { selected } => {
                 if self.selected_takeover.is_some()

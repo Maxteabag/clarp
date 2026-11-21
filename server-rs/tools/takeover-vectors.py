@@ -46,6 +46,7 @@ def capture(place):
             {"type": "system", "subtype": "init"},
             claude_block("thinking", "content_block"),
             claude_block("thinking_delta", "delta"),
+            claude_block("signature_delta", "delta"),
             claude_block("text", "content_block"),
             claude_block("text_delta", "delta"),
             claude_block("tool_use", "content_block"),
