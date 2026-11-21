@@ -76,7 +76,9 @@ BASELINE: dict[tuple[str, str], int] = {
     ('lib/tool_explanations.py', 'collection'): 1,
     ('lib/tool_explanations.py', 'compare'): 1,
     ('lib/transcript_incremental.py', 'collection'): 1,
-    ('lib/transcript_incremental.py', 'dict_key'): 4,
+    ('lib/transcript_incremental.py', 'dict_key'): 3,
+    # _PARSER_CARRIES moved unchanged into transcript_ranges.py (PR 572): a move, not new logic.
+    ('lib/transcript_ranges.py', 'dict_key'): 1,
     ('lib/turn_identity.py', 'collection'): 1,
     ('lib/viz_native.py', 'collection'): 1,
     ('lib/viz_rule_author.py', 'collection'): 2,
