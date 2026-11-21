@@ -144,7 +144,7 @@ def test_pinned_model_without_model_support_is_400():
     stt = StubSTT()
     out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova")
     assert out.status == 400
-    assert out.payload == {"error": "transcription model not installed: deepgram:nova"}
+    assert out.payload == {"error": "transcription model not installed"}
     assert stt.calls == []
     assert out.trace_id
 
@@ -178,8 +178,8 @@ def test_long_form_escalation_overrides_pin(monkeypatch):
 
 
 @pytest.mark.parametrize("exc, status, message", [
-    (STTUnknownModelError("model gone"), 400, "model gone"),
-    (STTModelLoadingError("still loading"), 503, "still loading"),
+    (STTUnknownModelError("model gone"), 400, "transcription model not installed"),
+    (STTModelLoadingError("still loading"), 503, "transcription model loading"),
 ])
 def test_model_errors_map_without_voice_rows(exc, status, message):
     rec = Recorder()
@@ -207,11 +207,11 @@ def test_unexpected_failure_is_500_with_stage(monkeypatch):
     rec = Recorder()
     boom = RuntimeError("decoder exploded " + "x" * 400)
     out = _run(_ctx(StubSTT(raise_=boom)), rec)
-    assert out.status == 500 and out.payload == {"error": str(boom)}
+    assert out.status == 500 and out.payload == {"error": "transcription failed"}
     assert marks == ["stt"]
     event, fields = rec.voice[0]
     assert event == "error"
-    assert fields["detail"] == {"message": str(boom)[:300], "stage": "stt"}
+    assert fields["detail"] == {"message": "transcription failed", "stage": "stt"}
 
 
 def test_herald_grant_blanks_text_but_keeps_transcript_row():
@@ -690,6 +690,69 @@ def test_an_own_adapter_that_cannot_answer_is_refused_with_fixed_words_and_logge
     assert any(path in error for _event, error, _detail in logged)
     assert [c for c in stt.calls if c[0] == "bytes"] == []
 
+
+# The 400, 503 and 500 answers say fixed words; the exception text (which can name a local path
+# or carry a provider's reply) goes only to the Host's log, never to the client or the voice timeline.
+_PLANTED = "/home/someone/.cache/clarp/models/secret-model.bin"
+
+
+@pytest.mark.parametrize("error,status,words", [
+    (STTUnknownModelError(f"transcription model not installed: {_PLANTED}"), 400,
+     "transcription model not installed"),
+    (STTModelLoadingError(f"loading {_PLANTED}"), 503, "transcription model loading"),
+    (RuntimeError(f"could not load transcription model: {_PLANTED}"), 500, "transcription failed"),
+])
+def test_an_error_answer_says_fixed_words_and_the_detail_stays_in_the_log(
+        monkeypatch, error, status, words):
+    logged = []
+    monkeypatch.setattr(tp, "log_exception",
+                        lambda event, e, detail="": logged.append((event, str(e), detail)))
+    rec = Recorder()
+    out = _run(_ctx(ModelSTT(raise_=error)), rec, requested_model="faster-whisper:small")
+    assert out.status == status and out.payload["error"] == words
+    assert _PLANTED not in json.dumps(out.payload) and _PLANTED not in json.dumps(rec.voice)
+    assert any(_PLANTED in text for _event, text, _detail in logged)
+
+
+def test_a_failing_fallback_engines_provider_error_is_not_told_to_the_client(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["deepgram:nova-3", "elevenlabs:scribe_v2"])
+    logged = []
+    monkeypatch.setattr(tp, "log_exception",
+                        lambda event, e, detail="": logged.append((event, str(e), detail)))
+    reply = f"HTTP 500 from provider: config at {_PLANTED}"
+    stt = PerModelSTT({"deepgram:nova-3": RuntimeError("deepgram down"),
+                       "elevenlabs:scribe_v2": RuntimeError(reply)})
+    rec = Recorder()
+    out = _run(_ctx(stt), rec, focus="rachel")
+    assert out.status == 500 and out.payload["error"] == "transcription failed"
+    assert _PLANTED not in json.dumps(out.payload) and _PLANTED not in json.dumps(rec.voice)
+    assert any(reply == text for _event, text, _detail in logged)
+
+
+def test_a_call_attempts_reason_is_fixed_words():
+    calls = ModelSTT(raise_=RuntimeError(f"worker crashed reading {_PLANTED}"))
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    with pytest.raises(RuntimeError):
+        tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
+                           ctype="audio/webm", prompt="")
+    reasons = [a.get("reason") for a in call_stt["report"]["attempts"]]
+    assert reasons == ["transcription failed", "transcription failed"]
+
+
+def test_a_call_attempt_that_finds_whisper_busy_says_so():
+    # client_words' busy branch: the attempt's reason is the fixed 'whisper busy', not the text.
+    calls = ModelSTT(raise_=STTBusyError(f"busy with {_PLANTED}"))
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    with pytest.raises(STTBusyError):
+        tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
+                           ctype="audio/webm", prompt="")
+    assert [a.get("reason") for a in call_stt["report"]["attempts"]] == ["whisper busy", "whisper busy"]
 
 # R175: each provider gets a recording at most once, whatever its models; the Host's own engine
 # is one engine under all its names; another local model is its own.
