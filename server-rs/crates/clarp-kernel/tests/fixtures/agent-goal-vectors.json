@@ -1,0 +1,152 @@
+[
+  {
+    "raw": {
+      "objective": "finish the work",
+      "status": "active",
+      "tokenBudget": 5000,
+      "createdAt": 1795000000,
+      "updatedAt": 1795000001
+    },
+    "now": 1795000020000,
+    "public": {
+      "objective": "finish the work",
+      "status": "active",
+      "token_budget": 5000,
+      "tokens_used": 0,
+      "time_used_seconds": 0,
+      "native": true,
+      "backend": "codex",
+      "created_at": 1795000000000,
+      "updated_at": 1795000001000
+    }
+  },
+  {
+    "raw": {
+      "objective": "finish the work",
+      "status": "paused",
+      "tokenBudget": 5000,
+      "tokensUsed": 12,
+      "timeUsedSeconds": 2
+    },
+    "now": 1795000021000,
+    "public": {
+      "objective": "finish the work",
+      "status": "paused",
+      "token_budget": 5000,
+      "tokens_used": 12,
+      "time_used_seconds": 2,
+      "native": true,
+      "backend": "codex",
+      "created_at": 1795000000000,
+      "updated_at": 1795000021000
+    }
+  },
+  {
+    "raw": {
+      "objective": "finish the work",
+      "status": "usageLimited",
+      "createdAt": 0,
+      "updatedAt": "1795000009000"
+    },
+    "now": 1795000022000,
+    "public": {
+      "objective": "finish the work",
+      "status": "usage_limited",
+      "token_budget": null,
+      "tokens_used": 0,
+      "time_used_seconds": 0,
+      "native": true,
+      "backend": "codex",
+      "created_at": 1795000000000,
+      "updated_at": 1795000009000
+    }
+  },
+  {
+    "raw": {
+      "objective": "finish the work",
+      "status": " budgetLimited ",
+      "tokenBudget": 0,
+      "tokensUsed": 50,
+      "timeUsedSeconds": 31
+    },
+    "now": 1795000023000,
+    "public": {
+      "objective": "finish the work",
+      "status": "budget_limited",
+      "token_budget": 0,
+      "tokens_used": 50,
+      "time_used_seconds": 31,
+      "native": true,
+      "backend": "codex",
+      "created_at": 1795000000000,
+      "updated_at": 1795000023000
+    }
+  },
+  {
+    "raw": {
+      "objective": "finish the work",
+      "status": "blocked",
+      "updatedAt": -1
+    },
+    "now": 1795000024000,
+    "public": {
+      "objective": "finish the work",
+      "status": "blocked",
+      "token_budget": null,
+      "tokens_used": 0,
+      "time_used_seconds": 0,
+      "native": true,
+      "backend": "codex",
+      "created_at": 1795000000000,
+      "updated_at": 1795000024000
+    }
+  },
+  {
+    "raw": {
+      "objective": "finish the work",
+      "status": "complete",
+      "updatedAt": 100000000000,
+      "tokensUsed": 53,
+      "timeUsedSeconds": 34
+    },
+    "now": 1795000025000,
+    "public": {
+      "objective": "finish the work",
+      "status": "complete",
+      "token_budget": null,
+      "tokens_used": 53,
+      "time_used_seconds": 34,
+      "native": true,
+      "backend": "codex",
+      "created_at": 1795000000000,
+      "updated_at": 100000000000
+    }
+  },
+  {
+    "raw": {
+      "objective": "other work",
+      "createdAt": 99999999999,
+      "updatedAt": "unknown"
+    },
+    "now": 1795000026000,
+    "public": {
+      "objective": "other work",
+      "status": "active",
+      "token_budget": null,
+      "tokens_used": 0,
+      "time_used_seconds": 0,
+      "native": true,
+      "backend": "codex",
+      "created_at": 99999999999000,
+      "updated_at": 1795000026000
+    }
+  },
+  {
+    "raw": {
+      "objective": "bad status",
+      "status": "unknown"
+    },
+    "now": 1795000027000,
+    "public": null
+  }
+]
