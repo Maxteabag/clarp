@@ -147,14 +147,11 @@ plant("clarp-host/src/explain.rs","host","classify a converted tool explanation 
       '"timeout" => "timeout",','"timeout" => "translator_failed",')
 plant(E,"host","lose the timeout category when a lower layer rewrites its words",
       'Unanswered::TimedOut | Unanswered::RoutingTimeout(_) => "timeout",','Unanswered::TimedOut => "timeout",\n            Unanswered::RoutingTimeout(_) => "tool_failed",')
-for why,method,allow in [
-    ("let a limited device set the Janitor policy", "POST", "false"),
-    ("deny a limited device the Janitor policy", "GET", "true"),
-]:
-    # The rule for a limited device is the kernel's since differences-truth part 1: the
-    # policy let through among its sends, or closed to its reading, is planted there.
-    where = '    let closed = |prefix: &&str|'
-    plant("clarp-kernel/src/devices.rs","host",why,where,
-          f'    if path=="/janitor-policy" && method=="{method}" {{return {allow};}}\n'+where)
+plant("clarp-kernel/src/devices.rs", "host", "let a limited device set the Janitor policy",
+      'method != "POST" || !LIMITED_POSTS.contains(&path)',
+      'method != "POST" || (path != "/janitor-policy" && !LIMITED_POSTS.contains(&path))')
+plant("clarp-kernel/src/devices.rs", "host", "let a limited device read the Janitor policy",
+      'return !LIMITED_GETS.contains(&path)',
+      'return path != "/janitor-policy" && !LIMITED_GETS.contains(&path)')
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
