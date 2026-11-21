@@ -3446,6 +3446,15 @@ writer claims each asset and change before broadcasting, in event-time and asset
 The claim is advisory and takes nothing away from the committed images or portraits if it
 fails. Late updates and replays of a delivered job add no duplicate created hint.
 
+**Cartesia output language (R168, 21 Nov 2026).** Each Cartesia clip uses the first
+transcription language matched by name, persona or session, else the Host's selected
+language. The model catalogue constrains that code and maps Norwegian variants to `no`.
+A request whose model requires English records the unsupported primary code once, at the
+Cartesia boundary. The same resolution reaches a configured alternative after another
+provider fails. Cartesia auditions, narration and cached router phrases include the resulting
+language in their cache identity, so a language change can produce its own audio. The
+reference's model, request and session rules are held by `cartesia-language-vectors.py`.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
