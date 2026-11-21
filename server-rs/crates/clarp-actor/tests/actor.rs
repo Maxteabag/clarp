@@ -422,6 +422,45 @@ fn what_waits_enters_the_conversation_when_its_turn_starts_whether_said_or_left_
 }
 
 #[test]
+fn a_stopped_turn_keeps_earlier_output_and_discards_output_from_retirement() {
+    let mut world = World::new("stop-output");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "stop this", Admission::Queue);
+    let (_, out) = actor.stop("peter", world.tick()).unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(1, "An answer printed after Stop.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+
+    let tail = actor.tail(10).unwrap();
+    assert!(
+        tail.entries
+            .iter()
+            .all(|row| !matches!(&row.entry, Entry::Reply(_)))
+    );
+    assert!(tail.entries.iter().any(|row| matches!(
+        &row.entry, Entry::TurnEnd(end) if end.closes == "u-1" && end.status == "interrupted"
+    )));
+
+    world.send(&mut actor, "u-2", "stop this too", Admission::Queue);
+    world.says(2, "Words printed before Stop.");
+    let (_, out) = actor.stop("peter", world.tick()).unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(2, "More words printed after Stop.");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    let rows = shown(&actor);
+    assert!(
+        rows.iter()
+            .any(|(_, text)| text.contains("Words printed before Stop."))
+    );
+    assert!(
+        rows.iter()
+            .all(|(_, text)| !text.contains("More words printed after Stop."))
+    );
+}
+
+#[test]
 fn a_stop_is_passed_to_the_shim_and_a_direct_message_takes_the_place_of_the_live_turn() {
     let mut world = World::new("stop");
     let mut actor = world.open();
