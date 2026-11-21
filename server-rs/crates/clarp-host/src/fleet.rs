@@ -384,12 +384,11 @@ pub struct Directory {
     pub gone: Arc<BTreeMap<String, (String, String)>>,
 }
 
-/// The contact a launch asked for in place of a name of its own: always a minted one
-/// (`mint_contact`), or the first free one of its tool's pool and a minted one where there is
-/// none (`auto_contact`).
-#[derive(Debug, Clone, Default)]
-pub struct ContactAsked {
-    pub mint: bool,
+/// How a launch without an explicit name chooses one in the fleet's registration turn.
+#[derive(Debug, Clone)]
+pub enum ContactAsked {
+    Pool { mint: bool },
+    Anonymous,
 }
 
 /// What an app says of a persona it makes or changes.
@@ -2860,7 +2859,7 @@ impl Fleet {
     fn contact_of_launch(
         &mut self,
         backend: &str,
-        contact: &ContactAsked,
+        mint: bool,
         catalogue: &VoiceCatalogue,
     ) -> Result<String, NotMade> {
         let pooled = {
@@ -2870,7 +2869,7 @@ impl Fleet {
             let pool = clarp_kernel::contacts::pool(&contacts, &wearers, backend, "");
             pool.first().map(|name| (*name).to_string())
         };
-        if !contact.mint
+        if !mint
             && let Some(name) = pooled
         {
             return Ok(name);
@@ -2879,6 +2878,31 @@ impl Fleet {
             Ok(Some(name)) => Ok(name),
             Ok(None) => Err(Told::new(409, "contact_pool_empty", "contact_pool_empty").into()),
             Err(why) => Err(NotMade::Refused(why.0)),
+        }
+    }
+
+    fn anonymous_name(&self, backend: &str) -> String {
+        let label = match backend {
+            "codex" => "Codex",
+            "claude" => "Claude",
+            "grok" => "Grok",
+            "agy" => "AGY",
+            "opencode" => "OpenCode",
+            "deepseek" => "DeepSeek",
+            other => other,
+        };
+        let contacts = self.personas_listed();
+        loop {
+            let candidate = format!("{label}-{}", ids::hex(2));
+            if self.owner_of_name(&candidate, "").is_none()
+                && !contacts.iter().any(|contact| {
+                    contact["name"]
+                        .as_str()
+                        .is_some_and(|name| personas::same(name, &candidate))
+                })
+            {
+                return candidate;
+            }
         }
     }
 
@@ -3132,8 +3156,19 @@ impl Fleet {
                 .filter(|backend| !backend.is_empty())
                 .unwrap_or("claude")
                 .to_string();
-            request.name = self.contact_of_launch(&backend, &contact, catalogue)?;
-            request.session = None;
+            match contact {
+                ContactAsked::Pool { mint } => {
+                    request.name = self.contact_of_launch(&backend, mint, catalogue)?;
+                    request.session = None;
+                }
+                ContactAsked::Anonymous => {
+                    request.name = self.anonymous_name(&backend);
+                    request.session = None;
+                    request.voice_id = Some("{}".into());
+                    request.personality = None;
+                    request.avatar_symbol = None;
+                }
+            }
         }
         let was_forked = forked.is_some();
         let persona = request.name.trim().to_string();
