@@ -285,7 +285,15 @@ def run(root) -> dict:
     agents.live_backend_session = lambda agent_id: world.get('backend', '')
     message_store.has_client_message = lambda client_msg_id: bool(world.get('has_message'))
     taken_from_queue = []
-    turn_queue.remove = lambda queue_id: taken_from_queue.append(queue_id)
+    omitted = object()
+
+    def remove_from_queue(queue_id, *, withdraw_shown=omitted):
+        if withdraw_shown is omitted:
+            taken_from_queue.append(queue_id)
+        else:
+            taken_from_queue.append({'queue_id': queue_id, 'withdraw_shown': withdraw_shown})
+
+    turn_queue.remove = remove_from_queue
 
     def told(row):
         """A row as a client is told it, with the agent by its session: the ids are this run's own."""

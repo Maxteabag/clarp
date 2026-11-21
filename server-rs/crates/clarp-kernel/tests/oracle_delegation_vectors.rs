@@ -286,9 +286,15 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
                         let called_off = book.called_off(&ids, at);
                         let called_off: Vec<&Delegation> = called_off.iter().collect();
                         assert_eq!(told(&called_off), step["answer"], "{step}");
-                        let waited = found.iter().filter(|one| one.waited);
-                        let waited: Vec<&str> =
-                            waited.map(|one| one.client_msg_id.as_str()).collect();
+                        // The Host withdraws these waiting turns regardless of whether
+                        // their messages already appeared in the conversation.
+                        let waited: Vec<Value> = found
+                            .iter()
+                            .filter(|one| one.waited)
+                            .map(|one| {
+                                json!({"queue_id": one.client_msg_id, "withdraw_shown": true})
+                            })
+                            .collect();
                         assert_eq!(json!(waited), step["taken_from_queue"], "{step}");
                         let mut traces: Vec<&str> =
                             found.iter().map(|one| one.trace_id.as_str()).collect();
