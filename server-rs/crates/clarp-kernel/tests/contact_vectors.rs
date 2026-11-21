@@ -12,6 +12,12 @@ use clarp_kernel::contacts::{
     pool, tier_of_tool, tool_of_tier,
 };
 use clarp_kernel::personas::{Owner, builtins};
+use clarp_kernel::{
+    said::{self, Voices},
+    voice_names::Snapshot,
+    voice_pool::{Pool, User},
+    voice_profile::HostView,
+};
 use serde_json::{Value, json};
 
 fn vectors() -> Value {
@@ -204,6 +210,27 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
     let assigns = vectors["assigns"].as_array().unwrap();
     assert_eq!(assigns.len(), 68);
     let rosters = vectors["pools"].as_array().unwrap();
+    let defaults = Owner::default();
+    let builtins = builtins(&defaults).len();
+    let view = HostView {
+        voices: Voices {
+            provider: said::CARTESIA.into(),
+            ..Default::default()
+        }
+        .with_cartesia(&[]),
+        ..Default::default()
+    };
+    let pool = Pool {
+        host: &view,
+        configured_cartesia: &[],
+        catalogue: &Snapshot::default(),
+        roster: &[],
+    };
+    let contacts_in_use = contacts.iter().enumerate().map(|(at, contact)| User {
+        name: contact.name,
+        stored: contact.voice_id,
+        builtin: at < builtins,
+    });
     for case in assigns {
         let roster = rosters
             .iter()
@@ -230,6 +257,25 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
             &contacts,
             &agents,
         );
+        let users: Vec<_> = roster["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|agent| agent["is_janitor"] != 1 && agent["archived_at"].is_null())
+            .map(|agent| User {
+                name: agent["persona"].as_str().unwrap(),
+                stored: agent["voice_id"].as_str().unwrap(),
+                builtin: false,
+            })
+            .chain(contacts_in_use.clone())
+            .collect();
+        let written_voice = |name, voice| {
+            assert_eq!(
+                pool.assign(name, voice, &users).stored,
+                case["written"][0]["voice_id"],
+                "{case}"
+            );
+        };
         match ours {
             Err(refused) => {
                 let body = json!({ "error": refused.error, "message": refused.message });
@@ -246,6 +292,8 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
             Ok(Assigned::Take(name)) => {
                 assert_eq!(json!(name), case["answer"]["name"], "{case}");
                 assert_eq!(case["written"][0]["persona"], json!(name), "{case}");
+                let contact = contacts.iter().find(|row| row.name == name).unwrap();
+                written_voice(&name, contact.voice_id);
                 assert!(
                     case["made"].as_array().unwrap().is_empty()
                         && case["minted"].as_array().unwrap().is_empty()
@@ -254,8 +302,10 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
             Ok(Assigned::Mint) => {
                 assert_eq!(case["minted"], json!([row.unwrap()["backend"]]), "{case}");
                 assert_eq!(case["answer"]["name"], "Minted", "{case}");
+                written_voice("Minted", r#"{"cartesia":"v-minted"}"#);
             }
             Ok(Assigned::Create(name)) => {
+                written_voice(&name, "{}");
                 assert_eq!(
                     case["made"],
                     json!([{ "name": name, "voice_id": "" }]),

@@ -13,7 +13,7 @@ use clarp_kernel::heard::{
     fingerprint, invented, is_cloud, job_id, joined, label, plan, provider_of, terms, truthy,
     wants_cloud_engine, weight, whole,
 };
-use clarp_kernel::languages;
+use clarp_kernel::{languages, said::Who};
 use serde_json::Value;
 
 fn vectors() -> Value {
@@ -336,9 +336,31 @@ fn the_language_an_agent_is_spoken_to_in_is_read_and_changed_as_the_python_host_
         all["language_changes"].as_array().unwrap(),
     );
     assert!(engine_changes.len() >= 18 && language_changes.len() >= 12);
+    fn who(row: &Value) -> Who<'_> {
+        Who {
+            agent_id: row["agent_id"].as_str().unwrap(),
+            persona: row["persona"].as_str().unwrap(),
+            session: row["session"].as_str().unwrap(),
+            ..Who::default()
+        }
+    }
+    let agents = all["agents"].as_array().unwrap();
+    let ids_for = |key: &str| languages::ids_for(agents.iter().map(who), key);
+    for row in all["matches"].as_array().unwrap() {
+        let stored = row["overrides"].to_string();
+        let entries = languages::languages(Some(&stored));
+        assert_eq!(
+            languages::of_agent(&entries, who(&row["agent"])),
+            row["result"].as_str()
+        );
+    }
     for case in engine_changes {
-        let changed =
-            languages::engines_changed(case["stored"].as_str(), &case["change"], &is_valid);
+        let changed = languages::engines_changed_for(
+            case["stored"].as_str(),
+            &case["change"],
+            &is_valid,
+            ids_for,
+        );
         match case.get("answer") {
             Some(answer) => assert_eq!(changed.as_deref(), Ok(answer.as_str().unwrap()), "{case}"),
             None => assert_eq!(
@@ -349,7 +371,8 @@ fn the_language_an_agent_is_spoken_to_in_is_read_and_changed_as_the_python_host_
         }
     }
     for case in language_changes {
-        let changed = languages::languages_changed(case["stored"].as_str(), &case["change"]);
+        let changed =
+            languages::languages_changed_for(case["stored"].as_str(), &case["change"], ids_for);
         match case.get("answer") {
             Some(answer) => assert_eq!(changed.as_deref(), Ok(answer.as_str().unwrap()), "{case}"),
             None => assert_eq!(
