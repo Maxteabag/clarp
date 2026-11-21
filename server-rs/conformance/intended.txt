@@ -167,6 +167,13 @@ ec43f007ab53  live-items: the thinking after the second tool: its detail names t
 90f256fd3f66  live-items: the same event: it is no phase of the stream
 822ab15ef3ea  live-items: the same event: it says where the turn's message came from
 
+# R108 keeps one live item per reply. The first text block can be followed by more text in
+# the message, so the Rust Host closes its item at message end. The Python Host closes the
+# block's item before the tool starts, then patches its phase to commentary.
+f2e33660afbe  live-items: the block's done and thinking status do not precede the first tool
+c11b0fc86f48  live-items: the commentary patch precedes done and has one revision fewer
+33a57035c697  live-items: the reply's done follows the first tool's input
+
 # Defect R19 of the reference: in the first streamed turn of a conversation, the row the answer
 # was written into while it grew is not the row the conversation keeps. Its live item and its
 # notification then name a row that is not there, and no row carries the turn's summary. It
