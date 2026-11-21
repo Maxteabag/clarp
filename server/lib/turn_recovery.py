@@ -188,7 +188,8 @@ class RecoveryMixin:
                 sender_agent_id=str(item["sender_agent_id"] or "") or None,
                 prompt_admission_id=str(item["prompt_admission_id"] or ""),
                 trace_id=str(item["trace_id"]),
-                sent_at=int(item["enqueued_at"]) if item["enqueued_at"] else None)
+                sent_at=int(item["enqueued_at"]) if item["enqueued_at"] else None,
+                user_word=bool(item["user_word"]))
             turn_queue.show(queue_id, con=database)
             started = turn_queue.start_receipt(queue_id)
             database.execute("COMMIT")
@@ -221,7 +222,8 @@ class RecoveryMixin:
                     sender_agent_id=str(item["sender_agent_id"] or "") or None,
                     prompt_admission_id=str(item["prompt_admission_id"] or ""),
                     trace_id=str(item["trace_id"]),
-                    sent_at=int(item["enqueued_at"]) if item["enqueued_at"] else None)
+                    sent_at=int(item["enqueued_at"]) if item["enqueued_at"] else None,
+                    user_word=bool(item["user_word"]))
                 if written is not None:
                     turn_queue.show(str(item["queue_id"]), con=database)
                 database.execute("COMMIT")
