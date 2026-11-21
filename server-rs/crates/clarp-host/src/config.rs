@@ -314,7 +314,7 @@ pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
 /// The model of GPT-Live the owner named in his file (`[openai] live_model`), read once: none
 /// named, or no file, is the default; another than the two there are is refused, said in one
 /// line, and the default runs.
-fn live_model_of(file: Option<&toml::Table>) -> &'static str {
+fn live_model_of(file: Option<&toml_edit::DocumentMut>) -> &'static str {
     let named = file
         .and_then(|file| file.get("openai"))
         .and_then(|openai| openai.get("live_model"));
@@ -328,13 +328,6 @@ fn live_model_of(file: Option<&toml::Table>) -> &'static str {
     })
 }
 
-/// The owner's file, where one is given and it reads: read once, where the configuration is.
-fn owners_of(owners: Option<&Path>) -> Option<toml::Table> {
-    owners
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| text.parse::<toml::Table>().ok())
-}
-
 /// From which client contract an agent's live call runs on the owner's model, by the client's
 /// exact name: the two the apps named, and what the owner's file says of any name (`[openai]
 /// live_model_min_client`; 0 for a name is never for it), read by the one reader of such tables
@@ -342,7 +335,7 @@ fn owners_of(owners: Option<&Path>) -> Option<toml::Table> {
 /// and that name keeps what it had; a key that differs from a built-in name only in its case is
 /// taken as written and said; a value that is no table is ignored and said. Each line carries the
 /// table's name, once, when the configuration is read.
-fn live_model_min_client_of(file: Option<&toml::Table>) -> Vec<(String, i64)> {
+fn live_model_min_client_of(file: Option<&toml_edit::DocumentMut>) -> Vec<(String, i64)> {
     let built_in = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT;
     let mut minimums: Vec<(String, i64)> = built_in
         .iter()
@@ -351,19 +344,17 @@ fn live_model_min_client_of(file: Option<&toml::Table>) -> Vec<(String, i64)> {
     let table = match file
         .and_then(|file| file.get("openai"))
         .and_then(|openai| openai.get(MIN_CLIENT_KEY))
+        .map(toml_edit::Item::as_table_like)
     {
         None => return minimums,
-        Some(toml::Value::Table(table)) => table,
+        Some(Some(table)) => table,
         Some(_) => {
             min_client_said("ignored: expected a table of client = number");
             return minimums;
         }
     };
-    let known: Vec<&str> = built_in.iter().map(|(name, _)| *name).collect();
-    let entries = table
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_integer()));
-    let read = clarp_kernel::client::minimums(entries, &known);
+    let entries = table.iter().map(|(key, value)| (key, value.as_integer()));
+    let read = clarp_kernel::client::minimums(entries, clarp_kernel::client::BUILT_IN_NAMES);
     for line in read.lines() {
         min_client_said(&line);
     }
@@ -643,7 +634,7 @@ impl Config {
         // over TLS, or stays here.
         let relay_stand_in = here("CLARP_RELAY_DIAL", Local::SOCKET)?;
         // The owner's file, read once for what this Host keeps of it.
-        let owners = owners_of(speech_keys.as_deref());
+        let owners = crate::owner::OwnerFile::new(speech_keys.clone()).read_document();
         Ok(Self {
             run_dir,
             listen: listen
