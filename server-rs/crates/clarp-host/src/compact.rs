@@ -54,6 +54,9 @@ async fn compact(State(app): State<App>, body: Bytes) -> Response {
     let Some(member) = directory.named(session) else {
         return refused("no such agent");
     };
+    if let Err(why) = member.agent.require_here() {
+        return crate::edge::ApiError::from(why).into_response();
+    }
     let backend = member.record.backend.as_str();
     let view = member.agent.view();
     let status = &view.status;
@@ -96,6 +99,7 @@ async fn compact(State(app): State<App>, body: Bytes) -> Response {
             let told = json!({ "ok": true, "status": "started", "backend": backend });
             Json(told).into_response()
         }
+        Err(why) if why.1.is_some() => crate::edge::ApiError::from(why).into_response(),
         Err(_) => refused("agent is busy \u{2014} try again when idle"),
     }
 }

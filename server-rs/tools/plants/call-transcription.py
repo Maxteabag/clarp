@@ -118,10 +118,10 @@ F='clarp-host/src/fleet.rs'
 # second write must leave the first visible after restart and fail the test.
 RUNS['settings']=['test','--lib','--','refused_settings_batch_preserves_the_directory_and_store']
 changes(F,'settings',[
-    ('        self.store\n            .put_together(&writes)\n            .map_err(|error| Unavailable(error.to_string()))?;\n        self.settings.extend(settings);',
-     '        self.settings.extend(settings);\n        self.store.put_together(&writes).map_err(|error|Unavailable(error.to_string()))?;'),
-    ('self.store\n            .put_together(&writes)\n            .map_err(|error| Unavailable(error.to_string()))?;',
-     'for (table,key,bytes) in &writes {self.store.put(table,key,bytes.as_deref().unwrap_or_default()).map_err(|error|Unavailable(error.to_string()))?;}'),
+    ('        self.store\n            .put_together(&writes)\n            .map_err(|error| Unavailable::new(error.to_string()))?;\n        self.settings.extend(settings);',
+     '        self.settings.extend(settings);\n        self.store.put_together(&writes).map_err(|error|Unavailable::new(error.to_string()))?;'),
+    ('self.store\n            .put_together(&writes)\n            .map_err(|error| Unavailable::new(error.to_string()))?;',
+     'for (table,key,bytes) in &writes {self.store.put(table,key,bytes.as_deref().unwrap_or_default()).map_err(|error|Unavailable::new(error.to_string()))?;}'),
 ])
 changes('clarp-host/src/edge.rs','host', [('("call_transcription_policy", 74)','("call_transcription_policy", 73)')])
 changes('clarp-kernel/src/heard.rs','vectors',[

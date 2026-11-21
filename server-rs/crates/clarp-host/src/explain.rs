@@ -105,7 +105,7 @@ fn put(app: &App, patches: Vec<Patch>) {
 }
 
 fn unread() -> Unavailable {
-    Unavailable("the explainer's book could not be read".to_string())
+    Unavailable::new("the explainer's book could not be read".to_string())
 }
 
 fn hex(bytes: &[u8]) -> String {

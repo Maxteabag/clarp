@@ -154,6 +154,9 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
     if !expired.is_empty() {
         outs.push(actor.keep(&kept(&expired), now)?);
     }
+    if actor.moved().is_some() {
+        return Ok(outs);
+    }
     for decision_id in actor.artifacts().undelivered() {
         let Some(artifact) = actor.artifacts().of_decision(&decision_id).cloned() else {
             continue;

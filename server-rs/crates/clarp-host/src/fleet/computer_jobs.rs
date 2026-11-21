@@ -210,11 +210,11 @@ impl Fleet {
             job: job.clone(),
             timeline,
         };
-        let bytes = serde_json::to_vec(&row).map_err(|e| Unavailable(e.to_string()))?;
+        let bytes = serde_json::to_vec(&row).map_err(|e| Unavailable::new(e.to_string()))?;
         writes.push((TABLE.into(), job.id.clone(), Some(bytes)));
         self.store
             .put_together(&writes)
-            .map_err(|e| Unavailable(e.to_string()))?;
+            .map_err(|e| Unavailable::new(e.to_string()))?;
         if self.computer_jobs.unreadable.remove(&job.id) {
             self.works
                 .log

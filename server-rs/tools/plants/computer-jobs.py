@@ -95,7 +95,7 @@ change(H, "http", [
     ('app.fleet.computer_job(job_id).await?.is_none()', 'app.fleet.computer_job(job_id).await?.is_none() && false'),
 ])
 change(F, "store", [
-    ('Ok(Err(ComputerJobRefusal::Kernel(why)))', 'Err(Unavailable(why.to_string()))'),
+    ('Ok(Err(ComputerJobRefusal::Kernel(why)))', 'Err(Unavailable::new(why.to_string()))'),
 ])
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

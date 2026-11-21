@@ -73,7 +73,7 @@ async fn opened<'a>(app: &App, held: &'a mut Option<Book>) -> Result<&'a mut Boo
 /// What changed in the book is written, before anybody is told of it.
 async fn written(app: &App, book: &mut Book) -> Result<(), Unavailable> {
     for row in book.written() {
-        let kept = serde_json::to_vec(&row).map_err(|error| Unavailable(error.to_string()))?;
+        let kept = serde_json::to_vec(&row).map_err(|error| Unavailable::new(error.to_string()))?;
         app.fleet.keep(KEPT, row.delegation_id, Some(kept)).await?;
     }
     Ok(())
@@ -197,6 +197,9 @@ pub(crate) async fn handed(
     (id, session, request): (&str, &str, &str),
 ) -> Result<Value, ApiError> {
     let member = app.anyone(python::strip(session));
+    if let Some(member) = &member {
+        member.agent.require_here()?;
+    }
     // A message of the delegation's own id in the agent's conversation: its turn was
     // admitted, and is the agent's to run, also after a restart.
     let has_message = match (&member, normalize_id(id)) {
@@ -237,7 +240,7 @@ pub(crate) async fn handed(
             Err(refused) => {
                 // A turn that cannot be admitted: the delegation failed, in the words of that.
                 book.fail(&admit.delegation_id, refused.message(), app.clock.now_ms());
-                return Err(ApiError::new(refused.status(), refused.message()));
+                return Err(refused);
             }
         };
         let tool_session = member

@@ -98,7 +98,7 @@ impl Desk {
             *held = Some(book);
         }
         let Some(book) = held.as_mut() else {
-            return Err(Unavailable(
+            return Err(Unavailable::new(
                 "the heartbeat's book could not be read".to_string(),
             ));
         };
@@ -347,7 +347,7 @@ async fn tick(app: &App) {
     for member in &directory.members {
         let record = &member.record;
         let here = record.archived_at_ms.is_none() && record.deleted_at_ms.is_none();
-        if !record.heartbeat_enabled || !here {
+        if !record.heartbeat_enabled || !here || member.agent.view().status.moved.is_some() {
             continue;
         }
         let seen = seen(member).await;

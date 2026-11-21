@@ -72,9 +72,29 @@ const REOPEN_MOST: Duration = Duration::from_secs(30);
 
 /// The agent could not answer: its log or its files are failing, or it is closed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Unavailable(pub String);
+pub struct Unavailable(pub String, pub Option<clarp_kernel::agent::Refusal>);
+
+impl Unavailable {
+    pub fn new(why: String) -> Self {
+        Self(why, None)
+    }
+
+    fn move_refusal(why: clarp_kernel::agent::Refusal) -> Self {
+        Self(why.to_string(), Some(why))
+    }
+}
 
 pub type Answer<T> = oneshot::Sender<Result<T, Unavailable>>;
+
+/// The terminal owns this permit from actor admission until the socket closes. If the
+/// upgrade is cancelled, dropping the permit still releases the actor's reservation.
+pub struct TerminalLease(mpsc::Sender<Ask>);
+
+impl Drop for TerminalLease {
+    fn drop(&mut self) {
+        let _ = self.0.send(Ask::Terminal { open: false });
+    }
+}
 
 /// What a Stop did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +162,15 @@ pub struct DelegationState {
 }
 
 enum Ask {
+    SetMove {
+        to: Option<clarp_kernel::agent_moves::Target>,
+        answer: Answer<clarp_kernel::agent_moves::Receipt>,
+    },
+    LaunchPermit {
+        turn: TurnId,
+        attempt: u32,
+        answer: mpsc::SyncSender<bool>,
+    },
     RefreshTelling,
     Bookkeeping {
         cmd: crate::bookkeeping::Command,
@@ -452,6 +481,9 @@ enum Ask {
     TerminalFacts {
         answer: Answer<TerminalFacts>,
     },
+    OpenTerminal {
+        answer: Answer<TerminalLease>,
+    },
     /// A terminal on the agent's own tool was opened, or closed. While one is open no
     /// turn's tool is started: two processes on one conversation would spoil it.
     Terminal {
@@ -629,7 +661,7 @@ impl AgentHandle {
         self.enqueue(make(answer))?;
         reply
             .await
-            .map_err(|_| Unavailable("the agent did not answer".to_string()))?
+            .map_err(|_| Unavailable::new("the agent did not answer".to_string()))?
     }
 
     pub(crate) fn accepting_work(&self) -> Result<(), Unavailable> {
@@ -638,7 +670,7 @@ impl AgentHandle {
 
     fn check_open(state: Closing) -> Result<(), Unavailable> {
         if state != Closing::Open {
-            return Err(Unavailable(REMOVING.into()));
+            return Err(Unavailable::new(REMOVING.into()));
         }
         Ok(())
     }
@@ -649,7 +681,7 @@ impl AgentHandle {
         Self::check_open(*state)?;
         self.tx
             .send(ask)
-            .map_err(|_| Unavailable("the agent is closed".into()))
+            .map_err(|_| Unavailable::new("the agent is closed".into()))
     }
 
     /// Fence admission before committing the tombstone. The fleet is the only caller.
@@ -663,6 +695,22 @@ impl AgentHandle {
             *self.close.lock() = Closing::Open;
         }
         kept
+    }
+
+    pub async fn set_move(
+        &self,
+        to: Option<clarp_kernel::agent_moves::Target>,
+    ) -> Result<clarp_kernel::agent_moves::Receipt, Unavailable> {
+        self.ask(|answer| Ask::SetMove { to, answer }).await
+    }
+
+    pub fn require_here(&self) -> Result<(), Unavailable> {
+        if let Some(mark) = &self.view().status.moved {
+            return Err(Unavailable::move_refusal(
+                clarp_kernel::agent::Refusal::Moved(mark.clone()),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn send(&self, message: Message, admission: Admission) -> Result<Sent, Unavailable> {
@@ -682,7 +730,9 @@ impl AgentHandle {
         {
             Ok(sent) => Ok(sent),
             // A send whose caller named no trace is never refused for it.
-            Err(clarp_actor::TraceTaken) => Err(Unavailable(clarp_actor::TRACE_TAKEN.to_string())),
+            Err(clarp_actor::TraceTaken) => {
+                Err(Unavailable::new(clarp_actor::TRACE_TAKEN.to_string()))
+            }
         }
     }
 
@@ -1170,8 +1220,8 @@ impl AgentHandle {
 
     /// Tells the agent's thread that a terminal on its tool was opened, or closed. Does
     /// not wait.
-    pub fn terminal(&self, open: bool) {
-        let _ = self.tx.send(Ask::Terminal { open });
+    pub async fn open_terminal(&self) -> Result<TerminalLease, Unavailable> {
+        self.ask(|answer| Ask::OpenTerminal { answer }).await
     }
 
     /// Tells the agent's thread that nothing of its tool may run for a while: the account
@@ -1222,7 +1272,7 @@ impl AgentHandle {
         // single fleet worker can delay unrelated requests per mailbox ask.
         self.enqueue_delegation(command)?
             .recv_timeout(Duration::from_secs(3))
-            .map_err(|e| Unavailable(format!("delegation mailbox unavailable: {e}")))
+            .map_err(|e| Unavailable::new(format!("delegation mailbox unavailable: {e}")))
     }
     pub(crate) fn enqueue_delegation(
         &self,
@@ -1256,6 +1306,7 @@ impl AgentHandle {
 /// What an agent that has never run a turn is doing: nothing, and nothing waits.
 pub(crate) fn never_ran() -> Status {
     Status {
+        moved: None,
         live: None,
         last: None,
         waiting: Vec::new(),
@@ -1549,7 +1600,13 @@ fn with_goals<T>(
 }
 
 fn unavailable(error: &ActorError) -> Unavailable {
-    Unavailable(error.to_string())
+    use clarp_kernel::{agent::Refusal, journal::JournalError};
+    match error {
+        ActorError::Journal(JournalError::Refused(
+            why @ (Refusal::Moved(_) | Refusal::AlreadyMoved(_)),
+        )) => Unavailable::move_refusal(why.clone()),
+        _ => Unavailable::new(error.to_string()),
+    }
 }
 
 impl Drop for Worker {
@@ -1622,6 +1679,7 @@ impl Worker {
             let goals_due = self
                 .actor
                 .as_ref()
+                .filter(|actor| actor.moved().is_none())
                 .and_then(|actor| actor.goals().next_due())
                 .filter(|due| *due > self.goals_looked_at)
                 .map(|due| {
@@ -2483,6 +2541,7 @@ impl Worker {
             &ask,
             Ask::Stop { .. }
                 | Ask::Hold { .. }
+                | Ask::SetMove { to: Some(_), .. }
                 | Ask::Withdraw { .. }
                 | Ask::Reword { .. }
                 | Ask::SendNow { .. }
@@ -2516,6 +2575,22 @@ impl Worker {
             }
         }
         let ask = match ask {
+            Ask::OpenTerminal { answer } => {
+                if let Some(actor) = self.actor.as_ref()
+                    && let Err(why) = actor.require_here()
+                {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
+                let result = self.terminal(true);
+                let _ = answer.send(
+                    result
+                        .as_ref()
+                        .map(|_| TerminalLease(self.tx.clone()))
+                        .map_err(unavailable),
+                );
+                return result;
+            }
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::TakePlans {
                 source,
@@ -2651,6 +2726,53 @@ impl Worker {
             ));
         }
         let (out, owed) = match ask {
+            Ask::SetMove { to, answer } => {
+                let held = self
+                    .held
+                    .as_ref()
+                    .or(self.behind_terminal.as_ref())
+                    .map(|order| order.turn);
+                let was_moved = actor.moved().is_some();
+                let (receipt, out) = match actor.set_move(to, held, now) {
+                    Ok(done) => done,
+                    Err(error) => {
+                        let refusal = unavailable(&error);
+                        let expected = refusal.1.is_some();
+                        let _ = answer.send(Err(refusal));
+                        return if expected { Ok(()) } else { Err(error) };
+                    }
+                };
+                if receipt.changed && !was_moved {
+                    self.behind_terminal = None;
+                }
+                self.after(out);
+                if receipt.changed {
+                    self.setup
+                        .hub
+                        .publish(wire::roster("agent-moved", &self.setup.record.session), now);
+                    if receipt.moved.is_none() {
+                        self.settle_requests()?;
+                    }
+                }
+                let _ = answer.send(Ok(receipt));
+                return Ok(());
+            }
+            Ask::LaunchPermit {
+                turn,
+                attempt,
+                answer,
+            } => {
+                if !actor.launch_pending(turn, attempt) {
+                    let _ = answer.send(false);
+                } else if actor.moved().is_some() {
+                    let held = actor.refuse_moved_launch(turn, now)?;
+                    self.after(held);
+                    let _ = answer.send(false);
+                } else {
+                    let _ = answer.send(true);
+                }
+                return Ok(());
+            }
             Ask::Send {
                 message,
                 admission,
@@ -2658,6 +2780,10 @@ impl Worker {
                 marks,
                 answer,
             } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
                 let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
                     .map(|sent| match sent {
@@ -2792,15 +2918,29 @@ impl Worker {
             }
             // The mailbox alone: the agent's goals stay as they are, and wait with it.
             Ask::Hold { answer } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
                 answered(actor.stop("move", now).map(|(_, out)| ((), out)), answer)?
             }
             Ask::Resume { by, answer } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
                 let resumed = actor.resume(&by, now);
                 self.let_go_by_hand = true;
                 let queue = actor.queue_state();
                 answered(resumed.map(|(held, out)| ((held, queue), out)), answer)?
             }
-            Ask::StartAgain { answer } => answered(actor.start_again(now), answer)?,
+            Ask::StartAgain { answer } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
+                answered(actor.start_again(now), answer)?
+            }
             Ask::Queue { answer } => {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
@@ -2936,7 +3076,13 @@ impl Worker {
                 let queue = actor.queue_state();
                 answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
             }
-            Ask::SendNow { turn, by, answer } => answered(actor.send_now(turn, &by, now), answer)?,
+            Ask::SendNow { turn, by, answer } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
+                answered(actor.send_now(turn, &by, now), answer)?
+            }
             Ask::Reword { turn, text, answer } => {
                 let item = actor.queue_item(turn)?;
                 let reworded = actor.reword(turn, &text, now);
@@ -3136,6 +3282,7 @@ impl Worker {
             Ask::Artifact { .. }
             | Ask::Goal { .. }
             | Ask::Amended { .. }
+            | Ask::OpenTerminal { .. }
             | Ask::Terminal { .. }
             | Ask::VisitProvider(_)
             | Ask::TakeLibrary { .. }
@@ -3195,6 +3342,10 @@ impl Worker {
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::TerminalFacts { answer } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
                 let profile = actor.profile();
                 // A turn of the agent is told the agent's name and where its tools find
                 // their Host: so is its tool in a terminal.
@@ -3264,6 +3415,11 @@ impl Worker {
         };
         // What follows from a command is done and published before its answer is given.
         self.after(out);
+        if let Some(actor) = self.actor.as_mut()
+            && let Some(held) = actor.settle_moved_wait(now)?
+        {
+            self.after(held);
+        }
         owed();
         Ok(())
     }
@@ -3560,6 +3716,9 @@ impl Worker {
                                     );
                                     return;
                                 }
+                                if !launch_permitted(&tx, turn, attempt) {
+                                    return;
+                                }
                                 match launcher.launch(&order) {
                                     Launched::NoShim(reason) => {
                                         if !opening_gate.ask(Phase::ReleaseUnsent, opening, attempt)
@@ -3596,7 +3755,10 @@ impl Worker {
                                 }
                             }
                         }
-                        launcher.launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told))
+                        if launch_permitted(&tx, turn, attempt) {
+                            launcher
+                                .launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told));
+                        }
                     })
             }
             Action::Follow {
@@ -3658,6 +3820,9 @@ impl Worker {
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
+        if actor.moved().is_some() {
+            return Ok(());
+        }
         let watched: Vec<String> = actor
             .goals()
             .watched()
@@ -4387,6 +4552,17 @@ fn tell_work(
     hub.publish(activity, now);
 }
 
+fn launch_permitted(tx: &mpsc::Sender<Ask>, turn: TurnId, attempt: u32) -> bool {
+    let (answer, permit) = mpsc::sync_channel(1);
+    tx.send(Ask::LaunchPermit {
+        turn,
+        attempt,
+        answer,
+    })
+    .is_ok()
+        && permit.recv().unwrap_or(false)
+}
+
 fn answered<T: Send + 'static>(
     result: Result<(T, Outputs), ActorError>,
     answer: Answer<T>,
@@ -4429,8 +4605,10 @@ fn refuse_for(
 ) -> bool {
     let until = Instant::now() + wait;
     loop {
-        let refusal = || Unavailable(format!("the agent cannot be opened: {why}"));
+        let refusal = || Unavailable::new(format!("the agent cannot be opened: {why}"));
         match rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
+            Ok(Ask::SetMove { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::LaunchPermit { answer, .. }) => drop(answer.send(false)),
             Ok(Ask::Send { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::LeaveNote { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
@@ -4463,6 +4641,7 @@ fn refuse_for(
             Ok(Ask::TakeLibrary { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::OpenTerminal { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobRecord { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Bookkeeping { answer, .. }) => drop(answer.send(Err(refusal()))),
@@ -4568,10 +4747,10 @@ mod mailbox_tests {
         let (agent, rx) = agent_mailbox();
         let original = agent.clone();
         let answer = agent.keep_removal(|| {
-            assert!(matches!(original.enqueue(Ask::LoginChanged), Err(Unavailable(why)) if why == REMOVING));
-            Err(Unavailable("storage failed".into()))
+            assert!(matches!(original.enqueue(Ask::LoginChanged), Err(Unavailable(why, _)) if why == REMOVING));
+            Err(Unavailable::new("storage failed".into()))
         });
-        assert!(matches!(answer, Err(Unavailable(why)) if why == "storage failed"));
+        assert!(matches!(answer, Err(Unavailable(why, _)) if why == "storage failed"));
         original.enqueue(Ask::LoginChanged).unwrap();
         assert!(matches!(rx.try_recv(), Ok(Ask::LoginChanged)));
         assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));

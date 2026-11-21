@@ -75,7 +75,7 @@ impl Fleet {
             )));
         }
 
-        let failed = |err: serde_json::Error| Unavailable(err.to_string());
+        let failed = |err: serde_json::Error| Unavailable::new(err.to_string());
         let mut written = Vec::new();
         let mut refused = Vec::new();
         let mut writes = Vec::new();
@@ -96,7 +96,7 @@ impl Fleet {
                 let id = row["agent_id"].as_str().unwrap_or("");
                 let mut record = self
                     .stored_agent(id)?
-                    .ok_or_else(|| Unavailable("agent missing during migration".into()))?;
+                    .ok_or_else(|| Unavailable::new("agent missing during migration".into()))?;
                 record.voice_id = voice.into();
                 writes.push((
                     AGENTS.into(),
@@ -150,7 +150,7 @@ impl Fleet {
         if !writes.is_empty() {
             self.store
                 .put_together(&writes)
-                .map_err(|err| Unavailable(err.to_string()))?;
+                .map_err(|err| Unavailable::new(err.to_string()))?;
             self.settings.extend(settings);
             self.book = Arc::new(book);
             for record in changed {
