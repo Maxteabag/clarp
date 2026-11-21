@@ -201,52 +201,6 @@ async fn no_oracle(uri: Uri) -> ApiError {
     not_built_at(&uri, "The Oracle is")
 }
 
-// ---- the tools' logins and what they use ------------------------------------------------------
-
-/// `GET /backend-auth` (`?harnesses=all` for an app that lists every harness): whether each
-/// tool this Host runs is installed and has a login, read off the file the tool keeps it in.
-async fn logins(State(app): State<App>, Query(asked): Asked) -> Answered {
-    let every = asked.get("harnesses").is_some_and(|said| said == "all");
-    let now = app.clock.now_ms();
-    let read = move || {
-        let home = crate::config::home();
-        let mut told = crate::logins::told(&home, every, now);
-        if app.config.ask_usage
-            && let Some(rows) = told["backends"].as_array_mut()
-        {
-            for row in rows.iter_mut() {
-                if row["state"] == "unverified"
-                    && row["id"]
-                        .as_str()
-                        .is_some_and(|tool| app.limits.login_verified(tool, &home, now))
-                {
-                    row["state"] = json!("valid");
-                    row["logged_in"] = json!(true);
-                }
-            }
-        }
-        told
-    };
-    let told = tokio::task::spawn_blocking(read).await;
-    let mut told = told.map_err(|_| {
-        ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "the logins could not be read",
-        )
-    })?;
-    if let Some(row) = told["backends"].as_array_mut().and_then(|rows| {
-        rows.iter_mut()
-            .find(|row| row["id"] == "grok" && row["installed"] == true)
-    }) {
-        crate::logins::probe_grok(row).await;
-    }
-    Ok(Json(told))
-}
-
-async fn no_logins(uri: Uri) -> ApiError {
-    not_built_at(&uri, "Signing a tool in or out from an app is")
-}
-
 // ---- the Host's own software and the skills of its agents' tools -----------------------------
 
 /// `GET /server-update`: who this Host is and whether a newer one is to be had. It is: who
@@ -277,39 +231,6 @@ async fn no_update() -> ApiError {
     not_built("Updating this Host from an app is")
 }
 
-/// `GET /managed-skills`: the skills this Host keeps installed for its agents' tools. It
-/// keeps none: the skills a tool finds on this machine are whoever's put them there.
-async fn skills() -> Json<Value> {
-    Json(json!({ "skills": [] }))
-}
-
-async fn no_skills() -> ApiError {
-    not_built("Keeping skills installed is")
-}
-
-/// `GET /harness-providers?harness=`: the providers of models a harness can be signed in
-/// to. This Host runs no harness that takes one: none is installed, none is listed.
-async fn model_providers(Query(asked): Asked) -> Json<Value> {
-    let harness = match asked.get("harness").map(|said| said.trim()) {
-        Some(named) if !named.is_empty() => named,
-        _ => "opencode",
-    };
-    Json(json!({
-        "catalogue_available": false, "harness": harness, "installed": false,
-        "providers": [], "store_harness": harness, "tasks": {},
-    }))
-}
-
-/// `GET /harness-providers/models?provider=`: no provider is known here.
-async fn models_of_provider(Query(asked): Asked) -> ApiError {
-    let provider = asked.get("provider").map_or("", |said| said.trim());
-    bad(&format!("unknown provider {provider}"))
-}
-
-async fn no_model_providers(uri: Uri) -> ApiError {
-    not_built_at(&uri, "Signing a harness in to a provider of models is")
-}
-
 /// What an app can ask to have done to an agent that this Host cannot do yet: servers of
 /// its own for its tool.
 async fn no_servers() -> ApiError {
@@ -322,15 +243,15 @@ async fn no_teams() -> ApiError {
 
 pub fn routes() -> Router<App> {
     Router::new()
-        .route("/harness-providers", get(model_providers))
-        .route("/harness-providers/models", get(models_of_provider))
-        .route("/harness-providers/{action}", post(no_model_providers))
+        .merge(crate::harness_providers::routes())
         .route("/agent-mcp", post(no_servers))
         .route("/team-nudging", post(no_teams))
         .route("/server-update", get(software).post(no_update))
-        .route("/managed-skills", get(skills).post(no_skills))
-        .route("/backend-auth", get(logins))
-        .route("/backend-auth/{action}", post(no_logins))
+        .route("/backend-auth", get(crate::logins::sign_in::read))
+        .route(
+            "/backend-auth/{action}",
+            post(crate::logins::sign_in::change),
+        )
         .route("/agent-dreaming", post(set_dreaming))
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))
         .route("/agent-goal/{action}", post(no_agent_goal))

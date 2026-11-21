@@ -187,13 +187,40 @@ fn host(raw: &str) -> Option<String> {
     raw.split('.').all(label).then(|| raw.to_string())
 }
 
-/// Whether a path, as it was given, has a segment that is a single or a double dot, each dot
-/// raw or percent-encoded in either case of its hex (R139): such a path can climb out of a
-/// prefix's path, and is refused before anything is resolved.
+/// Whether a path, read as a server might read it, has a segment `.` or `..` (R139, the
+/// Python Host's `_dot_segment`): the encoded dot, slash and backslash decoded once, in either
+/// case (never twice, so an encoded `%` stays what it is), a backslash read as a slash, and each
+/// segment cut at its first `;` (a server that drops a segment's parameters before resolving
+/// reads `..;x` as `..`). Only the test reads it so: what is sent is the path as given.
 pub fn dot_segment(path: &str) -> bool {
-    path.split('/').any(|segment| {
-        let dots = segment.replace("%2e", ".").replace("%2E", ".");
-        dots == "." || dots == ".."
+    let mut read = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some(at) = rest.find('%') {
+        read.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let decoded = after
+            .get(..2)
+            .and_then(|hex| match hex.to_ascii_lowercase().as_str() {
+                "2e" => Some('.'),
+                "2f" => Some('/'),
+                "5c" => Some('\\'),
+                _ => None,
+            });
+        match decoded {
+            Some(sign) => {
+                read.push(sign);
+                rest = &after[2..];
+            }
+            None => {
+                read.push('%');
+                rest = after;
+            }
+        }
+    }
+    read.push_str(rest);
+    read.replace('\\', "/").split('/').any(|segment| {
+        let segment = segment.split(';').next().unwrap_or_default();
+        segment == "." || segment == ".."
     })
 }
 
@@ -204,11 +231,12 @@ pub fn destination(url: &str) -> Option<Destination> {
     if url
         .chars()
         .any(|sign| python_space(sign) || u32::from(sign) < 32)
+        || url.contains('\\')
     {
         return None;
     }
     let (scheme, netloc, path, query) = split(url)?;
-    // R139 (the release owner's PR to come, taken here before it): a path with a dot segment.
+    // R139: a path with a dot segment, read as a server might read it.
     if dot_segment(&path) {
         return None;
     }
@@ -233,6 +261,11 @@ pub fn destination(url: &str) -> Option<Destination> {
     };
     let own = SCHEMES.iter().find(|(known, _)| *known == scheme)?.1;
     if netloc.contains('@') || hostname.is_empty() {
+        return None;
+    }
+    // Brackets around a name (the grammar's address of a version to come): only an address of
+    // IPv6 has its brackets.
+    if (netloc.contains('[') || netloc.contains(']')) && !hostname.contains(':') {
         return None;
     }
     let host = host(&hostname.to_lowercase())?;
@@ -288,6 +321,15 @@ mod tests {
             "/..",
             "/.",
             "/api/sub/../one",
+            "/api/%2e./x",
+            "/api/x/./",
+            "/api/..;x/y",
+            "/api/.;x/y",
+            "/api/%2e%2e;x/y",
+            "/api/a%2F..%2Fb",
+            "/api/a%2f..%2fb",
+            "/api/a%5C..%5Cb",
+            "/api/a%5c%2e%2e%5cb",
         ] {
             assert!(dot_segment(path), "{path}");
             let url = format!("https://service.invalid{path}");
@@ -296,19 +338,42 @@ mod tests {
             let under = [prefix("https://service.invalid/api").unwrap()];
             assert_eq!(allowed(&url, &under), None, "{url}");
         }
-        // Dots that make no segment of their own, and an encoded slash, are a path like any
-        // other; a dot segment in the query is no part of the path.
+        // Dots that make no segment of their own, an encoded slash with no dot segment beside
+        // it, what is encoded twice (decoded once, it is no dot), a parameter that follows no
+        // dot: a path like any other, sent byte for byte.
         for path in [
             "/api/..x",
             "/api/x..",
             "/api/...",
             "/api/%2e%2ex",
             "/api/x.y",
+            "/api/.well-known",
+            "/api/%2e%2e%2e",
+            "/api/a%2Fb",
+            "/api/%252e%252e/x",
+            "/api/a%252F..%252Fb",
+            "/api/report;v=2",
         ] {
             assert!(!dot_segment(path), "{path}");
             let url = format!("https://service.invalid{path}");
             assert!(destination(&url).is_some(), "{url}");
+            let under = [prefix("https://service.invalid/api").unwrap()];
+            assert_eq!(allowed(&url, &under), Some(url.clone()), "{url}");
         }
+        // A raw backslash anywhere, before anything is split; brackets around a name.
+        for url in [
+            "https://service.invalid/api/a\\b",
+            "https://service.invalid/api/a\\..\\b",
+            "https://service.invalid/api/x?a=\\",
+            "http://[v1.service.invalid]/x",
+        ] {
+            assert_eq!(destination(url), None, "{url}");
+            assert_eq!(prefix(url), None, "{url}");
+        }
+        assert!(
+            destination("http://[::1]:9/x").is_some(),
+            "an IPv6 address is a host"
+        );
         assert!(destination("https://service.invalid/api?x=/../y").is_some());
         assert_eq!(
             allowed("http://127.0.0.1:8123/a/../b", &[]),

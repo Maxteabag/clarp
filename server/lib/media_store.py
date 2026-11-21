@@ -1,6 +1,7 @@
 """SQLite-indexed media assets published by agents for chat/gallery display."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import mimetypes
@@ -31,6 +32,24 @@ TEXT_FILE_MIME = {"text/plain", "text/csv", "text/markdown"}
 # Hosts without a system mime table cannot guess these from the name.
 _MARKDOWN_EXTENSIONS = {".md", ".markdown"}
 SAFE_MEDIA_MIME = SAFE_IMAGE_MIME | SAFE_FILE_MIME
+
+
+@contextlib.contextmanager
+def _write_lock():
+    """The database write lock for a block: its own BEGIN IMMEDIATE ... COMMIT, or, inside a
+    caller's open transaction (a podcast image is published inside one), that transaction,
+    which already holds the lock and commits or rolls back with the caller."""
+    con = db.conn()
+    if con.in_transaction:
+        yield con
+        return
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        yield con
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    con.execute("COMMIT")
 
 
 class MediaError(ValueError):
@@ -68,8 +87,6 @@ def publish(
     blob_dir = media_dir / "blobs" / sha[:2]
     blob_dir.mkdir(parents=True, exist_ok=True)
     storage_path = blob_dir / f"{sha}{ext}"
-    if not storage_path.exists():
-        storage_path.write_bytes(blob)
 
     width, height = _image_size(blob, mime)
     asset_id = "asset_" + secrets.token_urlsafe(18).replace("-", "_")
@@ -89,20 +106,28 @@ def publish(
         "created_by": created_by.strip()[:80] or "agent",
         "created_at": now,
         "deleted_at": None,
+        "favorite_at": None,
     }
-    db.conn().execute(
-        """INSERT INTO media_assets (
-               asset_id, agent_id, session, source_name, sha256, mime_type,
-               bytes, width, height, storage_path, caption, created_by,
-               created_at, deleted_at
-           ) VALUES (
-               :asset_id, :agent_id, :session, :source_name, :sha256,
-               :mime_type, :bytes, :width, :height, :storage_path, :caption,
-               :created_by, :created_at, :deleted_at
-           )""",
-        row,
-    )
-    return _public_row(row)
+    # The file is checked and written under the same write lock as the row, and a delete
+    # releases a shared file under that lock too (release_blob): a publish of the same
+    # bytes either commits its row first, so the delete keeps the file, or finds the file
+    # gone and writes it again. Never a row whose file a concurrent delete removed.
+    with _write_lock() as con:
+        if not storage_path.exists():
+            storage_path.write_bytes(blob)
+        con.execute(
+            """INSERT INTO media_assets (
+                   asset_id, agent_id, session, source_name, sha256, mime_type,
+                   bytes, width, height, storage_path, caption, created_by,
+                   created_at, deleted_at
+               ) VALUES (
+                   :asset_id, :agent_id, :session, :source_name, :sha256,
+                   :mime_type, :bytes, :width, :height, :storage_path, :caption,
+                   :created_by, :created_at, :deleted_at
+               )""",
+            row,
+        )
+    return _public_row(row, used_as=_used_as([row]).get(asset_id, []))
 
 
 def get(asset_id: str) -> dict[str, Any] | None:
@@ -114,29 +139,281 @@ def get(asset_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def lookup(asset_id: str) -> dict[str, Any] | None:
+    """The asset's row, a deleted one included (``get`` leaves deleted rows out)."""
+    row = db.conn().execute(
+        "SELECT * FROM media_assets WHERE asset_id = ?", (asset_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def is_image(row: dict[str, Any]) -> bool:
+    return row.get("mime_type") in SAFE_IMAGE_MIME
+
+
+_IMAGE_MIMES = tuple(sorted(SAFE_IMAGE_MIME))
+_IMAGE_IN = ",".join("?" for _ in _IMAGE_MIMES)
+
+
 def list_for_session(session: str, limit: int = 100) -> list[dict[str, Any]]:
+    return list_page(session, limit=limit)["assets"]
+
+
+def list_page(session: str, *, limit: int = 100, before: str = "",
+              favorites: bool = False) -> dict[str, Any]:
+    """One page of a chat's images (not deleted), newest first, with the totals.
+
+    Without ``favorites``: by ``created_at`` then ``asset_id``, both descending, walking
+    ``idx_media_assets_session_page`` from the cursor. With it: favourites only, by
+    ``favorite_at`` then ``asset_id``, walking ``idx_media_assets_session_favorite``.
+    ``before`` is the ``next_before`` of the previous page; it names the last row shown,
+    so a row added or deleted meanwhile neither repeats nor skips one. One page reads
+    ``limit + 1`` rows and the portraits of its chat once (``used_as``).
+    Raises MediaError (400) for a cursor this function did not write.
+    """
     limit = max(1, min(int(limit or 100), 500))
-    image_mimes = sorted(SAFE_IMAGE_MIME)
-    placeholders = ",".join("?" for _ in image_mimes)
-    rows = db.conn().execute(
-        f"""SELECT * FROM media_assets
-            WHERE session = ? AND deleted_at IS NULL
-              AND mime_type IN ({placeholders})
-            ORDER BY created_at DESC
-            LIMIT ?""",
-        (session, *image_mimes, limit),
+    key = "favorite_at" if favorites else "created_at"
+    clauses = ["session = ?", "deleted_at IS NULL", f"mime_type IN ({_IMAGE_IN})"]
+    params: list[Any] = [session, *_IMAGE_MIMES]
+    if favorites:
+        clauses.append("favorite_at IS NOT NULL")
+    if before:
+        at, asset_id = _read_cursor(before, favorites)
+        # A row value, never "a < ? OR (a = ? AND b < ?)": with the OR the planner seeks only
+        # the chat and walks it from the top to the cursor (7 ms at row 49,800 of 50,000);
+        # the row value seeks the cursor itself (0.2 ms at any depth).
+        clauses.append(f"({key}, asset_id) < (?, ?)")
+        params += [at, asset_id]
+    con = db.conn()
+    rows = [dict(r) for r in con.execute(
+        f"""SELECT * FROM media_assets WHERE {' AND '.join(clauses)}
+            ORDER BY {key} DESC, asset_id DESC LIMIT ?""",
+        (*params, limit + 1),
+    ).fetchall()]
+    more = len(rows) > limit
+    rows = rows[:limit]
+    used = _used_as(rows)
+    total = con.execute(
+        f"""SELECT COUNT(*) FROM media_assets
+             WHERE session = ? AND deleted_at IS NULL AND mime_type IN ({_IMAGE_IN})""",
+        (session, *_IMAGE_MIMES),
+    ).fetchone()[0]
+    # Only an image can be marked, so the favourites index alone answers this.
+    favorites_total = con.execute(
+        """SELECT COUNT(*) FROM media_assets
+             WHERE session = ? AND deleted_at IS NULL AND favorite_at IS NOT NULL""",
+        (session,),
+    ).fetchone()[0]
+    return {
+        "assets": [_public_row(r, used_as=used.get(r["asset_id"], [])) for r in rows],
+        "next_before": _cursor(rows[-1], favorites) if more else None,
+        "total": int(total),
+        "favorites_total": int(favorites_total),
+    }
+
+
+def deleted_since(*, since: int, session: str = "", limit: int = 1000) -> dict[str, Any]:
+    """The images deleted strictly after ``since`` (ms), oldest first (ties by ``asset_id``),
+    every chat or one: ``{"deleted": [{asset_id, session, deleted_at}], "next_since",
+    "server_now"}`` (contract 489, section 3b, the exact paging rule).
+
+    A page never ends inside a millisecond: when the limit falls among images deleted in the
+    same millisecond, the page takes all of that millisecond, past the limit. ``next_since`` is
+    then the ``deleted_at`` of the page's last image when more remain, else None, so asking
+    again with it never repeats an image, never skips one and always advances.
+
+    The read holds the write lock and ``server_now`` is the millisecond before the one it was
+    taken in: a delete still committing waits until it is visible here, and every later delete
+    is stamped at or after that millisecond, so strictly after ``server_now``. Asking again with
+    ``since=server_now`` misses nothing (an image deleted in the millisecond of the read may
+    come twice). Reads ``idx_media_assets_deleted`` or, for one chat,
+    ``idx_media_assets_session_deleted`` alone (both cover the columns read)."""
+    limit = max(1, min(int(limit or 1000), 1000))
+    clauses = ["deleted_at IS NOT NULL", f"mime_type IN ({_IMAGE_IN})"]
+    params: list[Any] = [*_IMAGE_MIMES]
+    if session:
+        clauses.insert(0, "session = ?")
+        params.insert(0, session)
+    where = " AND ".join(clauses)
+    columns = "asset_id, session, deleted_at"
+    with _write_lock() as con:
+        server_now = db.now_ms() - 1
+        rows = [dict(r) for r in con.execute(
+            f"""SELECT {columns} FROM media_assets WHERE {where} AND deleted_at > ?
+                ORDER BY deleted_at, asset_id LIMIT ?""",
+            (*params, int(since), limit + 1)).fetchall()]
+        next_since = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            rows = rows[:limit]
+            # The rest of the last millisecond, past the limit.
+            rows += [dict(r) for r in con.execute(
+                f"""SELECT {columns} FROM media_assets
+                     WHERE {where} AND deleted_at = ? AND asset_id > ?
+                     ORDER BY deleted_at, asset_id""",
+                (*params, last["deleted_at"], last["asset_id"])).fetchall()]
+            more = con.execute(
+                f"SELECT 1 FROM media_assets WHERE {where} AND deleted_at > ? LIMIT 1",
+                (*params, last["deleted_at"])).fetchone()
+            next_since = last["deleted_at"] if more else None
+    return {"deleted": rows, "next_since": next_since, "server_now": server_now}
+
+
+def _cursor(row: dict[str, Any], favorites: bool) -> str:
+    at = row["favorite_at"] if favorites else row["created_at"]
+    return f"{'f' if favorites else 'c'}{int(at)}.{row['asset_id']}"
+
+
+def _read_cursor(raw: str, favorites: bool) -> tuple[int, str]:
+    raw = (raw or "").strip()
+    tag, (at, dot, asset_id) = raw[:1], raw[1:].partition(".")
+    if tag != ("f" if favorites else "c") or not dot or not at.isdigit() \
+            or not asset_id or len(asset_id) > 180 \
+            or not all(c.isalnum() or c in "_-" for c in asset_id):
+        raise MediaError("bad before")
+    return int(at), asset_id
+
+
+def _used_as(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """``{asset_id: [{"kind": "portrait", "agent_id", "persona"}, ...]}`` for rows that a
+    live portrait holds: made from that asset, or the very same file. One query for all the
+    rows, through ``idx_agent_portraits_agent_created`` (at most three live portraits per
+    agent; a portrait is only ever made from its own agent's image)."""
+    agent_ids = sorted({str(r["agent_id"]) for r in rows})
+    if not agent_ids:
+        return {}
+    marks = ",".join("?" for _ in agent_ids)
+    portraits = db.conn().execute(
+        f"""SELECT p.agent_id, p.media_asset_id, p.storage_path,
+                   (SELECT a.persona FROM agents a WHERE a.agent_id = p.agent_id) AS persona
+              FROM agent_portraits p
+             WHERE p.agent_id IN ({marks}) AND p.deleted_at IS NULL""",
+        agent_ids,
     ).fetchall()
-    return [_public_row(dict(r)) for r in rows]
+    portraits = sorted(portraits, key=lambda p: p["agent_id"])  # at most three per agent
+    used: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        seen: set[str] = set()
+        for portrait in portraits:
+            if portrait["agent_id"] != row["agent_id"] or portrait["agent_id"] in seen:
+                continue
+            if portrait["media_asset_id"] == row["asset_id"] \
+                    or portrait["storage_path"] == row["storage_path"]:
+                seen.add(portrait["agent_id"])
+                used.setdefault(row["asset_id"], []).append({
+                    "kind": "portrait", "agent_id": portrait["agent_id"],
+                    "persona": portrait["persona"]})
+    return used
+
+
+def set_favorite(asset_id: str, favorite: bool) -> tuple[dict[str, Any], dict[str, Any], int | None]:
+    """Mark or unmark an image. Returns (its public row, its row, the ms of the change or
+    None when nothing changed): setting what is already set keeps ``favorite_at``.
+    Raises MediaError: 404 unknown, 410 deleted (``deleted_at`` on the error), 422 not an image."""
+    with _write_lock() as con:
+        row = _writable(con, asset_id)
+        changed_at = None
+        if (row["favorite_at"] is None) == bool(favorite):
+            changed_at = db.now_ms()
+            row["favorite_at"] = changed_at if favorite else None
+            con.execute("UPDATE media_assets SET favorite_at = ? WHERE asset_id = ?",
+                        (row["favorite_at"], asset_id))
+    return _public_row(row, used_as=_used_as([row]).get(asset_id, [])), row, changed_at
+
+
+class Removed(MediaError):
+    def __init__(self, row: dict[str, Any]):
+        super().__init__("removed", status=410)
+        self.row = row
+
+
+def _writable(con, asset_id: str) -> dict[str, Any]:
+    row = con.execute("SELECT * FROM media_assets WHERE asset_id = ?",
+                      (asset_id,)).fetchone()
+    if not row:
+        raise MediaError("not_found", status=404)
+    row = dict(row)
+    if not is_image(row):
+        raise MediaError("not_an_image", status=422)
+    if row["deleted_at"] is not None:
+        raise Removed(row)
+    return row
+
+
+def delete(asset_id: str, *, deleted_by: str) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """Delete an image: (the answer, its row, whether this call deleted it).
+
+    Order: the row is marked deleted and committed first, then its file is released
+    (``release_blob``). A crash between the two leaves a deleted row and its file on disk,
+    never a row that says the image is there without its file; the next delete of the same
+    id (safe to repeat, it answers the first ``deleted_at``) releases the file again.
+    Raises MediaError: 404 unknown, 422 not an image."""
+    with _write_lock() as con:
+        row = con.execute("SELECT * FROM media_assets WHERE asset_id = ?",
+                          (asset_id,)).fetchone()
+        if not row:
+            raise MediaError("not_found", status=404)
+        row = dict(row)
+        if not is_image(row):
+            raise MediaError("not_an_image", status=422)
+        changed = row["deleted_at"] is None
+        if changed:
+            row["deleted_at"], row["deleted_by"] = db.now_ms(), (deleted_by or "")[:120]
+            con.execute(
+                """UPDATE media_assets SET deleted_at = ?, deleted_by = ?
+                    WHERE asset_id = ? AND deleted_at IS NULL""",
+                (row["deleted_at"], row["deleted_by"], asset_id))
+    release_blob(row["storage_path"], row["sha256"])
+    answer = {"asset_id": asset_id, "deleted": True, "deleted_at": row["deleted_at"],
+              "still_used_as": _used_as([row]).get(asset_id, [])}
+    return answer, row, changed
+
+
+def release_blob(raw_path: str, sha256: str) -> bool:
+    """Remove a media blob file that only deleted assets name. Returns whether it did.
+
+    The file stays while anything still uses it: an asset that is not deleted, a live
+    portrait, an agent's or a contact's avatar (a portrait made from an image holds the
+    very same file). Only a file some deleted asset names is ever removed, so a portrait's
+    or an avatar's own file is never touched. The check and the unlink run under the write
+    lock, which a publish of the same bytes also takes (see ``publish``). The file's assets
+    are found by its content address (``idx_media_assets_sha``), never by walking the table;
+    portraits, agents and contacts are small tables."""
+    raw_path, sha256 = str(raw_path or ""), str(sha256 or "")
+    if not raw_path or not sha256:
+        return False
+    with _write_lock() as con:
+        owned = con.execute(
+            """SELECT 1 FROM media_assets
+                WHERE sha256 = ? AND storage_path = ? AND deleted_at IS NOT NULL LIMIT 1""",
+            (sha256, raw_path)).fetchone()
+        used = con.execute(
+            """SELECT 1 FROM media_assets
+                WHERE sha256 = ? AND storage_path = ? AND deleted_at IS NULL
+               UNION ALL SELECT 1 FROM agent_portraits
+                 WHERE storage_path = ? AND deleted_at IS NULL
+               UNION ALL SELECT 1 FROM agents WHERE avatar_path = ?
+               UNION ALL SELECT 1 FROM personas WHERE avatar_path = ?
+               LIMIT 1""",
+            (sha256, raw_path, raw_path, raw_path, raw_path)).fetchone()
+        removed = False
+        if owned and not used:
+            try:
+                pathlib.Path(raw_path).unlink()
+                removed = True
+            except FileNotFoundError:
+                pass
+    return removed
 
 
 def to_response(row: dict[str, Any]) -> dict[str, Any]:
-    return _public_row(row)
+    return _public_row(row, used_as=_used_as([row]).get(row["asset_id"], []))
 
 
-def _public_row(row: dict[str, Any]) -> dict[str, Any]:
+def _public_row(row: dict[str, Any], *, used_as: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     asset_id = row["asset_id"]
     caption = row.get("caption") or row.get("source_name") or "file"
     is_image = row["mime_type"] in SAFE_IMAGE_MIME
+    favorite_at = row.get("favorite_at")
     return {
         "asset_id": asset_id,
         "session": row["session"],
@@ -154,6 +431,9 @@ def _public_row(row: dict[str, Any]) -> dict[str, Any]:
         "uri": f"clarp-media://asset/{asset_id}",
         "markdown": (f"![{_markdown_alt(caption)}](clarp-media://asset/{asset_id})"
                      if is_image else ""),
+        "favorite": favorite_at is not None,
+        "favorite_at": favorite_at,
+        "used_as": list(used_as or []),
     }
 
 
