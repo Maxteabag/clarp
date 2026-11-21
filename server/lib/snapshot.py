@@ -434,12 +434,14 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         call_profiles = agent_ring_live.user_call_profiles(strict=False)
     except agent_ring_live.CallError:
         call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
-    agent_rows = agents_db.list_agents()
+    agent_rows = agents_db.list_agents(with_moves=True)
     # The user's last compaction of each agent and what it did (R148).
     last_compactions = compaction.last_outcomes([str(r["agent_id"]) for r in agent_rows])
-    # Agents that moved to another Host (lib.agent_moves): {to: {host, id}, at} or None.
+    # Agents that moved to another Host (lib.agent_moves): {to: {host, id}, at} or None,
+    # read with the roster in its one statement (list_agents(with_moves=True)).
     from . import agent_moves
-    moves = agent_moves.all_moved()
+    moves = {str(r["agent_id"]): agent_moves.from_row(r) for r in agent_rows
+             if r.get("moved_to_host")}
     persona_rows = persona_store.list_all()
     personas_by_key = {
         str(row["name"]).strip().casefold(): row
