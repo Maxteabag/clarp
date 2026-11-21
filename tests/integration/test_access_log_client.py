@@ -52,3 +52,30 @@ def test_an_agent_and_a_peer_are_named_as_such(running_server, capfd):
     _get(base, {"X-Clarp-Peer": "some-peer"})
     lines = _access_lines(capfd)
     assert lines and lines[-1].endswith(" - peer"), lines
+
+
+def test_a_token_in_the_path_is_redacted_also_when_the_path_is_malformed(running_server, capfd):
+    """A token sent in the query, well formed or malformed (a second '?', or '&'
+    with no '?'), never reaches the access line."""
+    import http.client
+    import urllib.parse
+    base, ctx, srv = running_server
+    srv.ctx = ctx.with_(auth_token=ADMIN)
+    port = urllib.parse.urlsplit(base).port
+    paths = [f"/agents/snapshot?token={ADMIN}",                 # well formed
+             f"/agents/snapshot?x=1?token={ADMIN}",             # a second '?'
+             f"/agents/snapshot&token={ADMIN}",                 # '&' with no '?'
+             f"/agents/snapshot&x=1&token={ADMIN}&y=2"]
+    capfd.readouterr()
+    for path in paths:
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        connection.request("GET", path)
+        connection.getresponse().read()
+        connection.close()
+    time.sleep(0.05)
+    out = capfd.readouterr().out
+    lines = [line for line in out.splitlines() if '"GET /agents/snapshot' in line]
+    assert len(lines) == len(paths), out
+    for line in lines:
+        assert ADMIN not in line, line
+        assert "token=REDACTED" in line, line
