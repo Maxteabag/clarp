@@ -49,7 +49,7 @@ rules(KERNEL, 'vectors', [
     ('ElevenLabs reports a missing key as no voice', 'ELEVENLABS if !keyed => Some(NOT_CONFIGURED)', 'ELEVENLABS if !keyed => Some(NO_VOICE)'),
     ('ElevenLabs has no silence gate for an unusable id', '(!elevenlabs_id_usable(choice.voice.as_deref())).then_some(NO_VOICE)', 'None'),
     ('Google disregards a credential refusal', 'GOOGLE if view.google_refusal.is_some() => Some(NOT_CONFIGURED),', ''),
-    ('Google accepts an id off the allowlist', 'GOOGLE if !choice.voice.as_deref().is_some_and(voices::google_has) => Some(NO_VOICE),', ''),
+    ('Google accepts an id off the allowlist', 'GOOGLE if !choice.voice.as_deref().is_some_and(voices::google_has) => {\n            Some(VOICE_UNAVAILABLE)\n        }', ''),
     ('Google uses a voice even without a key', 'GOOGLE => (!keyed).then_some(NOT_CONFIGURED)', 'GOOGLE => None'),
     ('The Host-wide off switch loses to an agent override', 'view.voices.provider == "none" || route.provider == "none"', 'route.provider == "none"'),
     ('A silent primary never falls back', 'if primary.silent_reason.is_some()', 'if false && primary.silent_reason.is_some()'),
@@ -82,7 +82,7 @@ rules(KERNEL, 'vectors', [
     ('Partial speech is described as complete silence', 'if !partly {', 'if true {'),
     ('The fallback label for an unnamed provider is blank', '"The voice provider"', '""'),
     ('The fallback name for an unnamed agent is blank', '"this agent"', '""'),
-    ('Google maps a voice refusal to a configuration problem', '"voice_unavailable" => Some(NO_VOICE)', '"voice_unavailable" => Some(NOT_CONFIGURED)'),
+    ('Google maps a voice refusal to a configuration problem', '"voice_unavailable" => Some(VOICE_UNAVAILABLE)', '"voice_unavailable" => Some(NOT_CONFIGURED)'),
     ('Google quota sounds like a sign-in failure', 'Voice paused: Google Chirp 3 HD quota exceeded.', 'Voice unavailable: Google Chirp 3 HD sign-in failed.'),
 ])
 

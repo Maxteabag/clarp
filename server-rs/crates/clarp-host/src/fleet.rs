@@ -40,6 +40,7 @@ use crate::revisions::Revisions;
 use crate::wire;
 pub(crate) mod computer_jobs;
 pub(crate) mod portrait_jobs;
+mod voice_migration;
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
 pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
 
@@ -267,7 +268,7 @@ pub enum Amend {
     /// Whoever asks has seen to that.
     Tool(String),
     /// The voices it was given, as they are stored: one for each engine it has one for.
-    Voice(String),
+    Voice { provider: String, voice: String },
     /// How much it says while it works, from 0 to 3.
     Narration(i64),
     /// Whether it is a janitor: an agent is made one, and a janitor is let go.
@@ -396,6 +397,7 @@ pub struct ContactAsked {
 pub struct PersonaSaid {
     pub name: String,
     pub voice_id: String,
+    pub base_voice_id: Option<String>,
     pub avatar_symbol: String,
     pub personality: String,
     /// The picture it is given, in base64. Empty: none.
@@ -749,6 +751,11 @@ enum Ask {
     Set {
         settings: Vec<(String, String)>,
         answer: Answer<Result<(), Unavailable>>,
+    },
+    VoiceMigration {
+        view: Box<clarp_kernel::voice_profile::HostView>,
+        reviewed: Option<String>,
+        answer: Answer<Result<Result<serde_json::Value, String>, Unavailable>>,
     },
     /// Something small is left with the Host under a key, in the table of its kind, or
     /// taken away (`None`).
@@ -1249,6 +1256,19 @@ impl FleetHandle {
     /// returns, and after a restart.
     pub async fn set(&self, settings: Vec<(String, String)>) -> Result<(), Unavailable> {
         self.ask(|answer| Ask::Set { settings, answer }).await?
+    }
+
+    pub(crate) async fn migrate_voices(
+        &self,
+        view: clarp_kernel::voice_profile::HostView,
+        reviewed: Option<String>,
+    ) -> Result<Result<serde_json::Value, String>, Unavailable> {
+        self.ask(|answer| Ask::VoiceMigration {
+            view: Box::new(view),
+            reviewed,
+            answer,
+        })
+        .await?
     }
 
     /// Leaves something small with the Host under a key, in the table of its kind (where a
@@ -2131,6 +2151,14 @@ impl Fleet {
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));
                 }
+                Ask::VoiceMigration {
+                    view,
+                    reviewed,
+                    answer,
+                } => {
+                    let result = self.migrate_voices(*view, reviewed.as_deref());
+                    let _ = answer.send(Ok(result));
+                }
                 Ask::Set { settings, answer } => {
                     let _ = answer.send(Ok(self.set(settings)));
                 }
@@ -2323,9 +2351,25 @@ impl Fleet {
             cartesia: &cartesia,
             gemini: &gemini,
         };
+        let voice_id = if said.voice_id.is_empty() {
+            String::new()
+        } else if let Some(original) = original {
+            let current = self.book.named(&owner, original);
+            let stored = current
+                .as_ref()
+                .and_then(|row| row["voice_id"].as_str())
+                .unwrap_or("");
+            clarp_kernel::said::merge_provider_maps(
+                stored,
+                &said.voice_id,
+                said.base_voice_id.as_deref(),
+            )
+        } else {
+            clarp_kernel::said::canonical_voice(&said.voice_id)
+        };
         let wanted = Wanted {
             name: &said.name,
-            voice_id: &said.voice_id,
+            voice_id: &voice_id,
             avatar_symbol: &said.avatar_symbol,
             personality: &said.personality,
             picture: &said.picture,
@@ -3188,7 +3232,28 @@ impl Fleet {
                 }
             }
             Amend::Tool(backend) => record.backend = backend,
-            Amend::Voice(voices) => record.voice_id = voices,
+            Amend::Voice { provider, voice } => {
+                let occupied = self
+                    .members
+                    .iter()
+                    .filter(|other| {
+                        other.record.agent_id != record.agent_id && !other.record.is_janitor
+                    })
+                    .find(|other| {
+                        clarp_kernel::said::resolve_voice(Some(&other.record.voice_id), &provider)
+                            .as_deref()
+                            == Some(voice.as_str())
+                    });
+                if let Some(other) = occupied {
+                    return Ok(Err(NotAmended::Occupied {
+                        owner: other.record.persona.clone(),
+                        session: other.record.session.clone(),
+                    }));
+                }
+                record.voice_id =
+                    clarp_kernel::said::merge_voice(Some(&record.voice_id), &provider, &voice);
+            }
+
             Amend::Narration(level) => record.narration = level,
             // A janitor is that and nothing else: no helper of anybody, and not woken by
             // the heartbeat. Let go, it is an agent like any other again.

@@ -31,6 +31,7 @@ pub const OWN: &str = "own";
 /// A provider's one fallback voice, or the Host's engines or language.
 pub const DEFAULT: &str = "default";
 pub const NO_VOICE: &str = "no_voice";
+pub const VOICE_UNAVAILABLE: &str = "voice_unavailable";
 pub const PROVIDER_OFF: &str = "provider_off";
 pub const NOT_CONFIGURED: &str = "not_configured";
 /// An outage: the provider did not make the clip.
@@ -236,7 +237,9 @@ pub fn attempt(view: &HostView, agent: Agent<'_>, route: &Route, provider: &str)
         ELEVENLABS if !keyed => Some(NOT_CONFIGURED),
         ELEVENLABS => (!elevenlabs_id_usable(choice.voice.as_deref())).then_some(NO_VOICE),
         GOOGLE if view.google_refusal.is_some() => Some(NOT_CONFIGURED),
-        GOOGLE if !choice.voice.as_deref().is_some_and(voices::google_has) => Some(NO_VOICE),
+        GOOGLE if !choice.voice.as_deref().is_some_and(voices::google_has) => {
+            Some(VOICE_UNAVAILABLE)
+        }
         GOOGLE => (!keyed).then_some(NOT_CONFIGURED),
         _ => Some(NOT_CONFIGURED),
     };
@@ -424,6 +427,7 @@ pub fn defaults(view: &HostView) -> Value {
     let provider = view.voices.provider.as_str();
     let (provider_label, streaming) = provider_row(provider);
     let nobody = Who {
+        agent_id: "",
         name: "",
         persona: "",
         session: "",
@@ -505,6 +509,7 @@ pub fn not_spoken_words(reason: &str, provider_label: &str, name: &str, partly: 
     let name = if name.is_empty() { "this agent" } else { name };
     let words = match reason {
         NO_VOICE => format!("Not spoken: {provider} has no voice for {name}."),
+        VOICE_UNAVAILABLE => format!("Not spoken: {provider} cannot use the voice set for {name}."),
         NOT_CONFIGURED => format!("Not spoken: {provider} is not set up on this Host."),
         PROVIDER_OFF => "Not spoken: voice output is off on this Host.".to_string(),
         PROVIDER_FAILED => format!("Not spoken: {provider} did not make the clip."),
@@ -531,7 +536,7 @@ pub fn google_reason(code: &str) -> Option<&'static str> {
         | "google_auth_failed"
         | "google_id_collision"
         | "google_id_unverifiable" => Some(NOT_CONFIGURED),
-        "voice_unavailable" => Some(NO_VOICE),
+        "voice_unavailable" => Some(VOICE_UNAVAILABLE),
         _ => None,
     }
 }

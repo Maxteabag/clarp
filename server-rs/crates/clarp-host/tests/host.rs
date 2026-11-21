@@ -97,6 +97,8 @@ mod transcription_errors;
 mod transcription_inventory;
 #[path = "host/voice_events.rs"]
 mod voice_events;
+#[path = "host/voice_maps.rs"]
+mod voice_maps;
 #[path = "host/voice_names.rs"]
 mod voice_names;
 #[path = "host/voice_timeline.rs"]
