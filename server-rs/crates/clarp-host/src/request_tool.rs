@@ -16,6 +16,7 @@ use clarp_kernel::requests::{
 use clarp_protocol::requests::SendRequest;
 use serde_json::{Value, json};
 
+use crate::agent::GoalCaller;
 use crate::artifact_tool::parse;
 use crate::edge::{self, App};
 use crate::fleet::Member;
@@ -191,7 +192,7 @@ async fn abandon_wait(
     plan_id: &str,
     request_id: &str,
     why: &str,
-    turn: Option<&str>,
+    caller: GoalCaller,
 ) -> bool {
     let key = requests::dependency_key(request_id);
     for _ in 0..3 {
@@ -199,25 +200,57 @@ async fn abandon_wait(
             return false;
         };
         let wake = &plan["goal"]["continuation"];
-        if wake["state"] != "waiting" || wake["dependency_key"] != key.as_str() {
+        if plan["status"] != "active"
+            || wake["state"] != "waiting"
+            || wake["dependency_key"] != key.as_str()
+        {
             return false;
         }
         let evidence = requests::evidence(&format!("request {request_id} {NOT_DELIVERED}: {why}"));
         let data = json!({ "key": key, "outcome": "failed", "evidence": evidence });
-        if act(
-            &owner,
-            &plan,
-            "dependency",
-            data,
-            request_owner(turn, &owner),
-        )
-        .await
-        .is_ok()
+        if act(&owner, &plan, "dependency", data, caller.clone())
+            .await
+            .is_ok()
         {
             return true;
         }
     }
     false
+}
+
+/// The scheduler settles a peer wait only from the recipient's own terminal evidence.
+pub(crate) async fn settle_failed_waits(app: &App) {
+    let directory = app.fleet.directory();
+    for requester in &directory.members {
+        let view = requester.agent.view();
+        for plan in view.books.goals.watched() {
+            let Some(wake) = plan.goal.as_ref().map(|goal| &goal.continuation) else {
+                continue;
+            };
+            let Some(request_id) = wake
+                .get("dependency_key")
+                .and_then(Value::as_str)
+                .and_then(|key| key.strip_prefix("peer:"))
+                .filter(|id| requests::is_request_id(id))
+            else {
+                continue;
+            };
+            if wake.get("state").and_then(Value::as_str) != Some("waiting") {
+                continue;
+            }
+            let message_id = format!("u-{}", requests::request_client_id(request_id));
+            for recipient in &directory.members {
+                if let Ok(Some(why)) = recipient
+                    .agent
+                    .unrun_request(&message_id, &requester.record.agent_id)
+                    .await
+                {
+                    abandon_wait(app, &plan.plan_id, request_id, &why, GoalCaller::System).await;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /// `clarp-admin request --to SESSION --from ME --text TEXT [--goal PLAN] [--deadline S]`.
@@ -314,7 +347,7 @@ pub async fn request(app: &App, args: &[String], token: Option<&str>) -> ToolAns
                         plan_id,
                         &request_id,
                         &format!("HTTP {status}"),
-                        turn.as_deref(),
+                        request_owner(turn.as_deref(), &requester),
                     )
                     .await
                 }

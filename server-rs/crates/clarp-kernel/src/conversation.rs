@@ -285,6 +285,9 @@ pub struct TurnEnd {
     pub closes: String,
     /// How the turn ended, in the client's words.
     pub status: String,
+    /// Internal launch evidence for failed turns. An older record may lack it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub never_ran: Option<bool>,
     /// The taking-over turn's public id, when the turn ended without an answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaced_by: Option<String>,
@@ -356,6 +359,7 @@ impl TurnEnd {
             turn: settled.id.0,
             closes: closes.to_string(),
             status: status.to_string(),
+            never_ran: (status == "failed").then_some(settled.never_ran),
             replaced_by,
             started_at_ms: settled.started_at_ms,
             ended_at_ms: settled.ended_at_ms,
@@ -642,6 +646,7 @@ mod tests {
                 turn: 3,
                 closes: "r-msg_1".to_string(),
                 status: "completed".to_string(),
+                never_ran: None,
                 replaced_by: None,
                 started_at_ms: Some(5),
                 ended_at_ms: 30,

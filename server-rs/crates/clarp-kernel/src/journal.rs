@@ -18,7 +18,7 @@ use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, AgentEvent, Command, Effect, Refusal};
-use crate::turn::{Admission, IllegalTransition, Origin, Queued, TurnEvent, TurnId};
+use crate::turn::{Admission, IllegalTransition, Origin, Queued, Turn, TurnEvent, TurnId};
 
 /// What an item in an agent's log is. The numbers are permanent once a log holds them.
 pub mod kind {
@@ -369,6 +369,48 @@ impl Recorder {
     /// Native session of this particular turn, as its own log last bound it.
     pub fn turn_session(&self, turn: u64) -> Option<&str> {
         self.turn_sessions.get(turn)
+    }
+
+    /// The launch evidence for a failed turn written before its end carried that evidence.
+    /// Called only for a legacy refusal; new ends carry the result by key.
+    pub fn never_ran_before(&self, turn: u64, mut before: Seq) -> Result<bool, JournalError> {
+        if let Some(last) = self.agent.last().filter(|last| last.id.0 == turn) {
+            return Ok(last.never_ran);
+        }
+        let mut events = Vec::new();
+        loop {
+            let page = self
+                .log
+                .read_before(before, Kinds::only(kind::AGENT_EVENT), PAGE)?;
+            let Some(first) = page.first() else {
+                return Ok(false);
+            };
+            before = first.seq;
+            for item in page
+                .into_iter()
+                .rev()
+                .filter(|item| item.turn == Some(turn))
+            {
+                let event: AgentEvent =
+                    serde_json::from_slice(&item.body).map_err(|error| JournalError::Corrupt {
+                        seq: item.seq,
+                        why: error.to_string(),
+                    })?;
+                if let AgentEvent::Turn { change, .. } = event {
+                    let accepted = matches!(change, TurnEvent::Accepted { .. });
+                    events.push(change);
+                    if accepted {
+                        let replayed = Turn::replay(events.iter().rev()).map_err(|transition| {
+                            JournalError::Illegal {
+                                seq: item.seq,
+                                transition,
+                            }
+                        })?;
+                        return Ok(matches!(replayed, Some(Turn::Settled(end)) if end.never_ran));
+                    }
+                }
+            }
+        }
     }
 
     /// The position of the newest item in the log.

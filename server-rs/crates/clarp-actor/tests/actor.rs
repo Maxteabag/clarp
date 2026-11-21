@@ -4984,6 +4984,38 @@ fn r121_a_send_refused_every_time_is_tried_as_the_python_host_tries_it_and_its_s
 }
 
 #[test]
+fn r136_a_refused_peer_send_is_unrun_only_after_its_last_attempt_and_for_its_sender() {
+    let mut world = World::new("r136-request-refused");
+    let mut actor = world.open();
+    let now = world.tick();
+    let id = "u-peer-req-r0123456789ab";
+    let requester = "sender";
+    let asked = Message {
+        origin: Origin::Agent {
+            agent_id: requester.into(),
+        },
+        sender: Some(clarp_kernel::conversation::Sender {
+            agent_id: requester.into(),
+            ..Default::default()
+        }),
+        ..message(id, "do this")
+    };
+    let (_, out) = actor.send(&asked, Admission::Queue, now).unwrap();
+    assert_eq!(actor.unrun_request(id, requester).unwrap(), None);
+    r121_refuse_all(&mut world, &mut actor, out, now, r121_no_tool);
+    drop(actor);
+
+    let actor = world.open();
+    let notice = r121_never_run("claude: not found");
+    let (_, reason) = notice.split_once("\n\n").unwrap();
+    assert_eq!(
+        actor.unrun_request(id, requester).unwrap().as_deref(),
+        Some(reason)
+    );
+    assert_eq!(actor.unrun_request(id, "someone-else").unwrap(), None);
+}
+
+#[test]
 fn r121_a_launcher_that_cannot_start_the_shim_is_tried_the_same_and_its_sender_is_told() {
     let mut world = World::new("r121-no-shim-end");
     let mut actor = world.open();
@@ -5405,6 +5437,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             turn,
             closes: format!("r-p{turn}"),
             status: "completed".to_string(),
+            never_ran: None,
             replaced_by: None,
             started_at_ms: Some(at),
             ended_at_ms: at,

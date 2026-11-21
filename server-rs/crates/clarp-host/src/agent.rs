@@ -88,12 +88,13 @@ pub struct Stopped {
 }
 
 /// Caller identity established by the Host before the goal command reaches its owner.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub enum GoalCaller {
     #[default]
     Default,
     Verified(String),
     Peer(String, bool),
+    System,
 }
 
 /// A line that was said to its end, together with its engine and voice.
@@ -212,6 +213,11 @@ enum Ask {
     Fate {
         message_id: String,
         answer: Answer<TurnFate>,
+    },
+    UnrunRequest {
+        message_id: String,
+        requester: String,
+        answer: Answer<Option<String>>,
     },
     /// Where one of the agent's turns stands, by its number.
     Standing {
@@ -748,6 +754,19 @@ impl AgentHandle {
 
     pub async fn fate(&self, message_id: String) -> Result<TurnFate, Unavailable> {
         self.ask(|answer| Ask::Fate { message_id, answer }).await
+    }
+
+    pub async fn unrun_request(
+        &self,
+        message_id: &str,
+        requester: &str,
+    ) -> Result<Option<String>, Unavailable> {
+        self.ask(|answer| Ask::UnrunRequest {
+            message_id: message_id.to_owned(),
+            requester: requester.to_owned(),
+            answer,
+        })
+        .await
     }
 
     /// Where one of the agent's turns stands, by its number: whether it runs, or when it ended,
@@ -2202,13 +2221,14 @@ impl Worker {
                     | Goal::Finish { .. }
                     | Goal::Subgoal { .. }
             );
-            if guarded {
+            let identity = match &caller {
+                GoalCaller::Verified(id) => Some((id.as_str(), "owner", true)),
+                GoalCaller::Peer(id, verified) => Some((id.as_str(), "peer", *verified)),
+                GoalCaller::Default => Some((self.setup.record.agent_id.as_str(), "owner", false)),
+                GoalCaller::System => None,
+            };
+            if guarded && let Some((id, kind, verified)) = identity {
                 let ancestry = &self.setup.delegation_rejoin;
-                let (id, kind, verified) = match &caller {
-                    GoalCaller::Verified(id) => (id.as_str(), "owner", true),
-                    GoalCaller::Peer(id, verified) => (id.as_str(), "peer", *verified),
-                    GoalCaller::Default => (self.setup.record.agent_id.as_str(), "owner", false),
-                };
                 if let Err(why) = clarp_kernel::goals::delegation::guard(
                     kind,
                     verified,
@@ -2272,6 +2292,7 @@ impl Worker {
         let author = match (&caller, ask) {
             (GoalCaller::Verified(id), _) => Author::Owner(Some(id)),
             (GoalCaller::Peer(id, verified), _) => Author::Peer(id, *verified),
+            (GoalCaller::System, _) => Author::System,
             (_, goaltool::Ask::UserAct { .. }) => Author::User,
             (_, goaltool::Ask::Keeper { written, .. }) => Author::Keeper(&written.janitor_agent_id),
             _ => Author::Owner(None),
@@ -2757,6 +2778,13 @@ impl Worker {
             }
             Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
+            Ask::UnrunRequest {
+                message_id,
+                requester,
+                answer,
+            } => {
+                return read(actor.unrun_request(&message_id, &requester), answer);
+            }
             Ask::Standing { turn, answer } => return read(actor.standing_of(turn), answer),
             Ask::RunningTrace { turn, answer } => return read(actor.running_trace(turn), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
@@ -4306,6 +4334,7 @@ fn refuse_for(
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::UnrunRequest { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Standing { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RunningTrace { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),

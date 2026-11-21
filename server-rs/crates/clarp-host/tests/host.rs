@@ -73,6 +73,8 @@ mod provider_tasks;
 mod queue_provenance;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
+#[path = "host/r136_peer_wait.rs"]
+mod r136_peer_wait;
 #[path = "host/r175_engine_order.rs"]
 mod r175_engine_order;
 #[path = "host/remote_action.rs"]

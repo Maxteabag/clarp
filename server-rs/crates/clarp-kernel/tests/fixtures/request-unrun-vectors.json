@@ -1,0 +1,92 @@
+[
+ {
+  "case": "no row",
+  "status": null,
+  "started_at": null,
+  "notices": {},
+  "reason": ""
+ },
+ {
+  "case": "queued",
+  "status": "queued",
+  "started_at": null,
+  "notices": {},
+  "reason": ""
+ },
+ {
+  "case": "claimed",
+  "status": "running",
+  "started_at": 10,
+  "notices": {},
+  "reason": ""
+ },
+ {
+  "case": "completed",
+  "status": "completed",
+  "started_at": 10,
+  "notices": {},
+  "reason": ""
+ },
+ {
+  "case": "failed after delivery",
+  "status": "failed",
+  "started_at": 10,
+  "notices": {
+   "turn_failed": "Tool failed"
+  },
+  "reason": ""
+ },
+ {
+  "case": "missing start",
+  "status": "failed",
+  "started_at": null,
+  "notices": {},
+  "reason": "its queued message ended failed and was never run"
+ },
+ {
+  "case": "notice for a refused launch",
+  "status": "failed",
+  "started_at": 10,
+  "notices": {
+   "launch_refused": "Headline\n\n  The tool is missing. "
+  },
+  "reason": "The tool is missing."
+ },
+ {
+  "case": "notice for a held send",
+  "status": "failed",
+  "started_at": 10,
+  "notices": {
+   "held_send_not_run": "Mailbox could not be released"
+  },
+  "reason": "Mailbox could not be released"
+ },
+ {
+  "case": "refusal notice takes priority",
+  "status": "failed",
+  "started_at": null,
+  "notices": {
+   "held_send_not_run": "Held",
+   "launch_refused": "Launch"
+  },
+  "reason": "Launch"
+ },
+ {
+  "case": "empty notice does not prove anything",
+  "status": "failed",
+  "started_at": 10,
+  "notices": {
+   "launch_refused": ""
+  },
+  "reason": ""
+ },
+ {
+  "case": "notice after a nonfailed end",
+  "status": "completed",
+  "started_at": 10,
+  "notices": {
+   "launch_refused": "Stale"
+  },
+  "reason": ""
+ }
+]

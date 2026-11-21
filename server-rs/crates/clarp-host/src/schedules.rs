@@ -163,6 +163,7 @@ pub fn run(app: &App) {
         let desk = app.schedules.clone();
         loop {
             tokio::time::sleep(every).await;
+            crate::request_tool::settle_failed_waits(&app).await;
             desk.run(&app).await;
         }
     });

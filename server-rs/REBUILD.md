@@ -3317,6 +3317,14 @@ book after the store accepts it, so the next request can retry a refused write. 
 startup or expiry logs the failure and tries again a second later. An iOS chip whose state cannot be read
 arms another look in a minute. Each timer stays with the desk that knows when its work is due.
 
+**Peer request waits (21 Nov 2026, R136).** The schedule tick looks for a waiting peer dependency on an
+active goal. The recipient's journal proves the disposition of the original request by its message ID
+and sender. A terminal failure before any attempt reached the tool settles the dependency as failed and
+makes the goal due, with the refusal detail where the Host recorded it. The first launch's timestamp
+counts attempts and remains on the turn. A queued request or a turn that reached the tool keeps its wait,
+including a turn that ran and failed or whose later launch was refused. The write checks the current goal
+revision and dependency key, so an answer or deadline that settled the wait first keeps its result.
+
 **Remote action (20 Nov 2026).** The Shortcut's GET and POST send a live event to listening apps.
 A limited paired device may use either door. A controller edge requires POST and the receipt names the
 same event ID as the broadcast. Reconnecting clients cannot replay an earlier button press.

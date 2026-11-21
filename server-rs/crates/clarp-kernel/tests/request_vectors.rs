@@ -73,3 +73,29 @@ fn a_request_and_its_replies_are_worded_as_the_python_host_words_them() {
     }
     assert!(requests.len() >= 20 && replies.len() >= 70);
 }
+
+#[test]
+fn only_proven_unrun_requests_are_undelivered() {
+    use clarp_kernel::requests::unrun_reason;
+
+    let vectors: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/request-unrun-vectors.json")).unwrap();
+    for row in &vectors {
+        let notice = ["launch_refused", "held_send_not_run"]
+            .into_iter()
+            .filter_map(|key| row["notices"][key].as_str())
+            .find(|text| !text.is_empty());
+        assert_eq!(
+            unrun_reason(
+                row["status"].as_str().unwrap_or_default(),
+                !row["started_at"].is_null(),
+                notice,
+            )
+            .unwrap_or_default(),
+            row["reason"],
+            "{}",
+            row["case"]
+        );
+    }
+    assert_eq!(vectors.len(), 11);
+}

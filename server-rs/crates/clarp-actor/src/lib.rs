@@ -1933,6 +1933,62 @@ impl Actor {
         })
     }
 
+    /// Non-delivery of a peer request, proved by a failed launch and the original sender.
+    pub fn unrun_request(
+        &self,
+        message_id: &str,
+        requester: &str,
+    ) -> Result<Option<String>, ActorError> {
+        let log = self.recorder.log();
+        let Some(item) = log.find(message_id)? else {
+            return Ok(None);
+        };
+        let Some(turn) = item.turn else {
+            return Ok(None);
+        };
+        let Some(end) = self.turn_end(turn)? else {
+            return Ok(None);
+        };
+        if end.status != "failed" || end.never_ran == Some(false) {
+            return Ok(None);
+        }
+        let message = self.message_at(item.seq)?;
+        if message
+            .sender
+            .is_none_or(|sender| sender.agent_id != requester)
+        {
+            return Ok(None);
+        }
+        let marker = log.find(&format!("marker-{message_id}"))?;
+        let notice = marker
+            .as_ref()
+            .and_then(|item| match Entry::from_item(item) {
+                Ok(Some(Entry::Notice(notice)))
+                    if notice.turn == Some(turn)
+                        && notice.text.starts_with(launch_refused::NEVER_RUN) =>
+                {
+                    Some(notice.text)
+                }
+                _ => None,
+            });
+        // Older ends have the refusal notice but no saved launch evidence. The
+        // journal can tell whether any attempt had actually run before that refusal.
+        let proved = match (end.never_ran, marker) {
+            (Some(proved), _) => proved,
+            (None, Some(marker)) if notice.is_some() => {
+                self.recorder.never_ran_before(turn, marker.seq)?
+            }
+            _ => false,
+        };
+        if !proved {
+            return Ok(None);
+        }
+        Ok(
+            clarp_kernel::requests::unrun_reason(&end.status, false, notice.as_deref())
+                .map(str::to_owned),
+        )
+    }
+
     /// Where one of the agent's turns stands, by its number: what tells whether a token given
     /// to that turn still names the agent. Two keyed reads, never a scan: the turn that runs,
     /// and the row that ended this one.

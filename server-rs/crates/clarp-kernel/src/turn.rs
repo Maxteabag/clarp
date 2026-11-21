@@ -336,6 +336,8 @@ pub struct Starting {
     /// The turn waited for an account before this attempt: the tool is told that it is
     /// taken up again, not given the message as if for the first time.
     pub recovering: bool,
+    /// An earlier attempt reached its tool.
+    pub ran_before: bool,
 }
 
 /// A turn whose tool process is working.
@@ -351,6 +353,7 @@ pub struct Running {
     pub activity: Activity,
     pub tool_count: u32,
     pub account: AccountWaits,
+    pub ran_before: bool,
 }
 
 /// A turn between two attempts. It holds the agent like a turn that runs, and has no tool
@@ -372,6 +375,7 @@ pub struct Parked {
     pub kind: String,
     pub reason: String,
     pub since_ms: i64,
+    pub ran: bool,
     /// The waits for an account, this one included when it is one.
     pub account: AccountWaits,
 }
@@ -391,6 +395,8 @@ pub struct Settled {
     pub attempts: u32,
     /// How many of them followed a wait for an account.
     pub account_waits: u32,
+    /// A failed launch ended this turn before any attempt reached its tool.
+    pub never_ran: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -464,6 +470,7 @@ impl Queued {
             tool_count: 0,
             account: AccountWaits::default(),
             recovering: false,
+            ran_before: false,
         };
         (
             next,
@@ -487,6 +494,7 @@ impl Queued {
             tool_count: 0,
             attempts: 0,
             account_waits: 0,
+            never_ran: false,
         };
         (next, TurnEvent::Settled { outcome, at_ms })
     }
@@ -506,6 +514,7 @@ impl Starting {
             activity: Activity::Thinking,
             tool_count: self.tool_count,
             account: self.account,
+            ran_before: self.ran_before,
         };
         (
             next,
@@ -531,6 +540,7 @@ impl Starting {
             id: self.id,
             message_seq: self.message_seq,
             origin: self.origin,
+            never_ran: !self.ran_before && launch_failure(&outcome),
             outcome,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: Some(self.started_at_ms),
@@ -609,6 +619,7 @@ impl Running {
             message_seq: self.message_seq,
             origin: self.origin,
             outcome,
+            never_ran: false,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: Some(self.started_at_ms),
             ended_at_ms: at_ms,
@@ -645,6 +656,9 @@ impl Running {
             backend_session: self.backend_session,
             tool_count: self.tool_count,
             wait,
+            // Launch refusals pass through Running on their way to Parked. The
+            // refusal proves this attempt did not run, whatever earlier attempts did.
+            ran: self.ran_before || kind != crate::failures::NOT_STARTED,
             kind,
             reason,
             since_ms: at_ms,
@@ -668,6 +682,7 @@ impl Parked {
             tool_count: self.tool_count,
             account: self.account,
             recovering: self.wait.is_for_an_account(),
+            ran_before: self.ran,
         };
         (next, TurnEvent::Retried { at_ms })
     }
@@ -698,6 +713,7 @@ impl Parked {
             id: self.id,
             message_seq: self.message_seq,
             origin: self.origin,
+            never_ran: !self.ran && launch_failure(&outcome),
             outcome,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: Some(self.started_at_ms),
@@ -707,6 +723,10 @@ impl Parked {
             account_waits: self.account.count,
         }
     }
+}
+
+fn launch_failure(outcome: &Outcome) -> bool {
+    matches!(outcome, Outcome::Failed { kind, .. } if kind == crate::failures::NOT_STARTED)
 }
 
 impl TurnEvent {
@@ -883,6 +903,35 @@ mod tests {
 
     fn accepted() -> (Queued, TurnEvent) {
         Queued::accept(TurnId(7), 41, Origin::User, Admission::Queue, 1_000)
+    }
+
+    #[test]
+    fn a_final_launch_refusal_keeps_the_delivery_fact_from_earlier_attempts() {
+        use crate::failures::{CONNECTION, NOT_STARTED};
+
+        for first_failure in [CONNECTION, NOT_STARTED] {
+            let (queued, accepted) = accepted();
+            let (starting, started) = queued.start(1_100);
+            let (running, moved) = starting.running(1_200);
+            let (parked, parked_event) = running.park(
+                Wait::Retry { until_ms: 2_000 },
+                first_failure.to_owned(),
+                "first attempt".into(),
+                1_300,
+            );
+            let (retry, retried) = parked.retry(2_000);
+            let (ended, end) = retry.settle(
+                StartOutcome::Failed {
+                    reason: "missing tool".into(),
+                },
+                2_100,
+            );
+            assert_eq!(ended.never_ran, first_failure == NOT_STARTED);
+            assert_eq!(
+                Turn::replay(&[accepted, started, moved, parked_event, retried, end]).unwrap(),
+                Some(Turn::Settled(ended))
+            );
+        }
     }
 
     #[test]
