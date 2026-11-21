@@ -464,7 +464,11 @@ def test_deleted_since_lists_oldest_first_and_is_matched_before_the_content_rout
     assert host.call("GET", "/media/deleted")[0] == 400
     assert host.call("GET", "/media/deleted?since=-1")[0] == 400
     assert host.call("GET", "/media/deleted?since=abc")[0] == 400
-    assert host.call("GET", "/media/deleted?since=0&limit=x")[0] == 400
+    for limit in ("x", "0", "-1", "1001"):
+        assert host.call("GET", f"/media/deleted?since=0&limit={limit}") == (
+            400, {"error": "limit must be a number from 1 to 1000"}), limit
+    for limit in ("1", "1000"):
+        assert host.call("GET", f"/media/deleted?since=0&limit={limit}")[0] == 200, limit
 
 
 def _tombstones(n, *, at, prefix="asset_t", session=SESSION):
