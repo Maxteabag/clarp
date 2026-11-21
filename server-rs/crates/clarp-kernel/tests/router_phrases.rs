@@ -48,6 +48,7 @@ fn eviction_keeps_the_newest_fills_within_both_bounds() {
                 provider: "cartesia".into(),
                 voice: "v".into(),
                 model: "m".into(),
+                language: None,
             },
         },
         text: "Was that for me?".into(),
