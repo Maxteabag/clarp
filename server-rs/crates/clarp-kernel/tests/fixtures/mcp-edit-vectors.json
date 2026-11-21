@@ -1,0 +1,84 @@
+{
+  "catalog": {
+    "alpha": {},
+    "Beta": {},
+    "7": {},
+    "True": {},
+    "False": {},
+    "None": {},
+    "['alpha', 7]": {},
+    "{'b': True, 'a': None}": {},
+    "": {}
+  },
+  "cases": [
+    {
+      "requested": [],
+      "chosen": []
+    },
+    {
+      "requested": [
+        "unknown"
+      ],
+      "chosen": []
+    },
+    {
+      "requested": [
+        " Beta ",
+        "unknown",
+        "alpha",
+        "Beta",
+        " beta "
+      ],
+      "chosen": [
+        "Beta",
+        "alpha"
+      ]
+    },
+    {
+      "requested": [
+        "\u001calpha",
+        "alpha",
+        "  ",
+        ""
+      ],
+      "chosen": [
+        "alpha",
+        ""
+      ]
+    },
+    {
+      "requested": [
+        7,
+        "7",
+        true,
+        false,
+        null,
+        "None",
+        123
+      ],
+      "chosen": [
+        "7",
+        "True",
+        "False",
+        "None"
+      ]
+    },
+    {
+      "requested": [
+        [
+          "alpha",
+          7
+        ],
+        "['alpha', 7]",
+        {
+          "b": true,
+          "a": null
+        }
+      ],
+      "chosen": [
+        "['alpha', 7]",
+        "{'b': True, 'a': None}"
+      ]
+    }
+  ]
+}
