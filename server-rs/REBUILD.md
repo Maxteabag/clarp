@@ -201,6 +201,13 @@ next turn resumed Codex's thread (`CLARP_TEST_CODEX=1`, run the same way as the 
 **Pairing is there** (`clarp-host pair --url ...`, `POST /pairing/exchange`, scopes, revoke), the Python Host's
 scheme word for word.
 
+**Pairing identity** (21 Nov 2026, R172). Before spending its code a device can read this Host's id,
+name and contract at `GET /pairing/identity` without a token. The trusted request source has 30 reads a
+minute in its own budget. Pairing failures still count in the authentication budget. A device paired
+with limited access can revoke its own pairing using its token's exact device id after stripping the
+requested text. Revocation invalidates the token and uses the existing stream and call teardown.
+The pairing and device-scope vectors hold these rules to the Python Host.
+
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first (it does, since 15 Nov 17:14). Since the
@@ -1525,6 +1532,11 @@ changing it. The status records each provider's most recent action. Exhaustion
 leaves waiting work in the pool. Banked resets belong to a separate decision
 of the owner. The other account modes leave the login where it is.
 
+The Codex reading also carries the account-wide weekly usage (21 Nov 2026, PR 484).
+A failed or missing weekly reading stays unknown. The vectors hold the inclusive 99%
+threshold across the saved accounts and require a readable redemption count below the
+daily cap. Switch decisions still use the existing quota fields.
+
 **Launch directories** (19 Nov 2026). The new-agent dialog combines recent launches,
 zoxide results and explicit directory completions. The Host finds `zoxide` on PATH
 and starts it without a shell. Each invocation has half a second. If it is absent,
@@ -2542,11 +2554,14 @@ key came twice (refused as `invalid_object`). Both catalog files are in the prog
 not pass its checks refuses render specs alone (503, `catalog_unavailable`). The Host (`render_spec.rs`
 beside `library.rs`) publishes, revises (a whole new payload that names the version it follows) and only
 checks (`?validate_only=1`); a spec is never in a row of a list, a search, the pins, Updates or an event.
-Who sees it is said by each request: a client whose `X-Clarp-Client` says `<platform>/<build>
-contract=<n>` at or above the owner's threshold (`[artifacts] render_spec_min_client` in his file, read at
-every request; unset, as the reference ships, nobody) is shown what was left out (`content_omitted`, with
-`element_count`) and reads the spec, and once it was answered the answers, from the artifact itself; any
-other client sees a plain row and cannot answer (403, `client_contract`). The first answers that are taken
+A client sees the full spec when its exact `X-Clarp-Client` name and contract meet its minimum. The
+default is `ios` from 74. `[artifacts] render_spec_min_contract` overrides it per exact client name, with
+0 disabling that name. The legacy `render_spec_min_client` integer applies to `ios` alone and the table
+wins when both name it. Unknown or malformed headers see a generic row and cannot submit (403,
+`client_contract`). The Rust Host reads the owner's file for each request and writes each distinct
+configuration diagnostic once. `GET /artifacts/<id>/export` (R137) gives the administrator the public
+row, stored payload and accepted submission. On an authenticated Host it takes the token only from the
+Authorization header. Another artifact kind gets a 409 with its kind. The first answers that are taken
 close the spec (`already_answered`); they are told to its agent once, through the same delivery as a
 form's answers, and the same answers under the same id get the same receipt. `GET
 /artifact-catalogs/clarp.form/1` serves the catalog's bytes, and the agent's tool sends a whole request as
@@ -3364,6 +3379,36 @@ hold, half a line, a child, the bound with nobody to let go, ended while held, i
 a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
 hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
+
+**An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
+profile use the kernel's engine order. With a language set, models of one hosted provider
+share an attempt, as do the aliases of the Host's default local engine. If the ordinary
+chain ends on a hosted engine that cannot take the set, the Host considers its selected
+model if it is known, keyed and takes language sets. A provider already tried is excluded.
+The Host also considers its own model when no hosted replacement qualifies. Its catalogue
+languages determine coverage, with Norwegian aliases and the Whisper model default for an
+undeclared list. The successful response and an idempotent replay carry `engine_fallback`.
+An exhausted plan replies with the fixed `language_set_unsupported` 422 and its reasons.
+An own-engine failure keeps engine detail in the log. Loading and busy keep their statuses.
+Fallback uses the original audio buffer and current retention policy. The vectors run the
+reference's selection, declarations and fallback at the merge of PR 501.
+
+**Gallery management** (21 Nov 2026, the Python Host's PR 494). One bounded writer owns
+favorites, tombstones and gallery blob reclamation by asset id. The media publication in an
+agent's journal stays as written. At startup the gallery imports older publications and
+finishes any journal deliveries it owes. A deletion writes the tombstone and its pending
+blob removal together, then reflects the commit in the gallery and tombstone indexes.
+Every media read, including each range chunk, checks the tombstone before reading bytes.
+A pending unlink checks the live owners again on the same writer used by a publish. An
+interrupted unlink is safe to repeat. Independent portrait and contact files keep their
+existing names and storage. Media writes do not wait for a fleet or agent worker to reply
+from within the media writer, and those workers never wait for it. A request that does not
+receive its writer answer within three seconds receives a refusal. Deletion and favorite
+retries preserve their first timestamps and publish no new event.
+
+Gallery pages seek by creation or favorite time and asset id. Tombstone pages read nothing
+at or before their cursor, and include all rows that share the last millisecond of the
+page. They tell a reconnecting device what it must evict even when it missed the event.
 
 ## 7. Stages and gates
 
