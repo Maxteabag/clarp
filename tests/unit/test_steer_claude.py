@@ -334,11 +334,12 @@ def test_a_runtime_that_dies_before_the_echo_settles_the_follow_up_at_its_start(
     _send(w, "m2")
     assert _wait(lambda: len(_read(w, 1)) == 1)              # the CLI has it on its stdin
     assert settings_store.keys_with_prefix("steer.written.") == ["steer.written.t-m2"]
-    # The runtime dies: its memory of the written follow-up is gone, then the group.
+    # The runtime dies: its memory of the written follow-up is gone. The CLI outlives it,
+    # still inside its tool call (reviewer 4 on 4e2cd479): it would read the line later.
     for handle in real_backends.active_handles("claude", w.agent):
         handle.steer_state.pending.clear()
-    os.killpg(int((w.dir / "pid-1").read_text()), signal.SIGKILL)
-    assert _wait(lambda: not real_backends.active_handles("claude", w.agent))
+    old_cli = int((w.dir / "pid-1").read_text())
+    assert takeover.start_ticks(old_cli) is not None
     session = tmp_path / "session-file.jsonl"
     lines = [{"type": "user", "uuid": "an-earlier-entry", "message": {"content": "m1"}}]
     if in_session:
@@ -347,6 +348,8 @@ def test_a_runtime_that_dies_before_the_echo_settles_the_follow_up_at_its_start(
     monkeypatch.setattr(by_id("claude"), "find_transcript", lambda *a, **k: session)
     td.reset_for_tests()                                      # the next runtime starts
     w.service.recover_queued()
+    # The old group is ended before the lookup: it can no longer read the line.
+    assert takeover.start_ticks(old_cli) is None or takeover._state(old_cli) == "Z"
     for _ in range(3):
         for fn in list(w.scheduled):
             fn()
@@ -369,6 +372,24 @@ def test_a_runtime_that_dies_before_the_echo_settles_the_follow_up_at_its_start(
     rows = [t for t in agents_db.list_messages(agent_id=w.agent, limit=100) if t["id"] == "u-m2"]
     assert len(rows) == 1 and "m2" not in _queued(w)          # exactly one read
     assert settings_store.keys_with_prefix("steer.written.") == []
+
+
+def test_a_reused_pid_is_never_killed_and_the_recorded_group_is():
+    """The steer record's group is ended at start only while its pid is still the process
+    recorded (the same start ticks): a pid since reused by another process is left alone."""
+    import subprocess
+    other = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        ticks = takeover.start_ticks(other.pid)
+        assert takeover.kill_group_if_same(other.pid, other.pid, ticks + 1) is False
+        assert other.poll() is None                         # another process: untouched
+        assert takeover.kill_group_if_same(other.pid, other.pid, None) is False
+        assert other.poll() is None
+        assert takeover.kill_group_if_same(other.pid, other.pid, ticks) is True
+        assert other.wait(5) == -signal.SIGKILL
+    finally:
+        if other.poll() is None:
+            other.kill()
 
 
 def test_a_follow_up_bigger_than_the_pipe_never_blocks_the_drain(monkeypatch):

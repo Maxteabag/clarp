@@ -16,7 +16,8 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
-from . import launch_receipts, recovery_backoff, steer_records, turn_lifecycle, turn_slots
+from . import launch_receipts, recovery_backoff, steer_records, takeover, turn_lifecycle
+from . import turn_slots
 from . import events
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
@@ -453,11 +454,17 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             if read_later:
                 # Durable before the write: a runtime that dies before the CLI's echo
                 # leaves the next one what to look up (turn_recovery).
+                running = _alive(list(self.backends.active_handles(
+                    spec.backend, spec.agent_id) or ()))
+                proc_pid = int(getattr(running[0], "pid", 0) or 0) if running else 0
                 steer_records.record(
                     agent_id=spec.agent_id, trace_id=spec.trace_id, queue_id=spec.queue_id,
                     backend=spec.backend, cwd=str(spec.cwd),
                     session_id=(agents_db.live_backend_session(spec.agent_id)
-                                or spec.backend_session_id or ""))
+                                or spec.backend_session_id or ""),
+                    pid=proc_pid,
+                    pgid=int(getattr(running[0], "process_group", 0) or 0) if running else 0,
+                    start_ticks=takeover.start_ticks(proc_pid) if proc_pid else None)
             accepted = bool(steer(
                 spec.backend, spec.agent_id, steer_text,
                 client_msg_id=spec.client_msg_id,
