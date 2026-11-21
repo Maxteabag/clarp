@@ -921,8 +921,8 @@ client shows it and derives nothing from `voice_id`.
 - **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
   documented values are `own` and `default` (a later Host adds `parent`), and for
   `silent_reason`: `no_voice` (no voice for the provider), `voice_unavailable` (the agent has a
-  voice of its own the provider refuses, such as a Google voice off its list; Host contract
-  113), `provider_off` (the Host speaks with no provider) and `not_configured` (the provider
+  voice of its own the provider refuses, such as a Google voice off its list; with feature
+  `voice_provider_maps`), `provider_off` (the Host speaks with no provider) and `not_configured` (the provider
   has no credential or is refused).
   A client shows plain wording for a value it does not know; it never fails on one.
 
@@ -937,7 +937,7 @@ Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in
 every agent (`POST /tts/providers`, `POST /transcription-providers`, a configuration
 edit) sends `agent-roster` with `kind` `voice-profile`: re-read the snapshot.
 
-### A stored voice and its edits (feature `voice_provider_maps`, Host contract 113, provisional)
+### A stored voice and its edits (feature `voice_provider_maps`; Host contract: next free at merge)
 
 A stored `voice_id` (agent or contact) is a provider map, compact sorted JSON such as
 `{"cartesia":"<uuid>","gemini":"Kore"}`; `{}` means no voice of its own. A bare value stored
