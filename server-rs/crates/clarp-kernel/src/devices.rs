@@ -569,6 +569,9 @@ pub fn limited_refused(method: &str, path: &str) -> bool {
     if method == "PATCH" && !path.starts_with("/schedules/") {
         return false;
     }
+    if method == "POST" && path == "/paired-devices/revoke" {
+        return false;
+    }
     let closed = |prefix: &&str| path == prefix.trim_end_matches('/') || path.starts_with(*prefix);
     if FULL_ONLY.iter().any(closed) {
         return true;
@@ -587,6 +590,27 @@ pub fn limited_refused(method: &str, path: &str) -> bool {
         return !(method == "POST" && invoked(path).is_some());
     }
     method != "POST" || !LIMITED_POSTS.contains(&path)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevokeRefusal {
+    Missing,
+    OtherDevice,
+}
+
+/// A revocation's target, after stripping the request. A limited device can name only itself.
+pub fn revoke_target<'a>(
+    asked: &'a str,
+    limited_id: Option<&str>,
+) -> Result<&'a str, RevokeRefusal> {
+    let asked = crate::python::strip(asked);
+    if asked.is_empty() {
+        return Err(RevokeRefusal::Missing);
+    }
+    if limited_id.is_some_and(|own| own != asked) {
+        return Err(RevokeRefusal::OtherDevice);
+    }
+    Ok(asked)
 }
 
 #[cfg(test)]

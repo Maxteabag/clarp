@@ -55,6 +55,8 @@ mod live_model;
 mod managed_skills;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
+#[path = "host/pairing_identity.rs"]
+mod pairing_identity;
 #[path = "host/pictures.rs"]
 mod pictures;
 #[path = "host/provider_tasks.rs"]
