@@ -58,12 +58,38 @@ def _public_detail(kind: str, raw: str | None):
 
 
 class StateLogWatcher:
+    WORKING_TTL_S = 5.0
+
+    def _working_with(self, agent_id: str, kind: str, detail) -> dict:
+        """A working state's audience, as the dispatch's 'thinking' state carries it, on every
+        state of the running turn: a client that connects mid-turn learns from the next state
+        that the agent is working with another agent (feature coordination_working_state)."""
+        if kind not in AgentState.busy_states() or not isinstance(detail, dict):
+            return {}
+        trace = str(detail.get("trace_id") or "")
+        if not trace:
+            return {}
+        known = self._working.get(agent_id)
+        if known and known[0] == trace and time.monotonic() - known[1] < self.WORKING_TTL_S:
+            return dict(known[2])
+        from . import coordination
+        try:
+            fields = coordination.working_with(agent_id, trace)
+        except Exception as exc:  # noqa: BLE001 - never break the state stream
+            log_exception("stateWorkingWithFail", exc, detail=agent_id)
+            return {}
+        self._working[agent_id] = (trace, time.monotonic(), fields)
+        return dict(fields)
+
     INTERVAL_SEC = SERVER_TIMING.state_watcher_poll_sec
 
     def __init__(self, stream):
         self.stream = stream
         self._last_id = 0
         self._last_status: dict[str, str] = {}
+        # agent_id -> (trace_id, read at, its working_with fields): a turn's audience, read again
+        # after WORKING_TTL_S so a turn the user steps into reads 'user' soon after.
+        self._working: dict[str, tuple[str, float, dict]] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # Completed-turn notification policy settles for up to
@@ -192,6 +218,7 @@ class StateLogWatcher:
                 ts=int(r["ts"]),
                 detail=detail,
                 status_text=r["custom_status"] or "",
+                **self._working_with(r["agent_id"], r["kind"], detail),
             ))
             events.broadcast(self.stream, events.as_event(state_activity_event(
                 agent_id=r["agent_id"],
@@ -247,12 +274,14 @@ class StateLogWatcher:
             ).fetchone()
             if latest is None:
                 continue
+            latest_detail = _public_detail(latest["kind"], latest["detail"])
             events.broadcast(self.stream, events.agent_state(
                 agent_id=agent_id,
                 session=a["session"],
                 persona=a["persona"],
                 kind=latest["kind"],
                 ts=int(latest["ts"]),
-                detail=_public_detail(latest["kind"], latest["detail"]),
+                detail=latest_detail,
                 status_text=status_text,
+                **self._working_with(agent_id, latest["kind"], latest_detail),
             ))

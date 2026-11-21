@@ -116,6 +116,8 @@ def _tool_headline(tool: dict[str, Any]) -> str:
 
 def row_headline(activity: dict[str, Any]) -> str:
     """What the agent is doing, in the words the apps use; never empty."""
+    if activity.get("veiled"):
+        return str(activity.get("headline") or "Working with another agent")
     state = activity.get("state") or "idle"
     tool = activity.get("tool") if isinstance(activity.get("tool"), dict) else None
     if state == "tool":
@@ -340,6 +342,12 @@ class LiveActivityPusher:
         # lock never waits on the database; inline when not given.
         self._background = background
         self._refreshing = False
+        # Which chats hide coordination, and each agent's running turn's audience, read at most
+        # every VEIL_TTL_S: a coordination turn such a chat hides is pushed as "Working with
+        # <Name>", never with its tool or reasoning title (feature coordination_working_state).
+        self._hiding: set[str] = set()
+        self._hiding_at = float("-inf")
+        self._turns: dict[str, tuple[str, float, dict[str, Any]]] = {}
 
     def set_attention(self, attention: dict[str, Any]) -> None:
         """The Updates badge changed (decisions, blocking artifacts, Janitor)."""
@@ -410,8 +418,35 @@ class LiveActivityPusher:
                     return
                 self._learn_lineage(agent_id, info)
                 self._agents[agent_id] = info
-            info["activity"] = statuses[-1].get("activity") or {}
+            info["activity"] = self._veiled(agent_id, statuses[-1].get("activity") or {})
             self._consider()
+
+    VEIL_TTL_S = 5.0
+
+    def _veiled(self, agent_id: str, activity: dict[str, Any]) -> dict[str, Any]:
+        turn = str(activity.get("turn_id") or "")
+        if not turn or activity.get("state") in ("idle", "interrupted", "limited"):
+            return activity
+        from . import coordination
+        now = time.monotonic()
+        try:
+            if now - self._hiding_at >= self.VEIL_TTL_S:
+                self._hiding, self._hiding_at = coordination.hiding_agents(), now
+            if agent_id not in self._hiding:
+                return activity
+            known = self._turns.get(agent_id)
+            if known and known[0] == turn and now - known[1] < self.VEIL_TTL_S:
+                working = known[2]
+            else:
+                working = coordination.working_with(agent_id, turn)
+                self._turns[agent_id] = (turn, now, working)
+        except Exception as exc:  # noqa: BLE001 - never break the live stream
+            from .log import log_exception
+            log_exception("liveActivityVeilFail", exc, detail=f"agent={agent_id}")
+            return activity
+        if working.get("audience") != coordination.AGENTS:
+            return activity
+        return {**activity, "headline": coordination.veiled(working), "tool": None, "veiled": True}
 
     @staticmethod
     def _identity(agent_id: str, event: dict[str, Any]) -> dict[str, Any]:
