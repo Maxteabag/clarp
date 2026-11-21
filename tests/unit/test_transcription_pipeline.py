@@ -734,3 +734,15 @@ def test_a_call_attempts_reason_is_fixed_words():
                            ctype="audio/webm", prompt="")
     reasons = [a.get("reason") for a in call_stt["report"]["attempts"]]
     assert reasons == ["transcription failed", "transcription failed"]
+
+
+def test_a_call_attempt_that_finds_whisper_busy_says_so():
+    # client_words' busy branch: the attempt's reason is the fixed 'whisper busy', not the text.
+    calls = ModelSTT(raise_=STTBusyError(f"busy with {_PLANTED}"))
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    with pytest.raises(STTBusyError):
+        tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
+                           ctype="audio/webm", prompt="")
+    assert [a.get("reason") for a in call_stt["report"]["attempts"]] == ["whisper busy", "whisper busy"]
