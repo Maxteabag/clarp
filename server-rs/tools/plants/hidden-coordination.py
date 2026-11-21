@@ -44,7 +44,7 @@ PLANTS = [
     (E, 'host', 'hide leaves the original reader in place',
      'which.hide_coordination()', 'which'),
     (E, 'host', 'a snapshot shows the global instead of the effective policy',
-     'row["coordination_visibility"] = json!(choice.unwrap_or(global));',
+     'row["coordination_visibility"] = json!(visibility);',
      'row["coordination_visibility"] = json!(global);'),
     (E, 'host', 'a snapshot shows an empty string for a default override',
      'row["coordination_override"] = json!(choice);',
