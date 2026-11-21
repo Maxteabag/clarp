@@ -243,16 +243,30 @@ def test_two_follow_ups_during_one_tool_are_read_in_the_order_sent(world):
     assert _calls(w) == 1
 
 
-def test_a_follow_up_read_after_the_result_keeps_its_row_where_it_was_read(world):
+def test_case_9_the_echo_after_the_result_is_a_race_handled_in_place(world):
+    """Recording case 9, the known behaviour of the race (ruling 10:1x): the follow-up is read
+    after the running turn's result, so the CLI answers it in a second turn of its own in the
+    same process. It was written once; its row appears once, where it was read; nothing runs
+    twice and nothing is lost; the CLI's answer counts inside the running turn until the process
+    exits; and its receipt settles (the idle sweep that settles every steered receipt)."""
     w = world
     _first_turn(w, "after-result")
     _send(w, "m2")
-    assert _wait(lambda: len(_read(w, 1)) == 1)
+    assert _wait(lambda: len(_read(w, 1)) == 1)                # written once
     (w.dir / "release-1").write_text("1")
     assert _wait(lambda: _row(w, "m2") is not None)
-    assert _wait(lambda: turn_queue.status("m2") != "queued")
+    assert _wait(lambda: not real_backends.active_handles("claude", w.agent))
+    for fn in list(w.scheduled):
+        fn()
     time.sleep(0.5)
     assert _calls(w) == 1                                      # the CLI answered it itself
+    assert len(_read(w, 1)) == 1
+    rows = [t for t in agents_db.list_messages(agent_id=w.agent, limit=100) if t["id"] == "u-m2"]
+    assert len(rows) == 1                                      # once, never lost
+    assert _queued(w) == [] and turn_queue.status("m2") == "started"
+    turn_queue.terminalize_idle_agent_receipts(lambda _agent: False,
+                                               now_ms=db.now_ms() + 120_000)
+    assert turn_queue.status("m2") == "ended"                  # its receipt settles
 
 
 def test_a_follow_up_the_process_never_read_runs_as_its_own_turn_once(world):
