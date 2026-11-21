@@ -15,8 +15,11 @@ use crate::tools::{NOT_HERE, ToolAnswer};
 /// What the tool prints when it cannot read what it was called with.
 pub const USAGE: &str = "usage: agent_tasks.py create SESSION PLAN_ID TITLE JSON_ITEMS | \
 update RETURNED_PLAN_ID ITEM_ID STATUS [DETAIL] | \
-finish RETURNED_PLAN_ID [STATUS] | show SESSION | list SESSION | \
-goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | \
+finish RETURNED_PLAN_ID [STATUS] (a plan without a goal) | show SESSION | list SESSION | \
+goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | get PLAN_ID | \
+complete PLAN_ID REVISION (finishes a goal) | \
+checkpoint|replan|pause|resume|cancel|block|supersede|dependency|enroll|add_step|\
+document|rebind PLAN_ID REVISION JSON_DATA | read PLAN_ID NAME [REVISION] | \
 act PLAN_ID REVISION ACTION JSON_DATA | step PLAN_ID REVISION ITEM STATUS [DETAIL] | \
 subgoal PLAN_ID add|update JSON | ledger PLAN_ID [AFTER_EVENT] | \
 receipts PLAN_ID [LIMIT] | bookkeeping observe DELEGATION [JSON_OPTIONS] | \
