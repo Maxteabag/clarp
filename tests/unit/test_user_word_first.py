@@ -566,7 +566,8 @@ def _fail_before_the_turn_opens(world):
 def test_a_launch_that_failed_before_its_turn_is_taken_in_both_stores(tmp_path):
     """Review lead L5: requeue_front marks it taken in memory; the durable row
     is stamped too, so a user's word arriving meanwhile goes behind it on both
-    sides, and still after a restart."""
+    sides (held behind the drain's fence so nothing starts), and still after
+    a restart."""
     world = World(tmp_path)
     world.send("t0")
     world.send("p1", origin="agent", queue=True)
@@ -577,36 +578,46 @@ def test_a_launch_that_failed_before_its_turn_is_taken_in_both_stores(tmp_path):
     assert head is not None and head.client_msg_id == "p1"
     assert turn_queue.get("p1")["taken"] == 1
     assert not turn_queue._has_turn(turn_queue.get("p1"))
-    world.send("t-busy")                        # the agent is busy again
+    world.service.begin_admission_fence()      # nothing starts while we look
     world.send("u1", queue=True)
     assert _memory(world) == ["p1", "u1", "p2"]
     assert _waiting(world) == ["p1", "u1", "p2"]
+    world.service.persist_held(world.agent)
     world.restart()
     assert world.started[-3:] == ["p1", "u1", "p2"]
+
+
+def _proven_unlaunched(con, agent_id, trace_id):
+    """The durable state a launch leaves when the Host has proof it never
+    reached the backend: a turn settled 'failed' and an 'interrupted' state
+    naming that turn with dispatch_not_started. Recovery re-admits such a row."""
+    import json
+    cur = con.execute(
+        "INSERT INTO turns (agent_id, source, trace_id, started_at, ended_at, settled_at, outcome)"
+        " VALUES (?, 'pwa', ?, 1, 2, 2, 'failed')", (agent_id, trace_id))
+    con.execute("INSERT INTO state_log (agent_id, ts, kind, detail) VALUES (?, 3, 'interrupted', ?)",
+                (agent_id, json.dumps({"trace_id": trace_id, "dispatch_not_started": True,
+                                       "dispatch_not_started_turn_id": cur.lastrowid})))
 
 
 def test_a_re_admitted_row_whose_turn_opened_is_taken_in_memory(tmp_path):
     """Review lead L1: a row whose launch had begun (a turn row) is taken by
     the durable judgement. Re-admitted by recovery while the agent is busy, its
     memory spec is taken too, so a later user's word lands after it on both
-    sides. Its taken stamp is cleared first: only the turn row speaks, as for
-    a row written by the release before this one."""
+    sides. It carries no taken stamp (only its turn row speaks)."""
     world = World(tmp_path)
     con = agents_db.conn()
-    world.send("t0")
+    world.send("t0")                                         # busy with an owned turn
     world.send("a1", origin="agent", queue=True)
-    _arm(world)
-    world.provider.fail_next = True
-    _end_running(world)                       # a1's launch begins and fails
-    assert not world.provider.fail_next
-    row = turn_queue.get("a1")
-    assert row["status"] == "queued" and turn_queue._has_turn(row), row
-    con.execute("UPDATE queued_turns SET taken = 0 WHERE queue_id = 'a1'")
-    td._SLOTS.drop_queued(world.agent, lambda spec: spec.queue_id == "a1")   # memory lost it
-    world.send("b1")                          # busy with a turn this runtime owns
     world.send("q1", origin="agent", queue=True)
-    world.service.recover_queued()            # re-admits a1 behind b1, durable order
+    _proven_unlaunched(con, world.agent, "t-a1")
+    td._SLOTS.drop_queued(world.agent, lambda spec: spec.queue_id == "a1")   # memory lost it
+    row = turn_queue.get("a1")
+    assert not row["taken"] and turn_queue.row_taken(row)
+    assert "a1" in {r["client_msg_id"] for r in turn_queue.pending_for_dispatch()}
+    world.service.recover_queued()             # re-admits a1 behind t0, durable order
     assert _memory(world) == ["a1", "q1"]
+    assert [s.taken for s in td._SLOTS.queued_specs()[world.agent]] == [True, False]
     world.send("u1", queue=True)
     assert _memory(world) == ["a1", "u1", "q1"]
     assert _waiting(world) == ["a1", "u1", "q1"]
