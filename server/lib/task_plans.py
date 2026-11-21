@@ -154,7 +154,9 @@ def update_item(
             raise ValueError("task plan is no longer active")
         from . import task_goal_state
 
-        task_goal_state.check_revision(plan, revision)
+        task_goal_state.check_revision(
+            plan, revision,
+            next_command=f"step {{plan_id}} {{revision}} {item_id.removeprefix(plan['plan_id'] + ':').replace('{', '{{').replace('}', '}}')} {status}")
         task_goal_state.record(
             con,
             plan,
@@ -221,7 +223,10 @@ def finish(
             raise ValueError("task plan is no longer active")
         from . import task_goal_state
 
-        task_goal_state.check_revision(plan, revision)
+        task_goal_state.check_revision(plan, revision, next_command={
+            "completed": "complete {plan_id} {revision}",
+            "blocked": "block {plan_id} {revision} '{{\"reason\":\"...\"}}'",
+            "cancelled": "cancel {plan_id} {revision} '{{\"reason\":\"...\"}}'"}[status])
         if status == "completed":
             task_goal_state.require_completion(con, plan)
         task_goal_state.record(con, plan, status, {"reason": reason}, now)
@@ -448,6 +453,11 @@ def list_for_session(session: str) -> list[dict]:
     ]
 
 
+# The actions _goal_mutate takes, as a refusal names them (R140).
+GOAL_ACTIONS = ("add_step", "block", "cancel", "checkpoint", "dependency", "document", "enroll",
+                "pause", "rebind", "replan", "resume", "supersede", "unwaive", "waive")
+
+
 class PlanChanged(ValueError):
     """The plan changed since the caller read it (its revision moved). A type of its
     own so callers decide by the exception, never by its text: provider output and
@@ -459,9 +469,15 @@ class GoalClosed(ValueError):
 
 
 # Outcome commitments share the task plan store and its write transactions.
-def _goal_check_revision(plan, revision):
+def _goal_check_revision(plan, revision, *, next_command: str = ""):
+    """A durable goal is changed only at the revision the caller read (R140: a refusal names
+    what to run next, with the goal's current revision in it)."""
     if revision is None and json.loads(plan["goal_json"] or "{}"):
-        raise ValueError("revision required for durable goal")
+        plan_id, current = plan["plan_id"], plan["revision"]
+        command = (next_command or "get {plan_id}").format(plan_id=plan_id, revision=current)
+        raise ValueError(
+            f"revision required for durable goal {plan_id} (now revision {current}): "
+            f"run `clarp-goal {command}`")
     if revision is not None and revision != plan["revision"]:
         raise PlanChanged("plan changed; reload before editing")
 
@@ -670,17 +686,33 @@ def _goal_record(con, plan, kind, detail, now):
 def _goal_require_completion(con, plan):
     goal = json.loads(plan["goal_json"] or "{}")
     rows = con.execute(
-        "SELECT status,required FROM task_items WHERE plan_id=?", (plan["plan_id"],)
+        "SELECT item_id,status,required FROM task_items WHERE plan_id=? ORDER BY position",
+        (plan["plan_id"],)
     ).fetchall()
-    if any(r["required"] and r["status"] not in {"completed", "removed"} for r in rows):
-        raise ValueError("required work remains unresolved")
-    if any(r["status"] == "in_progress" for r in rows):
-        raise ValueError("running work must be resolved or deferred before completion")
-    if goal and any(not c["evidence"].strip() and not c.get("waived")
-                    for c in goal["criteria"]):
+    plan_id, current = plan["plan_id"], plan["revision"]
+
+    def ids(selected):
+        return ", ".join(str(r["item_id"]).removeprefix(f"{plan_id}:") for r in selected)
+    unresolved = [r for r in rows if r["required"] and r["status"] not in {"completed", "removed"}]
+    if unresolved:
         raise ValueError(
-            "completion requires evidence for every acceptance criterion "
-            "(or the owner's waiver of it, with a reason)")
+            f"required work remains unresolved: {ids(unresolved)}; settle each with "
+            f"`clarp-goal step {plan_id} {current} ITEM completed` (or removed, with a reason)")
+    running = [r for r in rows if r["status"] == "in_progress"]
+    if running:
+        raise ValueError(
+            f"running work must be resolved or deferred before completion: {ids(running)}; "
+            f"`clarp-goal step {plan_id} {current} ITEM completed` (or deferred, with a reason)")
+    missing = [c["id"] for c in (goal or {}).get("criteria", [])
+               if not c["evidence"].strip() and not c.get("waived")]
+    if goal and missing:
+        example = ", ".join(f'\"{c}\":\"...\"' for c in missing)
+        raise ValueError(
+            f"completion requires evidence for every acceptance criterion (or the owner's "
+            f"waiver of it, with a reason); missing: {', '.join(missing)}. Record it with "
+            f"`clarp-goal checkpoint {plan_id} {current} "
+            f"'{{\"progress\":\"...\",\"next_work\":\"...\",\"evidence\":{{{example}}}}}'`, "
+            f"then `clarp-goal complete {plan_id} REVISION` with the revision it answers")
     if not goal and any(r["status"] != "completed" for r in rows):
         raise ValueError("unfinished legacy work cannot be completed")
 
@@ -855,7 +887,11 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
         elif action == "checkpoint":
             paused = plan["status"] == "paused"
             if plan["status"] not in {"active", "paused"}:
-                raise ValueError("resume goal before checkpointing")
+                raise ValueError(
+                    f"resume goal before checkpointing: it is {plan['status']}; "
+                    f"`clarp-goal resume {plan_id} {plan['revision']} '{{\"reason\":\"...\"}}'`"
+                    if plan["status"] == "blocked" else
+                    f"the goal is {plan['status']} and takes no checkpoint")
             if paused and data.get("continuation"):
                 raise ValueError(
                     "Nothing was saved: the goal is paused, so a checkpoint records progress "
@@ -1115,7 +1151,8 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 raise ValueError("too many steps")
             task_plans._insert_item(con, plan_id, key, None, position, data, now)
         else:
-            raise ValueError("unknown goal action")
+            raise ValueError(f"unknown goal action {action!r}: use one of {', '.join(GOAL_ACTIONS)} "
+                             f"(and `clarp-goal complete PLAN REVISION` to finish a goal)")
         enabled = con.execute(
             "SELECT recovery_enabled FROM task_plans WHERE plan_id=?", (plan_id,)
         ).fetchone()[0]
