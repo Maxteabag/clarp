@@ -2957,6 +2957,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 prompt_admission=prompt_admission,
                 queue_if_busy=req.queue_if_busy,
                 unheard_audio_sessions=tuple(req.unheard_audio_sessions),
+                user_word=req.front_desk,
             ))
         except DispatchError as e:
             if opening is not None and opening["route"] == "greeting":
