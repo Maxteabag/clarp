@@ -56,6 +56,42 @@ _BIT_RATE = 128000
 # sequence, so the split points are immaterial.
 _CHUNK_BYTES = 16 * 1024
 
+# The languages each Cartesia model family speaks (docs.cartesia.ai, models and
+# languages, read 21 Nov 2026). Any voice speaks any of its model's languages; a
+# request carries one. A code outside the configured model's set is sent as "en",
+# which every request carried before (R168).
+_SONIC_2_LANGUAGES = frozenset({
+    "en", "fr", "de", "es", "pt", "zh", "ja", "hi", "it", "ko", "nl", "pl", "ru", "sv", "tr"})
+_SONIC_3_LANGUAGES = _SONIC_2_LANGUAGES | frozenset({
+    "tl", "bg", "ro", "ar", "cs", "el", "fi", "hr", "ms", "sk", "da", "ta", "uk", "hu", "no",
+    "vi", "bn", "th", "he", "ka", "id", "te", "gu", "kn", "ml", "mr", "pa"})
+# Bokmål and Nynorsk are written Norwegian, which Cartesia names "no".
+_SAME_LANGUAGE = {"nb": "no", "nn": "no"}
+
+
+def model_languages(model: str) -> frozenset[str]:
+    """What `model` speaks: the sonic-3 family (sonic-3, sonic-3.5, sonic-3.6 and their
+    dated ids), the sonic-2 family (sonic-2, sonic-turbo, sonic), else English only."""
+    model = (model or "").strip().lower()
+    if model.startswith("sonic-3"):
+        return _SONIC_3_LANGUAGES
+    if model in ("sonic", "sonic-turbo") or model.startswith(("sonic-2", "sonic-turbo-")):
+        return _SONIC_2_LANGUAGES
+    return frozenset({"en"})
+
+
+def language_for(code: str | None, model: str) -> str:
+    """The `language` a request on `model` carries for an agent heard in `code` (its
+    first language): that code when the model speaks it, else "en"."""
+    primary = (code or "").strip().lower().replace("_", "-").split("-", 1)[0]
+    primary = _SAME_LANGUAGE.get(primary, primary)
+    if primary and primary in model_languages(model):
+        return primary
+    if primary and primary != "en":
+        from .log import log
+        log("cartesiaLanguageUnsupported", f"{primary} on {model or '-'} -> en")
+    return "en"
+
 
 def synthesize(*,
                text: str,
