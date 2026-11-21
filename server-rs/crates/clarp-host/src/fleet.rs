@@ -375,6 +375,7 @@ pub struct Directory {
     /// The settings the owner makes from an app, each a text under its key
     /// (`transcription.agent_engines`), as the Python Host keeps them.
     pub settings: Arc<BTreeMap<String, String>>,
+    pub(crate) coordination: crate::hidden_coordination::Roster,
     /// The personas the owner made, and how he made built-in ones look.
     pub personas: Arc<Book>,
     /// The agents that were removed, by id: the name and the session each had last. A row an
@@ -1890,6 +1891,10 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         push: Arc::new(push.clone()),
         peers: Arc::new(peers.clone()),
         settings: Arc::new(settings.clone()),
+        coordination: crate::hidden_coordination::Roster::of(
+            &settings,
+            members.iter().map(|member| &member.record),
+        ),
         personas: book.clone(),
         gone: Arc::new(gone.clone()),
     }));
@@ -2360,6 +2365,10 @@ impl Fleet {
             push: Arc::new(self.push.clone()),
             peers: Arc::new(self.peers.clone()),
             settings,
+            coordination: crate::hidden_coordination::Roster::of(
+                &self.settings,
+                self.members.iter().map(|member| &member.record),
+            ),
             personas: self.book.clone(),
             gone: Arc::new(self.gone.clone()),
         }));
