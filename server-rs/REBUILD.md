@@ -3365,6 +3365,23 @@ a release when free and twice, a spent bound, a tool that has ended, one being s
 hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
 
+**Gallery management** (21 Nov 2026, the Python Host's PR 494). One bounded writer owns
+favorites, tombstones and gallery blob reclamation by asset id. The media publication in an
+agent's journal stays as written. At startup the gallery imports older publications and
+finishes any journal deliveries it owes. A deletion writes the tombstone and its pending
+blob removal together, then reflects the commit in the gallery and tombstone indexes.
+Every media read, including each range chunk, checks the tombstone before reading bytes.
+A pending unlink checks the live owners again on the same writer used by a publish. An
+interrupted unlink is safe to repeat. Independent portrait and contact files keep their
+existing names and storage. Media writes do not wait for a fleet or agent worker to reply
+from within the media writer, and those workers never wait for it. A request that does not
+receive its writer answer within three seconds receives a refusal. Deletion and favorite
+retries preserve their first timestamps and publish no new event.
+
+Gallery pages seek by creation or favorite time and asset id. Tombstone pages read nothing
+at or before their cursor, and include all rows that share the last millisecond of the
+page. They tell a reconnecting device what it must evict even when it missed the event.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
