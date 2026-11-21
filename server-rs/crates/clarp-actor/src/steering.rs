@@ -44,7 +44,14 @@ pub(super) struct Separate {
 impl State {
     pub(super) fn record(&mut self, entry: &Line) -> Option<Value> {
         match entry {
-            Line::Shim(ShimEvent::InputOpen { shim_pid, shim_start, tool_pid, tool_start, group, projects }) => {
+            Line::Shim(ShimEvent::InputOpen {
+                shim_pid,
+                shim_start,
+                tool_pid,
+                tool_start,
+                group,
+                projects,
+            }) => {
                 self.owner = Some(InputOwner {
                     shim_pid: *shim_pid,
                     shim_start: shim_start.clone(),
@@ -272,11 +279,16 @@ fn contains_uuid(prompts: &[Value], uuid: &str) -> bool {
 
 /// A vanished socket is insufficient evidence that the tool is done.
 pub(super) fn inactive_owner(agent: &Agent) -> Result<bool, ActorError> {
-    let Some(owner) = agent.joins().values().find_map(|follow| follow.join.recovery.as_ref()) else {
+    let Some(owner) = agent
+        .joins()
+        .values()
+        .find_map(|follow| follow.join.recovery.as_ref())
+    else {
         return Ok(true);
     };
-    super::orphan::ended(&owner.owner)
-        .map_err(|error| ActorError::Io(format!("could not fence the follow-up's old tool: {error}")))
+    super::orphan::ended(&owner.owner).map_err(|error| {
+        ActorError::Io(format!("could not fence the follow-up's old tool: {error}"))
+    })
 }
 
 /// Recover input that Claude logged without a corresponding durable stdout echo. Only call
@@ -287,21 +299,38 @@ pub(super) fn recover_reads(
     now_ms: i64,
     out: &mut Outputs,
 ) -> Result<bool, ActorError> {
-    let pending: Vec<_> = batch.agent().joins().iter()
+    let pending: Vec<_> = batch
+        .agent()
+        .joins()
+        .iter()
         .filter(|(_, follow)| follow.stage == Stage::Pending)
         .filter_map(|(&turn, follow)| {
-            Some((turn, follow.join.into, follow.join.uuid.clone(), follow.message_seq, follow.join.recovery.clone()?))
+            Some((
+                turn,
+                follow.join.into,
+                follow.join.uuid.clone(),
+                follow.message_seq,
+                follow.join.recovery.clone()?,
+            ))
         })
         .collect();
     let Some((_, _, _, _, recovery)) = pending.first() else {
         return Ok(false);
     };
     if pending.iter().any(|(_, _, _, _, other)| other != recovery) {
-        return Err(ActorError::Corrupt("follow-ups of the same turn name different tools".into()));
+        return Err(ActorError::Corrupt(
+            "follow-ups of the same turn name different tools".into(),
+        ));
     }
-    let uuids: BTreeSet<_> = pending.iter().map(|(_, _, uuid, _, _)| uuid.clone()).collect();
+    let uuids: BTreeSet<_> = pending
+        .iter()
+        .map(|(_, _, uuid, _, _)| uuid.clone())
+        .collect();
     let Some(read) = clarp_backend::past::claude_read_followups(
-        &recovery.owner.projects, &cwd.to_string_lossy(), &recovery.session, &uuids,
+        &recovery.owner.projects,
+        &cwd.to_string_lossy(),
+        &recovery.session,
+        &uuids,
     ) else {
         eprintln!("clarp-host: could not read Claude's follow-up receipts in its session file");
         return Ok(false);
@@ -309,7 +338,9 @@ pub(super) fn recover_reads(
     let mut revealed = false;
     for (turn, into, uuid, message_seq, _) in pending {
         if let Some(proof) = read.get(&uuid)
-            && batch.command(Command::JoinRead { turn }, proof.at_ms.unwrap_or(now_ms)).is_ok()
+            && batch
+                .command(Command::JoinRead { turn }, proof.at_ms.unwrap_or(now_ms))
+                .is_ok()
         {
             let message = message_at(batch.log(), message_seq)?;
             queue_started(batch, out, turn, &message);
@@ -350,10 +381,7 @@ impl Actor {
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
-        if !live.steering.stream.can_join()
-            || live.opening
-            || live.origin.name() == COMPACTION
-        {
+        if !live.steering.stream.can_join() || live.opening || live.origin.name() == COMPACTION {
             return Ok(None);
         }
         let Some(owner) = live.steering.owner.clone() else {
@@ -365,7 +393,10 @@ impl Actor {
         let join = Join {
             into: live.turn,
             uuid,
-            recovery: Some(Recovery { owner, session: session.to_owned() }),
+            recovery: Some(Recovery {
+                owner,
+                session: session.to_owned(),
+            }),
         };
         let socket = self.profile.socket_path_of(live.turn, live.attempt);
         let mut batch = self.recorder.batch();
