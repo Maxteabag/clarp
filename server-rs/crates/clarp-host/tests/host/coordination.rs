@@ -1179,8 +1179,12 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
         json!({"visibility":"show","hidden":false,"source":"chat"})
     );
     let snapshot = host.get("/agents/snapshot");
-    let oak = snapshot["agents"].as_array().unwrap().iter()
-        .find(|agent| agent["session"] == "oak").unwrap();
+    let oak = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["session"] == "oak")
+        .unwrap();
     assert_eq!(oak["coordination_visibility"], "show");
     assert_eq!(oak["coordination_override"], "show");
     assert!(
