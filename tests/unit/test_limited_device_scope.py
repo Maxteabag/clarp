@@ -82,15 +82,21 @@ def test_a_full_device_keeps_every_one_of_these(monkeypatch):
 
 
 @pytest.mark.parametrize("method, path", [
-    ("GET", "/terminal"),        # no session: unmatched, stays 404
-    ("GET", "/dirsX"),           # not /dirs: unmatched, stays 404
-    ("PATCH", "/nothing-here"),  # unmatched PATCH stays 404
+    ("GET", "/terminal"),        # no session: no route serves it
+    ("GET", "/dirsX"),           # not /dirs: no route serves it
+    ("PATCH", "/nothing-here"),  # no route serves it
 ])
-def test_unmatched_paths_answer_a_limited_device_as_before(method, path):
-    """The lead's rule for HTTP-01/02/03: only the finding's routes change;
-    an unmatched path keeps its 404 for a limited device."""
+def test_unmatched_paths_are_refused_to_a_limited_device_and_keep_their_404_for_a_full_one(method, path):
+    """HTTP-01/02/03 changed only the finding's routes; R123 then made the GETs a list of what a
+    limited device may read, and refuses every PATCH: a path no route serves is refused to a
+    limited device like any other off the list. A full device still gets its 404."""
     handler = _handler(path)
     sent = []
     handler._send = lambda status, *_a, **_k: sent.append(status)
     getattr(handler, f"do_{method}")()
-    assert handler.denied == [] and sent == [404]
+    assert handler.denied == [403] and sent == []
+    full = _handler(path, scope="full")
+    full_sent = []
+    full._send = lambda status, *_a, **_k: full_sent.append(status)
+    getattr(full, f"do_{method}")()
+    assert full.denied == [] and full_sent == [404]

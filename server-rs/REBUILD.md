@@ -1334,6 +1334,13 @@ its other process cannot take, and for what it missed while it was away, has no 
 and their explainer are one process. The switch and the janitor stay off as installed: what is asked of a
 model, on whose account, is the owner's to decide, and comes over with the owner's settings.
 
+**A shell call without its command (R184, 21 Nov 2026).** The explanation desk returns
+`failed` with reason `unexplained` when an enabled shell call brings only its name or
+description. The live reader waits until the command arrives. Such calls create no shape,
+model request or learned row. Templates with fixed call-specific values are kept for the exact
+call. A reusable row learned earlier is served only when the new call carries the values the
+sentence names.
+
 One part of the Python Host's explainer is left out on purpose: its memory of each agent's recent commands
 (`tool_explanation_commands`). That Host shows a command of Codex as the name of its row, cut at 80 signs,
 and remembers the whole commands to complete a cut name an app asks about. This Host shows such a command
@@ -2425,6 +2432,12 @@ closes it; failing again, archived, failing once more, discarded; a restart keep
 
 **Installed transcription models.** The Linux catalog lists the five faster-whisper models and the two macOS rows. The Host checks its own registered paths for the configuration, tokenizer and model files. A regular clip or a call can select an installed variant by name. The default stays warm. One additional worker loads on demand and stays resident until a different variant replaces it, the model is removed or the Host stops. Default and variant share an inference turn. A request with a fallback gives another variant ten seconds to finish selection and inference. The final choice waits for that turn.
 
+**Transcription failure words (PR 518, 21 Nov 2026).** Missing models, loading, contention, and failed attempts
+map to fixed words and statuses. Upload voice events and call attempt reasons use the same words. Health keeps
+fixed subsystem error labels with its timestamps, including for limited devices. The Host logs the engine detail.
+The speech stream gives a fixed failure message when its provider reports an error. The reference vectors and
+the upload, call, stream and health tests hold the failure paths.
+
 The Host marks a managed model before deleting its folder. While marked it is hidden. A restart finishes pending deletions and clears the mark on a newly configured default. A stored inventory that cannot be parsed is preserved byte for byte under `records.unreadable` before the Host logs a single diagnostic and opens with an empty inventory. Store read or backup failures stop startup.
 
 The additional process holds its model and inference buffers. A published CPU small-int8 benchmark used about 1.5 GB. Resident memory varies with model and workload. An idle timeout could reclaim that memory on machines under swap pressure at the cost of another cold load. This Host retains the worker as the reference does.
@@ -3391,17 +3404,37 @@ and how it ended: `let go by request`, `let go at the bound`, `ended while held`
 `refused: ` and why. Where the system shows no processes in `/proc` a hold is refused in words and nothing is
 signalled. Nothing of a hold is written in the spool: a turn never held is byte for byte as before, and a reader of today reads a held one. Not
 held: a process that left the tool's group (as it is not stopped today either), and the tool when the shim itself is
-killed while it holds it. No caller yet: the actor's side of a turn that produced nothing is a later piece. Held by
+killed while it holds it. Held by
 fifteen tests in `crates/clarp-shim/tests/shim.rs` with stand-in tools (printed before the hold, a pipe full at the
 hold, half a line, a child, the bound with nobody to let go, ended while held, input written while held, held twice,
 a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
 hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
 
+**A second user message can replace a quiet turn** (21 Nov 2026, issue 491 B, Python PR 521).
+Only the next plain user message can replace a running turn that another plain user message began.
+The actor checks the shim's bounded hold against the whole spool fence. An unfinished output line,
+an unfinished hook report, an answer or tool block that began, an observed call, or an unreadable
+fence leaves the follow-up waiting. Thinking by itself permits takeover. Claude Code 2.1.223 and
+Antigravity 1.5.13 are the minimum versions that support their respective paths.
+
+The actor writes the offer before asking the shim to freeze the tool, then records its selection
+before consuming the hold. An offer alone leaves the first turn in place. Under the same lock as release and
+expiry, the shim checks the exact acknowledged fence and writes the takeover marker durably before
+sending SIGKILL. Recovery uses the marker and the old process's exit to finish the selection.
+The actor writes the first turn's `replaced` end and the second turn's start together, keeping
+both user rows and the first delivery receipt. The new turn uses the second message's trace and
+cannot itself be replaced. A Stop that comes before the consume retains the ordinary Stop path.
+
+A resumed Claude turn reads the prior transcript entry and uses the CLI's resume and drop pair.
+Its input carries both user texts in one line, with a UUID derived from the current trace. A quiet
+first turn without prior provider history begins a new Claude session. Antigravity continues the
+same conversation with both texts after checking its transcript while held. An existing first
+message in that transcript causes release and an ordinary queued follow-up.
+
 **An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
-profile use the kernel's engine order. With a language set, models of one hosted provider
-share an attempt, as do the aliases of the Host's default local engine. If the ordinary
-chain ends on a hosted engine that cannot take the set, the Host considers its selected
+profile use the kernel's engine order. If the ordinary chain ends on a hosted engine that
+cannot take the set, the Host considers its selected
 model if it is known, keyed and takes language sets. A provider already tried is excluded.
 The Host also considers its own model when no hosted replacement qualifies. Its catalogue
 languages determine coverage, with Norwegian aliases and the Whisper model default for an
@@ -3423,6 +3456,10 @@ existing names and storage. Media writes do not wait for a fleet or agent worker
 from within the media writer, and those workers never wait for it. A request that does not
 receive its writer answer within three seconds receives a refusal. Deletion and favorite
 retries preserve their first timestamps and publish no new event.
+
+The gallery's delete, batch delete and favorite routes refuse any non-blank turn or
+paired-Host claim with 403 `agents_may_not` (R178, the reference's PR 519).
+Gallery reads and publication keep their existing access rules.
 
 Gallery pages seek by creation or favorite time and asset id. Tombstone pages read nothing
 at or before their cursor, and include all rows that share the last millisecond of the
@@ -3500,6 +3537,28 @@ Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversat
 `a_message_an_older_build_put_into_the_conversation_while_it_waited_stays_there`), the actor's, the Host's test
 `a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts` and the wrong rules of
 `tools/plants/enter-at-start.py`.
+
+**One delivery of a recording to each provider (R175, 21 Nov 2026).** Agent and call settings
+keep each engine at its first position. The ordinary upload and voice profile use the same
+distinct engine order. The Host's own model and its aliases name one engine. Two distinct
+models of one hosted provider remain in the order until a failed attempt reaches its adapter.
+A refusal before the adapter receives the language leaves the next model available. The
+ordinary upload logs repeated engines and later models it drops after provider contact. The
+call report records a visited excluded model as `outcome: "skipped"` with
+`reason: "provider_already_sent"`. A model-selection wait is bounded while a runnable fallback
+remains. The R152 recovery's failed list contains the engines that reached their boundary.
+Call attempt outcomes and skip reasons are open sets. Clients can display an unfamiliar
+value as words and keep the rest of the response. The reference vectors cover both attempt
+loops with stand-in adapters, and the Host test verifies the provider requests and call report.
+
+**Names for the voice profile (21 Nov 2026, PR 498).** The profile gives the configured
+language set alongside the language arguments of the first hearing engine. Archived rows,
+creation replies and roster events omit the profile. Cartesia and ElevenLabs names are
+read from the Host's published names file, with the Cartesia picker overlay. Gemini names
+use its picker labels and the configured Vertex aliases. The background refresher lists
+Cartesia's catalogue and looks up missing voices in use, handling at most 100 by-ID
+lookups per provider. A check advances the checked date. Only changed names change
+the file content and its digest; a provider failure keeps its earlier names.
 
 ## 7. Stages and gates
 
