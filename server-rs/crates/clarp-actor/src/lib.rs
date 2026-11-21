@@ -2321,6 +2321,14 @@ impl Actor {
         conversation::tail(self.recorder.log(), self.drafts(), whole, limit, Which::All)
     }
 
+    pub fn visible_previews(
+        &self,
+        candidate: impl Fn(&Entry) -> bool,
+        limit: usize,
+    ) -> Result<(Option<Versioned>, Option<Versioned>), ActorError> {
+        conversation::visible_previews(self.recorder.log(), self.drafts(), candidate, limit)
+    }
+
     /// Up to `limit` things that are newer than `revision`, as a client catches up.
     pub fn after(&self, revision: u64, limit: usize) -> Result<Page, ActorError> {
         self.after_of(revision, limit, Which::All)

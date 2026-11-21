@@ -256,6 +256,29 @@ impl Chip {
         };
         let (roster, now_ms) = (roster(app), app.clock.now_ms());
         self.count_badge(app, held, &roster, now_ms, false);
+        let directory = app.fleet.directory();
+        let recipient = event["agent_id"].as_str().unwrap_or_default();
+        let hidden = event["audience"] == clarp_kernel::coordination::AGENTS
+            && crate::hidden_coordination::hides(&directory, recipient)
+            && !matches!(
+                event["ops"][0]["activity"]["state"].as_str(),
+                None | Some("idle" | "interrupted" | "limited")
+            );
+        let mut veiled;
+        let event = if hidden {
+            let sender = event["sender_agent_id"]
+                .as_str()
+                .and_then(|id| directory.named(id));
+            let name = sender.map(|member| member.record.persona.as_str());
+            let headline = clarp_kernel::hidden_coordination::working_headline(name);
+            veiled = event.clone();
+            let activity = &mut veiled["ops"][0]["activity"];
+            clarp_kernel::hidden_coordination::veil_live(activity, &headline);
+            activity["veiled"] = json!(true);
+            &veiled
+        } else {
+            event
+        };
         if let Some(push) = held.pacer.observe(event, &roster, now_ms) {
             self.offer(app, held, &push, now_ms);
         }
