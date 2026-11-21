@@ -761,6 +761,12 @@ _DEFAULTS = {
 _AUDITS_BY_DIGEST = "audits_by_digest"
 
 
+def _carry_line(what: str, how: str) -> str:
+    """The transcriptCarryInputsChanged line: what stood in the way, and for a
+    refused kind of message row how its rows changed (message_carry._how)."""
+    return f"what={what} how={how}" if how else f"what={what}"
+
+
 def carry_rules(conf) -> frozenset:
     from . import message_carry
     return frozenset(rule for rule in message_carry.RULES if conf.get(rule))
@@ -1478,7 +1484,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         return refuse("partial_record")
     rows_now = None
 
-    def recorded_rows_changed(applying=frozenset()) -> str:
+    def recorded_rows_changed(applying=frozenset(), why=None) -> str:
         """What stands in the way of the stored record, the rows read once."""
         nonlocal rows_now
         if rows_now is None:
@@ -1488,7 +1494,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         return message_carry.changed(
             state.inputs, rows_now, rules=applying, carry=cp.store_carry,
             boundary_seq=cp.boundary_seq, source_file=str(path),
-            backend_session_id=backend_session_id, session_rows=session_rows)
+            backend_session_id=backend_session_id, session_rows=session_rows, why=why)
 
     # The file is the one that import read, to its last byte (a checkpoint's
     # size can be ahead of its imported bytes: the file grew during that
@@ -1503,10 +1509,11 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         # the file is read. The checks below read its samples and the bytes
         # after the boundary, and the first tail from it every imported
         # byte: all wasted on a tail the rows refuse.
-        what = recorded_rows_changed(rules)
+        why: dict = {}
+        what = recorded_rows_changed(rules, why)
         if what:
             from .log import log
-            log("transcriptCarryInputsChanged", f"what={what}")
+            log("transcriptCarryInputsChanged", _carry_line(what, why.get("how", "")))
             return refuse("carry_inputs_changed")
     # With ``tail_hashes_while_parsing`` a tail that is going to parse its
     # range takes both hashes of it from that parse: the one that proves the
@@ -1751,7 +1758,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     except message_writes._TailInvalidated as changed:
         # Which rows stood in the way: what a further rule would have to cover.
         from .log import log
-        log("transcriptCarryInputsChanged", f"what={getattr(changed, 'what', 'unknown')}")
+        log("transcriptCarryInputsChanged",
+            _carry_line(getattr(changed, "what", "unknown"), getattr(changed, "how", "")))
         return refuse("carry_inputs_changed")
     if snapshot and snapshot[-1] is not None and not _checkpoint_refused(checkpoint_status) \
             and not source_invalidated:

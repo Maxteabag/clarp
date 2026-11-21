@@ -229,7 +229,7 @@ class World:
         self.report = report
         [event] = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
         return event["code"], [word for line in report["carry_changed"]
-                               for word in line.removeprefix("what=").split(",")]
+                               for word in line.split(" how=")[0].removeprefix("what=").split(",")]
 
     def started(self, turns: int):
         """The first import (full), then one plain tail: a frontier stands."""
@@ -329,6 +329,12 @@ def test_a_row_of_this_session_that_an_old_turn_reads_is_a_full_import(tmp_path,
             expected = "row_send"
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("full_carry_inputs_changed", [expected])
+        # The line says how the refused kind's old rows changed, by their count.
+        how = {"an old row edited without a new revision": "row_transcript:in_place",
+               "an old row edited with a new revision": "row_transcript:rewritten",
+               "an old row removed": "row_transcript:removed"}.get(twin)
+        if how is not None:
+            assert world.report["carry_changed"] == [f"what={expected} how={how}"]
         world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == ("tail_applied", [])
 
