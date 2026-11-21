@@ -598,7 +598,16 @@ WantedBy=default.target
 EOF
 
 echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
-if [ -n "$push_relay" ]; then pushes="through $push_relay"; else pushes="nowhere (the relay is off)"; fi
+if [ -n "$push_keys" ]; then
+    pushes="directly with the owner's APNs/FCM keys"
+    if [ -n "$push_relay" ]; then
+        pushes="$pushes and through $push_relay for phones that gave a grant"
+    fi
+elif [ -n "$push_relay" ]; then
+    pushes="through $push_relay for phones that gave a grant"
+else
+    pushes="nowhere (neither direct keys nor a relay are configured)"
+fi
 echo "it listens on $listen as \"$name\"; pushes go $pushes"
 if [ "$accounts" = follow ]; then
     echo "a turn whose account is out waits for another login (the other Host's selector puts it in place)"
