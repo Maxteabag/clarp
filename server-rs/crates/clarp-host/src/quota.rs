@@ -89,6 +89,20 @@ pub struct With<'a> {
     pub now_ms: i64,
 }
 
+// A broken actor's activity is unknown, so leave automatic refresh eligible.
+fn agy_in_use(directory: &crate::fleet::Directory, now: i64) -> bool {
+    directory
+        .members
+        .iter()
+        .chain(&directory.janitors)
+        .filter(|member| member.record.backend == "agy")
+        .any(|member| {
+            let view = member.agent.view();
+            view.broken.is_some()
+                || clarp_kernel::usage_ask::agy_recent_activity(view.latest_turn_activity, now)
+        })
+}
+
 impl<'a> With<'a> {
     /// With what an app's request has, where the user's home is, and now.
     pub fn of(app: &'a crate::edge::App, home: &'a Path) -> Self {
@@ -202,6 +216,7 @@ impl Desk {
                         .unwrap_or_else(PoisonError::into_inner);
                     clarp_kernel::usage_ask::due(attempt, with.now_ms)
                         && clarp_kernel::usage_ask::due(last["at"].as_i64(), with.now_ms)
+                        && agy_in_use(&app.fleet.directory(), with.now_ms)
                 }
             };
             drop(known);

@@ -80,11 +80,21 @@ if mode == "desk":
     answer("desk-finished", first)
     raise SystemExit(0)
 tool = "tool-" + mode
-start(tool, "Task" if mode == "task" else "Bash")
-if mode == "task":
-    start("child", "Bash", tool)
-    returned("child", tool)
-(root / ("tool-" + mode)).touch()
+if mode in ("writing", "between-tools"):
+    if mode == "between-tools":
+        start("previous-tool", "Bash")
+        returned("previous-tool")
+    say("stream_event", event={
+        "type": "content_block_start", "index": 0,
+        "content_block": {"type": "text", "text": ""},
+    })
+    (root / ("writing-" + mode)).touch()
+else:
+    start(tool, "Task" if mode == "task" else "Bash")
+    if mode == "task":
+        start("child", "Bash", tool)
+        returned("child", tool)
+    (root / ("tool-" + mode)).touch()
 if mode == "large":
     release("flood-large")
     for _ in range(96):
@@ -102,12 +112,17 @@ for index in range(2 if mode == "double" else 1):
     more.append((uid, follow))
     (root / ("received-" + follow)).write_text(uid)
 release("release-" + mode)
-if mode == "race":
-    answer("first-race", first)
-    (root / "result-race").touch()
-    release("echo-race")
+if mode in ("race", "writing"):
+    answer("first-" + mode, first)
+    (root / ("result-" + mode)).touch()
+    release("echo-" + mode)
     echo(more[0][0])
-    answer("second-race", more[0][0])
+    answer("second-" + mode, more[0][0])
+elif mode == "between-tools":
+    start("next-tool", "Bash")
+    returned("next-tool")
+    echo(more[0][0])
+    answer("joined-between-tools", first, more[0][0])
 elif mode == "unread":
     answer("first-unread", first)
 elif mode == "ledger":
@@ -518,6 +533,54 @@ fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
             .any(|event| { event["type"] == "transcript-updated" && event["session"] == session }),
         "the transcript notification must precede the started event: {events:?}"
     );
+}
+
+#[test]
+fn a_claude_follow_up_can_join_while_no_tool_call_is_open() {
+    for mode in ["writing", "between-tools"] {
+        let place = Place::new(mode);
+        let claude = place.root.join("claude");
+        program(&claude, CLAUDE);
+        let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+        let host = place.start_in("", &[], &world);
+        let session = "open-input";
+        host.post(
+            "/agents",
+            json!({"name":session,"session":session,"backend":"claude"}),
+        );
+
+        let initial = format!("case-{mode}");
+        host.send(session, &initial, "first");
+        wait_for("the model to generate with no tool open", || {
+            place.root.join(format!("writing-{mode}")).exists()
+        });
+        let follow = format!("add-{mode}");
+        assert_eq!(host.send(session, &follow, &follow)["queued"], true);
+        wait_for("the follow-up on the running process's stdin", || {
+            place.root.join(format!("received-{follow}")).exists()
+        });
+        let queue = host.get(&format!("/turn-queue?session={session}"));
+        assert_eq!(queue["items"][0]["id"], follow);
+        assert_eq!(queue["items"][0]["status"], "started");
+        let row_id = format!("u-{follow}");
+        assert!(!host.turns(session).iter().any(|row| row["id"] == row_id));
+
+        std::fs::write(place.root.join(format!("release-{mode}")), "").unwrap();
+        if mode == "writing" {
+            collect_answer(&host, session, "first-writing");
+            assert!(!host.turns(session).iter().any(|row| row["id"] == row_id));
+            std::fs::write(place.root.join("echo-writing"), "").unwrap();
+            collect_answer(&host, session, "second-writing");
+        } else {
+            collect_answer(&host, session, "joined-between-tools");
+        }
+        let rows = host.turns(session);
+        assert_eq!(rows.iter().filter(|row| row["id"] == row_id).count(), 1);
+        assert_eq!(
+            std::fs::read_to_string(place.root.join("launches")).unwrap(),
+            format!("{initial}\n")
+        );
+    }
 }
 
 fn reads(heard: &Mutex<Vec<Value>>, session: &str, id: &str) -> Vec<u64> {

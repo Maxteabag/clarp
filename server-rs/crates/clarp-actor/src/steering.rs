@@ -8,7 +8,7 @@ use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::journal::{Batch, kind};
 use clarp_kernel::steering::{self, InputOwner, Join, Observation, Recovery, Stage};
 use clarp_kernel::takeover;
-use clarp_kernel::turn::{COMPACTION, RunOutcome, TurnId};
+use clarp_kernel::turn::{COMPACTION, Origin, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
 
@@ -40,6 +40,17 @@ pub(super) struct Separate {
     pub(super) turn: TurnId,
     pub(super) message: Message,
     pub(super) closes: String,
+}
+
+impl Separate {
+    pub(super) fn reply_origin(&self) -> Origin {
+        if self.message.origin.is_user_send() {
+            self.message.origin.clone()
+        } else {
+            // A trusted front-desk relay is shown as an answer to the user.
+            Origin::User
+        }
+    }
 }
 
 impl State {

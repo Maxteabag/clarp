@@ -206,8 +206,33 @@ def cases(place):
             except RuntimeError:
                 windows = None
         rpc_cases.append({"result": result, "windows": windows})
+    # Use the reference query over a synthetic turn and recorded states at the cutoff.
+    from lib import agents
+    from lib.protocol import TurnSource
+
+    activity = [{"start": None, "state": None, "active": agy.agy_in_use(began)}]
+    agent = agents.create_agent(persona="Gem", voice_id="", cwd=str(place), session="gem", backend="agy")
+    agents.start_runtime(agent, "gem")
+    agents.open_turn(agent_id=agent, source=TurnSource.PWA, trace_id="agy-activity")
+    hours = 3_600_000
+    for started, state in [
+        (began, None),
+        (began - 6 * hours + 1, None),
+        (began - 6 * hours, None),
+        (began - 6 * hours - 1, None),
+        (began - 7 * hours, began - 6 * hours),
+        (began - 7 * hours, began - 6 * hours + 1),
+    ]:
+        db.conn().execute("UPDATE turns SET started_at = ? WHERE agent_id = ?", (started, agent))
+        db.conn().execute("DELETE FROM state_log WHERE agent_id = ?", (agent,))
+        if state is not None:
+            db.conn().execute(
+                "INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail) VALUES (?,?,?,?,?)",
+                (agent, None, state, "thinking", "{}"))
+        activity.append({"start": started, "state": state, "active": agy.agy_in_use(began)})
+
     return {"at": began, "payload": {"command": {"data": {"groups": groups}}}, "cases": rows, "direct": direct,
-            "app_server": rpc_cases, "authoritative": turns, "ages": ages, "origins": origins, "blocks": blocks, "claude": readings, "agy": agy_cases}
+            "app_server": rpc_cases, "authoritative": turns, "ages": ages, "origins": origins, "blocks": blocks, "claude": readings, "agy": agy_cases, "agy_activity": activity}
 
 
 if __name__ == "__main__":
