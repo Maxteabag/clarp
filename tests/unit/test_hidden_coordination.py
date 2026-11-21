@@ -212,7 +212,7 @@ def test_a_users_steer_into_a_coordination_turn_says_so_on_the_live_channel_at_o
         hub.begin_turn(agent_id=world.id, session="worker", conv="native", turn_id="t-boss")
         assert hub.snapshot(agent_id=world.id)["turn"]["audience"] == "agents"
         service = SimpleNamespace(ctx=SimpleNamespace(stream=_Stream()))
-        spec = SimpleNamespace(agent_id=world.id, session="worker", origin="user", sender_agent_id="")
+        spec = SimpleNamespace(agent_id=world.id, session="worker", origin="user", sender_agent_id="", user_word=False)
         TurnDispatchService._steered_into(service, spec, "t-boss")
         turn_ops = [op for event in sent for op in event["ops"] if op["op"] == "turn"]
         assert turn_ops[-1]["turn"] == {**turn_ops[0]["turn"], "audience": "user"}
@@ -221,7 +221,7 @@ def test_a_users_steer_into_a_coordination_turn_says_so_on_the_live_channel_at_o
         # Another agent's message steered in changes nothing.
         world.turn("t-boss-2", "One more report please", "Done.", origin="agent", sender=world.boss,
                    settle=False)
-        peer = SimpleNamespace(agent_id=world.id, session="worker", origin="agent", sender_agent_id=world.peer)
+        peer = SimpleNamespace(agent_id=world.id, session="worker", origin="agent", sender_agent_id=world.peer, user_word=False)
         TurnDispatchService._steered_into(service, peer, "t-boss-2")
         assert coordination.audience_of(world.id, "t-boss-2") == "agents"
     finally:
@@ -266,7 +266,9 @@ def _set_visibility(*, chat=None, host=None, agent_id=""):
 def test_the_reminder_tells_the_truth_for_the_chat_at_that_moment(world):
     brief = lambda origin="agent", sender=world.boss: _turn_protocol(  # noqa: E731
         world.id, origin=origin, sender_agent_id=sender)
-    assert coordination.effective_visibility(world.id) == "show" and brief() == ""   # the default
+    assert coordination.effective_visibility(world.id) == "hide" and "tell-user" in brief()   # the default
+    _set_visibility(host="show")
+    assert brief() == ""
     _set_visibility(host="hide")
     assert "clarp-admin tell-user --from worker" in brief() and "(Boss)" in brief()
     assert brief(origin="user", sender="") == ""                 # the user's own turn
