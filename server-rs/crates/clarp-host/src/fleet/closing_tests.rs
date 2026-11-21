@@ -158,6 +158,7 @@ impl Place {
         )
         .unwrap();
         Works {
+            teams: None,
             runtime: tokio::runtime::Handle::current(),
             opening_gate: crate::calls::opening_launch::channel().0,
             config: Arc::new(config),

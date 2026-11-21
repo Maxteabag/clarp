@@ -70,6 +70,7 @@ pub mod helper_cells;
 pub mod provider_jobs;
 mod steering;
 pub mod takeover;
+pub mod teams;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
@@ -678,6 +679,8 @@ const STOPPED_FOR_AN_ACCOUNT: &str =
     "usage limit reached: the account was out, and the turn was stopped to wait for another";
 
 pub struct Actor {
+    teams: Option<Arc<dyn teams::Runtime>>,
+    team_effect_through: Seq,
     profile: Profile,
     backend: Arc<dyn Backend>,
     recorder: Recorder,
@@ -1249,9 +1252,14 @@ fn kept(text: String, origin: &Origin) -> String {
 }
 
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, origin: &Origin, live: LiveReply, ts_ms: i64) {
-    let text = kept(live.text, origin);
+    let display = clarp_kernel::teams::runtime::strip_team_blocks(&live.text);
+    let text = kept(display.into_owned(), origin);
     // An answer that is no answer is not shown while it is written.
-    if text == clarp_kernel::heartbeat::NOTHING_TO_DO {
+    if text.is_empty()
+        || text == clarp_kernel::heartbeat::NOTHING_TO_DO
+        || (origin.name() == clarp_kernel::teams::runtime::LEADER_TICK
+            && clarp_kernel::teams::runtime::leader_reply(&text).is_none())
+    {
         drafts.retain(|draft| draft.id != live.id);
         return;
     }
@@ -1276,6 +1284,16 @@ impl Actor {
         backend: Arc<dyn Backend>,
         log: Box<dyn AgentLog>,
         now_ms: i64,
+    ) -> Result<(Self, Outputs), ActorError> {
+        Self::open_with_teams(profile, backend, log, now_ms, None)
+    }
+
+    pub fn open_with_teams(
+        profile: Profile,
+        backend: Arc<dyn Backend>,
+        log: Box<dyn AgentLog>,
+        now_ms: i64,
+        teams: Option<Arc<dyn teams::Runtime>>,
     ) -> Result<(Self, Outputs), ActorError> {
         let recorder = Recorder::open(log)?;
         let mut jobs = JobBook::new();
@@ -1352,6 +1370,8 @@ impl Actor {
         let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session);
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
+            teams,
+            team_effect_through: 0,
             delegation,
             listener_heartbeat: None,
             pool: None,
@@ -1380,6 +1400,7 @@ impl Actor {
             remembered: Remembered::default(),
             turn_notes: (0, 0),
         };
+        actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
         actor.recover_imported_accounts(older_imports, now_ms)?;
         actor.remembered = actor.remembered_in_log()?;
@@ -3316,9 +3337,18 @@ impl Actor {
     pub fn take_up(
         &mut self,
         session: &str,
-        rows: Vec<ImportedRow>,
+        mut rows: Vec<ImportedRow>,
         now_ms: i64,
     ) -> Result<(Result<usize, String>, Outputs), ActorError> {
+        for row in &mut rows {
+            if row.row["role"] == "user"
+                && let Some(text) = row.row["text"]
+                    .as_str()
+                    .and_then(clarp_kernel::teams::runtime::strip_prompt_context)
+            {
+                row.row["text"] = text.into();
+            }
+        }
         let take = Command::TakeUp {
             backend_session: session.to_string(),
         };
@@ -3958,6 +3988,7 @@ impl Actor {
     }
 
     fn carry_out(&mut self, effects: Vec<Effect>, out: &mut Outputs) -> Result<(), ActorError> {
+        self.flush_teams()?;
         for effect in effects {
             match effect {
                 Effect::StartTurn { turn, message_seq } => {
@@ -4131,6 +4162,24 @@ impl Actor {
             let reminder =
                 clarp_kernel::hidden_coordination::reminder(&self.profile.session, sender);
             format!("{reminder}\n\n{prompt}")
+        } else {
+            prompt
+        };
+        let prompt = if let Some(teams) = &self.teams
+            && !bare
+        {
+            let brief = teams.brief(
+                &self.profile.agent_id,
+                &self.profile.session,
+                message.origin.name(),
+            );
+            let key = clarp_kernel::journal::team_transit::launch_key(turn, attempt);
+            if !brief.ids.is_empty() || self.recorder.log().find(&key)?.is_some() {
+                let mut batch = self.recorder.batch();
+                batch.item(record_item(kind::TEAM_PROMPT, key, &brief.ids, 0)?);
+                batch.commit()?;
+            }
+            brief.prompt(&prompt)
         } else {
             prompt
         };
@@ -5150,7 +5199,23 @@ impl Actor {
                             } else {
                                 live.speak
                             };
+                            let has_teams = self.teams.is_some();
+                            if reply.origin.name() == clarp_kernel::teams::runtime::LEADER_TICK {
+                                if let Some(text) =
+                                    clarp_kernel::teams::runtime::leader_reply(&reply.text)
+                                {
+                                    reply.text = text;
+                                } else {
+                                    reply.text = clarp_kernel::teams::runtime::NOTHING_TO_DO.into();
+                                    if has_teams {
+                                        teams::record_noop(&mut batch, &reply.id, t)?;
+                                    }
+                                }
+                            }
                             reply.text = kept(std::mem::take(&mut reply.text), &reply.origin);
+                            if has_teams {
+                                teams::capture(&mut batch, &reply, t)?;
+                            }
                             // The tools it calls are work after what the turn said before.
                             if !reply.tools.is_empty() {
                                 follow(&mut batch, &mut live.said, turn, t)?;

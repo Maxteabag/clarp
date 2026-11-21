@@ -512,6 +512,8 @@ enum Ask {
 /// What an agent is doing, as anyone may read it at any time without asking the agent.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
+    pub team_activity_ms: i64,
+    pub last_real_message_ms: i64,
     pub latest_turn_start: i64,
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
@@ -547,6 +549,7 @@ impl View {
 
 /// Everything an agent's thread is given.
 pub struct Setup {
+    pub teams: Option<Arc<crate::teams::runtime::TurnTeams>>,
     pub(crate) versions: Arc<crate::cli_version::Cache>,
     pub(crate) delegation_rejoin: crate::fleet::delegations::Rejoin,
     pub runtime: tokio::runtime::Handle,
@@ -1333,6 +1336,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     let (tx, rx) = mpsc::channel();
     let idle = never_ran();
     let (view_tx, view) = watch::channel(Arc::new(View {
+        team_activity_ms: setup.record.created_at_ms,
+        last_real_message_ms: 0,
         latest_turn_start: 0,
         status: idle,
         newest: None,
@@ -2028,11 +2033,15 @@ impl Worker {
             .engine
             .open(&self.setup.profile.dir, self.setup.codecs.clone())
             .map_err(|error| error.to_string())?;
-        let (mut actor, mut out) = Actor::open(
+        let (mut actor, mut out) = Actor::open_with_teams(
             self.setup.profile.clone(),
             self.setup.backend.clone(),
             log,
             self.now_ms(),
+            self.setup
+                .teams
+                .clone()
+                .map(|teams| teams as Arc<dyn clarp_actor::teams::Runtime>),
         )
         .map_err(|error| error.to_string())?;
         self.setup
@@ -2768,6 +2777,16 @@ impl Worker {
                     let held = actor.refuse_moved_launch(turn, now)?;
                     self.after(held);
                     let _ = answer.send(false);
+                } else if actor.is_leader_tick()
+                    && !self
+                        .setup
+                        .teams
+                        .as_ref()
+                        .is_some_and(|teams| teams.nudge_allowed(&self.setup.record.agent_id))
+                {
+                    let refused = actor.refuse_leader_launch(turn, now)?;
+                    self.after(refused);
+                    let _ = answer.send(false);
                 } else {
                     let _ = answer.send(true);
                 }
@@ -2782,6 +2801,17 @@ impl Worker {
             } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
+                if message.origin.name() == clarp_kernel::teams::runtime::LEADER_TICK
+                    && !self
+                        .setup
+                        .teams
+                        .as_ref()
+                        .is_some_and(|teams| teams.nudge_allowed(&self.setup.record.agent_id))
+                {
+                    let why = clarp_kernel::teams::runtime::NUDGE_DISABLED;
+                    let _ = answer.send(Err(Unavailable::new(why.into())));
                     return Ok(());
                 }
                 let mut sent = actor
@@ -4002,7 +4032,42 @@ impl Worker {
             .live
             .as_ref()
             .map(|live| working_with(actor, live, &self.setup.hub));
+        use clarp_kernel::teams::runtime::routine;
+        let prior = self.view.borrow().clone();
+        let origin = status
+            .live
+            .as_ref()
+            .map(|live| live.origin.name())
+            .or_else(|| status.last.as_ref().map(|last| last.origin.name()));
+        let state = wire::state_kind(&status);
+        let at = if !origin.is_some_and(routine)
+            && !matches!(state, clarp_protocol::events::AgentStateKind::Tool)
+        {
+            let observed = wire::state_since(&self.setup.record, &status);
+            if prior.broken.is_none() && state != wire::state_kind(&prior.status) {
+                observed.max(self.now_ms())
+            } else {
+                observed
+            }
+        } else {
+            0
+        };
+        let last_real_message_ms = self
+            .newest
+            .as_ref()
+            .filter(|row| {
+                matches!(
+                    row.entry,
+                    clarp_kernel::conversation::Entry::Message(_)
+                        | clarp_kernel::conversation::Entry::Reply(_)
+                        | clarp_kernel::conversation::Entry::Imported(_)
+                ) && !routine(row.entry.origin_name())
+            })
+            .map_or(0, |row| row.ts_ms)
+            .max(prior.last_real_message_ms);
         self.view.send_replace(Arc::new(View {
+            team_activity_ms: prior.team_activity_ms.max(at).max(last_real_message_ms),
+            last_real_message_ms,
             latest_turn_start: actor.latest_turn_start(),
             status,
             newest: self.newest.clone(),
@@ -4701,6 +4766,8 @@ mod mailbox_tests {
     fn agent_mailbox() -> (AgentHandle, mpsc::Receiver<Ask>) {
         let (tx, rx) = mpsc::channel();
         let (_, view) = watch::channel(Arc::new(View {
+            team_activity_ms: 0,
+            last_real_message_ms: 0,
             latest_turn_start: 0,
             status: never_ran(),
             newest: None,

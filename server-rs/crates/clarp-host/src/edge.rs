@@ -2882,7 +2882,18 @@ async fn send_as(
             .map(|sender| sender.agent_id.clone())
             .unwrap_or_default(),
     };
-    let named = coordination::origin(request.origin.as_deref(), &principal, made.peer);
+    use clarp_kernel::teams::runtime::{self as team, LEADER_TICK};
+    let named = if own && request.origin.as_deref() == Some(LEADER_TICK) {
+        if !app
+            .teams
+            .read(|teams, _| team::nudge_allowed(teams, &member.record.agent_id))
+        {
+            return Err(ApiError::plain(StatusCode::CONFLICT, team::NUDGE_DISABLED));
+        }
+        LEADER_TICK.to_owned()
+    } else {
+        coordination::origin(request.origin.as_deref(), &principal, made.peer)
+    };
     // Another agent addressing this one: its turn is marked so, with that agent (none for an
     // agent of a peer Host). Decided from the origin as it was claimed and who made it, before
     // this Host maps the origin to its own kinds: the user's word never is, whatever sender it
@@ -2903,11 +2914,13 @@ async fn send_as(
     }
     let origin = match (sender.is_some(), named.as_str()) {
         (true, _) | (false, "agent") => from_agent(),
-        (false, "oracle" | "schedule" | "automation" | "watcher" | "dreaming" | "heartbeat") => {
-            Origin::Trigger {
-                name: named.clone(),
-            }
-        }
+        (
+            false,
+            "oracle" | "schedule" | "automation" | "watcher" | "dreaming" | "heartbeat"
+            | LEADER_TICK,
+        ) => Origin::Trigger {
+            name: named.clone(),
+        },
         (false, _) => Origin::User,
     };
     let origin_is_user = origin == Origin::User;

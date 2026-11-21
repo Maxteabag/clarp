@@ -10,6 +10,7 @@
 //! becomes; what a stretch of a tool's output means, with the position in that output the log
 //! has now reached. There is never one without the other.
 
+pub mod team_transit;
 mod turn_sessions;
 
 use std::collections::HashSet;
@@ -73,6 +74,9 @@ pub mod kind {
     pub const TRACE: u16 = 900;
     /// A coordination turn that the user joined. The original sender mark remains.
     pub const MIXED_TURN: u16 = 901;
+    pub const TEAM_PROMPT: u16 = 902;
+    pub const TEAM_EFFECT: u16 = 903;
+    pub const TEAM_CURSOR: u16 = 904;
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;
@@ -230,6 +234,7 @@ pub struct Recorder {
     last_seq: Seq,
     /// The position of the newest item of the conversation: 0 when it has none.
     conversation_seq: Seq,
+    team_effect_seq: Seq,
     /// Where the agent was last started again: its conversation, as it is read, is what
     /// was written after this. 0: it never was.
     floor: Seq,
@@ -354,6 +359,10 @@ impl Recorder {
             .read_before(Seq::MAX, kind::CONVERSATION, 1)?
             .last()
             .map_or(0, |item| item.seq);
+        let team_effect_seq = log
+            .read_before(Seq::MAX, Kinds::only(kind::TEAM_EFFECT), 1)?
+            .last()
+            .map_or(0, |item| item.seq);
         let mut shown_waiting = HashSet::new();
         for queued in agent.waiting() {
             if log
@@ -376,6 +385,7 @@ impl Recorder {
             cursor,
             last_seq,
             conversation_seq,
+            team_effect_seq,
             floor,
         })
     }
@@ -489,6 +499,10 @@ impl Recorder {
         }
         batch.commit()?;
         Ok(Some(moved))
+    }
+
+    pub fn team_effect_seq(&self) -> Seq {
+        self.team_effect_seq
     }
 
     pub fn agent(&self) -> &Agent {
@@ -723,7 +737,11 @@ impl Batch<'_> {
     /// Decides a command against the agent as this batch has moved it, and adds its events.
     /// A command the agent refuses adds nothing: the refusal is returned and the batch stands.
     pub fn command(&mut self, command: Command, now_ms: i64) -> Result<(), Refusal> {
+        let team_prompt = self.team_prompt_key(&command);
         let decision = self.work.decide(command, now_ms)?;
+        if let Some(key) = &team_prompt {
+            self.team_prompt_read(key, now_ms);
+        }
         for event in decision.events {
             match event_item(&event, now_ms) {
                 Ok(item) => {
@@ -885,6 +903,13 @@ impl Batch<'_> {
             self.recorder.floor = first_seq + at as Seq;
         }
         self.recorder.last_seq = last_seq;
+        if let Some(last) = self
+            .items
+            .iter()
+            .rposition(|item| item.kind == kind::TEAM_EFFECT)
+        {
+            self.recorder.team_effect_seq = first_seq + last as Seq;
+        }
         self.recorder.agent = self.work;
         for event in &self.events {
             if let AgentEvent::Turn {

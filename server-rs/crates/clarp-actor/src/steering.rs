@@ -5,7 +5,7 @@ use std::path::Path;
 
 use clarp_kernel::agent::{Agent, Command};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
-use clarp_kernel::journal::Batch;
+use clarp_kernel::journal::{Batch, kind};
 use clarp_kernel::steering::{self, InputOwner, Join, Observation, Recovery, Stage};
 use clarp_kernel::takeover;
 use clarp_kernel::turn::{COMPACTION, RunOutcome, TurnId};
@@ -405,7 +405,22 @@ impl Actor {
         let Some(session) = self.recorder.agent().backend_session() else {
             return Ok(None);
         };
-        let mut input = takeover::claude_user_line(&uuid, &[text]).to_string();
+        let brief = self.teams.as_ref().map(|teams| {
+            let mut origin = "user".to_owned();
+            if let Some(waiting) = self
+                .recorder
+                .agent()
+                .waiting()
+                .find(|waiting| waiting.id == turn)
+            {
+                origin = waiting.origin.name().to_owned();
+            }
+            teams.brief(&self.profile.agent_id, &self.profile.session, &origin)
+        });
+        let prompt = brief
+            .as_ref()
+            .map_or_else(|| text.to_owned(), |brief| brief.prompt(text));
+        let mut input = takeover::claude_user_line(&uuid, &[&prompt]).to_string();
         input.push('\n');
         let join = Join {
             into: live.turn,
@@ -419,6 +434,15 @@ impl Actor {
         let mut batch = self.recorder.batch();
         if batch.command(Command::Join { turn, join }, now_ms).is_err() {
             return Ok(None);
+        }
+        if let Some(brief) = brief.filter(|brief| !brief.ids.is_empty()) {
+            let key = clarp_kernel::journal::team_transit::followup_key(turn);
+            batch.item(crate::record_item(
+                kind::TEAM_PROMPT,
+                key,
+                &brief.ids,
+                now_ms,
+            )?);
         }
         batch.commit()?;
         Ok(Some(Action::Steer { socket, input }))

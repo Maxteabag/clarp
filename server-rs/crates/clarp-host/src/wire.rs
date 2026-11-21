@@ -1025,7 +1025,7 @@ const NOTHING_TO_DO: [&str; 4] = [
 pub fn notification_preview(reply: &str) -> Option<(String, &'static str)> {
     // Cleaned as what it is, something spoken: an emotion tag the engine acts out is not
     // shown. (The Python Host cleans the blocks' inner text and shows the tag.)
-    let spoken = markup::speak_blocks(reply, true).join(" ");
+    let spoken = markup::speak_blocks(&markup::strip_team_blocks(reply), true).join(" ");
     let spoken = markup::clean_for_display(&format!("<speak>{spoken}</speak>"), true);
     if !spoken.is_empty() {
         return Some((cut(spoken, NOTIFICATION_PREVIEW_MAX, false), "speak"));
@@ -1411,6 +1411,12 @@ pub fn row(version: &Versioned) -> Value {
         let mut row = imported.row.clone();
         if row.is_object() {
             row["revision"] = json!(version.revision);
+            if row["role"] == "assistant"
+                && let Some(text) = row["text"].as_str()
+                && let std::borrow::Cow::Owned(visible) = markup::strip_team_blocks(text)
+            {
+                row["text"] = json!(visible);
+            }
         }
         return row;
     }
@@ -1460,9 +1466,10 @@ pub fn row(version: &Versioned) -> Value {
             }
         }
         Entry::Reply(reply) => {
-            // What is metadata and never conversation does not leave the Host. The voice
-            // markup does: an app hides it itself, and speaks from it.
+            // Team broadcasts are private to their feed. Keep the voice markup that the
+            // app uses to speak the rest of the reply.
             let said = markup::strip_hidden_blocks(&reply.text);
+            let said = markup::strip_team_blocks(&said);
             row["text"] = match automated_reply(kind, &said) {
                 Some(shown) => json!(shown),
                 None => json!(said),

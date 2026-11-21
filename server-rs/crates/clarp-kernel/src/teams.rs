@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::python;
+pub mod runtime;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member {
@@ -44,6 +45,9 @@ pub struct Message {
 /// One message and the recipients who were members when it was sent. None is unread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Delivery {
+    /// Break timestamp ties in the order messages reached the team feed.
+    #[serde(default)]
+    pub order: u64,
     pub message: Message,
     pub inbox: BTreeMap<String, Option<i64>>,
 }

@@ -61,6 +61,7 @@ patterns! {
     SPEAK_REGION = r"(?is)(<speak\b[^>]*>)(.*?)(</speak>|$)";
     TTS_DROP_SSML = r"(?i)</?(?:speed|volume|emotion)\b[^>]*/?>";
     TEAM_BLOCK = r"(?is)<team\b[^>]*>.*?</team>";
+    TEAM_OPEN_TAIL = r"(?is)<team\b[^>]*(?:>.*)?$";
     INLINE_WS = r"[ \t]{2,}";
     SPACE_BEFORE_PUNCT = r"[ \t]+([,.;:!?])";
     VOX_CONTENT = r"(?is)<vox\b[^>]*>(.*?)</vox>";
@@ -97,6 +98,17 @@ fn replace_emotion_tags(text: &str, with: &str) -> String {
 pub fn strip_hidden_blocks(text: &str) -> String {
     let closed = HIDDEN_BLOCK.replace_all(text, "");
     HIDDEN_OPEN_TAIL.replace_all(&closed, "").into_owned()
+}
+
+/// Hides team messages from users, including an open tail in a streaming reply.
+pub fn strip_team_blocks(text: &str) -> std::borrow::Cow<'_, str> {
+    let closed = TEAM_BLOCK.replace_all(text, "");
+    if TEAM_OPEN_TAIL.is_match(&closed) {
+        let result = TEAM_OPEN_TAIL.replace_all(&closed, "").into_owned();
+        std::borrow::Cow::Owned(result)
+    } else {
+        closed
+    }
 }
 
 /// Only a plain lowercase word is given a capital: "iOS", "npm" in backticks, file.py stay as

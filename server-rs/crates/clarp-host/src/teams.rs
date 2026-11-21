@@ -1,6 +1,7 @@
 //! The Host's durable team directory, messages, and per-recipient inbox.
 
 mod routes;
+pub mod runtime;
 pub(crate) use routes::routes;
 
 use std::collections::BTreeMap;
@@ -15,7 +16,7 @@ use serde_json::{Map, Value, json};
 const TEAMS: &str = "team";
 const DELIVERIES: &str = "team-message";
 
-pub type Deliveries = BTreeMap<String, BTreeMap<String, Delivery>>;
+pub use clarp_kernel::teams::runtime::Deliveries;
 
 pub struct Desk(Mutex<Stored>);
 
@@ -23,6 +24,7 @@ struct Stored {
     disk: Box<dyn KeyValue>,
     teams: Teams,
     delivery: Deliveries,
+    delivery_order: u64,
 }
 
 #[derive(Debug)]
@@ -65,7 +67,9 @@ impl Desk {
             .map(|team| (team.team_id.clone(), team))
             .collect();
         let mut delivery = Deliveries::new();
+        let mut delivery_order = 0;
         for row in read::<Delivery>(&*disk, DELIVERIES)? {
+            delivery_order = delivery_order.max(row.order);
             delivery
                 .entry(row.message.team_id.clone())
                 .or_default()
@@ -75,6 +79,7 @@ impl Desk {
             disk,
             teams,
             delivery,
+            delivery_order,
         })))
     }
 
@@ -92,7 +97,8 @@ impl Desk {
     ) -> Result<usize, StoreError> {
         let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let mut fresh = BTreeMap::new();
-        for row in produce(&held.teams) {
+        let mut order = held.delivery_order;
+        for mut row in produce(&held.teams) {
             let team = &row.message.team_id;
             let id = &row.message.team_message_id;
             if held
@@ -104,7 +110,12 @@ impl Desk {
                     .get(team)
                     .is_some_and(|rows| rows.contains_key(id))
             {
-                fresh.entry(id.clone()).or_insert(row);
+                let id = id.clone();
+                fresh.entry(id).or_insert_with(|| {
+                    order = order.saturating_add(1);
+                    row.order = order;
+                    row
+                });
             }
         }
         let writes = fresh
@@ -114,6 +125,7 @@ impl Desk {
         if !writes.is_empty() {
             held.disk.put_together(&writes)?;
         }
+        held.delivery_order = order;
         let count = fresh.len();
         for (id, row) in fresh {
             held.delivery

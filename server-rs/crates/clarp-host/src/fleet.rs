@@ -560,6 +560,7 @@ pub enum Pushed {
 
 /// What every agent of a Host is given.
 pub struct Works {
+    pub teams: Option<Arc<crate::teams::Desk>>,
     pub runtime: tokio::runtime::Handle,
     pub opening_gate: crate::calls::opening_launch::Gate,
     pub config: Arc<Config>,
@@ -1686,6 +1687,12 @@ fn setup(
         ),
     };
     Ok(Setup {
+        teams: works.teams.as_ref().map(|desk| {
+            Arc::new(crate::teams::runtime::TurnTeams {
+                desk: desk.clone(),
+                hub: works.hub.clone(),
+            })
+        }),
         versions: versions.clone(),
         delegation_rejoin: desk.for_worker(),
         runtime: works.runtime.clone(),
