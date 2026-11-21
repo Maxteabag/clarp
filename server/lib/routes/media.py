@@ -54,9 +54,10 @@ class MediaRoutes:
     # ---- delete and favourite a gallery image (feature media_manage) ----
 
     def _media_write_refused(self) -> bool:
-        """An agent may not delete or mark images: a request carrying a turn token is
-        refused, whoever's. A limited device was refused before dispatch."""
-        if (self.headers.get("X-Clarp-Turn") or "").strip():
+        """An agent may not delete or mark images: a request with a turn token, whoever's,
+        or from a peer Host is refused (R178). A limited device was refused before dispatch."""
+        from lib.http_utils import from_an_agent
+        if from_an_agent(self.headers):
             self._json(403, {"error": "agents_may_not"})
             return True
         return False
