@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use clarp_kernel::agent::AgentEvent;
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
-use clarp_kernel::journal::{Batch, coordination_key, kind};
+use clarp_kernel::journal::{Batch, coordination_key, kind, mixed_coordination_key, mixed_turn};
 use clarp_kernel::turn::{Origin, Turn, TurnEvent, TurnId, left_out_of_chats};
 use clarp_ports::log::{AgentLog, Item, NewItem, Seq};
 
@@ -217,26 +217,19 @@ fn original_mark(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorE
     })
 }
 
-fn mixed_key(turn: u64) -> String {
-    format!("coordination-mixed-{turn}")
-}
-
 fn restamp_key(id: &str) -> String {
     format!("coordination-row-{id}")
 }
 
 pub(super) fn mixed(log: &dyn AgentLog, turn: u64) -> Result<bool, ActorError> {
     Ok(log
-        .find(&mixed_key(turn))?
+        .find(&mixed_coordination_key(turn))?
         .is_some_and(|item| item.kind == kind::MIXED_TURN))
 }
 
 /// Show a marked turn once a user is heard in it. New revisions let a client read the old
 /// rows again without writing a second message or moving any existing row.
 pub(super) fn loosen(batch: &mut Batch<'_>, turn: TurnId, at: i64) -> Result<bool, ActorError> {
-    if mark_of(batch.log(), turn.0)?.is_none() {
-        return Ok(false);
-    }
     let Some(message_seq) = (match batch.agent().live() {
         Some(Turn::Starting(live)) if live.id == turn => Some(live.message_seq),
         Some(Turn::Running(live)) if live.id == turn => Some(live.message_seq),
@@ -244,31 +237,51 @@ pub(super) fn loosen(batch: &mut Batch<'_>, turn: TurnId, at: i64) -> Result<boo
     }) else {
         return Ok(false);
     };
-    let mut after = message_seq.saturating_sub(1);
-    let mut stamped = HashSet::new();
-    loop {
-        let rows = batch.log().read_after(after, kind::ROWS, CHUNK)?;
-        let Some(last) = rows.last() else { break };
-        after = last.seq;
-        for row in rows.iter().filter(|row| row.turn == Some(turn.0)) {
-            let Some(entry) = Entry::from_item(row).map_err(|error| corrupt(row, error))? else {
-                continue;
-            };
-            let id = entry.id();
-            if stamped.insert(id.to_owned()) {
-                batch.item(
-                    NewItem::new(kind::AUDIENCE_ROW, at, id.as_bytes().to_vec())
-                        .in_turn(turn.0)
-                        .keyed(restamp_key(id)),
-                );
+    loosen_from(batch, turn, Some(message_seq), at)
+}
+
+/// Reveal an already accepted relay on retry. A waiting message has no rows to restamp.
+pub(super) fn loosen_from(
+    batch: &mut Batch<'_>,
+    turn: TurnId,
+    first: Option<Seq>,
+    at: i64,
+) -> Result<bool, ActorError> {
+    if mark_of(batch.log(), turn.0)?.is_none() {
+        return Ok(false);
+    }
+    if let Some(first) = first {
+        let end = batch
+            .log()
+            .find(&format!("t-{}", turn.0))?
+            .map_or(Seq::MAX, |row| row.seq);
+        let mut after = first.saturating_sub(1);
+        let mut stamped = HashSet::new();
+        while after < end {
+            let rows = batch.log().read_after(after, kind::ROWS, CHUNK)?;
+            let Some(last) = rows.last() else { break };
+            after = last.seq;
+            for row in rows
+                .iter()
+                .take_while(|row| row.seq < end)
+                .filter(|row| row.turn == Some(turn.0))
+            {
+                let Some(entry) = Entry::from_item(row).map_err(|error| corrupt(row, error))?
+                else {
+                    continue;
+                };
+                let id = entry.id();
+                if stamped.insert(id.to_owned()) {
+                    batch.item(
+                        NewItem::new(kind::AUDIENCE_ROW, at, id.as_bytes().to_vec())
+                            .in_turn(turn.0)
+                            .keyed(restamp_key(id)),
+                    );
+                }
             }
         }
     }
-    batch.item(
-        NewItem::new(kind::MIXED_TURN, at, Vec::new())
-            .in_turn(turn.0)
-            .keyed(mixed_key(turn.0)),
-    );
+    batch.item(mixed_turn(turn.0, at));
     Ok(true)
 }
 

@@ -5194,6 +5194,71 @@ fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
 }
 
 #[test]
+fn a_verified_relay_is_mixed_at_acceptance_with_its_sender() {
+    let mut world = World::new("relay-mixed");
+    let mut actor = world.open();
+    let (message, mut marks) = from_an_agent("u-relay", "tr-relay");
+    marks.user_word = true;
+    let (sent, _) = actor
+        .send_marked(&message, Admission::Later, None, &marks, world.tick())
+        .unwrap()
+        .unwrap();
+    assert_eq!(sent.turn, Some(TurnId(1)));
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let mixed = log
+        .find(&clarp_kernel::journal::mixed_coordination_key(1))
+        .unwrap()
+        .unwrap();
+    assert_eq!((mixed.kind, mixed.turn), (kind::MIXED_TURN, Some(1)));
+    assert!(
+        log.find(&clarp_kernel::journal::coordination_key(1))
+            .unwrap()
+            .is_some()
+    );
+    assert!(actor.mark(1).unwrap().is_none());
+    let page = actor.tail_of(4, Which::WithoutCoordination).unwrap();
+    let Entry::Message(relay) = &page.entries[0].entry else {
+        panic!("expected the accepted relay");
+    };
+    assert_eq!(relay.origin, message.origin);
+    assert_eq!(relay.sender, message.sender);
+}
+
+#[test]
+fn a_verified_retry_of_a_hidden_relay_reveals_the_row_once() {
+    let mut world = World::new("relay-retry-mixed");
+    let mut actor = world.open();
+    let (message, mut marks) = from_an_agent("u-relay", "tr-relay");
+    actor
+        .send_marked(&message, Admission::Queue, None, &marks, world.tick())
+        .unwrap()
+        .unwrap();
+    let before = actor.tail_of(4, Which::WithoutCoordination).unwrap();
+    assert!(before.entries.is_empty());
+    marks.user_word = true;
+    let (sent, out) = actor
+        .send_marked(&message, Admission::Queue, None, &marks, world.tick())
+        .unwrap()
+        .unwrap();
+    assert!(sent.duplicate && out.changed.conversation);
+    let page = actor
+        .after_of(before.latest_revision, 4, Which::WithoutCoordination)
+        .unwrap();
+    assert_eq!(page.entries.len(), 1);
+    assert_eq!(page.entries[0].entry.id(), "u-relay");
+    assert!(page.entries[0].coordination.is_none());
+    let (_, repeated) = actor
+        .send_marked(&message, Admission::Queue, None, &marks, world.tick())
+        .unwrap()
+        .unwrap();
+    assert!(!repeated.changed.conversation);
+    assert_eq!(actor.head_revision(), page.latest_revision);
+}
+
+#[test]
 fn a_turn_accepted_without_a_note_capability_stays_visible_when_that_capability_returns() {
     let mut world = World::new("coordination-without-notes");
     let mut actor = world.open();
