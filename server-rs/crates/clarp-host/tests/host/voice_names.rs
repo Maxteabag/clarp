@@ -60,7 +60,7 @@ Fixture = "voice_fixture_vertex"
     };
     let host = start();
     let events = host.listen();
-    let make = |name, provider, voice| {
+    let make = |name: &str, provider: &str, voice: &str| {
         let stored = json!({(provider):voice}).to_string();
         host.post(
             "/agents",
