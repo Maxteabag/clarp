@@ -1,5 +1,6 @@
 //! R175 through the upload route, the call receipt, and the provider boundaries.
 
+use clarp_kernel::call_transcription::ENGINES as CALL_ENGINES_KEY;
 use clarp_kernel::languages::AGENT_ENGINES_KEY;
 use clarp_ports::kv::KeyValueEngine as _;
 use serde_json::{Value, json};
@@ -111,6 +112,11 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
     );
     assert_eq!(ink_requests.lock().unwrap().len(), 1);
     assert_eq!(nova_requests.lock().unwrap().len(), 1);
+    wait_for("the provider skip to be logged", || {
+        host.heard.lock().unwrap().contains(&format!(
+            "sttEngineRepeatSkipped session={session} {INK_TWO} (cartesia already had this recording)"
+        ))
+    });
 
     // The same provider exclusion is per clip. The call's receipt explains the skipped model.
     let (phone, _) = pair(&host, "Phone", "full");
@@ -151,7 +157,15 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
             .unwrap();
     };
     seed(&format!("cartesia:retired,{INK_WHISPER},{NOVA}"));
+    clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap()
+        .put("setting", CALL_ENGINES_KEY, format!("{NOVA},{NOVA}").as_bytes())
+        .unwrap();
     let host = start();
+    let policy = host.get("/transcription-providers");
+    assert_eq!(policy["call_engines"], NOVA);
+    assert_eq!(policy["call_policy_error"], "");
     let (status, said) = hear(&host, "admin", None, b"pre-contact fixture");
     assert_eq!((status, &said["text"]), (200, &json!("Nova heard it.")));
     let requests = ink_requests.lock().unwrap();
@@ -178,4 +192,12 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
     let (status, said) = hear(&host, "admin", None, b"ab");
     assert_eq!((status, &said["text"]), (200, &json!("Nova heard it.")));
     assert_eq!(own_count(), before + 1);
+    wait_for("each duplicate own alias to be logged", || {
+        let heard = host.heard.lock().unwrap();
+        ["server-default", "faster-whisper:small"].iter().all(|alias| {
+            heard.contains(&format!(
+                "sttEngineRepeatSkipped session={session} {alias} (listed before)"
+            ))
+        })
+    });
 }
