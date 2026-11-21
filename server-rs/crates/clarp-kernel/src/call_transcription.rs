@@ -5,8 +5,11 @@ use crate::{
 };
 use serde_json::{Value, json};
 
+use heard::engine_order::Contacts;
+
 pub const LANGUAGES: &str = "transcription.call_languages";
 pub const ENGINES: &str = "transcription.call_engines";
+pub const PROVIDER_ALREADY_SENT: &str = "provider_already_sent";
 
 #[derive(Debug, serde::Serialize)]
 pub struct Scope {
@@ -90,6 +93,23 @@ pub struct Step {
     pub language: Option<Option<String>>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub local_default: bool,
+}
+
+impl Step {
+    /// A language policy refusal precedes the clip's provider exclusion.
+    pub fn skip_reason(&self, contacts: &Contacts) -> Option<&'static str> {
+        self.skip.or_else(|| {
+            contacts
+                .already_sent(&self.engine)
+                .map(|_| PROVIDER_ALREADY_SENT)
+        })
+    }
+}
+
+pub fn has_runnable_step(steps: &[Step], contacts: &Contacts) -> bool {
+    steps
+        .iter()
+        .any(|step| step.skip_reason(contacts).is_none())
 }
 
 pub fn plan(order: &[String], language: Option<&str>, local: &str) -> Vec<Step> {

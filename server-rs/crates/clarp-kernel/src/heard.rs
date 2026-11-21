@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 pub use clarp_speech::listen::{Segment, file_name, suffix, terms};
 
 pub mod duration;
+pub mod engine_order;
 pub mod inventory;
 pub mod language_set;
 
@@ -158,14 +159,10 @@ pub struct Plan {
 
 impl Plan {
     /// The ordinary engine order, shared by the upload path and the voice profile.
-    pub fn chat_order(&self, language: &str, own_id: Option<&str>) -> Vec<&str> {
-        let mut seen = std::collections::HashSet::new();
-        std::iter::once(self.model.as_str())
-            .chain(self.fallbacks.iter().map(String::as_str))
-            .filter(|model| {
-                !language.contains(',') || seen.insert(language_set::identity(model, own_id))
-            })
-            .collect()
+    pub fn chat_order(&self, own_id: Option<&str>) -> (Vec<&str>, Vec<&str>) {
+        let order =
+            std::iter::once(self.model.as_str()).chain(self.fallbacks.iter().map(String::as_str));
+        engine_order::distinct_engines(order, own_id)
     }
 }
 
@@ -216,8 +213,7 @@ pub fn provider_of(model: &str) -> String {
 
 /// Whether an engine's name is one of a cloud provider's.
 pub fn is_cloud(model: &str) -> bool {
-    let provider = provider_of(model);
-    PROVIDERS.iter().any(|known| known.id == provider)
+    engine_order::hosted_provider(model).is_some()
 }
 
 /// An engine that is reached over the network, as the contract lists it.

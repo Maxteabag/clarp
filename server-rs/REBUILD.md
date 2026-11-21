@@ -3399,9 +3399,8 @@ hook's report under way, one begun, a vfork parent, a served tool, how a request
 process group. Wrong rules: `tools/plants/shim-hold.py`.
 
 **An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
-profile use the kernel's engine order. With a language set, models of one hosted provider
-share an attempt, as do the aliases of the Host's default local engine. If the ordinary
-chain ends on a hosted engine that cannot take the set, the Host considers its selected
+profile use the kernel's engine order. If the ordinary chain ends on a hosted engine that
+cannot take the set, the Host considers its selected
 model if it is known, keyed and takes language sets. A provider already tried is excluded.
 The Host also considers its own model when no hosted replacement qualifies. Its catalogue
 languages determine coverage, with Norwegian aliases and the Whisper model default for an
@@ -3504,6 +3503,19 @@ Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversat
 `a_message_an_older_build_put_into_the_conversation_while_it_waited_stays_there`), the actor's, the Host's test
 `a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts` and the wrong rules of
 `tools/plants/enter-at-start.py`.
+
+**One delivery of a recording to each provider (R175, 21 Nov 2026).** Agent and call settings
+keep each engine at its first position. The ordinary upload and voice profile use the same
+distinct engine order. The Host's own model and its aliases name one engine. Two distinct
+models of one hosted provider remain in the order until a failed attempt reaches its adapter.
+A refusal before the adapter receives the language leaves the next model available. The
+ordinary upload logs repeated engines and later models it drops after provider contact. The
+call report records a visited excluded model as `outcome: "skipped"` with
+`reason: "provider_already_sent"`. A model-selection wait is bounded while a runnable fallback
+remains. The R152 recovery's failed list contains the engines that reached their boundary.
+Call attempt outcomes and skip reasons are open sets. Clients can display an unfamiliar
+value as words and keep the rest of the response. The reference vectors cover both attempt
+loops with stand-in adapters, and the Host test verifies the provider requests and call report.
 
 ## 7. Stages and gates
 
