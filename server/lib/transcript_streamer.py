@@ -123,6 +123,11 @@ class TranscriptStreamer:
             return
         live = agents_db.list_agents()
         sessions = _live_backend_sessions()
+        if sessions is None:
+            # The runtimes could not be read: no agent is known to be unbound, so
+            # every binding stays, no stamp is recorded, and the next pass is full.
+            self._resubmit_unresolved()
+            return
         live_ids = set()
         wanted: list[tuple[dict, str]] = []
         streams: dict[str | None, bool] = {}
@@ -503,8 +508,9 @@ def _read_timing(line_ts: str | None) -> dict:
     return {"line_ts": line_ts, "read_lag_ms": lag, "ts_status": "ok"}
 
 
-def _live_backend_sessions() -> dict[str, str]:
-    """Most recent live runtime's backend_session_id per agent, in one query.
+def _live_backend_sessions() -> dict[str, str] | None:
+    """Most recent live runtime's backend_session_id per agent, in one query;
+    None when the runtimes could not be read.
 
     The reconcile pass runs every second for every agent; one lookup per agent
     was about a hundred queries a second on a busy host.
@@ -517,7 +523,7 @@ def _live_backend_sessions() -> dict[str, str]:
     except Exception as e:
         health.mark_error("transcript_streamer", e)
         log_exception("transcriptStreamerRuntimeLookupFail", e)
-        return {}
+        return None
     # Later rows started later, so the last write per agent wins.
     return {row["agent_id"]: row["backend_session_id"]
             for row in rows if row["backend_session_id"]}
