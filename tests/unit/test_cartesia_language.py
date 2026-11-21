@@ -102,6 +102,13 @@ def _speak(cfg, tmp_path, *, raw_pcm=False, agent=AGENT, provider="cartesia"):
     ("pt", "sonic-3.6", "pt"),
     ("xx", "sonic-3.6", "en"),             # a code the model lacks
     ("no", "sonic-2", "en"),               # sonic-2 does not speak Norwegian
+    ("ko", "sonic-2", "ko"),
+    ("hi", "sonic-2", "en"),               # sonic-2 has eight codes, Hindi not among them
+    ("hi", "sonic-turbo", "hi"),
+    ("or", "sonic-3.6", "or"),             # new in sonic-3.6
+    ("or", "sonic-3.5", "en"),
+    ("ur", "sonic-latest", "ur"),          # sonic-latest speaks what sonic-3.6 speaks
+    ("no", "sonic-latest", "no"),
     ("en", "sonic-3.6", "en"),             # an English agent is unchanged
 ])
 def test_the_request_carries_the_agents_language(monkeypatch, tmp_path, raw_pcm, languages,
