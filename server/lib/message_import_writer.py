@@ -3,6 +3,7 @@ message_writes.py imports these names back. Generated: change the recipe, not th
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from .db import note_import_holds_lock
 
@@ -67,7 +68,7 @@ class _ImportWriter:
             row = self._database.execute(
                 "SELECT revision, replace_revision FROM conversation_heads "
                 "WHERE agent_id = ? AND backend_session_id = ?", self.head_key).fetchone()
-        except Exception:  # noqa: BLE001 - a diagnostic only; publication is decided by the fence
+        except sqlite3.Error:  # a diagnostic only; publication is decided by the fence
             return False
         return None if row is None else (row[0], row[1])
 
