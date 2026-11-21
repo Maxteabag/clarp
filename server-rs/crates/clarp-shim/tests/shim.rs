@@ -158,12 +158,32 @@ fn streaming_input_closes_at_the_first_top_level_stdout_result() {
     wait_for("the initial prompt", || {
         outs(&records(&running.spool)).contains(&"ready:first")
     });
-    assert!(records(&running.spool).iter().any(|record| record.entry == Entry::Shim(ShimEvent::InputOpen)));
-    assert!(ask(&running.socket, &Request::Stdin { data: "second\n".into() }).ok);
+    assert!(
+        records(&running.spool)
+            .iter()
+            .any(|record| record.entry == Entry::Shim(ShimEvent::InputOpen))
+    );
+    assert!(
+        ask(
+            &running.socket,
+            &Request::Stdin {
+                data: "second\n".into()
+            }
+        )
+        .ok
+    );
     wait_for("EOF after the result", || {
         outs(&records(&running.spool)).contains(&"closed:second")
     });
-    assert!(!ask(&running.socket, &Request::Stdin { data: "late\n".into() }).ok);
+    assert!(
+        !ask(
+            &running.socket,
+            &Request::Stdin {
+                data: "late\n".into()
+            }
+        )
+        .ok
+    );
     std::fs::write(running.dir.join("release"), "").unwrap();
     assert!(running.shim.wait().unwrap().success());
     std::fs::remove_dir_all(&running.dir).unwrap();
@@ -186,7 +206,15 @@ fn stdin_refuses_a_write_when_the_tool_has_closed_its_read_end() {
     wait_for("the tool to close its pipe", || {
         outs(&records(&running.spool)).contains(&"closed")
     });
-    assert!(!ask(&running.socket, &Request::Stdin { data: "unread\n".into() }).ok);
+    assert!(
+        !ask(
+            &running.socket,
+            &Request::Stdin {
+                data: "unread\n".into()
+            }
+        )
+        .ok
+    );
     std::fs::write(running.dir.join("release"), "").unwrap();
     assert!(running.shim.wait().unwrap().success());
     std::fs::remove_dir_all(&running.dir).unwrap();
