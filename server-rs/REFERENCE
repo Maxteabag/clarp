@@ -1,2 +1,2 @@
-0f982dbb17fa5d7d9b3dacf75dda98e11771dec6
-The merge of the Python Host's PR 492 (it holds every merge through PRs 485 and 492): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+c4f8dc0bec2b0c33b8b3ced7040937d21a29bd60
+The merge of the Python Host's PR 479 (it holds every merge through PR 479: 471, 485, 490, 492): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
