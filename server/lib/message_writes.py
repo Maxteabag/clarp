@@ -1459,6 +1459,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     # the backend records one more copy of it per retry.
     unanswered_key = ""
     current_request_trace = ""
+    client_keys: set[str] | None = None      # every client row's words, read when needed
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
     client_traces = {row.message_id: row.trace_id for row in prelude.client_rows
@@ -1643,6 +1644,39 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # Stored under other words than the transcript's: a reply
                 # that takes a live row over is matched by these.
                 said.append((reply_trace, _strip_voice_markup(text)))
+        # A user line of several text blocks (issue 491, part B: the turn that took over
+        # one that printed nothing was given both messages as one line). Each block is
+        # linked to its own client row; a block whose row an earlier copy already linked
+        # (the dropped entry of message 1, still in the file off the chain) needs nothing.
+        # Nothing is written: the client rows stand for the line, and what follows is the
+        # answer of the last block's turn. A block with no client row at all falls back to
+        # the line as one row, as before: no row is ever invented.
+        parts = [p for p in (turn.get("parts") or []) if _norm_text(p)] if role == "user" else []
+        if parts and len(parts) >= 2 and turn.get("id") is None:
+            if client_keys is None:
+                client_keys = {_norm_text(row.text) for row in prelude.client_rows}
+            matched: list[tuple[str, list]] = []
+            for part in parts:
+                part_key = _norm_text(part)
+                part_rows = provenance.candidates(part_key)
+                if part_rows:
+                    matched.append((part_key, part_rows))
+                elif part_key not in client_keys:
+                    matched = []
+                    break
+            if matched:
+                for part_key, part_rows in matched:
+                    taken_row = provenance.take(part_key, part_rows, 0)
+                client_msg_id, current_origin, current_sender_agent_id, _ = taken_row
+                unanswered_key = ""
+                authored = database.execute(
+                    "SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
+                current_request_trace = (authored["trace_id"] or "") if authored else ""
+                current_heartbeat_key = ""
+                removed = _delete_slot(database, agent_id, backend_session_id,
+                                       source_file, seq)
+                skipped_slot_removed = skipped_slot_removed or removed > 0
+                continue
         # A user turn already owned by a durable client row → don't import a
         # second copy; the client row stands in for it (matched by send order).
         if role == "user" and turn.get("id") is None:
