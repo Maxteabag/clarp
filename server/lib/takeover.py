@@ -22,8 +22,10 @@ a Claude turn whose request is in flight lets it print the whole answer after th
 """
 from __future__ import annotations
 
+import codecs
 import fcntl
 import functools
+import io
 import json
 import os
 import pathlib
@@ -170,6 +172,18 @@ def freeze(handle) -> bool:
         return False
 
 
+def stopped(pid: int) -> bool:
+    """The process is in the stopped state (/proc/<pid>/stat field 3 is T)."""
+    try:
+        stat = pathlib.Path(f"/proc/{int(pid)}/stat").read_text()
+    except (OSError, ValueError, TypeError):
+        return False
+    try:
+        return stat.rsplit(")", 1)[1].split()[0] == "T"
+    except IndexError:
+        return False
+
+
 def thaw(handle) -> None:
     try:
         os.killpg(handle.process_group, signal.SIGCONT)
@@ -185,6 +199,42 @@ def end_frozen(handle) -> None:
         pass
 
 
+def read_lines(stream, handle=None):
+    """The lines of a turn's stdout, read so that none can wait unseen in a buffer of
+    Python's (reviewer 4, on df7af42c): a text stream reads ahead, so a line could sit
+    in its buffer, out of the pipe and not yet handled, while the drain is busy with
+    the line before. Here the bytes are read from the pipe only when every line read
+    so far has been handed out and its handling is over, and ``handle.reader_waiting``
+    says so: True only while the reader waits in its read with nothing kept back.
+    A stream with no file descriptor (a stand-in) is iterated as it is."""
+    try:
+        fd = stream.fileno()
+    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
+        yield from stream
+        return
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    kept = ""
+    while True:
+        while "\n" not in kept:
+            if handle is not None:
+                handle.reader_waiting = not kept
+            try:
+                chunk = os.read(fd, 65536)
+            except InterruptedError:
+                continue
+            finally:
+                if handle is not None:
+                    handle.reader_waiting = False
+            if not chunk:
+                kept += decoder.decode(b"", final=True)
+                if kept:
+                    yield kept
+                return
+            kept += decoder.decode(chunk)
+        line, kept = kept.split("\n", 1)
+        yield line + "\n"
+
+
 def _unread_bytes(stream) -> int | None:
     try:
         buf = fcntl.ioctl(stream.fileno(), termios.FIONREAD, struct.pack("i", 0))
@@ -194,8 +244,9 @@ def _unread_bytes(stream) -> int | None:
 
 
 def drained(handle, *, bound_s: float = DRAIN_BOUND_S) -> bool:
-    """True once the drain has read everything the frozen CLI had printed: the pipe is empty
-    and the drain's count of lines read has stopped moving. False when that is not seen
+    """True once the drain has read everything the frozen CLI had printed: the pipe is empty,
+    the reader waits in its read with no line kept back, and the drain's count of lines
+    read has stopped moving. False when that is not seen
     within ``bound_s`` (then the turn is thawed and the follow-up waits)."""
     stream = getattr(handle.proc, "stdout", None)
     if stream is None:
@@ -208,7 +259,10 @@ def drained(handle, *, bound_s: float = DRAIN_BOUND_S) -> bool:
         if unread is None:
             return False
         lines = int(getattr(handle, "lines_read", 0))
-        if unread == 0 and lines == last:
+        # Every line read has been handled: the reader waits in its read with nothing
+        # kept back (read_lines). Not known: not drained.
+        waiting = getattr(handle, "reader_waiting", None) is True
+        if unread == 0 and waiting and lines == last:
             quiet += 1
             if quiet >= 3:
                 return True

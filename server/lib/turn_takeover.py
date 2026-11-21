@@ -33,6 +33,29 @@ def _first_message(agent_id: str, trace_id: str):
         (trace_id, agent_id)).fetchone()
 
 
+def _frozen(handle) -> bool:
+    """The group's leader is still stopped (state T in /proc), as far as can be read."""
+    return takeover.stopped(getattr(handle, "pid", 0))
+
+
+def _undo(spec, running: str, handle, *, claimed: bool, traced: bool, ended: bool) -> None:
+    """A takeover abandoned by a raise before its end: the frozen turn runs on, with its
+    slot and its session's trace as they were."""
+    if ended:
+        return
+    try:
+        takeover.thaw(handle)
+    except Exception as exc:  # noqa: BLE001 - the record stays; a restart thaws it
+        log_exception("takeoverThawFail", exc, detail=spec.agent_id)
+    if traced:
+        try:
+            agents_db.set_trace_for_session(spec.session, running)
+        except Exception as exc:  # noqa: BLE001 - the next turn's start writes it again
+            log_exception("takeoverTraceRestoreFail", exc, detail=spec.agent_id)
+    if claimed:
+        _SLOTS.hand_back(spec.agent_id, spec.trace_id, running)
+
+
 def take_over_if_silent(service, spec):
     """Freeze, judge, end. Returns the spec to launch as the takeover (the running turn is
     ended, the slot is this spec's), or None: nothing changed and the message waits."""
@@ -79,9 +102,11 @@ def take_over_if_silent(service, spec):
     key = takeover.record_freeze(agent_id=agent_id, trace_id=running,
                                  pgid=handle.process_group, pid=handle.pid)
     plan = None
-    ended = False
+    claimed = traced = False
+    handled = False     # the frozen group runs on again, or is dead: the record may go
     try:
         if not takeover.freeze(handle):
+            handled = True                  # nothing was stopped (the group is gone)
             return None
         if takeover.drained(handle) and not handle.output_seen:
             # Judged while frozen, before any kill: the backend reads its own session
@@ -100,18 +125,29 @@ def take_over_if_silent(service, spec):
                 else:
                     # The slot first: the frozen turn's dying callbacks find it superseded.
                     _SLOTS.claim(agent_id, spec.trace_id)
+                    claimed = True
         if plan is None:
             takeover.thaw(handle)
+            handled = True
             return None
         agents_db.set_trace_for_session(spec.session, spec.trace_id)
+        traced = True
         takeover.end_frozen(handle)
-        ended = True
+        handled = True
+    except Exception as exc:  # noqa: BLE001 - nothing is taken over; the message waits
+        # Raised before the end (a slot claim, a locked database): the frozen turn runs
+        # on with its slot, and the record goes only once its group is handled.
+        _undo(spec, running, handle, claimed=claimed, traced=traced, ended=handled)
+        handled = handled or not _frozen(handle)
+        log_exception("takeoverAbandoned", exc, detail=agent_id)
+        return None
     except BaseException:
-        if not ended and plan is None:
-            takeover.thaw(handle)
+        _undo(spec, running, handle, claimed=claimed, traced=traced, ended=handled)
+        handled = handled or not _frozen(handle)
         raise
     finally:
-        takeover.clear_freeze(key)
+        if handled:
+            takeover.clear_freeze(key)      # else the next runtime thaws it (thaw_left_frozen)
     try:
         handle.proc.wait(timeout=5)
     except Exception as exc:  # noqa: BLE001 - SIGKILL of a stopped group; logged, not waited on
