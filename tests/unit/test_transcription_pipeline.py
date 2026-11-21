@@ -288,7 +288,8 @@ class PerModelSTT(StubSTT):
         self.calls.append(("model", model))
         error = self.errors.get(model)
         if error and not isinstance(error, (stt_providers.LanguageSetUnsupported, STTUnknownModelError)):
-            stt_language.note_handed(None)
+            with stt_language.sending_audio():          # a provider-side failure: the audio left
+                raise error
         if error:
             raise error
         return f"from {model}", True, 1.0
@@ -764,8 +765,9 @@ def test_a_repeated_agent_engine_sends_the_recording_to_its_provider_once(monkey
     sent = []
 
     def scribe(**kw):
-        sent.append("elevenlabs")
-        raise RuntimeError("scribe 503")
+        with stt_language.sending_audio():       # stands where the audio leaves
+            sent.append("elevenlabs")
+            raise RuntimeError("scribe 503")
     monkeypatch.setattr(lib.eleven_stt, "transcribe", scribe)
     monkeypatch.setattr(lib.deepgram_stt, "transcribe",
                         lambda **kw: (sent.append("deepgram"), ("heard", 1.0))[1])
@@ -794,10 +796,10 @@ class _ContactSTT(StubSTT):
         self.calls.append(("model", model))
         if model in self.before:
             raise stt_providers.LanguageSetUnsupported("set")
-        stt_language.note_handed("no,en")
-        if model in self.after:
-            raise RuntimeError(f"{model} 503")
-        return f"from {model}", True, 1.0
+        with stt_language.sending_audio():
+            if model in self.after:
+                raise RuntimeError(f"{model} 503")
+            return f"from {model}", True, 1.0
 
 
 def test_a_refusal_before_contact_leaves_the_provider_for_its_next_model(monkeypatch):

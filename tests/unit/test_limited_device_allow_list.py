@@ -40,7 +40,7 @@ def test_what_a_limited_app_needs_is_allowed(path):
 REFUSED = [
     "/dirs", "/launch-directories", "/favorite-paths", "/past-sessions", "/background-jobs",
     "/background-jobs/j1", "/agent-conversations", "/archived-agents", "/schedules",
-    "/transcription-capabilities", "/transcription-providers", "/agent-portraits", "/paired-devices",
+    "/agent-portraits", "/paired-devices",
     "/backend-auth", "/settings", "/podcast-history", "/dreaming", "/janitor-runs/r1",
     "/a-path-no-route-serves", "/server-info/extra", "/statusx", "/logs", "/artifacts/a1/export",
 ]

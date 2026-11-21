@@ -405,10 +405,12 @@ def _hosted_provider(engine: str) -> str:
 
 def _reached(engine: str, handed: dict) -> bool:
     """Whether an attempt that failed had the recording: a local engine always; a hosted one
-    only once its audio left for the provider, which stt_providers.transcribe marks by noting
-    the language it hands the adapter. A refusal before that (a language set it cannot take,
-    no key, an unknown model) did not send it."""
-    return not _hosted_provider(engine) or "language" in handed
+    only once its audio left for the provider, which the adapter marks at the very request it
+    makes (stt_language.sending_audio). A refusal before that (a language set it cannot take,
+    no key, an unknown model, the adapter's own decoding or credentials, a refused
+    connection) did not send it."""
+    from .stt_language import was_sent
+    return not _hosted_provider(engine) or was_sent(handed)
 
 
 def _not_sent_twice(engine: str, handed: dict, pending: list[str], sent: set[str],
@@ -416,8 +418,9 @@ def _not_sent_twice(engine: str, handed: dict, pending: list[str], sent: set[str
     """After a failed attempt: the engines still to try, without another model of a hosted
     provider the recording has now reached (R175: never the same audio to one provider twice;
     a refusal before contact uses nothing up)."""
+    from .stt_language import was_sent
     provider = _hosted_provider(engine)
-    if provider and "language" in handed:
+    if provider and was_sent(handed):
         sent.add(provider)
     kept = []
     for later in pending:
@@ -594,7 +597,7 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
     """Run a call-scoped clip through its planned engines in order: the next
     only on failure, an incompatible one skipped, every attempt recorded in
     ``call_stt["report"]``. Returns (text, ends_terminal, duration, engine)."""
-    from .stt_language import bound_language, bound_session, capturing_handed
+    from .stt_language import bound_language, bound_session, capturing_handed, was_sent
     attempts: list[dict] = []
     report = {"language": call_stt["language"], "engines": call_stt["engines"],
               "effective_engine": None, "attempts": attempts, "language_adapted": None,
@@ -641,9 +644,13 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
         except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error (VP-09)
             attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
                              "ms": int((time.monotonic() - started) * 1000), "reason": client_words(e)})
-            if provider(step) and "language" in handed:
+            if provider(step) and was_sent(handed):
                 sent.add(provider(step))
             if not runs_later(index):
+                # The rest is reported before the error goes up: nothing is left out.
+                for later in steps[index + 1:]:
+                    attempts.append({"engine": later["engine"], "outcome": "skipped",
+                                     "reason": later.get("skip") or "provider_already_sent"})
                 raise
             log_exception("sttCallEngineFallback", e, detail=step["engine"])
             continue

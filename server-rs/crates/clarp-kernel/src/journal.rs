@@ -62,6 +62,8 @@ pub mod kind {
     /// A change to helper cells on a parent message. Its place in a
     /// conversation page is still the original row.
     pub const HELPER_CELLS: u16 = 113;
+    /// A hidden row whose turn the user joined. Its row stays where it was written.
+    pub const AUDIENCE_ROW: u16 = 114;
     /// A [`Note`](crate::conversation::Note): what an agent left for its user from a turn
     /// (`POST /agent-notes`). A row of the conversation, as a reply is.
     pub const AGENT_NOTE: u16 = 105;
@@ -69,6 +71,8 @@ pub mod kind {
     /// ([`super::trace_key`]), written with the message. A send that names a trace another
     /// message has is refused by one look by key.
     pub const TRACE: u16 = 900;
+    /// A coordination turn that the user joined. The original sender mark remains.
+    pub const MIXED_TURN: u16 = 901;
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;
@@ -165,6 +169,7 @@ pub struct Incoming {
     /// Another agent addresses this one: its id ("" for a peer Host's agent); `None`: the
     /// user's. The turn the message becomes is marked so in its acceptance.
     pub coordination: Option<String>,
+    pub user_word: bool,
 }
 
 /// What a message did: where it is in the log, and what the actor must now do.
@@ -262,6 +267,9 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     }
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
+        | AgentEvent::Joined { turn, .. }
+        | AgentEvent::JoinRead { turn, .. }
+        | AgentEvent::JoinSettled { turn, .. }
         | AgentEvent::StopRequested { turn, .. }
         | AgentEvent::SentNow { turn, .. }
         | AgentEvent::Reworded { turn, .. }
@@ -488,6 +496,9 @@ impl Recorder {
         rewrite: impl FnOnce(&[u8]) -> Result<Vec<u8>, JournalError>,
         now_ms: i64,
     ) -> Result<Reworded, JournalError> {
+        if self.agent.joins().contains_key(&turn) {
+            return Ok(Reworded::NotWaiting);
+        }
         let waiting = self.agent.waiting().find(|queued| queued.id == turn);
         let Some(message_seq) = waiting.map(|queued| queued.message_seq) else {
             return Ok(Reworded::NotWaiting);
@@ -541,6 +552,7 @@ impl Recorder {
                 origin,
                 admission: Admission::Queue,
                 coordination: None,
+                user_word: false,
             },
             now_ms,
         )
@@ -602,6 +614,7 @@ impl Recorder {
                     origin: message.origin,
                     admission: message.admission,
                     coordination: message.coordination,
+                    user_word: message.user_word,
                 },
                 now_ms,
             )
@@ -673,6 +686,11 @@ impl Batch<'_> {
             if let Some(turn) = turn_sessions::affected(&event) {
                 self.turn_bindings
                     .push((turn, self.work.backend_session().map(str::to_owned)));
+            }
+            if let AgentEvent::JoinRead { turn, .. } = &event
+                && let Some(join) = self.work.joins().get(turn)
+            {
+                self.enter(*turn, join.message_seq, now_ms);
             }
             self.events.push(event);
         }
@@ -751,6 +769,18 @@ impl Batch<'_> {
     /// The agent as it will be once this batch is in the log.
     pub fn agent(&self) -> &Agent {
         &self.work
+    }
+
+    /// Read messages from the committed portion of the transaction.
+    pub fn log(&self) -> &dyn AgentLog {
+        self.recorder.log()
+    }
+
+    pub fn queue_depth(&self) -> usize {
+        self.work
+            .waiting()
+            .filter(|queued| !self.recorder.shown_waiting.contains(&queued.id))
+            .count()
     }
 
     /// Writes everything in one append, then changes the state.
@@ -1280,6 +1310,7 @@ mod tests {
             origin: Origin::User,
             admission,
             coordination: None,
+            user_word: false,
         }
     }
 
@@ -1500,6 +1531,7 @@ mod tests {
             origin,
             admission,
             coordination: None,
+            user_word: false,
         };
         let items = |r: &Recorder, key: &str| {
             let all = r.log().read_after(0, Kinds::ALL, 1_000).unwrap();
@@ -1801,6 +1833,7 @@ mod tests {
             origin: Origin::User,
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         };
         batch.command(accept, now_ms).unwrap();
         batch.commit().unwrap();
@@ -2052,6 +2085,122 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_follow_up_enters_on_its_echo_and_an_unread_one_still_obeys_stop() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        recorder.accept(b"first".to_vec(), Origin::User, 1).unwrap();
+        recorder
+            .handle(Command::TurnStarted { turn: TurnId(1) }, 2)
+            .unwrap();
+        for (key, uuid) in [("u-two", "read"), ("u-three", "unread")] {
+            let accepted = recorder
+                .accept_message(message(key, Admission::Queue), 3)
+                .unwrap();
+            assert!(!accepted.entered);
+            let turn = accepted.turn.unwrap();
+            recorder
+                .handle(
+                    Command::Join {
+                        turn,
+                        join: crate::steering::Join {
+                            into: TurnId(1),
+                            uuid: uuid.to_string(),
+                            recovery: None,
+                        },
+                    },
+                    3,
+                )
+                .unwrap();
+            assert_eq!(
+                recorder
+                    .reword(turn, |_| panic!("the reserved text is immutable"), 4)
+                    .unwrap(),
+                Reworded::NotWaiting
+            );
+            assert!(matches!(
+                recorder.handle(
+                    Command::Withdraw {
+                        turn,
+                        by: "user".into()
+                    },
+                    5
+                ),
+                Err(JournalError::Refused(Refusal::NotWaiting(_))),
+            ));
+        }
+        drop(recorder);
+        let mut recorder = open(&engine);
+        assert_eq!(recorder.agent().joins().len(), 2);
+        assert_eq!(
+            recorder
+                .log()
+                .read_after(0, Kinds::only(kind::MESSAGE), 10)
+                .unwrap()
+                .len(),
+            1,
+        );
+
+        recorder
+            .handle(Command::JoinRead { turn: TurnId(2) }, 6)
+            .unwrap();
+        assert!(
+            recorder
+                .handle(Command::JoinRead { turn: TurnId(2) }, 7)
+                .is_err()
+        );
+        recorder
+            .handle(Command::JoinSettled { turn: TurnId(2) }, 8)
+            .unwrap();
+        let rows = recorder
+            .log()
+            .read_after(0, Kinds::only(kind::MESSAGE), 10)
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].turn, Some(2));
+        assert_eq!(rows[1].ts_ms, 6);
+
+        recorder
+            .handle(
+                Command::Stop {
+                    by: Control::by("user"),
+                },
+                9,
+            )
+            .unwrap();
+        let effects = recorder
+            .handle(
+                Command::TurnEnded {
+                    turn: TurnId(1),
+                    outcome: RunOutcome::Completed,
+                },
+                10,
+            )
+            .unwrap();
+        assert!(effects.is_empty(), "Stop holds the follow-up left unread");
+        assert!(recorder.agent().joins().is_empty());
+        assert!(recorder.agent().holds(TurnId(3)));
+        drop(recorder);
+
+        let mut recorder = open(&engine);
+        let effects = recorder
+            .handle(Command::Resume { by: "user".into() }, 11)
+            .unwrap();
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::StartTurn {
+                turn: TurnId(3),
+                ..
+            }]
+        ));
+        let rows = recorder
+            .log()
+            .read_after(0, Kinds::only(kind::MESSAGE), 10)
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[2].turn, Some(3));
+    }
+
     /// A user's send admitted behind a turn that runs, and the user's Stop, in one write: each
     /// is where its own event is in the log, the Stop strictly after the admission, and the
     /// agent folded from the log again holds the send as it was left.
@@ -2099,6 +2248,7 @@ mod tests {
             origin: Origin::User,
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         };
         batch.command(accept, 3).unwrap();
         let stop = Command::Stop {

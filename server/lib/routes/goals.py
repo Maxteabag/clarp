@@ -7,6 +7,7 @@ from lib import agents as agents_db
 from lib import backends
 from lib import identity
 from lib.log import log, log_exception
+from lib.request_texts import body_text
 
 
 class GoalRoutes:
@@ -24,7 +25,7 @@ class GoalRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         objective = str(data.get("objective") or "").strip()
