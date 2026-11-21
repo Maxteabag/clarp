@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import itertools
 import re
 import signal
 import socket
@@ -91,6 +92,9 @@ def _tool_name(payload: dict) -> str:
 # Serialize Muse spawn/registration with orphan verification. An in-progress
 # spawn must never look like a forgotten handle between launch and register.
 _RECOVERY_LOCK = threading.RLock()
+# The most open files of a lock holder the reclaim looks through (under
+# _RECOVERY_LOCK). A holder with more is unverifiable: fail closed.
+_FD_WALK_CAP = 4096
 _RECLAIM_GRACE = 2.0
 
 
@@ -156,9 +160,15 @@ def _kernel_lock_holder(lock, pid, *, locks_path='/proc/locks', proc='/proc'):
             break
     if not held:
         return False
-    for fd in pathlib.Path(proc, str(pid), 'fd').iterdir():
+    # At most one name past the cap is read; a holder with more open files than
+    # the cap is unverifiable, whatever order its fd directory lists them in.
+    with os.scandir(os.path.join(proc, str(pid), 'fd')) as listing:
+        fds = list(itertools.islice(listing, _FD_WALK_CAP + 1))
+    if len(fds) > _FD_WALK_CAP:
+        return False
+    for fd in fds:
         try:
-            opened = fd.stat()
+            opened = os.stat(fd.path)
         except OSError:
             continue
         if (opened.st_dev, opened.st_ino) == (info.st_dev, info.st_ino):
