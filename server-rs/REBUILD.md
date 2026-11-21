@@ -3381,12 +3381,32 @@ and how it ended: `let go by request`, `let go at the bound`, `ended while held`
 `refused: ` and why. Where the system shows no processes in `/proc` a hold is refused in words and nothing is
 signalled. Nothing of a hold is written in the spool: a turn never held is byte for byte as before, and a reader of today reads a held one. Not
 held: a process that left the tool's group (as it is not stopped today either), and the tool when the shim itself is
-killed while it holds it. No caller yet: the actor's side of a turn that produced nothing is a later piece. Held by
+killed while it holds it. Held by
 fifteen tests in `crates/clarp-shim/tests/shim.rs` with stand-in tools (printed before the hold, a pipe full at the
 hold, half a line, a child, the bound with nobody to let go, ended while held, input written while held, held twice,
 a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
 hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
+
+**A second user message can replace a quiet turn** (21 Nov 2026, issue 491 B, Python PR 521).
+Only the next plain user message can replace a running turn that another plain user message began.
+The actor checks the shim's bounded hold against the whole spool fence. An unfinished output line,
+an unfinished hook report, an answer or tool block that began, an observed call, or an unreadable
+fence leaves the follow-up waiting. Thinking by itself permits takeover. Claude Code 2.1.223 and
+Antigravity 1.5.13 are the minimum versions that support their respective paths.
+
+The actor records its selection before consuming the hold. Under the same lock as release and
+expiry, the shim checks the exact acknowledged fence and writes the takeover marker durably before
+sending SIGKILL. Recovery uses the marker and the old process's exit to finish the selection.
+The actor writes the first turn's `replaced` end and the second turn's start together, keeping
+both user rows and the first delivery receipt. The new turn uses the second message's trace and
+cannot itself be replaced. A Stop that comes before the consume retains the ordinary Stop path.
+
+A resumed Claude turn reads the prior transcript entry and uses the CLI's resume and drop pair.
+Its input carries both user texts in one line, with a UUID derived from the current trace. A quiet
+first turn without prior provider history begins a new Claude session. Antigravity continues the
+same conversation with both texts after checking its transcript while held. An existing first
+message in that transcript causes release and an ordinary queued follow-up.
 
 **An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
 profile use the kernel's engine order. With a language set, models of one hosted provider

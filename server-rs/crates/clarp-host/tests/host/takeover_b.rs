@@ -55,7 +55,9 @@ say("result", subtype="success", result=answer)
     };
 
     host.send("ada", "first", "first");
-    wait_for("the first tool to report its thinking", || launches().len() == 1);
+    wait_for("the first tool to report its thinking", || {
+        launches().len() == 1
+    });
     host.send("ada", "second", "second");
     wait_for("the replacement tool", || launches().len() == 2);
     let saw = launches();
@@ -63,7 +65,12 @@ say("result", subtype="success", result=answer)
     assert_eq!(saw[1]["parts"], json!(["first", "second"]));
     assert_ne!(saw[0]["session"], saw[1]["session"]);
     assert_ne!(saw[0]["uuid"], saw[1]["uuid"]);
-    assert!(saw[1]["argv"].as_array().unwrap().contains(&json!("--session-id")));
+    assert!(
+        saw[1]["argv"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("--session-id"))
+    );
 
     let third = host.send("ada", "third", "third");
     assert_eq!(third["queued"], true);
@@ -72,15 +79,20 @@ say("result", subtype="success", result=answer)
     let first = rows.iter().find(|row| row["id"] == "u-first").unwrap();
     assert_eq!(first["turn"]["status"], "replaced", "{rows:?}");
     assert!(first["turn"]["replaced_by"].is_string());
-    let visible = rows.iter().filter_map(|row| row["id"].as_str()).collect::<Vec<_>>();
+    let visible = rows
+        .iter()
+        .filter_map(|row| row["id"].as_str())
+        .collect::<Vec<_>>();
     assert_eq!(visible, ["u-first", "u-second"]);
 
     release(&saw[1]);
-    wait_for("the third message to start after the combined answer", || {
-        launches().len() == 3
-    });
+    wait_for(
+        "the third message to start after the combined answer",
+        || launches().len() == 3,
+    );
     let rows = host.turns("ada");
-    let answers = rows.iter()
+    let answers = rows
+        .iter()
         .filter(|row| row["role"] == "assistant")
         .filter_map(|row| row["text"].as_str())
         .collect::<Vec<_>>();
