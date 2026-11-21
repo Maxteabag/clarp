@@ -160,6 +160,18 @@ def load_conversation(*, session: str, after_revision: int = 0,
     # Coordination between agents (issue 478): only a request that names a mode is filtered
     # and answered with the policy it was read under; without one, the answer is today's.
     policy = coordination.read_policy(agent_id, coordination_mode) if coordination_mode else None
+    # The head BEFORE the rows. Read after them, in a statement of its own, a row
+    # committed in between (a steered message lands within milliseconds of the
+    # next) had a revision at or below the cursor this answer returned, and the
+    # client's next delta (after_revision) never sent it. Read first, the cursor
+    # never passes a row this answer did not see: a row committed in between is
+    # sent now, and again in the next delta, which clients merge by id. Writers
+    # are serialized, so every row committed after this read has a higher
+    # revision.
+    head_revision = agents_db.latest_message_revision(
+        agent_id=agent_id, backend_session_id=backend_session_id,
+        extra_backend_session_id=service_namespace,
+    )
     turns = agents_db.list_messages(
         agent_id=agent_id,
         backend_session_id=backend_session_id,
@@ -218,10 +230,6 @@ def load_conversation(*, session: str, after_revision: int = 0,
                 turn["display_cells"] = [representative]
             else:
                 turn["display_cells"] = []
-    head_revision = agents_db.latest_message_revision(
-        agent_id=agent_id, backend_session_id=backend_session_id,
-        extra_backend_session_id=service_namespace,
-    )
     # Never advance an incremental cursor beyond rows actually delivered.
     # Doing so permanently skips the remainder of a backlog larger than limit.
     revision = (
