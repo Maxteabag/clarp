@@ -13,6 +13,7 @@ from lib import events
 from lib import identity
 from lib.log import log
 from lib.routes.helpers import _raw_query_value
+from lib.request_texts import body_text
 
 
 class AgentRoutes:
@@ -67,6 +68,35 @@ class AgentRoutes:
                               "created": bool(note.get("created")),
                               "notified": bool(notification.get("notify")),
                               "reason": notification.get("reason") or ""})
+
+    def _handle_agent_coordination(self):
+        """POST /agent-coordination {session, visibility: show|hide|default}: one chat's own
+        choice ('default' follows the Host). Answers and broadcasts the chat's effective
+        visibility in the same step."""
+        from lib import coordination
+        from lib.http_utils import from_an_agent
+        if from_an_agent(self.headers):
+            return self._json(403, {"error": "agents_may_not"})
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        session = str(data.get("session") or "").strip()
+        if not session or "visibility" not in data:
+            return self._json_error(400, "session and visibility required")
+        agent = identity.lookup(session)
+        if not agent:
+            return self._json_error(404, "no such agent")
+        try:
+            own = coordination.set_chat(agent["agent_id"], data["visibility"])
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        effective = coordination.effective_visibility(agent["agent_id"])
+        stream = getattr(self.ctx, "stream", None)
+        if stream is not None:
+            events.broadcast(stream, events.agent_roster(
+                coordination.ROSTER_KIND, session=session, coordination_visibility=effective))
+        return self._json_ok({"ok": True, "session": session, "coordination_visibility": effective,
+                              "coordination_override": own or None})
 
     def _handle_agent_assign(self):
         from lib.contact_assignment import assign_contact
@@ -205,7 +235,7 @@ class AgentRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         agent = identity.lookup(session)
@@ -217,7 +247,7 @@ class AgentRoutes:
         if "model" in data:
             if data.get("model") is not None and not isinstance(data.get("model"), str):
                 return self._json_error(400, "model must be string or null")
-            model = (data.get("model") or "").strip()
+            model = body_text(data, "model")
             if not backends.is_valid_model(backend, model):
                 return self._json(400, {
          "error": "invalid model for backend", "backend": backend,
@@ -227,7 +257,7 @@ class AgentRoutes:
         if "effort" in data:
             if data.get("effort") is not None and not isinstance(data.get("effort"), str):
                 return self._json_error(400, "effort must be string or null")
-            effort = (data.get("effort") or "").strip().lower()
+            effort = body_text(data, "effort").lower()
             if effort and effort not in valid:
                 return self._json(400, {"error": "invalid effort for backend",
                                         "backend": backend, "valid_efforts": valid})
@@ -262,7 +292,7 @@ class AgentRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         agent = identity.lookup(session)
@@ -302,7 +332,7 @@ class AgentRoutes:
             return self._json_error(400, "bad json")
         if self._reject_janitor_control(data):
             return
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         # Collapse internal runs of whitespace: this is a display name, and a
@@ -452,7 +482,9 @@ class AgentRoutes:
         other value, the answer is every agent, as it has always been."""
         from lib import snapshot
         include_archived = self._query().get("include_archived", [""])[0] != "0"
-        self._send(200, snapshot.SHARED.body(self.ctx, include_archived=include_archived),
+        limited = getattr(self, "_request_device_scope", "") == "limited"
+        self._send(200, snapshot.SHARED.body(self.ctx, include_archived=include_archived,
+                                              limited=limited),
                    "application/json")
 
     def _handle_archived_agents(self):
