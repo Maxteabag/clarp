@@ -1290,8 +1290,21 @@ _READ_PREFIXES = RevisionedCache("transcript-read-prefix", max_entries=256)
 # it never had one (a Host start), lost it to the size limit, or the last
 # import wrote nothing and could not publish. The stored frontier is still
 # the last one that was published; its digests decide whether it holds.
+#
+# A tail whose publication was refused because another writer committed while
+# it had given the writer away (`foreign_commit_yield`, or its connection
+# changed in that gap) wrote rows but neither its checkpoint nor its frontier:
+# the fence refuses both in the same place (`checkpoint_allowed`). So the
+# store still holds the PREVIOUS pair, written together and consistent with
+# each other (the frontier is keyed to that checkpoint's digest). A tail from
+# it reads the same bytes after the same boundary and re-applies the lines the
+# refused tail wrote; the import's writes are idempotent per line. Its guard
+# re-checks the rows before the boundary against the stored record, as for
+# any restored frontier, so whatever the foreign commit changed there is
+# judged by the carry rules, not trusted.
 _RESTORABLE = frozenset({"missing_unknown", "unknown_reset", "evicted", "evicted_empty",
-                         "publication_not_written"})
+                         "publication_not_written", "publication_foreign_commit_yield",
+                         "publication_connection_changed_yield"})
 
 
 def _stored_frontier(database, key, revision, agent_id, backend_session_id, path):
