@@ -3997,7 +3997,7 @@ mod tests {
             (Method::GET, "/past-sessions", true),
             (Method::GET, "/terminal/echo", true),
             (Method::GET, "/terminal/", true),
-            (Method::GET, "/terminal", false),
+            (Method::GET, "/terminal", true),
             (Method::GET, "/server-terminal", true),
             (Method::GET, "/personalities/settings", true),
             (Method::GET, "/automation-settings", true),
@@ -4008,7 +4008,7 @@ mod tests {
             (Method::GET, "/orchestrator", true),
             (Method::GET, "/calls", true),
             (Method::GET, "/voice-humanness", false),
-            (Method::GET, "/persona-avatars/persona-1", false),
+            (Method::GET, "/persona-avatars/persona-1", true),
             (Method::POST, "/personas", true),
         ] {
             assert_eq!(
