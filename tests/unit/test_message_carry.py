@@ -713,8 +713,15 @@ def test_words_said_before_pass_only_when_sent_after_every_old_turn_for_no_old_t
            "timestamp": at(60_000)}
     notice = {**new, "text": "<clarp-delivery-context>\nx\n</clarp-delivery-context>\n\nstatus"}
     before = _inputs(rows=old)
-    later = dict(prefix_latest_ms=10_000, initial_provenance_used=False)
+    later = dict(prefix_latest_ms=10_000, prefix_untimed_user=False, initial_provenance_used=False)
     assert _changed(before, _inputs(rows=[*old, new]), **later) == ""
+    # A user turn before the boundary without a timestamp, or a carry that does
+    # not say: the linker bounds no such copy by time.
+    for untimed in (dict(prefix_untimed_user=True), dict(prefix_untimed_user=None), {}):
+        stored = {**later, **untimed}
+        if not untimed:
+            del stored["prefix_untimed_user"]
+        assert _changed(before, _inputs(rows=[*old, new]), **stored) == "send_said_before"
     assert _changed(before, _inputs(rows=[*old, {**new, "timestamp": at(11_500)}]),
                     **later) == "send_said_before"
     with_turn = _inputs(rows=old, turns=[_turn("t-old", 9_000)])
