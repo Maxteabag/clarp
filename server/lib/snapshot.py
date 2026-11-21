@@ -14,7 +14,7 @@ from . import (background_jobs, agent_goals, agents as agents_db, avatar_setting
                compaction, db,
                config, message_store, model_avatars, persona_avatar_generation, team_store,
                turn_queue, scheduler, janitors, quiet_agents)
-from . import reconcile, turn_lifecycle
+from . import coordination, reconcile, turn_lifecycle
 from .clock import now_ms
 from .session_models import agent_model
 from . import personas as persona_store
@@ -442,6 +442,9 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 f"count={len(agent_rows)} error_type={type(exc).__name__}")
     if select is not None and reconcile_available:
         _reconcile_unlisted(agent_rows, selected, states, runtimes, runtime_status)
+    # Read once for every row (lib.coordination): the Host's choice and the chats' own.
+    coordination_host = coordination.global_visibility()
+    coordination_chosen = coordination.overrides()
     for a in selected:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -560,6 +563,9 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             "heartbeat_enabled": bool(a.get("heartbeat_enabled")),
             "dreaming_enabled": bool(a.get("dreaming_enabled")),
             "muted":          bool(a.get("muted")),
+            # Coordination between agents (lib.coordination): the chat's effective
+            # visibility and its own choice (None: it follows the Host).
+            **coordination.snapshot_fields(agent_id, coordination_chosen, coordination_host),
             "archived_at":    a.get("archived_at"),
             "backend_session_id": bsid,
             "alive":          True,
