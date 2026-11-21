@@ -110,3 +110,50 @@ def test_a_limited_device_may_not_and_a_full_device_may(running_server):
                  headers={"Authorization": "Bearer administrator-secret"})[0] == 200
     assert _call(base, "POST", "/agent-moved", {"session": "claude", "moved_to": None},
                  headers={"Authorization": f"Bearer {token('full')}"})[0] == 200
+
+
+class _Runtime:
+    """A runtime client as the Host holds one: its status names its capabilities."""
+
+    def __init__(self, capabilities=None, *, fails=False):
+        self.capabilities, self.fails, self.recovered = capabilities, fails, 0
+
+    def status(self, **_kw):
+        if self.fails:
+            raise RuntimeError("runtime status unavailable")
+        return {"capabilities": dict(self.capabilities or {})}
+
+    def recover_queued(self):
+        self.recovered += 1
+        return 0
+
+
+def _with_runtime(srv, ctx, runtime):
+    srv.ctx = ctx.with_(runtime_client=runtime)
+
+
+def test_a_runtime_that_does_not_enforce_moves_refuses_the_mark(running_server):
+    """A runtime of a release before agent_moves would store nothing and refuse
+    nothing: the Host sets no mark it cannot enforce."""
+    base, ctx, srv = running_server
+    for runtime in (_Runtime({"janitor_runs": True}), _Runtime(fails=True),
+                    _Runtime({"agent_moves": "yes"})):
+        _with_runtime(srv, ctx, runtime)
+        status, body = _call(base, "POST", "/agent-moved", MOVE)
+        assert status == 409 and body["error"] == "runtime_not_ready", body
+        assert body["moved"] is None
+    from lib import agent_moves, agents
+    assert agent_moves.moved(agents.get_by_session("claude")["agent_id"]) is None
+
+
+def test_a_ready_runtime_accepts_and_taking_back_is_always_allowed(running_server):
+    base, ctx, srv = running_server
+    ready = _Runtime({"agent_moves": True})
+    _with_runtime(srv, ctx, ready)
+    status, body = _call(base, "POST", "/agent-moved", MOVE)
+    assert status == 200 and body["changed"] is True
+    old = _Runtime({"janitor_runs": True})                 # a runtime rolled back meanwhile
+    _with_runtime(srv, ctx, old)
+    status, body = _call(base, "POST", "/agent-moved", {"session": "claude", "moved_to": None})
+    assert status == 200 and body["changed"] is True and body["moved"] is None
+    assert old.recovered == 1                              # the held items are released

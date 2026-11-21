@@ -797,6 +797,9 @@ administrator may: a request with an agent's turn token or a peer Host's header 
 `403 {"error": "agents_may_not"}`, a limited device `403`. Each answers
 `{"ok", "session", "changed", "moved"}`; the same call again changes nothing (`changed: false`),
 and a mark to another place while moved answers `409 {"error": "already_moved"}`.
+Setting a mark answers `409 {"error": "runtime_not_ready"}` and sets nothing while the
+runtime that owns turns does not report the `agent_moves` capability in its status (a
+runtime of an older release would ignore the mark); taking a move back is always allowed.
 While an agent is moved no turn of it starts here, by any door: `POST /send` (and every relay
 through it: `clarp-admin prompt`, a parent steering a helper, a peer Host's request) and
 `POST /turn-queue/{id}/send` answer `409 {"error": "agent_moved", "moved_to": {host, id},

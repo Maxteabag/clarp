@@ -28,6 +28,28 @@ from . import db
 AGENT_MOVED = "agent_moved"
 
 
+# The runtime capability that says its admission refuses a moved agent. The
+# refusal lives where turns start (the runtime); the mark is written by the Host
+# (POST /agent-moved). A runtime of a release before this one would store
+# nothing and refuse nothing: a mark set then is false safety.
+RUNTIME_CAPABILITY = "agent_moves"
+
+
+def runtime_enforces(ctx) -> bool:
+    """Whether the runtime that owns turns refuses a moved agent: it reports
+    ``agent_moves`` among its status capabilities. With no runtime client this
+    process owns turns and runs this very admission. A status that cannot be
+    read is not proof: False."""
+    runtime = getattr(ctx, "runtime_client", None)
+    if runtime is None:
+        return True
+    try:
+        capabilities = runtime.status().get("capabilities") or {}
+    except Exception:  # noqa: BLE001 - unknown is not ready; the caller refuses and says so
+        return False
+    return isinstance(capabilities, dict) and capabilities.get(RUNTIME_CAPABILITY) is True
+
+
 class MoveConflict(ValueError):
     """The agent is already marked moved somewhere else."""
 

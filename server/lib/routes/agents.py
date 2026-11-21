@@ -140,6 +140,14 @@ class AgentRoutes:
         else:
             if not isinstance(target, dict):
                 return self._json_error(400, "moved_to must be {host, id} or null")
+            if not agent_moves.runtime_enforces(self.ctx):
+                # A runtime of an older release would ignore the mark: never claim a
+                # safety that is not there. Install the release on the runtime first.
+                return self._json(409, {
+                    "ok": False, "error": "runtime_not_ready",
+                    "detail": "the runtime does not refuse moved agents yet "
+                              "(it reports no agent_moves capability); nothing was set",
+                    "moved": agent_moves.moved(agent_id)})
             try:
                 _mark, changed = agent_moves.set_moved(
                     agent_id, host=target.get("host"), remote_id=target.get("id"))
