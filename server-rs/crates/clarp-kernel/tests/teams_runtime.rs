@@ -88,11 +88,14 @@ fn teams_runtime_matches_the_reference_fanout_digest_protocol_and_wake_rules() {
             &person(agent).unwrap().session,
             origin,
             &person,
+            || panic!("this vector is not an ordinary leader turn"),
         );
         assert_eq!(text, row["text"]);
     }
     let brief = Brief {
-        protocol: runtime::protocol(&teams, "a-leader", "leader", "leader_tick", &person),
+        protocol: runtime::protocol(&teams, "a-leader", "leader", "leader_tick", &person, || {
+            panic!("leader ticks use their lean brief")
+        }),
         digest,
         ids: inbox.clone(),
     };

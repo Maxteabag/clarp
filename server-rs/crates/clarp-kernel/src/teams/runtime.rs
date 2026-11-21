@@ -206,6 +206,7 @@ pub fn protocol(
     session: &str,
     origin: &str,
     person: &impl Fn(&str) -> Option<Person>,
+    leader_context: impl FnOnce() -> String,
 ) -> String {
     let mut active: Vec<_> = active_for(teams, agent).collect();
     active.sort_by(|a, b| a.name.cmp(&b.name));
@@ -266,7 +267,7 @@ pub fn protocol(
             format!(
                 "Delegate as yourself with self-prompt --from {session}. Track owner, objective, proof, risk, time budget, and terminal result."
             ),
-            include_str!("leader-standing-orders.txt").trim_end().into(),
+            leader_context(),
         ];
         for team in led {
             let states = member_lines(team, agent, "  ", person);

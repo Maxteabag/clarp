@@ -61,6 +61,8 @@ mod language_set;
 mod launch_directories;
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
+#[path = "host/leader_memory.rs"]
+mod leader_memory;
 #[path = "host/live_model.rs"]
 mod live_model;
 #[path = "host/managed_skills.rs"]
