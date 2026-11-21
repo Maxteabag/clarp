@@ -114,6 +114,7 @@ class ReadMeter:
             disk = thread_disk()
         except (OSError, ValueError):
             disk = None
+            self.unavailable = True
         try:
             return self.measure(self.lanes, name, fn)
         finally:
