@@ -166,7 +166,16 @@ SETTLED_TURNS = "carry_settled_turns"
 # inside the turn, and the next full import puts the boundary there (issue
 # 352). Needs LIVE_ROWS. Off unless switched on.
 LIVE_WORDS = "carry_live_rows_by_words"
-RULES = (SESSION_ROWS, LATER_TURNS, NEW_SENDS, LIVE_ROWS, SETTLED_TURNS, LIVE_WORDS)
+# A new note row (``POST /agent-notes``, message_writes.record_note) does not
+# count. It is the Host's own row: its source is ``note:<id>``, its seq is in
+# the negative band and its role is assistant, so no read of the import takes
+# it by source (client, live and final rows, the transcript's slots) or by role
+# (the latest user row). It takes the next seq below the conversation's lowest,
+# as a new /send row does, which NEW_SENDS already lets through. A note that
+# was there when the frontier was published and has changed or gone is
+# refused as before.
+NEW_NOTES = "carry_new_notes"
+RULES = (SESSION_ROWS, LATER_TURNS, NEW_SENDS, LIVE_ROWS, SETTLED_TURNS, LIVE_WORDS, NEW_NOTES)
 # How many of the newest turns before the boundary have their replies' words
 # kept, and how many bytes of words at most, counted as the checkpoint stores
 # them (``stored_size``): the carry is written whole whenever it changes.
@@ -626,6 +635,9 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
             continue
         if kind == "row_tail":
             continue            # asked above
+        if kind == "row_other" and NEW_NOTES in rules \
+                and str(row[table.at["source_file"]] or "").startswith("note:"):
+            continue
         if kind != "row_send" or NEW_SENDS not in rules:
             found.add(kind)
             continue

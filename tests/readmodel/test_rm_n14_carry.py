@@ -382,6 +382,31 @@ def test_a_coordination_turn_made_visible_is_a_tail(tmp_path, backend, twin):
         assert world.imported() == ("tail_applied", [])
 
 
+@pytest.mark.parametrize("change", ["a new note, rule on", "a new note, rule off",
+                                    "an old note edited"])
+@BACKENDS
+def test_a_new_note_row_is_a_tail(tmp_path, backend, change):
+    """An agent's note to the user (POST /agent-notes) is a row of the Host's
+    own: no read of the import takes it, and a new one is let through
+    (carry_new_notes). A note that was there when the frontier was published
+    and changed since is refused, as every old row is."""
+    settings = {"carry_new_notes": False} if change.endswith("rule off") else None
+    with World(tmp_path, backend, _history(backend), settings=settings) as world:
+        world.message("note-old", source_file="note:old", role="assistant", text="an old note",
+                      at=1500, trace="t-note")
+        ordinal = world.started(6)
+        if change.startswith("a new note"):
+            world.message("note-new", source_file="note:new", role="assistant", text="a note",
+                          at=FAR, trace="t-note")
+        else:
+            world.write("UPDATE messages SET text='edited note' WHERE message_id='note-old'")
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == (("tail_applied", []) if change == "a new note, rule on"
+                                    else ("full_carry_inputs_changed", ["row_other"]))
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
 # ---- turn rows that began after the boundary's turns ---------------------------
 
 @ON_OFF
