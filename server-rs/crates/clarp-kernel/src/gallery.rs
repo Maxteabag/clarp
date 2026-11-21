@@ -173,6 +173,7 @@ fn cursor(before: &str, favorites: bool) -> Result<Key, Refusal> {
 
 #[derive(Debug, Default)]
 struct Session {
+    published: Order,
     images: Order,
     favorites: Order,
     deleted: Order,
@@ -227,6 +228,9 @@ impl Index {
             .entry(image.asset.session.clone())
             .or_default();
         let is_gallery = !image.asset.named_only && is_image(&image.asset.mime_type);
+        if is_gallery {
+            session.published.insert((image.asset.created_at, id.clone()));
+        }
         if let Some(deletion) = &image.deletion {
             self.deleted.insert((deletion.at, id.clone()));
             session.deleted.insert((deletion.at, id.clone()));
@@ -247,6 +251,7 @@ impl Index {
         let Some(session) = self.sessions.get_mut(&image.asset.session) else {
             return;
         };
+        session.published.remove(&(image.asset.created_at, id.clone()));
         if let Some(deletion) = &image.deletion {
             self.deleted.remove(&(deletion.at, id.clone()));
             session.deleted.remove(&(deletion.at, id.clone()));
@@ -305,6 +310,41 @@ impl Index {
             total: session.images.len(),
             favorites_total: session.favorites.len(),
         })
+    }
+
+    /// The images this producer published in one chat during the run, as kept and
+    /// discarded. Each set has the reference's order by creation time and id.
+    pub fn published_by(
+        &self,
+        session: &str,
+        prefix: &str,
+        since: i64,
+        until: i64,
+    ) -> (Vec<&Image>, Vec<&Image>) {
+        if session.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let Some(session) = self.sessions.get(session) else {
+            return (Vec::new(), Vec::new());
+        };
+        let mut kept = Vec::new();
+        let mut discarded = Vec::new();
+        for (_, id) in session
+            .published
+            .range((Included((since, String::new())), Unbounded))
+            .take_while(|(at, _)| *at <= until)
+        {
+            let Some(image) = self.images.get(id) else { continue };
+            if !image.asset.created_by.starts_with(prefix) {
+                continue;
+            }
+            match &image.deletion {
+                None => kept.push(image),
+                Some(deletion) if deletion.at >= since => discarded.push(image),
+                Some(_) => {}
+            }
+        }
+        (kept, discarded)
     }
 
     pub fn deleted(&self, session: &str, since: i64, limit: usize, now: i64) -> DeletedPage<'_> {

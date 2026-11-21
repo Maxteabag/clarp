@@ -1,0 +1,259 @@
+{
+  "rows": [
+    {
+      "id": "asset_early",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 9,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_before_run",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 9,
+      "deleted_at": 12
+    },
+    {
+      "id": "asset_born_at_start",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 10,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_born_at_end",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 20,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_late",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 21,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_tombstone_at_start",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 10,
+      "deleted_at": 10
+    },
+    {
+      "id": "asset_tombstone_after_end",
+      "session": "oak",
+      "created_by": "portrait_generation:second",
+      "mime": "image/png",
+      "created_at": 11,
+      "deleted_at": 30
+    },
+    {
+      "id": "asset_tombstone_before_start",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 18,
+      "deleted_at": 9
+    },
+    {
+      "id": "asset_same_a",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 14,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_same_b",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 14,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_other_producer",
+      "session": "oak",
+      "created_by": "agent",
+      "mime": "image/png",
+      "created_at": 14,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_prefix_in_middle",
+      "session": "oak",
+      "created_by": "other:portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 14,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_other_chat",
+      "session": "elm",
+      "created_by": "portrait_generation:openai",
+      "mime": "image/png",
+      "created_at": 14,
+      "deleted_at": null
+    },
+    {
+      "id": "asset_not_an_image",
+      "session": "oak",
+      "created_by": "portrait_generation:openai",
+      "mime": "text/plain",
+      "created_at": 14,
+      "deleted_at": null
+    }
+  ],
+  "queries": [
+    {
+      "session": "oak",
+      "producer": "portrait_generation:",
+      "since": 10,
+      "until": 20,
+      "kept": [
+        "asset_born_at_start",
+        "asset_same_a",
+        "asset_same_b",
+        "asset_born_at_end"
+      ],
+      "discarded": [
+        "asset_tombstone_at_start",
+        "asset_tombstone_after_end"
+      ]
+    },
+    {
+      "session": "oak",
+      "producer": "portrait_generation:",
+      "since": 11,
+      "until": 19,
+      "kept": [
+        "asset_same_a",
+        "asset_same_b"
+      ],
+      "discarded": [
+        "asset_tombstone_after_end"
+      ]
+    },
+    {
+      "session": "oak",
+      "producer": "portrait_generation:",
+      "since": 10,
+      "until": 10,
+      "kept": [
+        "asset_born_at_start"
+      ],
+      "discarded": [
+        "asset_tombstone_at_start"
+      ]
+    },
+    {
+      "session": "oak",
+      "producer": "portrait_generation:",
+      "since": 20,
+      "until": 20,
+      "kept": [
+        "asset_born_at_end"
+      ],
+      "discarded": []
+    },
+    {
+      "session": "oak",
+      "producer": "portrait_generation:",
+      "since": 21,
+      "until": 22,
+      "kept": [
+        "asset_late"
+      ],
+      "discarded": []
+    },
+    {
+      "session": "oak",
+      "producer": "portrait_generation:",
+      "since": 21,
+      "until": 20,
+      "kept": [],
+      "discarded": []
+    },
+    {
+      "session": "oak",
+      "producer": "portrait_generation:second",
+      "since": 10,
+      "until": 20,
+      "kept": [],
+      "discarded": [
+        "asset_tombstone_after_end"
+      ]
+    },
+    {
+      "session": "oak",
+      "producer": "portrait_generation:",
+      "since": 22,
+      "until": 100,
+      "kept": [],
+      "discarded": []
+    },
+    {
+      "session": "elm",
+      "producer": "portrait_generation:",
+      "since": 10,
+      "until": 20,
+      "kept": [
+        "asset_other_chat"
+      ],
+      "discarded": []
+    },
+    {
+      "session": "",
+      "producer": "portrait_generation:",
+      "since": 10,
+      "until": 20,
+      "kept": [],
+      "discarded": []
+    },
+    {
+      "session": "absent",
+      "producer": "portrait_generation:",
+      "since": 10,
+      "until": 20,
+      "kept": [],
+      "discarded": []
+    },
+    {
+      "session": "oak",
+      "producer": "agent",
+      "since": 10,
+      "until": 20,
+      "kept": [
+        "asset_other_producer"
+      ],
+      "discarded": []
+    },
+    {
+      "session": "oak",
+      "producer": "",
+      "since": 10,
+      "until": 20,
+      "kept": [
+        "asset_born_at_start",
+        "asset_other_producer",
+        "asset_prefix_in_middle",
+        "asset_same_a",
+        "asset_same_b",
+        "asset_born_at_end"
+      ],
+      "discarded": [
+        "asset_tombstone_at_start",
+        "asset_tombstone_after_end"
+      ]
+    }
+  ]
+}
