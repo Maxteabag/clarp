@@ -177,7 +177,9 @@ def _stop_with_arrivals(world, arrivals):
 
 def test_a_database_error_while_holding_loses_no_queued_work(tmp_path, monkeypatch):
     """"database is locked" mid-hold: every spec taken from memory goes back,
-    in order; the retried handover then holds or starts each one."""
+    in order; the retried handover then holds or starts each one. The send
+    that may run past the pause is another agent's: the user's word would go
+    first and start before the hold takes the queue out (issue 481)."""
     import sqlite3
     world = World(tmp_path)
     world.send("t0")
@@ -192,14 +194,14 @@ def test_a_database_error_while_holding_loses_no_queued_work(tmp_path, monkeypat
         return real_get(queue_id)
 
     monkeypatch.setattr(turn_queue, "get", flaky_get)
-    _stop_with_arrivals(world, [("u_mid", "user", False)])
+    _stop_with_arrivals(world, [("m_mid", "agent", False)])
     assert failed == ["p_pre2"]
     world.service._retry_handoff(world.agent)   # the scheduled retry
     world.settle()
-    assert world.started == ["t0", "u_mid"]
+    assert world.started == ["t0", "m_mid"]
     assert _waiting(world) == ["p_pre", "p_pre2"]
     _resume(world)
-    assert world.started == ["t0", "u_mid", "p_pre", "p_pre2"]
+    assert world.started == ["t0", "m_mid", "p_pre", "p_pre2"]
 
 
 def test_a_new_park_row_keeps_older_park_rows_behind_it(tmp_path):
@@ -228,7 +230,9 @@ def test_a_new_park_row_keeps_older_park_rows_behind_it(tmp_path):
 
 def test_a_second_stop_while_holding_also_holds_the_kept_sends(tmp_path, monkeypatch):
     """A send that could run past Stop 1 was queued before Stop 2. Stop 2
-    lands while the hold has the memory queue out; Stop 2 holds it too."""
+    lands while the hold has the memory queue out; Stop 2 holds it too. The
+    kept send is another agent's: the user's word would go first and start
+    before the hold takes the queue out (issue 481)."""
     world = World(tmp_path)
     world.send("t0")
     world.send("p_pre", origin="agent", queue=True)
@@ -236,20 +240,20 @@ def test_a_second_stop_while_holding_also_holds_the_kept_sends(tmp_path, monkeyp
 
     def holds_then_stop_again(spec):
         result = real_holds(spec)
-        if spec.client_msg_id == "u_mid" and not fired:
+        if spec.client_msg_id == "m_mid" and not fired:
             fired.append(spec.client_msg_id)
             world.stop()                      # Stop 2, inside the window
         return result
 
     patch_shared(monkeypatch, td, "_stop_holds", holds_then_stop_again)
-    _stop_with_arrivals(world, [("u_mid", "user", False)])
-    assert fired == ["u_mid"]
+    _stop_with_arrivals(world, [("m_mid", "agent", False)])
+    assert fired == ["m_mid"]
     world.service.start_held_work()
     world.settle()
     assert world.started == ["t0"]
-    assert _waiting(world) == ["p_pre", "u_mid"]
+    assert _waiting(world) == ["p_pre", "m_mid"]
     _resume(world)
-    assert world.started == ["t0", "p_pre", "u_mid"]
+    assert world.started == ["t0", "p_pre", "m_mid"]
 
 
 @pytest.mark.parametrize("failing", ["pause", "fence"])

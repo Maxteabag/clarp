@@ -114,6 +114,9 @@ class HandoffMixin:
                 return  # Stop or a newer owner already took the slot over
             _SLOTS.release(agent_id, spec.trace_id)
             _SLOTS.requeue_front(agent_id, retry)
+        # Taken in memory (requeue_front), taken in the durable store: a user's
+        # word that arrives meanwhile goes behind it on both sides (#481).
+        turn_queue.mark_taken(spec.queue_id or spec.park_id)
         delay = min(60.0, float(2 ** (retry.handoff_failures - 1)))
         log("queuedSpawnRequeued",
             f"agent={agent_id} trace={spec.trace_id} failures="
