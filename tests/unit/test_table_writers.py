@@ -44,6 +44,8 @@ ALLOWED = {
     ("artifact_decisions", "lib/db_migrations.py"): _MIGRATION,
     ("decision_deliveries", "lib/db_migrations.py"): _MIGRATION,
     ("message_clock", "lib/db_migrations.py"): _MIGRATION,
+    ("task_plan_versions", "lib/db_migrations.py"):
+        _MIGRATION + " (v136 stamps the plans that exist; the task_plans triggers in db_schema keep it after)",
     ("teams", "lib/db_migrations.py"): _MIGRATION,
     ("task_items", "lib/db_migrations.py"): _MIGRATION,
     ("queued_turns", "lib/db_migrations.py"): _MIGRATION,
