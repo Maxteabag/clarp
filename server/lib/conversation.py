@@ -10,6 +10,7 @@ import pathlib
 from typing import Any
 
 from . import agents as agents_db
+from . import coordination, message_previews
 from . import backends
 from . import transcript_import_cache
 from . import transcript_incremental
@@ -61,7 +62,9 @@ def load_conversation(*, session: str, after_revision: int = 0,
                       include_tool_details: bool = True,
                       before_message_id: str = "",
                       interaction_id: str = "",
-                      background_import: bool = False) -> dict[str, Any]:
+                      background_import: bool = False,
+                      coordination_mode: str = "",
+                      coordination_read: str = "") -> dict[str, Any]:
     # The message store caps reads at 5,000 rows. Reserve one row for the
     # pagination lookahead so `has_more` remains truthful at the public maximum.
     limit = max(1, min(int(limit or 100), 4999))
@@ -154,6 +157,9 @@ def load_conversation(*, session: str, after_revision: int = 0,
     # truncated. For a snapshot the store returns ascending display order for
     # the newest rows, so discard the oldest extra row. For a delta it returns
     # ascending revision order, so discard the newest extra row.
+    # Coordination between agents (issue 478): only a request that names a mode is filtered
+    # and answered with the policy it was read under; without one, the answer is today's.
+    policy = coordination.read_policy(agent_id, coordination_mode) if coordination_mode else None
     turns = agents_db.list_messages(
         agent_id=agent_id,
         backend_session_id=backend_session_id,
@@ -162,10 +168,21 @@ def load_conversation(*, session: str, after_revision: int = 0,
         before_message_id=before_message_id,
         limit=limit + 1,
         include_automated=include_automated,
+        hide_coordination=bool(policy and policy["hidden"]),
     )
     has_more = len(turns) > limit
     if has_more:
         turns = turns[:limit] if after_revision else turns[-limit:]
+    hidden_after = None
+    if policy and policy["hidden"] and coordination.can_leave_note(agent_id):
+        sessions = list(dict.fromkeys(v for v in (backend_session_id, service_namespace) if v))
+        before, hidden_after = message_previews.coordination_gaps(
+            agent_id=agent_id, sessions=sessions, rows=turns, include_automated=include_automated,
+            contiguous=not after_revision,
+            tail=not after_revision and not before_message_id)
+        for turn in turns:
+            if turn["id"] in before:
+                turn["hidden_before"] = before[turn["id"]]
     if not include_tool_details:
         for turn in turns:
             tools = turn.get("tools") if isinstance(turn.get("tools"), list) else []
@@ -218,8 +235,19 @@ def load_conversation(*, session: str, after_revision: int = 0,
         after_revision=after_revision,
         extra_backend_session_id=service_namespace,
     )
+    if (policy and after_revision and coordination_read
+            and coordination_read != policy["visibility"]):
+        # The client's cache was read under another policy (the setting changed, here or on
+        # another device): it reloads; nothing was written to the conversation for it.
+        replace_required = True
     latest_ts = max((row.get("timestamp") or "" for row in turns), default="")
-    return {
+    extra: dict[str, Any] = {}
+    if policy:
+        extra["coordination"] = {"hidden": policy["hidden"], "source": policy["source"],
+                                 "visibility": policy["visibility"]}
+        if hidden_after:
+            extra["hidden_after"] = hidden_after
+    return {**extra, 
         "cwd": str(cwd),
         "file": latest.name if latest is not None else None,
         "turns": turns,

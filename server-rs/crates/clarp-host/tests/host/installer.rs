@@ -194,9 +194,10 @@ fn computer_jobs_can_be_seen_and_cancelled_without_an_agent_across_restart() {
     assert_eq!(detail["is_process"], true);
     assert_eq!(detail["timeline"][0]["status"], "queued");
     assert_eq!(detail["log"]["reason"], "no_log");
-    let limited_detail = host.ask_as(&limited, "GET", &path, None);
-    assert_eq!(limited_detail.0, 200);
-    assert_eq!(limited_detail.1["log"]["reason"], "forbidden");
+    assert_eq!(
+        host.ask_as(&limited, "GET", &path, None),
+        (403, json!({"error":"full device access required"}))
+    );
     let cancel = |generation| {
         host.ask(
             "DELETE",

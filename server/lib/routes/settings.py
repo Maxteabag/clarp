@@ -78,6 +78,32 @@ class SettingsRoutes:
             return self._json_error(400, "special_treatment required")
         self._json_ok(update(data["special_treatment"]))
 
+    def _handle_coordination_settings_get(self):
+        """GET /coordination-settings: the Host's choice for coordination between agents."""
+        from lib import coordination
+        self._json_ok({"coordination_visibility": coordination.global_visibility()})
+
+    def _handle_coordination_settings_post(self):
+        """POST /coordination-settings {coordination_visibility: show|hide}. Written, then
+        the roster event that carries the new value: every agent row of the next snapshot
+        has it (one step; nothing is written to any conversation)."""
+        from lib import coordination, events
+        from lib.http_utils import from_an_agent
+        if from_an_agent(self.headers):
+            return self._json(403, {"error": "agents_may_not"})
+        data = self._read_json()
+        if not isinstance(data, dict) or "coordination_visibility" not in data:
+            return self._json_error(400, "coordination_visibility required")
+        try:
+            value = coordination.set_global(data["coordination_visibility"])
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        stream = getattr(self.ctx, "stream", None)
+        if stream is not None:
+            events.broadcast(stream, events.agent_roster(
+                coordination.ROSTER_KIND, coordination_visibility=value))
+        self._json_ok({"coordination_visibility": value})
+
     def _handle_avatar_settings_get(self):
         from lib.avatar_settings import get
         self._json_ok(get())

@@ -1313,3 +1313,65 @@ def test_a_block_left_open_when_the_result_comes_is_settled_with_its_words(fake_
     stored = {r["message_id"]: (r["text"], r["kind"]) for r in agents_db.conn().execute(
         "SELECT message_id, text, kind FROM messages WHERE role = 'assistant'")}
     assert stored == {ids[0]: (FIRST_BLOCK, None), ids[1]: ("Second block, ", None)}
+
+
+# ---- R143: a key-less stream's single live row: no structure rendered, blocks as paragraphs ----
+
+def _keyless(events):
+    """The same message as a stream whose events carry no message id (the key-less path)."""
+    import copy
+    events = copy.deepcopy(events)
+    for event in events:
+        inner = event.get("event") or {}
+        if inner.get("type") == "message_start":
+            inner["message"].pop("id", None)
+        if event.get("type") == "assistant":
+            event["message"].pop("id", None)
+    return events
+
+
+def _keyless_row(fake_clarp, tmp_path, monkeypatch, body, sid):
+    writes = []
+    original = agents_db.upsert_live_assistant_message
+
+    def spy(**kwargs):
+        writes.append(kwargs["text"])
+        return original(**kwargs)
+    monkeypatch.setattr(agents_db, "upsert_live_assistant_message", spy)
+    agent_id = agents_db.create_agent(persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    fake_clarp([{"type": "system", "subtype": "init", "session_id": sid}, *body,
+                {"type": "result", "subtype": "success", "result": "ok"}])
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-keyless")
+    handle = CLAUDE.start_turn(text="hi", cwd=tmp_path, backend_session_id=sid, session="rachel",
+                               agent_id=agent_id, trace_id="trace-keyless")
+    handle.wait(timeout=10.0)
+    return writes
+
+
+def test_a_keyless_live_row_never_holds_a_tool_results_structure_and_reads_as_paragraphs(
+        fake_clarp, tmp_path, monkeypatch):
+    """The measured message (text, server tool, its result, text) streamed without message ids:
+    the row's words are the two text blocks, a blank line between, never the search result's
+    Python rendering; the first block stays a prefix of every write, so adoption by prefix
+    (order A) still matches."""
+    writes = _keyless_row(fake_clarp, tmp_path, monkeypatch, _keyless(_order_b_events()), "sid-keyless")
+    assert writes and writes[-1] == FIRST_BLOCK + "\n\n" + SECOND_BLOCK
+    assert not any("web_search_result" in text or "{'" in text for text in writes)
+    assert all(text.startswith(FIRST_BLOCK) or FIRST_BLOCK.startswith(text) for text in writes)
+
+
+def test_without_partial_messages_a_keyless_row_joins_blocks_as_paragraphs(fake_clarp, tmp_path, monkeypatch):
+    body = [event for event in _keyless(_order_b_events()) if event["type"] == "assistant"]
+    writes = _keyless_row(fake_clarp, tmp_path, monkeypatch, body, "sid-keyless-whole")
+    assert writes[-1] == FIRST_BLOCK + "\n\n" + SECOND_BLOCK
+    assert not any("web_search_result" in text for text in writes)
+
+
+def test_a_non_text_block_adds_no_words():
+    from lib.backend.claude import _content_text
+    result = {"type": "web_search_tool_result", "tool_use_id": "s",
+              "content": [{"type": "web_search_result", "title": "t", "url": "https://example.invalid/"}]}
+    assert _content_text(result) == ""
+    assert _content_text({"type": "server_tool_use", "id": "s", "name": "web_search", "input": {}}) == ""
+    assert _content_text({"type": "text", "text": "Words."}) == "Words."
+    assert _content_text({"content": [{"type": "text", "text": "Nested."}]}) == "Nested."

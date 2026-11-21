@@ -156,6 +156,7 @@ dependencies = [
  "clarp-spool",
  "clarp-store-mem",
  "clarp-store-sqlite",
+ "rustix",
  "serde",
  "serde_json",
 ]
