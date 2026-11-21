@@ -240,7 +240,13 @@ pub(crate) async fn handed(
             Err(refused) => {
                 // A turn that cannot be admitted: the delegation failed, in the words of that.
                 book.fail(&admit.delegation_id, refused.message(), app.clock.now_ms());
-                return Err(refused);
+                // The delegation route uses the reference's JSON error envelope for
+                // the size refusal, even though /send returns those words as plain text.
+                return Err(if refused.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                    ApiError::new(refused.status(), refused.message())
+                } else {
+                    refused
+                });
             }
         };
         let tool_session = member
