@@ -18,10 +18,10 @@ impl Variants {
     }
 
     /// Default and alternative workers share the same inference turn.
-    pub(super) async fn inference(&self) -> Result<OwnedMutexGuard<()>, Told> {
+    pub(super) async fn inference(&self) -> Result<OwnedMutexGuard<()>, AttemptError> {
         tokio::time::timeout(WAITS, self.inference.clone().lock_owned())
             .await
-            .map_err(|_| refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY))
+            .map_err(|why| engine_failure(Failure::Busy, why))
     }
 
     /// The selection guard stays with the clip through inference, including if the HTTP
@@ -32,18 +32,18 @@ impl Variants {
         id: &str,
         inventory: &inventory::Inventory,
         has_fallback: bool,
-    ) -> Result<(Arc<Whisper>, Selection), Told> {
+    ) -> Result<(Arc<Whisper>, Selection), AttemptError> {
         let pending = self.loaded.clone().lock_owned();
         let mut slot = if has_fallback {
             tokio::time::timeout(WAITS, pending)
                 .await
-                .map_err(|_| refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY))?
+                .map_err(|why| engine_failure(Failure::Busy, why))?
         } else {
             pending.await
         };
         let path = inventory
             .path(id)
-            .ok_or_else(|| refuse(StatusCode::BAD_REQUEST, heard::not_installed(id)))?;
+            .ok_or_else(|| engine_failure(Failure::UnknownModel, id))?;
         if let Some((loaded, engine)) = slot.as_ref()
             && loaded == id
         {
@@ -57,24 +57,12 @@ impl Variants {
             let language = languages::own_language(model).map(str::to_owned);
             let worker = default
                 .installed_variant(&selected, &path, language)
-                .map_err(|error| match error {
-                    Deaf::Loading => refuse(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        format!("transcription model loading: {selected}"),
-                    ),
-                    Deaf::Failed(why) => refuse(StatusCode::INTERNAL_SERVER_ERROR, why),
-                    Deaf::Busy => refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY),
-                })?;
+                .map_err(|error| deaf(error, &selected))?;
             let worker = Arc::new(worker);
             *slot = Some((selected, worker.clone()));
             Ok((worker, slot))
         })
         .await
-        .map_err(|_| {
-            refuse(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "the transcription worker could not be loaded",
-            )
-        })?
+        .map_err(|why| engine_failure(Failure::Failed, why))?
     }
 }

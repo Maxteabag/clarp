@@ -212,7 +212,8 @@ class DrainMixin:
                         client_msg_id=spec.client_msg_id,
                         synthesize_audio=spec.synthesize_audio,
                         origin=spec.origin, sender_agent_id=spec.sender_agent_id,
-                        prompt_admission_id=spec.prompt_admission_id)
+                        prompt_admission_id=spec.prompt_admission_id,
+                        user_word=spec.user_word)
                     closed_ids = [row[0] for row in con.execute(
                         "SELECT turn_id FROM turns WHERE agent_id=? AND trace_id=? AND ended_at IS NULL",
                         (spec.agent_id, spec.trace_id)).fetchall()]
