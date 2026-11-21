@@ -3215,9 +3215,11 @@ asks for audio. The first use after eviction follows the ordinary speech path.
 **The shim holds its tool** (20 Nov 2026, decision D-hold). Two requests on the shim's socket:
 `{"op":"hold","ms":N}` and `{"op":"release"}`. A hold stops every process of the tool's group (SIGSTOP), and
 looks in `/proc` until every thread of every process whose group is the tool's is stopped or a zombie; while one is
-not, the group is told again, so a process forked while the signal went out is stopped too. Then it takes everything
-the group printed: nothing waits in either pipe, neither pump has a chunk in hand (each pump reads and records under
-a turn of its own), every complete hook report is handled under its connection's turn, and no connection waits to
+not, the group is told again, so a process forked while the signal went out is stopped too. A task in uninterruptible
+sleep can be a parent waiting for a child that was stopped before exec. During acquisition the shim briefly resumes
+the group and retries within the original deadline. After the group stands still, the shim counts everything
+printed through the last stop, including output during a retry. Both pipes must be empty, neither pump can have
+a chunk in hand, every complete hook report is handled under its connection's turn, and no connection waits to
 be accepted. The spool's one writer then says how long the spool is after every record sent to it before. If the
 writer missed a record or cannot answer in time, the shim refuses the hold. The answer gains `held`: `spool` (that length, the offset after the last whole record), `partial_out` and
 `partial_err` (the bytes of a line each pump holds that is not whole: it had begun to print), `partial_reports` (the
@@ -3238,10 +3240,10 @@ and how it ended: `let go by request`, `let go at the bound`, `ended while held`
 signalled. Nothing of a hold is written in the spool: a turn never held is byte for byte as before, and a reader of today reads a held one. Not
 held: a process that left the tool's group (as it is not stopped today either), and the tool when the shim itself is
 killed while it holds it. No caller yet: the actor's side of a turn that produced nothing is a later piece. Held by
-fourteen tests in `crates/clarp-shim/tests/shim.rs` with stand-in tools (printed before the hold, a pipe full at the
+fifteen tests in `crates/clarp-shim/tests/shim.rs` with stand-in tools (printed before the hold, a pipe full at the
 hold, half a line, a child, the bound with nobody to let go, ended while held, input written while held, held twice,
 a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
-hook's report under way, one begun, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
+hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
 
 ## 7. Stages and gates

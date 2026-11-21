@@ -52,6 +52,10 @@ const READ_AT_ONCE: usize = 64 * 1024;
 /// How long a hold waits between two looks at whether the tool stands still and all it printed
 /// is taken.
 const HOLD_LOOKS_EVERY: Duration = Duration::from_millis(1);
+/// A blocked task gets time to finish on its own before another acquisition attempt.
+const HOLD_RETRY_AFTER: Duration = Duration::from_millis(25);
+/// A stopped child can need a short window to finish exec and unblock its parent.
+const HOLD_RETRY_WINDOW: Duration = Duration::from_millis(10);
 /// The driver a served tool is run through: the shim's own program, with this word first.
 const SERVED: &str = "opencode-turn";
 const ENDED_WHILE_HELD: &str = "the tool was ended while it was held";
@@ -425,11 +429,18 @@ fn lock<T>(held: &Mutex<T>) -> MutexGuard<'_, T> {
     held.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum GroupMotion {
+    Still,
+    Running,
+    Blocked,
+}
+
 /// Whether every thread of every process of the group `group` stands still: stopped, or dead.
 /// What `/proc` cannot say of a process is a process that is gone.
-fn stands_still(proc: &Path, group: i32) -> bool {
+fn group_motion(proc: &Path, group: i32) -> GroupMotion {
     let Ok(all) = std::fs::read_dir(proc) else {
-        return false;
+        return GroupMotion::Running;
     };
     for entry in all.flatten() {
         let Some(pid) = entry
@@ -450,11 +461,15 @@ fn stands_still(proc: &Path, group: i32) -> bool {
             if let Some((state, _)) = state_and_group(&task.path().join("stat"))
                 && !matches!(state, 'T' | 'Z')
             {
-                return false;
+                return if state == 'D' {
+                    GroupMotion::Blocked
+                } else {
+                    GroupMotion::Running
+                };
             }
         }
     }
-    true
+    GroupMotion::Still
 }
 
 /// The state and the process group in a `stat` of `/proc`. The name before them is in brackets
@@ -624,7 +639,7 @@ impl Control {
         let control = self.clone();
         std::thread::spawn(move || control.let_go_at_the_bound());
         let proc = self.proc.clone();
-        if let Err(error) = self.stand_still(until, || stands_still(&proc, self.pid as i32)) {
+        if let Err(error) = self.stand_still(until, || group_motion(&proc, self.pid as i32)) {
             return Reply::failed(error);
         }
         let stood = Instant::now();
@@ -659,7 +674,12 @@ impl Control {
     /// not instant, and a process that runs may have forked while it went out: so the group is
     /// told again, under the hold's lock and only while it is held, never after the bound has let
     /// it go.
-    fn stand_still(&self, until: Instant, still: impl Fn() -> bool) -> Result<(), &'static str> {
+    fn stand_still(
+        &self,
+        until: Instant,
+        motion: impl Fn() -> GroupMotion,
+    ) -> Result<(), &'static str> {
+        let mut retry_at = Instant::now() + HOLD_RETRY_AFTER;
         loop {
             let hold = lock(&self.hold);
             match *hold {
@@ -675,8 +695,22 @@ impl Control {
                 }
             }
             drop(hold);
-            if still() {
+            let motion = motion();
+            if motion == GroupMotion::Still {
                 return Ok(());
+            }
+            if motion == GroupMotion::Blocked && Instant::now() >= retry_at {
+                // A vfork parent can wait in D until its stopped child execs. Retry only before
+                // acknowledging the hold. Count all output after the group finally stops.
+                let hold = lock(&self.hold);
+                if matches!(*hold, Hold::Held { .. }) && Instant::now() + HOLD_RETRY_WINDOW < until
+                {
+                    let _ = killpg(self.group(), Signal::SIGCONT);
+                    drop(hold);
+                    std::thread::sleep(HOLD_RETRY_WINDOW);
+                    retry_at = Instant::now() + HOLD_RETRY_AFTER;
+                    continue;
+                }
             }
             std::thread::sleep(HOLD_LOOKS_EVERY);
         }
@@ -1496,7 +1530,7 @@ mod tests {
         let (control, said) = (rig.control.clone(), mpsc::channel());
         let answer = said.0;
         std::thread::spawn(move || {
-            let _ = answer.send(control.stand_still(until, || false));
+            let _ = answer.send(control.stand_still(until, || GroupMotion::Running));
         });
         let result = said.1.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(result, Err("the tool did not stand still within the bound"));
@@ -1510,7 +1544,13 @@ mod tests {
         rig2.mark(Hold::held(Instant::now() + Duration::from_secs(2)));
         let looked = AtomicUsize::new(0);
         let until = Instant::now() + Duration::from_secs(2);
-        let still = || looked.fetch_add(1, Ordering::SeqCst) >= 2;
+        let still = || {
+            if looked.fetch_add(1, Ordering::SeqCst) >= 2 {
+                GroupMotion::Still
+            } else {
+                GroupMotion::Running
+            }
+        };
         assert_eq!(rig2.control.stand_still(until, still), Ok(()));
         assert_eq!(
             looked.load(Ordering::SeqCst),
@@ -1525,7 +1565,7 @@ mod tests {
         let (control, said) = (rig2.control.clone(), mpsc::channel());
         let answer = said.0;
         std::thread::spawn(move || {
-            let _ = answer.send(control.stand_still(until, || false));
+            let _ = answer.send(control.stand_still(until, || GroupMotion::Running));
         });
         assert_eq!(
             said.1.recv_timeout(Duration::from_secs(2)).unwrap(),
@@ -1710,9 +1750,15 @@ mod tests {
     fn a_group_with_one_process_awake_does_not_stand_still() {
         // This test's own process group: this thread runs.
         let group = nix::unistd::getpgrp().as_raw();
-        assert!(!stands_still(Path::new("/proc"), group));
+        assert_eq!(
+            group_motion(Path::new("/proc"), group),
+            GroupMotion::Running
+        );
         // A group with no process left stands still.
-        assert!(stands_still(Path::new("/proc"), i32::MAX));
+        assert_eq!(
+            group_motion(Path::new("/proc"), i32::MAX),
+            GroupMotion::Still
+        );
     }
 
     #[test]
@@ -1726,9 +1772,9 @@ mod tests {
             std::fs::write(process.join("stat"), &stat).unwrap();
             std::fs::write(task.join("stat"), &stat).unwrap();
         }
-        let still = stands_still(&proc, 12);
+        let motion = group_motion(&proc, 12);
         std::fs::remove_dir_all(proc).unwrap();
-        assert!(still);
+        assert_eq!(motion, GroupMotion::Still);
     }
 
     #[test]

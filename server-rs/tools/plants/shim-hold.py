@@ -33,6 +33,7 @@ RUNS = {
     'unit-ended': UNIT + ['a_held_tool_is_ended_at_once_and_a_hold_under_way_says_so'],
     'unit-stat': UNIT + ['a_stat_is_read_after_the_last_bracket_of_the_name', 'a_group_with_one_process_awake'],
     'unit-zombie': UNIT + ['a_group_with_zombies_and_stopped_tasks_stands_still'],
+    'vfork': SHIM + ['the_hold_retries_when_a_vfork_parent_cannot_stop'],
     'words': ['test', '-p', 'clarp-shim', '--lib', '--', 'a_reply_is_written_as_before'],
 }
 LIB = 'clarp-shim/src/lib.rs'
@@ -90,12 +91,13 @@ PLANTS = [
     (MAIN, 'count', 'the time left is told as the whole bound', 'held.left_ms = u64::try_from(left.as_millis()).unwrap_or(u64::MAX);', 'held.left_ms = HOLD_MOST_MS;'),
 
     # Standing still.
+    (MAIN, 'vfork', 'a blocked vfork parent is never retried', '                    let _ = killpg(self.group(), Signal::SIGCONT);', '                    let _ = self.group();'),
     (MAIN, 'count', 'the group is never told to stop', '                    let _ = killpg(self.group(), Signal::SIGSTOP);', '                    let _ = killpg(self.group(), Signal::SIGCONT);'),
     (MAIN, 'child', 'only the tool is told to stop, not its children', '                    let _ = killpg(self.group(), Signal::SIGSTOP);', '                    let _ = kill(self.group(), Signal::SIGSTOP);'),
     (MAIN, 'unit-still', 'the group is told to stop after the bound', '                Hold::Held { .. } if Instant::now() < until => {', '                Hold::Held { .. } => {'),
     (MAIN, 'unit-still', 'a group that does not stand still is left stopped', '                    let why = "the tool did not stand still within the bound";\n                    self.let_go(&format!("refused: {why}"));', '                    let why = "the tool did not stand still within the bound";'),
     (MAIN, 'unit-still', 'a hold ended while it is looked at goes on', '                Hold::Ended => return Err(ENDED_WHILE_HELD),\n                Hold::Held', '                Hold::Ended => {}\n                Hold::Held'),
-    (MAIN, 'unit-still', 'the group is looked at once only', '            if still() {\n                return Ok(());\n            }', '            let _ = still();\n            return Ok(());'),
+    (MAIN, 'unit-still', 'the group is looked at once only', '            if motion == GroupMotion::Still {\n                return Ok(());\n            }', '            let _ = motion;\n            return Ok(());'),
     (MAIN, 'zero', 'a spent bound is refused in other words', 'let why = "the tool did not stand still within the bound";', 'let why = "not still";'),
     (MAIN, 'unit-stat', 'a running thread stands still', "                && !matches!(state, 'T' | 'Z')", "                && !matches!(state, 'T' | 'Z' | 'R' | 'S')"),
     (MAIN, 'unit-zombie', 'a zombie of the group does not stand still', "                && !matches!(state, 'T' | 'Z')", "                && !matches!(state, 'T')"),
@@ -133,8 +135,8 @@ PLANTS = [
 
     # Letting go.
     (MAIN, 'once', 'a tool that is not held is let go', '        let Hold::Held { timing, .. } = *hold else {\n            return false;\n        };', '        let timing = match *hold {\n            Hold::Held { timing, .. } => timing,\n            Hold::Ended => return false,\n            _ => Timing { began: Instant::now(), still: None, drained: None },\n        };'),
-    (MAIN, 'count', 'a release does not let the tool go', '        let _ = killpg(self.group(), Signal::SIGCONT);', '        let _ = killpg(self.group(), Signal::SIGWINCH);'),
-    (MAIN, 'child', 'a release lets only the tool go, not its children', '        let _ = killpg(self.group(), Signal::SIGCONT);', '        let _ = kill(self.group(), Signal::SIGCONT);'),
+    (MAIN, 'count', 'a release does not let the tool go', '        *hold = Hold::Released;\n        let _ = killpg(self.group(), Signal::SIGCONT);', '        *hold = Hold::Released;\n        let _ = killpg(self.group(), Signal::SIGWINCH);'),
+    (MAIN, 'child', 'a release lets only the tool go, not its children', '        *hold = Hold::Released;\n        let _ = killpg(self.group(), Signal::SIGCONT);', '        *hold = Hold::Released;\n        let _ = kill(self.group(), Signal::SIGCONT);'),
     (MAIN, 'unit-still', 'a tool let go is still held', '        *hold = Hold::Released;\n', ''),
     (MAIN, 'count', 'a release says it let nothing go', '                let_go: Some(self.let_go("let go by request")),', '                let_go: Some(!self.let_go("let go by request")),'),
     (MAIN, 'outside', 'a tool killed from outside leaves its group stopped', '    control.let_go("let go when the tool ended");\n', '    let _ = "let go when the tool ended";\n'),
