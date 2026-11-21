@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use super::{PROVIDERS, cloud_model};
-use crate::languages::SET_PROVIDERS;
+use crate::languages::{SET_PROVIDERS, primary};
 use crate::python::strip;
 
 pub const UNSUPPORTED: &str = "language_set_unsupported";
@@ -38,15 +38,6 @@ pub enum Own<'a> {
         id: &'a str,
         languages: &'a [&'a str],
     },
-}
-
-fn primary(code: &str) -> String {
-    let code = strip(code);
-    let code = code.split(['-', '_']).next().unwrap_or("").to_lowercase();
-    match code.as_str() {
-        "nb" | "nn" => "no".to_string(),
-        _ => code,
-    }
 }
 
 pub fn own_refusal(own: Own<'_>, languages: &[&str]) -> Option<String> {

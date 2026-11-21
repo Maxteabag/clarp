@@ -2647,6 +2647,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             "client_msg_id": row["client_msg_id"] or "",
             "sent_at": iso_from_ms(int(row["enqueued_at"])),
             "kind": row["kind"] or turn_queue.KIND_LATER,
+            **turn_queue.item_provenance(row),
         } for row in turn_queue.waiting_items(agent["agent_id"])]
         return self._json_ok({
             "items": items,
@@ -2684,7 +2685,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     def _broadcast_turn_queue(self, agent_id: str, session: str, *,
                               client_msg_id: str = "", change: str = "",
-                              text: str | None = None) -> None:
+                              text: str | None = None, provenance: dict | None = None) -> None:
         """queue-updated. For an edit or a deletion of one item it names the
         item (client_msg_id) and what changed (``queue_change``: edited, with
         the new ``text``, or deleted), so a device's waiting bubble follows."""
@@ -2698,7 +2699,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             queue_started=False, queue_revision=state["revision"],
             **({"client_msg_id": client_msg_id} if client_msg_id else {}),
             **({"queue_change": change} if change else {}),
-            **({"text": text} if text is not None else {}))
+            **({"text": text} if text is not None else {}),
+            **(provenance or {}))
         events.broadcast(self.ctx.stream, event)
 
     def _handle_turn_queue_update(self, queue_id: str):
@@ -2719,7 +2721,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
                                    client_msg_id=str(row["client_msg_id"] or ""),
-                                   change="edited", text=text)
+                                   change="edited", text=text,
+                                   provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_delete(self, queue_id: str):
@@ -2734,7 +2737,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
                                    client_msg_id=str(row["client_msg_id"] or ""),
-                                   change="deleted")
+                                   change="deleted", provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_send(self, queue_id: str):
