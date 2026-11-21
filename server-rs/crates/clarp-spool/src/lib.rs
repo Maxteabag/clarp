@@ -112,6 +112,11 @@ impl SpoolWriter {
     pub fn sync(&mut self) -> io::Result<()> {
         self.file.sync_data()
     }
+
+    /// How far the spool goes, in bytes: the offset after the last record appended.
+    pub fn end(&self) -> io::Result<u64> {
+        self.file.metadata().map(|meta| meta.len())
+    }
 }
 
 /// A line of the spool that is not a record. It is kept, not dropped: the reader moves past it and

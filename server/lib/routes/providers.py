@@ -192,6 +192,11 @@ class ProviderRoutes:
         device_id = str(data.get("device_id") or "").strip()
         if not device_id:
             return self._json_error(400, "device_id required")
+        who = self.principal()
+        if who.device_scope == "limited" and device_id != who.principal:
+            # A limited device may end its own pairing (an app that finds it
+            # paired the wrong Host), never another device's (R172).
+            return self._json_error(403, "full device access required")
         if not revoke(device_id):
             return self._json_error(404, "device not found")
         self._json_ok({"ok": True})
@@ -200,6 +205,18 @@ class ProviderRoutes:
     def _handle_paired_devices(self):
         from lib.device_pairing import list_devices
         self._json_ok({"devices": list_devices()})
+
+    def _handle_pairing_identity(self):
+        """GET /pairing/identity, without a token: server_id, name and the
+        contract number, so an app checks the Host before it spends a code."""
+        from lib.request_security import failure_source
+        from lib.server_identity import identity
+        retry = self.server.identity_reads.failure(
+            failure_source(self.client_address[0], self.headers))
+        if retry:
+            return self._send(429, b'{"error":"too many identity reads"}',
+                              "application/json", extra_headers={"Retry-After": str(retry)})
+        self._json_ok(identity())
 
     def _handle_pairing_exchange(self):
         from lib.device_pairing import PairingError, exchange

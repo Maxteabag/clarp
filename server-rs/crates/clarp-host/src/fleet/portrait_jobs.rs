@@ -39,6 +39,7 @@ impl Fleet {
         let Some(at) = self.place_of(agent_id) else {
             return Ok(Admission::Refused("unknown Agent session"));
         };
+        self.members[at].agent.accepting_work()?;
         let member = &self.members[at].record;
         let id = rules::job_id(&member.agent_id);
         if let Some(known) = self
@@ -97,6 +98,7 @@ impl Fleet {
         let Some(at) = self.place_of(&publication.agent_id) else {
             return Err(Unavailable("unknown Agent session".into()));
         };
+        self.members[at].agent.accepting_work()?;
         let mut record = self.members[at].record.clone();
         let digest = record
             .avatar

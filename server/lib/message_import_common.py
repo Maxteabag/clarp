@@ -15,6 +15,25 @@ def _message_id(agent_id: str, backend_session_id: str, source_file: str,
     return "msg-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
 
 
+def _identity_id(agent_id: str, backend_session_id: str, trace_id: str, provider_id: str,
+                 block: int) -> str:
+    """The id of block ``block`` of provider message ``provider_id`` in turn ``trace_id`` (R108):
+    the same on every import of the same transcript, wherever the line stands. Block 0 is the id
+    the turn's stream writes that message's live row under, so the import and the stream name
+    one row whichever comes first. The trace is part of it: a Codex item id restarts every turn.
+    The later blocks have a prefix of their own (``IDENTITY_BLOCK_PREFIX``), which no positional
+    ('msg-'), live ('live-') or client ('u-') id has: such a row is known as an identity row by
+    its id alone."""
+    from .message_text import live_message_id
+    if block == 0:
+        return live_message_id(agent_id, backend_session_id, trace_id, provider_id)
+    raw = f"{agent_id}\0{backend_session_id}\0{trace_id}\0{provider_id}\0{block}"
+    return IDENTITY_BLOCK_PREFIX + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
+
+
+IDENTITY_BLOCK_PREFIX = "blk-"
+
+
 def _client_message_id(client_msg_id: str) -> str:
     """Message id for a user message the client authored. The client mints
     `client_msg_id` once per send and keys its bubble by it; the server stores
@@ -165,6 +184,11 @@ def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
 
 
 _PARKED_SEQ_BASE = 10 ** 12
+# A positional row an identity row's shift moved aside (R108): parked at this base plus its slot,
+# a band of its own. Its line writes it again later in the same full read, and the stale cleanup
+# at the end of the pass removes the copy. No reader of the parked band above (re-adoption,
+# RM-N1c's restore, RM-N1's shifted twin) may see this one.
+_PARKED_POSITIONAL_SEQ_BASE = 2 * 10 ** 12
 
 
 class _ClientProvenanceRow(NamedTuple):
