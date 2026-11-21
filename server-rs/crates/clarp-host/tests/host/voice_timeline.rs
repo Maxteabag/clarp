@@ -186,7 +186,9 @@ print(json.dumps({"metrics":{"bytes":len(data),"content_type":sys.argv[1],"durat
 
 #[test]
 fn voice_timeline_analyser_matches_the_synthetic_pcm_reference() {
-    let result = std::process::Command::new("python3")
+    let place = Place::new("voice-metrics-tool");
+    let result = place
+        .command("python3")
         .args([
             "-IB",
             concat!(

@@ -569,6 +569,7 @@ pub struct Works {
     pub pusher: Pusher,
     /// Where whole files are kept: what agents publish, and the pages of their reports.
     pub blobs: Arc<dyn Blobs>,
+    pub portrait_hints: Option<crate::media_created::Announcer>,
     /// The way to the one that speaks.
     pub speaks: crate::voice::Speaks,
     /// What the tools of this Host's agents are told, by what holds when one is asked.

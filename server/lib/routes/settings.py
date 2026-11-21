@@ -36,6 +36,27 @@ def _named_user_miss(raw: str) -> bool:
     return False
 
 
+# What a limited device is told of this Host (R123): its identity, versions, contract numbers,
+# features and its own transport to the Host; none of the owner's setup (default_cwd). An
+# allow-list of keys: a key added to /server-info later reaches a limited device only once it
+# is named here. The local transport's error text (it can carry a path or an interface name)
+# is one fixed word.
+LIMITED_SERVER_INFO_KEYS = ("server_id", "name", "deployment_mode", "version", "image_version",
+                            "clarp_version", "min_app_version", "capabilities", "contract", "client",
+                            "local_connection")
+LIMITED_LOCAL_CONNECTION_KEYS = ("enabled", "port", "certificate_sha256", "service_type", "urls")
+
+
+def limited_server_info(info: dict) -> dict:
+    out = {key: info[key] for key in LIMITED_SERVER_INFO_KEYS if key in info}
+    local = info.get("local_connection")
+    if isinstance(local, dict):
+        out["local_connection"] = {key: local[key] for key in LIMITED_LOCAL_CONNECTION_KEYS if key in local}
+        if local.get("error"):
+            out["local_connection"]["error"] = "failed"
+    return out
+
+
 class SettingsRoutes:
     def _connection_server_info(self):
         from lib.server_identity import get_server_info
@@ -67,7 +88,8 @@ class SettingsRoutes:
         the roster event that carries the new value: every agent row of the next snapshot
         has it (one step; nothing is written to any conversation)."""
         from lib import coordination, events
-        if coordination.from_an_agent(self.headers):
+        from lib.http_utils import from_an_agent
+        if from_an_agent(self.headers):
             return self._json(403, {"error": "agents_may_not"})
         data = self._read_json()
         if not isinstance(data, dict) or "coordination_visibility" not in data:
@@ -288,6 +310,8 @@ class SettingsRoutes:
         info["client"] = client
         if client["status"] == "client_outdated":
             _note_outdated_client(client)
+        if getattr(self, "_request_device_scope", "") == "limited":
+            info = limited_server_info(info)
         self._json_ok(info)
 
     def _handle_tool_explanation_settings_get(self):

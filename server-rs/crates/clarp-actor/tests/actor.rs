@@ -328,7 +328,7 @@ fn a_message_sent_twice_is_one_turn() {
 }
 
 #[test]
-fn what_is_said_is_in_the_conversation_at_once_and_what_is_left_for_later_when_its_turn_starts() {
+fn what_waits_enters_the_conversation_when_its_turn_starts_whether_said_or_left_for_later() {
     let mut world = World::new("later");
     let mut actor = world.open();
     let ids = |actor: &Actor| {
@@ -341,31 +341,51 @@ fn what_is_said_is_in_the_conversation_at_once_and_what_is_left_for_later_when_i
             .collect::<Vec<_>>()
     };
     world.send(&mut actor, "u-1", "go", Admission::Queue);
-    // Said while the agent is busy: there at once. Left for later: in the queue.
-    let said = world.send(&mut actor, "u-2", "and this", Admission::Queue);
-    assert!(said.changed.conversation && said.changed.queue);
+    // Said while the agent is busy, or left for later: in the queue, not in the conversation
+    // (issue 491: a row above an answer that had not read it told the user it was ignored).
     let head = actor.head_revision();
+    let said = world.send(&mut actor, "u-2", "and this", Admission::Queue);
+    assert!(!said.changed.conversation && said.changed.queue);
     let left = world.send(&mut actor, "u-3", "when you are done", Admission::Later);
     assert!(!left.changed.conversation && left.changed.queue);
-    assert_eq!(ids(&actor), vec!["u-1", "u-2"]);
+    assert_eq!(ids(&actor), vec!["u-1"]);
     assert_eq!(
         actor.head_revision(),
         head,
         "what is not in the conversation does not change it"
     );
-    let waiting: Vec<String> = actor
+    let waiting: Vec<(String, String)> = actor
         .queue()
         .unwrap()
         .into_iter()
-        .map(|waiting| waiting.message_id)
+        .map(|waiting| (waiting.message_id, waiting.text))
         .collect();
-    assert_eq!(waiting, vec!["u-2", "u-3"], "both wait their turn");
+    assert_eq!(
+        waiting,
+        vec![
+            ("u-2".to_string(), "and this".to_string()),
+            ("u-3".to_string(), "when you are done".to_string())
+        ],
+        "both wait their turn"
+    );
 
     world.says(1, "One.");
     world.exits(1, Some(0), None);
+    let before = actor.head_revision();
     world.hint(&mut actor);
     assert_eq!(world.took, vec![1, 2]);
-    assert_eq!(ids(&actor), vec!["u-1", "u-2", "r-1-1"]);
+    assert_eq!(
+        ids(&actor),
+        vec!["u-1", "r-1-1", "u-2"],
+        "its turn started: now it is in the conversation, after the answer before it"
+    );
+    let page = actor.after(before, 10).unwrap();
+    let newer: Vec<&str> = page.entries.iter().map(|v| v.entry.id()).collect();
+    assert_eq!(
+        newer,
+        vec!["u-2", "r-1-1"],
+        "the answer is told its end after the row that starts the next turn"
+    );
     world.says(2, "Two.");
     world.exits(2, Some(0), None);
     let before = actor.head_revision();
@@ -373,8 +393,8 @@ fn what_is_said_is_in_the_conversation_at_once_and_what_is_left_for_later_when_i
     assert_eq!(world.took, vec![1, 2, 3]);
     assert_eq!(
         ids(&actor),
-        vec!["u-1", "u-2", "r-1-1", "r-2-1", "u-3"],
-        "its turn started: now it is in the conversation, after the answer before it"
+        vec!["u-1", "r-1-1", "u-2", "r-2-1", "u-3"],
+        "each message stands above the answer that read it"
     );
     // A client that asks what is newer is given the message and the answer that closed the
     // turn before it, and holds the newest revision afterwards.
@@ -663,6 +683,249 @@ fn what_was_written_after_a_time_is_read_from_the_revision_the_conversation_had_
         fifth.unwrap().ts_ms
     };
     assert_eq!(since(&actor, asked_at), vec!["r-5-1", "u-6", "r-6-1"]);
+}
+
+#[test]
+fn a_takeover_reads_every_record_at_the_fence_before_it_consumes_the_hold() {
+    use std::io::Write;
+
+    let block = |kind| {
+        Line::Out(
+            json!({
+                "type": "stream_event",
+                "event": {"type": "content_block_start", "content_block": {"type": kind}}
+            })
+            .to_string(),
+        )
+    };
+    for (record, quiet) in [
+        (block("thinking"), true),
+        (block("text"), false),
+        (block("tool_use"), false),
+        (Line::Out("not JSON".to_string()), false),
+        (Line::Err("unknown diagnostic".to_string()), false),
+        (
+            Line::Hook {
+                name: "tool".to_string(),
+                data: json!({}),
+            },
+            false,
+        ),
+        (
+            Line::Out(r#"{"type":"result","subtype":"success"}"#.to_string()),
+            false,
+        ),
+    ] {
+        let mut world = World::new("takeover-fence");
+        world.backend = Arc::new(Claude::new());
+        let mut actor = world.open();
+        world.send(&mut actor, "u-first", "first text", Admission::Queue);
+        world.send(&mut actor, "u-second", "second text", Admission::Queue);
+        let offer = actor.takeover_offer(TurnId(2)).unwrap().unwrap();
+        let spool = world.profile.spool_path(TurnId(1));
+        let before = std::fs::metadata(&spool).unwrap().len();
+        world.write(1, record.clone());
+        let after = std::fs::metadata(&spool).unwrap().len();
+
+        // The actor has not been told of the appended record. It must judge the actual
+        // fence, which can be ahead of the last notification it received.
+        assert!(actor.takeover_quiet(&offer, before).unwrap());
+        assert_eq!(
+            actor.takeover_quiet(&offer, after).unwrap(),
+            quiet,
+            "{record:?}"
+        );
+        assert!(!actor.takeover_quiet(&offer, after - 1).unwrap());
+        assert!(!actor.takeover_quiet(&offer, after + 1).unwrap());
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&spool)
+            .unwrap()
+            .write_all(b"{\"t\":42,\"s\":\"out")
+            .unwrap();
+        let with_half_line = std::fs::metadata(&spool).unwrap().len();
+        assert!(!actor.takeover_quiet(&offer, with_half_line).unwrap());
+
+        actor.stop("user", world.tick()).unwrap();
+        assert!(!actor.takeover_quiet(&offer, after).unwrap());
+        assert!(actor.takeover_offer(TurnId(2)).unwrap().is_none());
+    }
+}
+
+#[test]
+fn a_confirmed_takeover_closes_the_first_row_and_leaves_the_third_message_waiting() {
+    let mut world = World::new("takeover-confirmed");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-first", "first text", Admission::Queue);
+    let mut follow_up = message("u-second", "second text");
+    follow_up.trace_id = Some("trace-second".to_string());
+    actor
+        .send(&follow_up, Admission::Queue, world.tick())
+        .unwrap();
+    world.send(&mut actor, "u-third", "third text", Admission::Queue);
+    let offer = actor
+        .request_takeover_hold(TurnId(2), world.tick())
+        .unwrap()
+        .unwrap();
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let before_freeze = log
+        .read_after(0, clarp_ports::log::Kinds::only(kind::AGENT_EVENT), 30)
+        .unwrap();
+    assert!(before_freeze.iter().any(|item| {
+        matches!(
+            serde_json::from_slice::<clarp_kernel::agent::AgentEvent>(&item.body),
+            Ok(clarp_kernel::agent::AgentEvent::TakeoverOffered {
+                from: TurnId(1),
+                into: TurnId(2),
+                attempt: 1,
+            })
+        )
+    }));
+    let fence = std::fs::metadata(world.profile.spool_path(TurnId(1)))
+        .unwrap()
+        .len();
+    let input = clarp_kernel::takeover::Input::ClaudeFresh {
+        first: offer.first.clone(),
+    };
+    assert!(
+        !actor
+            .select_takeover(
+                &offer,
+                fence - 1,
+                "new-provider-session".to_string(),
+                input.clone(),
+                world.tick(),
+            )
+            .unwrap()
+    );
+    assert!(actor.selected_takeover().is_none());
+    assert!(
+        actor
+            .select_takeover(
+                &offer,
+                fence,
+                "new-provider-session".to_string(),
+                input,
+                world.tick(),
+            )
+            .unwrap()
+    );
+    assert_eq!(actor.selected_takeover().unwrap().fence, fence);
+
+    world.exits(1, None, Some(9));
+    let out = actor.finish_takeover(TurnId(1), world.tick()).unwrap();
+    let order = out
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Launch(order) => Some(order),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(order.turn, TurnId(2));
+    assert!(
+        order
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--session-id", "new-provider-session"])
+    );
+    assert!(!order.args.iter().any(|arg| arg == "--resume"));
+    let stdin = std::fs::read_to_string(&order.stdin_file).unwrap();
+    assert_eq!(stdin.lines().count(), 1);
+    let prompt: serde_json::Value = serde_json::from_str(&stdin).unwrap();
+    assert_eq!(
+        prompt["message"]["content"],
+        json!([{"type":"text","text":"first text"}, {"type":"text","text":"second text"}])
+    );
+    let chat = actor.tail(10).unwrap();
+    let ids: Vec<_> = chat.entries.iter().map(|row| row.entry.id()).collect();
+    assert_eq!(ids, ["u-first", "u-second"]);
+    let first = chat
+        .entries
+        .iter()
+        .find(|row| row.entry.id() == "u-first")
+        .unwrap();
+    let end = first.turn.as_ref().unwrap();
+    assert_eq!(end.status, "replaced");
+    assert_eq!(end.replaced_by.as_deref(), Some("trace-second"));
+    assert_eq!(actor.queue().unwrap()[0].message_id, "u-third");
+    assert!(actor.takeover_offer(TurnId(3)).unwrap().is_none());
+}
+
+#[test]
+fn restart_resolves_a_takeover_only_with_its_marker_and_exit() {
+    for consumed in [false, true] {
+        let mut world = World::new("takeover-restart");
+        world.backend = Arc::new(Claude::new());
+        let mut actor = world.open();
+        world.send(&mut actor, "u-first", "first", Admission::Queue);
+        world.send(&mut actor, "u-second", "second", Admission::Queue);
+        let offer = actor.takeover_offer(TurnId(2)).unwrap().unwrap();
+        let fence = std::fs::metadata(world.profile.spool_path(TurnId(1)))
+            .unwrap()
+            .len();
+        assert!(
+            actor
+                .select_takeover(
+                    &offer,
+                    fence,
+                    "replacement-session".to_string(),
+                    clarp_kernel::takeover::Input::ClaudeFresh {
+                        first: offer.first.clone(),
+                    },
+                    world.tick(),
+                )
+                .unwrap()
+        );
+        drop(actor);
+        if consumed {
+            world.write(
+                1,
+                Line::Shim(ShimEvent::Takeover {
+                    fence,
+                    replaced_by: 2,
+                }),
+            );
+            let actor = world.open();
+            assert!(actor.selected_takeover().is_some());
+            assert_eq!(world.took, [1], "the marker alone cannot resolve a restart");
+        }
+        world.exits(1, None, Some(9));
+
+        let actor = world.open();
+        assert!(actor.selected_takeover().is_none());
+        assert_eq!(world.took, [1, 2]);
+        let input: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(world.profile.stdin_path(TurnId(2))).unwrap())
+                .unwrap();
+        let parts: Vec<_> = input["message"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["text"].as_str().unwrap())
+            .collect();
+        if consumed {
+            assert_eq!(parts, ["first", "second"]);
+            let page = actor.tail(10).unwrap();
+            let first = page
+                .entries
+                .iter()
+                .find(|row| row.entry.id() == "u-first")
+                .unwrap();
+            assert_eq!(first.turn.as_ref().unwrap().status, "replaced");
+        } else {
+            assert_eq!(parts, ["second"]);
+            assert!(!actor.tail(10).unwrap().entries.iter().any(|row| {
+                row.turn
+                    .as_ref()
+                    .is_some_and(|end| end.status == "replaced")
+            }));
+        }
+    }
 }
 
 // ---- restarts -------------------------------------------------------------------------------
@@ -1428,10 +1691,11 @@ fn a_day_without_a_restart_is_what_it_should_be() {
         day.conversation,
         vec![
             pair("u-1", "user: go"),
-            pair("u-2", "user: and again"),
             pair("r-1-1", "agent: Let me look."),
             pair("t1", "Bash Ok Some(\"a.txt\")"),
             pair("r-1-2", "agent: One file.\nDone."),
+            // Said while the first turn ran: it enters when its own turn starts (issue 491).
+            pair("u-2", "user: and again"),
             pair("r-2-1", "agent: Second answer."),
         ]
     );
@@ -5140,6 +5404,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             turn,
             closes: format!("r-p{turn}"),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(at),
             ended_at_ms: at,
             tool_count: 0,
@@ -5172,126 +5437,136 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
     }
 }
 
-/// The median of what `work` took, in microseconds, over `times` runs.
-fn median_us(times: usize, mut work: impl FnMut(usize)) -> u128 {
-    let mut took: Vec<u128> = (0..times)
-        .map(|at| {
-            let began = std::time::Instant::now();
-            work(at);
-            began.elapsed().as_micros()
-        })
-        .collect();
-    took.sort_unstable();
-    took[times / 2]
+/// One of the two SQLite conversations sampled by the coordination benchmark.
+struct CostFixture {
+    // Close the SQLite actor before the world removes its scratch directory.
+    actor: Actor,
+    world: World,
+    turns: u64,
+    middle: String,
 }
 
-/// What the reads and writes of coordination cost in a conversation of `rows` rows.
-#[derive(Debug, Clone, Copy)]
-struct Costs {
-    /// A page of 100 of the newest rows, every turn marked.
-    tail_marked: u128,
-    /// A page of 100 rows from the middle, one turn in 87 marked.
-    before_unmarked: u128,
-    /// A send of another agent under a trace its caller named: the trace looked up by key, the
-    /// mark written with the acceptance.
-    send: u128,
-    /// A note from the running turn: the turn's state and the note's id, by key.
-    note: u128,
-    /// The end of a turn that left notes, its count kept as they were written.
-    settle: u128,
-}
-
-fn costs(rows: u64) -> Costs {
-    let mut world = World::new(&format!("costs-{rows}"));
-    world.engine = Box::new(clarp_store_sqlite::SqliteEngine::new());
-    let turns = rows / 2;
-    fill(&world, turns, 2_500.min(turns / 2));
-    let mut actor = world.open();
-    let middle = format!("u-p{}", turns / 2);
-    let tail_marked = median_us(31, |_| {
-        let page = actor.tail(100).unwrap();
-        assert!(page.entries.iter().all(|row| row.coordination.is_some()));
-    });
-    let before_unmarked = median_us(31, |_| {
-        let page = actor.before(&middle, 100).unwrap().unwrap();
-        assert_eq!(page.entries.len(), 100);
-    });
-    let mut sends = 0;
-    let send = median_us(9, |at| {
-        let (asked, marks) = from_an_agent(&format!("u-s{at}"), &format!("ts{at}"));
-        let now = world.tick();
-        let (sent, out) = actor
-            .send_marked(&asked, Admission::Queue, None, &marks, now)
-            .unwrap()
-            .unwrap();
-        assert!(!sent.duplicate);
-        world.carry_out(&mut actor, out);
-        sends += 1;
-    });
-    let first = turns + 1;
-    let note = median_us(9, |at| {
-        let now = world.tick();
-        let (noted, _) = actor
-            .leave_note(first, &format!("note-a1-n{at}"), "Noted.", now)
-            .unwrap();
-        assert!(matches!(noted, Noted::Written { .. }));
-    });
-    let settle = median_us(5, |at| {
-        let turn = first + u64::try_from(at).unwrap();
-        world.exits(turn, Some(0), None);
-        world.hint(&mut actor);
-    });
-    let end = actor
-        .tail(200)
-        .unwrap()
-        .entries
-        .into_iter()
-        .find(|row| row.entry.id() == "u-s0")
-        .and_then(|row| row.turn)
-        .expect("the first send's turn ended");
-    assert_eq!((sends, end.note_count), (9, 9));
-    Costs {
-        tail_marked,
-        before_unmarked,
-        send,
-        note,
-        settle,
+impl CostFixture {
+    fn new(rows: u64) -> Self {
+        let mut world = World::new(&format!("costs-{rows}"));
+        world.engine = Box::new(clarp_store_sqlite::SqliteEngine::new());
+        let turns = rows / 2;
+        fill(&world, turns, 2_500.min(turns / 2));
+        let actor = world.open();
+        let middle = format!("u-p{}", turns / 2);
+        Self {
+            actor,
+            world,
+            turns,
+            middle,
+        }
     }
+}
+
+/// Sample both sizes in each round, alternating the order so they see the same
+/// stretch of runner load. Return the median microseconds for each size.
+fn paired_medians<const N: usize>(
+    fixtures: &mut [CostFixture; 2],
+    mut work: impl FnMut(&mut CostFixture, usize),
+) -> [u128; 2] {
+    let mut samples = [[0; N]; 2];
+    let [small, big] = &mut samples;
+    for (round, (small, big)) in small.iter_mut().zip(big.iter_mut()).enumerate() {
+        let mut pair = [(0, small), (1, big)];
+        pair.rotate_left(round % 2);
+        for (size, sample) in pair {
+            let began = std::time::Instant::now();
+            work(&mut fixtures[size], round);
+            *sample = began.elapsed().as_micros();
+        }
+    }
+    samples.map(|mut times| {
+        times.sort_unstable();
+        times[N / 2]
+    })
 }
 
 #[test]
 fn coordination_costs_the_same_in_a_conversation_of_300_000_rows_as_in_one_of_3_000() {
-    let small = costs(3_000);
-    let big = costs(300_000);
+    const READS: usize = 31;
+    const SENDS_AND_NOTES: usize = 15;
+    const SETTLES: usize = 9;
+    let mut fixtures = [CostFixture::new(3_000), CostFixture::new(300_000)];
+    let tail_marked = paired_medians::<READS>(&mut fixtures, |fixture, _| {
+        let page = fixture.actor.tail(100).unwrap();
+        assert!(page.entries.iter().all(|row| row.coordination.is_some()));
+    });
+    let before_unmarked = paired_medians::<READS>(&mut fixtures, |fixture, _| {
+        let page = fixture.actor.before(&fixture.middle, 100).unwrap().unwrap();
+        assert_eq!(page.entries.len(), 100);
+    });
+    let send = paired_medians::<SENDS_AND_NOTES>(&mut fixtures, |fixture, at| {
+        let (asked, marks) = from_an_agent(&format!("u-s{at}"), &format!("ts{at}"));
+        let now = fixture.world.tick();
+        let (sent, out) = fixture
+            .actor
+            .send_marked(&asked, Admission::Queue, None, &marks, now)
+            .unwrap()
+            .unwrap();
+        assert!(!sent.duplicate);
+        fixture.world.carry_out(&mut fixture.actor, out);
+    });
+    let note = paired_medians::<SENDS_AND_NOTES>(&mut fixtures, |fixture, at| {
+        let now = fixture.world.tick();
+        let (noted, _) = fixture
+            .actor
+            .leave_note(fixture.turns + 1, &format!("note-a1-n{at}"), "Noted.", now)
+            .unwrap();
+        assert!(matches!(noted, Noted::Written { .. }));
+    });
+    let settle = paired_medians::<SETTLES>(&mut fixtures, |fixture, at| {
+        let turn = fixture.turns + 1 + u64::try_from(at).unwrap();
+        fixture.world.exits(turn, Some(0), None);
+        fixture.world.hint(&mut fixture.actor);
+    });
+    for fixture in &mut fixtures {
+        let end = fixture
+            .actor
+            .tail(200)
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|row| row.entry.id() == "u-s0")
+            .and_then(|row| row.turn)
+            .expect("the first send's turn ended");
+        assert_eq!(end.note_count, u32::try_from(SENDS_AND_NOTES).unwrap());
+    }
+    let measurements = [
+        ("a page of marked rows", READS, tail_marked),
+        ("a page of unmarked rows", READS, before_unmarked),
+        ("a send's acceptance", SENDS_AND_NOTES, send),
+        ("a note", SENDS_AND_NOTES, note),
+        ("a turn's end", SETTLES, settle),
+    ];
+    let mut said =
+        String::from("coordination costs, interleaved median us, 3,000 -> 300,000 rows:\n");
+    for (what, samples, [small, big]) in measurements {
+        use std::fmt::Write as _;
+        writeln!(
+            said,
+            "  {what} ({samples} samples per size): {small} -> {big}"
+        )
+        .unwrap();
+    }
     // Written past the test harness's capture, so that a passing run shows the numbers too.
-    let said = format!(
-        "coordination costs, median microseconds, 3,000 rows -> 300,000 rows: {small:?} -> {big:?}\n"
-    );
     std::io::Write::write_all(&mut std::io::stderr(), said.as_bytes()).unwrap();
-    // Nothing of it grows with the conversation: at most twice the small one's, and a
-    // millisecond of room for a machine that is busy with other tests.
+    // Keep the original scaling bound, including its allowance for millisecond noise.
     let bound = |small: u128| (small * 2).max(small + 1_000);
-    for (what, small, big) in [
-        ("a page of marked rows", small.tail_marked, big.tail_marked),
-        (
-            "a page of unmarked rows",
-            small.before_unmarked,
-            big.before_unmarked,
-        ),
-        ("a send's acceptance", small.send, big.send),
-        ("a note", small.note, big.note),
-        ("a turn's end", small.settle, big.settle),
-    ] {
+    for (what, _, [small, big]) in measurements {
         assert!(
             big <= bound(small),
             "{what}: {small} us -> {big} us\n{said}"
         );
     }
-    // And a page of marked rows costs no more than twice one of unmarked rows.
     assert!(
-        big.tail_marked <= bound(big.before_unmarked),
+        tail_marked[1] <= bound(before_unmarked[1]),
         "marked {} us, unmarked {} us",
-        big.tail_marked,
-        big.before_unmarked
+        tail_marked[1],
+        before_unmarked[1]
     );
 }

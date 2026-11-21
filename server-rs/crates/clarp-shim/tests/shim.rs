@@ -10,6 +10,17 @@ use std::time::{Duration, Instant};
 use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request};
 use clarp_spool::{Entry, Record, ShimEvent, SpoolReader};
 
+/// The shim as a test starts it with `dir` for its place: nothing of the machine the tests run on
+/// is in its environment, by the one rule every test that starts a process keeps
+/// (`clarp-sealed`). It starts what it is told by its path, so no program is pinned for it.
+fn shim_in(dir: &Path) -> Command {
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    clarp_sealed::command(
+        env!("CARGO_BIN_EXE_clarp-shim"),
+        clarp_sealed::sealed(&clarp_sealed::runner(), dir, &[], &[]),
+    )
+}
+
 struct Running {
     shim: Child,
     spool: PathBuf,
@@ -27,7 +38,7 @@ fn start_with(name: &str, message: Option<&str>, script: &str) -> Running {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-shim"));
+    let mut command = shim_in(&dir);
     command.args(["--spool", spool.to_str().unwrap()]);
     command.args(["--socket", socket.to_str().unwrap()]);
     if let Some(message) = message {
@@ -85,6 +96,35 @@ fn outs(records: &[Record]) -> Vec<&str> {
             }
         })
         .collect()
+}
+
+/// A shim a test starts gives its tool nothing of the machine the tests run on: the names its
+/// tool sees are those of the rule [`shim_in`] keeps, what the shim adds for its hooks, and what
+/// `sh` sets of itself; none of cargo's, none of the runner's.
+#[test]
+fn a_shim_a_test_starts_gives_its_tool_nothing_of_the_machine() {
+    let mut running = start("sealed", "env");
+    assert_eq!(running.shim.wait().unwrap().code(), Some(0));
+    let all = records(&running.spool);
+    let names: Vec<&str> = outs(&all)
+        .into_iter()
+        .filter_map(|line| line.split_once('=').map(|(name, _)| name))
+        .collect();
+    assert!(
+        names.contains(&"PATH") && names.contains(&"HOME"),
+        "{names:?}"
+    );
+    let rule = clarp_sealed::sealed(&[], &running.dir, &[], &[]);
+    let own = [clarp_shim::SOCKET_ENV, "PWD", "OLDPWD", "SHLVL", "_"];
+    let more: Vec<&&str> = names
+        .iter()
+        .filter(|name| !own.contains(name) && !rule.contains_key(std::ffi::OsStr::new(name)))
+        .collect();
+    assert!(
+        more.is_empty(),
+        "the tool saw more than the test gave: {more:?}"
+    );
+    std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
 #[test]
@@ -222,7 +262,7 @@ fn a_program_that_cannot_start_is_recorded_and_the_shim_says_so() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
-    let status = Command::new(env!("CARGO_BIN_EXE_clarp-shim"))
+    let status = shim_in(&dir)
         .args([
             "--spool",
             spool.to_str().unwrap(),
@@ -270,7 +310,7 @@ fn the_message_is_given_to_the_tool_after_its_start_is_on_record() {
 fn a_second_shim_for_the_same_turn_starts_nothing() {
     let mut first = start("taken", "echo once");
     assert_eq!(first.shim.wait().unwrap().code(), Some(0));
-    let status = Command::new(env!("CARGO_BIN_EXE_clarp-shim"))
+    let status = shim_in(&first.dir)
         .args(["--spool", first.spool.to_str().unwrap()])
         .args(["--socket", first.socket.to_str().unwrap()])
         .args(["--", "sh", "-c", "echo twice"])
@@ -362,7 +402,7 @@ fn a_shim_says_ready_when_the_turn_is_taken_and_the_tool_is_up() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
-    let mut shim = Command::new(env!("CARGO_BIN_EXE_clarp-shim"))
+    let mut shim = shim_in(&dir)
         .args(["--spool", spool.to_str().unwrap()])
         .args(["--socket", socket.to_str().unwrap()])
         .args(["--", "sh", "-c", "read line; echo done"])
@@ -396,7 +436,7 @@ fn prompt_delivery_is_selected_by_the_shim_flag() {
             let input = dir.join("turn input");
             let spool = dir.join("turn.jsonl");
             std::fs::write(&input, "turn bytes").unwrap();
-            let mut shim = Command::new(env!("CARGO_BIN_EXE_clarp-shim"));
+            let mut shim = shim_in(&dir);
             shim.arg("--spool")
                 .arg(&spool)
                 .arg("--socket")
@@ -486,7 +526,7 @@ while True:
     note("direct")
     if sys.argv[1]=="true": os._exit(0)
 "#;
-        let mut shim = Command::new(env!("CARGO_BIN_EXE_clarp-shim"))
+        let mut shim = shim_in(&dir)
             .current_dir(&dir)
             .args([
                 "--spool",
@@ -1367,7 +1407,7 @@ fn a_served_tool_is_not_held() {
     .unwrap();
     let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
     let shim_path = env!("CARGO_BIN_EXE_clarp-shim");
-    let mut shim = Command::new(shim_path)
+    let mut shim = shim_in(&dir)
         .args(["--spool", spool.to_str().unwrap()])
         .args(["--socket", socket.to_str().unwrap()])
         .args(["--stdin-file", message.to_str().unwrap()])
@@ -1473,4 +1513,122 @@ time.sleep(300)'"#;
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
     ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
+}
+#[test]
+fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
+    const NEXT: u64 = 42;
+    for case in [
+        "unheld",
+        "released",
+        "expired",
+        "late-hook",
+        "partial",
+        "current",
+    ] {
+        let name = format!("consume-{case}");
+        let marker = dir_of(&name).join("ready");
+        let partial = if case == "partial" {
+            "printf partial;"
+        } else {
+            ""
+        };
+        let script = format!(
+            "printf 'ready\\n'; {partial} : > '{}'; read line; printf 'read:%s\\n' \"$line\"",
+            marker.display()
+        );
+        let mut running = start(&name, &script);
+        wait_for("the fixture to wait for input", || {
+            marker.exists() && outs(&records(&running.spool)).contains(&"ready")
+        });
+        let mut fence = spool_len(&running.spool);
+        if case != "unheld" {
+            let ms = if case == "expired" { 500 } else { 2_000 };
+            let held = hold(&running.socket, ms).held.unwrap();
+            fence = held.spool;
+            if case == "partial" {
+                assert_eq!(held.partial_out, 7);
+            }
+            if case == "released" {
+                assert_eq!(release(&running.socket).let_go, Some(true));
+            }
+            if case == "expired" {
+                wait_for("the shim to auto-release the held tool", || {
+                    hold_lines(&running.dir)
+                        .iter()
+                        .any(|line| hold_end(line) == "let go at the bound")
+                });
+            }
+            if case == "late-hook" {
+                assert!(
+                    ask(
+                        &running.socket,
+                        &Request::Hook {
+                            name: "late".to_string(),
+                            data: serde_json::Value::Null,
+                        },
+                    )
+                    .ok
+                );
+            }
+        }
+
+        let reply = ask(
+            &running.socket,
+            &Request::ConsumeHold {
+                fence,
+                replaced_by: NEXT,
+            },
+        );
+        assert_eq!(reply.killed, Some(case == "current"), "{case}: {reply:?}");
+        if case != "current" {
+            // A refusal leaves the existing tool able to take input.
+            release(&running.socket);
+            assert!(
+                ask(
+                    &running.socket,
+                    &Request::Stdin {
+                        data: "still here\n".to_string()
+                    },
+                )
+                .ok
+            );
+        }
+        ends(&mut running.shim);
+        let all = records(&running.spool);
+        if case == "current" {
+            let tail = after(&running.spool, fence);
+            assert_eq!(
+                tail[0].entry,
+                Entry::Shim(ShimEvent::Takeover {
+                    fence,
+                    replaced_by: NEXT
+                })
+            );
+            assert_eq!(
+                tail.last().unwrap().entry,
+                Entry::Shim(ShimEvent::Exited {
+                    code: None,
+                    signal: Some(9)
+                })
+            );
+        } else {
+            assert!(
+                all.iter()
+                    .all(|record| !matches!(record.entry, Entry::Shim(ShimEvent::Takeover { .. })))
+            );
+            assert!(
+                outs(&all)
+                    .iter()
+                    .any(|line| line.ends_with("read:still here"))
+            );
+            assert_eq!(
+                all.last().unwrap().entry,
+                Entry::Shim(ShimEvent::Exited {
+                    code: Some(0),
+                    signal: None
+                })
+            );
+        }
+        std::fs::remove_dir_all(&running.dir).unwrap();
+    }
 }
