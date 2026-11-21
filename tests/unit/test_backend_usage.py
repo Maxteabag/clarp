@@ -1481,3 +1481,16 @@ def test_the_usage_refresher_never_starts_under_the_test_suite(monkeypatch):
         worker.stop()
         worker._thread.join(5)
     assert not worker._thread.is_alive()
+
+
+@pytest.mark.parametrize("value", ["false", "1", "no", "", " ", None])
+def test_only_zero_switches_the_usage_refresher_off(monkeypatch, value):
+    """Only "0" turns the refresher off; any other value, or none, leaves an
+    installed Host's refresher on (a typo must not silence quota checks)."""
+    if value is None:
+        monkeypatch.delenv(backend_usage.REFRESH_WORKER_ENV)
+    else:
+        monkeypatch.setenv(backend_usage.REFRESH_WORKER_ENV, value)
+    assert backend_usage.refresh_worker_enabled() is True
+    monkeypatch.setenv(backend_usage.REFRESH_WORKER_ENV, " 0 ")
+    assert backend_usage.refresh_worker_enabled() is False

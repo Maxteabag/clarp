@@ -244,10 +244,17 @@ def test_compact_answers_when_compaction_raises(running_server, monkeypatch, rai
     from lib.runtime_bridge import RuntimeProtocolError, RuntimeUnavailable
     base, _ctx, _srv = running_server
 
+    from lib.routes import send as send_routes
+    logged = []
+    monkeypatch.setattr(send_routes, "log_exception",
+                        lambda event, exc, detail="": logged.append((event, type(exc).__name__, detail)))
+
     def compact_session(session, *, dispatch):
         raise (RuntimeUnavailable if raised == "unavailable" else RuntimeProtocolError)("runtime said no")
     monkeypatch.setattr(compaction, "compact_session", compact_session)
     assert _call(base, "POST", "/compact", {"session": "claude"}) == expected
+    error = "RuntimeUnavailable" if raised == "unavailable" else "RuntimeProtocolError"
+    assert logged == [("compactFail", error, "claude")]
 
 
 def test_orchestrator_settings_post_errors(running_server):
