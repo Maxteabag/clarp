@@ -242,7 +242,7 @@ impl Actor {
         batch
             .command(Command::FinishTakeover { from }, now_ms)
             .map_err(clarp_kernel::journal::JournalError::Refused)?;
-        if let Some(end) = closing(&batch, from, &first.id, facts) {
+        if let Some(end) = closing(&mut batch, from, &first.id, facts) {
             batch.item(written(&end, now_ms)?);
         }
         let effects = batch.commit()?.effects;
