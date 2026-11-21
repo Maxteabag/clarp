@@ -194,20 +194,16 @@ def settle_failed_waits() -> int:
     requester's goal. A request delivered, still queued or already answered is left alone; a
     wait already settled (its deadline passed) no longer waits on the key, so nothing is woken
     twice. Returns how many were settled."""
-    # The substring test is a cheap first cut that spares parsing every active goal's JSON
-    # each tick; the two json_extract terms decide.
-    rows = conn().execute(
-        """SELECT plan_id, json_extract(goal_json, '$.continuation.dependency_key') AS waiting
-             FROM task_plans
-            WHERE status = 'active'
-              AND instr(goal_json, '"peer:') > 0
-              AND json_extract(goal_json, '$.continuation.state') = 'waiting'
-              AND json_extract(goal_json, '$.continuation.dependency_key') LIKE 'peer:%'""").fetchall()
+    # The plans' summaries are kept until a plan changes (task_plans.plan_index): a tick reads
+    # every active goal's JSON only when goals were written, not each time.
+    from . import task_plans
+    waits = [(plan_id, summary["peer_wait"]) for plan_id, summary in task_plans.plan_index().items()
+             if summary["status"] == "active" and summary["peer_wait"]]
     settled = 0
-    for row in rows:
-        request_id = str(row["waiting"])[len("peer:"):]
+    for plan_id, waiting in waits:
+        request_id = str(waiting)[len("peer:"):]
         reason = unrun_reason(request_id)
-        if reason and abandon_wait(row["plan_id"], request_id, reason, by_host=True):
+        if reason and abandon_wait(plan_id, request_id, reason, by_host=True):
             settled += 1
     return settled
 
