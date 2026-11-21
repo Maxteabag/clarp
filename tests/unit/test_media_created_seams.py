@@ -99,6 +99,33 @@ def test_a_later_event_of_the_finished_job_announces_nothing_again(portrait_run)
     assert [e["asset_id"] for e in _media_events(sent)] == [kept["asset_id"]]
 
 
+def test_after_the_watcher_forgets_a_finished_run_a_later_event_announces_it_again(portrait_run):
+    """The watcher remembers job states in a bounded map: past 1,024 entries it drops 256
+    that are not active, oldest first. A finished run it has dropped looks new again, so a
+    later event of that run announces its kept image once more: the documented idempotent
+    hint (protocol.md, created per asset_id), exactly one repeat, nothing else."""
+    kept = portrait_run.publish(1)
+    sent: list[dict] = []
+    watcher = background_job_watcher.BackgroundJobWatcher(SimpleNamespace(broadcast=sent.append))
+    job_id = portrait_run.job["job_id"]
+    background_jobs.finish(job_id, generation=int(portrait_run.job["generation"]), status="succeeded")
+    watcher._poll_once()
+    assert [e["asset_id"] for e in _media_events(sent)] == [kept["asset_id"]]
+    assert next(iter(watcher._statuses)) == job_id           # the oldest entry
+    for n in range(1024):                                   # other finished jobs it has seen
+        watcher._statuses[f"other-{n}"] = (1, "succeeded")
+    other = background_jobs.upsert_computer(computer_id="host", job_id="unrelated-job",
+                                            kind="other", title="Unrelated", status="running")
+    background_jobs.finish("unrelated-job", generation=int(other["generation"]), status="succeeded")
+    watcher._poll_once()                                    # its transition trims the map
+    assert job_id not in watcher._statuses
+    assert [e["asset_id"] for e in _media_events(sent)] == [kept["asset_id"]]
+    assert background_jobs.reassign_terminal_computer_owner(job_id, computer_id="host") is not None
+    watcher._poll_once()
+    assert [(e["change"], e["asset_id"]) for e in _media_events(sent)] == [
+        ("created", kept["asset_id"]), ("created", kept["asset_id"])]
+
+
 def test_images_published_before_the_run_started_are_not_its(portrait_run, tmp_path):
     earlier = portrait_run.publish(1)
     db.conn().execute("UPDATE media_assets SET created_at = created_at - 60000 WHERE asset_id = ?",
