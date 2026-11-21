@@ -214,7 +214,8 @@ def merge_agent_engines(value, *, is_valid) -> str:
                 or not engine.strip(" ,"):
             raise ValueError(f"unknown transcription engine: {engine}")
         else:
-            merged[key] = ",".join(e.strip() for e in engine.split(",") if e.strip())
+            # An engine listed twice is kept once, at its first place (R175).
+            merged[key] = ",".join(dict.fromkeys(e.strip() for e in engine.split(",") if e.strip()))
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))
 
 

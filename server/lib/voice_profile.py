@@ -327,7 +327,9 @@ def hearing(host: HostView, agent: Mapping) -> dict:
     plan = stt_router.plan_engines(requested_model="", agent_engines=own_engines,
                                    cloud_engine=cloud, long_model="", in_call=False)
     local = f"{cfg.whisper_provider}:{cfg.whisper_model}" if cfg.whisper_enabled else ""
-    engines = [e for e in [plan.model or local, *plan.agent_fallbacks] if e]
+    # Each provider once, as the pipeline tries them (stt_router.once_per_provider, R175).
+    engines, _skipped = stt_router.once_per_provider(
+        [e for e in [plan.model or local, *plan.agent_fallbacks] if e], local or None)
     engine_origin = OWN if own_engines else DEFAULT
     own_language = stt_language.match(host.agent_languages, agent)
     language_origin = OWN if own_language else DEFAULT

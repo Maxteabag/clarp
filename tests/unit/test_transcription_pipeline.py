@@ -682,3 +682,53 @@ def test_an_own_adapter_that_cannot_answer_is_refused_with_fixed_words_and_logge
     assert path not in json.dumps(out.payload)
     assert any(path in error for _event, error, _detail in logged)
     assert [c for c in stt.calls if c[0] == "bytes"] == []
+
+
+# R175: each provider gets a recording at most once, whatever its models; the Host's own engine
+# is one engine under all its names; another local model is its own.
+def test_a_repeated_agent_engine_sends_the_recording_to_its_provider_once(monkeypatch):
+    # The reference case (reference_repeats_provider): Scribe listed twice and down, Nova
+    # refuses the set before contact. Scribe gets the recording once, not twice.
+    import lib.deepgram_stt, lib.eleven_stt
+    from lib import config, stt_language
+    sent = []
+
+    def scribe(**kw):
+        sent.append("elevenlabs")
+        raise RuntimeError("scribe 503")
+    monkeypatch.setattr(lib.eleven_stt, "transcribe", scribe)
+    monkeypatch.setattr(lib.deepgram_stt, "transcribe",
+                        lambda **kw: (sent.append("deepgram"), ("heard", 1.0))[1])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(whisper_model="small.en"))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: [
+        "elevenlabs:scribe_v2", "elevenlabs:scribe_v2", "deepgram:nova-3"])
+    received = []
+    out = _run(_ctx(_RealCloudSTT(received)), Recorder(), focus="rachel")
+    assert sent == ["elevenlabs"] and received == []
+    assert out.status == 422
+
+
+@pytest.mark.parametrize("engines, default, tried", [
+    (["elevenlabs:scribe_v1", "elevenlabs:scribe_v2"], None, ["elevenlabs:scribe_v1"]),
+    (["server-default", "local", "faster-whisper:small"], "faster-whisper:small", ["server-default"]),
+    (["faster-whisper:medium", "faster-whisper:large-v3"], None,
+     ["faster-whisper:medium", "faster-whisper:large-v3"]),
+])
+def test_an_engine_is_tried_once_per_provider_identity(monkeypatch, engines, default, tried):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: list(engines))
+    stt = PerModelSTT({engine: RuntimeError(f"{engine} down") for engine in engines})
+    if default:
+        stt.default_model_id = default
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 500
+    assert [c[1] for c in stt.calls] == tried
+
+
+def test_saving_an_agents_engines_keeps_each_engine_once():
+    from lib import stt_language
+    stored = stt_language.merge_agent_engines(
+        {"ada": "elevenlabs:scribe_v2, elevenlabs:scribe_v2,deepgram:nova-3"}, is_valid=lambda e: True)
+    assert json.loads(stored)["ada"] == "elevenlabs:scribe_v2,deepgram:nova-3"

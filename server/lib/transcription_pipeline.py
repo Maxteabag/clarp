@@ -290,17 +290,20 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                 # first engine fails, so one provider outage does not lose
                 # the user's recording.
                 failed: list[str] = []      # engines this recording went to and that failed
-                for index, engine in enumerate([requested_model, *agent_fallbacks]):
+                # Each provider is tried at most once per recording (R175).
+                engines = _once_per_provider([requested_model, *agent_fallbacks], stt, focus)
+                last = len(engines) - 1
+                for index, engine in enumerate(engines):
                     # Only an engine with a fallback after it gives up on a
                     # variant another request is warming (VP-08).
-                    selection_wait = 10.0 if index < len(agent_fallbacks) else None
+                    selection_wait = 10.0 if index < last else None
                     try:
                         with bounded_selection_wait(selection_wait):
                             text, ends_terminal, _dur = model_transcribe(
                                 engine, audio_bytes, ctype, prompt, wait=10.0)
                         break
                     except Exception as e:  # noqa: BLE001 - busy, loading or missing too (VP-09)
-                        if index == len(agent_fallbacks):
+                        if index == last:
                             if not isinstance(e, LanguageSetUnsupported):
                                 raise
                             # R152: the engine (often one the device chose) cannot take the
@@ -362,6 +365,15 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
             failed.payload["stt"] = call_stt["report"]          # every attempt, not hidden
         return failed
     return text, ends_terminal, _dur, requested_model, engine_fallback
+
+
+def _once_per_provider(engines: list[str], stt, focus: str) -> list[str]:
+    """The engines in order, each provider once (stt_router.once_per_provider, R175)."""
+    from . import stt_router
+    kept, skipped = stt_router.once_per_provider(engines, getattr(stt, "default_model_id", None))
+    for engine in skipped:
+        log("sttEngineRepeatSkipped", f"session={focus or '-'} {engine} (its provider was already tried)")
+    return kept
 
 
 def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: bytes, ctype: str,
