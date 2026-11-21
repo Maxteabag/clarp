@@ -255,9 +255,14 @@ pub(crate) async fn journal(
 ) -> Result<(), crate::agent::Unavailable> {
     let id = asset.asset_id.clone();
     if member.agent.view().books.media.get(&id) != Some(&asset) {
-        tokio::time::timeout(std::time::Duration::from_secs(3), member.agent.publish(asset))
-            .await
-            .map_err(|_| crate::agent::Unavailable("the media publication journal did not answer in time".into()))??;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            member.agent.publish(asset),
+        )
+        .await
+        .map_err(|_| {
+            crate::agent::Unavailable("the media publication journal did not answer in time".into())
+        })??;
     }
     let agent_id = member.record.agent_id.clone();
     app.gallery
