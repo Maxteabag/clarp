@@ -1,0 +1,250 @@
+[
+  {
+    "name": "Boss",
+    "hide": true,
+    "headline": "Working with Boss",
+    "activity": {
+      "phase": "tool",
+      "tool": "Read",
+      "file_path": "/fixture/plan.md",
+      "call_id": "call-1",
+      "summary": "Reading plan.md",
+      "action": "reading"
+    },
+    "live": {
+      "state": "tool",
+      "headline": "Reading plan.md",
+      "tool": {
+        "name": "Read",
+        "label": "plan.md"
+      }
+    },
+    "detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "input": {
+        "path": "plan.md"
+      },
+      "tool": "Read"
+    },
+    "veiled_activity": {
+      "phase": "tool",
+      "tool": "",
+      "file_path": "",
+      "call_id": null,
+      "summary": "Working with Boss",
+      "action": "working"
+    },
+    "veiled_live": {
+      "state": "tool",
+      "headline": "Working with Boss",
+      "tool": null
+    },
+    "veiled_detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "summary": "Working with Boss"
+    },
+    "pushed_headline": "Working with Boss"
+  },
+  {
+    "name": "",
+    "hide": true,
+    "headline": "Working with another agent",
+    "activity": {
+      "phase": "tool",
+      "tool": "Read",
+      "file_path": "/fixture/plan.md",
+      "call_id": "call-1",
+      "summary": "Reading plan.md",
+      "action": "reading"
+    },
+    "live": {
+      "state": "tool",
+      "headline": "Reading plan.md",
+      "tool": {
+        "name": "Read",
+        "label": "plan.md"
+      }
+    },
+    "detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "input": {
+        "path": "plan.md"
+      },
+      "tool": "Read"
+    },
+    "veiled_activity": {
+      "phase": "tool",
+      "tool": "",
+      "file_path": "",
+      "call_id": null,
+      "summary": "Working with another agent",
+      "action": "working"
+    },
+    "veiled_live": {
+      "state": "tool",
+      "headline": "Working with another agent",
+      "tool": null
+    },
+    "veiled_detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "summary": "Working with another agent"
+    },
+    "pushed_headline": "Working with another agent"
+  },
+  {
+    "name": null,
+    "hide": true,
+    "headline": "Working with another agent",
+    "activity": {
+      "phase": "tool",
+      "tool": "Read",
+      "file_path": "/fixture/plan.md",
+      "call_id": "call-1",
+      "summary": "Reading plan.md",
+      "action": "reading"
+    },
+    "live": {
+      "state": "tool",
+      "headline": "Reading plan.md",
+      "tool": {
+        "name": "Read",
+        "label": "plan.md"
+      }
+    },
+    "detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "input": {
+        "path": "plan.md"
+      },
+      "tool": "Read"
+    },
+    "veiled_activity": {
+      "phase": "tool",
+      "tool": "",
+      "file_path": "",
+      "call_id": null,
+      "summary": "Working with another agent",
+      "action": "working"
+    },
+    "veiled_live": {
+      "state": "tool",
+      "headline": "Working with another agent",
+      "tool": null
+    },
+    "veiled_detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "summary": "Working with another agent"
+    },
+    "pushed_headline": "Working with another agent"
+  },
+  {
+    "name": "Boss",
+    "hide": false,
+    "headline": "",
+    "activity": {
+      "phase": "tool",
+      "tool": "Read",
+      "file_path": "/fixture/plan.md",
+      "call_id": "call-1",
+      "summary": "Reading plan.md",
+      "action": "reading"
+    },
+    "live": {
+      "state": "tool",
+      "headline": "Reading plan.md",
+      "tool": {
+        "name": "Read",
+        "label": "plan.md"
+      }
+    },
+    "detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "input": {
+        "path": "plan.md"
+      },
+      "tool": "Read"
+    },
+    "veiled_activity": {
+      "phase": "tool",
+      "tool": "Read",
+      "file_path": "/fixture/plan.md",
+      "call_id": "call-1",
+      "summary": "Reading plan.md",
+      "action": "reading"
+    },
+    "veiled_live": {
+      "state": "tool",
+      "headline": "Reading plan.md",
+      "tool": {
+        "name": "Read",
+        "label": "plan.md"
+      }
+    },
+    "veiled_detail": {
+      "trace_id": "trace-1",
+      "phase": "tool",
+      "input": {
+        "path": "plan.md"
+      },
+      "tool": "Read"
+    },
+    "pushed_headline": "Reading plan.md"
+  },
+  {
+    "name": "Boss",
+    "hide": true,
+    "headline": "Working with Boss",
+    "activity": {
+      "phase": "account_recovery",
+      "tool": "Read",
+      "file_path": "/fixture/plan.md",
+      "call_id": "call-1",
+      "summary": "Waiting for an account with available usage",
+      "action": "waiting for account"
+    },
+    "live": {
+      "state": "tool",
+      "headline": "Reading plan.md",
+      "tool": {
+        "name": "Read",
+        "label": "plan.md"
+      }
+    },
+    "detail": {
+      "trace_id": "trace-1",
+      "phase": "account_recovery",
+      "input": {
+        "path": "plan.md"
+      },
+      "tool": "Read",
+      "account_recovery": "waiting"
+    },
+    "veiled_activity": {
+      "phase": "account_recovery",
+      "tool": "",
+      "file_path": "",
+      "call_id": null,
+      "summary": "Waiting for an account with available usage",
+      "action": "waiting for account"
+    },
+    "veiled_live": {
+      "state": "tool",
+      "headline": "Working with Boss",
+      "tool": null
+    },
+    "veiled_detail": {
+      "trace_id": "trace-1",
+      "phase": "account_recovery",
+      "account_recovery": "waiting",
+      "summary": "Working with Boss"
+    },
+    "pushed_headline": "Working with Boss"
+  }
+]

@@ -17,10 +17,26 @@ pub struct CatalogueVoice {
     pub owner: bool,
 }
 
+impl CatalogueVoice {
+    pub fn from_cartesia(row: &Value) -> Self {
+        let label = |key| crate::python::strip(row[key].as_str().unwrap_or_default());
+        Self {
+            language: row["language"].as_str().unwrap_or_default().to_owned(),
+            public: label("access").eq_ignore_ascii_case("public")
+                || label("visibility").eq_ignore_ascii_case("all")
+                || label("visibility").eq_ignore_ascii_case("public")
+                || row["is_public"].as_bool() == Some(true),
+            owner: row["is_owner"].as_bool() != Some(false),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
     #[serde(flatten)]
     pub names: Names,
+    #[serde(rename = "_format", skip_serializing_if = "Option::is_none")]
+    pub format: Option<i64>,
     #[serde(rename = "_catalogue", skip_serializing_if = "BTreeMap::is_empty")]
     pub catalogue: Catalogue,
     #[serde(rename = "_gone", skip_serializing_if = "BTreeMap::is_empty")]
@@ -29,11 +45,14 @@ pub struct Snapshot {
 
 pub const FIRST_AFTER: Duration = Duration::from_secs(60);
 pub const REFRESH_EVERY: Duration = Duration::from_secs(24 * 3600);
+pub const RETRY_AFTER: Duration = Duration::from_secs(15 * 60);
 pub const MAX_LOOKUPS: usize = 100;
 
-/// The startup refresh depends on the file's age; later passes run daily.
-pub fn start_due(age: Option<Duration>) -> bool {
-    age.is_none_or(|age| age >= REFRESH_EVERY)
+const FORMAT: i64 = 2;
+
+/// Startup refreshes an older format even if the file was written today.
+pub fn start_due(age: Option<Duration>, format: Option<i64>) -> bool {
+    age.is_none_or(|age| age >= REFRESH_EVERY) || format.is_some_and(|format| format < FORMAT)
 }
 
 impl Snapshot {
@@ -64,8 +83,8 @@ impl Snapshot {
                             id.clone(),
                             CatalogueVoice {
                                 language: row["language"].as_str().unwrap_or_default().to_owned(),
-                                public: crate::python::truthy(&row["public"]),
-                                owner: crate::python::truthy(&row["owner"]),
+                                public: row["public"].as_bool() == Some(true),
+                                owner: row["owner"].as_bool() != Some(false),
                             },
                         )
                     })
@@ -87,13 +106,37 @@ impl Snapshot {
             .collect();
         Self {
             names,
+            format: Some(raw["_format"].as_i64().unwrap_or(1)),
             catalogue,
             gone,
         }
     }
 
-    /// Publish each refreshed provider's latest facts and return newly deleted voices.
-    pub fn apply(&mut self, fetched: Self) -> Vec<(String, String)> {
+    /// Update the cache after a refresh. None means the file can stay untouched.
+    pub fn refresh(
+        &mut self,
+        fetched: Self,
+        has_key: bool,
+        failed: bool,
+    ) -> Option<Vec<(String, String)>> {
+        let old_format = self.format.is_some_and(|format| format < FORMAT);
+        if !has_key {
+            if !old_format && self.format.is_some() {
+                return None;
+            }
+            self.catalogue.clear();
+            self.format = Some(FORMAT);
+            return Some(Vec::new());
+        }
+        if fetched.names.is_empty() && !old_format {
+            return None;
+        }
+        if old_format {
+            self.catalogue.clear();
+        }
+        if !failed {
+            self.format = Some(FORMAT);
+        }
         merge(&mut self.names, fetched.names);
         self.catalogue.extend(fetched.catalogue);
         let mut newly_gone = Vec::new();
@@ -108,7 +151,7 @@ impl Snapshot {
             }
             *previous = ids;
         }
-        newly_gone
+        Some(newly_gone)
     }
 }
 

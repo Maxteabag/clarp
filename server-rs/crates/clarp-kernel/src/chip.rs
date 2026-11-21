@@ -115,6 +115,14 @@ fn tool_headline(tool: &Value) -> String {
 
 /// What an agent is doing, in the words the apps use. Never empty.
 pub fn headline(activity: &Value) -> String {
+    if activity["veiled"] == true {
+        let head = text(&activity["headline"]);
+        return if head.is_empty() {
+            crate::hidden_coordination::working_headline(None)
+        } else {
+            head
+        };
+    }
     let state = match &activity["state"] {
         state if truthy(state) => text(state),
         _ => "idle".to_string(),

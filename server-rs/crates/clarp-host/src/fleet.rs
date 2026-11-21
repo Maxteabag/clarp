@@ -2426,6 +2426,12 @@ impl Fleet {
             });
         let users: Vec<_> = agents.chain(contacts).collect();
         let assigned = pool.assign(name, stored, &users);
+        if let Some(note) = assigned.catalogue_miss {
+            eprintln!(
+                "voicePoolNoCatalogueVoice provider=cartesia language={} eligible=0 total={}",
+                note.language, note.total
+            );
+        }
         for note in assigned.exhausted {
             eprintln!(
                 "voicePoolExhausted provider={} pool={} shared_by={}",

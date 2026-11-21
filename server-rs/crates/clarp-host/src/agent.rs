@@ -484,6 +484,9 @@ pub struct View {
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
     pub newest: Option<Versioned>,
+    pub(crate) visible_previews: (Option<Versioned>, Option<Versioned>),
+    pub(crate) working: Option<wire::WorkingWith>,
+    pub(crate) can_leave_note: bool,
     /// How the last turn ended, with what its tool said of itself.
     pub ended: Option<TurnEnd>,
     /// What the agent last finished for its user, of which the user was told and to which
@@ -1281,6 +1284,9 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         latest_turn_start: 0,
         status: idle,
         newest: None,
+        visible_previews: Default::default(),
+        working: None,
+        can_leave_note: false,
         ended: None,
         finished: None,
         backend: setup.backend.id(),
@@ -1308,6 +1314,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         queue_edit: None,
         takeover_wait: VecDeque::new(),
         newest: None,
+        visible_previews: Default::default(),
         ended: None,
         finished: None,
         transcript_sent: None,
@@ -1381,6 +1388,7 @@ struct Worker {
     takeover_wait: VecDeque<Ask>,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
+    visible_previews: (Option<Versioned>, Option<Versioned>),
     /// How the last turn ended.
     ended: Option<TurnEnd>,
     /// What the agent last finished for its user, as the view shows it.
@@ -1735,8 +1743,16 @@ impl Worker {
         let Some(actor) = self.actor.as_mut() else {
             return;
         };
+        let view = self.view.borrow().clone();
+        let trace = view
+            .status
+            .live
+            .as_ref()
+            .and_then(|live| live.trace_id.as_deref());
         for event in actor.take_shown(now) {
-            self.setup.hub.show(event, now);
+            self.setup
+                .hub
+                .show(event, now, trace.zip(view.working.as_ref()));
         }
     }
 
@@ -2042,7 +2058,7 @@ impl Worker {
         if let Some(actor) = self.actor.as_mut() {
             actor.take_job_events();
         }
-        self.newest = self.newest_row();
+        self.update_previews();
         self.ended = self.last_end();
         self.finished = self.last_finished();
         // Nor are its artifacts: only what changes from here on is told. How many of its
@@ -3767,6 +3783,22 @@ impl Worker {
         back.into_iter().rev().find(wire::previewed)
     }
 
+    fn update_previews(&mut self) {
+        const HIDDEN_PREVIEW_ROWS: usize = 200;
+
+        self.newest = self.newest_row();
+        self.visible_previews = self
+            .actor
+            .as_ref()
+            .filter(|actor| actor.profile().hides_coordination)
+            .and_then(|actor| {
+                actor
+                    .visible_previews(wire::previewed_entry, HIDDEN_PREVIEW_ROWS)
+                    .ok()
+            })
+            .unwrap_or_default();
+    }
+
     /// How the last turn ended, as the log has it.
     fn last_end(&self) -> Option<TurnEnd> {
         self.actor.as_ref()?.last_end().ok()?
@@ -3790,10 +3822,18 @@ impl Worker {
             return;
         };
         let shown_since = self.now_ms() - JOB_SHOWN_FOR_MS;
+        let status = actor.status();
+        let working = status
+            .live
+            .as_ref()
+            .map(|live| working_with(actor, live, &self.setup.hub));
         self.view.send_replace(Arc::new(View {
             latest_turn_start: actor.latest_turn_start(),
-            status: actor.status(),
+            status,
             newest: self.newest.clone(),
+            visible_previews: self.visible_previews.clone(),
+            working,
+            can_leave_note: actor.profile().hides_coordination,
             ended: self.ended.clone(),
             finished: self.finished.clone(),
             backend: actor.backend_id(),
@@ -3838,6 +3878,9 @@ impl Worker {
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
+        if changed.conversation {
+            self.update_previews();
+        }
         let job_events = self
             .actor
             .as_mut()
@@ -3867,9 +3910,6 @@ impl Worker {
         } else {
             Vec::new()
         };
-        if changed.conversation {
-            self.newest = self.newest_row();
-        }
         let turn_ended = status.last.as_ref().map(|last| last.id)
             != before
                 .as_ref()
@@ -3996,7 +4036,7 @@ impl Worker {
                     &record,
                     live,
                     status.queue_depth,
-                    &working_with(actor, live),
+                    &working_with(actor, live, &hub),
                 ),
                 now,
             );
@@ -4013,7 +4053,7 @@ impl Worker {
                     &record,
                     live,
                     status.queue_depth,
-                    &working_with(actor, live),
+                    &working_with(actor, live, &hub),
                 ),
                 now,
             );
@@ -4066,8 +4106,7 @@ impl Worker {
             let of = stood.live.as_ref().map(|live| live.turn);
             let in_order = of.is_some() && (live_now.is_none() || live_now == of);
             if in_order && last_told != Some(told_state(stood)) {
-                hub.publish(wire::state(&record, stood, backend, None), now);
-                hub.publish(wire::activity(&record, stood), now);
+                tell_work(&hub, actor, &record, stood, backend, None, now);
                 last_told = Some(told_state(stood));
             }
         }
@@ -4092,11 +4131,15 @@ impl Worker {
                     hub.publish(wire::activity(&record, &rested), now);
                 }
             }
-            hub.publish(
-                wire::state(&record, &status, backend, self.ended.as_ref()),
+            tell_work(
+                &hub,
+                actor,
+                &record,
+                &status,
+                backend,
+                self.ended.as_ref(),
                 now,
             );
-            hub.publish(wire::activity(&record, &status), now);
         }
         // A turn ended with an answer: the user is told, once.
         let answered = status
@@ -4275,7 +4318,7 @@ fn nobody() -> Owed {
 /// agent's message began it and this agent can leave a note (its profile says so), with that
 /// agent named when it is one of this Host; the user otherwise. A mark that cannot be read is
 /// the user's: nothing is hidden by a fault.
-fn working_with(actor: &Actor, live: &clarp_actor::LiveStatus) -> wire::WorkingWith {
+fn working_with(actor: &Actor, live: &clarp_actor::LiveStatus, hub: &Hub) -> wire::WorkingWith {
     if !actor.profile().hides_coordination {
         return wire::WorkingWith::User;
     }
@@ -4285,14 +4328,46 @@ fn working_with(actor: &Actor, live: &clarp_actor::LiveStatus) -> wire::WorkingW
     if sender.is_empty() {
         return wire::WorkingWith::Agents { sender: None };
     }
-    let name = actor.row(&live.message_id).ok().flatten();
-    let name = name.and_then(|row| match row.entry {
-        Entry::Message(message) => message.sender.map(|sender| sender.name),
-        _ => None,
+    let known = hub.queue_directory().and_then(|directory| {
+        directory
+            .named(&sender)
+            .map(|member| member.record.persona.clone())
     });
     wire::WorkingWith::Agents {
-        sender: Some((sender, name.unwrap_or_default())),
+        sender: known.map(|name| (sender, name)),
     }
+}
+
+fn tell_work(
+    hub: &Hub,
+    actor: &Actor,
+    record: &AgentRecord,
+    status: &Status,
+    backend: &str,
+    ended: Option<&TurnEnd>,
+    now: i64,
+) {
+    let mut state = wire::state(record, status, backend, ended);
+    let mut activity = wire::activity(record, status);
+    if let Some(live) = &status.live
+        && matches!(
+            state["kind"].as_str(),
+            Some("thinking" | "tool" | "compacting")
+        )
+    {
+        let who = working_with(actor, live, hub);
+        who.tell(&mut state);
+        if hub
+            .queue_directory()
+            .is_none_or(|directory| crate::hidden_coordination::hides(&directory, &record.agent_id))
+            && let Some(headline) = who.headline()
+        {
+            clarp_kernel::hidden_coordination::veil_detail(&mut state["detail"], &headline);
+            clarp_kernel::hidden_coordination::veil_activity(&mut activity, &headline);
+        }
+    }
+    hub.publish(state, now);
+    hub.publish(activity, now);
 }
 
 fn answered<T: Send + 'static>(
@@ -4433,6 +4508,9 @@ mod mailbox_tests {
             latest_turn_start: 0,
             status: never_ran(),
             newest: None,
+            visible_previews: Default::default(),
+            working: None,
+            can_leave_note: false,
             ended: None,
             finished: None,
             backend: "scripted",

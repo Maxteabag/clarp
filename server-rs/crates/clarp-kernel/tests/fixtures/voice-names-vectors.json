@@ -1,4 +1,140 @@
 {
+  "access": {
+    "result": {
+      "_catalogue": {
+        "cartesia": {
+          "access": {
+            "language": "en-US",
+            "owner": false,
+            "public": true
+          },
+          "legacy": {
+            "language": "",
+            "owner": false,
+            "public": true
+          },
+          "legacy-number": {
+            "language": "",
+            "owner": false,
+            "public": false
+          },
+          "legacy-string": {
+            "language": "",
+            "owner": false,
+            "public": false
+          },
+          "owned": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-missing": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-null": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-number": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-string": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "private": {
+            "language": "",
+            "owner": false,
+            "public": false
+          },
+          "public-visibility": {
+            "language": "",
+            "owner": false,
+            "public": true
+          },
+          "visible": {
+            "language": "",
+            "owner": false,
+            "public": true
+          }
+        }
+      },
+      "_format": 2,
+      "_gone": {
+        "cartesia": []
+      },
+      "cartesia": {}
+    },
+    "rows": [
+      {
+        "access": " PUBLIC ",
+        "id": "access",
+        "is_owner": false,
+        "language": "en-US"
+      },
+      {
+        "id": "visible",
+        "is_owner": false,
+        "visibility": " All "
+      },
+      {
+        "id": "public-visibility",
+        "is_owner": false,
+        "visibility": " PUBLIC "
+      },
+      {
+        "id": "legacy",
+        "is_owner": false,
+        "is_public": true
+      },
+      {
+        "id": "legacy-string",
+        "is_owner": false,
+        "is_public": "true"
+      },
+      {
+        "id": "legacy-number",
+        "is_owner": false,
+        "is_public": 1
+      },
+      {
+        "access": "private",
+        "id": "private",
+        "is_owner": false,
+        "visibility": "owner"
+      },
+      {
+        "access": "public",
+        "id": "owned",
+        "is_owner": true
+      },
+      {
+        "access": "public",
+        "id": "owner-missing"
+      },
+      {
+        "access": "public",
+        "id": "owner-null",
+        "is_owner": null
+      },
+      {
+        "access": "public",
+        "id": "owner-number",
+        "is_owner": 0
+      },
+      {
+        "access": "public",
+        "id": "owner-string",
+        "is_owner": "false"
+      }
+    ]
+  },
   "deleted": {
     "current": {
       "_catalogue": {
@@ -50,6 +186,7 @@
           }
         }
       },
+      "_format": 2,
       "_gone": {
         "cartesia": [
           "missing"
@@ -284,6 +421,15 @@
     {
       "case": "new names replace only matched ids",
       "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
         "cartesia": {
           "c1": "Old Cartesia",
           "missing": "Former name"
@@ -292,6 +438,8 @@
           "e1": "Old Eleven"
         }
       },
+      "due": false,
+      "failed": false,
       "fetched": {
         "_catalogue": {
           "cartesia": {
@@ -319,6 +467,7 @@
           "e1": "New Eleven"
         }
       },
+      "has_key": true,
       "providers": [
         "cartesia",
         "elevenlabs"
@@ -338,6 +487,7 @@
             }
           }
         },
+        "_format": 2,
         "_gone": {
           "cartesia": [],
           "elevenlabs": []
@@ -351,11 +501,20 @@
           "e1": "New Eleven"
         }
       },
-      "same_bytes": false
+      "wait": 86400
     },
     {
       "case": "a catalogue failure keeps every old Cartesia name",
       "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
         "cartesia": {
           "c1": "Old Cartesia",
           "missing": "Former name"
@@ -364,6 +523,8 @@
           "e1": "Old Eleven"
         }
       },
+      "due": true,
+      "failed": true,
       "fetched": {
         "_gone": {
           "elevenlabs": []
@@ -372,10 +533,13 @@
           "e1": "New Eleven"
         }
       },
+      "has_key": true,
       "providers": [
         "elevenlabs"
       ],
       "result": {
+        "_catalogue": {},
+        "_format": 1,
         "_gone": {
           "elevenlabs": []
         },
@@ -387,11 +551,20 @@
           "e1": "New Eleven"
         }
       },
-      "same_bytes": false
+      "wait": 900
     },
     {
-      "case": "no keys leave the file alone",
+      "case": "failed catalogue drops stale rows",
       "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
         "cartesia": {
           "c1": "Old Cartesia",
           "missing": "Former name"
@@ -400,9 +573,14 @@
           "e1": "Old Eleven"
         }
       },
+      "due": true,
+      "failed": true,
       "fetched": {},
+      "has_key": true,
       "providers": [],
       "result": {
+        "_catalogue": {},
+        "_format": 1,
         "cartesia": {
           "c1": "Old Cartesia",
           "missing": "Former name"
@@ -411,11 +589,21 @@
           "e1": "Old Eleven"
         }
       },
-      "same_bytes": true
+      "wait": 900
     },
     {
-      "case": "equal names leave file content unchanged",
+      "case": "failed catalogue keeps current rows",
       "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
+        "_format": 2,
         "cartesia": {
           "c1": "Old Cartesia",
           "missing": "Former name"
@@ -424,6 +612,212 @@
           "e1": "Old Eleven"
         }
       },
+      "due": false,
+      "failed": true,
+      "fetched": {},
+      "has_key": true,
+      "providers": [],
+      "result": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
+        "_format": 2,
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "wait": 86400
+    },
+    {
+      "case": "failed first fetch leaves no file",
+      "current": null,
+      "due": true,
+      "failed": true,
+      "fetched": {},
+      "has_key": true,
+      "providers": [],
+      "result": null,
+      "wait": 900
+    },
+    {
+      "case": "no keys upgrade the old file",
+      "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "due": false,
+      "failed": false,
+      "fetched": {},
+      "has_key": false,
+      "providers": [],
+      "result": {
+        "_format": 2,
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "wait": 86400
+    },
+    {
+      "case": "no keys leave a current file alone",
+      "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
+        "_format": 2,
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "due": false,
+      "failed": false,
+      "fetched": {},
+      "has_key": false,
+      "providers": [],
+      "result": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
+        "_format": 2,
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "wait": 86400
+    },
+    {
+      "case": "no keys create the first file",
+      "current": null,
+      "due": false,
+      "failed": false,
+      "fetched": {},
+      "has_key": false,
+      "providers": [],
+      "result": {
+        "_format": 2
+      },
+      "wait": 86400
+    },
+    {
+      "case": "ElevenLabs alone upgrades the old file",
+      "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "due": false,
+      "failed": false,
+      "fetched": {
+        "_gone": {
+          "elevenlabs": []
+        },
+        "elevenlabs": {
+          "e1": "New Eleven"
+        }
+      },
+      "has_key": true,
+      "providers": [
+        "elevenlabs"
+      ],
+      "result": {
+        "_catalogue": {},
+        "_format": 2,
+        "_gone": {
+          "elevenlabs": []
+        },
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "New Eleven"
+        }
+      },
+      "wait": 86400
+    },
+    {
+      "case": "equal names still publish a fresh catalogue",
+      "current": {
+        "_catalogue": {
+          "cartesia": {
+            "retired": {
+              "language": "en",
+              "owner": true,
+              "public": false
+            }
+          }
+        },
+        "cartesia": {
+          "c1": "Old Cartesia",
+          "missing": "Former name"
+        },
+        "elevenlabs": {
+          "e1": "Old Eleven"
+        }
+      },
+      "due": false,
+      "failed": false,
       "fetched": {
         "_catalogue": {
           "cartesia": {
@@ -441,6 +835,7 @@
           "c1": "Old Cartesia"
         }
       },
+      "has_key": true,
       "providers": [
         "cartesia"
       ],
@@ -454,6 +849,7 @@
             }
           }
         },
+        "_format": 2,
         "_gone": {
           "cartesia": []
         },
@@ -465,32 +861,63 @@
           "e1": "Old Eleven"
         }
       },
-      "same_bytes": false
+      "wait": 86400
     }
   ],
   "startup": [
     {
       "age": null,
+      "content": null,
       "due": true
     },
     {
       "age": -60,
+      "content": "{\"_format\":2}",
       "due": false
     },
     {
       "age": 0,
+      "content": "{\"_format\":2}",
       "due": false
     },
     {
       "age": 86399,
+      "content": "{\"_format\":2}",
       "due": false
     },
     {
       "age": 86400,
+      "content": "{\"_format\":2}",
       "due": true
     },
     {
       "age": 86401,
+      "content": "{\"_format\":2}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{\"_format\":1}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{\"_format\":3}",
+      "due": false
+    },
+    {
+      "age": 0,
+      "content": "{\"_format\":\"2\"}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{broken",
       "due": true
     }
   ]
