@@ -234,7 +234,10 @@ pub(crate) fn takeover_request(socket: &Path, request: Request) -> Option<Reply>
     line.push(b'\n');
     shim.write_all(&line).ok()?;
     let mut answer = String::new();
-    BufReader::new(shim).take(4096).read_line(&mut answer).ok()?;
+    BufReader::new(shim)
+        .take(4096)
+        .read_line(&mut answer)
+        .ok()?;
     serde_json::from_str(&answer).ok()
 }
 

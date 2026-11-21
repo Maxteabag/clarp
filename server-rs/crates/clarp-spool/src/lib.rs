@@ -40,7 +40,10 @@ pub enum ShimEvent {
         signal: String,
     },
     /// The shim committed a hold's consumption before sending SIGKILL.
-    Takeover { fence: u64, replaced_by: u64 },
+    Takeover {
+        fence: u64,
+        replaced_by: u64,
+    },
     /// The process is gone. A process that was killed has a signal and no code.
     Exited {
         code: Option<i32>,
@@ -325,7 +328,10 @@ mod tests {
         let new_fence = std::fs::metadata(&path).unwrap().len();
         assert!(writer.append_at_and_sync(new_fence, &marker).unwrap());
         assert_eq!(
-            SpoolReader::new(&path).read_from(new_fence).unwrap().records,
+            SpoolReader::new(&path)
+                .read_from(new_fence)
+                .unwrap()
+                .records,
             [marker]
         );
     }

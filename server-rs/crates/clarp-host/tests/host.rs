@@ -37,6 +37,8 @@ mod delivery;
 mod diagnostics;
 #[path = "host/enter_at_start.rs"]
 mod enter_at_start;
+#[path = "host/takeover_b.rs"]
+mod takeover_b;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
 #[path = "host/harness.rs"]

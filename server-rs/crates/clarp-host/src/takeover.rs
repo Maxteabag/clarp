@@ -50,12 +50,8 @@ pub(super) fn plan(
                 .and_then(takeover::prompt_uuid)
                 .unwrap_or_else(|| takeover::untraced_uuid(agent, offer.from.0));
             let facts = takeover::claude_facts(text.as_deref(), &drops_turn);
-            let input = takeover::claude_input(
-                facts,
-                offer.first_turn,
-                offer.first.clone(),
-                drops_turn,
-            )?;
+            let input =
+                takeover::claude_input(facts, offer.first_turn, offer.first.clone(), drops_turn)?;
             let session = if matches!(input, Input::ClaudeFresh { .. }) {
                 crate::ids::uuid()
             } else {

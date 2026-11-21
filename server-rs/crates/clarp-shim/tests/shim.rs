@@ -1517,10 +1517,21 @@ time.sleep(300)'"#;
 #[test]
 fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
     const NEXT: u64 = 42;
-    for case in ["unheld", "released", "expired", "late-hook", "partial", "current"] {
+    for case in [
+        "unheld",
+        "released",
+        "expired",
+        "late-hook",
+        "partial",
+        "current",
+    ] {
         let name = format!("consume-{case}");
         let marker = dir_of(&name).join("ready");
-        let partial = if case == "partial" { "printf partial;" } else { "" };
+        let partial = if case == "partial" {
+            "printf partial;"
+        } else {
+            ""
+        };
         let script = format!(
             "printf 'ready\\n'; {partial} : > '{}'; read line; printf 'read:%s\\n' \"$line\"",
             marker.display()
@@ -1575,7 +1586,9 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
             assert!(
                 ask(
                     &running.socket,
-                    &Request::Stdin { data: "still here\n".to_string() },
+                    &Request::Stdin {
+                        data: "still here\n".to_string()
+                    },
                 )
                 .ok
             );
@@ -1586,18 +1599,34 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
             let tail = after(&running.spool, fence);
             assert_eq!(
                 tail[0].entry,
-                Entry::Shim(ShimEvent::Takeover { fence, replaced_by: NEXT })
+                Entry::Shim(ShimEvent::Takeover {
+                    fence,
+                    replaced_by: NEXT
+                })
             );
             assert_eq!(
                 tail.last().unwrap().entry,
-                Entry::Shim(ShimEvent::Exited { code: None, signal: Some(9) })
+                Entry::Shim(ShimEvent::Exited {
+                    code: None,
+                    signal: Some(9)
+                })
             );
         } else {
-            assert!(all.iter().all(|record| !matches!(record.entry, Entry::Shim(ShimEvent::Takeover { .. }))));
-            assert!(outs(&all).iter().any(|line| line.ends_with("read:still here")));
+            assert!(
+                all.iter()
+                    .all(|record| !matches!(record.entry, Entry::Shim(ShimEvent::Takeover { .. })))
+            );
+            assert!(
+                outs(&all)
+                    .iter()
+                    .any(|line| line.ends_with("read:still here"))
+            );
             assert_eq!(
                 all.last().unwrap().entry,
-                Entry::Shim(ShimEvent::Exited { code: Some(0), signal: None })
+                Entry::Shim(ShimEvent::Exited {
+                    code: Some(0),
+                    signal: None
+                })
             );
         }
         std::fs::remove_dir_all(&running.dir).unwrap();
