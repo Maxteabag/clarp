@@ -12,7 +12,7 @@ import socket
 
 import pytest
 
-from lib import snapshot, voice_names, voice_profile
+from lib import config, snapshot, voice_names, voice_profile
 from tests.unit.test_voice_profile import (ADA_CARTESIA, _cfg, _host, _profile_queries, _seed,  # noqa: F401
                                  quiet_snapshot)
 
@@ -499,20 +499,65 @@ def test_a_refused_key_is_final_until_the_key_changes(names_file, monkeypatch):
     assert calls[-1] == "new-key" and "_refused" not in json.loads(names_file.read_text())
 
 
-def test_a_refused_elevenlabs_key_stops_the_lookups_at_once(names_file):
-    """A 403 on the first ElevenLabs lookup ends that pass (not up to 100 more) and is final."""
+def test_an_elevenlabs_401_stops_the_lookups_at_once_and_a_403_is_one_voice(names_file):
+    """ElevenLabs is read by lookups only: a 401 proves the key refused (one call, not 100, and
+    final); a 403 can be one voice, so it leaves that voice nameless and asks the rest."""
     asked = []
 
-    def eleven(key, voice_id):
-        asked.append(voice_id)
-        raise _http(403)
+    def eleven(status):
+        def lookup(key, voice_id):
+            asked.append(voice_id)
+            raise _http(status)
+        return lookup
     ids = {f"{i:020d}" for i in range(30)}
     for _ in range(2):
         voice_names.refresh(_cfg("cartesia", cartesia_api_key=""), path=names_file,
-                            cartesia_all=lambda key: [], cartesia_one=lambda k, v: {}, eleven_one=eleven,
+                            cartesia_all=lambda key: [], cartesia_one=lambda k, v: {}, eleven_one=eleven(401),
                             voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": ids})
     assert len(asked) == 1
-    assert json.loads(names_file.read_text())["_refused"]["elevenlabs"]["status"] == 403
+    assert json.loads(names_file.read_text())["_refused"]["elevenlabs"]["status"] == 401
+    names_file.unlink()
+    asked.clear()
+    voice_names.refresh(_cfg("cartesia", cartesia_api_key=""), path=names_file,
+                        cartesia_all=lambda key: [], cartesia_one=lambda k, v: {}, eleven_one=eleven(403),
+                        voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": ids})
+    assert len(asked) == 30 and "_refused" not in json.loads(names_file.read_text())
+
+
+def test_a_refused_voice_lookup_after_a_good_catalogue_is_not_a_refused_key(names_file):
+    """Reviewer 4 on 564: Cartesia's key is proved by the catalogue fetch; a 403 for one voice
+    in use (withdrawn, not shared) leaves that voice nameless and never freezes the catalogue."""
+    import os
+    import time
+    asked = []
+
+    def one(key, voice_id):
+        asked.append(voice_id)
+        raise _http(403)
+    for _ in range(2):
+        voice_names.refresh(_cfg("cartesia", eleven_api_key=""), path=names_file,
+                            cartesia_all=lambda key: asked.append("catalogue") or [{"id": "v1", "name": "One"}],
+                            cartesia_one=one, eleven_one=lambda k, v: {},
+                            voices_in_use=lambda _cfg: {"cartesia": {OTHER}, "elevenlabs": set()})
+        old = time.time() - voice_names.REFRESH_SECONDS - 60          # the next day
+        os.utime(names_file, (old, old))
+    stored = json.loads(names_file.read_text())
+    assert "_refused" not in stored and list(stored["_catalogue"]["cartesia"]) == ["v1"]
+    assert asked == ["catalogue", OTHER, "catalogue", OTHER]          # asked again the next day
+    assert voice_names.start_due() is True
+
+
+def test_a_replaced_key_makes_the_file_due_at_once(names_file, monkeypatch):
+    """Reviewer 4's note on 564: a key refused, then replaced: the next start asks at once."""
+    refused_cfg = _cfg("cartesia", eleven_api_key="")
+    voice_names.refresh(refused_cfg, path=names_file, cartesia_all=lambda key: (_ for _ in ()).throw(_http(401)),
+                        cartesia_one=lambda k, v: {}, eleven_one=lambda k, v: {},
+                        voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": set()})
+    monkeypatch.setattr(config, "load", lambda path=None: refused_cfg)
+    assert voice_names.start_due() is False                          # same key: final
+    monkeypatch.setattr(config, "load",
+                        lambda path=None: _cfg("cartesia", cartesia_api_key="replaced", eleven_api_key=""))
+    assert voice_names.start_due() is True
 
 
 def test_retries_back_off_and_a_retry_pass_asks_only_for_the_catalogue(names_file):

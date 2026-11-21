@@ -40,7 +40,7 @@ def names_path() -> pathlib.Path:
 REFRESH_SECONDS = 24 * 3600
 RETRY_SECONDS = 15 * 60          # after a pass that left the file due (a keyed fetch failed)
 BACKOFF_SECONDS = (15 * 60, 3600, 4 * 3600)   # then daily: retries after a failure, in order
-REFUSED_STATUSES = (401, 403)    # the key is refused for good: final until the key changes
+REFUSED_STATUSES = (401, 403)    # on the Cartesia catalogue fetch: the key is refused, final until it changes
 FIRST_AFTER_SECONDS = 60.0
 # 2: catalogue rows read public from access/visibility (21 Nov 2026: Cartesia sends no
 # is_public, so every row of a format-1 file reads not public).
@@ -101,7 +101,7 @@ def signature(path: pathlib.Path | None = None) -> str | None:
 
 def start_due(path: pathlib.Path | None = None, now: float | None = None) -> bool:
     """Whether the start-up refresh is due: no file, one written by an older format of this
-    code (FORMAT), or one older than REFRESH_SECONDS."""
+    code (FORMAT), a key that was refused has been replaced, or one older than REFRESH_SECONDS."""
     path = path or names_path()
     try:
         age = (time.time() if now is None else now) - path.stat().st_mtime
@@ -110,7 +110,19 @@ def start_due(path: pathlib.Path | None = None, now: float | None = None) -> boo
     loaded = _loaded(path)
     if loaded and loaded[0].get("_format", 1) < FORMAT:
         return True
+    if loaded and _key_changed(loaded[0].get("_refused") or {}):
+        return True                       # a refused key was replaced: ask at once
     return age >= REFRESH_SECONDS
+
+
+def _key_changed(refused: dict) -> bool:
+    """Whether a provider recorded as refused now has a different key (never a fetch)."""
+    if not refused:
+        return False
+    from . import config as config_module
+    cfg = config_module.load()
+    keys = {CARTESIA: cfg.cartesia_key(), ELEVENLABS: cfg.eleven_key()}
+    return any(keys.get(p) and _key_mark(keys[p]) != (m or {}).get("key") for p, m in refused.items())
 
 
 def _read(path: pathlib.Path) -> dict[str, dict[str, str]]:
@@ -225,15 +237,17 @@ def _not_found(exc: Exception) -> bool:
 
 
 def _lookup(key: str, ids: set[str], fetch_one: Callable[[str, str], dict],
-            provider: str) -> tuple[dict[str, str], set[str]]:
-    """(names found, ids the provider answered 404 for)."""
+            provider: str, *, key_refused: tuple[int, ...] = ()) -> tuple[dict[str, str], set[str]]:
+    """(names found, ids the provider answered 404 for). A status in ``key_refused`` proves
+    the KEY refused and ends the pass (_KeyRefused); any other error leaves that one voice
+    nameless (a 401/403 for one voice can be a voice withdrawn or not shared)."""
     from .log import log_exception
     out, missing = {}, set()
     for voice_id in sorted(ids)[:MAX_LOOKUPS]:
         try:
             row = fetch_one(key, voice_id) or {}
         except Exception as exc:  # noqa: BLE001 - an unknown or removed voice stays nameless
-            if _status(exc) in REFUSED_STATUSES:
+            if _status(exc) in key_refused:
                 raise _KeyRefused(_status(exc)) from exc       # no point asking about the rest
             if _not_found(exc):
                 missing.add(voice_id)
@@ -318,8 +332,11 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
     eleven_ids = {v for v in used.get(ELEVENLABS, set()) if elevenlabs_id_usable(v)}
     if asked(ELEVENLABS, eleven_key) and eleven_ids:
         try:
+            # ElevenLabs has no catalogue fetch here: a 401 on a lookup proves the key refused;
+            # a 403 can be one voice, so it only leaves that voice nameless.
             fresh[ELEVENLABS], gone_now[ELEVENLABS] = _lookup(
-                eleven_key, eleven_ids, eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS)
+                eleven_key, eleven_ids, eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS,
+                key_refused=(401,))
         except _KeyRefused as exc:
             refused_now[ELEVENLABS] = exc.status
     old_format = path.exists() and current.get("_format", 1) < FORMAT
