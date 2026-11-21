@@ -360,6 +360,7 @@ pub struct App {
     pub desks: Arc<Mutex<Presence>>,
     /// The bytes of the files agents publish.
     pub blobs: Arc<dyn Blobs>,
+    pub gallery: crate::gallery::Writer,
     /// What the apps have reported of themselves: whether one is in front, and touched.
     pub activity: Arc<Mutex<Leases>>,
     /// The engines that listen: what turns a clip of speech into text.
