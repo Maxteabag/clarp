@@ -181,6 +181,11 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
                 "the pipe write is no read"
             );
             assert!(reads(&heard, &session, &id).is_empty());
+            assert_eq!(
+                host.ask("PUT", &format!("/turn-queue/{id}"), Some(&json!({"text":"new"}))).0,
+                404
+            );
+            assert_eq!(host.ask("DELETE", &format!("/turn-queue/{id}"), None).0, 404);
             expected.push(format!("u-{id}"));
         }
         if mode == "stop" {
