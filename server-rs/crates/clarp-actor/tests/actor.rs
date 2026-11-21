@@ -5228,33 +5228,56 @@ fn a_verified_relay_is_mixed_at_acceptance_with_its_sender() {
 }
 
 #[test]
-fn a_verified_retry_of_a_hidden_relay_reveals_the_row_once() {
-    let mut world = World::new("relay-retry-mixed");
+fn a_verified_relay_with_a_new_id_reveals_the_prior_turn_of_its_trace() {
+    let mut world = World::new("relay-trace-mixed");
     let mut actor = world.open();
-    let (message, mut marks) = from_an_agent("u-relay", "tr-relay");
+    let (first, ordinary) = from_an_agent("u-first", "tr-relay");
     actor
-        .send_marked(&message, Admission::Queue, None, &marks, world.tick())
+        .send_marked(&first, Admission::Queue, None, &ordinary, world.tick())
         .unwrap()
         .unwrap();
     let before = actor.tail_of(4, Which::WithoutCoordination).unwrap();
     assert!(before.entries.is_empty());
-    marks.user_word = true;
+
+    let verified = Marks {
+        user_word: true,
+        ..ordinary.clone()
+    };
     let (sent, out) = actor
-        .send_marked(&message, Admission::Queue, None, &marks, world.tick())
+        .send_marked(&first, Admission::Queue, None, &verified, world.tick())
         .unwrap()
         .unwrap();
-    assert!(sent.duplicate && out.changed.conversation);
+    assert!(sent.duplicate);
+    assert!(!out.changed.conversation);
+    assert_eq!(actor.head_revision(), before.latest_revision);
+    assert_eq!(actor.mark(1).unwrap().as_deref(), Some("a-boss"));
+
+    let (relay, _) = from_an_agent("u-relay", "tr-relay");
+    assert!(
+        actor
+            .send_marked(&relay, Admission::Later, None, &ordinary, world.tick())
+            .unwrap()
+            .is_err()
+    );
+    let (sent, out) = actor
+        .send_marked(&relay, Admission::Later, None, &verified, world.tick())
+        .unwrap()
+        .unwrap();
+    assert_eq!(sent.turn, Some(TurnId(2)));
+    assert!(out.changed.conversation);
     let page = actor
         .after_of(before.latest_revision, 4, Which::WithoutCoordination)
         .unwrap();
     assert_eq!(page.entries.len(), 1);
-    assert_eq!(page.entries[0].entry.id(), "u-relay");
+    assert_eq!(page.entries[0].entry.id(), "u-first");
     assert!(page.entries[0].coordination.is_none());
-    let (_, repeated) = actor
-        .send_marked(&message, Admission::Queue, None, &marks, world.tick())
+    assert!(actor.mark(2).unwrap().is_none());
+
+    let (again, out) = actor
+        .send_marked(&relay, Admission::Later, None, &verified, world.tick())
         .unwrap()
         .unwrap();
-    assert!(!repeated.changed.conversation);
+    assert!(again.duplicate && !out.changed.conversation);
     assert_eq!(actor.head_revision(), page.latest_revision);
 }
 
