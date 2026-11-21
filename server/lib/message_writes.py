@@ -863,6 +863,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
     completed = writer.heartbeat_completed
     writer = _ImportWriter(database, locked=True)
     writer.heartbeat_completed = completed
+    writer.head_key = (agent_id, backend_session_id)
     try:
         prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
         out = _store_transcript_turns_txn(
@@ -1183,6 +1184,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
     writer = _TailWriter(database) if yield_after_first_write \
         else _ImportWriter(database, locked=True)
     writer.heartbeat_completed = completed
+    writer.head_key = (agent_id, backend_session_id)
     try:
         prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
         guard(prepared)
