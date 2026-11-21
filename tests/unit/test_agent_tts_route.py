@@ -230,7 +230,7 @@ def test_a_failing_override_without_a_fallback_is_silent_and_the_ring_still_ring
 # ---- unchanged: no override, no agent, disabled, preview, muted ------------------------------
 
 @pytest.mark.parametrize("global_provider,expected", [
-    ("cartesia", [("cartesia-direct", "<theo's cartesia voice>")]),  # the persona's Cartesia voice
+    ("cartesia", [("cartesia", "<theo's cartesia voice>")]),         # the persona's Cartesia voice
     ("elevenlabs", [("elevenlabs-direct", "stored-voice")]),
     ("custom.alt", [("custom.alt", "rec-default")]),                # the adapter's default voice
 ])
@@ -246,10 +246,13 @@ def test_without_an_override_the_direct_path_is_unchanged(env, global_provider, 
 
 
 @pytest.mark.parametrize("session", [None, "", "nobody-0000"])
-def test_without_an_agent_the_direct_path_is_unchanged(env, session):
+def test_without_an_agent_no_second_provider_speaks(env, session):
+    """Ruling O: with no Cartesia voice and fallback none, a line outside a turn is not
+    spoken by ElevenLabs any more (it used to be, whatever the configuration said)."""
     env.configure("cartesia", {**SANDER, "nobody-0000": SANDER["sander"]})
-    env.engine.synthesize("Hello", "stored-voice", session=session)
-    assert env.spoken() == [("elevenlabs-direct", "stored-voice")]   # no Cartesia voice: today's EL fallback
+    with pytest.raises(Exception):
+        env.engine.synthesize("Hello", "stored-voice", session=session)
+    assert env.spoken() == []
 
 
 def test_a_legacy_voice_map_still_resolves_per_provider(env):
@@ -318,13 +321,13 @@ def test_a_same_provider_voice_override_takes_the_agent_route_with_that_voice(en
     {"cartesia_voice": ""},                           # an empty voice
     {"provider": "cartesia"},                         # the global provider, named again
 ])
-def test_an_override_that_changes_nothing_keeps_the_legacy_path(env, override):
+def test_an_override_that_changes_nothing_takes_the_configured_ladder(env, override):
     env.configure("cartesia", {"sander": override})
     ring = _ring(env)
-    # Today's direct path: Sander has no Cartesia voice, so the built-in ElevenLabs backup.
-    assert ring["opening_audio_url"].startswith("/audio/")
-    assert env.spoken() == [("elevenlabs-direct", "stored-voice")]
-    assert env.builtin[0]["api_key"] == "engine-key"
+    # Ruling O: Sander has no Cartesia voice and the fallback is none: a silent opening,
+    # truthfully, instead of the ElevenLabs backup the configuration excluded.
+    assert ring["opening_audio_url"] == ""
+    assert env.spoken() == []
 
 
 # ---- F1(a): the agent route falls back exactly as the queue does ------------------------------
@@ -348,12 +351,19 @@ def test_an_effective_override_with_a_configured_fallback_uses_exactly_it(env):
     assert env.spoken() == [("cartesia", "sander-cartesia"), ("custom.alt", "rec-default")]
 
 
-def test_without_an_effective_override_the_elevenlabs_backup_is_unchanged(env):
+def test_without_an_effective_override_no_second_provider_either(env):
     cfg = env.configure("cartesia", {"sander": {"gemini_voice": "Charon"}})
-    env.fail.add("cartesia-direct")
+    env.fail.add("cartesia")
     _ring(env, agent="a-theo")
-    assert env.spoken() == [("cartesia-direct", cfg.cartesia_voice_for("Theo")),
-                            ("elevenlabs-direct", "stored-voice")]
+    assert env.spoken() == [("cartesia", cfg.cartesia_voice_for("Theo"))]     # ruling O
+
+
+def test_without_an_effective_override_the_configured_fallback_speaks(env):
+    cfg = env.configure("cartesia", {"sander": {"gemini_voice": "Charon"}}, fallback="elevenlabs")
+    env.fail.add("cartesia")
+    _ring(env, agent="a-theo")
+    assert env.spoken() == [("cartesia", cfg.cartesia_voice_for("Theo")),
+                            ("elevenlabs-direct", "stored-voice")]          # the engine's file transport
 
 
 def test_the_adapter_dir_is_the_sessions_own_empty_dir():

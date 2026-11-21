@@ -1005,40 +1005,14 @@
   "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=context": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=herald": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=preview": {
   "calls": [],
@@ -1046,22 +1020,9 @@
   "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=ring": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=deepgram|purpose=context": {
   "calls": [
@@ -1176,10 +1137,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs|purpose=herald": {
   "calls": [
@@ -1194,10 +1165,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs|purpose=preview": {
   "calls": [
@@ -1240,10 +1221,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=False|provider=gemini|purpose=context": {
   "calls": [
@@ -1442,22 +1433,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=cartesia|purpose=herald": {
   "calls": [
@@ -1470,22 +1449,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=cartesia|purpose=preview": {
   "calls": [
@@ -1514,22 +1481,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=deepgram|purpose=context": {
   "calls": [
@@ -1644,10 +1599,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs|purpose=herald": {
   "calls": [
@@ -1662,10 +1627,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs|purpose=preview": {
   "calls": [
@@ -1708,10 +1683,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=cartesia|override=none|primary_key=True|provider=gemini|purpose=context": {
   "calls": [
@@ -4495,40 +4480,14 @@
   "result": "RuntimeError: gemini failed"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=context": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=herald": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=preview": {
   "calls": [],
@@ -4536,22 +4495,9 @@
   "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=ring": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
+  "calls": [],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=False|provider=deepgram|purpose=context": {
   "calls": [
@@ -4801,22 +4747,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=True|provider=cartesia|purpose=herald": {
   "calls": [
@@ -4829,22 +4763,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=True|provider=cartesia|purpose=preview": {
   "calls": [
@@ -4873,22 +4795,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
   "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=both-fail|fallback=none|override=none|primary_key=True|provider=deepgram|purpose=context": {
   "calls": [
@@ -5753,40 +5663,14 @@
   "result": "ok:ID3gemini"
  },
  "failure=ok|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=context": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=herald": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": true,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=preview": {
   "calls": [],
@@ -5794,22 +5678,9 @@
   "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=ring": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=cartesia|override=none|primary_key=False|provider=deepgram|purpose=context": {
   "calls": [
@@ -8269,40 +8140,14 @@
   "result": "ok:ID3gemini"
  },
  "failure=ok|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=context": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=herald": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": true,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=preview": {
   "calls": [],
@@ -8310,22 +8155,9 @@
   "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=ring": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=ok|fallback=none|override=none|primary_key=False|provider=deepgram|purpose=context": {
   "calls": [
@@ -9871,40 +9703,14 @@
   "result": "ok:ID3cartesia"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=context": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=herald": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": true,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=preview": {
   "calls": [],
@@ -9912,22 +9718,9 @@
   "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=cartesia|purpose=ring": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=deepgram|purpose=context": {
   "calls": [
@@ -10042,10 +9835,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
-  "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "internal_filename": false,
+  "result": "ok:ID3cartesia"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs|purpose=herald": {
   "calls": [
@@ -10060,10 +9863,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
-  "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "internal_filename": true,
+  "result": "ok:ID3cartesia"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=elevenlabs|purpose=preview": {
   "calls": [
@@ -10106,10 +9919,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
-  "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "internal_filename": false,
+  "result": "ok:ID3cartesia"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=False|provider=gemini|purpose=context": {
   "calls": [
@@ -10308,22 +10131,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "internal_filename": null,
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=True|provider=cartesia|purpose=herald": {
   "calls": [
@@ -10336,22 +10147,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
-  "internal_filename": true,
-  "result": "ok:ID3elevenlabs"
+  "internal_filename": null,
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=True|provider=cartesia|purpose=preview": {
   "calls": [
@@ -10380,22 +10179,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "internal_filename": null,
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=True|provider=deepgram|purpose=context": {
   "calls": [
@@ -10510,10 +10297,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
-  "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "internal_filename": false,
+  "result": "ok:ID3cartesia"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs|purpose=herald": {
   "calls": [
@@ -10528,10 +10325,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
-  "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "internal_filename": true,
+  "result": "ok:ID3cartesia"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=True|provider=elevenlabs|purpose=preview": {
   "calls": [
@@ -10574,10 +10381,20 @@
     "text": "plain",
     "transport": "direct",
     "voice": "eleven-ada"
+   },
+   {
+    "provider": "cartesia",
+    "settings": {
+     "api_key": "ck",
+     "model": "sonic-3.5"
+    },
+    "text": "plain",
+    "transport": "http",
+    "voice": "cart-ada"
    }
   ],
-  "internal_filename": null,
-  "result": "ElevenWSError: elevenlabs failed"
+  "internal_filename": false,
+  "result": "ok:ID3cartesia"
  },
  "failure=primary-fails|fallback=cartesia|override=none|primary_key=True|provider=gemini|purpose=context": {
   "calls": [
@@ -13361,40 +13178,14 @@
   "result": "RuntimeError: gemini failed"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=context": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=herald": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": true,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=preview": {
   "calls": [],
@@ -13402,22 +13193,9 @@
   "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=False|provider=cartesia|purpose=ring": {
-  "calls": [
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
-   }
-  ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "calls": [],
+  "internal_filename": null,
+  "result": "CartesiaError: Cartesia key or voice is not configured"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=False|provider=deepgram|purpose=context": {
   "calls": [
@@ -13667,22 +13445,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "internal_filename": null,
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=True|provider=cartesia|purpose=herald": {
   "calls": [
@@ -13695,22 +13461,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
-  "internal_filename": true,
-  "result": "ok:ID3elevenlabs"
+  "internal_filename": null,
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=True|provider=cartesia|purpose=preview": {
   "calls": [
@@ -13739,22 +13493,10 @@
     "text": "plain",
     "transport": "http",
     "voice": "cart-ada"
-   },
-   {
-    "provider": "elevenlabs",
-    "settings": {
-     "api_key": "engine-key",
-     "model": "engine-model",
-     "speed": 1.3,
-     "timeout": 12
-    },
-    "text": "plain",
-    "transport": "direct",
-    "voice": "eleven-ada"
    }
   ],
-  "internal_filename": false,
-  "result": "ok:ID3elevenlabs"
+  "internal_filename": null,
+  "result": "CartesiaError: cartesia failed"
  },
  "failure=primary-fails|fallback=none|override=none|primary_key=True|provider=deepgram|purpose=context": {
   "calls": [
