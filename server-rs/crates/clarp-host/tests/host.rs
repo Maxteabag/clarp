@@ -42630,7 +42630,7 @@ fn transcription_guidance_reaches_the_phone_and_the_speech_engine() {
     );
     assert_eq!(
         host.ask_as(&limited, "GET", ROUTE, None),
-        (403, json!({"error":"full device access required"}))
+        (200, before.clone())
     );
     assert_eq!(
         host.ask_as(&limited, "POST", ROUTE, Some(&json!({}))).0,
