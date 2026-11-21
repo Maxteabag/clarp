@@ -39,6 +39,8 @@ pub enum ShimEvent {
     Stopping {
         signal: String,
     },
+    /// The shim committed a hold's consumption before sending SIGKILL.
+    Takeover { fence: u64, replaced_by: u64 },
     /// The process is gone. A process that was killed has a signal and no code.
     Exited {
         code: Option<i32>,
