@@ -2669,6 +2669,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             "client_msg_id": row["client_msg_id"] or "",
             "sent_at": iso_from_ms(int(row["enqueued_at"])),
             "kind": row["kind"] or turn_queue.KIND_LATER,
+            # queued, claimed or started: a started item is already being read (a steer
+            # into the running turn, or its own turn) and is no longer waiting.
+            "status": row["status"] or "queued",
             **turn_queue.item_provenance(row),
         } for row in turn_queue.waiting_items(agent["agent_id"])]
         return self._json_ok({

@@ -757,7 +757,9 @@ Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/s
 releases one. Each item is `{id, text, enqueued_at, synthesize_audio, client_msg_id,
 sent_at, kind}` (the last three from Host contract 115): `sent_at` is ISO,
 `kind` is `waiting` (a send that met a busy agent) or `later` (its sender asked
-it to wait). Each item also says who it is from: `origin`, the stored value (an open set:
+it to wait). Each item also carries `status` (optional; `queued`, `claimed` or `started`): a
+`started` item is already being read, by a steer into the running turn or by its own turn,
+and is no longer waiting; it leaves the list once its row is written. Each item also says who it is from: `origin`, the stored value (an open set:
 `user`, `oracle`, `agent`, `automation` for a goal wake or a schedule, `janitor`,
 `heartbeat`, ...), and `sender`, `{agent_id, name}` when an agent sent it (`name` is `null`
 once that agent is gone), else `null`. A user's send from another device is
