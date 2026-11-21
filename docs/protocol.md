@@ -718,9 +718,12 @@ Rules:
   `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
   queues as if `queue_if_busy` were true. `/stop` pauses the queue to
   hold its backlog. The user's next fresh message (a plain user or Oracle send,
-  whether it starts a turn or is taken as a follow-up or a steer) runs past the
-  pause and ends it: what the Stop held then runs after it, in its queue order
-  (the user's own first, oldest first). A Send Now of a held item, another
+  whether it starts a turn or is taken as a follow-up or a steer) ends the
+  pause, and what the Stop held runs again in the queue's order: the user's own
+  messages first, oldest first, then the rest. On an idle agent the fresh
+  message starts at once and the held work follows it; on a busy agent the
+  fresh message waits too and takes its place in that order, behind the user's
+  older held messages. A Send Now of a held item, another
   agent's message, a goal wake or a schedule does not end it, and a Stop with
   nothing after it stays in force, across restarts too.
   A peer message, a queued user or Oracle send, and a goal wake the user
