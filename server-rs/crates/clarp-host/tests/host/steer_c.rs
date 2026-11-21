@@ -169,11 +169,21 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         });
         let hidden = (mode == "mixed").then(|| {
             let page = host.get(&format!("/log?session={session}"));
-            let first = page["turns"].as_array().unwrap().iter()
-                .find(|row| row["id"] == "u-first").unwrap();
+            let first = page["turns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == "u-first")
+                .unwrap();
             assert_eq!(first["audience"], "agents");
-            assert_eq!(host.get(&format!("/live?session={session}"))["turn"]["audience"], "agents");
-            (page["latest_revision"].as_u64().unwrap(), first["sender_agent_id"].clone())
+            assert_eq!(
+                host.get(&format!("/live?session={session}"))["turn"]["audience"],
+                "agents"
+            );
+            (
+                page["latest_revision"].as_u64().unwrap(),
+                first["sender_agent_id"].clone(),
+            )
         });
         let mut expected = vec!["u-first".to_owned()];
         let mut traces = Vec::new();
@@ -245,8 +255,12 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
                     host.get(&format!("/live?session={session}"))["turn"]["audience"] == "user"
                 });
                 let delta = host.get(&format!("/log?session={session}&after_revision={cursor}"));
-                let prior = delta["turns"].as_array().unwrap().iter()
-                    .find(|row| row["id"] == "u-first").unwrap();
+                let prior = delta["turns"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["id"] == "u-first")
+                    .unwrap();
                 assert_eq!(prior["audience"], "user");
                 assert_eq!(&prior["sender_agent_id"], sender);
                 assert_eq!(prior["origin"], "agent");

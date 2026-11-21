@@ -8,7 +8,10 @@ use clarp_kernel::turn::{COMPACTION, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
 
-use super::{Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, conversation, message_at, written};
+use super::{
+    Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, conversation, message_at,
+    written,
+};
 
 #[derive(Default)]
 pub(super) struct State {
