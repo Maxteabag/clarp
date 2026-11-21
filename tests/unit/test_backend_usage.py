@@ -1465,3 +1465,32 @@ def test_snapshot_and_exhaustion_take_no_write_lock_behind_active_writer(tmp_pat
     ).fetchall()
     plan_text = " | ".join(str(tuple(r)) for r in plan)
     assert "idx_state_log_agent_ts" in plan_text
+
+
+def test_the_usage_refresher_never_starts_under_the_test_suite(monkeypatch):
+    """Every in-process Host a test builds starts its workers; a refresher there
+    reached for the real Codex app-server 20 s later, from another test."""
+    worker = backend_usage.UsageRefreshWorker(stream=None)
+    worker.start()
+    assert worker._thread is None
+    monkeypatch.delenv(backend_usage.REFRESH_WORKER_ENV)
+    worker.start()                  # an installed Host has no such variable
+    try:
+        assert worker._thread is not None and worker._thread.is_alive()
+    finally:
+        worker.stop()
+        worker._thread.join(5)
+    assert not worker._thread.is_alive()
+
+
+@pytest.mark.parametrize("value", ["false", "1", "no", "", " ", None])
+def test_only_zero_switches_the_usage_refresher_off(monkeypatch, value):
+    """Only "0" turns the refresher off; any other value, or none, leaves an
+    installed Host's refresher on (a typo must not silence quota checks)."""
+    if value is None:
+        monkeypatch.delenv(backend_usage.REFRESH_WORKER_ENV)
+    else:
+        monkeypatch.setenv(backend_usage.REFRESH_WORKER_ENV, value)
+    assert backend_usage.refresh_worker_enabled() is True
+    monkeypatch.setenv(backend_usage.REFRESH_WORKER_ENV, " 0 ")
+    assert backend_usage.refresh_worker_enabled() is False
