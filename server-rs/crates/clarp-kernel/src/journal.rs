@@ -62,6 +62,8 @@ pub mod kind {
     /// A change to helper cells on a parent message. Its place in a
     /// conversation page is still the original row.
     pub const HELPER_CELLS: u16 = 113;
+    /// A hidden row whose turn the user joined. Its row stays where it was written.
+    pub const AUDIENCE_ROW: u16 = 114;
     /// A [`Note`](crate::conversation::Note): what an agent left for its user from a turn
     /// (`POST /agent-notes`). A row of the conversation, as a reply is.
     pub const AGENT_NOTE: u16 = 105;
@@ -69,6 +71,8 @@ pub mod kind {
     /// ([`super::trace_key`]), written with the message. A send that names a trace another
     /// message has is refused by one look by key.
     pub const TRACE: u16 = 900;
+    /// A coordination turn that the user joined. The original sender mark remains.
+    pub const MIXED_TURN: u16 = 901;
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;
@@ -767,6 +771,10 @@ impl Batch<'_> {
     /// Read messages from the committed portion of the transaction.
     pub fn log(&self) -> &dyn AgentLog {
         self.recorder.log()
+    }
+
+    pub fn queue_depth(&self) -> usize {
+        self.work.waiting().filter(|queued| !self.recorder.shown_waiting.contains(&queued.id)).count()
     }
 
     /// Writes everything in one append, then changes the state.

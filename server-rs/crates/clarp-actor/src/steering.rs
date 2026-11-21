@@ -8,9 +8,7 @@ use clarp_kernel::turn::{COMPACTION, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
 
-use super::{
-    Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, Waiting, message_at, written,
-};
+use super::{Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, conversation, message_at, written};
 
 #[derive(Default)]
 pub(super) struct State {
@@ -23,6 +21,12 @@ pub(super) struct State {
     /// Once a separate turn was read, the process's exit is no longer the parent's verdict.
     crossed: bool,
     pub(super) joined_speech: bool,
+    pub(super) mixed: bool,
+}
+
+pub(super) struct Sharing {
+    pub(super) speak: bool,
+    pub(super) revealed: bool,
 }
 
 pub(super) struct Separate {
@@ -92,7 +96,7 @@ impl State {
         closes: &str,
         now_ms: i64,
         out: &mut Outputs,
-    ) -> Result<Option<bool>, ActorError> {
+    ) -> Result<Option<Sharing>, ActorError> {
         match self.stream.observe(event) {
             Observation::Echo(uuid) => {
                 let Some((&turn, follow)) =
@@ -106,21 +110,18 @@ impl State {
                     return Ok(None);
                 };
                 let message = message_at(batch.log(), follow.message_seq)?;
-                let Some(queued) = batch.agent().waiting().find(|queued| queued.id == turn) else {
-                    return Ok(None);
-                };
-                let waiting =
-                    Waiting::from_message(&message, turn, queued.accepted_at_ms, queued.admission);
+                let into = follow.join.into;
                 if batch.command(Command::JoinRead { turn }, now_ms).is_ok() {
                     out.changed.queue = true;
                     let agent = batch.agent();
                     let queue = QueueState {
-                        waiting: agent.waiting().count(),
+                        waiting: batch.queue_depth(),
                         paused: agent.is_paused(),
                         revision: agent.queue_revision(),
                     };
                     out.joined_reads.push(JoinedRead {
-                        message: waiting,
+                        turn,
+                        client_id: message.client_id().to_owned(),
                         queue,
                     });
                     let speak = message.speak;
@@ -130,7 +131,9 @@ impl State {
                         }
                         return Ok(None);
                     }
-                    return Ok(Some(speak));
+                    let revealed = !self.mixed && conversation::loosen(batch, into, now_ms)?;
+                    self.mixed |= revealed;
+                    return Ok(Some(Sharing { speak, revealed }));
                 }
             }
             Observation::Result { prompts, failed } if !prompts.is_empty() => {
