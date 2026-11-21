@@ -110,8 +110,13 @@ impl Hub {
         }
     }
 
-    pub(crate) fn queue_roster(&self, roster: &Arc<watch::Receiver<Arc<Directory>>>) {
-        let _ = self.queue_roster.set(Arc::downgrade(roster));
+    pub(crate) fn queue_roster(
+        &self,
+        roster: &Arc<watch::Receiver<Arc<Directory>>>,
+    ) -> Result<(), &'static str> {
+        self.queue_roster
+            .set(Arc::downgrade(roster))
+            .map_err(|_| "the queue roster is already attached")
     }
 
     pub(crate) fn queue_directory(&self) -> Option<Arc<Directory>> {
