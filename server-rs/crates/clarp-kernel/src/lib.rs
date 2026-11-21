@@ -36,6 +36,7 @@ pub mod explain;
 pub mod failures;
 pub mod fcm;
 pub mod fork;
+pub mod gallery;
 pub mod goals;
 pub mod grok_muse;
 pub mod grok_muse_history;
