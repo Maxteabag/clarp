@@ -291,3 +291,19 @@ def test_the_walk_starts_at_the_names_hash():
     name = _name_starting_at(5, len(pool))
     assert json.loads(voice_pool.assign(cfg, name, "{}", agents=[], contacts=[]))["cartesia"] == pool[5]
     assert voice_pool.pick(cfg, "cartesia", "Quentin", Counter()) == pool[_walk_start("Quentin", len(pool))]
+
+
+def test_the_pool_hands_out_only_todays_catalogue(tmp_path, monkeypatch):
+    """Live find (21 Nov): Cartesia deleted voices agents spoke with. A voice still remembered
+    by name but missing from today's catalogue, or answered 404, is never handed out."""
+    names_file = tmp_path / "voice-names.json"
+    monkeypatch.setenv("CLARP_VOICE_NAMES", str(names_file))
+    names_file.write_text(json.dumps({
+        "cartesia": {"old-deleted": "Old", "today-1": "One", "today-2": "Two", "gone-1": "Gone"},
+        "_catalogue": {"cartesia": ["today-1", "today-2", "gone-1"]},
+        "_gone": {"cartesia": ["gone-1"]}}))
+    cfg = config.Config(tts_provider="cartesia", cartesia_voices={})
+    assert voice_pool.pool(cfg, "cartesia") == ["today-1", "today-2"]
+    picks = {json.loads(voice_pool.assign(cfg, f"Name{i}", "{}", agents=[], contacts=[]))["cartesia"]
+             for i in range(20)}
+    assert picks <= {"today-1", "today-2"}
