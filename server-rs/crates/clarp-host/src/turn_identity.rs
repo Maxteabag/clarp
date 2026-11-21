@@ -134,7 +134,7 @@ impl Signer {
         if let Some(key) = self.key() {
             return Ok(key);
         }
-        let unavailable = || Unavailable(UNAVAILABLE.to_string());
+        let unavailable = || Unavailable::new(UNAVAILABLE.to_string());
         let kept = fleet.kept(KIND, KEY.to_string()).await;
         let key = kept.map_err(|_| unavailable())?.as_deref().and_then(key_of);
         let key = key.ok_or_else(unavailable)?;
@@ -160,7 +160,7 @@ pub async fn caller(app: &App, token: &str) -> Result<Option<Arc<Member>>, Unava
         return Ok(None);
     };
     let standing = member.agent.standing(claim.turn).await;
-    let standing = standing.map_err(|_| Unavailable(UNAVAILABLE.to_string()))?;
+    let standing = standing.map_err(|_| Unavailable::new(UNAVAILABLE.to_string()))?;
     let current = turn_identity::current(standing, app.clock.now_ms());
     Ok(current.then(|| member.clone()))
 }
@@ -211,7 +211,7 @@ pub async fn publishing_trace(
         return Ok(String::new());
     };
     let running = member.agent.running_trace(claim.turn).await;
-    let running = running.map_err(|_| unavailable(Unavailable(UNAVAILABLE.to_string())))?;
+    let running = running.map_err(|_| unavailable(Unavailable::new(UNAVAILABLE.to_string())))?;
     Ok(running.unwrap_or_default())
 }
 

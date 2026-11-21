@@ -514,6 +514,7 @@ pub struct ApiError {
     detail: Option<Value>,
     /// Says to the caller that the same request may well be met when it is asked again.
     retryable: bool,
+    body: Option<Value>,
 }
 
 impl ApiError {
@@ -524,6 +525,7 @@ impl ApiError {
             plain: false,
             detail: None,
             retryable: false,
+            body: None,
         }
     }
 
@@ -561,6 +563,7 @@ impl ApiError {
             plain: true,
             detail: None,
             retryable: false,
+            body: None,
         }
     }
 
@@ -587,13 +590,29 @@ pub(crate) fn body_text<'a>(
 
 impl From<Unavailable> for ApiError {
     fn from(unavailable: Unavailable) -> Self {
-        Self::new(StatusCode::SERVICE_UNAVAILABLE, unavailable.0)
+        use clarp_kernel::agent::Refusal;
+        let body = match unavailable.1 {
+            Some(Refusal::Moved(mark)) => json!({
+                "ok": false, "error": unavailable.0, "moved_to": mark.to, "moved_at": mark.at,
+            }),
+            Some(Refusal::AlreadyMoved(mark)) => json!({
+                "ok": false, "error": unavailable.0,
+                "detail": format!("already moved to {} ({})", mark.to.host, mark.to.id), "moved": mark,
+            }),
+            _ => return Self::new(StatusCode::SERVICE_UNAVAILABLE, unavailable.0),
+        };
+        Self {
+            body: Some(body),
+            ..Self::new(StatusCode::CONFLICT, unavailable.0)
+        }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        if self.plain {
+        if let Some(body) = self.body {
+            (self.status, Json(body)).into_response()
+        } else if self.plain {
             let kind = [(header::CONTENT_TYPE, "text/plain")];
             (self.status, kind, self.error).into_response()
         } else if let Some(detail) = self.detail {
@@ -633,6 +652,7 @@ pub fn router(app: App) -> Router {
         .route("/log", get(log))
         .route("/events", get(events))
         .route("/send", post(send))
+        .route("/agent-moved", post(crate::agent_moved::set))
         .route(
             "/agent-coordination",
             post(crate::hidden_coordination::set_chat),
@@ -1135,7 +1155,11 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 ApiError::new(StatusCode::UNAUTHORIZED, why).into_response()
             }
             Some((principal, _)) if out_of_scope(&principal, request.method(), &path) => {
-                let why = if matches!(principal, Principal::Tools) {
+                let why = if path == "/agent-moved" && matches!(principal, Principal::Tools) {
+                    "agents_may_not"
+                } else if path == "/agent-moved" {
+                    "full device access required"
+                } else if matches!(principal, Principal::Tools) {
                     "an agent's tools may ask for tools only"
                 } else {
                     clarp_kernel::devices::LIMITED_REFUSAL
@@ -1364,6 +1388,7 @@ pub(crate) fn agent_row(
         view.ended.as_ref(),
         focused,
     );
+    row["moved"] = json!(view.status.moved);
     row["coordination_visibility"] = json!(visibility);
     row["coordination_override"] = json!(choice);
     let working = view.working.as_ref();
@@ -1668,8 +1693,13 @@ async fn started_again(
     replaces: String,
     request: CreateAgentRequest,
 ) -> Result<Result<AgentRecord, NotMade>, (StatusCode, Value)> {
-    let unavailable =
-        |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
+    let unavailable = |why: Unavailable| {
+        let why = ApiError::from(why);
+        (
+            why.status,
+            why.body.unwrap_or_else(|| json!({"error":why.error})),
+        )
+    };
     let checked = app
         .fleet
         .start_again(replaces.clone(), request.clone(), true);
@@ -2775,6 +2805,7 @@ async fn send_as(
         (member, target.text, target.by_name)
     };
     member.agent.accepting_work()?;
+    member.agent.require_here()?;
     // A tool that takes its message on its command line takes no more than fits there:
     // refused before anything is kept, in the Python Host's words.
     let tool = clarp_backend::by_id(&member.record.backend);

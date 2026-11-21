@@ -26,6 +26,8 @@ pub struct AgentSummary {
     pub backend: String,
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved: Option<AgentMove>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
@@ -108,4 +110,17 @@ pub struct Schedule {
     pub next_run_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// Where the agent moved, and when the source set its mark.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMove {
+    pub to: MoveTarget,
+    pub at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveTarget {
+    pub host: String,
+    pub id: String,
 }

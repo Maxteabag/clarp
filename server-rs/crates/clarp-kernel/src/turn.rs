@@ -319,6 +319,8 @@ pub struct Queued {
     pub admission: Admission,
     pub accepted_at_ms: i64,
     pub user_word: bool,
+    /// A held unsent continuation resumes on a fresh attempt, keeping its existing row.
+    pub attempt: u32,
 }
 
 /// A turn whose tool process is being started: for the first time, or again.
@@ -434,6 +436,10 @@ impl std::fmt::Display for IllegalTransition {
 impl std::error::Error for IllegalTransition {}
 
 impl Queued {
+    pub(crate) fn returning_to_tool(&self) -> bool {
+        self.attempt > 1
+    }
+
     /// Accepts a message as a turn. This is where a turn begins.
     pub fn accept(
         turn: TurnId,
@@ -460,6 +466,7 @@ impl Queued {
                 admission,
                 accepted_at_ms: at_ms,
                 user_word,
+                attempt: 1,
             },
             event,
         )
@@ -472,7 +479,7 @@ impl Queued {
             origin: self.origin,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: at_ms,
-            attempt: 1,
+            attempt: self.attempt,
             backend_session: None,
             tool_count: 0,
             account: AccountWaits::default(),

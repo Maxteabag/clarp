@@ -49,7 +49,7 @@ PLANTS = [
     ('clarp-host/src/fleet.rs', 'port', "the store's words not said", 'self.log.unkept(kind, why);', 'self.log.unkept(kind, "");'),
     ('clarp-host/src/unkept.rs', 'guard', 'the line without its kind', 'let line = format!("clarp-host: a record of the kind {kind} was not kept: {why}");', 'let line = format!("clarp-host: a record was not kept: {why}");'),
     ('clarp-host/src/edge.rs', 'port', "the let-go's failure dropped", 'Err(unavailable) => told(unavailable),', 'Err(_) => failed,'),
-    ('clarp-host/src/edge.rs', 'port', 'a let-go that went told as failed', 'Ok(_) => failed,', 'Ok(_) => told(Unavailable("not let go".into())),'),
+    ('clarp-host/src/edge.rs', 'port', 'a let-go that went told as failed', 'Ok(_) => failed,', 'Ok(_) => told(Unavailable::new("not let go".into())),'),
     ('clarp-host/src/unkept.rs', 'guard', "the Oracle's keep not a write", 'if (method && WRITES.contains(&last)) || called == "keep" {', 'if method && WRITES.contains(&last) {'),
     ('clarp-host/src/unkept.rs', 'guard', 'a function of its own taken for a write', 'if (method && WRITES.contains(&last)) || called == "keep" {', 'if WRITES.contains(&last) || called == "keep" {'),
     ('clarp-host/src/unkept.rs', 'guard', 'a delete not a write', '        "delete",\n', '        "deleted",\n'),

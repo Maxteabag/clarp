@@ -152,7 +152,7 @@ impl Chip {
             });
         }
         held.as_mut()
-            .ok_or_else(|| Unavailable("the chip could not be read".to_string()))
+            .ok_or_else(|| Unavailable::new("the chip could not be read".to_string()))
     }
 
     pub async fn present(&self, app: &App) -> Option<Value> {

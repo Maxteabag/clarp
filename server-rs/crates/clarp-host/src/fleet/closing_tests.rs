@@ -280,7 +280,7 @@ async fn removed_whole(place: &Place, fleet: &FleetHandle) {
 }
 
 fn not_closed(answer: Result<bool, Unavailable>) {
-    let Err(Unavailable(why)) = answer else {
+    let Err(Unavailable(why, _)) = answer else {
         panic!("an agent that did not close was removed: {answer:?}");
     };
     assert_eq!(
@@ -351,7 +351,7 @@ async fn an_agent_awaiting_removal_refuses_new_work_and_keeps_its_tombstone() {
     );
     assert!(matches!(
         tokio::time::timeout(Duration::from_secs(1), sent).await.unwrap(),
-        Err(Unavailable(why)) if why == words
+        Err(Unavailable(why, _)) if why == words
     ));
     let made = fleet
         .create(CreateAgentRequest {
@@ -368,7 +368,7 @@ async fn an_agent_awaiting_removal_refuses_new_work_and_keeps_its_tombstone() {
     let renamed = tokio::time::timeout(Duration::from_secs(1), rename)
         .await
         .unwrap();
-    assert!(matches!(renamed, Err(Unavailable(why)) if why == words));
+    assert!(matches!(renamed, Err(Unavailable(why, _)) if why == words));
     assert_eq!(left_as_it_was(&place, &fleet).await, deleted_at);
     assert_eq!(fleet.directory().members.len(), 3);
     assert_eq!(stored(&fleet, HELD).await.persona, "held");

@@ -272,7 +272,7 @@ impl Desk {
             });
         }
         held.as_mut().ok_or_else(|| {
-            RecordFailure::Read(Unavailable("the calls could not be read".to_string()))
+            RecordFailure::Read(Unavailable::new("the calls could not be read".to_string()))
         })
     }
 
@@ -286,7 +286,7 @@ impl Desk {
             && let Some(raw) = app.fleet.kept("opening_history", id.into()).await?
         {
             let ring: rings::Ring =
-                serde_json::from_slice(&raw).map_err(|e| Unavailable(e.to_string()))?;
+                serde_json::from_slice(&raw).map_err(|e| Unavailable::new(e.to_string()))?;
             originals.insert(id.into(), ring.opening.clone());
             rings.attach_opening(ring);
         }
@@ -444,7 +444,7 @@ impl Desk {
                 RINGS,
                 TAKING_KEPT.to_string(),
                 serde_json::to_vec(taking)
-                    .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
+                    .map_err(|e| RecordFailure::Write(Unavailable::new(e.to_string())))?,
             ));
         }
         for principal in &of_calls.changed {
@@ -452,7 +452,7 @@ impl Desk {
                 KIND,
                 principal.clone(),
                 serde_json::to_vec(calls.of(principal))
-                    .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
+                    .map_err(|e| RecordFailure::Write(Unavailable::new(e.to_string())))?,
             ));
         }
         for (changed, name, bytes) in [
@@ -486,7 +486,7 @@ impl Desk {
                 rows.push((
                     RINGS,
                     name.to_string(),
-                    bytes.map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
+                    bytes.map_err(|e| RecordFailure::Write(Unavailable::new(e.to_string())))?,
                 ));
             }
         }
@@ -507,8 +507,9 @@ impl Desk {
                 if let Some(entries) = ring.opening["clip_bindings"].as_array() {
                     for entry in entries {
                         let binding: rings::binding::Binding =
-                            serde_json::from_value(entry.clone())
-                                .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?;
+                            serde_json::from_value(entry.clone()).map_err(|e| {
+                                RecordFailure::Write(Unavailable::new(e.to_string()))
+                            })?;
                         if let Some(key) = rings::binding::key(&ring.agent_id, binding.turn_id) {
                             rows.push((
                                 "opening_by_turn",
@@ -539,7 +540,7 @@ impl Desk {
                         "opening_history",
                         dropped.ring_id.clone(),
                         serde_json::to_vec(dropped)
-                            .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
+                            .map_err(|e| RecordFailure::Write(Unavailable::new(e.to_string())))?,
                     ));
                 }
             }
@@ -550,7 +551,7 @@ impl Desk {
                     "opening_history",
                     ring.ring_id.clone(),
                     serde_json::to_vec(&ring)
-                        .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
+                        .map_err(|e| RecordFailure::Write(Unavailable::new(e.to_string())))?,
                 ));
             }
         }

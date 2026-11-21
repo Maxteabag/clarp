@@ -69,9 +69,9 @@ impl Fleet {
         };
         let change = self
             .change_computer_job(command, vec![])?
-            .map_err(|why| Unavailable(why.to_string()))?;
+            .map_err(|why| Unavailable::new(why.to_string()))?;
         Ok(Admission::Begun(change.job.ok_or_else(|| {
-            Unavailable("missing portrait generation".into())
+            Unavailable::new("missing portrait generation".into())
         })?))
     }
 
@@ -100,22 +100,22 @@ impl Fleet {
             return Ok(false);
         };
         let Some(at) = self.place_of(&publication.agent_id) else {
-            return Err(Unavailable("unknown Agent session".into()));
+            return Err(Unavailable::new("unknown Agent session".into()));
         };
         self.members[at].agent.accepting_work()?;
         let mut record = self.members[at].record.clone();
         let digest = record
             .avatar
             .as_deref()
-            .ok_or_else(|| Unavailable("primary portrait unavailable".into()))?;
+            .ok_or_else(|| Unavailable::new("primary portrait unavailable".into()))?;
         let primary_name = picture_name(digest);
         let head = self
             .works
             .blobs
             .read(&primary_name, 0, 12)
-            .map_err(|e| Unavailable(e.to_string()))?;
+            .map_err(|e| Unavailable::new(e.to_string()))?;
         let kind = kept::picture_kind(&head)
-            .ok_or_else(|| Unavailable("primary portrait content unavailable".into()))?;
+            .ok_or_else(|| Unavailable::new("primary portrait content unavailable".into()))?;
         record
             .portraits
             .retain(|portrait| portrait.sha256 == digest);
@@ -125,10 +125,10 @@ impl Fleet {
             Some((digest, kind)),
             |_| true,
         )
-        .map_err(|e| Unavailable(e.why.into()))?;
+        .map_err(|e| Unavailable::new(e.why.into()))?;
         for asset in &publication.assets {
             if asset.sha256 == digest {
-                return Err(Unavailable(
+                return Err(Unavailable::new(
                     "generated portrait duplicates the primary".into(),
                 ));
             }
@@ -146,7 +146,7 @@ impl Fleet {
         let mut window = rules::MediaWindow::of(&current.job);
         window.until = now;
         staged.media_window = Some(window);
-        let encode_err = |e: serde_json::Error| Unavailable(e.to_string());
+        let encode_err = |e: serde_json::Error| Unavailable::new(e.to_string());
         let mut writes = vec![
             (
                 AGENTS.into(),
@@ -170,7 +170,7 @@ impl Fleet {
         };
         let change = self
             .change_computer_job_at(finish, writes, now)?
-            .map_err(|e| Unavailable(e.to_string()))?;
+            .map_err(|e| Unavailable::new(e.to_string()))?;
         if change.record.is_none() {
             return Ok(false);
         }

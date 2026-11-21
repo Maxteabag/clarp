@@ -37,7 +37,7 @@ use nix::unistd::Pid;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::agent::AgentHandle;
+use crate::agent::TerminalLease;
 use crate::edge::{ApiError, App};
 use crate::line::{self, ENDED_WELL, Heard, Line, Socket, Told};
 
@@ -65,24 +65,7 @@ struct Program {
     /// What it is told on top of the Host's environment.
     env: Vec<(String, String)>,
     /// The agent whose tool it is, when it is one's: no turn of it is started meanwhile.
-    agent: Option<AgentHandle>,
-}
-
-/// An agent's terminal that is open: its agent is told so, and told again when this goes,
-/// however it goes.
-struct Open(AgentHandle);
-
-impl Open {
-    fn new(agent: AgentHandle) -> Self {
-        agent.terminal(true);
-        Self(agent)
-    }
-}
-
-impl Drop for Open {
-    fn drop(&mut self) {
-        self.0.terminal(false);
-    }
+    _agent: Option<TerminalLease>,
 }
 
 /// A number as Python's `int()` reads a value a client sent: a whole number, the whole
@@ -185,8 +168,6 @@ async fn serve(mut line: Line, program: Program) {
         line.tell(Told::Close(ENDED_WELL, String::new())).await;
         return;
     };
-    // From here to the end of this, no turn of the agent whose tool it is is started.
-    let _open = program.agent.clone().map(Open::new);
     let pid = child.id().and_then(|pid| i32::try_from(pid).ok());
     eprintln!(
         "clarp-host: the terminal {called} started ({}) terminalStart",
@@ -282,7 +263,7 @@ async fn of_the_host(State(app): State<App>, socket: Socket) -> Response {
         argv: vec![shell, "-l".to_string()],
         cwd: crate::config::home(),
         env: Vec::new(),
-        agent: None,
+        _agent: None,
     };
     socket.open(move |line| serve(line, program))
 }
@@ -323,9 +304,12 @@ async fn of_an_agent(
         return line::refused(StatusCode::FORBIDDEN, LOOKED_AT_ONLY);
     }
     let tool = member.record.backend.as_str();
-    let Ok(facts) = member.agent.terminal_facts().await else {
-        let why = "the agent cannot be asked";
-        return line::refused(StatusCode::SERVICE_UNAVAILABLE, why);
+    let facts = match member.agent.terminal_facts().await {
+        Ok(facts) => facts,
+        Err(why) if why.1.is_some() => return crate::edge::ApiError::from(why).into_response(),
+        Err(_) => {
+            return line::refused(StatusCode::SERVICE_UNAVAILABLE, "the agent cannot be asked");
+        }
     };
     let argv = match command_of(tool, facts.tool_session.as_deref().unwrap_or("")) {
         Ok(argv) => argv,
@@ -338,12 +322,16 @@ async fn of_an_agent(
     } else {
         crate::config::home()
     };
+    let lease = match member.agent.open_terminal().await {
+        Ok(lease) => lease,
+        Err(why) => return ApiError::from(why).into_response(),
+    };
     let program = Program {
         called: session.to_string(),
         argv,
         cwd,
         env: facts.env,
-        agent: Some(member.agent.clone()),
+        _agent: Some(lease),
     };
     socket.open(move |line| serve(line, program))
 }

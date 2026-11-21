@@ -113,7 +113,7 @@ for file,why,old,new in [
     ('agent.rs','a conversation carried over is claimed by the user','clarp_kernel::goals::ledger::Author::System,\n                    now,','clarp_kernel::goals::ledger::Author::User,\n                    now,'),
 ]: plant(H+file,'doors',why,old,new)
 for why,old,new in [
-    ('a durable removal returns a failure when only retirement failed','self.works.log.unkept("goal ledger retirement", &why);','return Err(Unavailable(why));'),
+    ('a durable removal returns a failure when only retirement failed','self.works.log.unkept("goal ledger retirement", &why);','return Err(Unavailable::new(why));'),
     ('a failed retirement goes unreported','self.works.log.unkept("goal ledger retirement", &why);','drop(why);'),
     ('reading a tombstoned ledger before retirement is allowed','if !record.ledger_retired {\n            return Err','if false {\n            return Err'),
 ]: plant(H+'fleet.rs','retire',why,old,new)

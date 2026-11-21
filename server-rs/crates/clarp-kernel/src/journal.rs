@@ -284,12 +284,14 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         | AgentEvent::StopRequested { turn, .. }
         | AgentEvent::SentNow { turn, .. }
         | AgentEvent::Reworded { turn, .. }
-        | AgentEvent::Compacted { turn, .. } => Some(turn.0),
+        | AgentEvent::Compacted { turn, .. }
+        | AgentEvent::HeldUnsentForMove { turn } => Some(turn.0),
         AgentEvent::TakeoverSelected { selected } => Some(selected.start.from.0),
         AgentEvent::TakeoverOffered { from, .. } | AgentEvent::TakeoverCleared { from } => {
             Some(from.0)
         }
-        AgentEvent::Paused { .. }
+        AgentEvent::MoveMarked { .. }
+        | AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }
         | AgentEvent::TookUp { .. }
@@ -495,9 +497,9 @@ impl Recorder {
 
     /// The public queue contains messages whose conversation row does not exist yet.
     pub fn unshown_waiting(&self) -> impl Iterator<Item = &Queued> {
-        self.agent
-            .waiting()
-            .filter(|queued| !self.shown_waiting.contains(&queued.id))
+        self.agent.waiting().filter(|queued| {
+            !queued.returning_to_tool() && !self.shown_waiting.contains(&queued.id)
+        })
     }
 
     /// What changed of the user sends' delivery since this was last asked (send_delivery_state).
@@ -553,9 +555,13 @@ impl Recorder {
             return Ok(Reworded::NotWaiting);
         }
         let waiting = self.agent.waiting().find(|queued| queued.id == turn);
-        let Some(message_seq) = waiting.map(|queued| queued.message_seq) else {
+        let Some(waiting) = waiting else {
             return Ok(Reworded::NotWaiting);
         };
+        if waiting.returning_to_tool() {
+            return Ok(Reworded::InConversation);
+        }
+        let message_seq = waiting.message_seq;
         let kept =
             self.log
                 .read_after(message_seq.saturating_sub(1), Kinds::only(kind::WAITING), 1)?;
@@ -763,6 +769,12 @@ impl Batch<'_> {
     /// same write that starts the turn, and stands where the turn starts. Its row keeps when it
     /// was sent: when its turn was accepted, which a new wording does not move.
     fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64) {
+        // Work held before it reached the tool already entered the conversation on its
+        // original start. Its message_seq may still point at the original WAITING item.
+        if matches!(self.work.live(), Some(Turn::Starting(started)) if started.id == turn && started.attempt > 1)
+        {
+            return;
+        }
         if message_seq > self.recorder.last_seq {
             // The message was written in this batch. If the turn went through the queue,
             // count its conversation row separately from joining and starting, as Python does.
@@ -845,7 +857,9 @@ impl Batch<'_> {
     pub fn queue_depth(&self) -> usize {
         self.work
             .waiting()
-            .filter(|queued| !self.recorder.shown_waiting.contains(&queued.id))
+            .filter(|queued| {
+                !queued.returning_to_tool() && !self.recorder.shown_waiting.contains(&queued.id)
+            })
             .count()
     }
 

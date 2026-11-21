@@ -2054,6 +2054,7 @@ mod tests {
 
     fn status(live: Option<Activity>, last: Option<Outcome>) -> Status {
         Status {
+            moved: None,
             live: live.map(|activity| LiveStatus {
                 turn: TurnId(2),
                 message_id: "u-m2".to_string(),

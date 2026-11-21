@@ -276,14 +276,16 @@ pub(crate) async fn journal(
         )
         .await
         .map_err(|_| {
-            crate::agent::Unavailable("the media publication journal did not answer in time".into())
+            crate::agent::Unavailable::new(
+                "the media publication journal did not answer in time".into(),
+            )
         })??;
     }
     let agent_id = member.record.agent_id.clone();
     app.gallery
         .ask(move |store| store.delivered(&agent_id, &id))
         .await
-        .map_err(|why| crate::agent::Unavailable(why.words().to_owned()))
+        .map_err(|why| crate::agent::Unavailable::new(why.words().to_owned()))
 }
 
 pub async fn import_history(app: &App) -> Result<(), Failure> {

@@ -34,7 +34,7 @@ async fn ask(owner: &AgentHandle, cmd: DelegationCommand) -> Result<DelegationSt
     let agent = owner.clone();
     tokio::task::spawn_blocking(move || agent.delegation(cmd))
         .await
-        .map_err(|e| Unavailable(e.to_string()))?
+        .map_err(|e| Unavailable::new(e.to_string()))?
 }
 
 #[derive(Default)]
@@ -65,7 +65,7 @@ async fn tick(app: &App, row: &Listener, window: &mut Window) -> Result<(), Unav
                 "principal or delegate moved to a backend without turn identity",
             ))
             .await
-            .map_err(|e| Unavailable(e.message().into()))?;
+            .map_err(|e| Unavailable::new(e.message().into()))?;
         return Ok(());
     }
     let snapshot = ask(
@@ -95,7 +95,7 @@ async fn tick(app: &App, row: &Listener, window: &mut Window) -> Result<(), Unav
         app.fleet
             .goal_delegation(stop("listener job cancelled"))
             .await
-            .map_err(|e| Unavailable(e.message().into()))?;
+            .map_err(|e| Unavailable::new(e.message().into()))?;
         return Ok(());
     }
     let job_handle = if let Some(job) = job.filter(|job| job.status.is_active()) {
@@ -109,14 +109,14 @@ async fn tick(app: &App, row: &Listener, window: &mut Window) -> Result<(), Unav
                     source: "listener".into(),
                 })
                 .await?
-                .map_err(|e| Unavailable(e.to_string()))?;
+                .map_err(|e| Unavailable::new(e.to_string()))?;
         }
         job.handle()
     } else {
         app.fleet
             .claim_job(job_id.clone(), helper.record.agent_id.clone())
             .await?
-            .map_err(|_| Unavailable("listener job belongs to another owner".into()))?;
+            .map_err(|_| Unavailable::new("listener job belongs to another owner".into()))?;
         let cmd = JobCommand::Register {
             queued: false,
             id: job_id.clone(),
@@ -133,9 +133,9 @@ async fn tick(app: &App, row: &Listener, window: &mut Window) -> Result<(), Unav
             .agent
             .job(cmd)
             .await?
-            .map_err(|e| Unavailable(e.to_string()))?
+            .map_err(|e| Unavailable::new(e.to_string()))?
             .job
-            .ok_or_else(|| Unavailable("listener job unavailable".into()))?
+            .ok_or_else(|| Unavailable::new("listener job unavailable".into()))?
             .handle()
     };
     let prefix = format!("bookkeeping-{}-", row.id);
