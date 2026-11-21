@@ -155,6 +155,7 @@ dependencies = [
  "clarp-ports",
  "clarp-spool",
  "clarp-store-mem",
+ "clarp-store-sqlite",
  "serde",
  "serde_json",
 ]

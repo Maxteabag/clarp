@@ -18,6 +18,18 @@ from tests.integration.test_server_di import (  # noqa: F401
 )
 
 
+
+# The transcript's copy of the request is dated by the corpus (2026-10-11T08:20:00Z on), while the
+# request was sent and its turn begun at the real time: a copy before its own send, which a copy
+# cannot be (a transcript line is written after its turn has begun). As 505a7b0a did for three
+# other files: this file's clock starts two seconds before the corpus's first line and runs on at
+# the real pace, so each send and turn comes just before its copy (R107).
+@pytest.fixture(autouse=True)
+def _clock_before_the_corpus(monkeypatch):
+    real = time.time
+    offset = (corpus.BASE_S - 2) - real()
+    monkeypatch.setattr(time, "time", lambda: real() + offset)
+
 def _active_turn(running_server, monkeypatch, tmp_path, backend):
     from lib import tool_explanation_settings
     tool_explanation_settings.update({"enabled": False})
@@ -42,6 +54,21 @@ def _active_turn(running_server, monkeypatch, tmp_path, backend):
     active_trace = agents.get_trace(agent["agent_id"])
     monkeypatch.setattr(backends, "find_session_jsonl", lambda *a: transcript)
     return base, agent, transcript, source, spawned, steered, active_trace
+
+
+def _written_now(source):
+    """The corpus stamps its records on a fixed day in the past. A provider
+    writes its copy of a prompt after the prompt was sent, and the importer
+    links a copy only to a send it could be the copy of (a copy written
+    before a send is another message). Move the records to now, in order."""
+    stamps = [dt.datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+              for group in [source.header, *source.groups] for r in group if "timestamp" in r]
+    shift = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=1) - min(stamps)
+    for group in [source.header, *source.groups]:
+        for record in group:
+            if "timestamp" in record:
+                moved = dt.datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")) + shift
+                record["timestamp"] = moved.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _log(base, after=0):
@@ -122,20 +149,35 @@ def _held_import(monkeypatch, transcript):
 @pytest.mark.parametrize("backend,queue", [("claude", True), ("codex", True), ("codex", False)])
 def test_replacement_after_send_keeps_live_tools_awaiting_import(
         running_server, monkeypatch, tmp_path, backend, queue):
+    # The streamed commentary overlaps commentary already imported: under R108 the import took the
+    # stream's id and that write is refused, so the overlap arises only for a row stored before
+    # R108. This pins R107's retraction as that fallback.
+    from lib import message_writes
+    monkeypatch.setattr(message_writes, "_keyed_line_id", lambda *a, **k: "")
     base, agent, transcript, source, spawned, steered, trace = _active_turn(
         running_server, monkeypatch, tmp_path, backend)
+    _written_now(source)
     first = source.groups[0]
     if backend == "claude":
         commentary = json.loads(json.dumps(first[1]))
         commentary["message"]["content"] = commentary["message"]["content"][:1]
+        # Every real Claude line carries its message's id, which its stream is keyed by (R107).
+        commentary["message"]["id"] = own_id = "msg_commentary_0"
         initial = [first[0], commentary]
         tool_line = json.loads(json.dumps(first[1]))
         tool_line["uuid"] = "synthetic-tool-only"
+        tool_line["message"]["id"] = own_id
         tool_line["message"]["content"] = tool_line["message"]["content"][1:]
         later = [tool_line, first[2]]
         call = "toolu_0"
     else:
         initial, later, call = first[:4], first[4:6], "call_0"
+        # A modern rollout names each completed message by the item id its stream is keyed by (R107).
+        own_id = "item_commentary_0"
+        initial = initial + [{"timestamp": initial[-1]["timestamp"], "type": "event_msg", "payload": {
+            "type": "item_completed", "turn_id": "turn-0", "item": {
+                "type": "AgentMessage", "id": own_id, "phase": "commentary",
+                "content": [{"type": "Text", "text": "Looking at 0."}]}}}]
         # Exploration commands coalesce under a display-cell group id;
         # this probe needs the tool's exact identity for the recovery check.
         later[0]["payload"]["arguments"] = json.dumps({"cmd": "printf synthetic"})
@@ -144,12 +186,26 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
     assert before["turns"] and not any(r["tools"] or r["display_cells"] for r in before["turns"])
 
     # A streamed commentary row can overlap commentary already imported.
-    # The next real import retracts that duplicate and raises the replace
-    # watermark, even though this provider turn is still running.
+    # Once the provider has finished that message, the next real import
+    # retracts the duplicate and raises the replace watermark, even though
+    # this provider turn is still running. (Since #411 a row still streaming
+    # is kept while it may be a new reply that begins with the same words;
+    # test_live_import_identity covers that rule.)
     streamed = message_store.upsert_live_assistant_message(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
-        trace_id=trace, text="Looking at 0.", item_key="overlapping-commentary")
+        trace_id=trace, text="Looking at 0.", item_key=own_id)
     assert streamed is not None
+    # Finished as production finishes it: under the key its stream wrote it with (Claude's
+    # message-stop and Codex's item.completed settle the row they streamed).
+    assert message_store.mark_live_message_final(
+        agent_id=agent["agent_id"], backend_session_id="synthetic-native",
+        trace_id=trace, item_key=own_id)
+    # The provider has already begun its next reply, other words, still
+    # streaming: an import of the commentary must leave it where it is shown.
+    next_reply = message_store.upsert_live_assistant_message(
+        agent_id=agent["agent_id"], backend_session_id="synthetic-native",
+        trace_id=trace, text="Running the probe now", item_key="next-reply")
+    assert next_reply is not None
     transcript_incremental.import_transcript(
         backend=backend, path=transcript, agent_id=agent["agent_id"],
         backend_session_id="synthetic-native")
@@ -157,6 +213,13 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         "SELECT replace_revision FROM conversation_heads WHERE agent_id=? AND backend_session_id=?",
         (agent["agent_id"], "synthetic-native")).fetchone()[0]
     assert head > before["latest_revision"]
+    imported = _log(base)["turns"]
+    # One copy of the commentary, under the id the client already holds.
+    assert [r["id"] for r in imported if r["role"] == "assistant"
+            and r["text"].strip() == "Looking at 0."] == [streamed["id"]]
+    # The reply still streaming is kept, once, with its words.
+    assert [(r["id"], r["text"]) for r in imported if r["id"] == next_reply["id"]] == [
+        (next_reply["id"], "Running the probe now")]
 
     with _held_import(monkeypatch, transcript) as (entered, release):
         # Hold the real background import queue: live activity can reach the
@@ -210,8 +273,8 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         refreshed = _log(base)
         imported_calls = [t.get("id") for r in refreshed["turns"]
                           for t in r["tools"] + r["display_cells"]]
-        assert call in imported_calls
-        assert call in calls, "a replacement snapshot must retain the tool already shown live"
+        assert imported_calls.count(call) == 1
+        assert calls.count(call) == 1, "a replacement snapshot must retain the tool already shown live"
 
 
 @pytest.mark.parametrize("queue", [True, False])

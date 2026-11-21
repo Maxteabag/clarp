@@ -313,6 +313,8 @@ impl Desk {
             host_id: &app.server_id,
             has_key: true,
             runs_tools: true,
+            live_model: app.config.live_model,
+            live_model_min_client: &app.config.live_model_min_client,
         };
         books.rings.sees(ring, principal, &world)
     }
@@ -453,6 +455,7 @@ pub(super) fn placed(rings: &Rings, ring: rings::Ring, world: &rings::World) -> 
 async fn user_call(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    headers: axum::http::HeaderMap,
     bytes: Bytes,
 ) -> Response {
     let (caller, said) = match ring_asked(&principal, &bytes) {
@@ -472,7 +475,12 @@ async fn user_call(
             return Err(refusal(400, "live_request_invalid"));
         }
         rings.user_call(
-            (&caller, &said["agent"]),
+            // The call's model is chosen for the client that asks for it.
+            (
+                &caller,
+                &said["agent"],
+                crate::render_spec::client(&headers),
+            ),
             (&said["request_id"], &said["client_nonce"]),
             with.known,
             &with.world,
@@ -816,6 +824,8 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let mut polling = false;
     let mut last_poll = 0.0;
     let mut last_user = f64::NEG_INFINITY;
+    // The kinds of event of the voice no part of this Host reads, said once a call.
+    let mut unread: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut last_output = f64::NEG_INFINITY;
     loop {
         // What the step before this told is said now, in its order, the books let go of.
@@ -956,6 +966,13 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                     Some(Ok(_)) => None,
                 };
                 if let Some(event) = event.filter(Value::is_object) {
+                    // A kind of event nothing here reads (a session's standby, a kind to come)
+                    // is passed over, and said once by its type alone.
+                    if let Some(kind) = live_call::unread_voice_event(&event)
+                        && unread.insert(kind.clone())
+                    {
+                        eprintln!("agentLiveEventUnread type={kind}");
+                    }
                     if configured {
                         routing.observe(&event,seconds(began));
                         if event["type"]=="session.input_transcript.delta" && event["delta"].as_str().is_some_and(|s|!python::strip(s).is_empty()){last_user=seconds(began);}

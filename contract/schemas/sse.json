@@ -122,7 +122,7 @@
         "queue_started": {"type": "boolean"},
         "queue_revision": {"type": "integer"},
         "client_msg_id": {"type": "string"},
-        "queue_change": {"enum": ["edited", "deleted"], "description": "Host contract 114 (provisional), feature waited_send_order: what happened to the item client_msg_id; with edited, text is its new words."},
+        "queue_change": {"enum": ["edited", "deleted"], "description": "Host contract 115, feature waited_send_order: what happened to the item client_msg_id; with edited, text is its new words."},
         "text": {"type": "string"}
       }
     },

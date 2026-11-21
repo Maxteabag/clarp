@@ -50,7 +50,7 @@ def call_languages() -> str:
 
 def call_engines() -> list[str]:
     raw = settings_store.get_text(CALL_ENGINES_KEY) or ""
-    return [e.strip() for e in raw.split(",") if e.strip()]
+    return stt_language.split_engines(raw)          # each once (R175)
 
 
 def policy_snapshot() -> dict:
@@ -62,7 +62,7 @@ def policy_snapshot() -> dict:
     from . import stt_providers
     stored = settings_store.get_many([CALL_LANGUAGES_KEY, CALL_ENGINES_KEY, stt_providers.ENGINE_KEY])
     languages = (stored.get(CALL_LANGUAGES_KEY) or "").strip()
-    engines = [e.strip() for e in (stored.get(CALL_ENGINES_KEY) or "").split(",") if e.strip()]
+    engines = stt_language.split_engines(stored.get(CALL_ENGINES_KEY))     # each once (R175)
     snapshot = {"languages": languages, "engines": engines,
                 "global_engine": stored.get(stt_providers.ENGINE_KEY) or stt_providers.LOCAL_ENGINE,
                 "configured": bool(languages or engines), "error": ""}
@@ -90,7 +90,7 @@ def validate_settings(languages, engines, *, is_valid,
     if engines is not None:
         if not isinstance(engines, str):
             raise ValueError("call_engines must be a comma-separated string of engines")
-        listed = [e.strip() for e in engines.split(",") if e.strip()]
+        listed = stt_language.split_engines(engines)    # an engine listed twice is kept once (R175)
         for engine in listed:
             if not is_valid(engine):
                 raise ValueError(f"unknown transcription engine: {engine}")
