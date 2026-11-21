@@ -395,4 +395,7 @@ class HandoffMixin:
             queue_paused=queue_state["paused"],
             queue_started=started,
             queue_revision=queue_state["revision"],
+            # An event that names an item says who it is from (R182).
+            **turn_queue.item_provenance({"origin": spec.origin,
+                                          "sender_agent_id": spec.sender_agent_id}),
         ))
