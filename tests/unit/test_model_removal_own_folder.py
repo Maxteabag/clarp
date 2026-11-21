@@ -103,12 +103,14 @@ def test_whatever_the_stored_path_names_the_removal_deletes_only_its_own_folder(
         assert (tm._managed_root(model_id) / "model.bin").is_file()
     if shape == "another model's cache folder":
         assert (root / "models--Systran--faster-whisper-alpha" / "model.bin").is_file()
-    assert logged.count(("transcriptionModelFolderRefused", "model=faster-whisper:beta reason=stored_path")) == 1
+    assert logged.count(("transcriptionModelStoredPathMismatch", "model=faster-whisper:beta")) == 1
+    assert not [line for line in logged if line[0] == "transcriptionModelFolderRefused"]  # not a refusal
 
 
 def test_a_stored_path_that_is_exactly_its_own_folder_logs_nothing(models, logged):
     tm.remove("faster-whisper:beta", allow_active=True)
-    assert not [line for line in logged if line[0] == "transcriptionModelFolderRefused"]
+    assert not [line for line in logged
+                if line[0] in ("transcriptionModelFolderRefused", "transcriptionModelStoredPathMismatch")]
 
 
 def _beta_is_a_link_elsewhere(tmp_path):
@@ -245,3 +247,29 @@ def test_what_is_deleted_is_the_folder_the_id_gives_never_the_stored_path(tmp_pa
     monkeypatch.setattr(tm.shutil, "rmtree", lambda path, *a, **k: (deleted.append(path), real_rmtree(path))[1])
     tm.remove("faster-whisper:beta", allow_active=True)
     assert deleted == [folder] and str(deleted[0]) != stored and not (real / "faster-whisper--beta").exists()
+
+
+# ---- R138: a record whose files are not whole is still removed ----------------------------------
+
+def test_a_managed_model_whose_files_are_not_whole_is_removed_with_its_folder(models):
+    """A half download or a file deleted by hand fails _valid_record; remove() used to return
+    there, leaving the line (out of sight) and the folder for ever."""
+    root, registry = models
+    (tm._managed_root("faster-whisper:beta") / "model.bin").unlink()
+    assert "faster-whisper:beta" not in [r["id"] for r in tm.installed_records()]
+    tm.remove("faster-whisper:beta", allow_active=True)
+    assert _folders(root) == ["faster-whisper--alpha", "faster-whisper--gamma"]
+    assert [r["id"] for r in json.loads(registry.read_text())] == ["faster-whisper:alpha", "faster-whisper:gamma"]
+
+
+def test_a_users_own_folder_whose_files_are_not_whole_loses_only_its_line(models, tmp_path):
+    root, registry = models
+    own = tmp_path / "my-model"
+    own.mkdir()
+    for name in ("config.json", "model.bin", "tokenizer.json"):
+        (own / name).write_text("x")
+    tm.register("faster-whisper:mine", str(own))
+    (own / "tokenizer.json").unlink()
+    tm.remove("faster-whisper:mine", allow_active=True)
+    assert own.is_dir() and (own / "model.bin").is_file()            # the user's folder is not ours
+    assert "faster-whisper:mine" not in [r["id"] for r in json.loads(registry.read_text())]
