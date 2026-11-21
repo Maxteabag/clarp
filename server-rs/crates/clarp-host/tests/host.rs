@@ -42562,6 +42562,14 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     assert_eq!(refused["stt"]["attempts"][0]["engine"], "deepgram:nova-3");
     assert_eq!(requests.lock().unwrap().len(), nova_requests);
     assert_eq!(
+        change(json!({
+            "call_languages":"no,en","call_engines":"google:chirp_3",
+            "agent_languages":{"mike":"en"},"agent_engines":{"mike":"elevenlabs:scribe_v2"}
+        }))
+        .0,
+        200
+    );
+    assert_eq!(
         action("/calls/hold", json!({"agent":second,"call_id":id})).0,
         200
     );
