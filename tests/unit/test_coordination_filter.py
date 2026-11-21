@@ -99,8 +99,10 @@ def test_a_the_echo_names_the_policy_of_every_answer(chat):
     chat.user_turn("u1")
     chat.coordination_turn("c1")
     last = chat.user_turn("u2")
-    tail = chat.log(mode="auto")
-    assert tail["coordination"] == {"hidden": False, "source": "global", "visibility": "show"}
+    tail = chat.log(mode="auto")                          # nothing stored: the Host's default
+    assert tail["coordination"] == {"hidden": True, "source": "global", "visibility": "hide"}
+    coordination.set_global("show")
+    assert chat.log(mode="auto")["coordination"] == {"hidden": False, "source": "global", "visibility": "show"}
     coordination.set_global("hide")
     tail = chat.log(mode="auto")
     assert tail["coordination"] == {"hidden": True, "source": "global", "visibility": "hide"}
@@ -130,6 +132,7 @@ def test_c_a_setting_changed_on_another_device_reloads_once_not_for_ever(chat):
     """(c) A delta that says its cache was read under 'show' gets replace_required once the chat
     is 'hide'; the reload's echo names the new policy, and the deltas after it flow. Nothing was
     written to the conversation for it, so the old cursor alone does not cause it."""
+    coordination.set_global("show")
     chat.user_turn("u1")
     chat.coordination_turn("c1")
     cached = chat.log(mode="auto")
