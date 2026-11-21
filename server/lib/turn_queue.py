@@ -1223,9 +1223,11 @@ def show(queue_id: str, *, con=None) -> bool:
 # claimed or started but has no row yet (a turn on a session with no backend id at
 # its handoff writes its row at the CLI's init, not at the start): until then it is
 # still the queue's, so a message is never in neither read. A listen-first opening
-# never has a row and is no message of the user's.
+# never has a row and is no message of the user's, and neither is a started item whose
+# words are gone (an older Host cleared them at the start): its row was written then.
 IN_QUEUE_READ = ("(status = 'queued' OR (status IN ('claimed', 'started')"
-                 " AND queue_id NOT LIKE 'call-open:%')) AND shown_at IS NULL")
+                 " AND queue_id NOT LIKE 'call-open:%' AND COALESCE(text, '') <> ''))"
+                 " AND shown_at IS NULL")
 
 
 def waiting_items(agent_id: str) -> list[dict]:
