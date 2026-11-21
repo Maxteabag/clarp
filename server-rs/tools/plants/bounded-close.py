@@ -54,7 +54,7 @@ WRITTEN = ('            store\n'
            '                .put(AGENTS, &agent_id, &value)\n'
            '                .map_err(|e| e.to_string())?;\n'
            '        }\n'
-           '        match setup(&works, &delegation_desk, &record) {')
+           '        match setup(&works, &delegation_desk, &versions, &record) {')
 PLANTS = [
     # How long a close waits, and what it counts as closed.
     (A, 'close', 'a close waits ten times its bound', WAIT, WAIT.replace('within,', 'within * 10,')),
@@ -107,7 +107,7 @@ PLANTS = [
     (F, 'start', 'a start keeps no moment its helper finished', COMPLETED,
      '            record.helper_completed_at_ms = None;'),
     (F, 'start', 'a start moves the helper and writes nothing', WRITTEN,
-     '            let _ = value;\n        }\n        match setup(&works, &delegation_desk, &record) {'),
+     '            let _ = value;\n        }\n        match setup(&works, &delegation_desk, &versions, &record) {'),
 ]
 
 
