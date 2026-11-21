@@ -314,8 +314,11 @@ def test_a_stop_pause_survives_the_drain_and_fresh_intent_still_runs(tmp_path):
     new_service, new_provider = _restart(tmp_path)
     _finish_recovered(new_service, new_provider, ("user carries on",))
     assert new_provider.texts() == ["user carries on", "user queue send"]
-    assert turn_queue.is_paused(agent) is True
-    assert turn_queue.status("parked automation") == "queued"
+    # The user's fresh message ended the pause: the parked work runs after it.
+    assert turn_queue.is_paused(agent) is False
+    new_provider.finish("user queue send")
+    new_service.recover_queued()
+    assert new_provider.texts()[-1] == "parked automation"
 
 
 def test_a_held_item_the_user_cancels_never_starts(tmp_path):

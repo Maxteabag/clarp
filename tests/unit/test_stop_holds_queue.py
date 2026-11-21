@@ -75,23 +75,23 @@ def test_peer_messages_queued_before_a_stop_wait_for_resume(tmp_path, queue):
 
 
 @pytest.mark.parametrize("killed", [False, True], ids=["finished", "killed"])
-def test_a_turn_ending_after_stop_does_not_start_held_work(tmp_path, killed):
-    """The user carries on past the pause; when that turn ends (or its process
-    is killed by hand), the older held work still waits."""
+def test_the_user_carrying_on_after_a_stop_ends_its_pause(tmp_path, killed):
+    """The user carries on past the pause: that fresh message ends it. When its
+    turn ends (or its process is killed by hand), the held work runs after it,
+    in its order, with no resume."""
     world = World(tmp_path)
     world.send("t0")
     for cid in ("p1", "p2"):
         world.send(cid, origin="agent", queue=True)
     world.stop()
-    world.send("u1")                  # a plain user send runs past the pause
+    world.send("u1")                  # a plain user send runs past the pause and ends it
     world._collect()
     assert world.started == ["t0", "u1"]
+    assert not turn_queue.is_paused(world.agent)
     _end_running(world, killed=killed)
     world.settle()
-    assert world.started == ["t0", "u1"]
-    assert _waiting(world) == ["p1", "p2"]
-    _resume(world)
     assert world.started == ["t0", "u1", "p1", "p2"]
+    assert _waiting(world) == []
 
 
 def test_held_work_is_not_started_by_handoff_retries_or_ownerless_starts(tmp_path):
@@ -111,8 +111,8 @@ def test_held_work_is_not_started_by_handoff_retries_or_ownerless_starts(tmp_pat
 
 
 def test_arrivals_during_the_stop_keep_their_documented_rights(tmp_path):
-    """docs/protocol.md (send rules): a plain user send and a peer message run
-    past the pause; an agent's explicit queue send waits for Resume."""
+    """docs/protocol.md (send rules): a plain user send runs past the pause and
+    ends it (the user carries on), so what the Stop held runs after it."""
     world = World(tmp_path)
     world.send("t0")
     world.send("p_pre", origin="agent", queue=True)
@@ -123,10 +123,8 @@ def test_arrivals_during_the_stop_keep_their_documented_rights(tmp_path):
     td.complete_stop(world.service.ctx, world.agent, snapshot, set(),
                      backend_registry=world.provider)
     world.settle()
-    assert world.started == ["t0", "u_mid"]
-    assert _waiting(world) == ["p_pre", "pq_mid"]
-    _resume(world)
     assert world.started == ["t0", "u_mid", "p_pre", "pq_mid"]
+    assert _waiting(world) == [] and not turn_queue.is_paused(world.agent)
 
 
 def test_a_stop_takes_back_the_arrival_right_of_work_queued_before_it(tmp_path):
