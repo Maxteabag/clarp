@@ -77,7 +77,6 @@ impl Service {
     pub fn guard_turn(&self, order: &mut clarp_actor::ShimOrder) {
         let Some(path) = &self.login_lock else { return };
         let program = std::mem::replace(&mut order.program, "flock".into());
-        order.version_program = Some(program.clone());
         let args = std::mem::take(&mut order.args);
         order.args = vec![
             "--shared".into(),
