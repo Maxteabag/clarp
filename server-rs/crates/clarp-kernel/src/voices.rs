@@ -172,6 +172,31 @@ pub fn gemini_voices(owners: &Voices) -> Vec<(String, String, String)> {
     voices
 }
 
+/// The picker labels also identify the registered Vertex variants of designed voices.
+pub fn gemini_labels(owners: &Voices) -> std::collections::BTreeMap<String, String> {
+    let mut labels: std::collections::BTreeMap<_, _> = gemini_voices(owners)
+        .into_iter()
+        .map(|(id, label, _)| (id, label))
+        .collect();
+    let api: std::collections::BTreeMap<_, _> = owners
+        .gemini_voices
+        .iter()
+        .map(|(persona, id)| (persona, id))
+        .collect();
+    for (persona, vertex) in &owners.gemini_vertex_voices {
+        if vertex.is_empty() || labels.contains_key(vertex) {
+            continue;
+        }
+        let name = api
+            .get(persona)
+            .and_then(|id| labels.get(*id))
+            .cloned()
+            .unwrap_or_else(|| format!("{persona} (designed)"));
+        labels.insert(vertex.clone(), name);
+    }
+    labels
+}
+
 /// The catalogue as an app is told it, for the agent with this session (empty: for no agent
 /// in particular).
 pub fn catalog(agents: &[Agent<'_>], current: &str, speech: &Speech<'_>) -> Value {

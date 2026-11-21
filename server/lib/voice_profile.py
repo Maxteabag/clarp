@@ -27,8 +27,10 @@ from .voice import CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE, resolve_voice
 OWN = "own"
 DEFAULT = "default"
 NO_VOICE = "no_voice"
+VOICE_UNAVAILABLE = "voice_unavailable"   # the agent has a voice of its own the provider refuses
 PROVIDER_OFF = "provider_off"
 NOT_CONFIGURED = "not_configured"
+VOICELESS_ROLE = "voiceless_role"     # a role that is never heard (a Janitor's turns are silent)
 PROVIDER_FAILED = "provider_failed"   # an outage: the provider did not make the clip
 HOST_FAILED = "host_failed"           # the Host itself failed while making the clip
 BUILTIN_PROVIDERS = frozenset({CARTESIA, ELEVENLABS, GEMINI, DEEPGRAM, GOOGLE})
@@ -119,6 +121,7 @@ class HostView:
     language: str                          # transcription.language (validated)
     agent_engines: dict[str, str]
     agent_languages: dict[str, str]
+    gone: dict[str, frozenset] = field(default_factory=dict)   # provider -> voices it deleted (voice_names)
     _version: str = field(default="", repr=False)
 
     @classmethod
@@ -146,6 +149,7 @@ class HostView:
             agent_engines=stt_language.parse_map(stored.get("transcription.agent_engines")),
             agent_languages=stt_language.parse_agent_languages(
                 stored.get("transcription.agent_languages")),
+            gone=_gone(),
         )
 
     @property
@@ -158,6 +162,11 @@ class HostView:
                 "language": self.language, "agent_engines": self.agent_engines,
                 "agent_languages": self.agent_languages, "names": _names_signature()})
         return self._version
+
+
+def _gone() -> dict[str, frozenset]:
+    from . import voice_names
+    return {p: voice_names.gone(p) for p in (CARTESIA, ELEVENLABS)}
 
 
 def _names_signature():
@@ -272,17 +281,20 @@ def _attempt(host: HostView, agent: Mapping, route: tts_mode.Route, provider: st
     choice = provider_voice(cfg, agent.get("voice_id"), agent, route, provider,
                             adapter_default=(adapter or {}).get("default_voice"))
     silent = None
+    deleted = bool(choice.voice) and choice.voice in host.gone.get(provider, ())
     if provider == CARTESIA:
-        silent = NO_VOICE if not choice.voice else (None if host.keys.get(CARTESIA) else NOT_CONFIGURED)
+        silent = (NO_VOICE if not choice.voice else VOICE_UNAVAILABLE if deleted
+                  else None if host.keys.get(CARTESIA) else NOT_CONFIGURED)
     elif provider == ELEVENLABS:
         silent = (NOT_CONFIGURED if not host.keys.get(ELEVENLABS)
-                  else None if elevenlabs_id_usable(choice.voice) else NO_VOICE)
+                  else NO_VOICE if not elevenlabs_id_usable(choice.voice)
+                  else VOICE_UNAVAILABLE if deleted else None)
     elif provider == GEMINI:
         silent = NO_VOICE if not choice.voice else (None if host.keys.get(GEMINI) else NOT_CONFIGURED)
     elif provider == GOOGLE:
         from . import google_tts
         silent = (NOT_CONFIGURED if host.google_refusal
-                  else NO_VOICE if choice.voice not in google_tts.VOICES
+                  else VOICE_UNAVAILABLE if choice.voice not in google_tts.VOICES
                   else None if host.keys.get(GOOGLE) else NOT_CONFIGURED)
     elif provider == DEEPGRAM:
         silent = None if host.keys.get(DEEPGRAM) else NOT_CONFIGURED
@@ -305,6 +317,12 @@ def speech(host: HostView, agent: Mapping) -> dict:
     worker routes it (tts_mode.route, then the configured fallback before any
     audio), or the reason nothing is heard."""
     route = tts_mode.route(host.cfg, dict(agent))
+    if agent.get("is_janitor"):
+        # A Janitor speaks to nobody by design (its turns are dispatched silent), and
+        # gets no voice from the pool: say that, not "no voice".
+        return {"provider": route.provider, "provider_label": _provider_label(host, route.provider),
+                "voice_id": None, "voice_label": None, "origin": None,
+                "streaming": _streaming(route.provider), "silent_reason": VOICELESS_ROLE}
     # The worker ends every clip when the Host's provider is "none", before it reads
     # any per-agent override (tts_worker.synth_one): the override is never heard.
     if host.cfg.tts_provider == "none" or route.provider == "none":
@@ -379,13 +397,14 @@ def profile(host: HostView, agent: Mapping) -> dict:
 
 
 def defaults(host: HostView) -> dict:
-    """What a new agent gets before it exists. Its voice is known only once it
-    is created (its contact's), so speech names the provider alone."""
+    """What a new agent gets before it exists. Its voice is known only once it is
+    created (its contact's, else a free one from the pool: voice_pool), so speech
+    names the provider alone."""
     provider = host.cfg.tts_provider
     return {
         "speech": {"provider": provider, "provider_label": _provider_label(host, provider),
                    "voice_id": None, "voice_label": None, "origin": DEFAULT,
-                   "streaming": _streaming(provider), "assignment": "contact",
+                   "streaming": _streaming(provider), "assignment": "pool",
                    "silent_reason": PROVIDER_OFF if provider == "none" else None},
         "hearing": hearing(host, {}),
     }
@@ -470,6 +489,7 @@ def watch_config(stream, previous: str | None) -> str:
 # label, never from an error's text, and carry nothing provider-internal.
 NOT_SPOKEN_WORDS = {
     NO_VOICE: "Not spoken: {provider} has no voice for {name}.",
+    VOICE_UNAVAILABLE: "Not spoken: {provider} cannot use the voice set for {name}.",
     NOT_CONFIGURED: "Not spoken: {provider} is not set up on this Host.",
     PROVIDER_OFF: "Not spoken: voice output is off on this Host.",
     PROVIDER_FAILED: "Not spoken: {provider} did not make the clip.",
@@ -479,7 +499,7 @@ NOT_SPOKEN_WORDS = {
 GOOGLE_REASONS = {
     "google_credentials_missing": NOT_CONFIGURED, "google_project_missing": NOT_CONFIGURED,
     "google_auth_failed": NOT_CONFIGURED, "google_id_collision": NOT_CONFIGURED,
-    "google_id_unverifiable": NOT_CONFIGURED, "voice_unavailable": NO_VOICE,
+    "google_id_unverifiable": NOT_CONFIGURED, "voice_unavailable": VOICE_UNAVAILABLE,
 }
 
 
@@ -497,6 +517,18 @@ def not_spoken_words(reason: str, *, provider_label: str = "", name: str = "",
         rest = words.removeprefix("Not spoken: ").removeprefix("Not spoken.").strip()
         words = PARTLY_SPOKEN_PREFIX + rest if rest else PARTLY_SPOKEN_PREFIX.rstrip(": ") + "."
     return words
+
+
+def no_voice_reason(cfg, agent: Mapping | None, route: tts_mode.Route) -> str:
+    """Why the worker found no voice for ``route.provider``: voice_unavailable when the agent
+    has a voice of its own the provider refuses (a Google voice off its allowlist), else
+    no_voice. The same rule as the profile's silent_reason."""
+    if route.provider == GOOGLE:
+        from . import google_tts
+        choice = provider_voice(cfg, (agent or {}).get("voice_id"), agent, route, GOOGLE)
+        if choice.voice and choice.voice not in google_tts.VOICES:
+            return VOICE_UNAVAILABLE
+    return NO_VOICE
 
 
 def clip_failure(cfg, agent: Mapping | None, *, google_code: str | None = None) -> tuple[str, str]:

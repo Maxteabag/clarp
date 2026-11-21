@@ -12,6 +12,7 @@ from lib.log import log_exception
 from lib.send_request import SendRequest, SendRequestError
 from lib.orchestrator import get_settings as get_orchestrator_settings, recent_ignored_decisions as recent_orchestrator_ignored_decisions, recent_decisions as recent_orchestrator_decisions, update_settings as update_orchestrator_settings
 from lib.routes.helpers import _runtime_paths
+from lib.request_texts import body_text
 
 
 class SendRoutes:
@@ -52,7 +53,7 @@ class SendRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         from lib.runtime_bridge import RuntimeUnavailable
@@ -130,7 +131,7 @@ class SendRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session or not all(c.isalnum() or c in "._-" for c in session):
             return self._json_error(400, "bad session name")
         agent = identity.lookup(session)

@@ -295,7 +295,9 @@ def test_janitor_flag_in_ordinary_create_json_does_not_enable_private_mode(tmp_p
     ctx = context(tmp_path)
     result = AgentLifecycleService(ctx).create({"name": "Ordinary", "is_janitor": True, "janitor": True,
         "voice_id": "v-ordinary", "backend": "codex", "cwd": str(tmp_path)})
-    assert result.voice_id == "v-ordinary"
+    from lib.voice import voice_map
+    # The voice it was given is kept (feature voice_pool adds one only for a provider it lacks).
+    assert voice_map(result.voice_id)["elevenlabs"] == "v-ordinary"
     assert not agents.get_by_session(result.session)["is_janitor"]
     assert ctx.announcements
 

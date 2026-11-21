@@ -6,10 +6,12 @@
 //! is told to look at everything again, and the conversations themselves tell it what is new.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
+
+use crate::fleet::Directory;
 
 /// How long an event is kept for clients that reconnect.
 const KEEP_MS: i64 = 5 * 60 * 1000;
@@ -76,6 +78,8 @@ pub struct Hub {
     /// What adds an agent's profile to the roster's events about it (feature
     /// `voice_profile`), once the Host has its speaker and its ears.
     pub profiles: crate::profile::Slot,
+    /// A queue event resolves names when it is published. The fleet owns the roster.
+    queue_roster: OnceLock<Weak<watch::Receiver<Arc<Directory>>>>,
 }
 
 impl Hub {
@@ -102,7 +106,18 @@ impl Hub {
             live,
             waiting: Mutex::new(BTreeMap::new()),
             profiles: crate::profile::Slot::new(),
+            queue_roster: OnceLock::new(),
         }
+    }
+
+    pub(crate) fn queue_roster(&self, roster: &Arc<watch::Receiver<Arc<Directory>>>) {
+        let _ = self.queue_roster.set(Arc::downgrade(roster));
+    }
+
+    pub(crate) fn queue_directory(&self) -> Option<Arc<Directory>> {
+        let roster = self.queue_roster.get()?.upgrade()?;
+        let directory = roster.borrow().clone();
+        Some(directory)
     }
 
     /// An agent says how many of its requests wait for the user. Answers how many wait in

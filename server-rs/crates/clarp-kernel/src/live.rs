@@ -558,6 +558,20 @@ impl Hub {
         out
     }
 
+    /// A user stepped into a running coordination turn. Keep its identity and state intact.
+    pub fn set_turn_audience(&mut self, audience: &str, now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
+        if self.has_open_turn()
+            && let Some(mut turn) = self.view.turn.clone()
+            && turn.get("audience").and_then(Value::as_str) != Some(audience)
+        {
+            turn.insert("audience".to_owned(), json!(audience));
+            let op = json!({"op": "turn", "conv": self.conv, "turn": turn});
+            self.emit(vec![op], (false, ""), now, &mut out);
+        }
+        out
+    }
+
     /// The turn ended: `completed`, `failed` or `interrupted`. What still ran is settled
     /// with it. A turn that failed says why (`error`: reason, message, the provider's words).
     pub fn end_turn(&mut self, status: &str, error: Option<&Value>, now: i64) -> Vec<Value> {
