@@ -94,6 +94,10 @@ impl AppServer {
         self.send(&json!({"method": "initialized", "params": {}}))
     }
 
+    pub fn next_request(&self) -> u64 {
+        self.next_id
+    }
+
     pub fn request(&mut self, method: &str, params: Value) -> io::Result<u64> {
         let id = self.next_id;
         self.next_id += 1;

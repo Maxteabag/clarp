@@ -1976,6 +1976,9 @@ async fn voice_migrate(app: &App, args: &[String]) -> ToolAnswer {
 
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
+        Some((command, rest)) if command == "leader-decision" => {
+            crate::teams::leader_memory::run(app, call, rest).await
+        }
         Some((command, rest)) if command == "controller-action" => {
             crate::controller_action_tool::run(app, call, rest).await
         }

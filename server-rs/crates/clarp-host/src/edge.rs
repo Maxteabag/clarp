@@ -175,6 +175,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("log_turn_summary", 47),
     // Plans with goals: `/task-plan`, `/task-plans`, `/task-plan/action`.
     ("durable_task_goals", 21),
+    // Native Codex goals, with a persistent app-server lane only while the goal needs it.
+    ("agent_goals", 5),
     // Goals kept current by the Goal keeper: `plan.goal.updater` beside the owner's own
     // checkpoint, `plan.updater`, a criterion set aside, a paused goal's step that keeps
     // its place.
@@ -691,6 +693,7 @@ pub fn router(app: App) -> Router {
         .merge(library::routes().layer(middleware::from_fn_with_state(app.clone(), library::texts)))
         .merge(media::routes())
         .merge(plans::routes())
+        .merge(crate::native_goal_routes::routes())
         .merge(push::routes())
         .merge(peers::routes())
         .merge(roster::routes())
@@ -738,7 +741,7 @@ pub fn router(app: App) -> Router {
 }
 
 /// The controls of a chat, by their paths: what is asked of an agent a person speaks to.
-const CHAT_CONTROLS: [&str; 18] = [
+const CHAT_CONTROLS: [&str; 22] = [
     "/send",
     "/stop",
     "/select",
@@ -757,6 +760,10 @@ const CHAT_CONTROLS: [&str; 18] = [
     "/agent-portraits",
     "/agent-portrait-generation",
     "/agent-schedules",
+    "/agent-goal",
+    "/agent-goal/pause",
+    "/agent-goal/resume",
+    "/agent-goal/clear",
 ];
 
 fn body_refusal(status: StatusCode, message: &str, close: bool) -> Response {
@@ -1393,6 +1400,11 @@ pub(crate) fn agent_row(
         focused,
     );
     row["moved"] = json!(view.status.moved);
+    row["goal"] = json!(
+        view.native_goal
+            .as_ref()
+            .map(clarp_kernel::agent_goal::Goal::public)
+    );
     row["coordination_visibility"] = json!(visibility);
     row["coordination_override"] = json!(choice);
     let working = view.working.as_ref();

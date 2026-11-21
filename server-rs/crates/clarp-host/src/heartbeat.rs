@@ -126,6 +126,7 @@ struct Seen {
     /// Nothing: not within what was looked through.
     last_person_ms: i64,
     team_activity_ms: i64,
+    promotion_ms: i64,
     /// The heartbeat's turn that ended last, by a name no other turn has, and what its
     /// answers count as.
     turn: Option<(String, Counted)>,
@@ -157,6 +158,14 @@ fn counted(rows: &[Versioned], turn: u64) -> Counted {
         Some(last) if last == rules::NOTHING_TO_DO => Counted::Nothing,
         Some(last) if !rules::is_neutral_status(last) => Counted::Activity,
         _ => Counted::Neither,
+    }
+}
+
+impl Seen {
+    fn wake_signal_ms(&self) -> i64 {
+        self.last_person_ms
+            .max(self.team_activity_ms)
+            .max(self.promotion_ms)
     }
 }
 
@@ -266,6 +275,7 @@ async fn seen(app: &App, member: &Member) -> Seen {
         held: status.paused,
         last_person_ms: last_person_ms.unwrap_or(0),
         team_activity_ms: crate::teams::runtime::latest_activity(app, &record.agent_id),
+        promotion_ms: app.teams.latest_promotion(),
         turn,
         woken_by_a_goal,
         plan,
@@ -300,7 +310,7 @@ fn caught_up<'a>(book: &'a mut Book, agent_id: &str, seen: &Seen) -> &'a mut rul
         }
         counted.insert(agent_id.to_string(), turn.clone());
     }
-    state.woken_by(seen.last_person_ms.max(seen.team_activity_ms));
+    state.woken_by(seen.wake_signal_ms());
     state
 }
 
@@ -332,7 +342,7 @@ fn due(book: &mut Book, agent_id: &str, seen: &Seen, now_ms: i64) -> Option<Stri
     if !why_not.is_empty() {
         return None;
     }
-    state.started(now, seen.last_person_ms.max(seen.team_activity_ms));
+    state.started(now, seen.wake_signal_ms());
     let interrupted = seen.latest.interrupted() && !seen.latest.taken_down_by_a_restart();
     let plan = seen.plan.as_ref();
     let plan = plan.map(|(title, lines)| (title.as_str(), lines.as_slice()));
@@ -567,6 +577,7 @@ mod due_work_tests {
             held: false,
             last_person_ms: 0,
             team_activity_ms: 5_000,
+            promotion_ms: 0,
             turn: None,
             woken_by_a_goal: false,
             plan: None,
@@ -578,7 +589,13 @@ mod due_work_tests {
         state.dormant = true;
         assert!(caught_up(&mut book, id, &seen).dormant);
         seen.team_activity_ms = 6_000;
-        assert!(!caught_up(&mut book, id, &seen).dormant);
+        let state = caught_up(&mut book, id, &seen);
+        assert!(!state.dormant);
+        state.dormant = true;
+        seen.promotion_ms = 7_000;
+        let state = caught_up(&mut book, id, &seen);
+        assert!(!state.dormant);
+        assert_eq!(state.last_wake_signal_ms, 7_000);
     }
 
     #[tokio::test]

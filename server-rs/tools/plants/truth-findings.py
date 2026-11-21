@@ -31,9 +31,15 @@ for label,old,new in [
     # change'): /backend-auth/ answers only its three changes, and anything else under it is no route.
     # 'the harness not asked': the doors under /harness-providers/ are built; that any other
     # action there is no route is planted in harness-providers.py ('any action is a change').
-    ('the old goal not asked','not_built_at(&uri, "A goal of this kind is")','not_built("A goal of this kind is")'),
 ]:
     PLANTS.append((S,'wire',label,old,new))
+# Unknown goal actions still return the plain 404. The Host test checks
+# /agent-goal/start and /agent-goal/stop against the explicit mutation routes.
+PLANTS.append((
+    'clarp-host/src/native_goal_routes.rs', 'wire', 'an unknown native goal action is a route',
+    '.route("/agent-goal/clear", post(clear))',
+    '.route("/agent-goal/{action}", post(clear))',
+))
 J='clarp-kernel/src/janitors.rs'
 H='clarp-host/src/janitors.rs'
 RUNS['words']=['test','-p','clarp-kernel','--lib','a_janitor_that_cannot_run_is_told']
