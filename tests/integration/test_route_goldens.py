@@ -66,7 +66,7 @@ DYNAMIC_SAMPLES = (
     # agents and personas
     "/agents/a1", "/agents/a1/fork", "/personas/p1",
     # static, media and avatars
-    "/static/app.js", "/static/../server.py", "/media/m1",
+    "/static/app.js", "/static/../server.py", "/media/m1", "/media/m1/favorite",
     "/agent-portraits/p1/content", "/notification-avatars/a1",
     "/viz/owner-avatar/owner", "/avatars/a1", "/persona-avatars/p1",
     "/audio/clip.mp3", "/audio/../secret",
