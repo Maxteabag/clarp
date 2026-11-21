@@ -750,7 +750,13 @@ impl Batch<'_> {
     /// was sent: when its turn was accepted, which a new wording does not move.
     fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64) {
         if message_seq > self.recorder.last_seq {
-            return; // accepted in this very batch: it is in the conversation already
+            // The message was written in this batch. If the turn went through the queue,
+            // count its conversation row separately from joining and starting, as Python does.
+            if self.work.live_from_queue() && self.work.live().is_some_and(|live| live.id() == turn)
+            {
+                self.queue_shown(turn, now_ms);
+            }
+            return;
         }
         let waiting = self.recorder.log.read_after(
             message_seq.saturating_sub(1),
@@ -769,16 +775,20 @@ impl Batch<'_> {
                     let body = sent(stored.body, sent_at);
                     let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);
                     item.key = stored.key;
-                    self.items
-                        .push(NewItem::new(kind::QUEUE_SHOWN, now_ms, Vec::new()).in_turn(turn.0));
+                    self.queue_shown(turn, now_ms);
                     self.items.push(item);
-                    self.work.queue_item_shown();
                 }
             }
             Err(error) => {
                 self.failed.get_or_insert(error.into());
             }
         }
+    }
+
+    fn queue_shown(&mut self, turn: TurnId, now_ms: i64) {
+        self.items
+            .push(NewItem::new(kind::QUEUE_SHOWN, now_ms, Vec::new()).in_turn(turn.0));
+        self.work.queue_item_shown();
     }
 
     /// Adds an item that is not an event, such as a piece of the conversation. Returns its place
@@ -1473,6 +1483,32 @@ mod tests {
             .accept_message(message("u-2", Admission::Queue), 4)
             .unwrap();
         assert_eq!((other.turn, other.duplicate), (Some(TurnId(2)), false));
+    }
+
+    #[test]
+    fn a_same_batch_start_counts_showing_the_message_only_when_it_went_through_the_queue() {
+        for (admission, expected) in [
+            (Admission::Queue, 0),
+            (Admission::Later, 3),
+            (Admission::Background, 3),
+        ] {
+            let engine = MemEngine::new();
+            let mut recorder = open(&engine);
+            let accepted = recorder
+                .accept_message(message("u-1", admission), 1)
+                .unwrap();
+            assert!(accepted.entered);
+            assert!(recorder.unshown_waiting().next().is_none());
+            assert_eq!(recorder.agent().queue_revision(), expected);
+            let markers = recorder
+                .log()
+                .read_after(0, Kinds::only(kind::QUEUE_SHOWN), 10)
+                .unwrap();
+            assert_eq!(markers.len(), usize::from(expected != 0));
+            assert!(markers.iter().all(|marker| marker.turn == Some(1)));
+            drop(recorder);
+            assert_eq!(open(&engine).agent().queue_revision(), expected);
+        }
     }
 
     #[test]
