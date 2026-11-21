@@ -166,16 +166,10 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     let detail = host.get(&path);
     assert_eq!(detail["job"]["revision"], shown["revision"]);
     assert_eq!(detail["timeline"].as_array().unwrap().len(), 2);
-    // A limited device can inspect canonical state and progress, but the
-    // provider's output path and bytes are withheld before any file read.
     let (limited, _) = pair(&host, "Task observer", "limited");
-    let (status, restricted) = host.ask_as(&limited, "GET", &path, None);
-    assert_eq!(status, 200);
-    assert_eq!(restricted["timeline"], detail["timeline"]);
-    assert_eq!(restricted["progress"], detail["progress"]);
     assert_eq!(
-        restricted["log"],
-        json!({"path":"","available":false,"reason":"forbidden","text":"","size":0,"truncated":false})
+        host.ask_as(&limited, "GET", &path, None),
+        (403, json!({"error":"full device access required"}))
     );
     // A stale generation and an unsupported cancellation are separate
     // refusals and leave the job and its timeline at the same revision.

@@ -218,6 +218,16 @@ with limited access can revoke its own pairing using its token's exact device id
 requested text. Revocation invalidates the token and uses the existing stream and call teardown.
 The pairing and device-scope vectors hold these rules to the Python Host.
 
+**Limited-device reads** (21 Nov 2026, R123c). The device scope check applies before routing.
+Limited GETs allow only the reference's exact reads and route families, including the three
+speech reads added by PR 544: transcription capabilities, providers and retained audio.
+Artifact exports are excluded even with trailing slashes. Unknown paths, PATCH, PUT and
+DELETE are refused with 403 `full device access required`. The existing POST allowlist stays in force. The public
+pairing and avatar routes keep their separate auth rules. A limited `/server-info` builds
+its reply from fixed identity, compatibility and connection keys. It omits `default_cwd`
+and reduces a local connection error to `failed`. The scope and identity vectors are
+generated from the Python Host's PR 544 merge, which includes PR 529.
+
 **Provider message identity** (21 Nov 2026, R108). A modern Codex assistant item keeps its provider id,
 including when its rollout tells the same words in a legacy record. Native-session seed imports name the
 row from that id and its occurrence in the session. A line whose provider gives no id follows its place
@@ -256,7 +266,7 @@ answer that they are not here yet), and what an account's usage limit does to a 
 The Goal keeper and its receipts are there: below.
 
 **Developer diagnostics** (19 Nov 2026). A computer's capture preferences live in one fleet
-setting. A limited device may read settings and health; changing the setting requires full access.
+setting. Reading settings or health, and changing the setting, require full access.
 Capture goes to one private directory and uses a bounded nonblocking queue. Its writer drops new
 records at capacity and expires hour files even with capture off. Its resource sampler runs only
 when selected. The public retention numbers are upper bounds; this Host keeps no hourly rollups.
@@ -286,8 +296,7 @@ one Bash PreToolUse hook through inline settings. The shim reads at most 64 KiB 
 no permission decision and never contacts the Host. The hook attaches the exact agent, native
 session and tool-use id to a worker registration. A registration with that binding takes the native
 row's place in the list; its own detail and timeline remain available. Full devices can read
-the last 64 KiB of the receipted task's output with secrets redacted. A limited device sees only
-progress and history. Cancelling a native job gives a 409 receipt and leaves its state intact.
+the last 64 KiB of the receipted task's output with secrets redacted. Task detail requires full access. Cancelling a native job gives a 409 receipt and leaves its state intact.
 
 The hook's turn advice is held by `tools/provider-hook-vectors.py` and the Host test that runs
 the repository's `run_detached_job.sh --goal` against its own tools. A worker awaiting a refused
@@ -2427,7 +2436,7 @@ closes it; failing again, archived, failing once more, discarded; a restart keep
 
 **Transcription failure words (PR 518, 21 Nov 2026).** Missing models, loading, contention, and failed attempts
 map to fixed words and statuses. Upload voice events and call attempt reasons use the same words. Health keeps
-fixed subsystem error labels with its timestamps, including for limited devices. The Host logs the engine detail.
+fixed subsystem error labels with its timestamps for callers with full access. The Host logs the engine detail.
 The speech stream gives a fixed failure message when its provider reports an error. The reference vectors and
 the upload, call, stream and health tests hold the failure paths.
 

@@ -36,9 +36,6 @@ def record(tmp):
         _json_ok = Handler._json_ok
         _json_error = Handler._json_error
         _json = Handler._json
-        _DEVICE_FULL_ONLY_PREFIXES = Handler._DEVICE_FULL_ONLY_PREFIXES
-        _LIMITED_DEVICE_POST_EXACT = Handler._LIMITED_DEVICE_POST_EXACT
-        _request_device_scope = 'limited'
 
         def _send(self, status, body, mime):
             self.reply = [status, json.loads(body) if mime == 'application/json' else body.decode()]
@@ -96,8 +93,10 @@ def record(tmp):
             ask('POST', json.dumps(dict(base, queued=queued)))
         for field in ['button', 'controller_event']:
             ask('POST', json.dumps({k:v for k,v in base.items() if k != field}))
+    limited = Handler.__new__(Handler)
+    limited._request_device_scope = 'limited'
     return dict(now=NOW, draw=DRAW, rows=rows, malformed_actions=malformed,
-                limited={m:Handler._device_forbidden(Door(), '/remote-action', m) for m in ['GET','POST']})
+                limited={m: limited._device_forbidden('/remote-action', m) for m in ['GET', 'POST']})
 
 
 if __name__ == '__main__':

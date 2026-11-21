@@ -25,10 +25,14 @@ fn shortcuts_broadcast_once_to_live_listeners_and_never_replay_a_button_press() 
         })
     };
     ready(&heard);
+    assert_eq!(
+        host.ask_as(&limited, "GET", "/remote-action?action=record", None),
+        (403, json!({"error":"full device access required"}))
+    );
     let get = |action: &str| {
         fetch(
             &host,
-            &limited,
+            &host.token,
             "GET",
             &format!("/remote-action?action={action}"),
             &[],

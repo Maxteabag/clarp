@@ -2266,7 +2266,7 @@
     "{\"action\": {\"action\": \"record\"}}"
   ],
   "limited": {
-    "GET": false,
+    "GET": true,
     "POST": false
   }
 }

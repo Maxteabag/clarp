@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Writes down which requests the Python Host refuses a device that pairs with limited access.
 
-A device a user paired with limited access (a watch) may read, send, and ask to revoke its own pairing. The rule is the Python
-Host's `Handler._device_forbidden` (server/server.py), with `do_PATCH`'s own narrowing (a PATCH is looked at only
-under /schedules/), run here as it is for every prefix of its lists, every route it lets through, the ones next to
-them, and every method a request may have. A refusal is 403 {"error": "full device access required"}.
+A device paired with limited access may read and send at named routes and revoke its own pairing.
+The fixture runs the Python Host's `Handler._device_forbidden` for exact paths, families, their neighbors,
+and the methods the handlers pass into it. It also records the limited `/server-info` projection.
 
     <the Python Host's interpreter> server-rs/tools/device-scope-vectors.py
 
@@ -35,6 +34,15 @@ def paths(handler) -> list:
         out.update({bare, bare + '/', bare + '/x', bare + 'x', bare[:-1]})
     for exact in handler._LIMITED_DEVICE_POST_EXACT:
         out.update({exact, exact + '/', exact + '/x', exact + 'x'})
+    for exact in handler._LIMITED_DEVICE_GET_EXACT:
+        out.update({exact, exact + '/', exact + '/x', exact + 'x'})
+    for prefix in handler._LIMITED_DEVICE_GET_PREFIXES:
+        bare = prefix.rstrip('/')
+        out.update({bare, bare + '/', bare + '/x', bare + 'x', bare[:-1]})
+    out.update({'/artifacts/a/export', '/artifacts/a/export/', '/artifacts/a/export//',
+                '/artifacts/a/exported', '/artifacts/a/export/x', '/remote-action',
+                '/agent-files', '/a-path-no-route-serves', '/%73erver-info',
+                '/media%2Fx', '/media/%78', '/artifacts/a/ex%70ort'})
     out.update({'/launch-directories', '/launch-directories/x', '/favorite-paths', '/favorite-paths/x'})
     out.update({'/dirs', '/dirs/x', '/past-sessions', '/past-sessions/x', '/terminal', '/terminal/', '/terminal/echo',
                 '/terminal/echo/x', '/controller-actions', '/controller-actions/', '/controller-actions/a',
@@ -59,29 +67,39 @@ def run(root) -> dict:
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    import server
-
-    class Asking:
-        """What the rule reads of a request: its device's scope, and the Host's lists."""
-        _DEVICE_FULL_ONLY_PREFIXES = server.Handler._DEVICE_FULL_ONLY_PREFIXES
-        _LIMITED_DEVICE_POST_EXACT = server.Handler._LIMITED_DEVICE_POST_EXACT
-
-        def __init__(self, scope):
-            self._request_device_scope = scope
+    from server import Handler
+    from lib.routes.settings import limited_server_info
 
     cases = []
     for scope in ('limited', 'full', ''):
-        asking = Asking(scope)
-        for path in paths(asking):
+        handler = Handler.__new__(Handler)
+        handler._request_device_scope = scope
+        for path in paths(handler):
             for method in METHODS:
-                refused = server.Handler._device_forbidden(asking, path, method)
-                if method == 'PATCH':
-                    # do_PATCH asks the rule only under /schedules/: any other PATCH keeps its 404.
-                    refused = path.startswith('/schedules/') and refused
-                cases.append({'scope': scope, 'method': method, 'path': path, 'refused': refused})
+                cases.append({'scope': scope, 'method': method, 'path': path,
+                              'refused': handler._device_forbidden(path, method)})
+
+    connection = {'enabled': True, 'port': 7683, 'certificate_sha256': 'ab',
+                  'service_type': '_clarps._tcp', 'urls': ['https://192.0.2.1:7683'],
+                  'future_field': 'private'}
+    info = {'server_id': 'host-id', 'name': 'Test Host', 'deployment_mode': 'native',
+            'version': '1', 'image_version': '', 'clarp_version': '1', 'min_app_version': '1',
+            'capabilities': {'version': 1, 'features': []}, 'contract': {'host': 42},
+            'client': {'status': 'unknown'}, 'default_cwd': '/synthetic/home',
+            'future_field': 'private'}
+    projections = [
+        {},
+        info,
+        {**info, 'local_connection': connection},
+        {**info, 'local_connection': {**connection, 'error': 'bind failed on /synthetic/socket'}},
+        {**info, 'local_connection': {**connection, 'error': ''}},
+        {**info, 'local_connection': None},
+    ]
     return {'what': 'server/server.py: Handler._device_forbidden, as do_GET, do_POST, do_PUT, do_DELETE and do_PATCH '
                     'ask it; the refusal is 403 {"error": "full device access required"}',
-            'cases': cases}
+            'cases': cases,
+            'server_info': [{'full': full, 'limited': limited_server_info(full)} for full in projections]}
+
 
 
 def main() -> int:
@@ -97,6 +115,10 @@ def main() -> int:
     lines = ['{', f' "what": {json.dumps(said["what"])},', ' "cases": [']
     cases = said['cases']
     lines.extend('  ' + json.dumps(one) + (',' if n < len(cases) - 1 else '') for n, one in enumerate(cases))
+    lines += [' ],', ' "server_info": [']
+    projections = said['server_info']
+    lines.extend('  ' + json.dumps(one) + (',' if n < len(projections) - 1 else '')
+                 for n, one in enumerate(projections))
     lines += [' ]', '}']
     OUT.write_text('\n'.join(lines) + '\n', encoding='ascii')
     refused = sum(1 for one in cases if one['refused'])
