@@ -19,7 +19,9 @@ L = 'clarp-actor/src/lib.rs'
 W = 'clarp-host/src/wire.rs'
 H = 'clarp-host/src/agent.rs'
 OUTSIDE = '        let outside = !self.agent.starts_at_once(message.admission);\n'
-AT_ONCE = '        self.live.is_none() && !(self.paused && admission == Admission::Background)\n'
+HERE = '        self.moved.is_none()\n'
+AT_ONCE = HERE + ('            && self.live.is_none()\n'
+                  '            && !(self.paused && admission == Admission::Background)\n')
 SENT_AT = '                    let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);\n'
 ROW = '                    let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);\n'
 KEYED = '                    item.key = stored.key;\n'
@@ -46,19 +48,21 @@ PLANTS = [
     (J, 'kernel', 'held background work is in the conversation at once', OUTSIDE,
      '        let outside = message.admission != Admission::Background\n'
      '            && !self.agent.starts_at_once(message.admission);\n'),
-    (J, 'kernel', 'a message is said to have entered whether or not it did', '            entered: !outside,\n',
-     '            entered: true,\n'),
-    (J, 'kernel', 'no message is said to have entered', '            entered: !outside,\n', '            entered: false,\n'),
+    (J, 'kernel', 'a message is said to have entered whether or not it did',
+     '            entered: !outside && !native_goal,\n', '            entered: !native_goal,\n'),
+    (J, 'kernel', 'no message is said to have entered',
+     '            entered: !outside && !native_goal,\n', '            entered: false,\n'),
     # Whether a message starts at once.
-    (A, 'kernel', 'held background work starts at once', AT_ONCE, '        self.live.is_none()\n'),
-    (A, 'kernel', 'nothing starts at once on a held agent', AT_ONCE, '        self.live.is_none() && !self.paused\n'),
+    (A, 'kernel', 'held background work starts at once', AT_ONCE, HERE + '            && self.live.is_none()\n'),
+    (A, 'kernel', 'nothing starts at once on a held agent', AT_ONCE,
+     HERE + '            && self.live.is_none() && !self.paused\n'),
     (A, 'kernel', 'a busy agent starts a message at once', AT_ONCE,
-     '        !(self.paused && admission == Admission::Background)\n'),
+     HERE + '            && !(self.paused && admission == Admission::Background)\n'),
     (A, 'kernel', 'a stopping turn lets a message start at once', AT_ONCE,
-     '        (self.live.is_none() || self.stopping.is_some())\n'
+     HERE + '            && (self.live.is_none() || self.stopping.is_some())\n'
      '            && !(self.paused && admission == Admission::Background)\n'),
     (A, 'kernel', 'a parked turn lets a message start at once', AT_ONCE,
-     '        (self.live.is_none() || matches!(self.live, Some(Turn::Parked(_))))\n'
+     HERE + '            && (self.live.is_none() || matches!(self.live, Some(Turn::Parked(_))))\n'
      '            && !(self.paused && admission == Admission::Background)\n'),
     # The row its turn's start writes.
     (J, 'kernel', 'the send time is when the waiting copy was last written', SENT_AT,
@@ -92,7 +96,10 @@ PLANTS = [
      '                .read_after(message_seq.saturating_sub(1), Kinds::only(kind::MESSAGE), 1)?;\n'),
     # A log an older build wrote.
     (J, 'kernel', 'a message an older build wrote into the conversation is said not to wait',
-     '            return Ok(Reworded::InConversation);\n', '            return Ok(Reworded::NotWaiting);\n'),
+     '        let Some(stored) = kept.into_iter().find(|item| item.seq == message_seq) else {\n'
+     '            return Ok(Reworded::InConversation);\n',
+     '        let Some(stored) = kept.into_iter().find(|item| item.seq == message_seq) else {\n'
+     '            return Ok(Reworded::NotWaiting);\n'),
     (J, 'kernel', 'a start anew moves what waits outside into the conversation',
      '            let kept = self.log.read_after(from, Kinds::only(kind::MESSAGE), 1)?;\n',
      '            let kept = self.log.read_after(from, Kinds::only(kind::WAITING), 1)?;\n'),
@@ -128,8 +135,8 @@ PLANTS = [
     (H, 'host', 'the start event loses the queued item ID',
      'client_id: &live.client_id,', 'client_id: "",'),
     (J, 'kernel', 'a row shown by an older build also appears in the queue',
-     '.filter(|queued| !self.shown_waiting.contains(&queued.id))',
-     '.filter(|_| true)'),
+     '            !queued.returning_to_tool() && !self.shown_waiting.contains(&queued.id)',
+     '            !queued.returning_to_tool()'),
     (J, 'kernel', 'an older row is never recognized during restart',
      '                shown_waiting.insert(queued.id);',
      '                let _ = &mut shown_waiting;'),
