@@ -277,9 +277,13 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         if mode == "race" {
             let argv: Vec<String> = serde_json::from_slice(
                 &std::fs::read(place.root.join("steering-argv.json")).unwrap(),
-            ).unwrap();
+            )
+            .unwrap();
             assert!(argv.iter().any(|arg| arg == "--replay-user-messages"));
-            assert!(argv.windows(2).any(|pair| pair == ["--input-format", "stream-json"]));
+            assert!(
+                argv.windows(2)
+                    .any(|pair| pair == ["--input-format", "stream-json"])
+            );
             await_file("result-race");
             collect_answer(&host, &session, "first-race");
             assert_eq!(ids(&host, &session), ["u-first"]);
