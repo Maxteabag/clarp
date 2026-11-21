@@ -153,6 +153,29 @@ impl Actor {
         self.recorder.agent().selected_takeover()
     }
 
+    pub fn selected_takeover_socket(&self) -> Option<(TurnId, PathBuf)> {
+        let selection = self.selected_takeover()?;
+        let from = selection.start.from;
+        Some((from, self.profile.socket_path_of(from, selection.attempt)))
+    }
+
+    pub fn selected_takeover_has_marker(&self) -> Result<bool, ActorError> {
+        let Some(selection) = self.selected_takeover() else {
+            return Ok(false);
+        };
+        let spool = self.profile.spool_path_of(selection.start.from, selection.attempt);
+        let read = SpoolReader::new(&spool)
+            .read_window(selection.fence, u64::MAX, 1)
+            .map_err(|error| super::io_error(&spool, error))?;
+        Ok(read.damaged.is_empty()
+            && read.records.first().is_some_and(|record| {
+                record.entry == Entry::Shim(ShimEvent::Takeover {
+                    fence: selection.fence,
+                    replaced_by: selection.into.0,
+                })
+            }))
+    }
+
     pub fn clear_takeover(&mut self, from: TurnId, now_ms: i64) -> Result<(), ActorError> {
         self.recorder
             .handle(Command::ClearTakeover { from }, now_ms)?;
@@ -166,7 +189,10 @@ impl Actor {
             return Ok(None);
         };
         let (from, attempt, fence, into) = (
-            selected.start.from, selected.attempt, selected.fence, selected.into.0,
+            selected.start.from,
+            selected.attempt,
+            selected.fence,
+            selected.into.0,
         );
         let path = self.profile.spool_path_of(from, attempt);
         let read = SpoolReader::new(&path)
@@ -176,9 +202,19 @@ impl Actor {
             return Ok(None);
         };
         if read.damaged.is_empty()
-            && first.entry == Entry::Shim(ShimEvent::Takeover { fence, replaced_by: into })
+            && first.entry
+                == Entry::Shim(ShimEvent::Takeover {
+                    fence,
+                    replaced_by: into,
+                })
             && read.records.iter().any(|record| {
-                matches!(record.entry, Entry::Shim(ShimEvent::Exited { signal: Some(9), .. }))
+                matches!(
+                    record.entry,
+                    Entry::Shim(ShimEvent::Exited {
+                        signal: Some(9),
+                        ..
+                    })
+                )
             })
         {
             return self.finish_takeover(from, now_ms).map(Some);

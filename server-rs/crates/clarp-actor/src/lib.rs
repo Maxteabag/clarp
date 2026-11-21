@@ -4316,18 +4316,11 @@ impl Actor {
 
     /// Reads what is new in the live turn's spool and writes what it means to the log.
     fn pump(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
-        if let Some(recovered) = self.recover_takeover(now_ms)? {
-            out.actions.extend(recovered.actions);
-            out.changed.conversation = true;
-            out.changed.status = true;
-            out.changed.queue = true;
-            return Ok(());
-        }
         loop {
             // The turn is shown from before its first record is read, and its end after its
             // last one was.
             self.show_turn(now_ms);
-            let Some(live) = self.live.as_mut().filter(|live| !live.over) else {
+            let Some(live) = self.live.as_ref().filter(|live| !live.over) else {
                 return Ok(());
             };
             let turn = live.turn;
@@ -4339,6 +4332,20 @@ impl Actor {
                 return Ok(());
             }
             out.damaged_lines += read.damaged.len();
+            // Once the terminal record is in this read, a takeover marker cannot arrive
+            // between the recovery check and ordinary settlement.
+            if read.records.iter().any(|record| record.is_final())
+                && let Some(recovered) = self.recover_takeover(now_ms)?
+            {
+                out.actions.extend(recovered.actions);
+                out.changed.conversation = true;
+                out.changed.status = true;
+                out.changed.queue = true;
+                return Ok(());
+            }
+            let Some(live) = self.live.as_mut() else {
+                return Ok(());
+            };
 
             let model = live
                 .managed_model

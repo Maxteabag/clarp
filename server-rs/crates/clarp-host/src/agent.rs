@@ -7,7 +7,7 @@
 //! When the actor reports that its log or files failed, the thread drops it and opens it again
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -1280,6 +1280,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         behind_terminal: None,
         let_go_by_hand: false,
         queue_edit: None,
+        takeover_wait: VecDeque::new(),
         newest: None,
         ended: None,
         finished: None,
@@ -1348,6 +1349,8 @@ struct Worker {
     let_go_by_hand: bool,
     /// The edit or withdrawal committed by the request this worker is handling.
     queue_edit: Option<QueueEdit>,
+    /// Commands that could change the selected turns while a consume verdict is uncertain.
+    takeover_wait: VecDeque<Ask>,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
     /// How the last turn ended.
@@ -1625,7 +1628,13 @@ impl Worker {
             .into_iter()
             .flatten()
             .min();
-            let ask = match mailbox.next(rx, due, Instant::now()) {
+            let resolved = self
+                .actor
+                .as_ref()
+                .is_some_and(|actor| actor.selected_takeover().is_none());
+            let queued = if resolved { self.takeover_wait.pop_front() } else { None };
+            let request = queued.map_or_else(|| mailbox.next(rx, due, Instant::now()), Ok);
+            let ask = match request {
                 Ok(ask) => ask,
                 Err(RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
@@ -2419,6 +2428,36 @@ impl Worker {
     }
 
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
+        if matches!(
+            &ask,
+            Ask::Stop { .. }
+                | Ask::Hold { .. }
+                | Ask::Withdraw { .. }
+                | Ask::Reword { .. }
+                | Ask::SendNow { .. }
+                | Ask::Send { admission: Admission::Direct, .. }
+        ) && let Some((from, socket)) = self.actor.as_ref().and_then(Actor::selected_takeover_socket)
+        {
+            // Release is ordered against the consume in the shim. Once it replies, a
+            // missing marker means the old tool was never committed for takeover. If
+            // the commit won, finish its journal batch before applying this command.
+            let replied = crate::launcher::takeover_request(&socket, clarp_shim::Request::Release)
+                .and_then(|reply| reply.let_go)
+                .is_some();
+            let now = self.now_ms();
+            if let Some(actor) = self.actor.as_mut() {
+                let out = actor.spool_changed(now)?;
+                if replied && !actor.selected_takeover_has_marker()? {
+                    actor.clear_takeover(from, now)?;
+                }
+                let defer = actor.selected_takeover().is_some();
+                self.after(out);
+                if defer {
+                    self.takeover_wait.push_back(ask);
+                    return Ok(());
+                }
+            }
+        }
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::TakePlans {
@@ -2568,7 +2607,8 @@ impl Worker {
                             let held = tokio::task::spawn_blocking(move || {
                                 crate::launcher::takeover_request(&socket, request)
                                     .and_then(|reply| reply.held)
-                            }).await;
+                            })
+                            .await;
                             if let Ok(Some(held)) = held {
                                 let _ = tx.send(Ask::TakeoverHeld { offer, held });
                             }

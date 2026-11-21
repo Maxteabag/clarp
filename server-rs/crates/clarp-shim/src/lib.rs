@@ -50,7 +50,10 @@ pub enum Request {
         ms: u64,
     },
     /// End the tool only under an acknowledged, unexpired hold at this spool fence.
-    ConsumeHold { fence: u64, replaced_by: u64 },
+    ConsumeHold {
+        fence: u64,
+        replaced_by: u64,
+    },
     /// Let a held tool go on. A tool that is not held is left as it is.
     Release,
 }
