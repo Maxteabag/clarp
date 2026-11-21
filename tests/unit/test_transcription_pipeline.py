@@ -1,5 +1,6 @@
 """lib.transcription_pipeline.transcribe with a stub ctx: outcome mapping for
 every STT error class, the response contract, and the single-engine read."""
+import json
 import threading
 from types import SimpleNamespace
 
@@ -536,7 +537,7 @@ def test_the_own_engine_is_judged_by_its_declared_languages(monkeypatch):
     def down(manifest, force=False):
         raise custom_stt_adapters.AdapterError("adapter gone")
     monkeypatch.setattr(custom_stt_adapters, "models", down)
-    assert "unavailable: adapter gone" in refusal(config.load(), ["no", "en"])
+    assert refusal(config.load(), ["no", "en"]) == "the Host's own engine is unavailable"
 
 
 # F2: the fallback never sends the recording again to an engine that already failed for it.
@@ -606,8 +607,8 @@ def test_an_own_engine_that_is_off_or_missing_is_the_typed_refusal(monkeypatch, 
     rec = Recorder()
     out = _run(_ctx(stt), rec, requested_model="deepgram:nova-3", focus="rachel")
     assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
-    assert out.payload["reasons"] == [f"the Host's own engine could not hear it: {own_error}"]
-    assert str(own_error) in out.payload["message"]
+    assert out.payload["reasons"] == ["the Host's own engine could not hear it"]
+    assert str(own_error) not in json.dumps(out.payload)          # the detail stays in the log
     assert rec.voice[-1][1]["detail"]["message"] == "language_set_unsupported"
 
 
@@ -659,3 +660,25 @@ def test_a_fallback_to_chirp_records_the_set_it_was_handed(monkeypatch):
         "from": "deepgram:nova-3", "to": "google:chirp_3", "reason": "language_set",
         "languages": ["no", "en"]}
     assert handed and "," in str(handed[0])
+
+
+def test_an_own_adapter_that_cannot_answer_is_refused_with_fixed_words_and_logged(monkeypatch):
+    # The adapter's error names a local path: the answer says fixed words, the log keeps it.
+    from lib import custom_stt_adapters, log as host_log, stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_adapter(monkeypatch, ["multilingual"])
+    path = "/home/someone/.local/share/stt-adapters/myasr/run.sh"
+    def down(manifest, force=False):
+        raise custom_stt_adapters.AdapterError(f"myasr STT adapter files are unavailable: {path}")
+    monkeypatch.setattr(custom_stt_adapters, "models", down)
+    logged = []
+    monkeypatch.setattr(host_log, "log_exception",
+                        lambda event, e, detail="": logged.append((event, str(e), detail)))
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"] == ["the Host's own engine is unavailable"]
+    assert path not in json.dumps(out.payload)
+    assert any(path in error for _event, error, _detail in logged)
+    assert [c for c in stt.calls if c[0] == "bytes"] == []
