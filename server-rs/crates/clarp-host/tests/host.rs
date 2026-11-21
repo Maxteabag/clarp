@@ -23688,7 +23688,14 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         .len();
     let too_large = "QUFB".repeat(512_000 / 3 + 1);
     for (picture, why) in [
-        ("not base64!", "Avatar is not base64."),
+        ("not base64!", "Only base64 data is allowed"),
+        ("=AAA", "Leading padding not allowed"),
+        ("AAAA=", "Excess padding not allowed"),
+        ("AA=A", "Discontinuous padding not allowed"),
+        ("AA==A", "Excess data after padding"),
+        ("AA=", "Incorrect padding"),
+        ("A=", "Invalid base64-encoded string: number of data characters (1) cannot be 1 more than a multiple of 4"),
+        ("é", "string argument should contain only ASCII characters"),
         (too_large.as_str(), "avatar is too large"),
     ] {
         let (status, refused) = ask(

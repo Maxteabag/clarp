@@ -437,17 +437,61 @@ pub fn shelf(kind: &str) -> String {
     format!("kept.{kind}")
 }
 
-/// The name a persona's or an agent's own picture is kept under, by its digest. The Python
 fn creation_picture(base64: &str) -> Result<Option<(Vec<u8>, String)>, NotMade> {
     personas::picture(base64).map_err(|why| {
         let why = match why {
-            personas::AVATAR_TOO_LARGE => "avatar is too large",
-            other => other,
+            personas::AVATAR_TOO_LARGE => "avatar is too large".to_string(),
+            personas::NO_PICTURE => creation_picture_error(base64),
+            other => other.to_string(),
         };
         Told::new(400, "invalid avatar", why).into()
     })
 }
 
+// The creation route returns the reference interpreter's strict base64 errors.
+// Successful input and the byte limit still go through the shared picture reader.
+fn creation_picture_error(encoded: &str) -> String {
+    if !encoded.is_ascii() {
+        return "string argument should contain only ASCII characters".into();
+    }
+    let mut digits = 0;
+    let mut padding = 0;
+    for (at, byte) in encoded.bytes().enumerate() {
+        let quartet = digits % 4;
+        if byte == b'=' {
+            if at == 0 {
+                return "Leading padding not allowed".into();
+            }
+            if quartet == 1 {
+                break;
+            }
+            padding += 1;
+            if quartet == 0 || quartet + padding > 4 {
+                return "Excess padding not allowed".into();
+            }
+        } else {
+            if !byte.is_ascii_alphanumeric() && !matches!(byte, b'+' | b'/') {
+                return "Only base64 data is allowed".into();
+            }
+            if padding != 0 {
+                return if quartet + padding == 4 {
+                    "Excess data after padding".into()
+                } else {
+                    "Discontinuous padding not allowed".into()
+                };
+            }
+            digits += 1;
+        }
+    }
+    if digits % 4 == 1 {
+        return format!(
+            "Invalid base64-encoded string: number of data characters ({digits}) cannot be 1 more than a multiple of 4"
+        );
+    }
+    "Incorrect padding".into()
+}
+
+/// The name a persona's or an agent's own picture is kept under, by its digest. The Python
 /// Host keeps each as a JPEG file, whatever is in it, and hands it out as one.
 pub fn picture_name(digest: &str) -> String {
     format!("{digest}.jpg")
