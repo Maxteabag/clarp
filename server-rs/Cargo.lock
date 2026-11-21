@@ -199,6 +199,7 @@ dependencies = [
  "clarp-kernel",
  "clarp-ports",
  "clarp-protocol",
+ "clarp-sealed",
  "clarp-shim",
  "clarp-speech",
  "clarp-store-files",
@@ -273,11 +274,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarp-sealed"
+version = "0.0.1"
+
+[[package]]
 name = "clarp-shim"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "clarp-provider-hook",
+ "clarp-sealed",
  "clarp-spool",
  "clarp-tool-args",
  "minreq",

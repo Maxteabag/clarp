@@ -66,7 +66,9 @@ def test_a_key_differing_from_a_built_in_name_only_in_case_is_another_client_and
     monkeypatch.setattr("lib.log.log", lambda event, detail="", *a, **k: lines.append((event, detail)))
     table = config._render_spec_minimums({"render_spec_min_contract": {"IOS": 1, "Android": 2}})
     assert table == {"IOS": 1, "Android": 2}
-    assert len(lines) == 1 and "'IOS' (not 'ios')" in lines[0][1] and "'Android' (not 'android')" in lines[0][1]
+    assert len(lines) == 1 and lines[0][0] == "config.render_spec_min_contract"
+    assert "'IOS' is taken as its own client" in lines[0][1] and "the built-in 'ios' keeps its own number (74)" in lines[0][1]
+    assert "'Android' is taken as its own client" in lines[0][1] and "the built-in 'android' keeps its own setting" in lines[0][1]
     assert server_identity.render_spec_capable("IOS/1 contract=1", table)            # another client
     assert not server_identity.render_spec_capable("ios/2980 contract=73", table)    # ios keeps 74
     assert server_identity.render_spec_capable("ios/2981 contract=74", table)
@@ -103,3 +105,22 @@ def test_a_minimum_that_is_not_a_whole_number_is_refused(monkeypatch, value):
 def test_an_empty_table_leaves_the_default(monkeypatch):
     monkeypatch.setattr("lib.log.log", lambda *a, **k: None)
     assert config._render_spec_minimums({"render_spec_min_contract": {}}) is None
+
+
+def test_both_per_client_tables_are_read_by_the_one_rule(monkeypatch):
+    """render_spec's table and the live model's go through server_identity.client_minimums, and both
+    readers of the header through strict_client: one rule, one place."""
+    from lib import agent_ring_live
+    seen = []
+    real = server_identity.client_minimums
+    monkeypatch.setattr(server_identity, "client_minimums",
+                        lambda table, **kw: seen.append(kw["setting"]) or real(table, **kw))
+    config._render_spec_minimums({"render_spec_min_contract": {"Desktop": 5}})
+    config._live_model_min_client({"Desktop": 5})
+    assert seen == ["config.render_spec_min_contract", "config.live_model_min_client"]
+    read = []
+    real_strict = server_identity.strict_client
+    monkeypatch.setattr(server_identity, "strict_client", lambda header: read.append(header) or real_strict(header))
+    server_identity.render_spec_capable("ios/1 contract=74")
+    agent_ring_live.model_for_client("ios/1 contract=74")
+    assert read == ["ios/1 contract=74", "ios/1 contract=74"]

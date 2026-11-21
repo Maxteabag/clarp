@@ -503,7 +503,8 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     );
     // The command itself retries after losing the response to a note the Host already wrote.
     let (address, first) = lose_the_first_tool_answer(&host);
-    let told = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let told = place
+        .host_command()
         .args([
             "tool",
             "clarp-admin",
@@ -513,7 +514,6 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
             "--text",
             "Blue.",
         ])
-        .env_clear()
         .env("HOME", &place.root)
         .env("CLARP_HOST_ADDR", address)
         .env("CLARP_PROVIDER_TURN", &oak)
