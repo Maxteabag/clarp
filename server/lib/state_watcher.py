@@ -107,6 +107,11 @@ class StateLogWatcher:
         # WORKING_TTL_S: a setting change reaches the stream within seconds.
         self._hiding: set[str] = set()
         self._hiding_at = float("-inf")
+        # The database's change stamp at the last whole poll: what a poll broadcasts is
+        # new state_log rows and changed agents rows, so while it stands (no commit by
+        # anyone) a poll has nothing to say. Four polls a second read the agents table
+        # every time otherwise.
+        self._seen_stamp: tuple[int, int] | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # Completed-turn notification policy settles for up to
@@ -213,6 +218,14 @@ class StateLogWatcher:
                 log_exception("stateWatcherTickFail", e)
 
     def _poll_once(self) -> None:
+        from . import db
+        stamp = db.change_stamp()
+        if stamp == self._seen_stamp and stamp[0] >= 0:
+            return
+        self._poll_rows()
+        self._seen_stamp = stamp
+
+    def _poll_rows(self) -> None:
         from . import db
         c = db.conn()
         cur = c.execute(
