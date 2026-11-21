@@ -38,7 +38,7 @@ rules(KERNEL, 'vectors', [
     ('A model fallback uses a different output code', '        code: "en",', '        code: "fr",'),
     ('The fallback omits the unsupported primary', '(!matches!(primary.as_str(), "" | "en")).then_some(primary)', 'None'),
     ('An empty request is logged as unsupported', '(!matches!(primary.as_str(), "" | "en")).then_some(primary)', 'Some(primary)'),
-    ('An agent language is ignored', '.and_then(|who| of_agent(overrides, who))', '.and_then(|_| None)'),
+    ('An agent language is ignored', '.and_then(|who| of_agent(overrides, who))', '.and_then(|who| of_agent(overrides, who)).filter(|_| false)'),
     ('An unmatched agent always speaks English', '.unwrap_or(default)', '.unwrap_or("en")'),
     ('Take the last language from the set', "language.split(',').next()", "language.rsplit(',').next()"),
     ('A missing default leaves the language empty', '        "" => "en",', '        "" => "",'),
