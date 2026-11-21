@@ -44,7 +44,7 @@ rules('clarp-kernel/src/voices.rs', 'host', [
     ('A Vertex variant is labelled as its ID', 'labels.insert(vertex.clone(), name);', 'labels.insert(vertex.clone(), vertex.clone());'),
 ])
 rules(WORKER, 'worker', [
-    ('A refresh enters while another is running', 'let Ok(_refresh) = self.refreshing.try_lock() else {\n            return Ok(());\n        };', 'let _refresh = self.refreshing.try_lock();'),
+    ('A refresh enters while another is running', 'let Ok(_refresh) = self.refreshing.try_lock() else {\n            return Ok(false);\n        };', 'let _refresh = self.refreshing.try_lock();'),
     ('The file never takes the checked time', 'File::open(&self.path)?.set_modified(SystemTime::now())?;', 'let _ = File::open(&self.path)?;'),
     ('A file containing equal names is rewritten', 'old_hash.is_some() && snapshot == before', 'false'),
     ('The file contents lack a digest', 'let hash = Some(digest(&raw));', 'let hash = None;'),
