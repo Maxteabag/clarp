@@ -310,8 +310,14 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
                 Ok(())
             })
             .await;
-        if copied.is_err() {
-            return Err(declined(kept::ASSET_GONE));
+        if let Err(why) = copied {
+            return Err(match why {
+                crate::gallery::Failure::Busy
+                | crate::gallery::Failure::Stopped
+                | crate::gallery::Failure::TimedOut =>
+                    ApiError::new(StatusCode::SERVICE_UNAVAILABLE, why.words()),
+                _ => declined(kept::ASSET_GONE),
+            });
         }
         let published = Portrait {
             portrait_id: format!("portrait_{}", ids::secret(18).replace('-', "_")),

@@ -4,6 +4,7 @@ import runner
 RUNS = {
     'vectors': ['test', '--test', 'gallery_vectors'],
     'storage': ['test', '-p', 'clarp-host', '--lib', 'gallery::tests::restart_and_both'],
+    'deadline': ['test', '-p', 'clarp-host', '--lib', 'gallery::tests::a_media_request_times_out'],
     'host': ['test', '--test', 'host', '--', 'media_manage::'],
 }
 K = 'clarp-kernel/src/gallery.rs'
@@ -84,6 +85,13 @@ PLANTS = [
      'portrait.sha256.is_empty()'),
     (H, 'host', 'text publishes emit gallery events',
      '                && clarp_kernel::media::is_image(&kept.asset.mime_type)', ''),
+    (K, 'host', 'delete accepts an empty batch', '(1..=200).contains(&ids.len())', 'ids.len() <= 200'),
+    (K, 'host', 'delete accepts more than two hundred ids', '(1..=200).contains(&ids.len())',
+     '(1..=201).contains(&ids.len())'),
+    (K, 'host', 'a list can contain an empty asset id', ".filter(|id| !id.is_empty())", ""),
+    (K, 'host', 'a negative since time is read as a cursor', ".filter(|since| *since >= 0)", ""),
+    (W, 'deadline', 'the writer runs a queued mutation after the caller timed out',
+     'if !answer.is_closed() {', '{'),
     (M, 'host', 'a gallery request ignores its favorite filter',
      'let favorites = matches!(query.favorites.trim(), "1" | "true");',
      'let favorites = matches!(query.favorites.trim(), "never");'),
