@@ -1284,7 +1284,12 @@ impl FleetHandle {
         chat: Option<(String, String)>,
         choice: Option<clarp_kernel::hidden_coordination::Visibility>,
     ) -> Result<clarp_kernel::hidden_coordination::Visibility, Unavailable> {
-        self.ask(|answer| Ask::SetCoordination { chat, choice, answer }).await
+        self.ask(|answer| Ask::SetCoordination {
+            chat,
+            choice,
+            answer,
+        })
+        .await
     }
 
     /// Leaves something small with the Host under a key, in the table of its kind (where a
@@ -2179,7 +2184,11 @@ impl Fleet {
                 Ask::Set { settings, answer } => {
                     let _ = answer.send(Ok(self.set(settings)));
                 }
-                Ask::SetCoordination { chat, choice, answer } => {
+                Ask::SetCoordination {
+                    chat,
+                    choice,
+                    answer,
+                } => {
                     let _ = answer.send(self.set_coordination(chat, choice));
                 }
                 Ask::Keep {
@@ -2664,13 +2673,18 @@ impl Fleet {
         };
         self.set(vec![(key, choice.map_or("", Visibility::word).to_owned())])?;
         for member in &self.members {
-            if chat.as_ref().is_none_or(|(id, _)| *id == member.record.agent_id) {
+            if chat
+                .as_ref()
+                .is_none_or(|(id, _)| *id == member.record.agent_id)
+            {
                 member.agent.refresh_telling();
             }
         }
         let effective = choice.unwrap_or_else(|| {
-            self.settings.get(rules::GLOBAL_KEY)
-                .and_then(|value| Visibility::read(value)).unwrap_or_default()
+            self.settings
+                .get(rules::GLOBAL_KEY)
+                .and_then(|value| Visibility::read(value))
+                .unwrap_or_default()
         });
         let mut event = serde_json::json!({"type": "agent-roster", "kind": rules::ROSTER_KIND,
                                "coordination_visibility": effective});

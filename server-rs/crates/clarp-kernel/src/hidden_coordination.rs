@@ -70,7 +70,11 @@ impl Mode {
             (_, Some(visibility)) => (visibility, "chat"),
             _ => (global, "global"),
         };
-        Policy { hidden: visibility == Visibility::Hide, source, visibility }
+        Policy {
+            hidden: visibility == Visibility::Hide,
+            source,
+            visibility,
+        }
     }
 }
 
@@ -89,7 +93,8 @@ impl Policy {
 }
 
 pub fn reminder(session: &str, sender: Option<&str>) -> String {
-    let sender = sender.filter(|sender| !sender.is_empty())
+    let sender = sender
+        .filter(|sender| !sender.is_empty())
         .map_or_else(String::new, |name| format!(" ({name})"));
     format!(
         "Coordination: this turn answers a message from another agent{sender}. The user has \
