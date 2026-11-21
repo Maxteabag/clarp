@@ -42,11 +42,18 @@ CHANGES = [
         'id': 'event-missing',
         'what': 'a change of the queue is no longer announced',
         'file': 'server/server.py',
-        'find': ('        state = turn_queue.state(agent_id)\n'
-                 '        events.broadcast(self.ctx.stream, events.queue_updated(\n'
-                 '            session=session, agent_id=agent_id,\n'
-                 '            queue_depth=state["count"], queue_paused=state["paused"],\n'
-                 '            queue_started=False, queue_revision=state["revision"]))\n'),
+        'find': (
+            '        state = turn_queue.state(agent_id)\n'
+            '        event = events.queue_updated(\n'
+            '            session=session, agent_id=agent_id,\n'
+            '            queue_depth=state["count"], queue_paused=state["paused"],\n'
+            '            queue_started=False, queue_revision=state["revision"],\n'
+            '            **({"client_msg_id": client_msg_id} if client_msg_id else {}),\n'
+            '            **({"queue_change": change} if change else {}),\n'
+            '            **({"text": text} if text is not None else {}),\n'
+            '            **(provenance or {}))\n'
+            '        events.broadcast(self.ctx.stream, event)\n'
+        ),
         'replace': '        return\n',
         'expect': {'channel': 'sse', 'locator': r'queue-updated', 'kinds': SEQUENCE},
     },
@@ -71,8 +78,29 @@ CHANGES = [
     {
         'id': 'event-order',
         'what': 'a state change is announced as agent-activity before agent-state',
-        # The swap of two adjacent blocks that the replay harness maintains as `sse-order`.
-        'from_harness': 'sse-order',
+        'file': 'server/lib/state_watcher.py',
+        'swap': (
+            '            events.broadcast(self.stream, events.agent_state(\n'
+            '                agent_id=r["agent_id"],\n'
+            '                session=r["session"],\n'
+            '                persona=r["persona"],\n'
+            '                kind=r["kind"],\n'
+            '                ts=int(r["ts"]),\n'
+            '                detail=coordination.veil_detail(detail, veil),\n'
+            '                status_text=r["custom_status"] or "",\n'
+            '                **working,\n'
+            '            ))\n',
+            "            # Clients draw a row's activity from this event: a coordination turn its chat\n"
+            '            # hides shows who the agent works with, never what it does (as the snapshot does).\n'
+            '            events.broadcast(self.stream, events.as_event(coordination.veil_activity(state_activity_event(\n'
+            '                agent_id=r["agent_id"],\n'
+            '                session=r["session"],\n'
+            '                persona=r["persona"],\n'
+            '                kind=r["kind"],\n'
+            '                ts=int(r["ts"]),\n'
+            '                detail=detail,\n'
+            '            ), veil)))\n',
+        ),
         'expect': {'channel': 'sse', 'locator': r'agent-state|agent-activity', 'kinds': SEQUENCE},
     },
     {
