@@ -202,8 +202,9 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
             queue_event(&heard, id, false, None).is_some()
         });
         let event = queue_event(&heard, id, false, None).unwrap();
-        for key in ["client_msg_id", "text", "sent_at", "kind"] {
-            assert_eq!(event[key], item[key], "{key}: {event}");
+        assert_eq!(event["client_msg_id"], item["client_msg_id"]);
+        for key in ["text", "sent_at", "kind"] {
+            assert!(event.get(key).is_none(), "{key}: {event}");
         }
     }
     assert_eq!(host.ask("DELETE", "/turn-queue/l6", None).0, 200);
@@ -220,8 +221,8 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     });
     let edit = queue_event(&heard, "m2", false, Some("edited")).unwrap();
     assert_eq!(edit["text"], "two, better");
-    assert_eq!(edit["kind"], "waiting");
-    assert_eq!(edit["sent_at"], sent_at);
+    assert!(edit.get("kind").is_none(), "{edit}");
+    assert!(edit.get("sent_at").is_none(), "{edit}");
     assert_eq!(queue_items(&host)[0]["sent_at"], sent_at);
     let (status, withdrawn) = host.ask("DELETE", "/turn-queue/a4", None);
     assert_eq!(
@@ -282,9 +283,9 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
         queue_event(&heard, "m2", true, None).is_some()
     });
     let started = queue_event(&heard, "m2", true, None).unwrap();
-    assert_eq!(started["text"], "two, better");
-    assert_eq!(started["kind"], "waiting");
-    assert_eq!(started["sent_at"], sent_at);
+    assert_eq!(started["client_msg_id"], "m2");
+    assert_eq!(started["queue_depth"], 1);
+    assert!(started.get("text").is_none(), "{started}");
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
     assert_eq!(pending(&host, "u-m2"), "handed_over");
 
