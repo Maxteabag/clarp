@@ -87,8 +87,9 @@ def record():
                 ticks[0]+=0.125
                 if model in noted:
                     stt_language.note_handed(stt_language.current_language())
-                if model in fails:
-                    raise RuntimeError('failed ' + model + 'x' * 210)
+                with stt_language.sending_audio():
+                    if model in fails:
+                        raise RuntimeError('failed ' + model + 'x' * 210)
                 return ('heard', False, 1.0)
         for lang in ['no','en,no']:
             for configured in [False,True]:

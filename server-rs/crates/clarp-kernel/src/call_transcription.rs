@@ -330,6 +330,14 @@ impl Attempts {
         self.rows
             .push(json!({"engine":engine,"outcome":"skipped","reason":reason}));
     }
+    /// A terminal failure leaves only skipped steps. Include them in the call report.
+    pub fn skip_remaining(&mut self, steps: &[Step], contacts: &Contacts) {
+        for step in steps {
+            if let Some(reason) = step.skip_reason(contacts) {
+                self.skipped(&step.engine, reason);
+            }
+        }
+    }
     pub fn failed(&mut self, engine: &str, language: Option<&str>, ms: u64, reason: &'static str) {
         self.rows.push(
             json!({"engine":engine,"outcome":"error","language":language,"ms":ms,"reason":reason}),

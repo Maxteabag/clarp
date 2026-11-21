@@ -3556,10 +3556,14 @@ Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversat
 **One delivery of a recording to each provider (R175, 21 Nov 2026).** Agent and call settings
 keep each engine at its first position. The ordinary upload and voice profile use the same
 distinct engine order. The Host's own model and its aliases name one engine. Two distinct
-models of one hosted provider remain in the order until a failed attempt reaches its adapter.
-A refusal before the adapter receives the language leaves the next model available. The
-ordinary upload logs repeated engines and later models it drops after provider contact. The
-call report records a visited excluded model as `outcome: "skipped"` with
+models of one hosted provider remain in the order until an audio request leaves for it
+(PR 537). Decoding, credential or token work, DNS failure, and connection refusal leave the
+next model available. An ambiguous error after the request starts counts as sent. Each Google
+piece request or retry adds to the attempt's count. A request that never left takes back its
+own count, preserving other pieces' sends (PR 556). The language in a call report records what
+was handed to the adapter independently of whether any audio left. The ordinary upload logs
+repeated engines and models it drops after provider contact. The call report records provider-excluded
+models, including remaining steps after a terminal failure, as `outcome: "skipped"` with
 `reason: "provider_already_sent"`. A model-selection wait is bounded while a runnable fallback
 remains. The R152 recovery's failed list contains the engines that reached their boundary.
 Call attempt outcomes and skip reasons are open sets. Clients can display an unfamiliar

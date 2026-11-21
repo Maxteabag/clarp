@@ -124,7 +124,7 @@ pub(super) async fn hear(
             continue;
         }
         let began = std::time::Instant::now();
-        let mut handed = None;
+        let mut observed = Observation::default();
         let model = if step.local_default && resolved.fields["engines"]["source"] != "device" {
             ""
         } else {
@@ -143,7 +143,7 @@ pub(super) async fn hear(
                 lang,
                 listen_for,
                 clip,
-                &mut handed,
+                &mut observed,
                 rules::has_runnable_step(later, &contacted),
             )
             .await;
@@ -154,21 +154,18 @@ pub(super) async fn hear(
             Some(began),
         );
         let elapsed = began.elapsed().as_millis() as u64;
+        let handed = observed.handed.as_deref();
         match result {
             Ok(said) => {
-                report.heard(
-                    &step.engine,
-                    handed.as_deref(),
-                    elapsed,
-                    step.adapted == Some(true),
-                );
+                report.heard(&step.engine, handed, elapsed, step.adapted == Some(true));
                 return Ok((said, report.finish(), run_id));
             }
             Err(error) => {
                 let reason = error.word();
-                report.failed(&step.engine, handed.as_deref(), elapsed, reason);
-                contacted.failed(&step.engine, handed.is_some());
+                report.failed(&step.engine, handed, elapsed, reason);
+                contacted.failed(&step.engine, observed.sent());
                 if !rules::has_runnable_step(later, &contacted) {
+                    report.skip_remaining(later, &contacted);
                     let (status, mut body) = error.told();
                     if status == StatusCode::INTERNAL_SERVER_ERROR {
                         body["stt"] = report.finish();

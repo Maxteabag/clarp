@@ -59,12 +59,12 @@ rules(ORDER, "vectors", [
      ".find(|known| known.id == provider)", '.find(|known| known.id == provider && known.id == "deepgram")'),
     ("a local attempt before the boundary does not count toward R152",
      "let Some(provider) = hosted_provider(engine) else {\n            return true;",
-     "let Some(provider) = hosted_provider(engine) else {\n            return handed;"),
+     "let Some(provider) = hosted_provider(engine) else {\n            return sent;"),
     ("a refusal before provider contact exhausts the provider",
-     "if handed {\n            self.sent.insert(provider);",
-     "if !handed {\n            self.sent.insert(provider);"),
+     "if sent {\n            self.sent.insert(provider);",
+     "if !sent {\n            self.sent.insert(provider);"),
     ("the failed list includes a hosted refusal before its boundary",
-     "        handed\n    }", "        true\n    }"),
+     "        sent\n    }", "        true\n    }"),
     ("provider contact is ignored by later attempts",
      "hosted_provider(engine).filter(|provider| self.sent.contains(provider))",
      "hosted_provider(engine).filter(|provider| !self.sent.contains(provider))"),
@@ -95,15 +95,15 @@ rules(CALL, "vectors", [
 ])
 rules(UPLOAD, "host", [
     ("the upload excludes a provider after a refusal before contact",
-     "let failure = order.failed(model, handed.is_some());",
-     "let failure = order.failed(model, handed.is_none());"),
+     "let failure = order.failed(model, observed.sent());",
+     "let failure = order.failed(model, !observed.sent());"),
 ])
 rules(CALL_UPLOAD, "host", [
     ("a call does not tell the reason for skipping a contacted provider",
      "report.skipped(&step.engine, reason);", "report.skipped(&step.engine, if reason.is_empty() { reason } else { \"skipped\" });"),
     ("a call ignores provider contact when it advances",
-     "contacted.failed(&step.engine, handed.is_some());",
-     "contacted.failed(&step.engine, handed.is_none());"),
+     "contacted.failed(&step.engine, observed.sent());",
+     "contacted.failed(&step.engine, !observed.sent());"),
 ])
 rules(PROFILE, "host", [
     ("hearing counts the actual default model as a separate engine",

@@ -101,7 +101,7 @@ changes(H,'host',[
     ('if !rules::has_runnable_step(later, &contacted)','if true'),
     ('report.skipped(&step.engine, reason);','report.skipped(&step.engine, "skipped");'),
     ('step.adapted == Some(true)','false'),
-    ('report.failed(&step.engine, handed.as_deref(), elapsed, reason)', 'report.failed(&step.engine, None, elapsed, reason)'),
+    ('report.failed(&step.engine, handed, elapsed, reason)', 'report.failed(&step.engine, None, elapsed, reason)'),
 ])
 changes(EDGE,'host',[
     ('headers.contains_key("x-clarp-call-id")','false'),

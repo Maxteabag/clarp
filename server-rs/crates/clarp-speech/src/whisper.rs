@@ -459,14 +459,11 @@ impl Whisper {
 }
 
 impl Listener for Whisper {
-    fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf> {
-        self.hear_observed(clip, asked, &mut None)
-    }
     fn hear_observed(
         &self,
         clip: Clip<'_>,
         asked: Asked<'_>,
-        observed: &mut Option<String>,
+        observed: &mut crate::listen::Observation,
     ) -> Result<Heard, Deaf> {
         let mut running = self.take(asked.wait)?;
         let started = Instant::now();
@@ -479,7 +476,7 @@ impl Listener for Whisper {
                 )));
             }
         };
-        let answered = self.ask(&mut running, &path, asked, observed);
+        let answered = self.ask(&mut running, &path, asked, &mut observed.handed);
         let _ = std::fs::remove_file(&path);
         match answered {
             Ok(segments) => {
@@ -654,11 +651,11 @@ done
             .unwrap();
         assert!(variant.ready());
         assert!(!default.ready());
-        let mut handed = None;
+        let mut observed = crate::listen::Observation::default();
         let heard = variant
-            .hear_observed(clip(), asked("", 0), &mut handed)
+            .hear_observed(clip(), asked("", 0), &mut observed)
             .unwrap();
-        assert_eq!(handed.as_deref(), Some("auto"));
+        assert_eq!(observed.handed.as_deref(), Some("auto"));
         assert!(heard.segments[0].text.contains("13 bytes"));
         let broken =
             default.installed_variant("faster-whisper:broken", &place.dir.join("broken"), None);

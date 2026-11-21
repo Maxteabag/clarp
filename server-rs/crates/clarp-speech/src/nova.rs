@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::listen::{Asked, Clip, Deaf, Heard, Listener, terms};
+use crate::listen::{Asked, Clip, Deaf, Heard, Listener, Observation, http_agent, terms};
 use crate::scribe::Key;
 
 /// Where Deepgram takes a clip.
@@ -102,7 +102,13 @@ fn heard(answer: &Value) -> Result<Heard, Deaf> {
 }
 
 impl Listener for Nova {
-    fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf> {
+    fn hear_observed(
+        &self,
+        clip: Clip<'_>,
+        asked: Asked<'_>,
+        observed: &mut Observation,
+    ) -> Result<Heard, Deaf> {
+        observed.note_handed(asked.language);
         let Some(key) = (self.key)().filter(|key| !key.is_empty()) else {
             let none = "Deepgram API key is not configured".to_string();
             return Err(Deaf::Failed(none));
@@ -111,17 +117,14 @@ impl Listener for Nova {
             "" => "audio/webm",
             given => given,
         };
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .http_status_as_error(false)
-            .build();
-        let agent: ureq::Agent = config.into();
+        let agent = http_agent(self.timeout);
         let address = format!("{}?{}", self.endpoint, self.asked_for(&asked));
-        let mut response = agent
+        let request = agent
             .post(&address)
             .header("Authorization", format!("Token {key}"))
-            .header("Content-Type", content_type)
-            .send(clip.audio)
+            .header("Content-Type", content_type);
+        let mut response = observed
+            .send_http(|| request.send(clip.audio))
             // How it failed, and nothing of what was sent: the error of a transport can
             // name the address, never the key or the clip.
             .map_err(|error| Deaf::Failed(format!("Deepgram request failed: {error}")))?;

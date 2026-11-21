@@ -252,6 +252,11 @@
           "ms": 0,
           "outcome": "error",
           "reason": "transcription failed"
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "outcome": "skipped",
+          "reason": "provider_already_sent"
         }
       ],
       "focus": "fixture",
@@ -281,6 +286,16 @@
           "ms": 0,
           "outcome": "error",
           "reason": "transcription failed"
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "outcome": "skipped",
+          "reason": "provider_already_sent"
+        },
+        {
+          "engine": "deepgram:nova-3",
+          "outcome": "skipped",
+          "reason": "language_incompatible"
         }
       ],
       "focus": "fixture",
@@ -378,6 +393,11 @@
           "ms": 0,
           "outcome": "error",
           "reason": "transcription failed"
+        },
+        {
+          "engine": "deepgram:nova-3",
+          "outcome": "skipped",
+          "reason": "language_incompatible"
         }
       ],
       "focus": "fixture",
@@ -467,6 +487,199 @@
         {
           "engine": "cartesia:ink-2",
           "wait": null
+        }
+      ]
+    },
+    {
+      "attempts": [
+        {
+          "engine": "cartesia:ink-2",
+          "language": "en",
+          "ms": 0,
+          "outcome": "error",
+          "reason": "transcription failed"
+        },
+        {
+          "engine": "cartesia:ink-whisper",
+          "language": "en",
+          "ms": 0,
+          "outcome": "ok"
+        }
+      ],
+      "focus": "fixture",
+      "order": [
+        "cartesia:ink-2",
+        "cartesia:ink-whisper"
+      ],
+      "outcomes": {
+        "cartesia:ink-2": "before-decode"
+      },
+      "pre_skipped": [],
+      "result": {
+        "text": "cartesia:ink-whisper"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-2",
+          "wait": 10.0
+        },
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": null
+        }
+      ]
+    },
+    {
+      "attempts": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "language": "en",
+          "ms": 0,
+          "outcome": "error",
+          "reason": "transcription failed"
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "language": "en",
+          "ms": 0,
+          "outcome": "ok"
+        }
+      ],
+      "focus": "fixture",
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "refused"
+      },
+      "pre_skipped": [],
+      "result": {
+        "text": "cartesia:ink-2"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "wait": null
+        }
+      ]
+    },
+    {
+      "attempts": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "language": "en",
+          "ms": 0,
+          "outcome": "error",
+          "reason": "transcription failed"
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "language": "en",
+          "ms": 0,
+          "outcome": "ok"
+        }
+      ],
+      "focus": "fixture",
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "dns"
+      },
+      "pre_skipped": [],
+      "result": {
+        "text": "cartesia:ink-2"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "wait": null
+        }
+      ]
+    },
+    {
+      "attempts": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "language": "en",
+          "ms": 0,
+          "outcome": "error",
+          "reason": "transcription failed"
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "outcome": "skipped",
+          "reason": "provider_already_sent"
+        },
+        {
+          "engine": "deepgram:nova-3",
+          "outcome": "skipped",
+          "reason": "language_incompatible"
+        }
+      ],
+      "focus": "fixture",
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "timeout"
+      },
+      "pre_skipped": [
+        2
+      ],
+      "result": {
+        "error": "stand-in request timed out"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        }
+      ]
+    },
+    {
+      "attempts": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "language": "en",
+          "ms": 0,
+          "outcome": "error",
+          "reason": "transcription failed"
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "outcome": "skipped",
+          "reason": "provider_already_sent"
+        }
+      ],
+      "focus": "fixture",
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "sent-then-refused"
+      },
+      "pre_skipped": [],
+      "result": {
+        "error": "<urlopen error stand-in connection refused>"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
         }
       ]
     }
@@ -868,6 +1081,172 @@
           "wait": null
         }
       ]
+    },
+    {
+      "failed": [],
+      "focus": "fixture",
+      "logs": [],
+      "order": [
+        "cartesia:ink-2",
+        "cartesia:ink-whisper",
+        "deepgram:nova-3"
+      ],
+      "outcomes": {
+        "cartesia:ink-2": "before-decode"
+      },
+      "own": null,
+      "result": {
+        "text": "cartesia:ink-whisper"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-2",
+          "wait": 10.0
+        },
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        }
+      ]
+    },
+    {
+      "failed": [],
+      "focus": "fixture",
+      "logs": [],
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "refused"
+      },
+      "own": null,
+      "result": {
+        "text": "cartesia:ink-2"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "wait": 10.0
+        }
+      ]
+    },
+    {
+      "failed": [],
+      "focus": "fixture",
+      "logs": [],
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "dns"
+      },
+      "own": null,
+      "result": {
+        "text": "cartesia:ink-2"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        },
+        {
+          "engine": "cartesia:ink-2",
+          "wait": 10.0
+        }
+      ]
+    },
+    {
+      "failed": [],
+      "focus": "fixture",
+      "logs": [
+        "session=fixture cartesia:ink-2 (cartesia already had this recording)"
+      ],
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "timeout"
+      },
+      "own": null,
+      "result": {
+        "text": "deepgram:nova-3"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        },
+        {
+          "engine": "deepgram:nova-3",
+          "wait": null
+        }
+      ]
+    },
+    {
+      "failed": [],
+      "focus": "fixture",
+      "logs": [
+        "session=fixture cartesia:ink-2 (cartesia already had this recording)"
+      ],
+      "order": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3"
+      ],
+      "outcomes": {
+        "cartesia:ink-whisper": "sent-then-refused"
+      },
+      "own": null,
+      "result": {
+        "text": "deepgram:nova-3"
+      },
+      "tried": [
+        {
+          "engine": "cartesia:ink-whisper",
+          "wait": 10.0
+        },
+        {
+          "engine": "deepgram:nova-3",
+          "wait": null
+        }
+      ]
+    },
+    {
+      "failed": [],
+      "focus": "fixture",
+      "logs": [],
+      "order": [
+        "google:chirp_3",
+        "deepgram:nova-3"
+      ],
+      "outcomes": {
+        "deepgram:nova-3": "before-language",
+        "google:chirp_3": "before-token"
+      },
+      "own": null,
+      "result": {
+        "text": "recovered"
+      },
+      "tried": [
+        {
+          "engine": "google:chirp_3",
+          "wait": 10.0
+        },
+        {
+          "engine": "deepgram:nova-3",
+          "wait": null
+        }
+      ]
     }
   ],
   "contacts": [
@@ -895,7 +1274,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "",
@@ -921,7 +1328,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "",
@@ -947,7 +1355,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "",
@@ -973,7 +1382,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " ",
@@ -999,7 +1490,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " ",
@@ -1025,7 +1544,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": " ",
@@ -1051,7 +1571,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " ",
@@ -1077,7 +1598,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": " ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "local",
@@ -1103,7 +1706,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "local",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "local",
@@ -1129,7 +1760,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "local",
@@ -1155,7 +1787,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "local",
@@ -1181,7 +1814,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "local",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "local",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "local",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " local ",
@@ -1207,7 +1922,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " local ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " local ",
@@ -1233,7 +1976,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": " local ",
@@ -1259,7 +2003,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " local ",
@@ -1285,7 +2030,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " local ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": " local ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " local ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "server-default",
@@ -1311,7 +2138,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "server-default",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "server-default",
@@ -1337,7 +2192,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "server-default",
@@ -1363,7 +2219,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "server-default",
@@ -1389,7 +2246,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "server-default",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "server-default",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "server-default",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "server-default\u001f",
@@ -1415,7 +2354,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "server-default\u001f",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "server-default\u001f",
@@ -1441,7 +2408,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "server-default\u001f",
@@ -1467,7 +2435,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "server-default\u001f",
@@ -1493,7 +2462,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "server-default\u001f",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "server-default\u001f",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "server-default\u001f",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "faster-whisper:small",
@@ -1519,7 +2570,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "faster-whisper:small",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "faster-whisper:small",
@@ -1545,7 +2624,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "faster-whisper:small",
@@ -1571,7 +2651,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "faster-whisper:small",
@@ -1597,7 +2678,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "faster-whisper:small",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "faster-whisper:small",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "faster-whisper:small",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " faster-whisper:small ",
@@ -1623,7 +2786,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " faster-whisper:small ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " faster-whisper:small ",
@@ -1649,7 +2840,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": " faster-whisper:small ",
@@ -1675,7 +2867,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " faster-whisper:small ",
@@ -1701,7 +2894,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " faster-whisper:small ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": " faster-whisper:small ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": " faster-whisper:small ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "faster-whisper:base",
@@ -1727,7 +3002,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "faster-whisper:base",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "faster-whisper:base",
@@ -1753,7 +3056,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "faster-whisper:base",
@@ -1779,7 +3083,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "faster-whisper:base",
@@ -1805,7 +3110,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "faster-whisper:base",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "faster-whisper:base",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "faster-whisper:base",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "cartesia:ink-whisper",
@@ -1831,7 +3218,59 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": false
+      "reached": false,
+      "sent": false
+    },
+    {
+      "engine": "cartesia:ink-whisper",
+      "kept": [
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:ink-whisper",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:ink-whisper",
@@ -1854,7 +3293,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:ink-whisper",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:ink-whisper",
@@ -1877,7 +3344,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:ink-whisper",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:ink-whisper",
@@ -1900,7 +3395,8 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "cartesia:ink-2",
@@ -1926,7 +3422,59 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": false
+      "reached": false,
+      "sent": false
+    },
+    {
+      "engine": "cartesia:ink-2",
+      "kept": [
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:ink-2",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:ink-2",
@@ -1949,7 +3497,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:ink-2",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:ink-2",
@@ -1972,7 +3548,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:ink-2",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:ink-2",
@@ -1995,7 +3599,8 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "\tdeepgram:nova-3 ",
@@ -2021,7 +3626,61 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": false
+      "reached": false,
+      "sent": false
+    },
+    {
+      "engine": "\tdeepgram:nova-3 ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "\tdeepgram:nova-3 ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "\tdeepgram:nova-3 ",
@@ -2046,7 +3705,35 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "\tdeepgram:nova-3 ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "\tdeepgram:nova-3 ",
@@ -2071,7 +3758,35 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "\tdeepgram:nova-3 ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "\tdeepgram:nova-3 ",
@@ -2096,7 +3811,8 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "DEEPGRAM:NOVA-3",
@@ -2122,7 +3838,61 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": false
+      "reached": false,
+      "sent": false
+    },
+    {
+      "engine": "DEEPGRAM:NOVA-3",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "DEEPGRAM:NOVA-3",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "DEEPGRAM:NOVA-3",
@@ -2147,7 +3917,35 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "DEEPGRAM:NOVA-3",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "DEEPGRAM:NOVA-3",
@@ -2172,7 +3970,35 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "DEEPGRAM:NOVA-3",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "deepgram",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "DEEPGRAM:NOVA-3",
@@ -2197,7 +4023,8 @@
         "other"
       ],
       "provider": "deepgram",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "cartesia:retired",
@@ -2223,7 +4050,59 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": false
+      "reached": false,
+      "sent": false
+    },
+    {
+      "engine": "cartesia:retired",
+      "kept": [
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:retired",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:retired",
@@ -2246,7 +4125,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:retired",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:retired",
@@ -2269,7 +4176,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "cartesia:retired",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": "cartesia:retired",
@@ -2292,7 +4227,8 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": " CARTESIA:retired ",
@@ -2318,7 +4254,59 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": false
+      "reached": false,
+      "sent": false
+    },
+    {
+      "engine": " CARTESIA:retired ",
+      "kept": [
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": " CARTESIA:retired ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": " CARTESIA:retired ",
@@ -2341,7 +4329,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": " CARTESIA:retired ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": " CARTESIA:retired ",
@@ -2364,7 +4380,35 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": " CARTESIA:retired ",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "cartesia",
+      "reached": false,
+      "sent": false
     },
     {
       "engine": " CARTESIA:retired ",
@@ -2387,7 +4431,8 @@
         "other"
       ],
       "provider": "cartesia",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "other:one",
@@ -2413,7 +4458,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "other:one",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "other:one",
@@ -2439,7 +4512,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "other:one",
@@ -2465,7 +4539,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "other:one",
@@ -2491,7 +4566,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "other:one",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "other:one",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "other:one",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "own",
@@ -2517,7 +4674,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "own",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "own",
@@ -2543,7 +4728,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "own",
@@ -2569,7 +4755,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "own",
@@ -2595,7 +4782,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "own",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "own",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "own",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "LOCAL",
@@ -2621,7 +4890,35 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "LOCAL",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": false,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "LOCAL",
@@ -2647,7 +4944,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
     },
     {
       "engine": "LOCAL",
@@ -2673,7 +4971,8 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": true
     },
     {
       "engine": "LOCAL",
@@ -2699,7 +4998,89 @@
         "other"
       ],
       "provider": "",
-      "reached": true
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "LOCAL",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
+    },
+    {
+      "engine": "LOCAL",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": false
+    },
+    {
+      "engine": "LOCAL",
+      "kept": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "observed": true,
+      "pending": [
+        "cartesia:ink-whisper",
+        "cartesia:ink-2",
+        "deepgram:nova-3",
+        "elevenlabs:scribe_v2",
+        "google:chirp_3",
+        "cartesia:retired",
+        "local",
+        "other"
+      ],
+      "provider": "",
+      "reached": true,
+      "sent": true
     }
   ],
   "distinct": [
@@ -3491,6 +5872,56 @@
           "deepgram:nova-3"
         ]
       }
+    }
+  ],
+  "send_counts": [
+    {
+      "counts": [
+        0,
+        1,
+        2,
+        2,
+        1
+      ],
+      "inner": "ok",
+      "outer": "refused",
+      "sent": true
+    },
+    {
+      "counts": [
+        0,
+        1,
+        2,
+        1,
+        1
+      ],
+      "inner": "dns",
+      "outer": "ok",
+      "sent": true
+    },
+    {
+      "counts": [
+        0,
+        1,
+        2,
+        1,
+        0
+      ],
+      "inner": "refused",
+      "outer": "dns",
+      "sent": false
+    },
+    {
+      "counts": [
+        0,
+        1,
+        2,
+        2,
+        1
+      ],
+      "inner": "timeout",
+      "outer": "refused",
+      "sent": true
     }
   ],
   "splits": [

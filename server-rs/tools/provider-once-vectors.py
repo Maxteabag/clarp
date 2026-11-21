@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Run the Python Host's R175 rules using only stand-in transcription adapters."""
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 import importlib.util
 import json
 from pathlib import Path
+import socket
 import sys
 from types import SimpleNamespace
+import urllib.error
 from unittest.mock import patch
 
 import scratch
@@ -88,13 +90,15 @@ def reference(root):
     contacts = []
     for engine in names:
         for handed in ({}, {"language": None}, {"language": "auto"}, {"language": "en"}):
-            known = set()
-            pending = [INK, INK2, NOVA, SCRIBE, CHIRP, "cartesia:retired", "local", "other"]
-            with patch.object(pipeline, "log"):
-                kept = pipeline._not_sent_twice(engine, handed, pending, known, "fixture")
-            contacts.append(dict(engine=engine, observed="language" in handed,
-                                 provider=pipeline._hosted_provider(engine),
-                                 reached=pipeline._reached(engine, handed), pending=pending, kept=kept))
+            for sent in (False, True):
+                capture = dict(handed, sent=sent)
+                known = set()
+                pending = [INK, INK2, NOVA, SCRIBE, CHIRP, "cartesia:retired", "local", "other"]
+                with patch.object(pipeline, "log"):
+                    kept = pipeline._not_sent_twice(engine, capture, pending, known, "fixture")
+                contacts.append(dict(engine=engine, observed="language" in capture, sent=sent,
+                                     provider=pipeline._hosted_provider(engine),
+                                     reached=pipeline._reached(engine, capture), pending=pending, kept=kept))
 
     def run(data, call_mode):
         tried, logs, failed_for_recovery = [], [], []
@@ -116,8 +120,22 @@ def reference(root):
             if outcome == "before-key":
                 raise RuntimeError("stand-in missing key")
             language.note_handed(None if outcome == "after-auto" else "en")
-            if outcome in ("after", "after-auto"):
-                raise RuntimeError("stand-in provider error")
+            if outcome == "before-decode":
+                raise RuntimeError("stand-in decode error")
+            if outcome == "before-token":
+                raise RuntimeError("stand-in token error")
+            if outcome == "sent-then-refused":
+                with language.sending_audio():
+                    pass
+            with language.sending_audio():
+                if outcome in ("refused", "sent-then-refused"):
+                    raise urllib.error.URLError(ConnectionRefusedError("stand-in connection refused"))
+                if outcome == "dns":
+                    raise urllib.error.URLError(socket.gaierror("stand-in name lookup failed"))
+                if outcome == "timeout":
+                    raise TimeoutError("stand-in request timed out")
+                if outcome in ("after", "after-auto"):
+                    raise RuntimeError("stand-in provider error")
             return model, True, 1.0
 
         stt = SimpleNamespace(default_model_id=data.get("own"), transcribe_model_bytes=transcribe)
@@ -175,6 +193,12 @@ def reference(root):
         ([INK, INK2, NOVA], {INK: "after-auto", NOVA: "before-language"}, None, "fixture"),
         ([OWN, "local", NOVA], {OWN: "before-model", NOVA: "before-language"}, OWN, "fixture"),
         ([INK, INK2, NOVA, SCRIBE, CHIRP], {INK: "after", NOVA: "after", SCRIBE: "after"}, None, ""),
+        ([INK2, INK, NOVA], {INK2: "before-decode"}, None, "fixture"),
+        ([INK, INK2, NOVA], {INK: "refused"}, None, "fixture"),
+        ([INK, INK2, NOVA], {INK: "dns"}, None, "fixture"),
+        ([INK, INK2, NOVA], {INK: "timeout"}, None, "fixture"),
+        ([INK, INK2, NOVA], {INK: "sent-then-refused"}, None, "fixture"),
+        ([CHIRP, NOVA], {CHIRP: "before-token", NOVA: "before-language"}, None, "fixture"),
     ]
     chat = []
     for order, outcomes, own, focus in chat_cases:
@@ -193,13 +217,43 @@ def reference(root):
         ([INK, INK2, NOVA], {INK2: "after"}, [0, 2]),
         ([INK, INK2], {}, [0, 1]),
         (["cartesia:retired", INK2], {"cartesia:retired": "before-model"}, []),
+        ([INK2, INK], {INK2: "before-decode"}, []),
+        ([INK, INK2], {INK: "refused"}, []),
+        ([INK, INK2], {INK: "dns"}, []),
+        ([INK, INK2, NOVA], {INK: "timeout"}, [2]),
+        ([INK, INK2], {INK: "sent-then-refused"}, []),
     ]
     calls = []
     for order, outcomes, pre_skipped in call_cases:
         case = dict(order=order, outcomes=outcomes, pre_skipped=pre_skipped, focus="fixture")
         calls.append(dict(**case, **run(case, True)))
+
+    def finish(outcome):
+        if outcome == "refused":
+            raise ConnectionRefusedError("stand-in connection refused")
+        if outcome == "dns":
+            raise socket.gaierror("stand-in name lookup failed")
+        if outcome == "timeout":
+            raise TimeoutError("stand-in request timed out")
+
+    # Nest the two request scopes to record both in flight before either finishes.
+    send_counts = []
+    for outer, inner in [("refused", "ok"), ("ok", "dns"), ("dns", "refused"), ("refused", "timeout")]:
+        with language.capturing_handed() as capture:
+            counts = [capture.get("sent", 0)]
+            with suppress(OSError), language.sending_audio():
+                counts.append(capture.get("sent", 0))
+                with suppress(OSError), language.sending_audio():
+                    counts.append(capture.get("sent", 0))
+                    finish(inner)
+                counts.append(capture.get("sent", 0))
+                finish(outer)
+            counts.append(capture.get("sent", 0))
+            send_counts.append(dict(outer=outer, inner=inner, counts=counts,
+                                    sent=language.was_sent(capture)))
     return dict(splits=splits, merges=merges, stored=existing, identity=identity,
-                distinct=distinct, contacts=contacts, chat=chat, calls=calls, call_policies=call_policies)
+                distinct=distinct, contacts=contacts, chat=chat, calls=calls,
+                call_policies=call_policies, send_counts=send_counts)
 
 
 if __name__ == "__main__":
