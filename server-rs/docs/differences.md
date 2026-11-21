@@ -34,7 +34,7 @@ one of these:
 
 | Not listed here | Why |
 |---|---|
-| `teams` | left out for now by the owner's decision of 19 Nov 2026 |
+| `teams` | Team management is available. The capability will be listed after broadcast, inbox and leader runtime integration. |
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
@@ -86,8 +86,7 @@ Host's first day says there what this Host must not say of itself.
 | The Host's software (`GET /server-update`) | who it is, that nobody looked for a newer one, and that it is not updated from an app | refused: whoever installed it updates it with the installer |
 | The skills kept installed for the tools (`GET /managed-skills`) on a Host started with `--accounts follow` or with no mode, or installed without a tree of skills | none: such a Host keeps no skills, and reads no tool's folder | refused, 409, with `skills_kept_elsewhere` (or `skills_not_shipped`) and one sentence; nothing is written, at a change or at a start. One Host keeps a machine's tools (the lead's ruling of 20 Nov 2026) |
 
-Refused in words, 501, as not built: a tool's own servers (`POST /agent-mcp`); and nudging a team (`POST /team-nudging`),
-in the same words, teams being left out for now by the owner's decision of 19 Nov 2026.
+Refused in words, 501, as not built: a tool's own servers (`POST /agent-mcp`).
 Under `/harness-providers/`, `/agent-goal/` and `/oracle/` a change is refused so only
 where the Python Host has a route for it (its exact table: `clarp_kernel::doors`, by 480 requests of its own
 dispatcher); any other is no route, its plain 404 `not found`, as there.

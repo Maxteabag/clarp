@@ -262,7 +262,13 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let ears = Arc::new(clarp_host::heard::Ears::new(&config, &fleet).await?);
+    let team_disk = tables
+        .open(&config.data_dir.join("teams.db"))
+        .map_err(|error| error.to_string())?;
+    let teams =
+        Arc::new(clarp_host::teams::Desk::open(team_disk).map_err(|error| error.to_string())?);
     let app = App {
+        teams,
         capture,
         turns,
         form_event_writer: Arc::default(),

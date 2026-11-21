@@ -495,6 +495,10 @@ pub(crate) mod at_the_port {
                 activity: Arc::default(),
                 calls: Arc::default(),
                 schedules: Arc::default(),
+                teams: Arc::new(
+                    crate::teams::Desk::open(self.engine.open(&self.dir.join("teams.db")).unwrap())
+                        .unwrap(),
+                ),
                 heartbeat: Arc::default(),
                 fallbacks: Arc::default(),
                 janitors: Arc::default(),
