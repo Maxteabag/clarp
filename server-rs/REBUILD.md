@@ -3051,11 +3051,12 @@ turns it on.
   names are two agents (its row names neither) or one (its row names her); and by the demand history's own
   vectors of what it takes (`fits_metadata`). On a Host, by the router's test: its question answers the
   session spoken to, and the same message sent again after a restart is answered what it was first.
-- **A replay also returns the first decision and trace** (21 Nov 2026, Python PR 533, R134).
+- **A replay restores the first decision and trace in the router** (21 Nov 2026, Python PR 533, R134).
   The run's receipt keeps the decision id, the target session as the first answer named it,
   and the first decision's control action when they fit. The router reads the other decision
-  fields and trace from the retained row. A missing row or a receipt without the stored target
-  falls back to the old answer without a decision. The replay neither asks a model nor repeats
+  fields and trace from the retained row. The HTTP response echoes the current request's
+  trace, matching the Python adapter, and includes the original decision. A missing row or
+  a receipt without the stored target falls back to the old answer without a decision. The replay neither asks a model nor repeats
   an effect. A retryable dispatch still follows the separate delivery retry rule.
 - Not yet: phrases kept ready-spoken; a model's fallbacks; the two providers that are no tool. In a call,
   only those of the call who can take speech are shown, as there.

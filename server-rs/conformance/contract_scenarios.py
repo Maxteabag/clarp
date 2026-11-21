@@ -1825,6 +1825,8 @@ SCENARIOS.append({
         # nobody has, are asked about, and no agent is made or started again.
         spoken('synthetic restart [qa-restart-as:nova:claire]', 'routemike'),
         spoken('synthetic restart [qa-restart-as:nova:nobody]', 'routenovember'),
+        # Nova's ordinary reply to the yes can finish while the two commands are being refused.
+        *given('routelima', NOVA),
         SNAPSHOT,
         # The model fails: the message goes on as any other, to the agent that is open.
         spoken('synthetic word foxtrot [qa-router-fails]', 'routefoxtrot'),

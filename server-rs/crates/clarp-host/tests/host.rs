@@ -14044,7 +14044,7 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         "{again}"
     );
     assert_eq!(again["orchestrator"], sent["orchestrator"]);
-    assert_eq!(again["trace_id"], sent["trace_id"]);
+    assert_ne!(again["trace_id"], sent["trace_id"]);
     assert!(
         sent["trace_id"]
             .as_str()
@@ -14098,7 +14098,7 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
     let (status, still_unsure) = dictate("maybe ship it", "r-2");
     assert_eq!(status, 200, "{still_unsure}");
     assert_eq!(still_unsure["orchestrator"], unsure["orchestrator"]);
-    assert_eq!(still_unsure["trace_id"], unsure["trace_id"]);
+    assert_ne!(still_unsure["trace_id"], unsure["trace_id"]);
     assert_eq!(questions().len(), asked_before_replay);
     let (status, yes) = dictate("yes", "r-3");
     assert_eq!(
@@ -14245,7 +14245,7 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         "{sent}"
     );
     assert_eq!(sent["orchestrator"], unsure["orchestrator"]);
-    assert_eq!(sent["trace_id"], unsure["trace_id"]);
+    assert_ne!(sent["trace_id"], unsure["trace_id"]);
     assert_eq!(questions().len(), before);
     let screen = host.get("/orchestrator/settings");
     assert_eq!(
