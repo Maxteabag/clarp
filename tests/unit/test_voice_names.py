@@ -463,3 +463,78 @@ def test_a_failed_fetch_with_a_key_is_not_a_refresh(names_file):
     assert worker.next_wait() == voice_names.RETRY_SECONDS
     _refresh(_cfg("cartesia", eleven_api_key=""), names_file, pages=[{"id": "v1", "name": "One"}])
     assert voice_names.start_due() is False and worker.next_wait() == voice_names.REFRESH_SECONDS
+
+
+# ---------------------------------------------------------------- a refused key, backoff, retry passes
+
+def _http(status):
+    import urllib.error
+    return urllib.error.HTTPError("https://api.example/voices", status, "refused", None, None)
+
+
+def test_a_refused_key_is_final_until_the_key_changes(names_file, monkeypatch):
+    """401/403 is not retried every 15 minutes for ever: logged once, recorded against that key
+    (a fingerprint, never the key), the file is current (no start due), and the same key is
+    never asked again; a new key is."""
+    logged = []
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a))
+    calls = []
+
+    def refused(key):
+        calls.append(key)
+        raise _http(401)
+    for _ in range(2):
+        voice_names.refresh(_cfg("cartesia", eleven_api_key=""), path=names_file, cartesia_all=refused,
+                            cartesia_one=lambda k, v: {}, eleven_one=lambda k, v: {},
+                            voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": set()})
+    assert calls == ["ck"]                                          # the second pass did not ask
+    assert [a[1] for a in logged if a[0] == "voiceNamesKeyRefused"] == ["provider=cartesia status=401"]
+    stored = json.loads(names_file.read_text())
+    assert stored["_refused"]["cartesia"]["status"] == 401 and "ck" not in json.dumps(stored)
+    assert voice_names.start_due() is False
+    voice_names.refresh(_cfg("cartesia", cartesia_api_key="new-key", eleven_api_key=""), path=names_file,
+                        cartesia_all=lambda key: calls.append(key) or [{"id": "v1", "name": "One"}],
+                        cartesia_one=lambda k, v: {}, eleven_one=lambda k, v: {},
+                        voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": set()})
+    assert calls[-1] == "new-key" and "_refused" not in json.loads(names_file.read_text())
+
+
+def test_a_refused_elevenlabs_key_stops_the_lookups_at_once(names_file):
+    """A 403 on the first ElevenLabs lookup ends that pass (not up to 100 more) and is final."""
+    asked = []
+
+    def eleven(key, voice_id):
+        asked.append(voice_id)
+        raise _http(403)
+    ids = {f"{i:020d}" for i in range(30)}
+    for _ in range(2):
+        voice_names.refresh(_cfg("cartesia", cartesia_api_key=""), path=names_file,
+                            cartesia_all=lambda key: [], cartesia_one=lambda k, v: {}, eleven_one=eleven,
+                            voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": ids})
+    assert len(asked) == 1
+    assert json.loads(names_file.read_text())["_refused"]["elevenlabs"]["status"] == 403
+
+
+def test_retries_back_off_and_a_retry_pass_asks_only_for_the_catalogue(names_file):
+    """A failure that is not a refusal: 15 minutes, 1 hour, 4 hours, then daily; a retry pass
+    fetches only Cartesia's catalogue, never the ElevenLabs lookups."""
+    names_file.write_text(json.dumps({"cartesia": {}}))              # format 1: due
+    worker = voice_names.VoiceNamesWorker()
+    assert [worker.next_wait() for _ in range(5)] == [15 * 60, 3600, 4 * 3600,
+                                                      voice_names.REFRESH_SECONDS,
+                                                      voice_names.REFRESH_SECONDS]
+    _refresh(_cfg("cartesia"), names_file, pages=[{"id": "v1", "name": "One"}])
+    assert worker.next_wait() == voice_names.REFRESH_SECONDS and worker._retries == 0
+    seen = []
+    retry_worker = voice_names.VoiceNamesWorker(refresh_fn=lambda **kw: seen.append(kw))
+    retry_worker._once(retry=True)
+    retry_worker._once()
+    assert seen == [{"providers": ("cartesia",)}, {}]
+    done, asked = _refresh(_cfg("cartesia"), names_file, pages=[{"id": "v1", "name": "One"}],
+                           eleven_in_use={ELEVEN})
+    voice_names.refresh(_cfg("cartesia"), path=names_file, providers=("cartesia",),
+                        cartesia_all=lambda key: asked.append(("all", key)) or [{"id": "v1", "name": "One"}],
+                        cartesia_one=lambda k, v: asked.append(("one", v)) or {},
+                        eleven_one=lambda k, v: asked.append(("eleven", v)) or {},
+                        voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": {ELEVEN}})
+    assert asked.count(("eleven", ELEVEN)) == 1                     # the full pass only, not the retry
