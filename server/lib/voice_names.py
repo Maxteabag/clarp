@@ -39,6 +39,8 @@ def names_path() -> pathlib.Path:
 
 REFRESH_SECONDS = 24 * 3600
 RETRY_SECONDS = 15 * 60          # after a pass that left the file due (a keyed fetch failed)
+BACKOFF_SECONDS = (15 * 60, 3600, 4 * 3600)   # then daily: retries after a failure, in order
+REFUSED_STATUSES = (401, 403)    # the key is refused for good: final until the key changes
 FIRST_AFTER_SECONDS = 60.0
 # 2: catalogue rows read public from access/visibility (21 Nov 2026: Cartesia sends no
 # is_public, so every row of a format-1 file reads not public).
@@ -134,6 +136,11 @@ def _read_bytes(data: bytes, path: pathlib.Path) -> dict[str, Any]:
         str(p): {str(k): str(v) for k, v in m.items() if k and isinstance(v, str) and v.strip()}
         for p, m in raw.items() if isinstance(m, dict) and not str(p).startswith("_")}
     out["_format"] = raw.get("_format") if isinstance(raw.get("_format"), int) else 1
+    held = raw.get("_refused")
+    if isinstance(held, dict):
+        # provider -> {"key": fingerprint of the refused key, "status": 401 or 403}
+        out["_refused"] = {str(p): {"key": str(m.get("key") or ""), "status": int(m.get("status") or 0)}
+                           for p, m in held.items() if isinstance(m, dict) and m.get("key")}
     held = raw.get("_gone")
     if isinstance(held, dict):
         out["_gone"] = {str(p): sorted({str(v) for v in ids if v})
@@ -197,6 +204,22 @@ def _owned(row: dict) -> bool:
     return row.get("is_owner") is not False
 
 
+class _KeyRefused(Exception):
+    def __init__(self, status: int):
+        super().__init__(status)
+        self.status = status
+
+
+def _status(exc: Exception) -> int | None:
+    value = getattr(exc, "code", None) or getattr(exc, "status", None)
+    return value if isinstance(value, int) else None
+
+
+def _key_mark(key: str) -> str:
+    """A short fingerprint of a key, to tell a changed key from the refused one; never the key."""
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
 def _not_found(exc: Exception) -> bool:
     return getattr(exc, "code", None) == 404 or getattr(exc, "status", None) == 404
 
@@ -210,6 +233,8 @@ def _lookup(key: str, ids: set[str], fetch_one: Callable[[str, str], dict],
         try:
             row = fetch_one(key, voice_id) or {}
         except Exception as exc:  # noqa: BLE001 - an unknown or removed voice stays nameless
+            if _status(exc) in REFUSED_STATUSES:
+                raise _KeyRefused(_status(exc)) from exc       # no point asking about the rest
             if _not_found(exc):
                 missing.add(voice_id)
             else:
@@ -224,20 +249,23 @@ def refresh(cfg=None, *, path: pathlib.Path | None = None,
             cartesia_all: Callable[[str], list[dict]] | None = None,
             cartesia_one: Callable[[str, str], dict] | None = None,
             eleven_one: Callable[[str, str], dict] | None = None,
-            voices_in_use: Callable[[Any], dict[str, set[str]]] | None = None) -> list[str]:
+            voices_in_use: Callable[[Any], dict[str, set[str]]] | None = None,
+            providers: tuple[str, ...] | None = None) -> list[str]:
     """Fetch the names and write the file; the providers refreshed (none: file untouched).
-    Never two at once: a refresh asked while one runs does nothing."""
+    ``providers`` limits the pass (a retry asks only for Cartesia's catalogue). Never two at
+    once: a refresh asked while one runs does nothing."""
     if not _REFRESHING.acquire(blocking=False):
         return []
     try:
         return _refresh(cfg, path=path or names_path(), cartesia_all=cartesia_all,
                         cartesia_one=cartesia_one, eleven_one=eleven_one,
-                        voices_in_use=voices_in_use)
+                        voices_in_use=voices_in_use, providers=providers)
     finally:
         _REFRESHING.release()
 
 
-def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use) -> list[str]:
+def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use,
+             providers=None) -> list[str]:
     from . import cartesia_voices, config as config_module, elevenlabs_voices
     from .log import log, log_exception
     from .voice_profile import elevenlabs_id_usable
@@ -252,18 +280,23 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
             current["_format"] = FORMAT
             _write(path, current)
         return []
+    current = _read(path) if path.exists() else {}
+    refused = dict(current.get("_refused") or {})
+
+    def asked(provider: str, key: str) -> bool:
+        """A provider is asked when it has a key, the pass includes it, and that very key
+        was not refused for good (401/403) before; a new key is asked again."""
+        return bool(key) and (providers is None or provider in providers) and \
+            (refused.get(provider) or {}).get("key") != _key_mark(key)
     used = (voices_in_use or in_use)(cfg)
     failed = False                       # a provider with a key could not be read: retry soon
+    refused_now: dict[str, int] = {}     # provider -> 401/403 this pass
     fresh: dict[str, dict[str, str]] = {}
     gone_now: dict[str, set[str]] = {}
     today: dict[str, dict[str, dict]] = {}
-    if cartesia_key:
+    if asked(CARTESIA, cartesia_key):
         try:
             rows = (cartesia_all or cartesia_voices.all_voices)(cartesia_key)
-        except Exception as exc:  # noqa: BLE001 - the file keeps Cartesia's old names
-            log_exception("voiceNamesFetchFail", exc, detail=CARTESIA)
-            failed = True
-        else:
             today[CARTESIA] = {str(r.get("id")): {"language": str(r.get("language") or ""),
                                                    "public": _public(r), "owner": _owned(r)}
                                for r in rows if r.get("id")}
@@ -272,15 +305,25 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
             named, gone_now[CARTESIA] = _lookup(cartesia_key, used.get(CARTESIA, set()) - set(today[CARTESIA]),
                                                 cartesia_one or cartesia_voices.fetch_one, CARTESIA)
             fresh[CARTESIA] = {**found, **named}
+        except _KeyRefused as exc:
+            refused_now[CARTESIA] = exc.status
+        except Exception as exc:  # noqa: BLE001 - the file keeps Cartesia's old names
+            if _status(exc) in REFUSED_STATUSES:
+                refused_now[CARTESIA] = _status(exc)
+            else:
+                log_exception("voiceNamesFetchFail", exc, detail=CARTESIA)
+                failed = True
     # ElevenLabs is asked only for ids it can hold: a bare Cartesia uuid stored before the
     # one stored shape reads as an ElevenLabs id, and ElevenLabs answers it 400.
     eleven_ids = {v for v in used.get(ELEVENLABS, set()) if elevenlabs_id_usable(v)}
-    if eleven_key and eleven_ids:
-        fresh[ELEVENLABS], gone_now[ELEVENLABS] = _lookup(
-            eleven_key, eleven_ids, eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS)
-    current = _read(path) if path.exists() else {}
+    if asked(ELEVENLABS, eleven_key) and eleven_ids:
+        try:
+            fresh[ELEVENLABS], gone_now[ELEVENLABS] = _lookup(
+                eleven_key, eleven_ids, eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS)
+        except _KeyRefused as exc:
+            refused_now[ELEVENLABS] = exc.status
     old_format = path.exists() and current.get("_format", 1) < FORMAT
-    if not fresh and not old_format:
+    if not fresh and not old_format and not refused_now:
         return []
     before = json.dumps(current, sort_keys=True, separators=(",", ":"))
     for provider, found in fresh.items():
@@ -299,6 +342,18 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
     # the next start (or the worker within RETRY_SECONDS) asks again.
     if not failed:
         current["_format"] = FORMAT
+    for provider, status in refused_now.items():
+        key = cartesia_key if provider == CARTESIA else eleven_key
+        mark = {"key": _key_mark(key), "status": status}
+        if refused.get(provider) != mark:
+            log("voiceNamesKeyRefused", f"provider={provider} status={status}")
+        refused[provider] = mark
+    for provider in fresh:
+        refused.pop(provider, None)               # that key works now
+    if refused:
+        current["_refused"] = refused
+    else:
+        current.pop("_refused", None)
     for provider, ids in gone_now.items():
         current.setdefault("_gone", {})[provider] = sorted(ids)
         for voice_id in sorted(ids - set(((json.loads(before) if before else {}).get("_gone") or {})
@@ -329,6 +384,7 @@ class VoiceNamesWorker:
         self.interval = interval
         self.first_after = first_after
         self._refresh = refresh_fn or refresh
+        self._retries = 0                 # retries in a row since the file was last current
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -347,11 +403,16 @@ class VoiceNamesWorker:
         self._once()
         return True
 
-    def _once(self) -> None:
+    def _once(self, retry: bool = False) -> None:
+        """One pass; a retry asks only for Cartesia's catalogue (the one fetch whose failure
+        leaves the file due), never the ElevenLabs lookups."""
         from . import db
         from .log import log_exception
         try:
-            self._refresh()
+            if retry:
+                self._refresh(providers=(CARTESIA,))
+            else:
+                self._refresh()
         except Exception as exc:  # noqa: BLE001 - never take the Host down for names
             log_exception("voiceNamesWorkerFail", exc, detail="")
         finally:
@@ -361,9 +422,18 @@ class VoiceNamesWorker:
         if self._stop.wait(self.first_after):
             return
         self.start_pass()
-        while not self._stop.wait(self.next_wait()):
-            self._once()
+        while True:
+            wait, retry = self.next_wait(), self._retries > 0
+            if self._stop.wait(wait):
+                return
+            self._once(retry=retry)
 
     def next_wait(self) -> float:
-        """A day, or RETRY_SECONDS while the file is still due (a keyed fetch failed)."""
-        return min(self.interval, RETRY_SECONDS) if start_due() else self.interval
+        """A day; while the file is still due (a keyed fetch failed, not refused) the retries
+        back off: BACKOFF_SECONDS in order, then daily."""
+        if not start_due():
+            self._retries = 0
+            return self.interval
+        wait = BACKOFF_SECONDS[self._retries] if self._retries < len(BACKOFF_SECONDS) else self.interval
+        self._retries += 1
+        return min(self.interval, wait)
