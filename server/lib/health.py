@@ -25,10 +25,16 @@ def mark_success(subsystem: str, *, now: float | None = None) -> None:
 
 def mark_error(subsystem: str, error: BaseException | str,
                *, now: float | None = None) -> None:
+    """Record that `subsystem` failed. Every paired device reads this state (GET
+    /diagnostics/health, limited scope too), and an exception's text can name local
+    paths or carry a provider's reply, so only the exception's type name is kept, or,
+    for a string, the fixed word the caller passes on purpose. The full error belongs
+    in the caller's own log line."""
+    word = type(error).__name__ if isinstance(error, BaseException) else str(error)
     with _LOCK:
         item = _STATE.setdefault(subsystem, SubsystemHealth())
         item.last_error_at = now if now is not None else time.time()
-        item.last_error = str(error)
+        item.last_error = word
 
 
 def snapshot() -> dict[str, dict]:

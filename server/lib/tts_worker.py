@@ -137,7 +137,7 @@ def synth_one(*,
         tts_queue.mark_failed(queue_id, result.error)
         if result.cancelled:
             return True
-        health.mark_error("tts_worker", result.error)
+        health.mark_error("tts_worker", "speech failed")   # result.error is in synthFail below
         _emit("tts_worker", "synthFail",
               context=_event_context(row, agent),
               detail={"queue_id": queue_id, "error": result.error,
