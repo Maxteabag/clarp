@@ -21,7 +21,7 @@ calls to the server on `127.0.0.1:7682` (override with `CLARP_UPSTREAM`).
 
 | Command | What | Time |
 |---|---|---|
-| `make test-critical` | The pre-push gate: what can brick the Host or lose data (`tests/critical.txt`) | ~1 min |
+| `make test-critical` | What can brick the Host or lose data (`tests/critical.txt`); part of the one pass at the end of a piece of work | ~1 min |
 | `make py` | Python unit and integration tests, all cores, 60 s per-test timeout | ~30 s |
 | `make js` | JavaScript unit tests (vitest) | ~15 s |
 | `make e2e` | Playwright against a throwaway Docker node | minutes |
@@ -69,8 +69,8 @@ So a model release means a release here:
 
 1. Bump `CLAUDE_CODE_VERSION` (and `CODEX_VERSION` while you are there) in the
    `Dockerfile`.
-2. Tag it — `git tag vX.Y.Z && git push origin vX.Y.Z`. A push to `main` only
-   publishes `edge`; `stable` needs the tag.
+2. Tag it — `git tag vX.Y.Z && git push origin vX.Y.Z`. `edge` is published only by a
+   Docker run started by hand on `main`; `stable` needs the tag.
 3. On each deployment: `docker compose pull && docker compose up -d`.
 4. **Relaunch the running agents.** A live agent keeps the CLI process it
    started with, so it keeps failing until it is relaunched — updating the
@@ -82,8 +82,9 @@ So a model release means a release here:
 
 Write the commit message for the person reading `git log` in a year: what
 changed and why, in plain sentences. Keep pull request descriptions short and
-concrete. Run `make test-critical` and the tests for what you changed before
-pushing; the full suite only runs when someone starts it by hand on GitHub.
+concrete. A change lands once it builds and a reviewer has read it; tests run once, when
+the work is complete and before it is installed (see AGENTS.md). No workflow
+starts by itself; the full suite runs only when someone starts it on GitHub.
 
 Contributions are accepted under the [CLA](CLA.md); the project is licensed
 under [PolyForm Shield 1.0.0](LICENSE.md).

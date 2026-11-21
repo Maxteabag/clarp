@@ -1223,9 +1223,11 @@ def show(queue_id: str, *, con=None) -> bool:
 # claimed or started but has no row yet (a turn on a session with no backend id at
 # its handoff writes its row at the CLI's init, not at the start): until then it is
 # still the queue's, so a message is never in neither read. A listen-first opening
-# never has a row and is no message of the user's.
+# never has a row and is no message of the user's, and neither is a started item whose
+# words are gone (an older Host cleared them at the start): its row was written then.
 IN_QUEUE_READ = ("(status = 'queued' OR (status IN ('claimed', 'started')"
-                 " AND queue_id NOT LIKE 'call-open:%')) AND shown_at IS NULL")
+                 " AND queue_id NOT LIKE 'call-open:%' AND COALESCE(text, '') <> ''))"
+                 " AND shown_at IS NULL")
 
 
 def waiting_items(agent_id: str) -> list[dict]:
@@ -1235,6 +1237,22 @@ def waiting_items(agent_id: str) -> list[dict]:
         f"""SELECT * FROM queued_turns
             WHERE agent_id = ? AND {IN_QUEUE_READ}
             ORDER BY queue_seq""", (agent_id,))]
+
+
+def item_provenance(row) -> dict:
+    """Who a queue item is from, as stored (R182, issue 491): ``origin`` (an open set:
+    user, oracle, agent, automation (a goal wake, a schedule), janitor, heartbeat, ...) and
+    ``sender`` ``{agent_id, name}`` when an agent sent it (``name`` None once that agent is
+    gone), else None. An app tells the user's own waiting send from another device apart
+    from an agent's message or a goal wake by it."""
+    origin = str(row["origin"] or "user")
+    sender_id = str(row["sender_agent_id"] or "")
+    sender = None
+    if sender_id:
+        from . import agents
+        found = agents.get_by_agent_id(sender_id)
+        sender = {"agent_id": sender_id, "name": (found or {}).get("persona") or None}
+    return {"origin": origin, "sender": sender}
 
 
 def get(queue_id: str) -> dict | None:

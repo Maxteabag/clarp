@@ -11,8 +11,29 @@ K = 'clarp-kernel/src/gallery.rs'
 W = 'clarp-host/src/gallery.rs'
 H = 'clarp-host/src/media_manage.rs'
 M = 'clarp-host/src/media.rs'
+C = 'clarp-host/src/coordination.rs'
 
 PLANTS = [
+    (C, 'host', 'a peer claim is not an agent',
+     '[crate::turn_identity::HEADER, PEER_HEADER]', '[crate::turn_identity::HEADER]'),
+    (C, 'host', 'a turn claim is not an agent',
+     '[crate::turn_identity::HEADER, PEER_HEADER]', '[PEER_HEADER]'),
+    (C, 'host', 'an empty claim is an agent',
+     'headers.get(name).is_some_and(|value| {\n                value',
+     'headers.get(name).is_some_and(|value| {\n                if value.as_bytes().is_empty() { return true; }\n                value'),
+    (H, 'host', 'an agent may favorite an image',
+     '    allow(&headers)?;\n    let wanted =', '    let wanted ='),
+    (H, 'host', 'an agent may delete an image',
+     '    allow(&headers)?;\n    let by =', '    let by ='),
+    (H, 'host', 'an agent may delete a batch',
+     '    allow(&headers)?;\n    let body =', '    let body ='),
+    (H, 'host', 'a media write answers the wrong status to an agent',
+     'StatusCode::FORBIDDEN, "agents_may_not"', 'StatusCode::UNAUTHORIZED, "agents_may_not"'),
+    (H, 'host', 'a media write answers the wrong error to an agent',
+     'StatusCode::FORBIDDEN, "agents_may_not"', 'StatusCode::FORBIDDEN, "forbidden"'),
+    (M, 'host', 'the claim also forbids publishing',
+     '    let headers = &parts.headers;',
+     '    let headers = &parts.headers;\n    if crate::coordination::from_an_agent(headers) { return Err(bad("agents_may_not").into()); }'),
     (K, 'vectors', 'favorite retries move the timestamp', 'if self.favorite_at.is_some() == wanted {',
      'if self.favorite_at.is_none() && !wanted {'),
     (K, 'vectors', 'clearing a favorite gives it another timestamp', 'updated.favorite_at = wanted.then_some(at);',

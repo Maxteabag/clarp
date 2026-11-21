@@ -118,6 +118,7 @@ class RecoveryMixin:
         from .backend.registry import by_id
         for entry in steer_records.left():
             trace_id, queue_id = str(entry["trace_id"]), str(entry.get("queue_id") or "")
+            keep = False
             try:
                 item = db.conn().execute(
                     "SELECT * FROM queued_turns WHERE queue_id = ?", (queue_id,)).fetchone()
@@ -129,9 +130,16 @@ class RecoveryMixin:
                 # would read the line when its tool returns: it is ended first (only while
                 # its pid is still that process), so "not in the file" means never read.
                 from . import takeover
-                if takeover.kill_group_if_same(int(entry.get("pid") or 0),
-                                               int(entry.get("pgid") or 0),
-                                               entry.get("start_ticks")):
+                ended = takeover.kill_group_if_same(int(entry.get("pid") or 0),
+                                                    int(entry.get("pgid") or 0),
+                                                    entry.get("start_ticks"))
+                if ended is None:
+                    # Still there after the kill: it could still read the line. Nothing is
+                    # judged; the record stays for the next start (reviewer 4).
+                    keep = True
+                    log("steerOrphanStillAlive", f"agent={item['agent_id']} queue={queue_id}")
+                    continue
+                if ended:
                     log("steerOrphanEnded", f"agent={item['agent_id']} queue={queue_id}")
                 try:
                     read = by_id(str(entry.get("backend") or "")).steer_was_read(
@@ -148,7 +156,8 @@ class RecoveryMixin:
                     log("steerUnreadAtStart" if read is False else "steerUnknownAtStart",
                         f"agent={item['agent_id']} queue={queue_id}")
             finally:
-                steer_records.clear(trace_id)
+                if not keep:
+                    steer_records.clear(trace_id)
 
     def _show_steer_read(self, item: dict, steered_session: str) -> None:
         """A follow-up the CLI read: its row in the live session, shown and started in one

@@ -143,6 +143,16 @@ if __name__ == '__main__':
         print(child.stderr[-3000:], file=sys.stderr)
         raise SystemExit(child.returncode)
     vectors = json.loads(child.stdout.splitlines()[-1])
+    # The reference's contract number belongs to that Host. The Rust Host test takes its
+    # own number from /server-info and compares the full public identity response.
+    identities = vectors['identity'] + [
+        step['body'] for step in vectors['steps']
+        if step['kind'] == 'identity' and step['status'] == 200
+    ]
+    for identity in identities:
+        if type(identity['contract']['host']) is not int:
+            raise TypeError('the pairing identity contract number is not an integer')
+        identity['contract']['host'] = '<host-contract>'
     sections = []
     for key, rows in vectors.items():
         sections.append(f' "{key}": [\n' + ',\n'.join('  ' + json.dumps(row) for row in rows) + '\n ]')

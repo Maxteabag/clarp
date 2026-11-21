@@ -20,10 +20,14 @@ rules(KERNEL, 'vectors', [
     ('Each model at one hosted provider is sent the audio', 'return Engine::Hosted(provider.id);', 'return Engine::Other(model);'),
     ('Local default aliases each get the audio', 'return Engine::Own;', 'return Engine::Other(model);'),
     ('An explicit own model id is a different engine', ' || own_id == Some(model)', ''),
+])
+rules('clarp-kernel/src/languages.rs', 'vectors', [
     ('Norwegian Bokmal is treated as another language', '"nb" | "nn" => "no".to_string(),', '"nn" => "no".to_string(),'),
     ('Norwegian Nynorsk is treated as another language', '"nb" | "nn" => "no".to_string(),', '"nb" => "no".to_string(),'),
     ('An underscore stops a regional tag matching', "code.split(['-', '_'])", "code.split('-')"),
     ('A hyphen stops a regional tag matching', "code.split(['-', '_'])", "code.split('_')"),
+])
+rules(KERNEL, 'vectors', [
     ('The off own engine is permitted', '''Own::Off => return Some("the Host's own engine is off".into()),''', 'Own::Off => return None,'),
     ('An unavailable engine is permitted', 'Own::Unavailable => return Some(OWN_UNAVAILABLE.into()),', 'Own::Unavailable => return None,'),
     ('The unavailable engine has different words', "the Host's own engine is unavailable", "the Host's own engine returned no words"),
