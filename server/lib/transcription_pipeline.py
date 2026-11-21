@@ -46,6 +46,19 @@ class TranscriptionOutcome:
         return cls(status=status, payload={"error": message}, trace_id=trace_id)
 
 
+def client_words(e: BaseException) -> str:
+    """What a client is told about a transcription error: fixed words by its type.
+    The exception text can name local paths or carry a provider's reply, so it goes
+    only to the Host's log."""
+    if isinstance(e, STTUnknownModelError):
+        return "transcription model not installed"
+    if isinstance(e, STTModelLoadingError):
+        return "transcription model loading"
+    if isinstance(e, STTBusyError):
+        return "whisper busy"
+    return "transcription failed"
+
+
 def _cache_dir() -> pathlib.Path:
     return RuntimePaths.from_home(pathlib.Path.home()).cache_dir
 
@@ -324,7 +337,8 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                 audio_bytes, ctype, prompt, wait=10.0)
         health.mark_success("stt")
     except STTUnknownModelError as e:
-        return TranscriptionOutcome.error(400, str(e), trace_id)
+        log_exception("transcribeUnknownModel", e, detail=f"model={requested_model}")
+        return TranscriptionOutcome.error(400, client_words(e), trace_id)
     except LanguageSetRefused as e:
         # R152: no engine the owner chose can hear this agent's languages: a clear
         # refusal that says what to change, never a 500 and never English nonsense.
@@ -334,7 +348,8 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
             "error": "language_set_unsupported", "message": str(e), "engine": e.engine,
             "languages": e.languages, "engines": e.engines, "reasons": e.reasons})
     except STTModelLoadingError as e:
-        return TranscriptionOutcome.error(503, str(e), trace_id)
+        log_exception("transcribeModelLoading", e, detail=f"model={requested_model}")
+        return TranscriptionOutcome.error(503, client_words(e), trace_id)
     except STTBusyError:
         health.mark_error("stt", "busy")
         record_voice("error", utterance_id=utterance_id or None,
@@ -356,8 +371,8 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
             log_exception("heardAudioRetainFail", retain_error)
         record_voice("error", utterance_id=utterance_id or None,
                      client_ts=client_ts,
-                     detail={"message": str(e)[:300], "stage": "stt"})
-        failed = TranscriptionOutcome.error(500, str(e), trace_id)
+                     detail={"message": client_words(e), "stage": "stt"})
+        failed = TranscriptionOutcome.error(500, client_words(e), trace_id)
         if call_stt is not None and "report" in call_stt:
             failed.payload["stt"] = call_stt["report"]          # every attempt, not hidden
         return failed
@@ -563,7 +578,7 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
                         f"transcription model not installed: {step.get('model', step['engine'])}")
         except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error (VP-09)
             attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
-                             "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
+                             "ms": int((time.monotonic() - started) * 1000), "reason": client_words(e)})
             if step is runnable[-1]:
                 raise
             log_exception("sttCallEngineFallback", e, detail=step["engine"])
