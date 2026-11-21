@@ -3430,9 +3430,7 @@ impl Worker {
                         }
                     }
                 }
-                if let Some(pool) = self.setup.pool() {
-                    pool.guard_turn(&mut order);
-                }
+                let pool = self.setup.pool().cloned();
                 // Whose turn this is: a Clarp tool of the turn that presents its token is known
                 // to be this agent's. Nothing is written for it.
                 let agent_id = &self.setup.record.agent_id;
@@ -3446,6 +3444,10 @@ impl Worker {
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
+                        launcher::gate_steering(&mut order);
+                        if let Some(pool) = pool {
+                            pool.guard_turn(&mut order);
+                        }
                         if let Some(opening) = order.opening.as_deref() {
                             let (id, trace) = (opening.id.as_str(), opening.trace.as_str());
                             use crate::launcher::Launched;

@@ -168,7 +168,7 @@ impl Launcher {
         if let Some(dir) = order.socket.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let mut child = match self.command(&steering_order(order)).spawn() {
+        let mut child = match self.command(order).spawn() {
             Ok(child) => child,
             Err(error) => {
                 return Launched::NoShim(format!("the shim could not be started: {error}"));
@@ -207,11 +207,9 @@ impl Launcher {
     }
 }
 
-fn steering_order(order: &ShimOrder) -> std::borrow::Cow<'_, ShimOrder> {
-    use std::borrow::Cow;
-
+pub(crate) fn gate_steering(order: &mut ShimOrder) {
     if !order.args.iter().any(|arg| arg == REPLAY_USER_MESSAGES) {
-        return Cow::Borrowed(order);
+        return;
     }
     // This is the launch thread. Dispatch consults what the shim recorded; it does not probe.
     let version = tokio::runtime::Builder::new_current_thread()
@@ -220,19 +218,16 @@ fn steering_order(order: &ShimOrder) -> std::borrow::Cow<'_, ShimOrder> {
         .ok()
         .and_then(|runtime| {
             runtime.block_on(crate::models::asked(
-                Path::new(order.version_program.as_deref().unwrap_or(&order.program)),
+                Path::new(&order.program),
                 &["--version".into()],
                 Duration::from_millis(2_500),
             ))
         });
-    if version.is_some_and(|(code, version)| {
+    if !version.is_some_and(|(code, version)| {
         code == 0 && clarp_kernel::steering::supported_version(&version)
     }) {
-        return Cow::Borrowed(order);
+        order.args.retain(|arg| arg != REPLAY_USER_MESSAGES);
     }
-    let mut downgraded = order.clone();
-    downgraded.args.retain(|arg| arg != REPLAY_USER_MESSAGES);
-    Cow::Owned(downgraded)
 }
 
 /// Follows the shim at this socket until it is gone: says when its spool may have grown, and
@@ -325,7 +320,6 @@ mod tests {
             stdin_file: PathBuf::from("/data/agents/a1/spool/7.stdin"),
             cwd: PathBuf::from("/work"),
             program: "claude".to_string(),
-            version_program: None,
             args: vec!["-p".to_string()],
             env: vec![("CLAUDE_PWA_SESSION".to_string(), "maximus".to_string())],
         }

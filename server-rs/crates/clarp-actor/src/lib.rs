@@ -198,8 +198,6 @@ pub struct ShimOrder {
     pub named_session: Option<String>,
     pub cwd: PathBuf,
     pub program: String,
-    /// The provider executable when a launcher has wrapped the command.
-    pub version_program: Option<String>,
     pub args: Vec<String>,
     /// Set on top of the environment the tool inherits.
     pub env: Vec<(String, String)>,
@@ -3924,7 +3922,6 @@ impl Actor {
             cwd: self.profile.cwd.clone(),
             before_stop: launch.before_stop,
             program: launch.program,
-            version_program: None,
             args: launch.args,
             env: launch
                 .env
