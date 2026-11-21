@@ -45,6 +45,8 @@ class MediaRoutes:
         try:
             limit = int((qs.get("limit", ["1000"])[0] or "1000").strip())
         except ValueError:
+            limit = 0
+        if not 1 <= limit <= 1000:
             return self._json_error(400, "limit must be a number from 1 to 1000")
         session = (qs.get("session", [""])[0] or "").strip()
         self._json_ok(media_store.deleted_since(since=since, session=session, limit=limit))
