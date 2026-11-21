@@ -497,6 +497,9 @@ class Config:
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_CARTESIA_VOICES))
+    # [cartesia] pool: the Cartesia voices a new agent or contact may be given
+    # (voice_pool); empty means the distinct built-in voices.
+    cartesia_pool: tuple[str, ...] = ()
     local_tts_voice: str = ""
     # Audio delivery strategy.
     # "chunked-file" (default) = ClipStreamBroker + /clips/<id>/stream
@@ -1209,6 +1212,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         # Merge over the built-in defaults (never wholesale-replace): a
         # [cartesia.voices] table in config.toml adds/overrides specific
         # personas, but the built-ins always remain.
+        cartesia_pool = tuple(str(v).strip() for v in (cartesia.get("pool") or [])
+                              if isinstance(cartesia.get("pool"), list) and str(v).strip()),
         cartesia_voices = {**DEFAULT_CARTESIA_VOICES,
                            **(dict(cartesia_voices) if isinstance(cartesia_voices, dict) else {})},
         whisper_model   = str(whisper.get("model", "small.en")),
