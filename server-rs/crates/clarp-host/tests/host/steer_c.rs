@@ -54,6 +54,14 @@ def release(name):
         time.sleep(.02)
 
 first, text = prompt()
+# A hidden coordination prompt starts with the Host's reminder. Keep the case label
+# separate, and check that only the two coordination turns receive the reminder.
+reminder, separator, request = text.partition("\n\n")
+has_reminder = bool(separator) and reminder.startswith(
+    "Coordination: this turn answers a message from another agent")
+if has_reminder:
+    text = request
+assert has_reminder == (text in ("case-mixed", "case-relayed"))
 with (root / "launches").open("a") as rows:
     rows.write(text + "\n")
 if text == "case-race":
