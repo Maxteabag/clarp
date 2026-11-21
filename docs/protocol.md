@@ -882,7 +882,8 @@ client shows it and derives nothing from `voice_id`.
                            "model": "scribe_v2", "label": "ElevenLabs Scribe v2"}],
               "engine_origin": "own", "device_may_override": false,
               "device_cloud_languages": null,
-              "languages": ["no", "en"], "language_origin": "own"}
+              "languages": ["no", "en"], "language_origin": "own",
+              "configured_languages": ["no", "en"]}
 }
 ```
 
@@ -891,7 +892,16 @@ client shows it and derives nothing from `voice_id`.
   heard; `silent_reason` then says why. `voice_label`, `provider_label` and each engine's `label` are a real name or null, never
   an empty string; a client shows its own words for null.
 - `speech.origin`: `own` (the agent's or its contact's own voice) or `default` (the
-  provider's one default voice, the same for every agent without its own).
+  provider's one default voice, the same for every agent without its own); null when nothing
+  is heard (`voice_id` null, `silent_reason` given).
+- `speech.voice_label` comes from the Host's own tables and a names file it fills in the
+  background, never from a request: Cartesia's catalogue name and ElevenLabs' name for a voice
+  in use (null until the Host has fetched them, and for a voice the provider does not know),
+  ElevenLabs' built-in voices, Gemini voices in the voice picker's words (a prebuilt voice by
+  its name, a Voice Design voice as `<Contact> (designed)`, the contact it is stored under in
+  `[gemini_tts.voices]`; null for an id in no map), Google's and Deepgram's voice names.
+- An archived agent has no `voice_profile`: not on its snapshot row, and not in the creation
+  answer or a roster event about it.
 - The rule both Hosts hold (vectors in `tests/unit/test_voice_v2a.py`): no voice of its own =
   the provider's default voice where the provider has exactly one, silence (`no_voice`) where
   it has none; a migrated agent must not fall silent where it spoke before.
@@ -903,6 +913,12 @@ client shows it and derives nothing from `voice_id`.
   language itself (a multilingual local model, or ElevenLabs Scribe given a set).
 - `hearing.engine_origin`, `hearing.language_origin`: `own` (this agent's setting) or
   `default` (the Host's).
+- `hearing.configured_languages` (Host contract: next free at merge): the language set chosen
+  for this agent, else the Host's default set, as ISO codes, whatever the first engine is
+  handed. Show it as "listens for": an agent on ElevenLabs Scribe with `no,en` reads
+  `languages: []` (Scribe detects) but `configured_languages: ["no","en"]`. `language_origin`
+  says whose set it is (`own` or `default`), except when the first engine is a local model:
+  then `languages` is the model's own and `language_origin` is `default`.
 - `hearing.device_may_override`: the one rule for a client. When it is true (the engine
   is the Host's default), a phone that sends its own `X-Transcription-Model` is heard
   with that model instead; such a client shows its own setting.
