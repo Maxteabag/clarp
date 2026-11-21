@@ -136,6 +136,9 @@ class _TurnSpec:
     # a steer offered at its admission is a fresh send's, not a queue launch's,
     # so a Stop's fence still refuses it (_record_launch_attempt). In memory only.
     arrived_waiting: bool = False
+    # This turn takes over one that printed nothing (issue 491, part B): the
+    # Claude launch's plan (takeover.takeover_plan). In memory only.
+    takeover: Any = None
 
 
 def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
@@ -278,7 +281,14 @@ def _can_steer(registry, backend: str) -> bool:
     if by_id is None:
         return True
     try:
-        return bool(getattr(by_id(backend), "supports_steer", True))
+        found = by_id(backend)
+        if bool(getattr(found, "supports_steer", True)):
+            return True
+        # A backend whose CLI takes a follow-up into a running turn only from a recorded
+        # version on (Claude, issue 491 part C): offered; the backend refuses (nothing
+        # written) unless the running turn was launched able to take it. Its advertised
+        # capability is unchanged.
+        return bool(getattr(found, "steer_reads_later", False))
     except Exception:  # noqa: BLE001 - unknown: the steer path as before
         return True
 
