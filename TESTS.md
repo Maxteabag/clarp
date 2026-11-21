@@ -2,20 +2,21 @@
 
 ## How to run
 
-Before pushing, run `make test-critical`, `make test-guards` and the test files
-for the code you changed; do not run the full suite locally. The critical list
+Tests run once, at the end of a piece of work, before it is installed on the
+owner's Hosts: `make test-critical`, `make test-guards` and the test files for
+the code that changed. Nothing runs per push or per pull request (see AGENTS.md,
+"Tests run once, at the end of a piece of work"); do not run the full suite locally. The critical list
 (`tests/critical.txt`) holds only what can brick the Host or lose data: state
 database schema and migrations, boot and route wiring, authentication and
 device scope, turn dispatch/queue/stop, update and installer, transcript
-import. GitHub runs it on pull requests and, through the Docker workflow, on every push to main. The full suite
-never runs automatically; start it by hand ("Run workflow" on Tests) when wanted.
+import. No workflow runs it automatically; start the Tests workflow by hand ("Run workflow") when wanted.
 To run only a fix's own tests on GitHub, start the same workflow on the candidate
 branch with `paths` set to the test files (space separated); nothing else runs.
 
 | Layer | Command | Where it runs | Time |
 |---|---|---|---|
-| Critical gate (pre-push) | `make test-critical` | serial, in-process | ~1 min |
-| Structural guards (pre-push) | `make test-guards` | serial, in-process | ~3 min |
+| Critical (end-of-work pass) | `make test-critical` | serial, in-process | ~1 min |
+| Structural guards (end-of-work pass) | `make test-guards` | serial, in-process | ~3 min |
 | Python unit + integration (1,500 tests) | `make py` | in-process, every core, 60 s per-test timeout | ~30 s |
 | JavaScript unit (250 tests) | `make js` | vitest, in-process | ~15 s |
 | Container install, restart, backup | `make docker-test` | throwaway Docker node | minutes |

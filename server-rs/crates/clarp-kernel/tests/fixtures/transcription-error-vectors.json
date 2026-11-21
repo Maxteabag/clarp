@@ -1,0 +1,90 @@
+[
+  {
+    "kind": "unknown_model",
+    "type": "STTUnknownModelError",
+    "status": 400,
+    "word": "transcription model not installed",
+    "voice": []
+  },
+  {
+    "kind": "unknown_model",
+    "type": "STTUnknownModelError",
+    "status": 400,
+    "word": "transcription model not installed",
+    "voice": []
+  },
+  {
+    "kind": "loading",
+    "type": "STTModelLoadingError",
+    "status": 503,
+    "word": "transcription model loading",
+    "voice": []
+  },
+  {
+    "kind": "loading",
+    "type": "STTModelLoadingError",
+    "status": 503,
+    "word": "transcription model loading",
+    "voice": []
+  },
+  {
+    "kind": "loading",
+    "type": "DerivedLoading",
+    "status": 503,
+    "word": "transcription model loading",
+    "voice": []
+  },
+  {
+    "kind": "loading",
+    "type": "DerivedLoading",
+    "status": 503,
+    "word": "transcription model loading",
+    "voice": []
+  },
+  {
+    "kind": "busy",
+    "type": "STTBusyError",
+    "status": 429,
+    "word": "whisper busy",
+    "voice": [
+      {
+        "message": "whisper busy"
+      }
+    ]
+  },
+  {
+    "kind": "busy",
+    "type": "STTBusyError",
+    "status": 429,
+    "word": "whisper busy",
+    "voice": [
+      {
+        "message": "whisper busy"
+      }
+    ]
+  },
+  {
+    "kind": "failed",
+    "type": "RuntimeError",
+    "status": 500,
+    "word": "transcription failed",
+    "voice": [
+      {
+        "message": "transcription failed",
+        "stage": "stt"
+      }
+    ]
+  },
+  {
+    "kind": "failed",
+    "type": "RuntimeError",
+    "status": 500,
+    "word": "transcription failed",
+    "voice": [
+      {
+        "message": "transcription failed",
+        "stage": "stt"
+      }
+    ]
+  }
+]
