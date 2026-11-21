@@ -105,3 +105,36 @@ def test_lines_come_out_whole_across_reads_and_at_the_end():
 
 def test_a_stand_in_stream_without_a_descriptor_is_read_as_it_is():
     assert list(takeover.read_lines(iter(["a\n", "b\n"]))) == ["a\n", "b\n"]
+
+
+def test_thinking_alone_is_nothing_a_word_or_a_tool_call_is_output():
+    """What 'printed nothing' means for Claude (issue 491, part B): every line counts as read,
+    but only a word or a tool call is output; thinking (its blocks, deltas and signature, in a
+    stream event or a whole assistant message) is not."""
+    thinking = [
+        {"type": "stream_event", "event": {"type": "content_block_start",
+                                           "content_block": {"type": "thinking", "thinking": ""}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta",
+                                           "delta": {"type": "thinking_delta", "thinking": "hm"}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta",
+                                           "delta": {"type": "signature_delta", "signature": "s"}}},
+        {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "hm"}]}},
+        INIT,
+    ]
+    handle = SimpleNamespace(lines_read=0, output_seen=False)
+    for ev in thinking:
+        note_output(handle, ev)
+    assert handle.output_seen is False and handle.lines_read == len(thinking)
+    for ev in (
+        {"type": "stream_event", "event": {"type": "content_block_delta",
+                                           "delta": {"type": "text_delta", "text": "a"}}},
+        {"type": "stream_event", "event": {"type": "content_block_start",
+                                           "content_block": {"type": "tool_use", "id": "t"}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta",
+                                           "delta": {"type": "input_json_delta"}}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "a"}]}},
+        TOOL,
+    ):
+        printed = SimpleNamespace(lines_read=0, output_seen=False)
+        note_output(printed, ev)
+        assert printed.output_seen is True, ev
