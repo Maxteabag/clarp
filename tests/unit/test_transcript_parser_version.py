@@ -11,9 +11,10 @@ to a listed file fails here until its author records the decision.
   checkpoint of that backend is refused once (a full read, as it must be).
   Update the golden to say you meant it.
 - A store source changed: decide whether a full import now writes different rows,
-  or a different store carry, for lines already imported, or whether what a tail
-  resumes from changed (``parser_carry``, ``parse_range``, ``_RangePath`` and the
-  boundary rules live in transcript_incremental.py, a store source). If so, raise
+  or a different store carry, for lines already imported, or whether the boundary
+  rules changed (where a boundary may stand and what a tail may refer to, in
+  transcript_incremental.py, a store source; how a range is read and the parser
+  carry are in transcript_ranges.py, a parser source). If so, raise
   ``transcript_incremental.STORE_FORMAT``. That is a deliberate choice with a cost:
   every checkpoint is refused, so every transcript is read again in full on the
   install that ships it. If not, leave it. Then update the golden.
@@ -50,8 +51,8 @@ def test_a_change_to_the_parser_or_the_store_is_a_recorded_decision():
         "(a full read). If that is meant, update the golden (UPDATE_TRANSCRIPT_VERSION_GOLDEN=1).")
     assert current["store"] == golden["store"] and current["store_format"] == golden["store_format"], (
         "a store source changed: if a full import now writes different rows or a different store "
-        "carry for lines already imported, or if what a tail resumes from changed (parser_carry, "
-        "parse_range, _RangePath, the boundary rules), raise transcript_incremental.STORE_FORMAT. "
+        "carry for lines already imported, or if the boundary rules changed (where a boundary may "
+        "stand, what a tail may refer to), raise transcript_incremental.STORE_FORMAT. "
         "Raising it is a deliberate choice: every transcript is then read again in full on the "
         "install that ships it. Either way update the golden (UPDATE_TRANSCRIPT_VERSION_GOLDEN=1).")
 
@@ -128,3 +129,12 @@ def test_every_module_a_parser_imports_is_hashed_or_named_exempt():
             missing[name] = sorted(outside)
     assert not missing, ("parser sources import modules the parser version does not hash; add them "
                          f"to the backend's list or _PARSE_COMMON, or to EXEMPT with a reason: {missing}")
+
+
+def test_how_a_range_is_read_and_the_parser_carry_are_parser_sources():
+    """A change to them must refuse every checkpoint by itself: they live in a hashed
+    module, and transcript_incremental only re-exports them."""
+    from lib import transcript_ranges
+    assert "transcript_ranges.py" in inc._PARSE_COMMON
+    for name in ("parse_range", "parser_carry", "_RangePath", "_Range", "_claude_carry", "_agy_carry"):
+        assert getattr(inc, name) is getattr(transcript_ranges, name)

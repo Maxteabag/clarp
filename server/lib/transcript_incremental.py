@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import io
 import json
 import os
 import pathlib
@@ -59,9 +58,11 @@ _VERSION_SOURCES = {
             "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py", "transcript_paths.py"),
 }
 # What a checkpoint is valid for. ``parser_version`` hashes the parser's
-# sources: ``_VERSION_SOURCES`` per backend and ``_PARSE_COMMON``, the helpers
-# the parsers import (what a block is, the markup and preambles they strip, the
-# activity rows they build). A change to any of them refuses every checkpoint
+# sources: ``_VERSION_SOURCES`` per backend and ``_PARSE_COMMON``: how a range
+# is read and parsed and the parser carry a tail resumes from
+# (transcript_ranges.py), and the helpers the parsers import (what a block is,
+# the markup and preambles they strip, the activity rows they build). A change
+# to any of them refuses every checkpoint
 # of that backend, so the next import of each transcript is full once, as it
 # must be. ``tests/unit/test_transcript_parser_version.py`` checks that every
 # module a parser imports is in its list or named exempt, so a new helper
@@ -69,18 +70,17 @@ _VERSION_SOURCES = {
 #
 # The store's sources (``_STORE_SOURCES``) decide what a full import WRITES for
 # lines already imported, and the store carry a tail resumes from. So does this
-# module: the parser carry (``parser_carry``), how a range is read and parsed
-# (``parse_range``, ``_RangePath``) and where a boundary may stand live here.
+# module, which decides where a boundary may stand and what a tail may refer to.
 # They are not hashed: most changes to them (a heartbeat rule, a team block, a
 # log line) leave every row of an imported line as it was, and hashing them
 # re-read every transcript on every such install. Instead ``STORE_FORMAT`` is
 # part of the version and is raised by hand when a change alters those rows,
-# the store carry, the parser carry or how a range is read. The golden test
+# the store carry or the boundary rules. The golden test
 # holds the digests of both lists and STORE_FORMAT: any change to a listed file
 # fails it until its author records that decision.
-_PARSE_COMMON = ("backend/base.py", "message_text.py", "voice_markup.py", "activity.py", "protocol.py",
-                 "text_util.py", "voice_preamble.py", "clarp_guidance.py", "personalities.py",
-                 "error_classify.py")
+_PARSE_COMMON = ("transcript_ranges.py", "backend/base.py", "message_text.py", "voice_markup.py",
+                 "activity.py", "protocol.py", "text_util.py", "voice_preamble.py", "clarp_guidance.py",
+                 "personalities.py", "error_classify.py")
 _STORE_SOURCES = ("transcript_incremental.py", "message_writes.py",
                   "message_import_writer.py", "message_carry.py",
                   "message_import_rows.py", "message_import_common.py",
@@ -193,107 +193,11 @@ def prefix_turns_hash(digests: list[bytes], count: int) -> str:
 
 # ---- parsing a byte range -----------------------------------------------
 
-class _Range(io.RawIOBase):
-    def __init__(self, path: pathlib.Path, start: int, end: int):
-        self._file = open(path, "rb")
-        self._file.seek(start)
-        self._left = max(0, end - start)
-
-    def readable(self) -> bool:
-        return True
-
-    def readinto(self, buffer) -> int:
-        if self._left <= 0:
-            return 0
-        view = memoryview(buffer)[:self._left]
-        count = self._file.readinto(view)
-        self._left -= count or 0
-        return count or 0
-
-    def close(self) -> None:
-        self._file.close()
-        super().close()
-
-
-class _RangePath(pathlib.PosixPath):
-    """The transcript path, but ``open()`` reads only bytes [start, end).
-
-    The parsers take a path and open it themselves; this lets them parse a
-    tail unchanged. Everything derived from it (``parent``, ``stem``) is the
-    real path, so Claude still finds its sub-agent transcripts."""
-
-    def __init__(self, path, *, start: int, end: int):
-        super().__init__(path)
-        self.range_start, self.range_end = start, end
-
-    def with_segments(self, *segments):
-        return pathlib.Path(*segments)
-
-    def open(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
-        if mode not in ("r", "rt"):
-            raise ValueError(f"a transcript range is read-only text, not {mode!r}")
-        record = getattr(self, "_full_read", None)
-        if record is None:
-            raw = _Range(pathlib.Path(self), self.range_start, self.range_end)
-        else:
-            class ObservedRange(_Range):
-                def readinto(self, buffer):
-                    count = super().readinto(buffer)
-                    if count:
-                        view = memoryview(buffer)[:count]
-                        mark = record.get("mark")
-                        if mark is not None and record["bytes"] < mark <= record["bytes"] + count:
-                            # The digest of the first ``mark`` bytes, on the way past.
-                            cut = mark - record["bytes"]
-                            record["hash"].update(view[:cut])
-                            record["at_mark"] = record["hash"].hexdigest()
-                            view = view[cut:]
-                        record["hash"].update(view)
-                        record["bytes"] += count
-                    return count
-
-            raw = ObservedRange(pathlib.Path(self), self.range_start, self.range_end)
-            try:
-                stat = os.fstat(raw._file.fileno())
-                record["file"] = (stat.st_dev, stat.st_ino)
-                record["stat"] = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-                record["opens"] += 1
-                if record.get("mark") == 0:
-                    record["at_mark"] = record["hash"].hexdigest()      # of no bytes
-            except BaseException:
-                raw.close()
-                raise
-        return io.TextIOWrapper(io.BufferedReader(raw), encoding=encoding,
-                                errors=errors, newline=newline)
-
-
-def parse_range(backend: str, path: pathlib.Path, start: int, end: int,
-                *, observed: dict | None = None) -> list[dict]:
-    """``observed``, when given, receives the digest of the bytes the parser
-    was handed, as ``range_hash`` would take it: "hash" when the parser
-    opened the range once and read all of it, else None. With "mark" in it
-    (a count of bytes from ``start``) it also receives "at_mark", the digest
-    of the range's first ``mark`` bytes taken on the way past, as
-    ``range_hash(path, start, start + mark)`` would take it, and "opened",
-    the file as the reader found it when it opened it: (device, inode, size,
-    mtime_ns, ctime_ns). Both None with "hash"."""
-    from . import backends
-    ranged = _RangePath(path, start=start, end=end)
-    if observed is not None:
-        ranged._full_read = {"hash": hashlib.blake2b(digest_size=16), "bytes": 0, "opens": 0,
-                             "file": None}
-        if "mark" in observed:
-            ranged._full_read["mark"] = observed["mark"]
-    turns = backends.parse_turns(backend, ranged)
-    if observed is not None:
-        read = ranged._full_read
-        whole = read["opens"] == 1 and read["bytes"] == max(0, end - start)
-        observed["hash"] = read["hash"].hexdigest() if whole else None
-        if "mark" in observed:
-            observed["at_mark"] = read.get("at_mark") if whole else None
-            observed["opened"] = (*read["file"], *read["stat"]) if whole else None
-    return turns
-
+# How a range is read and parsed, and the parser carry, live in transcript_ranges.py,
+# a parser source hashed by parser_version; the names stay importable from here.
+from .transcript_ranges import (  # noqa: F401 - moved; callers and tests use these names here
+    _PARSER_CARRIES, _Range, _RangePath, _agy_carry, _claude_carry, _claude_children, parse_range,
+    parser_carry)
 
 def _lines(path: pathlib.Path, start: int, end: int):
     """(offset, raw line) for every newline-terminated line in [start, end)."""
@@ -328,61 +232,6 @@ def _records(path: pathlib.Path, start: int, end: int):
 
 _TOOL_USE_ID_RE = re.compile(r"<tool-use-id>(.*?)</tool-use-id>", re.DOTALL)
 _AGY_TASK_END_RE = re.compile(r"\b(finished|was canceled) with result:|background tasks have been stopped", re.I)
-
-
-def _claude_children(path: pathlib.Path, keys) -> list[list]:
-    """The child transcript each sub-agent lookup key finds now, or None.
-
-    A Claude sub-agent cell reads one thing outside the parent's bytes: the
-    ``<parent>/subagents`` directory, looked up by the Agent call's tool_use
-    id and then by agent id (claude_transcript._finish_subagent_cell)."""
-    from .claude_transcript import _subagent_transcripts
-    found = _subagent_transcripts(pathlib.Path(path))
-    return [[key, str(found[key]) if key in found else None] for key in sorted(keys)]
-
-
-def _claude_carry(prefix: list[dict], boundary_record: dict,
-                  path: pathlib.Path | None = None) -> dict[str, Any]:
-    pending, subagents, cells = [], [], []
-    for turn in prefix:
-        for tool in turn.get("tools") or []:
-            if tool.get("status") not in ("ok", "error"):
-                pending.append(str(tool.get("id") or ""))
-        for cell in turn.get("display_cells") or []:
-            if cell.get("kind") == "subagents":
-                subagents.append(str(cell.get("id") or ""))
-                cells.append(cell)
-    carry = {"pending_tool_ids": pending, "subagent_ids": subagents}
-    if cells and path is not None:
-        # What the directory answered for each old cell, so that a tail is
-        # refused once a child appears, goes or is bound to another call
-        # (the parent's bytes do not change when that happens). None when
-        # the directory already answers differently from what the parse saw.
-        children = _claude_children(path, {str(key) for cell in cells
-                                           for key in (cell.get("id"), cell.get("agent_id")) if key})
-        found = dict(children)
-        if any((found.get(str(cell.get("id") or "")) or found.get(str(cell.get("agent_id") or ""))
-                or "") != (cell.get("transcript_path") or "") for cell in cells):
-            children = None
-        carry["subagent_children"] = children
-    return carry
-
-
-def _agy_carry(prefix: list[dict], boundary_record: dict,
-               path: pathlib.Path | None = None) -> dict[str, Any]:
-    step = boundary_record.get("step_index")
-    return {"boundary_step": step if isinstance(step, int) else 0,
-            "running_tools": sum(1 for turn in prefix for tool in turn.get("tools") or []
-                                 if tool.get("status") == "running")}
-
-
-_PARSER_CARRIES = {"claude": _claude_carry, "agy": _agy_carry}
-
-
-def parser_carry(backend: str, prefix: list[dict], boundary_record: dict,
-                 path: pathlib.Path | None = None) -> dict[str, Any]:
-    carry = _PARSER_CARRIES.get(backend)
-    return carry(prefix, boundary_record, path) if carry else {}
 
 
 def _claude_reference(records, carry: dict) -> str:
