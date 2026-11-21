@@ -59,8 +59,15 @@ _SESSIONS = iter(range(10**6))
 
 
 class World:
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, *, coordination_visibility="show"):
         self.tmp_path = tmp_path
+        # The worlds built on this harness test queues, holds and handoffs, and compare the
+        # prompts the backend receives: their user sees coordination, so a peer's prompt arrives
+        # as it was sent. Under the Host's default 'hide' it would carry the coordination
+        # reminder, by design (tests/unit/test_hidden_coordination.py).
+        from lib import coordination
+        if coordination_visibility:
+            coordination.set_global(coordination_visibility)
         self.agent = agents_db.create_agent(
             persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike",
             backend="claude")
