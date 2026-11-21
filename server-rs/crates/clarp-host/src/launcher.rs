@@ -257,6 +257,22 @@ pub fn stop(socket: &Path, grace_ms: u64) {
     }
 }
 
+/// Try once. After an ambiguous socket outcome the actor still waits for stdout evidence.
+pub fn steer(socket: &Path, input: String) {
+    let Ok(mut shim) = UnixStream::connect(socket) else {
+        return;
+    };
+    let _ = shim.set_read_timeout(Some(STOP_TIMEOUT));
+    let _ = shim.set_write_timeout(Some(STOP_TIMEOUT));
+    let Ok(line) = serde_json::to_string(&Request::Stdin { data: input }) else {
+        return;
+    };
+    if shim.write_all(format!("{line}\n").as_bytes()).is_ok() {
+        let mut reply = String::new();
+        let _ = BufReader::new(shim).read_line(&mut reply);
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
