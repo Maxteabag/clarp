@@ -112,6 +112,14 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         ("CLARP_OPENCODE_PROGRAM", nowhere.to_str().unwrap()),
     ];
     let mut host = place.start_in("", &[], &world);
+    let subscribe = |host: &Host| {
+        let heard = host.listen();
+        wait_for("the event stream", || {
+            heard.lock().unwrap().iter().any(|event| event["type"] == "agent-roster")
+        });
+        heard
+    };
+    let mut heard = subscribe(&host);
     let sender = host.new_agent("sender");
     let await_file = |name: &str| {
         wait_for(name, || place.root.join(name).exists());
@@ -119,31 +127,42 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
     let mark = |name: &str| std::fs::write(place.root.join(name), "").unwrap();
     let launches = || std::fs::read_to_string(place.root.join("launches")).unwrap();
     let ids = |host: &Host, session: &str| {
-        host.turns(session).into_iter()
+        host.turns(session)
+            .into_iter()
             .filter(|row| row["role"] == "user")
             .map(|row| row["id"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>()
     };
 
-    for mode in ["race", "task", "double", "unread", "stop", "restart", "mixed"] {
+    for mode in [
+        "race", "task", "double", "unread", "stop", "restart", "mixed",
+    ] {
         let session = format!("steer-{mode}");
-        let made = host.post("/agents", json!({
-            "name": session, "session": session, "backend": "claude",
-        }));
+        let made = host.post(
+            "/agents",
+            json!({
+                "name": session, "session": session, "backend": "claude",
+            }),
+        );
         assert_eq!(made["session"], session);
         let case = format!("case-{mode}");
         let first = if mode == "mixed" {
-            host.post("/send", json!({
-                "session": session, "text": case, "client_msg_id": "first",
-                "origin": "agent", "sender": sender,
-            }))
+            host.post(
+                "/send",
+                json!({
+                    "session": session, "text": case, "client_msg_id": "first",
+                    "origin": "agent", "sender": sender,
+                }),
+            )
         } else {
             host.send(&session, &case, "first")
         };
         assert_eq!(first["queued"], false, "{first}");
         await_file(&format!("tool-{mode}"));
         // Let the real Host observe that the tool is active before the follow-up comes.
-        wait_for("the tool in the live projection", || host.state(&session) == "tool");
+        wait_for("the tool in the live projection", || {
+            host.state(&session) == "tool"
+        });
         let mut expected = vec!["u-first".to_owned()];
         let mut traces = Vec::new();
         for index in 0..if mode == "double" { 2 } else { 1 } {
@@ -152,7 +171,12 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             assert_eq!(sent["queued"], true, "{sent}");
             traces.push(sent["trace_id"].clone());
             await_file(&format!("received-{id}"));
-            assert_eq!(ids(&host, &session), ["u-first"], "the pipe write is no read");
+            assert_eq!(
+                ids(&host, &session),
+                ["u-first"],
+                "the pipe write is no read"
+            );
+            assert!(reads(&heard, &session, &id).is_empty());
             expected.push(format!("u-{id}"));
         }
         if mode == "stop" {
@@ -167,6 +191,7 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             if mode == "restart" {
                 host.kill();
                 host = place.start_in("", &[], &world);
+                heard = subscribe(&host);
                 assert_eq!(ids(&host, &session), ["u-first"]);
             }
             mark(&format!("release-{mode}"));
@@ -178,7 +203,8 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             mark("echo-race");
             collect_answer(&host, &session, "second-race");
             let rows = host.turns(&session);
-            let trace_for = |text: &str| &rows.iter().find(|row| row["text"] == text).unwrap()["trace_id"];
+            let trace_for =
+                |text: &str| &rows.iter().find(|row| row["text"] == text).unwrap()["trace_id"];
             assert_eq!(trace_for("first-race"), &first["trace_id"]);
             assert_eq!(trace_for("second-race"), &traces[0]);
         } else if matches!(mode, "stop" | "unread") {
@@ -186,7 +212,9 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             collect_answer(&host, &session, &text);
         } else {
             await_file(&format!("echoed-{mode}"));
-            wait_for("each read in the conversation", || ids(&host, &session) == expected);
+            wait_for("each read in the conversation", || {
+                ids(&host, &session) == expected
+            });
             if mode == "mixed" {
                 let live = host.get(&format!("/live?session={session}"));
                 assert_eq!(live["turn"]["audience"], "mixed", "{live}");
@@ -197,8 +225,16 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         wait_for("the agent to finish", || host.state(&session) == "done");
         assert_eq!(ids(&host, &session), expected);
         assert_eq!(launches().lines().filter(|text| *text == case).count(), 1);
+        let mut revision = 0;
         for index in 0..if mode == "double" { 2 } else { 1 } {
             let id = format!("add-{mode}-{index}");
+            wait_for("the queue-start for the read follow-up", || {
+                !reads(&heard, &session, &id).is_empty()
+            });
+            let started = reads(&heard, &session, &id);
+            assert_eq!(started.len(), 1);
+            assert!(started[0] > revision);
+            revision = started[0];
             assert_eq!(
                 launches().lines().filter(|text| *text == id).count(),
                 usize::from(matches!(mode, "stop" | "unread"))
@@ -207,8 +243,17 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
     }
 }
 
+fn reads(heard: &Mutex<Vec<Value>>, session: &str, id: &str) -> Vec<u64> {
+    heard.lock().unwrap().iter().filter(|event| {
+        event["type"] == "queue-updated" && event["session"] == session
+            && event["client_msg_id"] == id && event["queue_started"] == true
+    }).map(|event| event["queue_revision"].as_u64().unwrap()).collect()
+}
+
 fn collect_answer(host: &Host, session: &str, answer: &str) {
     wait_for(answer, || {
-        host.conversation(session).iter().any(|(role, text)| role == "assistant" && text == answer)
+        host.conversation(session)
+            .iter()
+            .any(|(role, text)| role == "assistant" && text == answer)
     });
 }

@@ -1068,7 +1068,9 @@ impl Agent {
                 self.deliveries.launch(turn.0);
             }
             AgentEvent::JoinSettled { turn } => {
-                let join = self.joins.get_mut(turn)
+                let join = self
+                    .joins
+                    .get_mut(turn)
                     .filter(|join| join.stage.read_at().is_some())
                     .ok_or(IllegalTransition {
                         turn: *turn,
