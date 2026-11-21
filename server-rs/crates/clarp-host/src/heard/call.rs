@@ -17,12 +17,13 @@ fn resolve(
     session: &str,
     requested: &str,
 ) -> Resolved {
-    let name = directory
+    let member = directory
         .members
         .iter()
-        .find(|m| m.record.session == session)
-        .map_or("", |m| m.record.persona.as_str());
+        .find(|m| m.record.session == session);
+    let name = member.map_or("", |m| m.record.persona.as_str());
     let who = Who {
+        agent_id: member.map_or("", |m| m.record.agent_id.as_str()),
         name,
         persona: name,
         session,

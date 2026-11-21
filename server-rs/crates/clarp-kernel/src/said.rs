@@ -84,9 +84,91 @@ pub fn merge_voice(stored: Option<&str>, provider: &str, voice: &str) -> String 
     python::sorted_ascii(&Value::Object(voices))
 }
 
+/// The provider a newly written bare ID names by its form.
+pub fn infer_provider(voice: &str) -> Option<&'static str> {
+    let voice = strip(voice);
+    let uuid = voice.len() == 36
+        && voice.bytes().enumerate().all(|(at, byte)| {
+            if matches!(at, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        });
+    if uuid {
+        return Some(CARTESIA);
+    }
+    if voice.len() == 20 && voice.bytes().all(|ch| ch.is_ascii_alphanumeric()) {
+        return Some(ELEVENLABS);
+    }
+    let (locale, name) = voice.split_once("-Chirp3-HD-")?;
+    let (lang, country) = locale.split_once('-')?;
+    ((2..=3).contains(&lang.len())
+        && lang.bytes().all(|ch| ch.is_ascii_lowercase())
+        && country.len() == 2
+        && country.bytes().all(|ch| ch.is_ascii_uppercase())
+        && name.len() >= 2
+        && name.as_bytes()[0].is_ascii_uppercase()
+        && name.bytes().all(|ch| ch.is_ascii_alphabetic()))
+    .then_some("google")
+}
+
+/// The compact, sorted provider map used for new stored voices.
+pub fn canonical_voice(raw: &str) -> String {
+    let raw = strip(raw);
+    let entries = if raw.is_empty() || raw.starts_with('{') {
+        voice_map(Some(raw))
+    } else {
+        vec![(infer_provider(raw).unwrap_or(ELEVENLABS).into(), raw.into())]
+    };
+    python::sorted_ascii(&Value::Object(
+        entries
+            .into_iter()
+            .map(|(provider, voice)| (provider, Value::String(voice)))
+            .collect(),
+    ))
+}
+
+/// Apply only the providers edited by the client. The stored value and the client's
+/// previous value keep the legacy read semantics for bare IDs.
+pub fn merge_provider_maps(stored: &str, incoming: &str, base: Option<&str>) -> String {
+    let map = |raw: &str| -> Map<String, Value> {
+        voice_map(Some(raw))
+            .into_iter()
+            .map(|(p, v)| (p, Value::String(v)))
+            .collect()
+    };
+    let mut next = map(stored);
+    let wanted = map(&canonical_voice(incoming));
+    if let Some(base) = base {
+        let was = map(base);
+        for provider in was.keys().chain(wanted.keys()) {
+            if wanted.get(provider) == was.get(provider) {
+                continue;
+            }
+            if let Some(voice) = wanted.get(provider) {
+                next.insert(provider.clone(), voice.clone());
+            } else {
+                next.remove(provider);
+            }
+        }
+    } else {
+        next.extend(wanted);
+        if let Ok(Value::Object(raw)) = serde_json::from_str(incoming) {
+            for (provider, voice) in &raw {
+                if voice.is_null() || voice.as_str() == Some("") {
+                    next.remove(provider);
+                }
+            }
+        }
+    }
+    python::sorted_ascii(&Value::Object(next))
+}
+
 /// An agent as the owner's settings may name it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Who<'a> {
+    pub agent_id: &'a str,
     pub name: &'a str,
     pub persona: &'a str,
     pub session: &'a str,

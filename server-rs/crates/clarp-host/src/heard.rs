@@ -1132,6 +1132,7 @@ fn spoken_to(
     started_with: &str,
 ) -> (Vec<String>, String) {
     let who = looked_at.map(|member| Who {
+        agent_id: &member.record.agent_id,
         name: &member.record.persona,
         persona: &member.record.persona,
         session: &member.record.session,
@@ -1367,15 +1368,30 @@ async fn set_providers(
         let language = languages::code(language).map_err(bad)?;
         settings.push((languages::LANGUAGE_KEY.to_string(), language));
     }
+    let ids_for = |key: &str| {
+        directory
+            .members
+            .iter()
+            .filter_map(|member| {
+                let row = &member.record;
+                [&row.persona, &row.session, &row.agent_id]
+                    .into_iter()
+                    .any(|known| known.trim().to_lowercase() == key)
+                    .then(|| row.agent_id.to_lowercase())
+            })
+            .collect()
+    };
     if let Some(change) = named("agent_engines") {
         let known = |engine: &str| heard::cloud_model(engine).is_some();
         let kept = directory.setting(languages::AGENT_ENGINES_KEY);
-        let changed = languages::engines_changed(kept, change, &known).map_err(|why| bad(&why))?;
+        let changed = languages::engines_changed_for(kept, change, &known, ids_for)
+            .map_err(|why| bad(&why))?;
         settings.push((languages::AGENT_ENGINES_KEY.to_string(), changed));
     }
     if let Some(change) = named("agent_languages") {
         let kept = directory.setting(languages::AGENT_LANGUAGES_KEY);
-        let changed = languages::languages_changed(kept, change).map_err(|why| bad(&why))?;
+        let changed =
+            languages::languages_changed_for(kept, change, ids_for).map_err(|why| bad(&why))?;
         settings.push((languages::AGENT_LANGUAGES_KEY.to_string(), changed));
     }
     // The engine and how a turn's end is found are looked at together, each as this save

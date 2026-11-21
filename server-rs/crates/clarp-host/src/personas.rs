@@ -53,6 +53,10 @@ fn said(fields: &Map<String, Value>, voice_id: String) -> PersonaSaid {
     PersonaSaid {
         name: text(fields, "name"),
         voice_id,
+        base_voice_id: fields
+            .get("base_voice_id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         avatar_symbol: text(fields, "avatar_symbol"),
         personality: text(fields, "personality"),
         picture: text(fields, "avatar_base64"),
