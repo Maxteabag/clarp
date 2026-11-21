@@ -703,6 +703,10 @@ where `engines` are the engines that can take a set and `reasons` says in words 
 owner's engines could take over (the Host's own engine being off or unavailable is one such
 reason, never a 500): show `message`, it says what to change. A
 recording is never sent to a provider the owner did not choose for transcription.
+An agent's engines are tried in order, each once, and never the same recording to one provider
+twice: a provider the recording reached (it answered, or failed after the audio left) is not asked
+again with another of its models. A refusal before any audio left (a language set the engine cannot
+take, no key, an unknown model) does not use up its provider, so its next model may still try.
 
 In a group call (feature `call_transcription_policy`), a clip captured for a
 participant also sends `X-Clarp-Call-Id: <call_id>` and
@@ -716,7 +720,10 @@ language_adapted, requested_model}`, sources `agent | call_policy | device |
 global`; `attempts[].language` is the language the Host handed at that
 engine's boundary (`auto` = no constraint handed, not a detection; `null`, or
 no `language` on a skip = the boundary was unobserved, never a statement that
-the engine was or was not invoked). With a call policy configured, when no
+the engine was or was not invoked). `attempts[].outcome` (`ok`, `error`, `skipped`) and a
+skip's `reason` (such as `language_incompatible` or `provider_already_sent`) are open sets: a
+client shows a value it does not know as plain words and keeps the answer. With a call policy
+configured, when no
 engine can take the call language the clip is refused, with no provider call:
 409 `{"ok": false, "error": "no compatible engine", "language", "engines",
 "attempts"}`. A stored call policy that can never work is refused the same

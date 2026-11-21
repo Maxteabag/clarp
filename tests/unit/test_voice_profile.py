@@ -194,6 +194,7 @@ def _plan_of_the_pipeline(session):
     ("", "elevenlabs:scribe_v2"),
     ("google:chirp_3,elevenlabs:scribe_v2", "local"),
     ("elevenlabs:scribe_v2", "deepgram:nova-3"),
+    ("elevenlabs:scribe_v2,elevenlabs:scribe_v2,deepgram:nova-3", "local"),     # R175
 ])
 def test_hearing_is_the_pipelines_plan(monkeypatch, engines, cloud):
     monkeypatch.setattr(config, "load", lambda path=None: _cfg("cartesia"))
@@ -207,7 +208,9 @@ def test_hearing_is_the_pipelines_plan(monkeypatch, engines, cloud):
     local = f"{cfg.whisper_provider}:{cfg.whisper_model}"
     shown = voice_profile.hearing(voice_profile.HostView.build(cfg),
                                   agents_db.get_by_agent_id(agent_id))
-    assert [e["id"] for e in shown["engines"]] == [model or local, *fallbacks]
+    from lib import stt_router
+    tried, _skipped = stt_router.distinct_engines([model or local, *fallbacks], local)
+    assert [e["id"] for e in shown["engines"]] == tried
     assert shown["engine_origin"] == ("own" if engines else "default")
     assert shown["device_may_override"] is (not engines)
 
@@ -375,3 +378,15 @@ def test_accepts_language_set_is_the_list_the_path_refuses_by(monkeypatch):
         if not row["accepts_language_set"]:
             with pytest.raises(ValueError, match="language-set"):
                 stt_providers.transcribe(row["id"], b"", "audio/wav", "")
+
+
+def test_hearing_lists_each_engine_once():
+    # R175: the engines shown are the plan, each engine once; two models of one provider stay,
+    # since a refusal before contact does not use the provider up.
+    from lib import stt_router
+    assert stt_router.distinct_engines(
+        ["elevenlabs:scribe_v2", "elevenlabs:scribe_v2", "elevenlabs:scribe_v1", "deepgram:nova-3"]) == (
+        ["elevenlabs:scribe_v2", "elevenlabs:scribe_v1", "deepgram:nova-3"], ["elevenlabs:scribe_v2"])
+    assert stt_router.distinct_engines(
+        ["faster-whisper:small", "local", "faster-whisper:medium"], "faster-whisper:small") == (
+        ["faster-whisper:small", "faster-whisper:medium"], ["local"])
