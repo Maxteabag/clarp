@@ -1,2 +1,2 @@
-9ae6fd6fe6a61d68be6a10fbfa69d8549af4c292
-The merge of the Python Host's PR 580 (it holds every merge through PR 580: 568-576 no port, the Python importer and its gates; 577-578 the moved state, its port owed (rs-logins-sol; contract 125 awaited); 579 no port, the Python snapshot's reads; 580 ported, coordination hidden when nothing is stored): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+dd26518e543283a65381e257ddf7efed5d06837c
+The merge of the Python Host's PR 583 (it holds every merge through PR 583: 581 no port, the Python runtime's readiness for a move mark (this Host is its own runtime); 582 checked on ours, no port (one actor page carries the cursor; train DD's test); 583 ported, the queue item status, contract 126): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
