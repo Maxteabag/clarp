@@ -1414,7 +1414,6 @@ mod tests {
             .process_group(0)
             .spawn()
             .unwrap();
-        let (to_stdin, _) = mpsc::channel();
         let control = Arc::new(Control {
             before_stop: None,
             pid: sleeper.id(),
@@ -1422,7 +1421,7 @@ mod tests {
             stage: Mutex::default(),
             changed: Condvar::new(),
             to_spool,
-            to_stdin,
+            input: Arc::new(Input(Mutex::new(None))),
             printed: Some(Arc::new(Printed::new(
                 out_read.as_fd().try_clone_to_owned().unwrap(),
             ))),
