@@ -347,3 +347,23 @@ def test_a_pid_with_no_open_file_on_the_lock_is_not_the_holder(tmp_path):
     os.symlink(other, proc / "4242" / "fd" / "3")
     locks = _locks_file(tmp_path, device="00:99", inode=lock.stat().st_ino, pid=4242)
     assert not muse._kernel_lock_holder(lock, 4242, locks_path=locks, proc=str(proc))
+
+
+def test_a_holder_with_more_open_files_than_the_cap_is_not_the_holder(tmp_path, monkeypatch):
+    """The fd walk is bounded (it runs under _RECOVERY_LOCK): past the cap is unverifiable,
+    even when one of the files is the lock."""
+    import os
+
+    from lib.backend import muse
+    monkeypatch.setattr(muse, "_FD_WALK_CAP", 2)
+    lock = tmp_path / "session.lock"
+    lock.write_text("pid=1\n")
+    proc = tmp_path / "proc"
+    fd_dir = proc / "4242" / "fd"
+    fd_dir.mkdir(parents=True)
+    locks = _locks_file(tmp_path, device="00:99", inode=lock.stat().st_ino, pid=4242)
+    for n in (3, 4):
+        os.symlink(lock, fd_dir / str(n))
+    assert muse._kernel_lock_holder(lock, 4242, locks_path=locks, proc=str(proc))
+    os.symlink(lock, fd_dir / "5")
+    assert not muse._kernel_lock_holder(lock, 4242, locks_path=locks, proc=str(proc))
