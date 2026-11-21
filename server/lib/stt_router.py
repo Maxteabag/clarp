@@ -18,6 +18,30 @@ class EnginePlan:
     escalated_from: str | None       # the model long-form escalation replaced, or None
 
 
+def engine_identity(engine: str, own_model_id: str | None = None) -> str:
+    """Who receives a recording sent to `engine`: a hosted provider whatever its model, the
+    Host's own engine under any of its names ("", server-default, local, its default model
+    id), or any other local or adapter model as itself (R175)."""
+    from .stt_providers import VALID_IDS, provider_of
+    name = (engine or "").strip()
+    if name in {"", "server-default", "local"} or (own_model_id and name == own_model_id):
+        return "own"
+    provider = provider_of(name)
+    return provider if provider in VALID_IDS else name
+
+
+def once_per_provider(engines: list[str], own_model_id: str | None = None
+                      ) -> tuple[list[str], list[str]]:
+    """The engines in order with each identity once, and the entries left out: a recording
+    is never sent a second time to a provider an earlier entry names (R175)."""
+    kept, skipped, seen = [], [], set()
+    for engine in engines:
+        identity = engine_identity(engine, own_model_id)
+        (skipped if identity in seen else kept).append(engine)
+        seen.add(identity)
+    return kept, skipped
+
+
 def wants_cloud_engine(*, requested_model: str, agent_engines: list[str], in_call: bool) -> bool:
     """Whether the cloud engine chosen in settings could stand in for the
     server default (so whether it is worth reading)."""
