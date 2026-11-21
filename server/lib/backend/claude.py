@@ -379,13 +379,25 @@ def _live_items(agent_id: str, conversation, trace_id: str, *, isolated: bool = 
         block_row_id=lambda key, block: _identity_id(agent_id, conversation(), trace_id, key, block))
 
 
+def _starts_text_block(ev: dict) -> bool:
+    inner = ev.get("event") if ev.get("type") == "stream_event" else None
+    if not isinstance(inner, dict) or inner.get("type") != "content_block_start":
+        return False
+    block = inner.get("content_block")
+    return isinstance(block, dict) and block.get("type") == "text"
+
+
 def _content_text(content) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, dict):
         if content.get("type") == "text":
             return str(content.get("text") or "")
-        return str(content.get("text") or content.get("content") or "")
+        if content.get("type"):
+            # A block that is not text (a tool use, a server tool's result, thinking) adds no
+            # words: never a Python rendering of its structure into a chat row (R143).
+            return ""
+        return _content_text(content.get("text") or content.get("content") or "")
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:
@@ -1137,6 +1149,10 @@ class ClaudeBackend(Backend):
         """Accumulate a provider text event and offer its current message to the pacer (not
         with ``offer`` False: a keyed message's rows are written block by block)."""
         text, is_delta = _assistant_event_text(ev)
+        if offer and not isolated and _starts_text_block(ev) and message["text"].strip():
+            # A message of several text blocks reads as paragraphs, not run together (R143);
+            # the first block stays a prefix of the row, so order A's adoption still matches.
+            message["text"] += "\n\n"
         if text:
             if isolated and not is_delta:
                 isolated_texts.append(text)
@@ -1161,7 +1177,8 @@ class ClaudeBackend(Backend):
             elif text.startswith(current_text):
                 current_text = text
             elif current_text and not current_text.endswith(text):
-                current_text += text
+                # Another block's whole text (assistant events, one a block): a paragraph.
+                current_text += text if current_text.endswith("\n\n") else "\n\n" + text
             else:
                 current_text = text
             message["text"] = current_text
