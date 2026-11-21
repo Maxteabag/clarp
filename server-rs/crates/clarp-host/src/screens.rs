@@ -45,16 +45,7 @@ fn bad(why: &str) -> ApiError {
     ApiError::new(StatusCode::BAD_REQUEST, why)
 }
 
-/// The session a request names, when this Host has an agent of that name or id.
-fn agent_of(app: &App, asked: &HashMap<String, String>, missing: &str) -> Result<String, ApiError> {
-    let session = asked.get("session").map_or("", |said| said.trim());
-    match app.fleet.directory().named(session) {
-        Some(_) => Ok(session.to_string()),
-        None => Err(ApiError::new(StatusCode::NOT_FOUND, missing)),
-    }
-}
-
-// ---- what an agent does by itself: dreaming, an old kind of goal ----------------------------
+// ---- what an agent does by itself: dreaming ---------------------------------------------------
 
 /// Turning something off that is off is done; turning it on is refused in words.
 async fn set_of_agent(app: &App, body: &[u8], field: &str, what: &str) -> Answered {
@@ -86,23 +77,6 @@ async fn set_of_agent(app: &App, body: &[u8], field: &str, what: &str) -> Answer
 
 async fn set_dreaming(State(app): State<App>, body: axum::body::Bytes) -> Answered {
     set_of_agent(&app, &body, "dreaming_enabled", "Dreaming is").await
-}
-
-/// `GET /agent-goal?session=`: the goal an agent works toward by itself in the old way.
-/// This Host keeps an agent's goals as its plans (`GET /task-plans`), and none of that kind.
-async fn agent_goal(State(app): State<App>, Query(asked): Asked) -> Answered {
-    if asked
-        .get("session")
-        .is_none_or(|said| said.trim().is_empty())
-    {
-        return Err(bad("session required"));
-    }
-    let session = agent_of(&app, &asked, "no such agent")?;
-    Ok(Json(json!({ "session": session, "goal": null })))
-}
-
-async fn no_agent_goal(uri: Uri) -> ApiError {
-    not_built_at(&uri, "A goal of this kind is")
 }
 
 // ---- how the Host speaks up and judges ---------------------------------------------------------
@@ -245,8 +219,6 @@ pub fn routes() -> Router<App> {
             post(crate::logins::sign_in::change),
         )
         .route("/agent-dreaming", post(set_dreaming))
-        .route("/agent-goal", get(agent_goal).post(no_agent_goal))
-        .route("/agent-goal/{action}", post(no_agent_goal))
         .route(
             "/diagnostics/settings",
             get(crate::diagnostics::settings).post(crate::diagnostics::update),

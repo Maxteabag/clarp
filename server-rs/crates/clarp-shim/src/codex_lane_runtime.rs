@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 
 use clarp_shim::Reply;
 use clarp_shim::codex_app::{AppServer, Frame};
-use clarp_shim::codex_lane::{Claim, GoalAction, Request, Snapshot};
+use clarp_shim::codex_lane::{Claim, GoalAction, Request, Reservation, Snapshot};
 use serde_json::{Value, json};
 
+use crate::codex_lane_login::Login;
 use crate::codex_lane_socket::{Socket, write};
 use crate::codex_lane_turns::Slot;
 
@@ -42,7 +43,7 @@ pub(super) fn from_args(mut args: impl Iterator<Item = String>) -> io::Result<()
     run(Path::new(&socket), &program, options)
 }
 
-fn run(path: &Path, program: &str, options: Value) -> io::Result<()> {
+fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     let _ = nix::unistd::setsid();
     let thread = options["threadId"]
         .as_str()
@@ -60,6 +61,23 @@ fn run(path: &Path, program: &str, options: Value) -> io::Result<()> {
         .mode(0o600)
         .open(path.with_extension("lock"))?;
     lock.try_lock().map_err(io::Error::other)?;
+    let thread_lock = options
+        .as_object_mut()
+        .and_then(|fields| fields.remove("_clarpThreadLock"));
+    let thread_lock = match thread_lock.as_ref().and_then(Value::as_str) {
+        Some(path) => {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(path)?;
+            file.try_lock().map_err(io::Error::other)?;
+            Some(file)
+        }
+        None => None,
+    };
     match fs::remove_file(path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -67,6 +85,7 @@ fn run(path: &Path, program: &str, options: Value) -> io::Result<()> {
     }
     let (send, input) = mpsc::sync_channel(64);
     let _listener = Socket::control(path, send.clone())?;
+    let login = Login::read(&mut options)?;
     let (server, frames) = AppServer::spawn(Command::new(program).args(["app-server", "--stdio"]))?;
     let relay = send.clone();
     std::thread::Builder::new()
@@ -82,18 +101,23 @@ fn run(path: &Path, program: &str, options: Value) -> io::Result<()> {
 
     let mut lane = Lane {
         server,
+        revision: 0,
         input,
         send,
         options,
         thread,
         goal: None,
         loaded: false,
+        known_goal: false,
         fenced: false,
         uncertain_goal: false,
+        stale_login: false,
+        login,
         slot: Slot::default(),
         turn_socket: None,
         watchers: Vec::new(),
         followers: Vec::new(),
+        retire_reply: None,
         deferred: VecDeque::new(),
         early: Vec::new(),
     };
@@ -105,31 +129,51 @@ fn run(path: &Path, program: &str, options: Value) -> io::Result<()> {
     io::stdout().flush()?;
     let result = lane.serve();
     let _ = lane.slot.lost(super::now_ms());
+    let retired = lane
+        .retire_reply
+        .take()
+        .map(|stream| (stream, lane.inspect()));
+    // The lock witnesses the app-server's real lifetime, including shutdown.
+    drop(lane);
+    drop(thread_lock);
+    drop(lock);
+    if let Some((mut stream, state)) = retired {
+        let _ = write(&mut stream, &json!({"ok": true, "state": state}));
+    }
     result
 }
 
 struct Lane {
     server: AppServer,
+    revision: u64,
     input: Receiver<Input>,
     send: SyncSender<Input>,
     options: Value,
     thread: String,
     goal: Option<Value>,
     loaded: bool,
+    known_goal: bool,
     fenced: bool,
     uncertain_goal: bool,
+    stale_login: bool,
+    login: Login,
     slot: Slot,
     turn_socket: Option<Socket>,
     watchers: Vec<UnixStream>,
     followers: Vec<UnixStream>,
+    retire_reply: Option<UnixStream>,
     deferred: VecDeque<Input>,
     early: Vec<(String, Value)>,
 }
 
 impl Lane {
-    fn inspect(&self) -> Snapshot {
+    fn inspect(&mut self) -> Snapshot {
+        self.revision = self.revision.saturating_add(1);
         Snapshot {
             thread: self.thread.clone(),
+            instance: std::process::id(),
+            revision: self.revision,
+            known_goal: self.known_goal,
             goal: self.goal.clone(),
             claim: self.slot.claim().cloned(),
             native_turn: self.slot.native_turn().map(str::to_owned),
@@ -199,6 +243,7 @@ impl Lane {
                 }
                 return Ok(false);
             }
+            Request::Probe => self.probe(),
             Request::Reserve { claim } => self.reserve(claim),
             Request::Prompt {
                 claim,
@@ -210,7 +255,7 @@ impl Lane {
             Request::Recover => self.recover(),
             Request::Stop { turn, attempt } => self.stop((turn, attempt)),
             Request::Retire if self.slot.claim().is_none() && !self.may_continue() => {
-                let _ = write(&mut stream, &json!({"ok": true, "state": self.inspect()}));
+                self.retire_reply = Some(stream);
                 return Ok(true);
             }
             Request::Retire => Err(io::Error::other("the Codex lane still owns live work")),
@@ -220,8 +265,21 @@ impl Lane {
             Err(error) => json!({"ok": false, "error": error.to_string()}),
         };
         let _ = write(&mut stream, &reply);
+        if self.slot.claim().is_none() {
+            self.login.release();
+        }
         self.show();
-        Ok(false)
+        Ok(self.stale_login)
+    }
+
+    fn use_login(&mut self) -> io::Result<()> {
+        if !self.login.acquire()? {
+            self.stale_login = true;
+            return Err(io::Error::other(
+                "the Codex login changed before this attempt",
+            ));
+        }
+        Ok(())
     }
 
     fn reserve(&mut self, claim: Claim) -> io::Result<()> {
@@ -232,9 +290,8 @@ impl Lane {
             return Err(io::Error::other("the Codex lane is already reserved"));
         }
         let socket = Socket::turn(&claim, self.send.clone())?;
-        if !self.slot.reserve_goal(claim) {
-            return Err(io::Error::other("the lane could not reserve the goal turn"));
-        }
+        self.use_login()?;
+        self.slot.reserve(Reservation::Goal(claim))?;
         self.turn_socket = Some(socket);
         Ok(())
     }
@@ -249,10 +306,12 @@ impl Lane {
         if self.slot.claim() == Some(&claim) {
             return Ok(());
         }
-        if self.slot.claim().is_some() || !self.loaded || self.fenced {
+        if self.slot.claim().is_some() {
             return Err(io::Error::other("the Codex lane cannot start a prompt now"));
         }
         let socket = Socket::turn(&claim, self.send.clone())?;
+        self.use_login()?;
+        self.load()?;
         let mut params = json!({
             "threadId": self.thread,
             "input": [{"type": "text", "text": text}],
@@ -268,13 +327,11 @@ impl Lane {
         if let Some(cwd) = self.options.get("cwd") {
             params["cwd"] = cwd.clone();
         }
-        let id = self.server.request("turn/start", params)?;
-        if !self.slot.reserve_prompt(claim, id) {
-            return Err(io::Error::other(
-                "the lane could not reserve the prompted turn",
-            ));
-        }
+        let request = self.server.next_request();
+        self.slot
+            .reserve(Reservation::PromptPending { claim, request })?;
         self.turn_socket = Some(socket);
+        let id = self.server.request("turn/start", params)?;
         let result = self.response(id, Some(id));
         let accepted = result
             .as_ref()
@@ -293,7 +350,7 @@ impl Lane {
             self.notice(&method, &params, None)?;
         }
         if accepted.is_none() {
-            self.clear_slot();
+            self.clear_slot()?;
             return match result {
                 Err(error) => Err(error),
                 Ok(_) => Err(io::Error::other("Codex supplied no turn ID")),
@@ -311,7 +368,10 @@ impl Lane {
         }
         if activating {
             self.fenced = false;
+        } else if action == GoalAction::Pause {
+            self.fenced = true;
         }
+        self.use_login()?;
         self.load()?;
         let (method, params) = action.request(&self.thread, objective);
         self.uncertain_goal = true;
@@ -334,7 +394,23 @@ impl Lane {
                 "goal recovery needs an admitted actor slot",
             ));
         }
+        let already_loaded = self.loaded;
         self.load()?;
+        self.probe()?;
+        if already_loaded
+            && self.slot.is_goal_reserved()
+            && self
+                .goal
+                .as_ref()
+                .is_some_and(|goal| goal["status"] == "active")
+        {
+            self.goal(GoalAction::Resume, String::new())?;
+        }
+        Ok(())
+    }
+
+    fn probe(&mut self) -> io::Result<()> {
+        self.use_login()?;
         let result = self.rpc("thread/goal/get", json!({"threadId": self.thread}))?;
         let goal = result
             .get("goal")
@@ -366,14 +442,27 @@ impl Lane {
 
     fn apply_goal(&mut self, goal: &Value) {
         if goal.is_object() {
+            let older = self.goal.as_ref().is_some_and(|current| {
+                let current = goal_time(&current["updatedAt"]);
+                let update = goal_time(&goal["updatedAt"]);
+                current
+                    .zip(update)
+                    .is_some_and(|(before, after)| after < before)
+            });
+            if older {
+                return;
+            }
             self.goal = Some(goal.clone());
         } else if goal.is_null() {
             self.goal = None;
+        } else {
+            return;
         }
+        self.known_goal = true;
         if self.slot.is_goal_reserved()
             && (goal.is_null() || matches!(goal["status"].as_str(), Some("paused" | "complete")))
         {
-            self.clear_slot();
+            let _ = self.clear_slot();
         } else {
             self.show();
         }
@@ -410,17 +499,19 @@ impl Lane {
                 json!({"threadId": self.thread, "turnId": native}),
             )?;
         } else {
-            self.clear_slot();
+            self.clear_slot()?;
         }
         paused
     }
 
-    fn clear_slot(&mut self) {
-        self.slot = Slot::Free;
+    fn clear_slot(&mut self) -> io::Result<()> {
+        self.slot.cancel(super::now_ms())?;
         self.hint();
         self.followers.clear();
         self.turn_socket = None;
+        self.login.release();
         self.show();
+        Ok(())
     }
 
     fn rpc(&mut self, method: &str, params: Value) -> io::Result<Value> {
@@ -522,10 +613,19 @@ impl Lane {
             }
         }
         if self.slot.notification(method, params, now)? {
-            self.clear_slot();
+            self.clear_slot()?;
         } else {
             self.hint();
         }
         Ok(())
+    }
+}
+
+fn goal_time(value: &Value) -> Option<i64> {
+    let n = value.as_i64().or_else(|| value.as_str()?.parse().ok())?;
+    match n {
+        1..100_000_000_000 => Some(n * 1_000),
+        100_000_000_000.. => Some(n),
+        _ => None,
     }
 }

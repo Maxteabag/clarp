@@ -31,6 +31,8 @@ pub enum Origin {
     Trigger {
         name: String,
     },
+    /// The Host has reserved a turn for Codex to continue its native goal.
+    NativeGoal,
 }
 
 impl Origin {
@@ -44,6 +46,7 @@ impl Origin {
             Self::User => "user",
             Self::Agent { .. } => "agent",
             Self::Trigger { name } => name,
+            Self::NativeGoal => "codex-goal",
         }
     }
 

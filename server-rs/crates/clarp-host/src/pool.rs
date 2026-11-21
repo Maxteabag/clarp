@@ -73,6 +73,10 @@ impl Service {
         self.tool
     }
 
+    pub(crate) fn login_lock(&self) -> Option<&std::path::Path> {
+        self.login_lock.as_deref()
+    }
+
     /// Hold an OS lock in the tool process. It survives a Host restart with the shim.
     pub fn guard_turn(&self, order: &mut clarp_actor::ShimOrder) {
         let Some(path) = &self.login_lock else { return };

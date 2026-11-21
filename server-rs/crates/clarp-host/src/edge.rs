@@ -690,6 +690,7 @@ pub fn router(app: App) -> Router {
         .merge(library::routes().layer(middleware::from_fn_with_state(app.clone(), library::texts)))
         .merge(media::routes())
         .merge(plans::routes())
+        .merge(crate::native_goal_routes::routes())
         .merge(push::routes())
         .merge(peers::routes())
         .merge(roster::routes())
@@ -737,7 +738,7 @@ pub fn router(app: App) -> Router {
 }
 
 /// The controls of a chat, by their paths: what is asked of an agent a person speaks to.
-const CHAT_CONTROLS: [&str; 18] = [
+const CHAT_CONTROLS: [&str; 22] = [
     "/send",
     "/stop",
     "/select",
@@ -756,6 +757,10 @@ const CHAT_CONTROLS: [&str; 18] = [
     "/agent-portraits",
     "/agent-portrait-generation",
     "/agent-schedules",
+    "/agent-goal",
+    "/agent-goal/pause",
+    "/agent-goal/resume",
+    "/agent-goal/clear",
 ];
 
 fn body_refusal(status: StatusCode, message: &str, close: bool) -> Response {
@@ -1392,6 +1397,11 @@ pub(crate) fn agent_row(
         focused,
     );
     row["moved"] = json!(view.status.moved);
+    row["goal"] = json!(
+        view.native_goal
+            .as_ref()
+            .map(clarp_kernel::agent_goal::Goal::public)
+    );
     row["coordination_visibility"] = json!(visibility);
     row["coordination_override"] = json!(choice);
     let working = view.working.as_ref();
