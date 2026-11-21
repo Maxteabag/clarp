@@ -3672,6 +3672,12 @@ the hidden turn's state, activity, and push give the partner's name. Account rec
 the agent's own status text stay visible. The summary of a running helper uses the helper's
 visibility when it has no status text of its own.
 
+The hiding choices (Python PR 565) are resolved when the fleet publishes its directory.
+Snapshot, log and working-state readers use those choices from memory. Publishing a
+settings change or a changed roster replaces them together with the directory. A
+snapshot still takes the running agent's ability to leave a note from its view, so a
+key becoming readable does not depend on a fleet publication.
+
 ## 7. Stages and gates
 
 Since 21 Nov 2026 at 12:39, stages, trains and pieces have no test gate of their own. A train lands when

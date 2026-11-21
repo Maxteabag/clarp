@@ -1,5 +1,7 @@
 //! The owner can change what a chat displays without touching its conversation.
 
+use std::collections::{BTreeMap, HashMap};
+
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
@@ -9,25 +11,56 @@ use clarp_kernel::python;
 use serde_json::{Value, json};
 
 use crate::edge::{ApiError, App};
-use crate::fleet::Directory;
+use crate::fleet::{AgentRecord, Directory};
+
+#[derive(Default)]
+pub(crate) struct Roster {
+    global: Visibility,
+    chats: HashMap<String, (Option<Visibility>, bool)>,
+}
+
+impl Roster {
+    /// The visibility choices that belong to this published directory. The current turn key
+    /// can become readable independently, so callers still apply the actor's note capability.
+    pub(crate) fn of<'a>(
+        settings: &BTreeMap<String, String>,
+        agents: impl Iterator<Item = &'a AgentRecord>,
+    ) -> Self {
+        let read = |key: &str| settings.get(key).and_then(|word| Visibility::read(word));
+        let global = read(rules::GLOBAL_KEY).unwrap_or_default();
+        let chats = agents
+            .map(|agent| {
+                let own = read(&rules::chat_key(&agent.agent_id));
+                let hides = own.unwrap_or(global) == Visibility::Hide
+                    && clarp_kernel::coordination::can_leave_note(
+                        &agent.agent_id,
+                        Some(&agent.backend),
+                        true,
+                    );
+                (agent.agent_id.clone(), (own, hides))
+            })
+            .collect();
+        Self { global, chats }
+    }
+}
 
 pub(crate) fn visibility(
     directory: &Directory,
     agent_id: &str,
 ) -> (Visibility, Option<Visibility>) {
-    let global = directory
-        .setting(rules::GLOBAL_KEY)
-        .and_then(Visibility::read)
-        .unwrap_or_default();
-    let chat = directory
-        .setting(&rules::chat_key(agent_id))
-        .and_then(Visibility::read);
-    (global, chat)
+    let roster = &directory.coordination;
+    (
+        roster.global,
+        roster.chats.get(agent_id).and_then(|(own, _)| *own),
+    )
 }
 
 pub(crate) fn hides(directory: &Directory, agent_id: &str) -> bool {
-    let (global, chat) = visibility(directory, agent_id);
-    chat.unwrap_or(global) == Visibility::Hide
+    let roster = &directory.coordination;
+    roster
+        .chats
+        .get(agent_id)
+        .map_or(roster.global == Visibility::Hide, |(_, hides)| *hides)
 }
 
 fn owner(headers: &HeaderMap) -> Result<(), ApiError> {
@@ -131,5 +164,64 @@ pub(crate) fn gaps(
     }
     if let Some(run) = &page.hidden_after {
         answer["hidden_after"] = public(run);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn published_visibility_changes_with_settings_and_the_roster() {
+        let mut agents = [
+            AgentRecord {
+                agent_id: "ivy".into(),
+                backend: "claude".into(),
+                ..AgentRecord::default()
+            },
+            AgentRecord {
+                agent_id: "oak".into(),
+                backend: "codex".into(),
+                ..AgentRecord::default()
+            },
+            AgentRecord {
+                agent_id: "moss".into(),
+                backend: "muse".into(),
+                ..AgentRecord::default()
+            },
+        ];
+        let mut settings = BTreeMap::from([
+            (rules::GLOBAL_KEY.into(), "hide".into()),
+            (rules::chat_key("oak"), "show".into()),
+        ]);
+        let directory = |settings: &BTreeMap<String, String>, agents: &[AgentRecord]| Directory {
+            coordination: Roster::of(settings, agents.iter()),
+            ..Directory::default()
+        };
+        let prior = directory(&settings, &agents);
+        assert!(hides(&prior, "ivy"));
+        assert!(!hides(&prior, "oak"));
+        assert!(!hides(&prior, "moss"));
+        assert_eq!(
+            visibility(&prior, "oak"),
+            (Visibility::Hide, Some(Visibility::Show))
+        );
+
+        settings.insert(rules::GLOBAL_KEY.into(), "show".into());
+        settings.insert(rules::chat_key("ivy"), "hide".into());
+        settings.remove(&rules::chat_key("oak"));
+        agents[0].backend = "muse".into();
+        let current = directory(&settings, &agents);
+        assert!(!hides(&current, "ivy"));
+        assert_eq!(
+            visibility(&current, "ivy"),
+            (Visibility::Show, Some(Visibility::Hide))
+        );
+        assert_eq!(visibility(&current, "oak"), (Visibility::Show, None));
+        assert!(hides(&prior, "ivy"));
+        assert_eq!(
+            visibility(&prior, "oak"),
+            (Visibility::Hide, Some(Visibility::Show))
+        );
     }
 }
