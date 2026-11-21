@@ -139,6 +139,23 @@ fn listed(name: &str) -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// The bundled ElevenLabs and prebuilt Gemini choices used by the voice pool.
+pub fn pool_ids(provider: &str) -> Vec<String> {
+    match provider {
+        ELEVENLABS => listed("elevenlabs")
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect(),
+        GEMINI => lists()["gemini"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|row| row[0].as_str().map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Gemini's voices: its own, and the ones that were designed for the owner's personas,
 /// each under the first persona that has it.
 pub fn gemini_voices(owners: &Voices) -> Vec<(String, String, String)> {

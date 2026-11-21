@@ -128,6 +128,42 @@ pub fn personas(file: &Table) -> [Vec<(String, String)>; 3] {
     ]
 }
 
+/// Apply the current app selections to the speech settings in the owner's file.
+pub(crate) fn apply_speech_settings<'a>(
+    file: &mut Table,
+    stored: impl Fn(&str) -> Option<&'a str>,
+) {
+    for (section, key, setting) in [
+        ("tts", "provider", "speech.provider"),
+        ("tts", "fallback", "speech.fallback"),
+        ("local_tts", "voice", "speech.local_voice"),
+    ] {
+        if let Some(value) = stored(setting) {
+            let table = file
+                .entry(section)
+                .or_insert_with(|| toml::Value::Table(Table::new()));
+            if let Some(table) = table.as_table_mut() {
+                table.insert(key.into(), toml::Value::String(value.into()));
+            }
+        }
+    }
+}
+
+pub(crate) fn cartesia_pool(file: &Table) -> Vec<String> {
+    let pool = file
+        .get("cartesia")
+        .and_then(Value::as_table)
+        .and_then(|cartesia| cartesia.get("pool"))
+        .and_then(Value::as_array);
+    pool.into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(clarp_kernel::python::strip)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// The owner's choices of speech out as his file has them: the engine every agent speaks
 /// with (`[tts] provider`, Cartesia unless he says otherwise) and the one that is tried
 /// after it (`fallback`), the entries of single agents (`[tts.agents.<name>]`), Gemini's

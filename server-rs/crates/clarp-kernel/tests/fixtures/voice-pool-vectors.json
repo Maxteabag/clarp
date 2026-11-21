@@ -1,0 +1,719 @@
+{
+  "assignments": [
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Free",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [
+        {
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        }
+      ],
+      "catalogue": [],
+      "contacts": [
+        {
+          "name": "Custom",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        },
+        {
+          "builtin": true,
+          "name": "Built In",
+          "voice_id": "{\"cartesia\":\"reserved\"}"
+        }
+      ],
+      "logs": [],
+      "name": "Free",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [
+        {
+          "archived_at": 1,
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        },
+        {
+          "is_janitor": 1,
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        }
+      ],
+      "catalogue": [],
+      "contacts": [
+        {
+          "builtin": true,
+          "name": "Built In",
+          "voice_id": "{\"cartesia\":\"reserved\"}"
+        }
+      ],
+      "logs": [],
+      "name": "Free",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [
+        {
+          "builtin": true,
+          "name": "Built In",
+          "voice_id": "{\"cartesia\":\"reserved\"}"
+        }
+      ],
+      "logs": [],
+      "name": "Free",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [
+        "c2",
+        "c1",
+        "reserved"
+      ],
+      "contacts": [
+        {
+          "builtin": true,
+          "name": "Built In",
+          "voice_id": "{\"cartesia\":\"reserved\"}"
+        }
+      ],
+      "logs": [],
+      "name": "Catalogue",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [
+        "not-used"
+      ],
+      "contacts": [],
+      "logs": [],
+      "name": "Catalogue",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "c2",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [
+        {
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        },
+        {
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        },
+        {
+          "persona": "Other",
+          "voice_id": "{\"cartesia\":\"c2\"}"
+        }
+      ],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [
+        [
+          "voicePoolExhausted",
+          "provider=cartesia pool=2 shared_by=1"
+        ]
+      ],
+      "name": "Exhausted",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Ada",
+      "result": "e-stored",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Ada": "c1"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "e-stored"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Other",
+      "result": "{\"cartesia\":\"c1\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{\"cartesia\":\"auto-123\"}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Other",
+      "result": "c0000000-0000-4000-8000-0000000000ad",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "c0000000-0000-4000-8000-0000000000ad"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Other",
+      "result": "{\"cartesia\":\"c1\",\"google\":\"nb-NO-Chirp3-HD-Kore\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "nb-NO-Chirp3-HD-Kore"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Gemini Override",
+      "result": "{\"cartesia\":\"c1\",\"gemini\":\"Zubenelgenubi\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_agent_overrides": {
+          "gemini override": {
+            "provider": "gemini"
+          }
+        },
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Fallback",
+      "result": "{\"cartesia\":\"c1\",\"elevenlabs\":\"cjVigY5qzO86Huf0OWal\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "elevenlabs",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Fallback",
+      "result": "{\"cartesia\":\"c1\",\"elevenlabs\":\"some-valid-id\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "elevenlabs",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{\"elevenlabs\":\"some-valid-id\"}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Fallback",
+      "result": "{\"cartesia\":\"c1\",\"elevenlabs\":\"cjVigY5qzO86Huf0OWal\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "elevenlabs",
+        "tts_provider": "cartesia"
+      },
+      "stored": "{\"elevenlabs\":\"some invalid id\"}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Silent Host",
+      "result": "{}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "none"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Deepgram",
+      "result": "{}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "deepgram"
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "catalogue": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Google",
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "reserved",
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "cartesia",
+        "tts_provider": "google"
+      },
+      "stored": "{}"
+    }
+  ],
+  "catalogue": {
+    "file": {
+      "_catalogue": {
+        "cartesia": {
+          "de": {
+            "language": "de",
+            "owner": false,
+            "public": true
+          },
+          "deleted": {
+            "language": "en",
+            "owner": false,
+            "public": true
+          },
+          "en": {
+            "language": "EN_us",
+            "owner": false,
+            "public": true
+          },
+          "nb": {
+            "language": "nb-NO",
+            "owner": false,
+            "public": true
+          },
+          "nn": {
+            "language": "nn",
+            "owner": false,
+            "public": true
+          },
+          "no": {
+            "language": "no",
+            "owner": false,
+            "public": true
+          },
+          "owned": {
+            "language": "en",
+            "owner": true,
+            "public": true
+          },
+          "private": {
+            "language": "en",
+            "owner": false,
+            "public": false
+          },
+          "unmarked": {
+            "language": "",
+            "owner": false,
+            "public": true
+          }
+        }
+      },
+      "_gone": {
+        "cartesia": [
+          "deleted"
+        ]
+      },
+      "cartesia": {
+        "remembered": "Remembered"
+      }
+    },
+    "languages": [
+      {
+        "ids": [
+          "en"
+        ],
+        "language": "en"
+      },
+      {
+        "ids": [
+          "nb",
+          "nn",
+          "no"
+        ],
+        "language": "nb-NO"
+      },
+      {
+        "ids": [
+          "nb",
+          "nn",
+          "no"
+        ],
+        "language": "NN_no"
+      },
+      {
+        "ids": [
+          "de"
+        ],
+        "language": "de"
+      },
+      {
+        "ids": [],
+        "language": "zh"
+      },
+      {
+        "ids": [
+          "unmarked"
+        ],
+        "language": ""
+      }
+    ],
+    "ola": "{\"cartesia\":\"nn\"}"
+  },
+  "default_assignment": "pool",
+  "janitor": {
+    "origin": null,
+    "provider": "cartesia",
+    "provider_label": "Cartesia Sonic",
+    "silent_reason": "voiceless_role",
+    "streaming": true,
+    "voice_id": null,
+    "voice_label": null
+  },
+  "picks": [
+    {
+      "keep": [],
+      "name": "no pool",
+      "pool": [],
+      "result": null,
+      "taken": {}
+    },
+    {
+      "keep": [],
+      "name": "Case name",
+      "pool": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "result": "c",
+      "taken": {}
+    },
+    {
+      "keep": [],
+      "name": "  CASE NAME  ",
+      "pool": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "result": "c",
+      "taken": {}
+    },
+    {
+      "keep": [],
+      "name": "name sharp \u00df",
+      "pool": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e"
+      ],
+      "result": "d",
+      "taken": {}
+    },
+    {
+      "keep": [],
+      "name": "skip occupied",
+      "pool": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "result": "b",
+      "taken": {
+        "a": 1,
+        "c": 1
+      }
+    },
+    {
+      "keep": [],
+      "name": "least shared",
+      "pool": [
+        "a",
+        "b",
+        "c"
+      ],
+      "result": "c",
+      "taken": {
+        "a": 4,
+        "b": 3,
+        "c": 1
+      }
+    },
+    {
+      "keep": [
+        "a"
+      ],
+      "name": "reserve even a free voice",
+      "pool": [
+        "a",
+        "b",
+        "c"
+      ],
+      "result": "b",
+      "taken": {
+        "b": 2,
+        "c": 5
+      }
+    },
+    {
+      "keep": [
+        "a",
+        "b"
+      ],
+      "name": "all reserved use the walk",
+      "pool": [
+        "a",
+        "b"
+      ],
+      "result": "b",
+      "taken": {}
+    },
+    {
+      "keep": [],
+      "name": "a tie keeps walk order",
+      "pool": [
+        "a",
+        "b",
+        "c"
+      ],
+      "result": "b",
+      "taken": {
+        "a": 1,
+        "b": 1,
+        "c": 1
+      }
+    }
+  ],
+  "pinned": "{\"cartesia\":\"c1\"}"
+}
