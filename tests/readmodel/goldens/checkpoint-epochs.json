@@ -19,6 +19,11 @@
    "checkpoints": "36237420cbd2566ae91f8ee130dd69cbb5581fe78ed98b0ab8210c191ed13667",
    "parse": "e5d318b2e774abd6dd63998d7bd98adbf130d8ea6ce7aa2d45234a7e7793f846",
    "store": "6e01f82b2710c913796df511816ca6e0dee33f32ad936d20f0b1a09aeb895e77"
+  },
+  "5": {
+   "checkpoints": "29e6480a4140e21cac0f6f0afe7323ddc8da1cf49b53968c013d2cbc7bc4781c",
+   "parse": "e5d318b2e774abd6dd63998d7bd98adbf130d8ea6ce7aa2d45234a7e7793f846",
+   "store": "6e01f82b2710c913796df511816ca6e0dee33f32ad936d20f0b1a09aeb895e77"
   }
  },
  "claude": {
@@ -41,6 +46,11 @@
    "checkpoints": "2741373649b353c7e1b8a66ae310075db9ff456d028e74648a8acfd16c82de7b",
    "parse": "0eac8f0ed77d67ae4721fe290db10daee0d32610dc2a0fc3600a4b42c642618f",
    "store": "7bdd13a486ba4208c7aa10adcbff1f1beed8c09734cb0c1252ab6097bdf99997"
+  },
+  "5": {
+   "checkpoints": "741d42bc047069451dd66d9884c1a52099538907b9db73403f007fa1bc8d15dc",
+   "parse": "0eac8f0ed77d67ae4721fe290db10daee0d32610dc2a0fc3600a4b42c642618f",
+   "store": "7bdd13a486ba4208c7aa10adcbff1f1beed8c09734cb0c1252ab6097bdf99997"
   }
  },
  "codex": {
@@ -51,6 +61,11 @@
   },
   "2": {
    "checkpoints": "475c24069d2265b2b67ccf6cef40ce9ec55f89584ce3bc06287eeae3fa84f308",
+   "parse": "ef776e9afd509adb43aa96727ac10493567892392624de7bcd60cb87fc40c553",
+   "store": "d96171c40579fbddd726ad8d0c311ed8c069ca925bf126c2810b2b1e32ef41a7"
+  },
+  "3": {
+   "checkpoints": "f71dff19e244ef87643a745e028a0a9f3cb7946bccd2271d67dfb4159a55425a",
    "parse": "ef776e9afd509adb43aa96727ac10493567892392624de7bcd60cb87fc40c553",
    "store": "d96171c40579fbddd726ad8d0c311ed8c069ca925bf126c2810b2b1e32ef41a7"
   }

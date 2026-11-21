@@ -699,7 +699,7 @@ def test_a_record_without_counts_says_so():
     assert why["how"] == "row_transcript:uncounted"
 
 
-# ---- a new note row (NEW_NOTES), and the log's how never deciding ----------------
+# ---- a new note row (NEW_NOTES) --------------------------------------------------
 
 def test_a_new_note_row_passes_and_an_old_one_that_changed_does_not():
     stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
@@ -714,6 +714,41 @@ def test_a_new_note_row_passes_and_an_old_one_that_changed_does_not():
     assert _changed(before, _inputs(rows=[old[0], {**old[1], "text": "edited"}]), **stored) == "row_other"
     assert _changed(before, _inputs(rows=old[:1]), **stored) == "row_other"
 
+
+# ---- a new /send row with words said before (NEW_SENDS) ----------------------------
+
+def test_words_said_before_pass_only_when_sent_after_every_old_turn_for_no_old_turn():
+    """The lane shows each condition against the full replay; here, the cases
+    it does not reach: a carry that did not record the time, and the notice."""
+    import datetime as dt
+
+    def at(ms):
+        return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    old = [{**_row("m-1", role="user", text="status", revision=1), "timestamp": at(10_000)}]
+    new = {**_row("u-2", source="client:2", role="user", text="status", seq=-1, revision=5),
+           "timestamp": at(60_000)}
+    notice = {**new, "text": "<clarp-delivery-context>\nx\n</clarp-delivery-context>\n\nstatus"}
+    before = _inputs(rows=old)
+    later = dict(prefix_latest_ms=10_000, prefix_untimed_user=False, initial_provenance_used=False)
+    assert _changed(before, _inputs(rows=[*old, new]), **later) == ""
+    # A user turn before the boundary without a timestamp, or a carry that does
+    # not say: the linker bounds no such copy by time.
+    for untimed in (dict(prefix_untimed_user=True), dict(prefix_untimed_user=None), {}):
+        stored = {**later, **untimed}
+        if not untimed:
+            del stored["prefix_untimed_user"]
+        assert _changed(before, _inputs(rows=[*old, new]), **stored) == "send_said_before"
+    assert _changed(before, _inputs(rows=[*old, {**new, "timestamp": at(11_500)}]),
+                    **later) == "send_said_before"
+    with_turn = _inputs(rows=old, turns=[_turn("t-old", 9_000)])
+    assert _changed(with_turn, _inputs(rows=[*old, {**new, "trace_id": "t-old"}],
+                                       turns=[_turn("t-old", 9_000)]), **later) == "send_said_before"
+    assert _changed(before, _inputs(rows=[*old, notice]), **later) == "send_said_before"
+    unknown = dict(initial_provenance_used=False)
+    assert _changed(before, _inputs(rows=[*old, new]), **unknown) == "send_said_before"
+
+
+# ---- the log's how never deciding ------------------------------------------------
 
 def test_the_how_word_failing_changes_no_decision(monkeypatch):
     stored = dict(prefix_latest_ms=0, initial_provenance_used=False)

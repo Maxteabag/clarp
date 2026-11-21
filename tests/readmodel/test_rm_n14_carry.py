@@ -512,15 +512,73 @@ def test_an_ordinary_new_message_is_imported_by_its_tail(tmp_path, backend, rule
 @pytest.mark.parametrize("words", ["synthetic request 2", "  synthetic request 2 \n"],
                          ids=["the same words", "with other whitespace around them"])
 @BACKENDS
-def test_a_new_message_with_the_words_of_an_old_turn_typed_in_a_terminal_is_a_full_import(
+def test_a_new_message_with_the_words_of_an_old_turn_sent_after_every_old_turn_is_a_tail(
         tmp_path, backend, words):
-    """The twin. The old turn found no /send row when it was imported and is
-    stored as a transcript row. A full replay links it to the new row. The
-    linker compares stripped words, so the new row's words are stripped too:
-    spaces and a newline around them do not make them new."""
+    """The old turn found no /send row when it was imported and is stored as a
+    transcript row. A row with its words, sent long after every turn before
+    the boundary and for no turn of theirs, is one the linker never takes for
+    that turn's copy (sent after it, beyond the slack): a full replay leaves
+    the old turn as it is, and so does the tail. The linker compares stripped
+    words, so spaces and a newline around them change nothing."""
     with World(tmp_path, backend, _history(backend)) as world:
         ordinal = world.started(6)
         world.send("again", words, at=FAR)
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
+def _untimed(data: bytes, words: str) -> bytes:
+    """The lines of a turn that carry ``words``, without their timestamp."""
+    out = []
+    for line in data.splitlines(keepends=True):
+        if words.encode() in line:
+            record = json.loads(line)
+            record.pop("timestamp", None)
+            line = json.dumps(record).encode() + b"\n"
+        out.append(line)
+    return b"".join(out)
+
+
+@BACKENDS
+def test_a_new_message_with_the_words_of_an_old_turn_without_a_timestamp_is_a_full_import(
+        tmp_path, backend):
+    """The twin by the copy's time (reviewer 1 on 591). The linker bounds a copy
+    by its timestamp; a copy without one can take a row sent at any time. Old
+    turn 2 said the words and took its own row; old turn 4 said them too, with
+    no timestamp and no row. A full replay links turn 4 to a new row with those
+    words however late it was sent, so the carry says a user turn had no
+    timestamp and the row is refused."""
+    history = _history(backend, request2="the same words", request4="the same words")
+    history[4] = _untimed(history[4], "the same words")
+    with World(tmp_path, backend, history) as world:
+        world.send("first", "the same words", at=1900)
+        ordinal = world.started(6)
+        world.send("again", "the same words", at=FAR)
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
+@pytest.mark.parametrize("twin", ["sent within the slack of the old copy",
+                                  "sent for the turn running at the old copy's time"])
+@BACKENDS
+def test_a_new_message_with_the_words_of_an_old_turn_it_can_be_linked_to_is_a_full_import(
+        tmp_path, backend, twin):
+    """The twins, each by one way the linker takes a row for an old copy
+    (message_import_rows._own_turns_row): a row sent no later than
+    _START_SLACK_MS after the copy, or a row sent for the turn that was
+    running when the copy was written, however late. A full replay links the
+    old turn, a transcript row until then, to the new row."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        world.turn_row("running", at=1500)
+        ordinal = world.started(6)
+        if twin.startswith("sent within"):
+            world.send("again", "synthetic request 2", at=3000)
+        else:
+            world.send("again", "synthetic request 2", at=FAR, trace="running")
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
         world.grow(_turn(backend, ordinal + 1))
@@ -596,21 +654,26 @@ def test_a_later_turn_after_a_message_a_tail_let_through_is_still_a_tail(tmp_pat
         assert world.imported() == ("tail_applied", [])
 
 
+@pytest.mark.parametrize("sent", ["after every old turn", "within the slack of the old copy"])
 @BACKENDS
-def test_a_new_message_with_the_words_of_an_old_linked_message_is_a_full_import(tmp_path, backend):
-    """The twin for a turn that WAS linked, so no transcript row holds its
-    words; the carry lists the row it took. The old row was sent before the
-    turn began that was running when the provider wrote the words (a queued
-    message, steered in). With a second row of the same words, sent after
-    that turn began, a full replay links the old turn to the newer row."""
+def test_a_new_message_with_the_words_of_an_old_linked_message(tmp_path, backend, sent):
+    """A turn that WAS linked, so no transcript row holds its words; the carry
+    lists the row it took. The old row was sent before the turn began that
+    was running when the provider wrote the words (a queued message, steered
+    in). A second row of the same words sent after that turn began is the one
+    a full replay takes, the newest sent since the turn began, when the
+    linker can take it at all: sent within the slack of the copy. Sent after
+    every old turn, it never can, and the import is a tail."""
     with World(tmp_path, backend, _history(backend)) as world:
         world.send("queued", "synthetic request 2", at=1000, trace="queued-trace")
         world.turn_row("running", at=1500)
         ordinal = world.started(6)
-        world.send("again", "synthetic request 2", at=FAR, trace="again-trace")
+        late = sent == "after every old turn"
+        world.send("again", "synthetic request 2", at=FAR if late else 2500, trace="again-trace")
         world.turn_row("again-trace", at=FAR)
         world.grow(_turn(backend, ordinal))
-        assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
+        assert world.imported() == (("tail_applied", []) if late else
+                                    ("full_carry_inputs_changed", ["send_said_before"]))
         world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == ("tail_applied", [])
 
@@ -670,7 +733,8 @@ def test_a_tail_takes_the_send_rows_and_the_latest_user_row_from_the_rows_it_rea
         reads = world.report["session_reads"]
         assert (reads["sends"], reads["latest_user"]) == (0, 0)
         assert reads["every_row"] >= 2
-        world.send("again", "synthetic request 2", at=FAR + 500)        # the words of an old turn
+        # The words of an old turn, sent within the slack of its copy: a full import.
+        world.send("again", "synthetic request 2", at=3000)
         world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
         reads = world.report["session_reads"]
