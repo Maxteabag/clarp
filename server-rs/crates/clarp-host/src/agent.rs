@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
-    Action, Actor, ActorError, ByHand, Changed, ImportedRow, JoinedRead, Kept, Outputs, Profile, QueueState,
-    Sent, ShimOrder, Status, TurnFate, Waiting,
+    Action, Actor, ActorError, ByHand, Changed, ImportedRow, JoinedRead, Kept, Outputs, Profile,
+    QueueState, Sent, ShimOrder, Status, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
