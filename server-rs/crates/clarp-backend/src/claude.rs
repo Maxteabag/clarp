@@ -222,6 +222,8 @@ struct Draft {
     id: String,
     /// The text blocks of the message, by their index in it.
     blocks: Vec<(u64, String)>,
+    /// A keyless draft can ignore its snapshots only while its text stream is current.
+    streamed_text: bool,
     /// The tools the message calls, by the ids of their uses, in the order it calls them.
     tools: Vec<String>,
 }
@@ -464,8 +466,8 @@ pub struct ClaudeInterpreter {
     /// The activity last reported, so that only a change is reported.
     activity: Option<Activity>,
     draft: Option<Draft>,
-    /// The messages that arrive piece by piece. Their text is taken from the pieces, so the
-    /// whole message that follows the pieces must not be taken again.
+    /// The keyed messages that arrive piece by piece. A later snapshot can name them even
+    /// after their draft settled. Keyless snapshots belong only to the current draft.
     streamed: HashSet<String>,
     replies: u32,
     /// How many replies each message has become. One, unless the tool goes on with a message
@@ -661,6 +663,7 @@ impl ClaudeInterpreter {
         self.draft.get_or_insert_with(|| Draft {
             id: id.to_string(),
             blocks: Vec::new(),
+            streamed_text: false,
             tools: Vec::new(),
         })
     }
@@ -670,8 +673,10 @@ impl ClaudeInterpreter {
         let draft = self.draft.get_or_insert_with(|| Draft {
             id: String::new(),
             blocks: Vec::new(),
+            streamed_text: false,
             tools: Vec::new(),
         });
+        draft.streamed_text = true;
         let at = match draft.blocks.iter().position(|(i, _)| *i == index) {
             Some(at) => at,
             None => {
@@ -829,8 +834,13 @@ impl ClaudeInterpreter {
         match text_of(&piece["type"]) {
             "message_start" => {
                 let id = text_of(&piece["message"]["id"]).to_string();
+                if id.is_empty() {
+                    // A message start is a new boundary even when neither message has an id.
+                    self.settle(out);
+                } else {
+                    self.streamed.insert(id.clone());
+                }
                 self.draft_for(&id, out);
-                self.streamed.insert(id);
             }
             "content_block_start" => {
                 let block = &piece["content_block"];
@@ -911,6 +921,13 @@ impl ClaudeInterpreter {
                     + count("cache_creation_input_tokens"),
             });
         }
+        let streamed = if id.is_empty() {
+            self.draft
+                .as_ref()
+                .is_some_and(|draft| draft.id.is_empty() && draft.streamed_text)
+        } else {
+            self.streamed.contains(&id)
+        };
         for block in content {
             match text_of(&block["type"]) {
                 "tool_use" | "server_tool_use" => {
@@ -955,7 +972,7 @@ impl ClaudeInterpreter {
                         self.tools.insert(call_id.to_string(), call);
                     }
                 }
-                "text" if !self.streamed.contains(&id) => {
+                "text" if !streamed => {
                     let text = text_of(&block["text"]);
                     if text.is_empty() {
                         continue;
@@ -1527,6 +1544,69 @@ mod tests {
             vec![("r-1", "First.\n\nSecond."), ("r-2", "Third.")]
         );
         assert_eq!(signals.last(), Some(&Signal::Ended(RunOutcome::Completed)));
+    }
+
+    #[test]
+    fn a_keyless_snapshot_does_not_rewrite_streamed_paragraphs_or_hide_the_next_reply() {
+        for started in [false, true] {
+            let mut lines = vec![INIT.to_string()];
+            if started {
+                lines.push(stream(
+                    r#"{"type":"message_start","message":{"role":"assistant"}}"#,
+                ));
+            }
+            lines.extend([
+                stream(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"First."}}"#),
+                stream(r#"{"type":"content_block_stop","index":0}"#),
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"A stale snapshot."}]}}"#.to_string(),
+                r#"{"type":"assistant","message":{"content":[{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}},{"type":"web_search_tool_result","text":"Not chat words","content":[{"type":"web_search_result","title":"A fixture"}]}]}}"#.to_string(),
+                stream(r#"{"type":"content_block_start","index":3,"content_block":{"type":"text","text":"Second."}}"#),
+                stream(r#"{"type":"content_block_stop","index":3}"#),
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Second."}]}}"#.to_string(),
+                stream(r#"{"type":"message_stop"}"#),
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Whole-only first."},{"type":"thinking","thinking":"Not for chat"},{"type":"text","text":"Whole-only second."}]}}"#.to_string(),
+                RESULT.to_string(),
+            ]);
+            let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let signals = read(&lines, (Some(0), None));
+            let growing: Vec<_> = signals
+                .iter()
+                .filter_map(|signal| match signal {
+                    Signal::Live(reply) => Some(reply.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                growing,
+                [
+                    "First.",
+                    "First.\n\nSecond.",
+                    "Whole-only first.",
+                    "Whole-only first.\n\nWhole-only second.",
+                ]
+            );
+            let replies: Vec<_> = signals
+                .iter()
+                .filter_map(|signal| match signal {
+                    Signal::Reply(reply) => Some(reply),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(replies.len(), 2);
+            assert_eq!(replies[0].text, growing[1]);
+            assert_eq!(replies[0].tools, ["srvtoolu_1"]);
+            assert_eq!(replies[1].text, growing[3]);
+            let items: HashSet<_> = signals
+                .iter()
+                .filter_map(|signal| match signal {
+                    Signal::Glimpse(Glimpse::Message {
+                        id, row: Some(row), ..
+                    }) if row == &replies[0].id => Some(id),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(items.len(), 1);
+        }
     }
 
     #[test]
