@@ -38,6 +38,7 @@ pub mod faces;
 pub mod fcm;
 pub mod files;
 pub mod fleet;
+pub mod gallery;
 pub mod forks;
 pub mod goal_listener;
 pub mod goaltool;
