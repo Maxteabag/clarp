@@ -27,8 +27,9 @@ def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
         data=audio_bytes, method="POST",
         headers={"Authorization": f"Token {api_key}",
                  "Content-Type": content_type or "audio/webm"})
+    from .stt_language import sending_audio
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with sending_audio(), urllib.request.urlopen(request, timeout=timeout) as response:
             body = json.loads(response.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")[:200]
