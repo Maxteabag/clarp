@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use clarp_actor::ShimOrder;
-use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Request};
+use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request};
 
 use crate::ids;
 
@@ -222,6 +222,20 @@ pub fn follow(socket: &Path, tell: &dyn Fn(Told)) {
     // Whatever the shim wrote last, and then the news that it is gone.
     tell(Told::SpoolChanged);
     tell(Told::Gone);
+}
+
+/// A bounded takeover exchange on a fresh connection. An absent reply is uncertain
+/// because the shim may already have recorded the decision.
+pub(crate) fn takeover_request(socket: &Path, request: Request) -> Option<Reply> {
+    let mut shim = UnixStream::connect(socket).ok()?;
+    shim.set_read_timeout(Some(STOP_TIMEOUT)).ok()?;
+    shim.set_write_timeout(Some(STOP_TIMEOUT)).ok()?;
+    let mut line = serde_json::to_vec(&request).ok()?;
+    line.push(b'\n');
+    shim.write_all(&line).ok()?;
+    let mut answer = String::new();
+    BufReader::new(shim).take(4096).read_line(&mut answer).ok()?;
+    serde_json::from_str(&answer).ok()
 }
 
 /// Asks the shim at this socket to end its tool. A shim that is not there has nothing to end.
