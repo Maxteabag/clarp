@@ -43,3 +43,12 @@ def test_presence_reports_delete_only_when_a_lease_is_stale(monkeypatch):
     assert not [s for s in _writes(lambda: report(first, 2)) if s.startswith("DELETE")]
     now[0] += desktop_presence.TOMBSTONE_MS + 1
     assert [s for s in _writes(lambda: report(second, 1)) if s.startswith("DELETE")]
+
+
+def test_a_value_of_only_spaces_is_blank_for_set_text_if_blank():
+    """set_text_if_blank replaces a blank value, and blank includes spaces: the
+    read that skips the write must use the same TRIM as the write's WHERE."""
+    from lib import settings_store
+    settings_store.set_text("blank-probe", "   ")
+    assert settings_store.set_text_if_blank("blank-probe", "first") == "first"
+    assert settings_store.set_text_if_blank("blank-probe", "second") == "first"

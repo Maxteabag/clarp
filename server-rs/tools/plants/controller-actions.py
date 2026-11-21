@@ -60,6 +60,11 @@ rules(K,'vectors',[
 ])
 
 # Where an action may send (R133): the Python Host's rule (`url_destination.py`), in the kernel's own module.
+# NOT PLANTED (R139): the path decoded once, not twice: a wrong rule that decodes twice is a second pass, not a change
+#   of one place; the vectors of what is encoded twice (sent byte for byte) hold it. A prefix with a dot segment, a
+#   backslash or a bracketed name: a prefix is parsed as a destination is, by the same function. Python's own check
+#   of an address of a version to come in brackets (`_check_bracketed_host`, kept in `split`): whatever it answers,
+#   brackets around a name are refused after it.
 rules(D,'vectors',[
     ('(a) a prefix without a port admits every port', '        if !any_port && self.port != prefix.port {', '        if false {'),
     ('(a) the loopback prefixes admit their own port alone', '.map(|prefix| (prefix, true));', '.map(|prefix| (prefix, false));'),
@@ -80,12 +85,18 @@ rules(D,'vectors',[
      'const SCHEMES: [(&str, u16); 3] = [("http", 80), ("https", 443), ("ftp", 21)];'),
     ('an empty query is sent', '        if !self.query.is_empty() {', '        if true {'),
     ('a prefix is not trimmed', '    let found = destination(text.trim_matches(python_space))?;', '    let found = destination(text)?;'),
-    # R139, taken before the reference's PR: held by the rows of the vectors marked as awaiting it.
+    # R139 (the release owner's PR 471): a path read as a server might read it, a raw backslash, brackets around
+    # a name.
     ('R139 a path with a dot segment is taken', '    if dot_segment(&path) {\n        return None;\n    }\n', ''),
-    ('R139 an encoded dot is no dot', '        let dots = segment.replace("%2e", ".").replace("%2E", ".");', '        let dots = segment.to_string();'),
-    ('R139 an encoded dot in capitals is no dot', '        let dots = segment.replace("%2e", ".").replace("%2E", ".");', '        let dots = segment.replace("%2e", ".");'),
-    ('R139 a single dot is no segment', '        dots == "." || dots == ".."', '        dots == ".."'),
-    ('an address of a version to come is refused in brackets', "        return (hex && !after.is_empty() && !after.contains('\\n')).then_some(());", '        return None;'),
+    ('R139 an encoded dot is no dot', "\"2e\" => Some('.'),", '"2e" => None,'),
+    ('R139 an encoded slash is no slash', "\"2f\" => Some('/'),", '"2f" => None,'),
+    ('R139 an encoded backslash is no slash', "\"5c\" => Some('\\\\'),", '"5c" => None,'),
+    ('R139 a backslash is no slash', "    read.replace('\\\\', \"/\").split('/').any(|segment| {", "    read.split('/').any(|segment| {"),
+    ('R139 what is encoded in capitals is not decoded', '.and_then(|hex| match hex.to_ascii_lowercase().as_str() {', '.and_then(|hex| match hex {'),
+    ("R139 a segment's parameter hides its dots", "        let segment = segment.split(';').next().unwrap_or_default();", '        let segment = segment;'),
+    ('R139 a single dot is no segment', '        segment == "." || segment == ".."', '        segment == ".."'),
+    ('R139 a raw backslash is taken', "        || url.contains('\\\\')\n", ''),
+    ('R139 brackets around a name are taken', "    if (netloc.contains('[') || netloc.contains(']')) && !hostname.contains(':') {", '    if false {'),
 ])
 rules(H,'door',[
     ('limited and full devices can define actions', 'op != "mappings" && principal != Principal::Administrator', 'false'),

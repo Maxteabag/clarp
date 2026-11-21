@@ -32,7 +32,7 @@ def test_reset_adapter_requires_structured_verified_receipt(code, receipt, want)
         def communicate(self, **kwargs):
             return json.dumps(receipt), ""
     with patch.object(janitor_reset.config,"load",return_value=SimpleNamespace(claude_reset_command=("broker",))), patch.object(janitor_reset.subprocess,"Popen",return_value=Process()) as run, patch.object(janitor_reset,"_kill_group"):
-        result=janitor_reset.attempt("claude_reset_command",["claude-fable-5-2"])
+        result=janitor_reset.attempt("claude_reset_command",["claude-fable-5-2"],accounts=("ai2","ai15"))
         assert result["verified"] is want
         assert run.call_args.kwargs["start_new_session"] is True
         assert "shell" not in run.call_args.kwargs

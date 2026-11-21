@@ -15,7 +15,7 @@ from . import oracle_voice_context, oracle_strategy, config, oracle_contact, ora
 from .http_utils import principal_of, require_full_scope, responder_of
 from .log import log_exception
 from .oracle_calls import AgentTools, validate_offer
-from .oracle_live_wire import LiveWire
+from .oracle_live_wire import oracle_wire
 
 _LOCK = threading.RLock()
 _ATTEMPTS = {}
@@ -99,7 +99,8 @@ class Call:
                 tools=self.tools, router_backend=self.cfg.oracle_router_backend, wire=self.wire,
                 images=self.podcast["images"], history_id=self.history_id, media_dir=getattr(self.ctx, "media_dir", None),
                 memory=self.memory, provider_session=result["session_id"],
-                delegation_strategy=self.delegation_strategy, router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
+                delegation_strategy=self.delegation_strategy, router_reuse=getattr(self.cfg, "oracle_router_reuse", False),
+                stream=getattr(self.ctx, "stream", None))
             self.emit({"type": "podcast.history", "conversation_id": self.history_id, "saved": True,
                        "position": self.podcast["position"]})
         else:
@@ -246,7 +247,7 @@ def create(*, ctx, principal, data, stop, negotiate=oracle_live_provider.negotia
             default=getattr(cfg, "oracle_delegation_strategy", "operator"))
     except ValueError as exc:
         raise CallError(str(exc), 400) from None
-    wire = LiveWire(cfg.oracle_voice_backend)
+    wire = oracle_wire(cfg, standby=True)  # standby fields only in API mode, only when configured
     if data.get("mode") != wire.mode:
         raise CallError("Oracle voice account changed; refresh the connection settings", 409)
     if strategy == "operator" and cfg.oracle_router_backend == "api" and not cfg.openai_key():

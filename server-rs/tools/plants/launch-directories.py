@@ -102,7 +102,12 @@ P='clarp-kernel/src/python.rs'
 plant(P,'int','lose non-ASCII decimal digits','(digit < 10).then_some(digit)','(digit < 2).then_some(digit)')
 plant(P,'int','ignore the Python integer input limit','if count > 4300 {','if count > 9999 {')
 RUNS['damaged']=['test','--test','host','unreadable_launch_usage_is_skipped_until_that_directory_is_launched_again']
-plant(F,'damaged','stop the Host for one unreadable path record','unreadable += 1;\n            continue;', 'return Err("invalid usage".into());')
-plant(F,'damaged','report one regardless of the number skipped','unreadable += 1;', 'unreadable = 1;')
+# A path record that cannot be read is set aside by the one loader at the start (`kept.rs`), said by its place in
+# the count (a path is private): the Host goes on, and the count is the loader's.
+# NOT PLANTED: 'stop the Host for one unreadable path record'. The start's walk judges every path record as a
+# `launches::Usage` and moves one that is not aside before this loop reads the table (`kept.rs`, the lead's ruling of
+# 20 Nov: books moved, never left in place), so the loop meets none it cannot read: nothing can observe the rule.
+# What the walk does to such a record is held by the list `start-tolerance.py`.
+plant('clarp-host/src/kept.rs','damaged','report one regardless of the number set aside','keys.insert(key.to_string()).then_some(keys.len())', 'keys.insert(key.to_string()).then_some(1)')
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

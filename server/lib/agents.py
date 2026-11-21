@@ -1264,6 +1264,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                         sender_agent_id: str | None = None,
                         prompt_admission_id: str = "",
                         trace_id: str = "",
+                        sent_at: int | None = None,
                         ) -> dict[str, Any] | None:
     from .message_store import record_user_message as _record
     return _record(
@@ -1271,6 +1272,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
         client_msg_id=client_msg_id, text=text,
         origin=origin, sender_agent_id=sender_agent_id,
         prompt_admission_id=prompt_admission_id, trace_id=trace_id,
+        sent_at=sent_at,
     )
 
 

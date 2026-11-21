@@ -32,6 +32,30 @@ use crate::owner;
 /// The engines that speak which are built into this Host.
 use crate::voice::{Audition, BUILT};
 
+/// What this desk keeps, declared once (`kept.rs`): the voice timeline's events, one for every
+/// event, kept for ever and listed only when shown, judged when read as the JSON row it reads;
+/// and their sequence, eight bytes under one key, read by key by the fleet (`append_voice`) and
+/// never begun anew.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(
+        crate::fleet::VOICE_EVENTS,
+        crate::kept::Key::Plain,
+        crate::kept::json,
+    )
+    .when_read(),
+    crate::kept::Kind::book(
+        crate::fleet::VOICE_SEQUENCE,
+        crate::kept::Key::Plain,
+        eight_bytes,
+    )
+    .when_read(),
+];
+
+/// Whether bytes are the voice timeline's sequence as the fleet reads it: eight bytes.
+fn eight_bytes(stored: &[u8]) -> bool {
+    stored.len() == 8
+}
+
 fn bad(why: &str) -> ApiError {
     ApiError::new(StatusCode::BAD_REQUEST, why)
 }
@@ -160,6 +184,9 @@ async fn choose(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiE
             "speech settings could not be saved",
         )
     })?;
+    // Every agent's voice may have changed: open apps re-read the agents.
+    app.hub
+        .publish(crate::profile::changed_for_all(), app.clock.now_ms());
     let Json(mut result) = engines_told(State(app)).await;
     result["restart_scheduled"] = json!(false);
     Ok(Json(result))
@@ -285,6 +312,9 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
     if amended.is_err() {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
     }
+    // Open apps show the voice the agent now speaks with (its profile is added as it is told).
+    let changed = json!({ "type": "agent-roster", "kind": "voice-changed", "session": session });
+    app.hub.publish(changed, app.clock.now_ms());
     Ok(Json(json!({ "ok": true })).into_response())
 }
 
@@ -513,7 +543,7 @@ async fn timeline(app: App, raw: Option<String>, grouped: bool) -> Result<Json<V
         .filter(|(_, v)| !v.is_empty())
         .collect();
     let q = clarp_kernel::voice_timeline::Query::read(&params);
-    let stored = app.fleet.kept_all("voice-events").await?;
+    let stored = app.fleet.kept_listed(crate::fleet::VOICE_EVENTS).await?;
     tokio::task::spawn_blocking(move || {
         let mut rows = Vec::with_capacity(stored.len());
         for (_, bytes) in stored {

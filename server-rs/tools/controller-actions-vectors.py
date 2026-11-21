@@ -56,16 +56,29 @@ def generate(root):
              'https://service.invalid/api/...', 'https://service.invalid/api/%2e%2ex']
     for url in cases:
         rows.append(dict(kind='address', url=url, entries=entries, reference=ca.sendable_url(url, entries)))
-    # AWAITING R139 (the release owner's PR to come): a path with a dot segment, raw or percent-encoded, is
-    # refused. Not on his main yet, so what is written here is the reference as it is, which admits them; the
-    # Rust Host refuses them already, and its test asserts that these rows still say the reference admits
-    # them: when his PR is merged and this runs again, that assertion fails, and the mark goes.
+    # R139 (the release owner's PR 471): a path read as a server might read it (the encoded dot, slash and
+    # backslash decoded once, a backslash read as a slash, each segment cut at its first ';') is refused where a
+    # segment is then '.' or '..'; a raw backslash anywhere is refused; brackets around anything but an IPv6
+    # address are refused. What is admitted is sent byte for byte.
     r139 = ['https://service.invalid/api/../x', 'https://service.invalid/api/./x', 'https://service.invalid/api/%2e%2e/x',
             'https://service.invalid/api/%2E%2e/x', 'https://service.invalid/api/.%2E/x', 'https://service.invalid/api/%2e/x',
-            'https://service.invalid/api/sub/../one', 'https://service.invalid/api/..', 'http://127.0.0.1:8123/a/../b']
+            'https://service.invalid/api/sub/../one', 'https://service.invalid/api/..', 'http://127.0.0.1:8123/a/../b',
+            'https://service.invalid/api/%2e./x', 'https://service.invalid/api/x/./', 'https://service.invalid/api/..;x/y',
+            'https://service.invalid/api/.;x/y', 'https://service.invalid/api/%2e%2e;x/y', 'https://service.invalid/api/a%2F..%2Fb',
+            'https://service.invalid/api/a%2f..%2fb', 'https://service.invalid/api/a%5C..%5Cb',
+            'https://service.invalid/api/a%5c%2e%2e%5cb', 'http://localhost/%2e%2E/x',
+            # a raw backslash anywhere
+            'https://service.invalid/api/a\\b', 'https://service.invalid/api/a\\..\\b', 'https://service.invalid/api/x?a=\\',
+            'http://localhost/a\\b',
+            # brackets around a name
+            'https://[v1.service.invalid]/x', 'http://[v1.localhost]/x',
+            # admitted, and sent byte for byte
+            'https://service.invalid/api/.well-known', 'https://service.invalid/api/a.b.c', 'https://service.invalid/api/...',
+            'https://service.invalid/api/%2e%2e%2e', 'https://service.invalid/api/a%2Fb', 'https://service.invalid/api/%252e%252e/x',
+            'https://service.invalid/api/a%252F..%252Fb', 'https://service.invalid/api/report;v=2',
+            'https://service.invalid/api/x?p=../a', 'https://service.invalid/api/x?p=/./a/%2e%2e', 'http://[::1]:9/x']
     for url in r139:
-        rows.append(dict(kind='address', url=url, entries=entries, reference=ca.sendable_url(url, entries),
-                         awaiting='R139'))
+        rows.append(dict(kind='address', url=url, entries=entries, reference=ca.sendable_url(url, entries)))
 
     def shown(found):
         return None if found is None else dict(scheme=found.scheme, host=found.host, port=found.port,
@@ -74,7 +87,10 @@ def generate(root):
     prefixes = ['https://service.invalid/api', ' https://service.invalid/api ', 'https://service.invalid/q?x=1',
                 'https://service.invalid/f#top', 'https://service.invalid/f#', 'https://service.invalid/q?',
                 'https://u@service.invalid', 'https://service.invalid:abc', 'not a url', 'https://', '',
-                'http://service.invalid:8123/line/', 'HTTP://Service.Invalid:80/', 'http://[::1]:8123']
+                'http://service.invalid:8123/line/', 'HTTP://Service.Invalid:80/', 'http://[::1]:8123',
+                # (d) a prefix is a destination: one with a dot segment, a backslash or a bracketed name admits nothing
+                'https://service.invalid/api/..', 'https://service.invalid/a/%2e%2e', 'https://service.invalid/a\\b',
+                'https://[v1.service.invalid]', 'https://service.invalid/report;v=2']
     for text in prefixes:
         rows.append(dict(kind='parse', text=text, destination=shown(url_destination.destination(text)),
                          prefix=shown(url_destination.prefix(text))))
@@ -83,7 +99,7 @@ def generate(root):
                          prefix=shown(url_destination.prefix(url))))
     for url in r139:
         rows.append(dict(kind='parse', text=url, destination=shown(url_destination.destination(url)),
-                         prefix=shown(url_destination.prefix(url)), awaiting='R139'))
+                         prefix=shown(url_destination.prefix(url))))
     told = []
     with patch('lib.log.log', lambda event, detail='', *a, **k: told.append([event, detail])):
         for given in (prefixes, ['https://service.invalid/api'], [], [' ', 'https://service.invalid/q?x=1']):

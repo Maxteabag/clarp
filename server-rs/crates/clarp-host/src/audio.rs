@@ -25,6 +25,13 @@ use clarp_kernel::spoken::{self, Line, LineState, SpeechBook};
 use crate::agent::Unavailable;
 use crate::edge::App;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    FACTS,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Fact>,
+)];
+
 /// The kind of thing a fact is, among what is left with the fleet.
 const FACTS: &str = "audio-facts";
 /// What a run of the bookkeeper is named before its fact's number.

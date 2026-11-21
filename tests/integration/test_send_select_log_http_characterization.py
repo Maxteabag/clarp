@@ -226,11 +226,35 @@ def test_compact(running_server, monkeypatch, ok, expected_status):
     from lib import compaction
     base, _ctx, _srv = running_server
     monkeypatch.setattr(compaction, "compact_session",
-                        lambda session: {"ok": ok, "session": session})
+                        lambda session, *, dispatch: {"ok": ok, "session": session})
     assert _call(base, "POST", "/compact", raw=b"{") == (400, {"error": "bad json"})
     assert _call(base, "POST", "/compact", {}) == (400, {"error": "session required"})
     assert _call(base, "POST", "/compact", {"session": " claude "}) == (
         expected_status, {"ok": ok, "session": "claude"})
+
+
+@pytest.mark.parametrize("raised, expected", [
+    ("unavailable", (503, {"ok": False, "error": "runtime unavailable", "retryable": True})),
+    ("refused", (500, {"ok": False, "error": "compaction could not start"})),
+])
+def test_compact_answers_when_compaction_raises(running_server, monkeypatch, raised, expected):
+    """The split runtime's client raises when the runtime is down or refuses: the
+    app gets a typed answer, never a connection closed without one."""
+    from lib import compaction
+    from lib.runtime_bridge import RuntimeProtocolError, RuntimeUnavailable
+    base, _ctx, _srv = running_server
+
+    from lib.routes import send as send_routes
+    logged = []
+    monkeypatch.setattr(send_routes, "log_exception",
+                        lambda event, exc, detail="": logged.append((event, type(exc).__name__, detail)))
+
+    def compact_session(session, *, dispatch):
+        raise (RuntimeUnavailable if raised == "unavailable" else RuntimeProtocolError)("runtime said no")
+    monkeypatch.setattr(compaction, "compact_session", compact_session)
+    assert _call(base, "POST", "/compact", {"session": "claude"}) == expected
+    error = "RuntimeUnavailable" if raised == "unavailable" else "RuntimeProtocolError"
+    assert logged == [("compactFail", error, "claude")]
 
 
 def test_orchestrator_settings_post_errors(running_server):

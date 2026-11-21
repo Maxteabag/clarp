@@ -177,7 +177,7 @@ pub(crate) async fn gallery_ready(
             && !matches!(blobs.len(&picture_name(&portrait.sha256)), Ok(Some(_)))
             && let Some(id) = &portrait.media_asset_id
             && fleet
-                .kept(crate::fleet::portrait_jobs::BYTES, id.clone())
+                .kept_book(crate::fleet::portrait_jobs::BYTES, id.clone())
                 .await?
                 .is_some()
         {

@@ -27,9 +27,9 @@ use crate::owner::{self, OwnerFile};
 use crate::personas::object;
 
 mod call;
-mod delegations;
-mod handoffs;
-mod memory;
+pub(crate) mod delegations;
+pub(crate) mod handoffs;
+pub(crate) mod memory;
 mod router;
 mod tools;
 mod upstream;
@@ -184,7 +184,8 @@ const FIRST_KIND: (&str, &str) = ("gpt-realtime-2.1", "cedar");
 /// and nothing of them is claimed.
 async fn status(State(app): State<App>) -> Json<Value> {
     let key = app.ears.key("openai").is_some();
-    let (model, voice) = (oracle::voice::model(), oracle::voice::voice());
+    // The model is the one a call opens with (`app.config.live_model`): one value, one place.
+    let (model, voice) = (app.config.live_model, oracle::voice::voice());
     let choice = voice_told(&app, &app.fleet.directory());
     let selected = &choice["gemini"];
     let second = choice["provider"] == "gemini";

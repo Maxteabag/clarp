@@ -198,6 +198,14 @@ def _no_real_agy_cli(_transcript_importer_quiescent, monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "no-agy-home"))
 
 
+@pytest.fixture(autouse=True)
+def _no_usage_refresher(monkeypatch):
+    """An in-process Host (build_server) starts its workers; the usage refresher
+    polls the providers 20 s later, the real Codex app-server among them, inside
+    whichever test is running by then. Tests call its run_once directly."""
+    monkeypatch.setenv("CLARP_USAGE_REFRESH_WORKER", "0")
+
+
 # ---- real provider CLIs, the network and the real HOME are never reached from a test ----
 #
 # A unit test once ran a real Claude Code turn through a handler that built its

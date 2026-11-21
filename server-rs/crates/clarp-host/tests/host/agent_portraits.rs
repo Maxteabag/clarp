@@ -583,7 +583,11 @@ fn startup_keeps_unreadable_portrait_publications_and_delivers_the_good_pair() {
     );
     host.kill();
     let db = open();
-    assert_eq!(db.list(&pending).unwrap(), retained);
+    // The one that is no publication is moved aside whole (`kept.rs`): its bytes stand under
+    // `<key>.unreadable` beside its freed key; the others are kept where they are.
+    let mut moved = retained.clone();
+    moved[0].0 = "a-invalid.unreadable".to_owned();
+    assert_eq!(db.list(&pending).unwrap(), moved);
     let remaining = db.list(&bytes).unwrap();
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].0, "b-missing-1");
