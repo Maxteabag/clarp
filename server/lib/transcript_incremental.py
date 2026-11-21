@@ -2492,10 +2492,14 @@ class _Shadow:
             self.ids_before = set(self.rows_before)
             self.witness_before = _witness_state(database, self.agent_id,
                                                  self.backend_session_id)
-            self.plan = message_writes.plan_transcript_tail(
-                agent_id=self.agent_id, backend_session_id=self.backend_session_id,
-                source_file=str(self.path), turns=tail, start_seq=old.boundary_seq,
-                carry=old.store_carry)
+            try:
+                self.plan = message_writes.plan_transcript_tail(
+                    agent_id=self.agent_id, backend_session_id=self.backend_session_id,
+                    source_file=str(self.path), turns=tail, start_seq=old.boundary_seq,
+                    carry=old.store_carry)
+            except message_writes._TailInvalidated as refused:
+                # The tail would give up to a full read (R108's shift rules): no plan to compare.
+                self.verdict = f"fallback:{getattr(refused, 'what', 'tail_invalidated')}"
         else:
             self.verdict = f"fallback:{reason}"
         self.boundary, why = choose_boundary(

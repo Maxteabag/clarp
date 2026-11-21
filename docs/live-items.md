@@ -67,7 +67,10 @@ Per kind:
 - `phase`: `commentary` (narration between tools) or `final` (the answer).
 - `row_id`: the `/log` message id that carries this text. It is stable: the live
   row is finalized in place, so the same id appears in `/log` when the turn is
-  imported.
+  imported. In a Claude message of several blocks, each text block's item names
+  its own block's row: block k counts the blocks the transcript keeps as lines of
+  their own (text, a client tool use; not thinking, a server tool or its result),
+  so two items of one message never share a `row_id`.
 
 **reasoning**: the model's thinking summary.
 - `text`: summary text (Claude `display: summarized`, Codex reasoning summaries,

@@ -357,6 +357,13 @@ Rules:
 - **A user message's `id` is `u-` + the `client_msg_id` the client sent.** So
   the optimistic bubble the client paints and the durable row the server files
   have the same id, and confirmation is an id lookup.
+- **Any other `id` is opaque.** The Host's own ids come in forms (`live-…` for
+  a row a turn streamed into, and for the first block of a provider message the
+  import stores under the same id; `blk-…` for that message's later blocks;
+  `msg-…` for a line without a provider message id, which follows its position
+  in the transcript), but a client never parses them: compare ids for equality
+  only. A row of a provider message keeps its id when the transcript's lines
+  shift; a positional `msg-` id changes with its line's position.
 - **`latest_revision` is the cursor.** Store it with the conversation and pass
   it back as `after_revision` on the next delta. After a delta, set the cursor
   to the response's `latest_revision`, which never exceeds the rows actually
