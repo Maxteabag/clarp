@@ -70,7 +70,7 @@ rules(KERNEL, 'vectors', [
     ('Local English models autodetect the language', 'if first.ends_with(".en")', 'if false'),
     ('A local model uses the agent language origin', 'language_origin = DEFAULT;', 'language_origin = OWN;'),
     ('ElevenLabs is handed a language set', 'heard::provider_of(first) == "elevenlabs" && spoken.len() > 1', 'false'),
-    ('A new agent is described without its contact assignment', '"assignment": "contact"', '"assignment": "voice"'),
+    ('A new agent is described without its pool assignment', '"assignment": "pool"', '"assignment": "voice"'),
     ('A new agent has no off indication', 'if provider == "none" { Some(PROVIDER_OFF) } else { None }', 'None::<&str>'),
     ('Archived agents and janitors count towards sharing', '(false, Some(key)) = (row.inactive, key(speech))', 'Some(key) = key(speech)'),
     ('An active agent counts its own voice as shared', 'shared.saturating_sub(1)', 'shared'),

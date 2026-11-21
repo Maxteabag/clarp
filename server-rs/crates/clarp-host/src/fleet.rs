@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 use clarp_actor::Profile;
 use clarp_kernel::devices::{self, PushBook, PushRow};
 use clarp_kernel::personas::{self, Book, Kept, Look, Made, Owner, PERSONALITY_MOST, Wanted};
-use clarp_kernel::{helpers, python, roster};
+use clarp_kernel::voice_names::Snapshot as VoiceCatalogue;
+use clarp_kernel::{helpers, languages, python, roster};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
@@ -282,11 +283,11 @@ pub enum Amend {
     /// voices, way of speaking, symbol and picture it takes on in place of its own, none
     /// where the persona has none (`contact_assignment.assign_contact`). Its conversation
     /// stays. Not told as a new name: whoever assigns it tells the apps.
-    Contact(String),
+    Contact(String, VoiceCatalogue),
     /// The contact `POST /agent-assign` gives it with `auto`, chosen in this turn: its own
     /// where it is in its pool, else the pool's first, else one minted for it (`fetched`: the
     /// voices of Cartesia's this Host has listed, what a minted contact's is picked from first).
-    ContactAuto(Vec<String>),
+    ContactAuto(VoiceCatalogue),
 }
 
 /// Why an agent was not changed.
@@ -384,12 +385,10 @@ pub struct Directory {
 
 /// The contact a launch asked for in place of a name of its own: always a minted one
 /// (`mint_contact`), or the first free one of its tool's pool and a minted one where there is
-/// none (`auto_contact`). `fetched`: the voices of Cartesia's this Host has listed, what a
-/// minted contact's voice is picked from first.
+/// none (`auto_contact`).
 #[derive(Debug, Clone, Default)]
 pub struct ContactAsked {
     pub mint: bool,
-    pub fetched: Vec<String>,
 }
 
 /// What an app says of a persona it makes or changes.
@@ -612,6 +611,7 @@ enum Ask {
         /// The contact the request asked for in place of a name of its own, chosen in this
         /// turn ([`ContactAsked`]).
         contact: Option<ContactAsked>,
+        catalogue: VoiceCatalogue,
         answer: Answer<Result<AgentRecord, NotMade>>,
     },
     /// An agent is started again in place. `dry`: only what would be is answered.
@@ -798,7 +798,7 @@ enum Ask {
     PersonaWrite {
         original: Option<String>,
         said: PersonaSaid,
-        fetched: Vec<String>,
+        fetched: VoiceCatalogue,
         /// Whether the apps are told the personas changed: not for a contact minted for an
         /// agent, of which the Python Host tells them nothing.
         announce: bool,
@@ -903,7 +903,8 @@ impl FleetHandle {
         request: CreateAgentRequest,
         forked: Option<String>,
     ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
-        self.create_contacted(request, forked, None).await
+        self.create_contacted(request, forked, None, VoiceCatalogue::default())
+            .await
     }
 
     /// Makes an agent as [`Self::create_as`] does, as the contact it asked for where it asked
@@ -916,11 +917,13 @@ impl FleetHandle {
         request: CreateAgentRequest,
         forked: Option<String>,
         contact: Option<ContactAsked>,
+        catalogue: VoiceCatalogue,
     ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
         self.ask(|answer| Ask::Create {
             request,
             forked,
             contact,
+            catalogue,
             answer,
         })
         .await
@@ -1173,7 +1176,7 @@ impl FleetHandle {
         &self,
         original: Option<String>,
         said: PersonaSaid,
-        fetched: Vec<String>,
+        fetched: VoiceCatalogue,
     ) -> Result<Result<serde_json::Value, String>, Unavailable> {
         self.ask(|answer| Ask::PersonaWrite {
             original,
@@ -1190,7 +1193,7 @@ impl FleetHandle {
     pub async fn persona_mint(
         &self,
         said: PersonaSaid,
-        fetched: Vec<String>,
+        fetched: VoiceCatalogue,
     ) -> Result<Result<serde_json::Value, String>, Unavailable> {
         self.ask(|answer| Ask::PersonaWrite {
             original: None,
@@ -1965,9 +1968,10 @@ impl Fleet {
                     request,
                     forked,
                     contact,
+                    catalogue,
                     answer,
                 } => {
-                    let _ = answer.send(Ok(self.create(request, forked, contact)));
+                    let _ = answer.send(Ok(self.create(request, forked, contact, &catalogue)));
                 }
                 Ask::StartAgain {
                     replaces,
@@ -2336,22 +2340,103 @@ impl Fleet {
         }));
     }
 
+    fn voice_pool_settings(&self) -> toml::Table {
+        let mut file = crate::owner::OwnerFile::new(self.works.config.speech_keys.clone())
+            .read()
+            .unwrap_or_default();
+        crate::owner::apply_speech_settings(&mut file, |key| {
+            self.settings.get(key).map(String::as_str)
+        });
+        file
+    }
+
+    /// The assignment and the write run in the same fleet turn.
+    fn assigned_voice(
+        &self,
+        file: &toml::Table,
+        owner: &Owner<'_>,
+        name: &str,
+        stored: &str,
+        catalogue: &VoiceCatalogue,
+    ) -> String {
+        let host = clarp_kernel::voice_profile::HostView {
+            voices: crate::owner::voices(file),
+            agent_languages: languages::languages(
+                self.settings
+                    .get(languages::AGENT_LANGUAGES_KEY)
+                    .map(String::as_str),
+            ),
+            language: languages::selected(
+                self.settings
+                    .get(languages::LANGUAGE_KEY)
+                    .map(String::as_str),
+                &self.works.config.speech_language,
+            ),
+            ..Default::default()
+        };
+        let configured = crate::owner::cartesia_pool(file);
+        let pool = clarp_kernel::voice_pool::Pool {
+            host: &host,
+            configured_cartesia: &configured,
+            catalogue,
+            roster: owner.roster,
+        };
+        let contacts = self.book.listed(owner);
+        let agents = self
+            .members
+            .iter()
+            .map(|member| &member.record)
+            .filter(|record| !record.is_janitor && record.archived_at_ms.is_none())
+            .map(|record| clarp_kernel::voice_pool::User {
+                name: &record.persona,
+                stored: &record.voice_id,
+                builtin: false,
+            });
+        let contacts = contacts
+            .iter()
+            .map(|contact| clarp_kernel::voice_pool::User {
+                name: contact["name"].as_str().unwrap_or(""),
+                stored: contact["voice_id"].as_str().unwrap_or(""),
+                builtin: contact["builtin"] == true,
+            });
+        let users: Vec<_> = agents.chain(contacts).collect();
+        let assigned = pool.assign(name, stored, &users);
+        for note in assigned.exhausted {
+            eprintln!(
+                "voicePoolExhausted provider={} pool={} shared_by={}",
+                note.provider, note.size, note.shared_by
+            );
+        }
+        assigned.stored
+    }
+
     /// The owner makes a persona, or changes one. What is kept is written before anybody
     /// is told: the picture first, then what names it.
     fn persona_write(
         &mut self,
         original: Option<&str>,
         said: &PersonaSaid,
-        fetched: &[String],
+        fetched: &VoiceCatalogue,
         announce: bool,
     ) -> Result<Result<serde_json::Value, String>, Unavailable> {
-        let [roster, cartesia, gemini] = self.works.telling.owner_tables();
+        let file = self.voice_pool_settings();
+        let [roster, cartesia, gemini] = crate::owner::personas(&file);
         let owner = Owner {
             roster: &roster,
             cartesia: &cartesia,
             gemini: &gemini,
         };
-        let voice_id = if said.voice_id.is_empty() {
+        let name = personas::named(&said.name).unwrap_or_else(|| said.name.clone());
+        let voice_id = if original.is_none() {
+            let stored = if said.voice_id.is_empty() {
+                "{}"
+            } else {
+                &said.voice_id
+            };
+            clarp_kernel::said::canonical_voice(
+                &self.assigned_voice(&file, &owner, &name, stored, fetched),
+            )
+        } else if said.voice_id.is_empty() {
             String::new()
         } else if let Some(original) = original {
             let current = self.book.named(&owner, original);
@@ -2374,13 +2459,12 @@ impl Fleet {
             personality: &said.personality,
             picture: &said.picture,
         };
-        // The voice it is given when its maker names none: one no agent and no persona has.
-        let voices = self.members.iter().map(|member| &member.record.voice_id);
-        let of_agents: HashSet<String> = voices
-            .filter_map(|voice| personas::cartesia_of(voice))
-            .collect();
-        let candidates = personas::candidate_voices(fetched, &owner);
-        let voice = personas::picked_voice(&candidates, &of_agents, &self.book.voices(&owner));
+        let voice = original
+            .filter(|_| voice_id.is_empty())
+            .and_then(|original| self.book.named(&owner, original))
+            .filter(|current| current["voice_id"].as_str().is_none_or(str::is_empty))
+            .map(|_| self.assigned_voice(&file, &owner, &name, "{}", fetched))
+            .unwrap_or_default();
         let mut book = (*self.book).clone();
         let changed = match original {
             None => {
@@ -2685,6 +2769,7 @@ impl Fleet {
         &mut self,
         backend: &str,
         contact: &ContactAsked,
+        catalogue: &VoiceCatalogue,
     ) -> Result<String, NotMade> {
         let pooled = {
             let personas = self.personas_listed();
@@ -2698,7 +2783,7 @@ impl Fleet {
         {
             return Ok(name);
         }
-        match self.mint_contact(backend, &contact.fetched) {
+        match self.mint_contact(backend, catalogue) {
             Ok(Some(name)) => Ok(name),
             Ok(None) => Err(Told::new(409, "contact_pool_empty", "contact_pool_empty").into()),
             Err(why) => Err(NotMade::Refused(why.0)),
@@ -2710,7 +2795,7 @@ impl Fleet {
     fn contact_of_assignment(
         &mut self,
         at: usize,
-        fetched: &[String],
+        fetched: &VoiceCatalogue,
     ) -> Result<Option<String>, Unavailable> {
         let record = self.members[at].record.clone();
         let decided = {
@@ -2741,7 +2826,7 @@ impl Fleet {
     fn mint_contact(
         &mut self,
         backend: &str,
-        fetched: &[String],
+        fetched: &VoiceCatalogue,
     ) -> Result<Option<String>, Unavailable> {
         let personas = self.personas_listed();
         let existing: Vec<String> = personas
@@ -2915,6 +3000,7 @@ impl Fleet {
         mut request: CreateAgentRequest,
         forked: Option<String>,
         contact: Option<ContactAsked>,
+        catalogue: &VoiceCatalogue,
     ) -> Result<AgentRecord, NotMade> {
         if let Some(parent) = request
             .parent
@@ -2954,7 +3040,7 @@ impl Fleet {
                 .filter(|backend| !backend.is_empty())
                 .unwrap_or("claude")
                 .to_string();
-            request.name = self.contact_of_launch(&backend, &contact)?;
+            request.name = self.contact_of_launch(&backend, &contact, catalogue)?;
             request.session = None;
         }
         let was_forked = forked.is_some();
@@ -3027,7 +3113,8 @@ impl Fleet {
         // Who it is made as: the persona of its name, built in or the owner's own. What the
         // request does not say of the agent is the persona's, and is written down with the
         // agent, so that it keeps it under another name.
-        let [named, cartesia, gemini] = self.works.telling.owner_tables();
+        let file = self.voice_pool_settings();
+        let [named, cartesia, gemini] = crate::owner::personas(&file);
         let owner = Owner {
             roster: &named,
             cartesia: &cartesia,
@@ -3058,6 +3145,11 @@ impl Fleet {
         let voice_id = match asked(&request.voice_id) {
             voice if voice.is_empty() => of_persona("voice_id").to_string(),
             voice => voice,
+        };
+        let voice_id = if role == "agent" && !was_forked {
+            self.assigned_voice(&file, &owner, &persona, &voice_id, catalogue)
+        } else {
+            voice_id
         };
         // Its picture: the one it is given, else the one its persona has of its own.
         let given = match personas::picture(&asked(&request.avatar_base64)) {
@@ -3201,14 +3293,14 @@ impl Fleet {
         // A contact chosen by the rule is chosen here, in the turn that gives it.
         let change = match change {
             Amend::ContactAuto(fetched) => match self.contact_of_assignment(at, &fetched)? {
-                Some(name) => Amend::Contact(name),
+                Some(name) => Amend::Contact(name, fetched),
                 None => return Ok(Err(NotAmended::NoContact)),
             },
             other => other,
         };
         let before = &self.members[at].record;
         let mut record = before.clone();
-        let assigned = matches!(change, Amend::Contact(_) | Amend::ContactAuto(_));
+        let assigned = matches!(change, Amend::Contact(..) | Amend::ContactAuto(_));
         match change {
             Amend::Mute(muted) => record.muted = muted,
             Amend::Heartbeat(on) => record.heartbeat_enabled = on,
@@ -3218,6 +3310,21 @@ impl Fleet {
                         owner: owner.persona.clone(),
                         session: owner.session.clone(),
                     }));
+                }
+                if record.persona != name {
+                    let file = self.voice_pool_settings();
+                    let [roster, _, _] = crate::owner::personas(&file);
+                    let host = clarp_kernel::voice_profile::HostView {
+                        voices: crate::owner::voices(&file),
+                        ..Default::default()
+                    };
+                    let pool = clarp_kernel::voice_pool::Pool {
+                        host: &host,
+                        configured_cartesia: &[],
+                        catalogue: &VoiceCatalogue::default(),
+                        roster: &roster,
+                    };
+                    record.voice_id = pool.pinned_before_rename(&record.persona, &record.voice_id);
                 }
                 record.persona = name;
             }
@@ -3274,14 +3381,15 @@ impl Fleet {
             }
             // Chosen above.
             Amend::ContactAuto(_) => {}
-            Amend::Contact(name) => {
+            Amend::Contact(name, catalogue) => {
                 if let Some(owner) = self.owner_of_name(&name, &record.agent_id) {
                     return Ok(Err(NotAmended::Occupied {
                         owner: owner.persona.clone(),
                         session: owner.session.clone(),
                     }));
                 }
-                let [named, cartesia, gemini] = self.works.telling.owner_tables();
+                let file = self.voice_pool_settings();
+                let [named, cartesia, gemini] = crate::owner::personas(&file);
                 let owner = Owner {
                     roster: &named,
                     cartesia: &cartesia,
@@ -3292,10 +3400,10 @@ impl Fleet {
                 };
                 let of_persona = |key: &str| persona[key].as_str().unwrap_or("").to_string();
                 record.persona = of_persona("name");
-                record.voice_id = match of_persona("voice_id") {
-                    voice if voice.is_empty() => "{}".to_string(),
-                    voice => voice,
-                };
+                let voice = of_persona("voice_id");
+                let voice = if voice.is_empty() { "{}" } else { &voice };
+                record.voice_id =
+                    self.assigned_voice(&file, &owner, &record.persona, voice, &catalogue);
                 record.personality = of_persona("personality");
                 record.avatar_symbol = of_persona("avatar_symbol");
                 record.avatar = persona["id"]

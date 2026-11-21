@@ -73,6 +73,7 @@ fn row(member: &Member) -> Row<'_> {
     Row {
         agent: speaker(&member.record),
         inactive: member.record.archived_at_ms.is_some() || member.record.is_janitor,
+        janitor: member.record.is_janitor,
     }
 }
 

@@ -3600,6 +3600,14 @@ overrides look up the agent ID first. `clarp-admin voice migrate` reports the ch
 requires a matching reviewed digest before applying them. The fleet saves only rows that
 sound the same under the speaker's resolver, along with the new transcription aliases.
 
+**Voices for new agents and contacts (PR 553, contract 123).** The fleet assigns voices
+as it creates new agents and contacts. The choice and the write run in the same turn.
+The configured Cartesia pool takes precedence. Otherwise, the pool uses the background
+catalogue's public, non-owner, non-deleted voices in the recipient's speech language,
+with the built-in pool as a fallback. A stable walk reserves built-in contacts' voices
+while other voices are free and chooses the least shared voice when the pool is exhausted.
+A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
+
 ## 7. Stages and gates
 
 Since 21 Nov 2026 at 12:39, stages, trains and pieces have no test gate of their own. A train lands when

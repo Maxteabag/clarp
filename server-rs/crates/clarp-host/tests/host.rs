@@ -101,6 +101,8 @@ mod voice_events;
 mod voice_maps;
 #[path = "host/voice_names.rs"]
 mod voice_names;
+#[path = "host/voice_pool.rs"]
+mod voice_pool;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
 
@@ -21615,7 +21617,12 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
         theo["agent"]["voice_profile"]["speech"]["shared_with"], 1,
         "{theo}"
     );
-    let stranger = made("Stranger");
+    let stranger = host.post(
+        "/agents",
+        json!({
+            "name":"Stranger","backend":"scripted","role":"helper","parent":maximus["session"],
+        }),
+    );
     let silent = speech_of(&stranger["agent"]["voice_profile"]);
     assert_eq!(
         (
@@ -21699,7 +21706,7 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     assert_eq!(
         first["voice_defaults"]["speech"],
         json!({ "provider": "cartesia", "provider_label": "Cartesia Sonic", "voice_id": null, "voice_label": null,
-                "origin": "default", "streaming": true, "assignment": "contact", "silent_reason": null })
+                "origin": "default", "streaming": true, "assignment": "pool", "silent_reason": null })
     );
     let version = |shot: &Value| shot["voice_profile_version"].as_str().unwrap().to_string();
     let v0 = version(&first);
