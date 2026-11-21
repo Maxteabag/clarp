@@ -1,0 +1,535 @@
+{
+  "uuids": [
+    {
+      "trace": "trace-one",
+      "uuid": "5905c1ea-7df9-5e20-9081-547464dcda44"
+    },
+    {
+      "trace": "trace-two",
+      "uuid": "8883f450-4710-598d-a6bb-7673056d9915"
+    },
+    {
+      "trace": " trace-one\n",
+      "uuid": "5905c1ea-7df9-5e20-9081-547464dcda44"
+    },
+    {
+      "trace": "\u2603-trace",
+      "uuid": "03cbd95b-4b21-52ca-8652-46e207ae6d0b"
+    },
+    {
+      "trace": "\u001ftrace-one\u001c",
+      "uuid": "5905c1ea-7df9-5e20-9081-547464dcda44"
+    }
+  ],
+  "launches": [
+    {
+      "trace": "trace-one",
+      "first": null,
+      "second": "plain",
+      "line": {
+        "type": "user",
+        "uuid": "5905c1ea-7df9-5e20-9081-547464dcda44",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "plain"
+            }
+          ]
+        }
+      },
+      "args": [
+        "claude",
+        "--resume",
+        "s"
+      ]
+    },
+    {
+      "trace": "trace-two",
+      "first": "first line\nmore",
+      "second": "second with \"quotes\"",
+      "line": {
+        "type": "user",
+        "uuid": "8883f450-4710-598d-a6bb-7673056d9915",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "first line\nmore"
+            },
+            {
+              "type": "text",
+              "text": "second with \"quotes\""
+            }
+          ]
+        }
+      },
+      "args": [
+        "claude",
+        "--resume",
+        "s",
+        "--resume-session-at",
+        "previous",
+        "--resume-drops-turn",
+        "original"
+      ]
+    },
+    {
+      "trace": "\u2603-trace",
+      "first": "\u2603",
+      "second": "two",
+      "line": {
+        "type": "user",
+        "uuid": "03cbd95b-4b21-52ca-8652-46e207ae6d0b",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "\u2603"
+            },
+            {
+              "type": "text",
+              "text": "two"
+            }
+          ]
+        }
+      },
+      "args": [
+        "claude",
+        "--resume",
+        "s",
+        "--resume-session-at",
+        "previous",
+        "--resume-drops-turn",
+        "original"
+      ]
+    }
+  ],
+  "streams": [
+    {
+      "provider": "claude",
+      "event": {},
+      "output": false
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "system",
+        "subtype": "init"
+      },
+      "output": false
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
+          "content_block": {
+            "type": "thinking"
+          }
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
+          "delta": {
+            "type": "thinking_delta"
+          }
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
+          "content_block": {
+            "type": "text"
+          }
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
+          "delta": {
+            "type": "text_delta"
+          }
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
+          "content_block": {
+            "type": "tool_use"
+          }
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
+          "delta": {
+            "type": "input_json_delta"
+          }
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
+          "content_block": {
+            "type": "server_tool_use"
+          }
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "assistant",
+        "message": {
+          "content": [
+            null,
+            {
+              "type": "thinking"
+            }
+          ]
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "thinking"
+            },
+            {
+              "type": "text"
+            }
+          ]
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "server_tool_use"
+            }
+          ]
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "assistant",
+        "message": {
+          "content": [
+            {
+              "type": "tool_result"
+            }
+          ]
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "result",
+        "subtype": "success"
+      },
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {},
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "init"
+      },
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": []
+      },
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "user_input",
+          "text_delta": "already sent"
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "checkpoint",
+          "text_delta": ""
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "agent_response",
+          "text_delta": ""
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "agent_response",
+          "text_delta": "\t "
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "agent_response",
+          "text_delta": "first word"
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "tool",
+          "text_delta": ""
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "agent_response",
+          "text_delta": true
+        }
+      },
+      "output": true
+    },
+    {
+      "provider": "agy",
+      "event": {
+        "event": "step_update",
+        "step_update": {
+          "step_type": "agent_response",
+          "text_delta": false
+        }
+      },
+      "output": false
+    }
+  ],
+  "transcripts": [
+    {
+      "transcript": null,
+      "prompt": "this",
+      "facts": {
+        "readable": false,
+        "found": false,
+        "resume_at": "",
+        "answered": false
+      }
+    },
+    {
+      "transcript": "",
+      "prompt": "this",
+      "facts": {
+        "readable": true,
+        "found": false,
+        "resume_at": "",
+        "answered": false
+      }
+    },
+    {
+      "transcript": "{\"type\": \"user\", \"uuid\": \"this\"}",
+      "prompt": "this",
+      "facts": {
+        "readable": true,
+        "found": true,
+        "resume_at": "",
+        "answered": false
+      }
+    },
+    {
+      "transcript": "{\"type\": \"assistant\", \"uuid\": \"before\"}\n{\"type\": \"user\", \"uuid\": \"this\"}",
+      "prompt": "this",
+      "facts": {
+        "readable": true,
+        "found": true,
+        "resume_at": "before",
+        "answered": false
+      }
+    },
+    {
+      "transcript": "{\"type\": \"user\", \"uuid\": \"earlier\"}\n{\"type\": \"summary\", \"uuid\": \"ignored\"}\n{\"type\": \"assistant\", \"uuid\": \"last\"}",
+      "prompt": "this",
+      "facts": {
+        "readable": true,
+        "found": false,
+        "resume_at": "last",
+        "answered": false
+      }
+    },
+    {
+      "transcript": "{\"type\": \"user\", \"uuid\": \"earlier\"}\n{\"type\": \"user\", \"uuid\": \"this\"}\n{half a line",
+      "prompt": "this",
+      "facts": {
+        "readable": true,
+        "found": true,
+        "resume_at": "earlier",
+        "answered": false
+      }
+    },
+    {
+      "transcript": "{\"type\": \"user\", \"uuid\": \"earlier\"}\n{\"type\": \"user\", \"uuid\": \"this\"}\n{\"type\": \"assistant\", \"uuid\": \"answer\"}",
+      "prompt": "this",
+      "facts": {
+        "readable": true,
+        "found": true,
+        "resume_at": "earlier",
+        "answered": true
+      }
+    },
+    {
+      "transcript": "1\n[]\n{\"type\": \"assistant\", \"uuid\": \"before\"}\n{\"type\": \"user\", \"uuid\": \"this\"}\n{\"type\": \"system\", \"uuid\": \"no\"}",
+      "prompt": "this",
+      "facts": {
+        "readable": true,
+        "found": true,
+        "resume_at": "before",
+        "answered": false
+      }
+    }
+  ],
+  "agy_guards": [
+    {
+      "turns": null,
+      "first": "first",
+      "allowed": false
+    },
+    {
+      "turns": [],
+      "first": "first",
+      "allowed": true
+    },
+    {
+      "turns": [],
+      "first": "  ",
+      "allowed": false
+    },
+    {
+      "turns": [
+        {
+          "role": "assistant",
+          "text": "first"
+        }
+      ],
+      "first": "first",
+      "allowed": true
+    },
+    {
+      "turns": [
+        {
+          "role": "user",
+          "text": "other"
+        }
+      ],
+      "first": "first",
+      "allowed": true
+    },
+    {
+      "turns": [
+        {
+          "role": "user",
+          "text": "prefix first suffix"
+        }
+      ],
+      "first": "\tfirst ",
+      "allowed": false
+    },
+    {
+      "turns": [
+        {
+          "role": "user",
+          "text": "First"
+        }
+      ],
+      "first": "first",
+      "allowed": true
+    },
+    {
+      "turns": [
+        {
+          "role": "user",
+          "text": null
+        }
+      ],
+      "first": "first",
+      "allowed": true
+    }
+  ]
+}
