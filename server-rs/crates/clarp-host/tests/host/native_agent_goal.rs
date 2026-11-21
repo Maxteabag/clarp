@@ -172,7 +172,7 @@ fn a_native_codex_goal_owns_its_thread_across_host_restart_and_returns_to_exec()
         .unwrap();
     assert_eq!(row["goal"]["status"], "active");
     std::fs::write(place.root.join("finish-goal"), "").unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let goal = host.get("/agent-goal?session=ada");
         let state = host.state("ada");

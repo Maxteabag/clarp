@@ -987,7 +987,10 @@ mod tests {
         let mut declared = std::collections::BTreeMap::new();
         for &(name, number) in kind::RECORDED {
             let previous = declared.insert(number, name);
-            assert!(previous.is_none(), "{name} and {previous:?} share record kind {number}");
+            assert!(
+                previous.is_none(),
+                "{name} and {previous:?} share record kind {number}"
+            );
         }
     }
 
