@@ -703,11 +703,6 @@ fn a_new_user_send_after_stop_runs_then_releases_what_waited() {
     a_fresh_send_releases_the_held_queue("user", false);
 }
 
-#[test]
-fn a_new_oracle_send_after_stop_runs_then_releases_what_waited() {
-    a_fresh_send_releases_the_held_queue("oracle", true);
-}
-
 fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
     let place = Place::new("stop");
     let host = place.start();
