@@ -986,7 +986,10 @@ mod tests {
                 activity: Activity::Thinking,
                 at_ms: 1_400,
             },
-            TurnEvent::Started { at_ms: 1_400, takeover: None },
+            TurnEvent::Started {
+                at_ms: 1_400,
+                takeover: None,
+            },
         ] {
             let mut wrong = waited.to_vec();
             wrong.push(illegal);
@@ -1158,7 +1161,10 @@ mod tests {
     #[test]
     fn a_log_that_makes_no_sense_is_refused() {
         let (_, accepted) = accepted();
-        let started = TurnEvent::Started { at_ms: 2, takeover: None };
+        let started = TurnEvent::Started {
+            at_ms: 2,
+            takeover: None,
+        };
         let thinking = TurnEvent::Moved {
             activity: Activity::Thinking,
             at_ms: 3,

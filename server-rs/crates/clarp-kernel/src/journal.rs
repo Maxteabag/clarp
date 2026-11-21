@@ -1118,7 +1118,10 @@ mod tests {
             .unwrap();
         let impossible = AgentEvent::Turn {
             turn: TurnId(1),
-            change: crate::turn::TurnEvent::Started { at_ms: 1, takeover: None },
+            change: crate::turn::TurnEvent::Started {
+                at_ms: 1,
+                takeover: None,
+            },
         };
         log.append(&[event_item(&impossible, 1).unwrap()]).unwrap();
         log.append(&[NewItem::new(kind::AGENT_EVENT, 2, b"not json".to_vec())])
@@ -1320,19 +1323,29 @@ mod tests {
         let mut recorder = open(&engine);
         assert_eq!(recorder.agent().selected_takeover(), Some(&selected));
         assert_eq!(rows(&recorder), ["u-first"]);
-        assert!(recorder
-            .handle(Command::ClearTakeover { from: TurnId(1) }, 5)
-            .unwrap()
-            .is_empty());
+        assert!(
+            recorder
+                .handle(Command::ClearTakeover { from: TurnId(1) }, 5)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(recorder.agent().selected_takeover(), None);
         assert_eq!(rows(&recorder), ["u-first"]);
         recorder.handle(select, 6).unwrap();
 
         let mut batch = recorder.batch();
-        batch.command(Command::FinishTakeover { from: TurnId(1) }, 7).unwrap();
+        batch
+            .command(Command::FinishTakeover { from: TurnId(1) }, 7)
+            .unwrap();
         assert_eq!(batch.agent().live_takeover(), Some(&selected.start));
         let committed = batch.commit().unwrap();
-        assert!(matches!(committed.effects.as_slice(), [Effect::StartTurn { turn: TurnId(2), .. }]));
+        assert!(matches!(
+            committed.effects.as_slice(),
+            [Effect::StartTurn {
+                turn: TurnId(2),
+                ..
+            }]
+        ));
         assert_eq!(rows(&recorder), ["u-first", "u-second"]);
         let end = recorder.agent().last().unwrap();
         assert_eq!(
