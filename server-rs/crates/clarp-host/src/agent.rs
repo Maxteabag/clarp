@@ -161,7 +161,25 @@ pub struct DelegationState {
     pub applied: Option<clarp_actor::bookkeeping::Applied>,
 }
 
+mod native_goal;
+
 enum Ask {
+    NativeGoal {
+        action: clarp_shim::codex_lane::GoalAction,
+        objective: String,
+        answer: native_goal::GoalAnswer,
+    },
+    NativeGoalReply {
+        result: Result<clarp_shim::codex_lane::Snapshot, String>,
+        answer: Option<native_goal::GoalAnswer>,
+    },
+    NativeGoalSeen(clarp_shim::codex_lane::Snapshot),
+    NativeGoalWatchLost,
+    NativeGoalReconciled(Result<clarp_shim::codex_lane::Snapshot, String>),
+    NativeGoalRetired {
+        thread: String,
+        released: bool,
+    },
     SetMove {
         to: Option<clarp_kernel::agent_moves::Target>,
         answer: Answer<clarp_kernel::agent_moves::Receipt>,
@@ -514,6 +532,7 @@ enum Ask {
 pub struct View {
     pub team_activity_ms: i64,
     pub last_real_message_ms: i64,
+    pub(crate) native_goal: Option<clarp_kernel::agent_goal::Goal>,
     pub latest_turn_start: i64,
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
@@ -771,6 +790,19 @@ impl AgentHandle {
             turn,
             id,
             text,
+            answer,
+        })
+        .await
+    }
+
+    pub(crate) async fn native_goal(
+        &self,
+        action: clarp_shim::codex_lane::GoalAction,
+        objective: String,
+    ) -> Result<Result<Option<clarp_kernel::agent_goal::Goal>, String>, Unavailable> {
+        self.ask(|answer| Ask::NativeGoal {
+            action,
+            objective,
             answer,
         })
         .await
@@ -1339,6 +1371,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     let (view_tx, view) = watch::channel(Arc::new(View {
         team_activity_ms: setup.record.created_at_ms,
         last_real_message_ms: 0,
+        native_goal: None,
         latest_turn_start: 0,
         status: idle,
         newest: None,
@@ -1357,6 +1390,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     }));
     let now_ms = setup.clock.now_ms();
     let worker = Worker {
+        native: native_goal::Native::default(),
         setup,
         actor: None,
         tx: tx.clone(),
@@ -1415,6 +1449,7 @@ enum QueueEdit {
 }
 
 struct Worker {
+    native: native_goal::Native,
     setup: Setup,
     actor: Option<Actor>,
     /// The way to this thread, for the turns' threads.
@@ -1789,7 +1824,11 @@ impl Worker {
             }
             // Whatever happened may have left a goal's owner resting, or ended what a goal
             // waits for.
-            if let Err(error) = self.handle(ask).and_then(|()| self.check_goals()) {
+            if let Err(error) = self
+                .handle(ask)
+                .and_then(|()| self.check_goals())
+                .and_then(|()| self.advance_native_goal())
+            {
                 eprintln!(
                     "clarp-host: agent {} failed and is opened again: {error}",
                     self.setup.record.session
@@ -2105,6 +2144,7 @@ impl Worker {
                 }
             }
         }
+        self.native.record = actor.native_goal().map_err(|error| error.to_string())?;
         self.actor = Some(actor);
         if let (Some(pool), Some(actor)) = (self.setup.pool(), self.actor.as_mut()) {
             actor.pooled(pool.of(&self.setup.record.agent_id));
@@ -2143,6 +2183,10 @@ impl Worker {
         self.read_speech();
         self.publish_view();
         self.after(out);
+        self.watch_native();
+        self.reconcile_native();
+        self.advance_native_goal()
+            .map_err(|error| error.to_string())?;
         // An answer that was given and not yet told when the Host went away is told now.
         self.settle_requests().map_err(|error| error.to_string())?;
         Ok(())
@@ -2547,6 +2591,39 @@ impl Worker {
     }
 
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
+        let ask = match ask {
+            Ask::NativeGoal {
+                action,
+                objective,
+                answer,
+            } => {
+                return self.request_native_goal(action, objective, answer);
+            }
+            Ask::NativeGoalReply { result, answer } => {
+                return self.finish_native_reply(result, answer);
+            }
+            Ask::NativeGoalSeen(state) => return self.observe_native(state),
+            Ask::NativeGoalReconciled(result) => return self.finish_native_reconcile(result),
+            Ask::NativeGoalWatchLost => {
+                self.lost_native_watch();
+                return Ok(());
+            }
+            Ask::NativeGoalRetired { thread, released } => {
+                return self.finish_native_retirement(&thread, released);
+            }
+            other => other,
+        };
+        if matches!(&ask, Ask::Stop { .. })
+            && self
+                .actor
+                .as_ref()
+                .is_some_and(|actor| actor.moved().is_none())
+        {
+            self.stop_native_goal()?;
+        }
+        if matches!(&ask, Ask::AccountStop) {
+            self.hold_native_for_account()?;
+        }
         if matches!(
             &ask,
             Ask::Stop { .. }
@@ -2736,6 +2813,12 @@ impl Worker {
             ));
         }
         let (out, owed) = match ask {
+            Ask::NativeGoal { .. }
+            | Ask::NativeGoalReply { .. }
+            | Ask::NativeGoalSeen(_)
+            | Ask::NativeGoalWatchLost
+            | Ask::NativeGoalReconciled(_)
+            | Ask::NativeGoalRetired { .. } => unreachable!("native goal handled above"),
             Ask::SetMove { to, answer } => {
                 let held = self
                     .held
@@ -3663,9 +3746,35 @@ impl Worker {
             }
             other => other,
         };
+        let action = match action {
+            Action::Launch(order) if self.native.owns() => {
+                self.launch_on_native_lane(order);
+                return;
+            }
+            other => other,
+        };
         let tx = self.tx.clone();
         let spawned = match action {
             Action::Launch(mut order) => {
+                if self.setup.record.backend == "codex"
+                    && let Some(thread) = self
+                        .actor
+                        .as_ref()
+                        .and_then(|actor| actor.status().backend_session)
+                    && let Err(error) = crate::codex_goal_lane::guard_exec(
+                        &mut order,
+                        &self.setup.profile.run_dir,
+                        &thread,
+                    )
+                {
+                    tell(
+                        &tx,
+                        order.turn,
+                        order.attempt,
+                        Told::Failed(error.to_string()),
+                    );
+                    return;
+                }
                 if self.setup.record.backend == "claude" {
                     if let Some(settings) = self
                         .setup
@@ -4074,6 +4183,7 @@ impl Worker {
         self.view.send_replace(Arc::new(View {
             team_activity_ms: prior.team_activity_ms.max(at).max(last_real_message_ms),
             last_real_message_ms,
+            native_goal: self.native.goal(),
             latest_turn_start: actor.latest_turn_start(),
             status,
             newest: self.newest.clone(),
@@ -4753,6 +4863,18 @@ fn refuse_for(
             Ok(Ask::Delivery { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RevisionAt { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::NativeGoal { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::NativeGoalReply {
+                answer: Some(answer),
+                ..
+            }) => drop(answer.send(Err(refusal()))),
+            Ok(
+                Ask::NativeGoalReply { answer: None, .. }
+                | Ask::NativeGoalSeen(_)
+                | Ask::NativeGoalWatchLost
+                | Ask::NativeGoalReconciled(_)
+                | Ask::NativeGoalRetired { .. },
+            ) => {}
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::ClaimLine { answer }) => drop(answer.send(Err(refusal()))),
             Ok(
@@ -4804,6 +4926,7 @@ mod mailbox_tests {
         let (_, view) = watch::channel(Arc::new(View {
             team_activity_ms: 0,
             last_real_message_ms: 0,
+            native_goal: None,
             latest_turn_start: 0,
             status: never_ran(),
             newest: None,

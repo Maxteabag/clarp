@@ -19,6 +19,7 @@
 //! A spool that says "spawned" belongs to a turn that must never be started again. A spool that
 //! does not belongs to a turn whose program was never given anything to do.
 
+mod codex_lane_login;
 mod codex_lane_runtime;
 mod codex_lane_socket;
 mod codex_lane_turns;

@@ -25,8 +25,18 @@ impl TurnSpool {
         pid: u32,
         now_ms: i64,
     ) -> io::Result<Self> {
+        Self::bind(SpoolWriter::create(path)?, thread, turn, pid, now_ms)
+    }
+
+    pub fn bind(
+        writer: SpoolWriter,
+        thread: String,
+        turn: String,
+        pid: u32,
+        now_ms: i64,
+    ) -> io::Result<Self> {
         let mut spool = Self {
-            writer: SpoolWriter::create(path)?,
+            writer,
             thread,
             turn,
             messages: BTreeMap::new(),
