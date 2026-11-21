@@ -121,15 +121,57 @@ class SteerState:
         self.tools: set[str] = set()      # tool calls started, no result yet
         self.results = 0                  # top-level results printed
         self.pending: dict[str, _Follow] = {}
+        # Lines waiting to be written, in order, by one writer thread that holds no lock
+        # while it writes: a follow-up bigger than the pipe, written while the CLI does not
+        # read its stdin, must never hold the lock the drain needs for every line.
+        self.outbox: list[tuple[str, str]] = []
+        self.writing = False
 
     def close(self) -> None:
-        """No more follow-ups: EOF to the CLI (the caller holds the lock)."""
+        """No more follow-ups: EOF to the CLI (the caller holds the lock). With a write
+        under way, the writer closes stdin after its last line."""
         if self.open:
             self.open = False
+            if not self.writing:
+                self._close_stdin()
+
+    def _close_stdin(self) -> None:
+        try:
+            self.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+    def send(self, uid: str, line: str) -> None:
+        """Queue one line for the writer (the caller holds the lock)."""
+        self.outbox.append((uid, line))
+        if not self.writing:
+            import threading
+            self.writing = True
+            threading.Thread(target=self._write_all, name="claude-steer-writer",
+                             daemon=True).start()
+
+    def _write_all(self) -> None:
+        while True:
+            with self.lock:
+                if not self.outbox:
+                    self.writing = False
+                    if not self.open:
+                        self._close_stdin()
+                    return
+                uid, line = self.outbox.pop(0)
             try:
-                self.stdin.close()
-            except OSError:
-                pass
+                self.stdin.write(line)
+                self.stdin.flush()
+                continue
+            except (OSError, ValueError) as exc:
+                log_exception("claudeSteerWriteFail", exc, detail=uid)
+            with self.lock:                       # not delivered: it runs as its own turn
+                follow = self.pending.pop(uid, None)
+            if follow is not None:
+                try:
+                    follow.on_unread()
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("claudeSteerUnreadFail", exc, detail=uid)
 
 
 def _tool_ids(ev: dict) -> tuple[list[str], list[str]]:
@@ -564,9 +606,8 @@ class ClaudeBackend(Backend):
             with state.lock:
                 if not state.open or not state.tools:
                     return False
-                state.stdin.write(line + "\n")
-                state.stdin.flush()
                 state.pending[uid] = _Follow(on_read, on_unread, state.results)
+                state.send(uid, line + "\n")          # written outside the lock
             return True
         return False
 
