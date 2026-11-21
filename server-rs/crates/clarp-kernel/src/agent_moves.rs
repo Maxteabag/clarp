@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const MOVED: &str = "agent_moved";
+pub const CONTINUATION_ERROR: &str =
+    "The agent moved to another Host; this turn does not continue here";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Target {

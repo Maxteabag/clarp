@@ -955,7 +955,17 @@ fn ending_notice(
         id: format!("n-{name}-{code}"),
         turn: Some(turn.0),
         code: code.to_string(),
-        text: reason.to_string(),
+        text: if reason == clarp_kernel::agent_moves::MOVED {
+            failures::told(
+                reason,
+                clarp_kernel::agent_moves::CONTINUATION_ERROR,
+                "",
+                failures::Known::default(),
+            )
+            .row
+        } else {
+            reason.to_string()
+        },
         trace_id,
     })
 }
@@ -1894,12 +1904,45 @@ impl Actor {
             return Ok(None);
         };
         let turn = waiting.id;
-        if waiting.ran {
-            self.ended_outside_the_spool(turn, Command::InterruptMovedRetry { turn }, now_ms)
-                .map(Some)
-        } else {
-            self.hold_unsent_for_move(turn, now_ms).map(Some)
+        if !waiting.ran {
+            return self.hold_unsent_for_move(turn, now_ms).map(Some);
         }
+
+        // A parked attempt has no process to end or spool to drain.
+        let message = self.message_at(waiting.message_seq)?;
+        let mut facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
+        facts.trace_id = message.trace_id;
+        facts.notes = notes_of(self.turn_notes, turn);
+        let notice = ending_notice(
+            turn,
+            turn_name(&message.id),
+            "turn-interrupted",
+            clarp_kernel::agent_moves::MOVED,
+            facts.trace_id.clone(),
+        );
+        let mut batch = self.recorder.batch();
+        batch
+            .command(Command::InterruptMovedRetry { turn }, now_ms)
+            .map_err(JournalError::Refused)?;
+        batch.item(written(&notice, now_ms)?);
+        if let Some(end) = closing(&mut batch, turn, notice.id(), facts) {
+            batch.item(written(&end, now_ms)?);
+        }
+        let effects = batch.commit()?.effects;
+        self.unstored_changes = 0;
+        self.held_for_an_account = false;
+        self.forget_live();
+        let mut out = Outputs {
+            changed: Changed {
+                status: true,
+                conversation: true,
+                queue: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        self.carry_out(effects, &mut out)?;
+        Ok(Some(out))
     }
 
     pub fn status(&self) -> Status {
@@ -3988,16 +4031,6 @@ impl Actor {
                 trace_id: facts.trace_id.clone(),
             })
             .map(|marker| (marker, false)),
-            Command::InterruptMovedRetry { .. } => {
-                let notice = ending_notice(
-                    turn,
-                    &name,
-                    "turn-interrupted",
-                    clarp_kernel::agent_moves::MOVED,
-                    facts.trace_id.clone(),
-                );
-                Some((notice, true))
-            }
             Command::TurnEnded {
                 outcome: RunOutcome::Interrupted { reason },
                 ..
