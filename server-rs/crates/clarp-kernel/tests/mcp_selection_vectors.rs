@@ -29,3 +29,15 @@ fn mcp_selection_matches_the_python_agent_creation_policy() {
     }
     assert_eq!(cases.len(), 17);
 }
+
+#[test]
+fn mcp_edit_matches_the_python_route_selection() {
+    let vectors: Value =
+        serde_json::from_str(include_str!("fixtures/mcp-edit-vectors.json")).unwrap();
+    let catalog = vectors["catalog"].as_object().unwrap();
+    for case in vectors["cases"].as_array().unwrap() {
+        let requested = case["requested"].as_array().unwrap();
+        let chosen = clarp_kernel::mcp::edited_selection(requested, catalog);
+        assert_eq!(json!(chosen), case["chosen"], "{requested:?}");
+    }
+}

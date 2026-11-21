@@ -11913,6 +11913,7 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
         "/agent-rename",
         "/agent-archive",
         "/agent-llm",
+        "/agent-mcp",
     ] {
         assert_eq!(
             post(control, json!({ "session": keeper })),
@@ -24657,7 +24658,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
         ("/server-update", json!({})),
-        ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
         ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));
