@@ -58,6 +58,17 @@ scope: a caller-selected root can contain configuration credentials, even
 though the operation is read-only. So do an agent's interactive terminal
 (`/terminal/<session>`) and `PATCH /schedules/<id>`.
 
+A limited device may `POST /paired-devices/revoke` with its own `device_id`
+(an app that finds it paired the wrong Host ends its own pairing); any other
+`device_id` answers `403 full device access required`. Its token stops working
+at once.
+
+`GET /pairing/identity` needs no token: it answers exactly `{"server_id",
+"name", "contract": {"host"}}`, so an app opening a pairing link can compare the
+link's `server_id` before it spends the one-time code. Each source may read it
+30 times a minute; more answer `429` with `Retry-After` (feature
+`pairing_identity`).
+
 Limited scope is an API permission boundary, not an agent sandbox. It still
 allows sending work to agents that run with the host user's permissions.
 
@@ -114,7 +125,9 @@ Rules:
   {"session": …}` is the only way the Host compacts an agent: it never does so
   by itself, on a timer, at a threshold or at launch. It answers at once
   (`{"ok": true, "status": "started"}`, `"already_compacting"`, or
-  `{"ok": false, "error": "<reason in words>"}`); `compacting` is true while it
+  `{"ok": false, "error": "<reason in words>"}`; 409). When it cannot start
+  at all it still answers in that shape: 503 with `"retryable": true` while
+  the runtime is unreachable, 500 otherwise; `compacting` is true while it
   runs, and a send that arrives meanwhile waits and runs after it, in order.
   When it ends, `last_compaction` is `{"outcome", "before_tokens",
   "after_tokens", "after_is_estimate", "detail", "backend", "at"}` (`at` in
@@ -833,7 +846,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 
 | Surface | Routes | Server module |
 |---|---|---|
-| Device pairing | `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
+| Device pairing | `GET /pairing/identity`, `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
 | Push notifications | `POST /devices` (APNs token, or an Android FCM token with `"platform": "android", "provider": "fcm"`: [push-android.md](push-android.md); an FCM registration may declare `"supported_conversation_modes": ["agent_live_v1"]`, which makes the phone Live-capable for `POST /calls/live` and Live rings, feature `agent_live_fcm`: [Live calls](push-android.md#live-calls-feature-agent_live_fcm-host-contract-94)), `DELETE /devices`, `GET /devices/push-tokens` ([unregistering](push-android.md#unregistering-and-revocation)), `POST`/`DELETE /devices/live-activity` (an ActivityKit token; or `"platform": "fcm"`, the agents-working summary for an Android phone, feature `live_activity_fcm`: [agents working](push-android.md#agents-working-feature-live_activity_fcm-host-contract-95)), `GET /notification-avatars/…`, `/attention` | `apns.py`, `fcm.py`, `user_notifications.py` |
 | Harness sign-in and usage | `/backend-auth` (`?harnesses=all` lists every harness), `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
 | Hotseat account status (read-only snapshot, `accounts_hotseat`) | `/hotseat/status` | `hotseat_status.py` |
@@ -1186,13 +1199,20 @@ advances. `since` is a Host time: when `next_since` is `null`, keep the answer's
 `server_now` for the next time (use `since=0` on the very first call). Every image deleted
 after `server_now` comes in a later answer; one deleted in the millisecond of the read may
 come twice. The Host keeps the record of a deleted image for good. `400` for a missing or
-negative `since` or a `limit` that is not a number. Any device that may read `GET /media`
+negative `since` or a `limit` that is not a number from 1 to 1,000. Any device that may read `GET /media`
 may read this.
 
-**Freshness.** `media-changed` (see the event table) is sent for an image published
-into a chat through `POST /media` (`change: "created"`), once per image a delete
-removed, also from the batch call (`"deleted"`), and for each favourite change that
-changed something (`"favorite"`, with `favorite`). `at` is the change's time in ms.
+**Freshness.** `media-changed` (see the event table) with `change: "created"` is sent
+once for every image added to a chat's gallery, whatever made it: published through
+`POST /media`, a podcast companion's concept image once it is saved, or an image a
+portrait generation run kept, when the run ends. `"deleted"` is sent once per image a
+delete removed, also from the batch call, and for each image a portrait generation run
+discarded, when the run ends. `"favorite"` (with `favorite`) for each favourite change that
+changed something. Each is sent after the change has committed; a save that rolls back
+sends nothing. `at` is the change's time in ms. `created` is a hint, idempotent per
+`asset_id`: a client may receive it more than once for the same image (rarely: a late write
+to a long-finished portrait run after the Host has stopped tracking that run) and must patch
+or re-read by `asset_id`, never append.
 
 **Who may.** A full device and the administrator. A limited device is refused the three
 writes with `403 full device access required`; it still reads `GET /media`, new keys

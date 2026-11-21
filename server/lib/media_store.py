@@ -258,6 +258,34 @@ def deleted_since(*, since: int, session: str = "", limit: int = 1000) -> dict[s
     return {"deleted": rows, "next_since": next_since, "server_now": server_now}
 
 
+def published_by(session: str, *, created_by_prefix: str, since: int,
+                 until: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The images one producer published into a chat between two times, as (kept, discarded):
+    kept are not deleted, discarded were deleted at or after ``since``. For a background job
+    that publishes from its own process (portrait generation), read when the Host learns the
+    job ended, so its gallery changes reach the events stream (media-changed). Reads the page
+    index for the kept and the chat's tombstone index for the discarded, each from ``since``."""
+    if not session:
+        return [], []
+    con = db.conn()
+    columns = "asset_id, agent_id, session, created_by, created_at, deleted_at"
+    kept = [dict(r) for r in con.execute(
+        f"""SELECT {columns} FROM media_assets
+             WHERE session = ? AND deleted_at IS NULL AND created_at >= ? AND created_at <= ?
+               AND mime_type IN ({_IMAGE_IN})""",
+        (session, int(since), int(until), *_IMAGE_MIMES)).fetchall()]
+    discarded = [dict(r) for r in con.execute(
+        f"""SELECT {columns} FROM media_assets
+             WHERE session = ? AND deleted_at IS NOT NULL AND deleted_at >= ?
+               AND mime_type IN ({_IMAGE_IN})""",
+        (session, int(since), *_IMAGE_MIMES)).fetchall()]
+    mine = lambda rows: sorted(
+        (r for r in rows if str(r["created_by"] or "").startswith(created_by_prefix)
+         and int(since) <= int(r["created_at"]) <= int(until)),
+        key=lambda r: (r["created_at"], r["asset_id"]))
+    return mine(kept), mine(discarded)
+
+
 def _cursor(row: dict[str, Any], favorites: bool) -> str:
     at = row["favorite_at"] if favorites else row["created_at"]
     return f"{'f' if favorites else 'c'}{int(at)}.{row['asset_id']}"

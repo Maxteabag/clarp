@@ -446,31 +446,6 @@ EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
 # differences to explain one by one, they are one feature that is not there yet. The register
 # of what is not there yet is server-rs/docs/differences.md.
 NOT_YET = {
-    # What the user's last compaction of an agent did, from numbers (`last_compaction` on its
-    # row of the snapshot, the Python Host's PR 483, R148): `null` there until the agent is
-    # compacted. The port to the Rust Host is owed; its contract stays 106 until it lands.
-    'compaction_outcome': {
-        'fields': ('last_compaction',),
-        'events': (),
-    },
-    # What an agent sounds like and how it is heard, as the Host resolves them (the Python Host's
-    # PR 485, its contract 109): `voice_profile` on an agent's row of the snapshot, on the
-    # creation answer and on the roster's events; `voice_defaults` and `voice_profile_version` on
-    # the snapshot's head; and the two kinds of roster event that only carry it (`voice-changed`
-    # for one agent, `voice-profile` for a change of the whole Host). An event is named here by
-    # its type and kind. The port to the Rust Host is owed; its contract stays 106 until it lands.
-    'voice_profile': {
-        'fields': ('voice_profile', 'voice_defaults', 'voice_profile_version'),
-        'events': ('agent-roster/voice-changed', 'agent-roster/voice-profile'),
-    },
-    # Why a reply was not spoken (`reason`, `provider` and `trace_id` on `tts-error`, once a turn,
-    # also when no provider had a voice for the agent; the same PR): no scenario of the corpus
-    # has a reply that is not spoken, and those names are too common to be left out everywhere,
-    # so nothing is left out for it. The port is owed with the one above.
-    'speech_outcome': {
-        'fields': (),
-        'events': (),
-    },
 }
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
@@ -495,15 +470,6 @@ NOT_BUILT = {
     # (the scenario live-items turns it off on both).
     "the explaining of a tool's use": {
         'fields': ('tool_explanations',),
-        'events': (),
-    },
-    # Whom a row, a live turn and a dispatch's working state are for (`audience`: 'agents' for a
-    # turn another agent's message started, else 'user'), the coordination between agents of the
-    # Python Host's PR 482 (its contract 108); no feature stands for it until `hidden_coordination`
-    # is advertised. A name no other answer carries. The port to the Rust Host is owed; its
-    # contract stays 106 until it lands.
-    'coordination between agents': {
-        'fields': ('audience',),
         'events': (),
     },
 }
@@ -711,6 +677,15 @@ def own_particulars(body):
     if out.get('clarp_version'):
         out['clarp_version'] = '<version>'
     return out
+
+
+def own_version_of_voices(body):
+    """A snapshot with the version of the Host's part of its agents' voices as just that: each
+    Host makes its own from what it reads (docs/differences.md); what it is held to is that it
+    is a text, and when it moves (crates/clarp-host/tests/host.rs)."""
+    if isinstance(body, dict) and isinstance(body.get('voice_profile_version'), str):
+        return {**body, 'voice_profile_version': '<version>'}
+    return body
 
 
 def conversation_of(value: dict, otherwise: str) -> str:
@@ -941,7 +916,8 @@ def core(raw: dict) -> dict:
     janitors_made = made_new(raw['http'], {}, nameless=raw.get('scenario') in NAMELESS)
     if janitors_made:
         raw = {**raw, 'http': by_name(raw['http'], janitors_made), 'sse': by_name(raw['sse'], janitors_made)}
-    http = [{**exchange, 'body': own_particulars(without_features(exchange['body']))} for exchange in raw['http']]
+    http = [{**exchange, 'body': own_version_of_voices(own_particulars(without_features(exchange['body'])))}
+            for exchange in raw['http']]
     http = [{**exchange, 'body': outline(exchange['body'])} if exchange.get('path') in NOT_KEPT and exchange.get('status') == 200
             else exchange for exchange in http]
     http = [{**exchange, 'body': kept_where(exchange['body'])} if exchange.get('path') == '/upload' else exchange

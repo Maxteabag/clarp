@@ -10,6 +10,7 @@
 
 use clarp_backend::claude::ClaudeInterpreter;
 use clarp_backend::{Interpreter, Signal};
+use clarp_kernel::compaction::Boundary;
 use clarp_kernel::conversation::ToolStatus;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -53,6 +54,7 @@ fn stored(signals: &[Signal]) -> Vec<&Signal> {
                     | Signal::Model(_)
                     | Signal::Usage { .. }
                     | Signal::Context { .. }
+                    | Signal::Concluded
                     | Signal::Cost { .. }
             )
         })
@@ -68,7 +70,7 @@ fn shown(fixture: &str) -> (clarp_kernel::live::View, usize) {
     let mut hub = Hub::new("epoch-1", "agent-1", "claire");
     let mut client = View::new();
     client.apply_snapshot(&json!({"epoch": "epoch-1", "lseq": 0}));
-    let mut sent = hub.begin_turn("claire", "conv-1", "tr-1", None, 0);
+    let mut sent = hub.begin_turn("claire", "conv-1", "tr-1", None, "user", 0);
     let mut t = 0;
     for signal in read(fixture) {
         t += 1;
@@ -242,9 +244,10 @@ fn a_real_conversation_made_shorter_moves_the_agent_and_says_nothing() {
     // Recorded on 17 Nov 2026 with Claude Code 2.1.321 on Sonnet, started as the Host starts a
     // turn (print mode, a session continued by its name), with `/compact` for its message,
     // after two short turns in that session. It says that it is making the conversation
-    // shorter, then how much shorter (30,729 tokens before, 8,957 after), and ends well
-    // without a word of its own: its summary of the conversation and the echo of the command
-    // come as messages of the user's, and are nobody's words. The session keeps its name.
+    // shorter, then how much shorter (30,729 tokens before, 8,957 after: its record of the
+    // compaction), and ends well without a word of its own: its summary of the conversation
+    // and the echo of the command come as messages of the user's, and are nobody's words. The
+    // session keeps its name.
     let signals = read("claude-2.1.321-compact.jsonl");
     let stored = stored(&signals);
     assert_eq!(
@@ -255,6 +258,12 @@ fn a_real_conversation_made_shorter_moves_the_agent_and_says_nothing() {
                 backend_session: SESSION.to_string()
             },
             &Signal::Moved(Activity::Thinking),
+            // The tool's own record of it, with both sizes: what the user's compaction did is
+            // said from it (`clarp_kernel::compaction`).
+            &Signal::Compacted(Boundary {
+                pre_tokens: 30_729,
+                post_tokens: Some(8_957),
+            }),
             &Signal::Ended(RunOutcome::Completed),
         ],
         "{stored:#?}"
