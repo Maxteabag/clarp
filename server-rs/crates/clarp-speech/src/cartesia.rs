@@ -33,7 +33,11 @@ pub fn all_voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, S
     catalogue(key, endpoint, false, 20)
 }
 
-pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<serde_json::Value, crate::LookupError> {
+pub fn voice_by_id(
+    key: &str,
+    endpoint: &str,
+    id: &str,
+) -> Result<serde_json::Value, crate::LookupError> {
     let path = crate::voice_names::segment(id);
     voice_json(key, &format!("{}/{path}", endpoint.trim_end_matches('/')))
 }

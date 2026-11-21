@@ -77,10 +77,13 @@ ALL_KEYS = {'cartesia': True, 'elevenlabs': True, 'gemini': True, 'deepgram': Tr
 
 def view(made: dict) -> dict:
     """What a case says of the Host: its settings, its keys and the rest of its view."""
-    return {'settings': made['settings'], 'keys': made.get('keys', ALL_KEYS),
+    seen = {'settings': made['settings'], 'keys': made.get('keys', ALL_KEYS),
             'google_refusal': made.get('google_refusal'), 'engine': made.get('engine', 'local'),
             'language': made.get('language', 'en'), 'agent_engines': made.get('agent_engines', {}),
             'agent_languages': made.get('agent_languages', {})}
+    if 'gone' in made:
+        seen['gone'] = made['gone']
+    return seen
 
 
 @tool_scratch.case('clarp-voice-profile-vectors-')
@@ -118,6 +121,7 @@ def run(root) -> dict:
         return voice_profile.HostView(
             cfg=cfg, keys=dict(seen['keys']), google_refusal=seen['google_refusal'], adapters={},
             labels={**labels, 'gemini': gemini}, engine=seen['engine'],
+            gone={provider: frozenset(ids) for provider, ids in seen.get('gone', {}).items()},
             language=stt_language.parse_language(seen['language']),
             agent_engines={str(k).strip().lower(): v for k, v in seen['agent_engines'].items()},
             agent_languages={str(k).strip().lower(): v for k, v in seen['agent_languages'].items()})
@@ -152,6 +156,15 @@ def run(root) -> dict:
                            {'settings': settings(provider, tts_fallback=fallback)}, agent_of(persona, stored))
     # The owner's entry for one agent, speech off, keys missing, Google refused, an engine of nobody's.
     zed = agent_of('Zed', '{}')
+    spoken('a deleted Cartesia voice is unavailable', {
+        'settings': settings(), 'gone': {'cartesia': [ADA_CARTESIA]}},
+        agent_of('Ada', '{}'))
+    spoken('a deleted ElevenLabs voice is unavailable', {
+        'settings': settings('elevenlabs'), 'gone': {'elevenlabs': [ELEVEN_ID]}},
+        agent_of('Ada', ELEVEN_ID))
+    spoken('a deleted ElevenLabs voice without a key is not configured', {
+        'settings': settings('elevenlabs'), 'gone': {'elevenlabs': [ELEVEN_ID]},
+        'keys': {**ALL_KEYS, 'elevenlabs': False}}, agent_of('Ada', ELEVEN_ID))
     entry = {'zed': {'provider': 'gemini', 'gemini_voice': 'Leda'}}
     spoken('an entry moves the agent to gemini with its voice', {'settings': settings(tts_agent_overrides=entry)},
            zed)
