@@ -293,6 +293,14 @@ def reap_exited_turns(*, limit: int = MAX_REAPED) -> int:
             continue
         turn_exited(row['turn_token'])
         count += 1
+    return count
+
+
+def prune_exited_turns() -> None:
+    """Drop turns that exited longer ago than TURN_RETENTION_MS. No index holds
+    exited_at, so looking reads the whole table; the observer does it with its
+    evidence sweep, not on every visit (a week's retention needs no more)."""
+    c = db.conn()
     cutoff = db.now_ms() - TURN_RETENTION_MS
     if c.execute('SELECT 1 FROM provider_turns WHERE exited_at<? LIMIT 1', (cutoff,)).fetchone():
         c.execute('BEGIN IMMEDIATE')
@@ -304,7 +312,6 @@ def reap_exited_turns(*, limit: int = MAX_REAPED) -> int:
         except BaseException:
             c.execute('ROLLBACK')
             raise
-    return count
 
 
 def _evidence_lost(c, now: int, limit: int) -> list:
@@ -479,6 +486,11 @@ class ProviderJobObserver:
         self.continue_soon = False
         self._sweep_backlog = False
         self._evidence_swept_at = float('-inf')
+        # The transcripts of the round in progress. A visit takes MAX_TRANSCRIPTS of them
+        # and the next comes at once while the round is unfinished, so asking SQLite for
+        # them every visit ran the join four times a second without end on a Host with a
+        # few hundred sessions. A session that appears meanwhile joins the next round.
+        self._round: list | None = None
 
     def poll_once(self) -> None:
         from . import backends
@@ -491,21 +503,17 @@ class ProviderJobObserver:
         if time.monotonic() - self._evidence_swept_at >= EVIDENCE_SWEEP_SEC:
             self._evidence_swept_at = time.monotonic()
             try:
+                prune_exited_turns()
+            except Exception as exc:
+                log_exception('providerTurnPruneFail', exc)
+            try:
                 if sweep_lost_evidence() >= MAX_ACTIONS:
                     self._evidence_swept_at = float('-inf')  # More next visit.
             except Exception as exc:
                 log_exception('providerEvidenceSweepFail', exc)
-        rows = db.conn().execute('''SELECT a.agent_id,a.session,r.backend_session_id,
-            MIN(r.started_at) AS bound_at,
-            MAX(CASE WHEN r.ended_at IS NULL THEN 1 ELSE 0 END) AS live
-            FROM agents a JOIN runtimes r ON r.agent_id=a.agent_id
-            WHERE (a.backend='claude' OR EXISTS (SELECT 1 FROM provider_job_cursors pc
-              WHERE pc.agent_id=a.agent_id AND pc.native_id=r.backend_session_id))
-            AND r.backend_session_id!=''
-            AND (r.ended_at IS NULL OR r.ended_at>? OR EXISTS (
-              SELECT 1 FROM background_jobs j WHERE j.agent_id=a.agent_id
-              AND j.kind='provider-task' AND j.terminal_at IS NULL))
-            GROUP BY a.agent_id,r.backend_session_id ORDER BY a.agent_id,r.backend_session_id''', (db.now_ms() - 86_400_000,)).fetchall()
+        if self._round is None:
+            self._round = self._transcripts()
+        rows = self._round
         ordered = [r for r in rows if (r['agent_id'], r['backend_session_id']) > self.after]
         ordered = ordered or rows
         self.continue_soon = False
@@ -532,6 +540,24 @@ class ProviderJobObserver:
             self.continue_soon = not round_complete or self._sweep_backlog
             if round_complete:
                 self._sweep_backlog = False
+                self._round = None
+        else:
+            self._round = None
+
+    @staticmethod
+    def _transcripts() -> list:
+        """Every (agent, native session) the observer reads, in visiting order."""
+        return db.conn().execute('''SELECT a.agent_id,a.session,r.backend_session_id,
+            MIN(r.started_at) AS bound_at,
+            MAX(CASE WHEN r.ended_at IS NULL THEN 1 ELSE 0 END) AS live
+            FROM agents a JOIN runtimes r ON r.agent_id=a.agent_id
+            WHERE (a.backend='claude' OR EXISTS (SELECT 1 FROM provider_job_cursors pc
+              WHERE pc.agent_id=a.agent_id AND pc.native_id=r.backend_session_id))
+            AND r.backend_session_id!=''
+            AND (r.ended_at IS NULL OR r.ended_at>? OR EXISTS (
+              SELECT 1 FROM background_jobs j WHERE j.agent_id=a.agent_id
+              AND j.kind='provider-task' AND j.terminal_at IS NULL))
+            GROUP BY a.agent_id,r.backend_session_id ORDER BY a.agent_id,r.backend_session_id''', (db.now_ms() - 86_400_000,)).fetchall()
 
 
 def poll_once() -> None:
