@@ -82,6 +82,48 @@ def capturing_handed():
         _HANDED.reset(token)
 
 
+@contextlib.contextmanager
+def sending_audio():
+    """Around the very call that sends a recording to a provider (R175): the attempt
+    counts as sent from here on, a reply or not, unless the request provably never left
+    (the connection was refused, the host name did not resolve). Whatever an adapter does
+    before this (decoding the clip, fetching a token, a missing project) sends nothing.
+    Only records, and only inside a capture."""
+    seen = _HANDED.get()
+    already = seen is not None and seen.get("sent", False)
+    if seen is not None:
+        seen["sent"] = True
+    try:
+        yield
+    except BaseException as error:
+        if seen is not None and not already and _never_left(error):
+            seen.pop("sent", None)
+        raise
+
+
+def _never_left(error: BaseException | None) -> bool:
+    """Whether a failure happened before the request could leave the Host."""
+    import socket
+    import urllib.error
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, urllib.error.HTTPError):
+            return False                                    # the provider answered
+        if isinstance(error, (ConnectionRefusedError, socket.gaierror)):
+            return True
+        if isinstance(error, urllib.error.URLError) and isinstance(
+                error.reason, (ConnectionRefusedError, socket.gaierror)):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
+def was_sent(capture: dict) -> bool:
+    """Whether the recording reached the provider in this captured attempt (R175)."""
+    return bool(capture.get("sent"))
+
+
 def note_handed(language: str | None) -> None:
     """At an engine boundary: the language handed (``auto`` = no constraint).
     Only records, and only inside a capture."""
