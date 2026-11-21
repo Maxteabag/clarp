@@ -98,6 +98,10 @@ def compact_session(session: str, *, dispatch: Any = None) -> dict[str, Any]:
     agent = agents_db.get_by_session(session)
     if agent and not agents_db.interaction_capabilities(agent)["can_restart"]:
         return _refuse(session, "Janitors are managed from their configuration")
+    from . import agent_moves
+    if agent and agent_moves.moved(agent["agent_id"]) is not None:
+        # Its session is the other Host's now (lib.agent_moves).
+        return _refuse(session, "the agent moved to another Host")
     if _runtime_client is not None:
         return _runtime_client.compact(session)
     if not agent:

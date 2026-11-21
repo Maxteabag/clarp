@@ -172,6 +172,11 @@ def _stop_holds(spec: _TurnSpec) -> bool:
     Resume. A Stop takes the arrival right back from work already queued
     (``prepare_queued_for_finish``), as ``turn_queue.set_paused`` does for rows.
     """
+    from . import agent_moves
+    if agent_moves.moved(spec.agent_id) is not None:
+        # Moved to another Host: nothing it waits for starts here, whatever
+        # right it had to run past a pause; the way back releases it.
+        return True
     if spec.bypass_pause or not turn_queue.is_paused(spec.agent_id):
         return False
     from . import task_goal_recovery

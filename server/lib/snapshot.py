@@ -437,6 +437,9 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     agent_rows = agents_db.list_agents()
     # The user's last compaction of each agent and what it did (R148).
     last_compactions = compaction.last_outcomes([str(r["agent_id"]) for r in agent_rows])
+    # Agents that moved to another Host (lib.agent_moves): {to: {host, id}, at} or None.
+    from . import agent_moves
+    moves = agent_moves.all_moved()
     persona_rows = persona_store.list_all()
     personas_by_key = {
         str(row["name"]).strip().casefold(): row
@@ -646,6 +649,8 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             # compacted / not_compacted / unknown (docs/protocol.md). None
             # until the agent has been compacted (feature compaction_outcome).
             "last_compaction": last_compactions.get(agent_id),
+            # Moved to another Host: no turn of it starts here (feature agent_moved).
+            "moved":          moves.get(agent_id),
             "queued_turn_count": queue_states.get(agent_id, {}).get("count", 0),
             "queued_turn_revision": queue_states.get(agent_id, {}).get("revision", 0),
             "queue_paused": bool(queue_states.get(agent_id, {}).get("paused", False)),
