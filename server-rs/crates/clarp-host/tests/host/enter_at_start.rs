@@ -38,7 +38,11 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     // Give each stand-in its own gate so a stopped turn cannot take the next turn's signal.
     let took = place.root.join("took");
     let script = [
-        "#!/bin/sh\nread -r message\n",
+        "#!/bin/sh\n",
+        // The stand-in implements separate turns. A version probe neither takes a turn
+        // nor advertises takeover or streaming follow-ups.
+        "if [ \"$1\" = --version ]; then exit 0; fi\n",
+        "read -r message\n",
         &format!(
             "printf '%s %s\\n' \"$$\" \"$message\" >> \"{took}\"\n\
              while [ -d \"{root}\" ] && [ ! -f \"{root}/go-$$\" ]; do sleep 0.05; done\n",
@@ -188,9 +192,18 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
         json!({ "session": session, "text": "later", "client_msg_id": "l6", "queue_if_busy": true }),
     );
     assert_eq!(later["queued"], true, "{later}");
+    assert_eq!(
+        queue(&host),
+        waiting(&[
+            ("m2", "two"),
+            ("l6", "later"),
+            ("t3", "three"),
+            ("a4", "four")
+        ])
+    );
     let items = queue_items(&host);
     let waiting_item = &items[0];
-    let later_item = &items[3];
+    let later_item = &items[1];
     let sent_at = waiting_item["sent_at"].clone();
     for (item, id, kind) in [(waiting_item, "m2", "waiting"), (later_item, "l6", "later")] {
         assert_eq!(item["id"], id);
@@ -255,7 +268,8 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     // The first answers: the second starts, on its new words, and only now is a row, below
     // the answer that did not read it.
     answer(0);
-    wait_for("the second turn to run", || taken().len() == 2);
+    wait_for("the second turn to run", || taken().len() >= 2);
+    assert_eq!(taken().len(), 2, "{:?}", taken());
     assert!(taken()[1].1.contains("two, better"), "{:?}", taken());
     wait_for("the second message's row", || {
         users(&host) == ["u-m1", "u-m2"]

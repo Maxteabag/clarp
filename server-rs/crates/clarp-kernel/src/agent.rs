@@ -2569,20 +2569,20 @@ mod tests {
         let mut a = Driven::new();
         a.user(1);
         a.background(2);
-        a.agent
-            .apply(&AgentEvent::Turn {
+        let legacy = AgentEvent::Turn {
+            turn: TurnId(3),
+            change: TurnEvent::Accepted {
                 turn: TurnId(3),
-                change: TurnEvent::Accepted {
-                    turn: TurnId(3),
-                    message_seq: 3,
-                    origin: Origin::User,
-                    admission: Admission::Queue,
-                    at_ms: 3,
-                    coordination: None,
-                    user_word: None,
-                },
-            })
-            .unwrap();
+                message_seq: 3,
+                origin: Origin::User,
+                admission: Admission::Queue,
+                at_ms: 3,
+                coordination: None,
+                user_word: None,
+            },
+        };
+        a.agent.apply(&legacy).unwrap();
+        a.history.push(legacy);
         a.background(4);
         a.user(5);
         let waiting: Vec<_> = a.agent.waiting().map(|queued| queued.id).collect();

@@ -871,7 +871,7 @@ mod tests {
     fn only_google_audio_requests_count_as_sent() {
         let refusal = ("400 Bad Request", "{}".to_string());
         for (name, script, sent, count) in [
-            ("token-only", vec![refusal.clone()], false, 1),
+            ("token-only", vec![refusal.clone(); 2], false, 2),
             (
                 "sent-piece",
                 vec![token("fixture"), refusal, heard("Next.")],
@@ -896,7 +896,15 @@ mod tests {
             assert!(chirp.hear_observed(clip, asked, &mut observed).is_err());
             assert_eq!(observed.handed.as_deref(), Some("en"));
             assert_eq!(observed.sent(), sent, "{name}");
-            assert_eq!(taken.lock().unwrap().len(), count, "{name}");
+            let requests = taken.lock().unwrap();
+            assert_eq!(requests.len(), count, "{name}");
+            if !sent {
+                assert!(
+                    requests
+                        .iter()
+                        .all(|request| request.starts_with("POST /token "))
+                );
+            }
             std::fs::remove_file(file).unwrap();
         }
     }
