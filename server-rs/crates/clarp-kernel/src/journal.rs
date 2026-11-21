@@ -2082,16 +2082,32 @@ mod tests {
                 .unwrap();
             assert!(!accepted.entered);
             let turn = accepted.turn.unwrap();
-            recorder.handle(Command::Join {
-                turn,
-                join: crate::steering::Join {
-                        into: TurnId(1),
-                        uuid: uuid.to_string(),
-                },
-            }, 3).unwrap();
-            assert_eq!(recorder.reword(turn, |_| panic!("the reserved text is immutable"), 4).unwrap(), Reworded::NotWaiting);
+            recorder
+                .handle(
+                    Command::Join {
+                        turn,
+                        join: crate::steering::Join {
+                            into: TurnId(1),
+                            uuid: uuid.to_string(),
+                        },
+                    },
+                    3,
+                )
+                .unwrap();
+            assert_eq!(
+                recorder
+                    .reword(turn, |_| panic!("the reserved text is immutable"), 4)
+                    .unwrap(),
+                Reworded::NotWaiting
+            );
             assert!(matches!(
-                recorder.handle(Command::Withdraw { turn, by: "user".into() }, 5),
+                recorder.handle(
+                    Command::Withdraw {
+                        turn,
+                        by: "user".into()
+                    },
+                    5
+                ),
                 Err(JournalError::Refused(Refusal::NotWaiting(_))),
             ));
         }
