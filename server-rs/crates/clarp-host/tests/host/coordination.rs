@@ -1062,6 +1062,19 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
         "{row}"
     );
     assert_eq!(host.get("/live?session=oak")["turn"]["audience"], "user");
+    let hidden = host.get("/log?session=oak&coordination=hide");
+    assert_eq!(hidden["coordination"]["visibility"], "hide");
+    for id in ["u-saved", "u-c-1"] {
+        assert!(
+            hidden["turns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == id),
+            "{hidden}"
+        );
+    }
+    assert!(hidden.get("hidden_after").is_none());
     let working = dispatched(&heard, "oak", "c-1");
     assert_eq!(working["audience"], "user", "{working}");
     assert!(working.get("sender_agent_id").is_none(), "{working}");
