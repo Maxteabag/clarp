@@ -1196,7 +1196,10 @@ portrait generation run kept, when the run ends. `"deleted"` is sent once per im
 delete removed, also from the batch call, and for each image a portrait generation run
 discarded, when the run ends. `"favorite"` (with `favorite`) for each favourite change that
 changed something. Each is sent after the change has committed; a save that rolls back
-sends nothing. `at` is the change's time in ms.
+sends nothing. `at` is the change's time in ms. Treat the event as a hint that is
+idempotent per `asset_id`: the same `created` can, rarely, come twice (a late write to a
+long-finished portrait run once the Host has forgotten it), so patch a gallery by id rather
+than appending.
 
 **Who may.** A full device and the administrator. A limited device is refused the three
 writes with `403 full device access required`; it still reads `GET /media`, new keys

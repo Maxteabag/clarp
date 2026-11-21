@@ -81,6 +81,24 @@ def test_a_failed_portrait_run_announces_the_images_it_discarded(portrait_run):
     assert all(e["at"] == media_store.lookup(e["asset_id"])["deleted_at"] for e in sent)
 
 
+def test_a_later_event_of_the_finished_job_announces_nothing_again(portrait_run):
+    """Announced on the job's change to a terminal status, not on every event it records: a
+    later write to the finished job (here its owner reassigned) sends no second created."""
+    kept = portrait_run.publish(1)
+    sent: list[dict] = []
+    watcher = background_job_watcher.BackgroundJobWatcher(SimpleNamespace(broadcast=sent.append))
+    background_jobs.finish(portrait_run.job["job_id"], generation=int(portrait_run.job["generation"]),
+                           status="succeeded")
+    watcher._poll_once()
+    assert [e["asset_id"] for e in _media_events(sent)] == [kept["asset_id"]]
+    before = background_jobs.latest_event_id()
+    assert background_jobs.reassign_terminal_computer_owner(
+        portrait_run.job["job_id"], computer_id="host") is not None
+    assert background_jobs.latest_event_id() > before  # a real new event of the finished job
+    watcher._poll_once()
+    assert [e["asset_id"] for e in _media_events(sent)] == [kept["asset_id"]]
+
+
 def test_images_published_before_the_run_started_are_not_its(portrait_run, tmp_path):
     earlier = portrait_run.publish(1)
     db.conn().execute("UPDATE media_assets SET created_at = created_at - 60000 WHERE asset_id = ?",
