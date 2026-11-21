@@ -39,7 +39,7 @@ use clarp_kernel::heard::{self, Failure, OWN_PROVIDER, PROVIDERS, engine_order, 
 use clarp_kernel::languages;
 use clarp_kernel::said::Who;
 use clarp_speech::chirp::Chirp;
-use clarp_speech::listen::{Asked, Clip, Deaf, Heard, Listener};
+use clarp_speech::listen::{Asked, Clip, Deaf, Heard, Listener, Observation};
 use clarp_speech::nova::Nova;
 use clarp_speech::scribe::Scribe;
 use clarp_speech::whisper::{self, Whisper, Worker};
@@ -439,7 +439,7 @@ impl Ears {
         language: &str,
         listen_for: &str,
         clip: (&axum::body::Bytes, &str),
-        observed: &mut Option<String>,
+        observed: &mut Observation,
         has_fallback: bool,
     ) -> Result<Heard, AttemptError> {
         let variant =
@@ -490,7 +490,7 @@ impl Ears {
                 language: handed.as_deref(),
                 wait: WAITS,
             };
-            let mut captured = None;
+            let mut captured = Observation::default();
             let result = engine.hear_observed(clip, asked, &mut captured);
             let mut selection = selection;
             if let Some(slot) = selection.as_mut()
@@ -936,13 +936,13 @@ async fn hear_chat(
     let mut order = engine_order::ChatOrder::new(order);
     let mut attempted = Vec::new();
     while let Some((model, has_fallback)) = order.attempt() {
-        let (result, handed) =
+        let (result, observed) =
             chat_attempt(app, ears, model, language, listen_for, clip, has_fallback).await;
         let error = match result {
             Ok(heard) => return Ok((heard, None)),
             Err(error) => error,
         };
-        let failure = order.failed(model, handed.is_some());
+        let failure = order.failed(model, observed.sent());
         for (engine, provider) in failure.skipped {
             eprintln!(
                 "clarp-host: sttEngineRepeatSkipped {}",
@@ -985,15 +985,15 @@ async fn chat_attempt(
     listen_for: &str,
     clip: (&axum::body::Bytes, &str),
     more: bool,
-) -> (Result<Heard, AttemptError>, Option<String>) {
+) -> (Result<Heard, AttemptError>, Observation) {
     let started = app
         .capture
         .settings()
         .allows("transcript")
         .then(std::time::Instant::now);
-    let mut handed = None;
+    let mut observed = Observation::default();
     let result = ears
-        .try_hearing(model, language, listen_for, clip, &mut handed, more)
+        .try_hearing(model, language, listen_for, clip, &mut observed, more)
         .await;
     app.capture.transcription(
         app.clock.now_ms(),
@@ -1001,7 +1001,7 @@ async fn chat_attempt(
         clip.0.len(),
         started,
     );
-    (result, handed)
+    (result, observed)
 }
 
 struct SetFallback<'a> {
@@ -1041,12 +1041,16 @@ async fn hear_language_set(
     let rejected = language_set::identity(plan.from, plan.own);
     match language_set::fallback(rejected, selected, plan.attempted, own, &codes) {
         language_set::Fallback::Hosted(target) => {
-            let (result, handed) =
+            let (result, observed) =
                 chat_attempt(app, ears, target, language, listen_for, clip, false).await;
             let heard = result.map_err(AttemptError::told)?;
             Ok((
                 heard,
-                Some(language_set::receipt(plan.from, target, handed.as_deref())),
+                Some(language_set::receipt(
+                    plan.from,
+                    target,
+                    observed.handed.as_deref(),
+                )),
             ))
         }
         language_set::Fallback::Own(mut reasons) => {

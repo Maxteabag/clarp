@@ -114,7 +114,8 @@ def reference(root):
                 raise stt.LanguageSetUnsupported('language set')
             calls.append(model)
             stt_language.note_handed(None)
-            raise RuntimeError('stand-in outage')
+            with stt_language.sending_audio():
+                raise RuntimeError('stand-in outage')
 
         own = SimpleNamespace(transcribe_model_bytes=transcribe)
         with patch.object(stt, 'language_set_engine', return_value=''), \

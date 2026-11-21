@@ -5,7 +5,7 @@ use clarp_kernel::languages::AGENT_ENGINES_KEY;
 use clarp_ports::kv::KeyValueEngine as _;
 use serde_json::{Value, json};
 
-use super::{Host, Place, WHISPER_STAND_IN, fetch, pair, scribe_stand_in, wait_for};
+use super::{Host, Place, WHISPER_STAND_IN, fetch, pair, program, scribe_stand_in, wait_for};
 
 #[test]
 fn a_recording_reaches_a_provider_once_across_its_models() {
@@ -43,13 +43,14 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
         ("TMPDIR", home),
         ("CLARP_INK_ENDPOINT", &ink),
         ("CLARP_NOVA_ENDPOINT", &nova),
-        ("CLARP_CHIRP_DECODER", "cat"),
         ("CARTESIA_API_KEY", "fixture-ink"),
         ("DEEPGRAM_API_KEY", "fixture-nova"),
         ("ELEVEN_API_KEY", ""),
         ("GOOGLE_APPLICATION_CREDENTIALS", ""),
     ];
-    let start = || {
+    let start = |decoder: &str| {
+        let mut world = world.to_vec();
+        world.push(("CLARP_CHIRP_DECODER", decoder));
         place.start_in(
             "admin",
             &[
@@ -63,7 +64,7 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
             &world,
         )
     };
-    let host = start();
+    let host = start("cat");
     let session = host.new_agent("Ada");
     let hear = |host: &Host, token: &str, call: Option<&str>, clip: &[u8]| {
         let mut headers = vec![("X-Transcription-Session", session.as_str())];
@@ -141,6 +142,22 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
     assert_eq!(attempts[2]["outcome"], "ok");
     assert_eq!(ink_requests.lock().unwrap().len(), 2);
     assert_eq!(nova_requests.lock().unwrap().len(), 2);
+    host.post(
+        "/transcription-providers",
+        json!({"agent_engines":{(&session):format!("{INK_WHISPER},{INK_TWO}")}}),
+    );
+    let (status, terminal) = hear(&host, &phone, Some(call), b"terminal failure");
+    assert_eq!(status, 500, "{terminal}");
+    assert_eq!(terminal["error"], "transcription failed");
+    let attempts = terminal["stt"]["attempts"].as_array().unwrap();
+    assert_eq!(attempts.len(), 2, "{terminal}");
+    assert_eq!(attempts[0]["engine"], INK_WHISPER);
+    assert_eq!(attempts[0]["reason"], "transcription failed");
+    assert_eq!(
+        attempts[1],
+        json!({"engine":INK_TWO,"outcome":"skipped","reason":"provider_already_sent"})
+    );
+    assert_eq!(ink_requests.lock().unwrap().len(), 3);
     host.kill();
 
     // A saved older list can name a now unknown model. That refusal must leave the next
@@ -166,15 +183,15 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
             format!("{NOVA},{NOVA}").as_bytes(),
         )
         .unwrap();
-    let host = start();
+    let host = start("cat");
     let policy = host.get("/transcription-providers");
     assert_eq!(policy["call_engines"], NOVA);
     assert_eq!(policy["call_policy_error"], "");
     let (status, said) = hear(&host, "admin", None, b"pre-contact fixture");
     assert_eq!((status, &said["text"]), (200, &json!("Nova heard it.")));
     let requests = ink_requests.lock().unwrap();
-    assert_eq!(requests.len(), 3);
-    assert!(requests[2].contains("pre-contact fixture"));
+    assert_eq!(requests.len(), 4);
+    assert!(requests[3].contains("pre-contact fixture"));
     assert!(
         requests
             .iter()
@@ -185,7 +202,7 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
 
     // The own engine also has one identity, but does not exhaust a cloud provider.
     seed(&format!("local,server-default,faster-whisper:small,{NOVA}"));
-    let host = start();
+    let host = start("cat");
     assert_eq!(hearing(&host), ["local", NOVA]);
     wait_for("the own stand-in to hear the clip", || {
         let (status, said) = hear(&host, "admin", None, b"abc");
@@ -206,4 +223,23 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
                 ))
             })
     });
+    host.kill();
+
+    // Ink-2 receives the language, then its local decoder fails before any audio send.
+    // Its batch sibling must still see this recording, before the final Nova fallback.
+    let decode = place.root.join("reject-audio");
+    program(&decode, "#!/bin/sh\nexit 1\n");
+    seed(&format!("{INK_TWO},{INK_WHISPER},{NOVA}"));
+    let host = start(decode.to_str().unwrap());
+    let before = ink_requests.lock().unwrap().len();
+    let (status, said) = hear(&host, "admin", None, b"local decoder refusal");
+    assert_eq!((status, &said["text"]), (200, &json!("Nova heard it.")));
+    let requests = ink_requests.lock().unwrap();
+    assert_eq!(requests.len(), before + 1);
+    assert!(requests[before].contains("local decoder refusal"));
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.contains("/stt/websocket"))
+    );
 }

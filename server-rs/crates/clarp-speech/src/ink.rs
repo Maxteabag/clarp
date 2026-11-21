@@ -5,7 +5,7 @@ use tungstenite::{Message, client::IntoClientRequest};
 
 use crate::{
     chirp,
-    listen::{Asked, Clip, Deaf, Heard, Listener, file_name, terms},
+    listen::{Asked, Clip, Deaf, Heard, Listener, Observation, file_name, http_agent, terms},
     scribe,
 };
 
@@ -20,13 +20,19 @@ pub struct Ink {
 const VERSION: &str = "2026-08-14";
 
 impl Listener for Ink {
-    fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf> {
+    fn hear_observed(
+        &self,
+        clip: Clip<'_>,
+        asked: Asked<'_>,
+        observed: &mut Observation,
+    ) -> Result<Heard, Deaf> {
+        observed.note_handed(asked.language);
         let key = (self.key)()
             .filter(|s| !s.is_empty())
             .ok_or_else(|| Deaf::Failed("Cartesia API key is not configured".into()))?;
         let language = asked.language.unwrap_or("en");
         if self.model == "ink-2" {
-            return self.socket(clip, language, asked.listen_for, &key);
+            return self.socket(clip, language, asked.listen_for, &key, observed);
         }
         let content = if clip.content_type.is_empty() {
             "audio/webm"
@@ -46,21 +52,17 @@ impl Listener for Ink {
         } else {
             self.base.trim_end_matches('/')
         };
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .timeout_global(Some(Duration::from_secs(60)))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let mut res = agent
+        let agent = http_agent(Duration::from_secs(60));
+        let request = agent
             .post(format!("{base}/stt"))
             .header("Authorization", format!("Bearer {key}"))
             .header("Cartesia-Version", VERSION)
             .header(
                 "Content-Type",
                 format!("multipart/form-data; boundary={boundary}"),
-            )
-            .send(body.as_slice())
+            );
+        let mut res = observed
+            .send_http(|| request.send(body.as_slice()))
             .map_err(|e| Deaf::Failed(format!("Cartesia request failed: {e}")))?;
         if !res.status().is_success() {
             return Err(Deaf::Failed(format!("Cartesia HTTP {}", res.status())));
@@ -131,6 +133,7 @@ impl Ink {
         language: &str,
         listen_for: &str,
         key: &str,
+        observed: &Observation,
     ) -> Result<Heard, Deaf> {
         let pcm = chirp::pcm(&self.decoder, clip.audio).map_err(Deaf::Failed)?;
         let url = self.url(language, listen_for);
@@ -147,7 +150,8 @@ impl Ink {
             .map_err(|e| Deaf::Failed(e.into()))?;
         let failed = |_| Deaf::Failed("Cartesia speech socket failed".into());
         for chunk in pcm.chunks(3200) {
-            ws.send(Message::Binary(chunk.to_vec().into()))
+            observed
+                .send_socket(|| ws.send(Message::Binary(chunk.to_vec().into())))
                 .map_err(failed)?;
         }
         for op in ["finalize", "close"] {

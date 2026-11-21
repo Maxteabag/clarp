@@ -29,6 +29,13 @@ fn handed(mode: &str) -> Option<&'static str> {
     }
 }
 
+fn sent(mode: &str) -> bool {
+    matches!(
+        mode,
+        "after" | "after-auto" | "timeout" | "sent-then-refused"
+    )
+}
+
 fn waited(engine: &str, has_fallback: bool) -> Value {
     json!({ "engine": engine, "wait": has_fallback.then_some(10.0) })
 }
@@ -51,7 +58,7 @@ fn chat(case: &Value) -> Value {
         if mode == "ok" {
             return json!({"tried":tried,"logs":logs,"failed":[],"result":{"text":engine}});
         }
-        let failure = order.failed(engine, handed(mode).is_some());
+        let failure = order.failed(engine, sent(mode));
         logs.extend(
             failure
                 .skipped
@@ -113,19 +120,25 @@ fn call(case: &Value) -> Value {
             result = json!({"text":step.engine});
             break;
         }
-        let internal_reason = match mode {
-            "before-key" => "stand-in missing key",
-            "before-model" => "stand-in unknown model",
-            "before-language" => "stand-in unsupported set",
-            _ => "stand-in provider error",
-        };
         let failure = match mode {
             "before-model" => Failure::UnknownModel,
             _ => Failure::Failed,
         };
         attempts.failed(&step.engine, boundary, 0, failure.client_words().1);
-        contacted.failed(&step.engine, boundary.is_some());
+        contacted.failed(&step.engine, sent(mode));
         if !call::has_runnable_step(later, &contacted) {
+            attempts.skip_remaining(later, &contacted);
+            let internal_reason = match mode {
+                "before-key" => "stand-in missing key",
+                "before-model" => "stand-in unknown model",
+                "before-language" => "stand-in unsupported set",
+                "before-decode" => "stand-in decode error",
+                "before-token" => "stand-in token error",
+                "refused" | "sent-then-refused" => "<urlopen error stand-in connection refused>",
+                "dns" => "<urlopen error stand-in name lookup failed>",
+                "timeout" => "stand-in request timed out",
+                _ => "stand-in provider error",
+            };
             result = json!({"error":internal_reason});
             break;
         }
@@ -174,7 +187,7 @@ fn provider_once_matches_the_recorded_python_paths() {
         );
         let mut contacts = order::Contacts::default();
         assert_eq!(
-            json!(contacts.failed(engine, case["observed"] == true)),
+            json!(contacts.failed(engine, case["sent"] == true)),
             case["reached"],
             "{case}"
         );
@@ -217,6 +230,6 @@ fn provider_once_matches_the_recorded_python_paths() {
             "calls"
         ]
         .map(|group| cases(group).len()),
-        [11, 13, 72, 22, 72, 4, 13, 11]
+        [11, 13, 72, 22, 144, 4, 19, 16]
     );
 }

@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::listen::{Asked, Clip, Deaf, Heard, Listener, file_name, terms};
+use crate::listen::{
+    Asked, Clip, Deaf, Heard, Listener, Observation, file_name, http_agent, terms,
+};
 
 /// Where ElevenLabs takes a clip.
 pub const ENDPOINT: &str = "https://api.elevenlabs.io/v1/speech-to-text";
@@ -117,7 +119,13 @@ fn heard(answer: &Value) -> Result<Heard, Deaf> {
 }
 
 impl Listener for Scribe {
-    fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf> {
+    fn hear_observed(
+        &self,
+        clip: Clip<'_>,
+        asked: Asked<'_>,
+        observed: &mut Observation,
+    ) -> Result<Heard, Deaf> {
+        observed.note_handed(asked.language);
         let Some(key) = (self.key)().filter(|key| !key.is_empty()) else {
             return Err(Deaf::Failed(
                 "ElevenLabs API key is not configured".to_string(),
@@ -136,19 +144,16 @@ impl Listener for Scribe {
             content_type,
             clip.audio,
         );
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .http_status_as_error(false)
-            .build();
-        let agent: ureq::Agent = config.into();
-        let mut response = agent
+        let agent = http_agent(self.timeout);
+        let request = agent
             .post(&self.endpoint)
             .header("xi-api-key", key.as_str())
             .header(
                 "Content-Type",
                 format!("multipart/form-data; boundary={boundary}"),
-            )
-            .send(&body[..])
+            );
+        let mut response = observed
+            .send_http(|| request.send(&body[..]))
             // How it failed, and nothing of what was sent: the error of a transport can
             // name the address, never the key or the clip.
             .map_err(|error| Deaf::Failed(format!("ElevenLabs request failed: {error}")))?;
