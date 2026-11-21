@@ -1,4 +1,4 @@
-//! The MCP selection in an agent creation request.
+//! MCP selections at agent creation and in roster edits.
 
 use std::collections::HashSet;
 
@@ -18,6 +18,22 @@ pub fn selection(raw: Option<&Value>) -> Result<Option<Vec<String>>, &'static st
         }
     }
     Ok(Some(names))
+}
+
+/// An edit keeps the known names in request order. The Python route stringifies each
+/// item, then strips it before looking it up.
+pub fn edited_selection(requested: &[Value], catalog: &Map<String, Value>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    requested
+        .iter()
+        .filter_map(|item| {
+            let name = match item {
+                Value::String(name) => crate::python::strip(name).to_owned(),
+                other => crate::python::repr(other),
+            };
+            (catalog.contains_key(&name) && seen.insert(name.clone())).then_some(name)
+        })
+        .collect()
 }
 
 pub fn check(

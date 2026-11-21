@@ -24,9 +24,21 @@ fn catalog() -> Map<String, Value> {
 }
 
 pub(crate) fn available() -> Vec<String> {
-    let mut names: Vec<_> = catalog().keys().cloned().collect();
+    names(&catalog())
+}
+
+fn names(catalog: &Map<String, Value>) -> Vec<String> {
+    let mut names: Vec<_> = catalog.keys().cloned().collect();
     names.sort_unstable();
     names
+}
+
+pub(crate) fn edit(requested: &[Value]) -> (Vec<String>, Vec<String>) {
+    let catalog = catalog();
+    (
+        clarp_kernel::mcp::edited_selection(requested, &catalog),
+        names(&catalog),
+    )
 }
 
 pub(crate) fn check(backend: &str, names: Option<&[String]>) -> Result<(), Told> {

@@ -243,6 +243,35 @@ async fn llm(State(app): State<App>, body: Bytes) -> Answered {
     Ok(Json(tune(&app, &object(&body)?).await?))
 }
 
+/// `POST /agent-mcp` selects the catalog servers for the agent's next turn.
+async fn mcp(State(app): State<App>, body: Bytes) -> Answered {
+    let asked = object(&body)?;
+    let session = edge::body_text(&asked, "session")?;
+    if session.is_empty() {
+        return Err(bad("session required"));
+    }
+    let target = app
+        .fleet
+        .directory()
+        .named(session)
+        .map(|member| member.record.session.clone())
+        .ok_or_else(no_such_agent)?;
+    let Some(Value::Array(requested)) = asked.get("mcp_servers") else {
+        return Err(bad("mcp_servers must be a list"));
+    };
+    let requested = requested.clone();
+    let (chosen, available) = tokio::task::spawn_blocking(move || crate::mcp::edit(&requested))
+        .await
+        .map_err(|why| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, why.to_string()))?;
+    let record = amend(&app, &target, Amend::McpServers(chosen)).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "session": session,
+        "mcp_servers": record.mcp_servers.unwrap_or_default(),
+        "available_mcp_servers": available,
+    })))
+}
+
 /// Sets an agent's model and effort from what a request said, and answers what the route
 /// answers. The agent's own tool for it (`clarp-admin model`) asks the same thing.
 pub(crate) async fn tune(app: &App, asked: &Fields) -> Result<Value, Refusal> {
@@ -400,6 +429,7 @@ pub fn routes() -> Router<App> {
         .route("/agent-rename", post(rename))
         .route("/agent-archive", post(archive))
         .route("/agent-llm", post(llm))
+        .route("/agent-mcp", post(mcp))
         .route("/agent-voice-verbosity", post(narration))
         .route("/agents/archived", get(archived))
 }
