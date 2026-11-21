@@ -298,6 +298,11 @@ class RecoveryMixin:
                 and task_goal_recovery.allows_paused_queue(row["client_msg_id"]))
             # Work the release drain held past a pause it was never subject to.
             pause_exempt = goal_wake or bool(row.get("allow_paused"))
+            from . import agent_moves
+            if agent_moves.moved(row["agent_id"]) is not None:
+                # Moved to another Host: held, never dispatched here; taking
+                # the move back runs this pass again and releases it.
+                continue
             if turn_queue.is_paused(row["agent_id"]) and not pause_exempt:
                 continue
             if agent and self.backends.active_handles(

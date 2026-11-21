@@ -98,6 +98,64 @@ class AgentRoutes:
         return self._json_ok({"ok": True, "session": session, "coordination_visibility": effective,
                               "coordination_override": own or None})
 
+    def _handle_agent_moved(self):
+        """POST /agent-moved {session, moved_to: {host, id} | null}: the Rust Host's import
+        marks the agent moved after it succeeded, and takes the move back (``null``) when
+        it rolls an import back or the agent returns (lib.agent_moves). Answers the agent's
+        mark and whether this call changed it; the same call again is a no-op that says so.
+        Only a full device or the administrator: an agent (its turn token or a peer Host's
+        header) or a limited device is refused. Taking it back runs the queue again, so
+        the items held while it was moved are released in their order."""
+        from lib import agent_moves
+        from lib.http_utils import from_an_agent, principal_of
+        if from_an_agent(self.headers):
+            return self._json(403, {"error": "agents_may_not"})
+        if not principal_of(self).full_scope:
+            return self._json_error(403, "full device access required")
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        session = str(data.get("session") or "").strip()
+        if not session or "moved_to" not in data:
+            return self._json_error(400, "session and moved_to required")
+        agent = identity.lookup(session)
+        if not agent:
+            return self._json_error(404, "no such agent")
+        agent_id = str(agent["agent_id"])
+        target = data["moved_to"]
+        if target is None:
+            changed = agent_moves.clear(agent_id)
+            if changed:
+                log("agentMoveTakenBack", f"session={session}")
+                runtime_client = getattr(self.ctx, "runtime_client", None)
+                try:
+                    if runtime_client is not None:
+                        runtime_client.recover_queued()
+                    else:
+                        from lib.turn_dispatch import TurnDispatchService
+                        TurnDispatchService(self.ctx).recover_queued()
+                except Exception as exc:  # noqa: BLE001 - the next recovery pass releases them
+                    from lib.log import log_exception
+                    log_exception("agentMoveRecoverFail", exc, detail=session)
+        else:
+            if not isinstance(target, dict):
+                return self._json_error(400, "moved_to must be {host, id} or null")
+            try:
+                _mark, changed = agent_moves.set_moved(
+                    agent_id, host=target.get("host"), remote_id=target.get("id"))
+            except agent_moves.MoveConflict as exc:
+                return self._json(409, {"ok": False, "error": "already_moved", "detail": str(exc),
+                                        "moved": agent_moves.moved(agent_id)})
+            except ValueError as exc:
+                return self._json_error(400, str(exc))
+            if changed:
+                log("agentMoved", f"session={session} to={target.get('host')}")
+        stream = getattr(self.ctx, "stream", None)
+        if changed and stream is not None:
+            events.broadcast(stream, events.agent_roster("agent-moved", session=session))
+        return self._json_ok({"ok": True, "session": session, "changed": changed,
+                              "moved": agent_moves.moved(agent_id)})
+
     def _handle_agent_assign(self):
         from lib.contact_assignment import assign_contact
         data = self._read_json()

@@ -307,6 +307,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v133(con)
         if version < 134:
             _migrate_to_v134(con)
+        if version < 135:
+            _migrate_to_v135(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1129,6 +1131,19 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v135(con: sqlite3.Connection) -> None:
+    """An agent that moved to another Host (lib.agent_moves): one row per moved
+    agent, deleted when the move is taken back. Created if missing, so a rerun is
+    a no-op; older code never reads it, so a rollback needs no down-step (a moved
+    agent would then take turns again: take the move back before rolling back)."""
+    con.execute("""CREATE TABLE IF NOT EXISTS agent_moves (
+        agent_id TEXT PRIMARY KEY,
+        to_host TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        moved_at INTEGER NOT NULL
+    )""")
 
 
 def _migrate_to_v134(con: sqlite3.Connection) -> None:
