@@ -403,7 +403,10 @@ impl Waiting {
             accepted_at_ms,
             admission,
             origin: message.origin.clone(),
-            sender_agent_id: message.sender.as_ref().map(|sender| sender.agent_id.clone()),
+            sender_agent_id: message
+                .sender
+                .as_ref()
+                .map(|sender| sender.agent_id.clone()),
         }
     }
 }
