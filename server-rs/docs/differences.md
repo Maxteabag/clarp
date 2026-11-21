@@ -496,3 +496,8 @@ Bookkeeping listeners run under the Host and resume from the principal’s log a
 reference starts a service for each delegation. On both Hosts the delegate’s background job
 shows the listener and cancelling it stops the delegation. An internal listener has no separate
 worker PID or system service. Its job ID stays with the delegation across a Host restart.
+
+**Voice names refresh age (PR 563).** A failed Cartesia catalogue request leaves
+the Rust cache's previous modification time intact. The Python Host can advance it
+when that pass also refreshes ElevenLabs names or discards old-format catalogue rows.
+Preserving the age keeps a due current-format cache eligible for the 15-minute retry.

@@ -6,8 +6,6 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::said::CARTESIA;
-
 pub type Names = BTreeMap<String, BTreeMap<String, String>>;
 pub type Catalogue = BTreeMap<String, BTreeMap<String, CatalogueVoice>>;
 pub type Gone = BTreeMap<String, BTreeSet<String>>;
@@ -47,6 +45,7 @@ pub struct Snapshot {
 
 pub const FIRST_AFTER: Duration = Duration::from_secs(60);
 pub const REFRESH_EVERY: Duration = Duration::from_secs(24 * 3600);
+pub const RETRY_AFTER: Duration = Duration::from_secs(15 * 60);
 pub const MAX_LOOKUPS: usize = 100;
 
 const FORMAT: i64 = 2;
@@ -113,12 +112,32 @@ impl Snapshot {
         }
     }
 
-    /// Publish each refreshed provider's latest facts and return newly deleted voices.
-    pub fn apply(&mut self, fetched: Self) -> Vec<(String, String)> {
-        merge(&mut self.names, fetched.names);
-        if fetched.catalogue.contains_key(CARTESIA) {
+    /// Update the cache after a refresh. None means the file can stay untouched.
+    pub fn refresh(
+        &mut self,
+        fetched: Self,
+        has_key: bool,
+        failed: bool,
+    ) -> Option<Vec<(String, String)>> {
+        let old_format = self.format.is_some_and(|format| format < FORMAT);
+        if !has_key {
+            if !old_format && self.format.is_some() {
+                return None;
+            }
+            self.catalogue.clear();
+            self.format = Some(FORMAT);
+            return Some(Vec::new());
+        }
+        if fetched.names.is_empty() && !old_format {
+            return None;
+        }
+        if old_format {
+            self.catalogue.clear();
+        }
+        if !failed {
             self.format = Some(FORMAT);
         }
+        merge(&mut self.names, fetched.names);
         self.catalogue.extend(fetched.catalogue);
         let mut newly_gone = Vec::new();
         for (provider, ids) in fetched.gone {
@@ -132,7 +151,7 @@ impl Snapshot {
             }
             *previous = ids;
         }
-        newly_gone
+        Some(newly_gone)
     }
 }
 

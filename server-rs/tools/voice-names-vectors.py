@@ -43,21 +43,32 @@ def reference(root):
             os.utime(path, (now - age, now - age))
         startup.append({'age': age, 'content': content, 'due': voice_names.start_due(path, now)})
 
-    current = {'cartesia': {'missing': 'Former name', 'c1': 'Old Cartesia'},
-               'elevenlabs': {'e1': 'Old Eleven'}}
+    old = {'cartesia': {'missing': 'Former name', 'c1': 'Old Cartesia'},
+           'elevenlabs': {'e1': 'Old Eleven'},
+           '_catalogue': {'cartesia': {'retired': {'language': 'en', 'public': False, 'owner': True}}}}
+    latest = {**old, '_format': 2}
     merged = []
-    for case, fetched in (
-        ('new names replace only matched ids', {'cartesia': {'c1': 'New Cartesia', 'c2': 'New second'},
-                                                'elevenlabs': {'e1': 'New Eleven'}}),
-        ('a catalogue failure keeps every old Cartesia name', {'elevenlabs': {'e1': 'New Eleven'}}),
-        ('no keys leave the file alone', {}),
-        ('equal names leave file content unchanged', {'cartesia': {'c1': 'Old Cartesia'}}),
+    for case, current, cartesia, eleven, fetched in (
+        ('new names replace only matched ids', old, True, True,
+         {'cartesia': {'c1': 'New Cartesia', 'c2': 'New second'}, 'elevenlabs': {'e1': 'New Eleven'}}),
+        ('a catalogue failure keeps every old Cartesia name', old, True, True,
+         {'elevenlabs': {'e1': 'New Eleven'}}),
+        ('failed catalogue drops stale rows', old, True, False, {}),
+        ('failed catalogue keeps current rows', latest, True, False, {}),
+        ('failed first fetch leaves no file', None, True, False, {}),
+        ('no keys upgrade the old file', old, False, False, {}),
+        ('no keys leave a current file alone', latest, False, False, {}),
+        ('no keys create the first file', None, False, False, {}),
+        ('ElevenLabs alone upgrades the old file', old, False, True,
+         {'elevenlabs': {'e1': 'New Eleven'}}),
+        ('equal names still publish a fresh catalogue', old, True, False,
+         {'cartesia': {'c1': 'Old Cartesia'}}),
     ):
         names = root / (case.replace(' ', '-') + '.json')
-        names.write_text(json.dumps(current, sort_keys=True), encoding='utf-8')
-        before = names.read_bytes()
-        cfg = SimpleNamespace(cartesia_key=lambda: 'test' if fetched else '',
-                              eleven_key=lambda: 'test' if 'elevenlabs' in fetched else '')
+        if current is not None:
+            names.write_text(json.dumps(current, sort_keys=True), encoding='utf-8')
+        cfg = SimpleNamespace(cartesia_key=lambda: 'test' if cartesia else '',
+                              eleven_key=lambda: 'test' if eleven else '')
         def list_all(_):
             if 'cartesia' not in fetched:
                 raise RuntimeError('stand-in catalogue not available')
@@ -76,8 +87,13 @@ def reference(root):
             }
         if fetched:
             update['_gone'] = {provider: [] for provider in fetched}
+        due = voice_names.start_due(names)
+        with patch.object(voice_names, 'start_due', lambda: due):
+            wait = voice_names.VoiceNamesWorker().next_wait()
         merged.append({'case': case, 'current': current, 'fetched': update, 'providers': done,
-                       'result': json.loads(names.read_text()), 'same_bytes': names.read_bytes() == before})
+                       'has_key': cartesia or eleven, 'failed': cartesia and 'cartesia' not in fetched,
+                       'result': json.loads(names.read_text()) if names.exists() else None,
+                       'due': due, 'wait': wait})
 
     deleted_path = root / 'deleted.json'
     previous = {

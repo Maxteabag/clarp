@@ -3643,6 +3643,13 @@ pool requires explicit non-ownership. A successful Cartesia fetch writes cache f
 no eligible voice in the recipient's language, the Host logs
 `voicePoolNoCatalogueVoice` before using the built-in pool.
 
+**Voice names refresh failures (PR 563, 21 Nov 2026).** A keyed catalogue failure
+preserves the cache age even if the Host writes names fetched from another provider.
+A cache that stays due retries after 15 minutes. Successful writes mark format 2,
+including an ElevenLabs-only refresh or a missing or older cache with no provider
+keys. Upgrading an older cache discards any stale catalogue rows the worker did
+not refetch. Voice labels remain available.
+
 **Hidden coordination** (the Python Host's PR 512). Fleet writes the global and per-chat
 visibility settings, publishes the directory, then emits the new effective choice with
 the roster hint. It never edits a conversation for this purpose. An explicit log mode reads

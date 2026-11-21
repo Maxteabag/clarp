@@ -120,24 +120,41 @@ impl Desk {
         voice_names::start_due(age, current.snapshot.format)
     }
 
+    fn next_wait(&self) -> std::time::Duration {
+        if self.start_due() {
+            voice_names::RETRY_AFTER
+        } else {
+            voice_names::REFRESH_EVERY
+        }
+    }
+
     fn refresh(&self, sources: &Sources, used: &Used) -> io::Result<()> {
         let Ok(_refresh) = self.refreshing.try_lock() else {
             return Ok(());
         };
-        let fetched = sources.fetch(used);
-        if fetched.names.is_empty() {
-            return Ok(());
-        }
+        let (fetched, failed) = sources.fetch(used);
         self.read()?;
-        let (before, old_hash) = self.snapshot();
+        let (before, old_hash, modified) = {
+            let current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
+            (
+                current.snapshot.clone(),
+                current.hash.clone(),
+                current.stamp.map(|(time, _)| time),
+            )
+        };
         let mut snapshot = before.clone();
-        let newly_gone = snapshot.apply(fetched);
+        let Some(newly_gone) = snapshot.refresh(fetched, sources.has_key(), failed) else {
+            return Ok(());
+        };
         let hash = if old_hash.is_some() && snapshot == before {
+            if failed {
+                return Ok(());
+            }
             File::open(&self.path)?.set_modified(SystemTime::now())?;
             old_hash
         } else {
             let raw = serde_json::to_vec(&snapshot).map_err(io::Error::other)?;
-            self.replace(&raw)?;
+            self.replace(&raw, modified.filter(|_| failed))?;
             Some(digest(&raw))
         };
         let meta = fs::metadata(&self.path)?;
@@ -160,7 +177,7 @@ impl Desk {
         Ok(())
     }
 
-    fn replace(&self, raw: &[u8]) -> io::Result<()> {
+    fn replace(&self, raw: &[u8], modified: Option<SystemTime>) -> io::Result<()> {
         let tmp = self.path.with_extension(format!("{}.tmp", ids::hex(8)));
         let mut file = OpenOptions::new()
             .create_new(true)
@@ -169,6 +186,7 @@ impl Desk {
             .open(&tmp)?;
         let written = file
             .write_all(raw)
+            .and_then(|()| modified.map_or(Ok(()), |time| file.set_modified(time)))
             .and_then(|()| file.sync_all())
             .and_then(|()| fs::rename(&tmp, &self.path));
         if written.is_err() {
@@ -186,8 +204,13 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 impl Sources {
-    fn fetch(&self, used: &Used) -> Snapshot {
+    fn has_key(&self) -> bool {
+        self.cartesia.is_some() || self.elevenlabs.is_some()
+    }
+
+    fn fetch(&self, used: &Used) -> (Snapshot, bool) {
         let mut fetched = Snapshot::default();
+        let mut failed = false;
         let ids = |provider: &str| {
             used.get(provider)
                 .into_iter()
@@ -220,7 +243,10 @@ impl Sources {
                     fetched.catalogue.insert(CARTESIA.into(), today);
                     fetched.gone.insert(CARTESIA.into(), gone);
                 }
-                Err(why) => eprintln!("voiceNamesFetchFail {CARTESIA}: {why}"),
+                Err(why) => {
+                    eprintln!("voiceNamesFetchFail {CARTESIA}: {why}");
+                    failed = true;
+                }
             }
         }
         let eleven_ids: BTreeSet<_> = ids(ELEVENLABS)
@@ -236,7 +262,7 @@ impl Sources {
             fetched.names.insert(ELEVENLABS.into(), found);
             fetched.gone.insert(ELEVENLABS.into(), gone);
         }
-        fetched
+        (fetched, failed)
     }
 }
 
@@ -278,7 +304,8 @@ impl Mouth {
         tokio::spawn(async move {
             tokio::time::sleep(voice_names::FIRST_AFTER).await;
             let mut first = true;
-            while let Some(mouth) = mouth.upgrade() {
+            while let Some(host) = mouth.upgrade() {
+                let mouth = host.clone();
                 let result = tokio::task::spawn_blocking(move || {
                     if first {
                         mouth.voice_names.read()?;
@@ -295,7 +322,9 @@ impl Mouth {
                     Err(why) => eprintln!("voiceNamesWorkerFail {why}"),
                 }
                 first = false;
-                tokio::time::sleep(voice_names::REFRESH_EVERY).await;
+                let wait = host.voice_names.next_wait();
+                drop(host);
+                tokio::time::sleep(wait).await;
             }
         });
     }
@@ -313,8 +342,8 @@ impl Mouth {
                 endpoint: self.eleven_at.clone(),
             }),
         };
-        if sources.cartesia.is_none() && sources.elevenlabs.is_none() {
-            return Ok(());
+        if !sources.has_key() {
+            return self.voice_names.refresh(&sources, &Used::new());
         }
 
         let mut used = Used::new();
@@ -521,10 +550,33 @@ mod tests {
             r#"{"cartesia":"fixture"}"#.into(),
             "",
         );
-        desk.refresh(&Sources::default(), &used).unwrap();
+        let no_keys_path = root.0.join("no-keys.json");
+        let no_keys = Desk::new(no_keys_path.clone());
+        no_keys.refresh(&Sources::default(), &used).unwrap();
+        assert_eq!(fs::read(&no_keys_path).unwrap(), br#"{"_format":2}"#);
+        assert!(!no_keys.start_due());
+        fs::write(
+            &no_keys_path,
+            br#"{"cartesia":{"c1":"Old name"},"_catalogue":{"cartesia":{"c1":{}}}}"#,
+        )
+        .unwrap();
+        no_keys.refresh(&Sources::default(), &used).unwrap();
+        let (upgraded, _) = no_keys.snapshot();
+        assert_eq!(upgraded.names[CARTESIA]["c1"], "Old name");
+        assert!(upgraded.catalogue.is_empty());
+        assert_eq!(upgraded.format, Some(2));
+        assert_eq!(no_keys.next_wait(), voice_names::REFRESH_EVERY);
+        File::open(&no_keys_path)
+            .unwrap()
+            .set_modified(stale)
+            .unwrap();
+        let no_keys_modified = fs::metadata(&no_keys_path).unwrap().modified().unwrap();
+        no_keys.refresh(&Sources::default(), &used).unwrap();
+        assert_eq!(
+            fs::metadata(&no_keys_path).unwrap().modified().unwrap(),
+            no_keys_modified
+        );
         assert!(server.asked.lock().unwrap().is_empty());
-        assert_eq!(fs::read(&path).unwrap(), initial);
-        assert!(desk.start_due());
 
         let endpoint = format!("http://{}", server.addr);
         let sources = Sources {
@@ -588,8 +640,15 @@ mod tests {
         assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
         assert!(!desk.start_due());
 
+        File::open(&path).unwrap().set_modified(stale).unwrap();
+        let previous_modified = fs::metadata(&path).unwrap().modified().unwrap();
         server.failures.store(1, Ordering::SeqCst);
         desk.refresh(&sources, &used).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().modified().unwrap(),
+            previous_modified
+        );
+        assert_eq!(desk.next_wait(), voice_names::RETRY_AFTER);
         assert_eq!(desk.snapshot(), (names.clone(), signature.clone()));
         assert_eq!(fs::read(&path).unwrap(), after);
         assert_eq!(server.asked.lock().unwrap().len(), 307);
@@ -601,6 +660,11 @@ mod tests {
         assert_eq!(after_partial.names[ELEVENLABS]["e000"], "New Eleven");
         assert_eq!(after_partial.names[ELEVENLABS]["old"], "Keep this too");
         assert_ne!(changed, signature);
+        assert_eq!(
+            fs::metadata(&path).unwrap().modified().unwrap(),
+            previous_modified
+        );
+        assert_eq!(desk.next_wait(), voice_names::RETRY_AFTER);
         assert_eq!(server.asked.lock().unwrap().len(), 408);
 
         server.failures.store(3, Ordering::SeqCst);
@@ -610,6 +674,7 @@ mod tests {
         assert!(!deleted.names[CARTESIA].contains_key("c+missing"));
         assert_eq!(deleted.names[CARTESIA]["c2"], "Second");
         assert!(!deleted.catalogue[CARTESIA].contains_key("c2"));
+        assert_eq!(desk.next_wait(), voice_names::REFRESH_EVERY);
         desk.refresh(&sources, &used).unwrap();
         assert_eq!(desk.snapshot(), (deleted, digest));
     }

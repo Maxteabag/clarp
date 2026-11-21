@@ -29,17 +29,31 @@ fn voice_names_follow_the_reference_age_merge_and_lookup_rules() {
     }
     let cases = fixture["merge"].as_array().unwrap();
     for row in cases {
-        let mut current = voice_names::Snapshot::from_file(&row["current"]);
-        current.apply(voice_names::Snapshot::from_file(&row["fetched"]));
-        if row["same_bytes"] == true {
-            assert_eq!(
-                current,
-                voice_names::Snapshot::from_file(&row["result"]),
-                "{row}"
-            );
+        let mut current = if row["current"].is_null() {
+            voice_names::Snapshot::default()
         } else {
-            assert_eq!(json!(current), row["result"], "{row}");
-        }
+            voice_names::Snapshot::from_file(&row["current"])
+        };
+        let _ = current.refresh(
+            voice_names::Snapshot::from_file(&row["fetched"]),
+            row["has_key"] == true,
+            row["failed"] == true,
+        );
+        let expected = if row["result"].is_null() {
+            voice_names::Snapshot::default()
+        } else {
+            voice_names::Snapshot::from_file(&row["result"])
+        };
+        assert_eq!(current, expected, "{row}");
+        let age = current.format.map(|_| Duration::ZERO);
+        let due = voice_names::start_due(age, current.format);
+        assert_eq!(json!(due), row["due"], "{row}");
+        let wait = if due {
+            voice_names::RETRY_AFTER
+        } else {
+            voice_names::REFRESH_EVERY
+        };
+        assert_eq!(json!(wait.as_secs()), row["wait"], "{row}");
     }
     let access = &fixture["access"];
     let mut fetched = voice_names::Snapshot::default();
@@ -57,19 +71,19 @@ fn voice_names_follow_the_reference_age_merge_and_lookup_rules() {
     fetched.names.insert("cartesia".into(), Default::default());
     fetched.gone.insert("cartesia".into(), Default::default());
     let mut current = voice_names::Snapshot::default();
-    assert!(current.apply(fetched).is_empty());
+    assert!(current.refresh(fetched, true, false).unwrap().is_empty());
     assert_eq!(json!(current), access["result"]);
 
     let deleted = &fixture["deleted"];
     let mut current = voice_names::Snapshot::from_file(&deleted["current"]);
     let fetched = voice_names::Snapshot::from_file(&deleted["fetched"]);
-    let newly_gone = current.apply(fetched.clone());
+    let newly_gone = current.refresh(fetched.clone(), true, false).unwrap();
     assert_eq!(
         newly_gone,
         [(String::from("cartesia"), String::from("missing"))]
     );
     assert_eq!(json!(current), deleted["result"]);
-    assert!(current.apply(fetched).is_empty());
+    assert!(current.refresh(fetched, true, false).unwrap().is_empty());
     assert_eq!(deleted["logged"].as_array().unwrap().len(), 1);
     let lookup = &fixture["lookup"];
     let used = serde_json::from_value(lookup["used"].clone()).unwrap();
@@ -78,6 +92,6 @@ fn voice_names_follow_the_reference_age_merge_and_lookup_rules() {
     assert_eq!(json!(asked), lookup["asked"]);
     assert_eq!(
         (start.len(), cases.len(), rows.len(), asked.len()),
-        (11, 4, 12, 100)
+        (11, 10, 12, 100)
     );
 }
