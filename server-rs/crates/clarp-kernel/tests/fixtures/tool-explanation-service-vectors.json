@@ -215,10 +215,10 @@
    "debounce_ms": 150,
    "work": "work",
    "model": "gpt-6-sol",
-   "asked": [{"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {}}]}, {"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {"name": "Bash"}}]}],
-   "learned": [{"signature": "x:? #07d728084e182fa0e331505e", "level": 2, "template_text": "Runs nothing.", "slot_names": [], "program": "?", "action": "unknown", "producer": "llm", "parameterised": false, "hits": 0}, {"signature": "x:tool:Bash #981abb7374d5fd4071ac723e", "level": 2, "template_text": "Runs Bash.", "slot_names": [], "program": "tool:Bash", "action": "unknown", "producer": "llm", "parameterised": false, "hits": 0}],
-   "counts": {"template": 0, "learned": 0, "exact_cache": 0, "jev": 0, "llm": 2, "failed": 0, "miss": 0, "disabled": 0},
-   "totals": {"lookups": 2, "hits": 0, "hit_rate": 0.0, "learned_entries": 2, "learned_parameterised": 0, "learned_exact_only": 2, "learned_by_producer": {"llm": 2}, "learned_hits": 0, "jev_picks": 0, "llm_calls": 2},
+   "asked": [{"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {}}]}],
+   "learned": [{"signature": "x:? #07d728084e182fa0e331505e", "level": 2, "template_text": "Runs nothing.", "slot_names": [], "program": "?", "action": "unknown", "producer": "llm", "parameterised": false, "hits": 0}],
+   "counts": {"template": 0, "learned": 0, "exact_cache": 0, "jev": 0, "llm": 1, "failed": 1, "miss": 0, "disabled": 0},
+   "totals": {"lookups": 2, "hits": 0, "hit_rate": 0.0, "learned_entries": 1, "learned_parameterised": 0, "learned_exact_only": 1, "learned_by_producer": {"llm": 1}, "learned_hits": 0, "jev_picks": 0, "llm_calls": 1},
    "steps": [
     {"do": "ask", "level": -1, "items": [], "refused": "detail_level must be an integer from 0 to 4", "asked_so_far": 0},
     {"do": "ask", "level": 5, "items": [], "refused": "detail_level must be an integer from 0 to 4", "asked_so_far": 0},
@@ -245,9 +245,9 @@
     {"do": "ask", "level": 2, "items": [{"id": "a", "activity": null}], "refused": "activity must be an object", "asked_so_far": 0},
     {"do": "ask", "level": 2, "items": [{"id": "a", "activity": {}}], "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "a", "status": "pending"}]}, "asked_so_far": 0},
     {"do": "settle", "asked_so_far": 1},
-    {"do": "ask", "level": 2, "items": [{"id": "a", "activity": {"name": "Bash"}}], "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "a", "status": "pending"}]}, "asked_so_far": 1},
-    {"do": "settle", "asked_so_far": 2},
-    {"do": "ask", "level": 2, "items": [{"id": "a", "activity": {}}], "provenance": true, "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "a", "status": "ready", "text": "Runs nothing.", "source": "llm", "cached": true, "provenance": {"template_version": 1, "fallback_reason": "malformed"}}]}, "asked_so_far": 2}
+    {"do": "ask", "level": 2, "items": [{"id": "a", "activity": {"name": "Bash"}}], "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "a", "status": "failed", "reason": "unexplained"}]}, "asked_so_far": 1},
+    {"do": "settle", "asked_so_far": 1},
+    {"do": "ask", "level": 2, "items": [{"id": "a", "activity": {}}], "provenance": true, "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "a", "status": "ready", "text": "Runs nothing.", "source": "llm", "cached": true, "provenance": {"template_version": 1, "fallback_reason": "malformed"}}]}, "asked_so_far": 1}
    ]
   },
   {

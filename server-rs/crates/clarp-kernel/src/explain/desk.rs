@@ -440,6 +440,7 @@ impl Desk {
             key: String,
             signature: String,
             units: Vec<Unit>,
+            unexplained: bool,
             at_once: bool,
         }
         let mut entries: Vec<Entry<'_>> = Vec::with_capacity(items.len());
@@ -455,7 +456,8 @@ impl Desk {
             let activity = item.get("activity").and_then(Value::as_object);
             let activity = read::normalize(activity.ok_or("activity must be an object")?);
             let (mut signature, mut units) = (String::new(), Vec::new());
-            if explains {
+            let unexplained = explains && shapes::lacks_command(&activity);
+            if explains && !unexplained {
                 let route = classify(&activity, &self.key);
                 signature = route["signature"].as_str().unwrap_or_default().to_string();
                 let mut parts = shapes::split(&activity, &self.key);
@@ -502,6 +504,7 @@ impl Desk {
                 key,
                 signature,
                 units,
+                unexplained,
                 at_once: answered && !delivering,
             });
         }
@@ -513,6 +516,10 @@ impl Desk {
         let mut added = 0;
         let mut wants: Vec<usize> = Vec::new();
         for (place, entry) in entries.iter().enumerate() {
+            if entry.unexplained {
+                answers.push(json!({ "status": "failed", "reason": "unexplained" }));
+                continue;
+            }
             let fenced = |view: &str| self.let_go.get(view).is_some_and(|until| *until > now);
             let gone = entry
                 .view
@@ -634,6 +641,10 @@ impl Desk {
                         let tier = answer["tier"].as_str().unwrap_or("exact_cache").to_string();
                         self.record(&tier, now, 0);
                     }
+                }
+                "failed" if entry.unexplained && !self.quieted(&entry.key, now, false) => {
+                    self.quiet.insert(entry.key.clone(), now + TOLD_MS);
+                    self.record("failed", now, 0);
                 }
                 "busy" | "disabled" if !self.quieted(&entry.key, now, false) => {
                     self.quiet.insert(entry.key.clone(), now + TOLD_MS);

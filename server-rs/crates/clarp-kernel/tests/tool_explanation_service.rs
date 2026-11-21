@@ -322,15 +322,15 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
         );
     }
     // Counted by the tool that wrote the vectors: 23 scenes, 107 requests of which 23 are
-    // refused and 3 fail on the Python Host (defects R39 and R40); the model was asked 33
-    // times about 85 parts there, and 77 rows were learned. Here the model is also asked
+    // refused and 3 fail on the Python Host (defects R39 and R40); the model was asked 32
+    // times about 84 parts there, and 76 rows were learned. Here the model is also asked
     // about what the Python Host fails on: two times and three parts more. The row that
     // Host learned in a scene before it failed is not counted here.
     assert_eq!(
         (scenes, requests, refused, where_python_fails),
         (23, 107, 23, 3)
     );
-    assert_eq!((batches, parts, learned), (33 + 2, 85 + 3, 77 - 1));
+    assert_eq!((batches, parts, learned), (32 + 2, 84 + 3, 76 - 1));
 }
 
 #[test]
@@ -426,4 +426,101 @@ fn the_ledger_says_what_the_python_hosts_says() {
         }
     }
     assert_eq!((asked, refused), (16, 2));
+}
+
+#[test]
+fn a_shell_placeholder_fails_without_model_work_or_learning() {
+    use clarp_kernel::explain::rows::Rows;
+
+    let items = json!([
+        {"id": "description", "activity": {"name": "Bash", "description": "A different call"}},
+        {"id": "label", "activity": {"name": "Bash", "command": "Bash"}},
+        {"id": "summary", "activity": {"kind": "command", "summary": "shell"}},
+    ]);
+    let level = json!(2);
+    let asked = Asked {
+        level: &level,
+        items: &items,
+        release: None,
+        target: None,
+        provenance: false,
+    };
+    let janitor = Janitor {
+        model: "fixture".into(),
+        identity: Some("explainer".into()),
+        level: None,
+        sources: 0,
+    };
+    let mut desk = Desk::new("key", Pace::default(), [], []);
+    let answer = desk
+        .request(&asked, Some(&janitor), &|_| panic!("no script reads"), 1)
+        .unwrap();
+    for item in answer["items"].as_array().unwrap() {
+        assert_eq!(item["status"], "failed");
+        assert_eq!(item["reason"], "unexplained");
+        assert!(item.get("text").is_none());
+    }
+    assert_eq!(answer["items"].as_array().unwrap().len(), 3);
+    assert!(!desk.busy());
+    assert_eq!(desk.table().rows().count(), 0);
+    let disabled = desk
+        .request(&asked, None, &|_| panic!("no script reads"), 2)
+        .unwrap();
+    assert!(
+        disabled["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["status"] == "disabled")
+    );
+
+    let event = |command: &str| {
+        json!({
+            "type": "live", "agent_id": "fixture", "ops": [{
+                "op": "upsert", "kind": "tool", "id": "same-item", "item": {
+                    "tool": {"name": "Bash", "command": command, "label": "Bash"}
+                }
+            }]
+        })
+    };
+    let mut rows = Rows::default();
+    assert!(rows.observe(&event("Bash"), true, 2, 1).is_empty());
+    assert!(!rows.busy());
+    let patches = rows.observe(&event("tail -n 5 /fixture/log.txt"), true, 2, 2);
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].explain["status"], "pending");
+}
+
+#[test]
+fn a_reusable_row_needs_its_fixed_values_in_this_call_but_an_exact_row_still_serves() {
+    use clarp_kernel::explain::{learned, shapes, version};
+
+    let use_it = json!({"name": "Bash", "command": "jobctl tail -n 50 /fixture/other.log"});
+    let activity = read::normalize(use_it.as_object().unwrap());
+    let parts = shapes::split(&activity, "key");
+    assert_eq!(parts.len(), 1);
+    let part = &parts[0];
+    let make = |key: &str, sentence: &str, parameterised: bool| Row {
+        signature: key.into(),
+        level: 2,
+        template_text: sentence.into(),
+        slot_names: Vec::new(),
+        program: part.program.clone(),
+        action: String::new(),
+        producer: "llm".into(),
+        parameterised,
+        prompt_version: PROMPT_VERSION,
+        templates_version: version(),
+        created_at: 0,
+        hits: 0,
+        last_hit_at: None,
+    };
+    let foreign = "Shows the end of {path1_name} in the nightly-build-7 run.";
+    let reused = |sentence: &str| learned::Table::of([make(&part.signature, sentence, true)]);
+    assert!(learned::learned(part, &reused(foreign), 2).is_none());
+    let ready = learned::learned(part, &reused("Shows the end of {path1_name}."), 2).unwrap();
+    assert_eq!(ready["text"], "Shows the end of other.log.");
+    let exact = "Shows the end of other.log in the nightly-build-7 run.";
+    let table = learned::Table::of([make(&part.exact_key, exact, false)]);
+    assert_eq!(learned::learned(part, &table, 2).unwrap()["text"], exact);
 }

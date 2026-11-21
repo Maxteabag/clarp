@@ -1002,23 +1002,46 @@ fn tool_part(activity: &Map<String, Value>, key: &str) -> Part {
     }
 }
 
+const SHELL_TOOLS: [&str; 4] = ["bash", "shell", "exec_command", "local_shell"];
+
+fn shell_command<'a>(activity: &'a Map<String, Value>, tool_kind: &str) -> &'a str {
+    match field(activity, &["command", "cmd"]) {
+        "" if tool_kind == "command" => activity
+            .get("summary")
+            .and_then(Value::as_str)
+            .map(python::strip)
+            .unwrap_or_default(),
+        command => command,
+    }
+}
+
+/// A shell tool's name or description alone says nothing about what it runs (R184).
+pub fn lacks_command(activity: &Map<String, Value>) -> bool {
+    let name = said_of(activity.get("name"));
+    let name = python::strip(&name).to_lowercase();
+    let kind = said_of(activity.get("kind"));
+    let kind = python::strip(&kind);
+    if (!SHELL_TOOLS.contains(&name.as_str()) && kind != "command")
+        || !shell_label(activity).is_empty()
+    {
+        return false;
+    }
+    let command = shell_command(activity, kind).to_lowercase();
+    command.is_empty() || SHELL_TOOLS.contains(&command.as_str()) || command == name
+}
+
 /// The parts of a use of a tool, as it was read. `key`: the Host's own, under which a
 /// shape is signed.
 pub fn split(activity: &Map<String, Value>, key: &str) -> Vec<Part> {
+    if lacks_command(activity) {
+        return Vec::new();
+    }
     let name = said_of(activity.get("name"));
     let name = python::strip(&name).to_lowercase();
     let tool_kind = said_of(activity.get("kind"));
     let tool_kind = python::strip(&tool_kind);
-    let summary = activity
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let command = match field(activity, &["command", "cmd"]) {
-        "" if tool_kind == "command" => summary,
-        command => command,
-    };
-    let shells = ["bash", "shell", "exec_command", "local_shell"];
-    if (shells.contains(&name.as_str()) || tool_kind == "command") && !command.is_empty() {
+    let command = shell_command(activity, tool_kind);
+    if (SHELL_TOOLS.contains(&name.as_str()) || tool_kind == "command") && !command.is_empty() {
         return shell_parts(command, 0, key);
     }
     let label = shell_label(activity);
@@ -1160,7 +1183,48 @@ pub fn parameterise<'a>(
     if counts && (DIGIT.is_match(&bare) || NUMBER_WORDS.is_match(&bare)) {
         return Err("literal_number");
     }
+    let fixed = PLACEHOLDER.replace_all(template, " ");
+    if specific_literal(&fixed) {
+        return Err("specific_literal");
+    }
     Ok(template)
+}
+
+static FIXED_WORD: LazyLock<Regex> = LazyLock::new(|| pattern(r#"[^\s\x1c-\x1f,;:()\[\]{}"'`]+"#));
+static DOTTED: LazyLock<Regex> = LazyLock::new(|| pattern(r"[A-Za-z0-9]\.[A-Za-z0-9]"));
+static IDENTIFIER: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)+|\d+"));
+
+fn specific_literal(fixed: &str) -> bool {
+    FIXED_WORD.find_iter(fixed).any(|word| {
+        let word = word.as_str().trim_end_matches(['.', '!', '?']);
+        word.contains('/')
+            || word.starts_with('~')
+            || DIGIT.is_match(word)
+            || word.contains('_')
+            || DOTTED.is_match(word)
+            || word.matches('-').nth(1).is_some()
+    })
+}
+
+/// An older reusable sentence can carry values that belong to another call.
+pub(super) fn foreign(template: &str, evidence: &str) -> bool {
+    let fixed = PLACEHOLDER.replace_all(template, " ");
+    let evidence = evidence.to_lowercase();
+    let bytes = evidence.as_bytes();
+    IDENTIFIER.find_iter(&fixed).any(|word| {
+        let word = word.as_str();
+        let specific =
+            DIGIT.is_match(word) || word.matches('-').nth(1).is_some() || word.contains(['_', '.']);
+        let word = word.to_lowercase();
+        specific
+            && !evidence.match_indices(word.as_str()).any(|(at, token)| {
+                let before = at.checked_sub(1).and_then(|at| bytes.get(at));
+                let after = bytes.get(at + token.len());
+                !before.is_some_and(u8::is_ascii_alphanumeric)
+                    && !after.is_some_and(u8::is_ascii_alphanumeric)
+            })
+    })
 }
 
 /// One sentence of a call from what was said of its parts, in their order.

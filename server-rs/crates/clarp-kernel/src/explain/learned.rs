@@ -216,8 +216,12 @@ pub fn learned(part: &Part, table: &Table, level: u8) -> Option<Value> {
             "hit": under, "hit_level": row.level,
         })
     };
+    let evidence = super::evidence(&part.activity);
     let said_by = |row: &Row| {
         let said = if row.parameterised {
+            if shapes::foreign(&row.template_text, &evidence) {
+                return None;
+            }
             shapes::render(&row.template_text, &part.slots)?
         } else {
             row.template_text.clone()
