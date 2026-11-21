@@ -71,6 +71,8 @@ mod pictures;
 mod provider_tasks;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
+#[path = "host/r175_engine_order.rs"]
+mod r175_engine_order;
 #[path = "host/remote_action.rs"]
 mod remote_action;
 #[path = "host/render_spec_export.rs"]
@@ -83,6 +85,8 @@ mod source_trace;
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
+#[path = "host/transcription_errors.rs"]
+mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
 #[path = "host/voice_events.rs"]
@@ -19853,7 +19857,7 @@ fn a_person_speaks_and_the_clip_becomes_text() {
     wait_for("the engine to have loaded its model", || {
         let (status, said) = hear(&[], b"a clip");
         assert!(
-            status == 200 || (status == 503 && said["error"] == "whisper model loading"),
+            status == 200 || (status == 503 && said["error"] == "transcription model loading"),
             "{status} {said}"
         );
         status == 200
@@ -19927,11 +19931,11 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         (status, &silent["text"], &silent["ends_terminal"]),
         (200, &json!(""), &json!(false))
     );
-    // An engine that fails says why, and the next clip is heard.
+    // An engine that fails gives the fixed word, and the next clip is heard.
     let (status, failed) = hear(&[], b"22");
     assert_eq!(
         (status, &failed["error"]),
-        (500, &json!("synthetic failure"))
+        (500, &json!("transcription failed"))
     );
     assert_eq!(hear(&[], b"a clip").0, 200);
 
@@ -19948,25 +19952,17 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         (
             "faster-whisper:medium",
             400,
-            "transcription model not installed: faster-whisper:medium",
+            "transcription model not installed",
         ),
         (
             "nothing-of-the-kind",
             400,
-            "transcription model not installed: nothing-of-the-kind",
+            "transcription model not installed",
         ),
-        ("cartesia:ink-2", 500, "cartesia API key is not configured"),
-        ("deepgram:nova-3", 500, "deepgram API key is not configured"),
-        (
-            "elevenlabs:scribe_v9",
-            500,
-            "unknown transcription engine: elevenlabs:scribe_v9",
-        ),
-        (
-            "elevenlabs:scribe_v2",
-            500,
-            "elevenlabs API key is not configured",
-        ),
+        ("cartesia:ink-2", 500, "transcription failed"),
+        ("deepgram:nova-3", 500, "transcription failed"),
+        ("elevenlabs:scribe_v9", 500, "transcription failed"),
+        ("elevenlabs:scribe_v2", 500, "transcription failed"),
     ] {
         let (answered, said) = hear(&[("X-Transcription-Model", model)], b"a clip");
         assert_eq!((answered, &said["error"]), (status, &json!(why)), "{model}");
@@ -20059,6 +20055,13 @@ fn a_person_speaks_and_the_clip_becomes_text() {
 /// A stand-in for ElevenLabs on the loopback: takes requests one after another, keeps what
 /// each sent, and answers every one with the same words.
 fn scribe_stand_in(answer: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+    speech_reply_stand_in("200 OK", answer)
+}
+
+fn speech_reply_stand_in(
+    status: &'static str,
+    answer: &'static str,
+) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = format!(
         "http://{}/v1/speech-to-text",
@@ -20102,7 +20105,7 @@ fn scribe_stand_in(answer: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
                 .unwrap()
                 .push(String::from_utf8_lossy(&seen).to_string());
             let reply = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
                  Connection: close\r\n\r\n{answer}",
                 answer.len()
             );
@@ -21329,20 +21332,17 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
     );
 
     // Another agent is looked at: it has no engines of its own. A clip an app names the
-    // failing engine for is answered with that engine's failure: there is no next one.
+    // failing engine for is answered with the fixed failure: there is no next one.
     look_at(&echo);
     let (status, said) = hear(
         &[("X-Transcription-Model", "elevenlabs:scribe_v2")],
         b"sound",
     );
     assert_eq!(status, 500, "{said}");
-    assert!(
-        said["error"]
-            .as_str()
-            .unwrap()
-            .starts_with("ElevenLabs HTTP 401: "),
-        "{said}"
-    );
+    assert_eq!(said["error"], "transcription failed", "{said}");
+    wait_for("the provider status in the private Host log", || {
+        host.heard.lock().unwrap().contains("ElevenLabs HTTP 401: ")
+    });
     // And one it names the working engine for is heard in the Host's language.
     let (status, said) = hear(&[("X-Transcription-Model", "google:chirp_3")], b"sound");
     assert_eq!(
@@ -34220,7 +34220,7 @@ fn stand_in_engine() -> StandInEngine {
                             of_turn += sound.len();
                             if address.contains("eot_timeout_ms=777") {
                                 let unwell = json!({
-                                    "type": "Error", "description": "the engine is unwell",
+                                    "type": "Error", "description": "the engine is unwell: /fixture/private/stream.bin",
                                 });
                                 says(&mut socket, unwell);
                                 continue;
@@ -34507,10 +34507,16 @@ fn a_phone_streams_what_it_hears_and_is_told_what_the_engine_says_of_the_turns()
     for _ in 0..2 {
         assert_eq!(
             told_on(&mut stream),
-            json!({ "type": "error", "message": "the engine is unwell" })
+            json!({ "type": "error", "message": "transcription failed" })
         );
         stream.send(sound_of(10)).unwrap();
     }
+    wait_for("stream provider detail in the private Host log", || {
+        host.heard
+            .lock()
+            .unwrap()
+            .contains("/fixture/private/stream.bin")
+    });
     // The phone goes without a word: the engine's socket is closed.
     assert_eq!(engine.open.load(Ordering::SeqCst), 1);
     drop(stream);
@@ -42602,7 +42608,11 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     let (nova, requests) = scribe_stand_in(
         r#"{"results":{"channels":[{"alternatives":[{"transcript":"the pump is ready"}]}]}}"#,
     );
-    let (scribe, failed) = scribe_stand_in(r#"{"error":"no transcript"}"#);
+    const PRIVATE: &str = "/fixture/private/provider-model.bin";
+    let (scribe, failed) = speech_reply_stand_in(
+        "502 Bad Gateway",
+        r#"{"error":"cannot load /fixture/private/provider-model.bin"}"#,
+    );
     let world = [
         ("CLARP_NOVA_ENDPOINT", nova.as_str()),
         ("CLARP_SCRIBE_ENDPOINT", scribe.as_str()),
@@ -42778,6 +42788,11 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     );
     let (_, again) = hear(&phone, id, &second, "clip-2");
     assert_eq!(again["stt"]["attempts"][0]["outcome"], "error");
+    assert_eq!(
+        again["stt"]["attempts"][0]["reason"],
+        "transcription failed"
+    );
+    assert!(!again.to_string().contains(PRIVATE));
     assert_eq!(again["stt"]["attempts"][0]["language"], "da");
     assert_eq!(again["stt"]["attempts"][1]["language"], "da");
     assert!(failed.lock().unwrap()[0].contains("name=\"language_code\"\r\n\r\nda"));
@@ -42793,9 +42808,52 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     assert_eq!(change(json!({"agent_languages":{"mike":"en"}})).0, 200);
     let (code, last) = hear(&phone, id, &second, "failed");
     assert_eq!(code, 500);
+    assert_eq!(last["error"], "transcription failed");
     assert_eq!(last["stt"]["effective_engine"], Value::Null);
     assert_eq!(last["stt"]["attempts"][0]["outcome"], "error");
     assert_eq!(last["stt"]["attempts"][0]["language"], "en");
+    assert_eq!(last["stt"]["attempts"][0]["reason"], "transcription failed");
+    assert!(!last.to_string().contains(PRIVATE));
+    let events = host.get("/voice-events?utterance_id=failed&event=error");
+    let error = &events["events"][0]["detail"];
+    assert_eq!(
+        error,
+        &json!({"message":"transcription failed","stage":"stt"})
+    );
+    assert!(!events.to_string().contains(PRIVATE));
+    let (status, health) = host.ask_as(&limited, "GET", "/diagnostics/health", None);
+    assert_eq!(status, 200);
+    assert_eq!(
+        health["subsystems"]["stt"]["last_error"],
+        "transcription failed"
+    );
+    assert!(!health.to_string().contains(PRIVATE));
+    wait_for("provider detail in the private Host log", || {
+        host.heard.lock().unwrap().contains(PRIVATE)
+    });
+    assert_eq!(
+        change(json!({"call_languages":"","call_engines":"","agent_languages":{"mike":"en,no"},"agent_engines":{"mike":"deepgram:nova-3"}})).0,
+        200
+    );
+    let nova_requests = requests.lock().unwrap().len();
+    let (code, refused) = hear(&phone, id, &second, "unhanded-set");
+    assert_eq!(code, 500, "{refused}");
+    assert_eq!(refused["error"], "transcription failed");
+    assert_eq!(
+        refused["stt"]["attempts"][0]["reason"],
+        "transcription failed"
+    );
+    assert_eq!(refused["stt"]["attempts"][0]["language"], Value::Null);
+    assert_eq!(refused["stt"]["attempts"][0]["engine"], "deepgram:nova-3");
+    assert_eq!(requests.lock().unwrap().len(), nova_requests);
+    assert_eq!(
+        change(json!({
+            "call_languages":"no,en","call_engines":"google:chirp_3",
+            "agent_languages":{"mike":"en"},"agent_engines":{"mike":"elevenlabs:scribe_v2"}
+        }))
+        .0,
+        200
+    );
     assert_eq!(
         action("/calls/hold", json!({"agent":second,"call_id":id})).0,
         200

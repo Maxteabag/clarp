@@ -1,2 +1,2 @@
-019721e45bdad2871a99367bbf7e36cfa24c5793
-The merge of the Python Host's PR 493 (issue 491 part A: a message that waits enters the conversation where its turn starts; contract 115): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+c2feb1486b109bb573541065008c9e2d4ca6bca5
+The merge of the Python Host's PR 504 (it holds every merge through PR 504: 517, the R175 rule): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
