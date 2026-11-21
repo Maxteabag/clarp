@@ -4,11 +4,14 @@ import runner
 
 KERNEL = "clarp-kernel/src/takeover.rs"
 AGENT = "clarp-kernel/src/agent.rs"
+ACTOR = "clarp-actor/src/takeover.rs"
 CLAUDE = "clarp-backend/src/claude.rs"
 AGY = "clarp-backend/src/agy.rs"
 RUNS = {
     "vectors": ["test", "--test", "takeover_vectors"],
     "journal": ["test", "-p", "clarp-kernel", "--lib", "a_selected_takeover_survives_reopen"],
+    "fence": ["test", "--test", "actor", "a_takeover_reads_every_record_at_the_fence"],
+    "finish": ["test", "--test", "actor", "a_confirmed_takeover_closes_the_first_row"],
     "first-turn": ["test", "-p", "clarp-kernel", "--lib", "a_first_turn_only_counts_as_fresh"],
     "claude": ["test", "-p", "clarp-backend", "--lib", "a_turn_is_started_with_the_message_on_standard_input"],
     "agy": ["test", "-p", "clarp-backend", "--lib", "a_turn_is_started_with_the_message_bound_to_its_flag"],
@@ -78,6 +81,16 @@ PLANTS = [
      'work.start_next_with(now_ms, Some(selected.start));', 'work.start_next_with(now_ms, None);'),
     (AGENT, "journal", "the third message can take over again",
      '            && self.live_takeover.is_none()\n', ''),
+    (ACTOR, "fence", "the unnotified tail is judged without reading the current fence",
+     '.read_window(0, until, usize::MAX)', '.read_window(0, until.saturating_sub(1), usize::MAX)'),
+    (ACTOR, "fence", "a torn or missing fenced record is counted as silence",
+     'if read.next_offset != until || !read.damaged.is_empty() {',
+     'if !read.damaged.is_empty() {'),
+    (ACTOR, "fence", "Claude result at the fence is ignored",
+     'event["type"] == "result" || takeover::claude_output(&event)',
+     'takeover::claude_output(&event)'),
+    (ACTOR, "finish", "the old user message has no turn end on takeover",
+     'batch.item(written(&end, now_ms)?);', 'let _ = end;'),
     (AGENT, "first-turn", "a seeded first turn is mistaken for an empty provider session",
      '            && !self.live_resumed_session', '            && true'),
 ]
