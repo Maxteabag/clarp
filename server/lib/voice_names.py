@@ -11,8 +11,9 @@ key; a failed fetch keeps what the file had; a voice found nowhere stays without
 rewrite it (it only marks the check), and the start-up refresh is skipped while the file is
 younger than REFRESH_SECONDS, so a restart with nothing changed moves no profile version.
 
-Beside the names, the file keeps "_catalogue" (the ids of the LAST successful catalogue fetch,
-replaced each time: what the provider offers today) and "_gone" (voices in use that the provider
+Beside the names, the file keeps "_catalogue" (the LAST successful catalogue fetch, replaced
+each time: what the provider offers today, each voice with its language and whether it is public
+and whether it is the account's own, as the row said) and "_gone" (voices in use that the provider
 answered 404 for at the last lookup: deleted voices, logged once each as voiceGone). The voice
 pool hands out only today's catalogue; the profile reads a gone voice as voice_unavailable.
 """
@@ -71,12 +72,12 @@ def names(provider: str, path: pathlib.Path | None = None) -> dict[str, str]:
     return dict(loaded[0].get(provider) or {}) if loaded else {}
 
 
-def catalogue(provider: str, path: pathlib.Path | None = None) -> list[str] | None:
-    """The ids of the provider's catalogue as last fetched (today's), or None when it never
-    was; never a fetch."""
+def catalogue(provider: str, path: pathlib.Path | None = None) -> dict[str, dict] | None:
+    """The provider's catalogue as last fetched (today's): voice id -> {"language", "public",
+    "owner"} as each row said, or None when it never was; never a fetch."""
     loaded = _loaded(path or names_path())
-    ids = (loaded[0].get("_catalogue") or {}).get(provider) if loaded else None
-    return list(ids) if ids is not None else None
+    rows = (loaded[0].get("_catalogue") or {}).get(provider) if loaded else None
+    return {k: dict(v) for k, v in rows.items()} if rows is not None else None
 
 
 def gone(provider: str, path: pathlib.Path | None = None) -> frozenset[str]:
@@ -123,11 +124,18 @@ def _read_bytes(data: bytes, path: pathlib.Path) -> dict[str, Any]:
     out: dict[str, Any] = {
         str(p): {str(k): str(v) for k, v in m.items() if k and isinstance(v, str) and v.strip()}
         for p, m in raw.items() if isinstance(m, dict) and not str(p).startswith("_")}
-    for meta in _META:
-        held = raw.get(meta)
-        if isinstance(held, dict):
-            out[meta] = {str(p): sorted({str(v) for v in ids if v})
-                         for p, ids in held.items() if isinstance(ids, list)}
+    held = raw.get("_gone")
+    if isinstance(held, dict):
+        out["_gone"] = {str(p): sorted({str(v) for v in ids if v})
+                        for p, ids in held.items() if isinstance(ids, list)}
+    held = raw.get("_catalogue")
+    if isinstance(held, dict):
+        # provider -> voice id -> {"language", "public", "owner"} as the catalogue row said
+        out["_catalogue"] = {str(p): {str(k): {"language": str((m or {}).get("language") or ""),
+                                               "public": bool((m or {}).get("public")),
+                                               "owner": bool((m or {}).get("owner"))}
+                                      for k, m in rows.items() if k and isinstance(m, dict)}
+                             for p, rows in held.items() if isinstance(rows, dict)}
     return out
 
 
@@ -216,14 +224,17 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
     used = (voices_in_use or in_use)(cfg)
     fresh: dict[str, dict[str, str]] = {}
     gone_now: dict[str, set[str]] = {}
-    today: dict[str, list[str]] = {}
+    today: dict[str, dict[str, dict]] = {}
     if cartesia_key:
         try:
             rows = (cartesia_all or cartesia_voices.all_voices)(cartesia_key)
         except Exception as exc:  # noqa: BLE001 - the file keeps Cartesia's old names
             log_exception("voiceNamesFetchFail", exc, detail=CARTESIA)
         else:
-            today[CARTESIA] = sorted({str(r.get("id")) for r in rows if r.get("id")})
+            today[CARTESIA] = {str(r.get("id")): {"language": str(r.get("language") or ""),
+                                                   "public": bool(r.get("is_public")),
+                                                   "owner": bool(r.get("is_owner"))}
+                               for r in rows if r.get("id")}
             found = {str(r.get("id")): str(r.get("name")).strip()
                      for r in rows if r.get("id") and str(r.get("name") or "").strip()}
             named, gone_now[CARTESIA] = _lookup(cartesia_key, used.get(CARTESIA, set()) - set(today[CARTESIA]),
