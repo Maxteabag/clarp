@@ -1,10 +1,11 @@
 //! Claude's stream records held to the isolated Python reference.
 
+#![allow(clippy::unwrap_used)]
+
 use clarp_kernel::steering::{Observation, Stream, tool_changes};
 use serde_json::Value;
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn claudes_tool_windows_and_replay_echoes_follow_the_reference() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/steer-c-vectors.json")).unwrap();

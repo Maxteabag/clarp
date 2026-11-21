@@ -72,7 +72,7 @@ case "$cmd" in
     # The shim a test Host launches its turns through is found beside the Host: build it first,
     # since a test run named by package or file (-p clarp-host --test host) builds no other binary.
     test)   cargo_cmd="cargo build -j $JOBS -p clarp-shim --bins && cargo test --workspace -j $JOBS $(printf '%q ' "$@")" ;;
-    clippy) cargo_cmd="cargo clippy --workspace --all-targets -j $JOBS -- -D warnings" ;;
+    clippy) cargo_cmd="cargo clippy --workspace --all-targets --keep-going -j $JOBS -- -D warnings" ;;
     fmt)    cargo_cmd="cargo fmt --all" ;;
     conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
     answers) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py rust --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
