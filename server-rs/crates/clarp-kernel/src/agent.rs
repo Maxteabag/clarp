@@ -428,6 +428,10 @@ impl Agent {
         self.queue_revision
     }
 
+    pub(crate) fn queue_item_shown(&mut self) {
+        self.queue_revision += 1;
+    }
+
     /// Whether the live turn came through the queue: it had to wait, or it was left for later.
     pub fn live_from_queue(&self) -> bool {
         self.live.is_some() && self.live_from_queue
@@ -515,7 +519,9 @@ impl Agent {
         })
     }
 
-    /// Whether a message admitted this way now would start at once, without waiting.
+    /// Whether a message admitted this way now would start at once, without waiting: and so
+    /// whether it is in the conversation at once. One that must wait enters it in the write
+    /// that starts its turn (D14).
     pub fn starts_at_once(&self, admission: Admission) -> bool {
         self.live.is_none() && !(self.paused && admission == Admission::Background)
     }
@@ -1021,7 +1027,7 @@ impl Agent {
                 // anything is in its way: whoever left it there is told that it joined and, in
                 // the same breath, that it left to run. The Python Host counts it so, and an app
                 // that orders queue news by the revision sees the same numbers from both.
-                if self.live.is_some() || held || queued.admission.waits_outside() {
+                if self.live.is_some() || held || queued.admission.left_for_later() {
                     self.waited.insert(turn);
                     self.queue_revision += 1;
                 }
@@ -1228,7 +1234,7 @@ impl Work {
         self.decision
             .effects
             .push(Effect::StartTurn { turn, message_seq });
-        if self.agent.live_from_queue {
+        if self.agent.live_from_queue() {
             self.let_go_of_nothing(DRAINED, now_ms);
         }
     }

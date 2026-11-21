@@ -89,17 +89,17 @@ pub fn silent_when_failed(origin: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Admission {
-    /// Said to the agent: it is in the conversation from now on, and the agent comes to it when
-    /// it is free. A hold that was placed before it came does not hold it: someone said this
-    /// after the stop, and means it.
+    /// Said to the agent: the agent comes to it when it is free. A hold that was placed before
+    /// it came does not hold it: someone said this after the stop, and means it. Like every
+    /// message, it enters the conversation when its turn starts; while it waits it keeps its
+    /// delivery receipt, and it can be reworded or taken back in the queue.
     #[default]
     Queue,
     /// The user wants it now: it ends the live turn, goes ahead of what waits its turn, and runs
     /// even while the agent is paused, without lifting the pause.
     Direct,
-    /// Left for later by someone: it waits its turn like a message that was said, but stays
-    /// out of the conversation until its turn starts. Until then it is in the queue, where it
-    /// can be taken back.
+    /// Left for later by someone: it waits its turn like a message that was said, in the queue,
+    /// where it can be taken back, and goes through the queue even when nothing is in its way.
     Later,
     /// Work nobody sits waiting for: it waits in the queue like `Later`, and a hold holds it
     /// like everything that waited when the hold was placed.
@@ -111,8 +111,9 @@ impl Admission {
         *self == Self::Queue
     }
 
-    /// Whether a message admitted this way stays out of the conversation while it waits.
-    pub fn waits_outside(self) -> bool {
+    /// Whether a message admitted this way was left for later: it goes through the queue even
+    /// when nothing is in its way.
+    pub fn left_for_later(self) -> bool {
         matches!(self, Self::Later | Self::Background)
     }
 }

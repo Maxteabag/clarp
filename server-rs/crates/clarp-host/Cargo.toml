@@ -43,6 +43,7 @@ ureq.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
+clarp-sealed.workspace = true
 proc-macro2 = "1"
 regex.workspace = true
 syn = { version = "2", features = ["full", "visit"] }
