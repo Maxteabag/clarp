@@ -338,6 +338,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("hidden_coordination", 120),
     ("coordination_working_state", 124),
     ("agent_moved", 125),
+    ("teams", 1),
 ];
 
 /// After this long without an event, a stream is sent a heartbeat.
