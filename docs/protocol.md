@@ -58,6 +58,17 @@ scope: a caller-selected root can contain configuration credentials, even
 though the operation is read-only. So do an agent's interactive terminal
 (`/terminal/<session>`) and `PATCH /schedules/<id>`.
 
+A limited device may `POST /paired-devices/revoke` with its own `device_id`
+(an app that finds it paired the wrong Host ends its own pairing); any other
+`device_id` answers `403 full device access required`. Its token stops working
+at once.
+
+`GET /pairing/identity` needs no token: it answers exactly `{"server_id",
+"name", "contract": {"host"}}`, so an app opening a pairing link can compare the
+link's `server_id` before it spends the one-time code. Each source may read it
+30 times a minute; more answer `429` with `Retry-After` (feature
+`pairing_identity`).
+
 Limited scope is an API permission boundary, not an agent sandbox. It still
 allows sending work to agents that run with the host user's permissions.
 
@@ -835,7 +846,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 
 | Surface | Routes | Server module |
 |---|---|---|
-| Device pairing | `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
+| Device pairing | `GET /pairing/identity`, `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
 | Push notifications | `POST /devices` (APNs token, or an Android FCM token with `"platform": "android", "provider": "fcm"`: [push-android.md](push-android.md); an FCM registration may declare `"supported_conversation_modes": ["agent_live_v1"]`, which makes the phone Live-capable for `POST /calls/live` and Live rings, feature `agent_live_fcm`: [Live calls](push-android.md#live-calls-feature-agent_live_fcm-host-contract-94)), `DELETE /devices`, `GET /devices/push-tokens` ([unregistering](push-android.md#unregistering-and-revocation)), `POST`/`DELETE /devices/live-activity` (an ActivityKit token; or `"platform": "fcm"`, the agents-working summary for an Android phone, feature `live_activity_fcm`: [agents working](push-android.md#agents-working-feature-live_activity_fcm-host-contract-95)), `GET /notification-avatars/…`, `/attention` | `apns.py`, `fcm.py`, `user_notifications.py` |
 | Harness sign-in and usage | `/backend-auth` (`?harnesses=all` lists every harness), `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
 | Hotseat account status (read-only snapshot, `accounts_hotseat`) | `/hotseat/status` | `hotseat_status.py` |

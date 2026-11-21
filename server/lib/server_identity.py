@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 113  # Delete and favourite a chat's gallery images (feature media_manage, issue 489). 112: a recording whose engine cannot take the agent's language set is heard within the owner's choice or refused with 422 language_set_unsupported; /transcribe answers engine_fallback (R152). 111: render_spec switched on per client (iOS 74); GET /artifacts/<id>/export for the administrator (issue 428, R137). 110: GPT-Live-1.1: the configured model per Host and per agent-Live client; oracle_v2.standby; standby usage (#473). 109: An agent's voice and hearing as the Host resolves them: voice_profile on snapshot rows, voice_defaults (issue 475). 108: Coordination between agents, first part (issue 478): /log rows and the working state carry audience; an agent's note to the user (POST /agent-notes, kind note). 107: An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 114  # Pairing identity before the code is spent: GET /pairing/identity without a token; a limited device may revoke itself (feature pairing_identity, R172). 113: Delete and favourite a chat's gallery images (feature media_manage, issue 489). 112: a recording whose engine cannot take the agent's language set is heard within the owner's choice or refused with 422 language_set_unsupported; /transcribe answers engine_fallback (R152). 111: render_spec switched on per client (iOS 74); GET /artifacts/<id>/export for the administrator (issue 428, R137). 110: GPT-Live-1.1: the configured model per Host and per agent-Live client; oracle_v2.standby; standby usage (#473). 109: An agent's voice and hearing as the Host resolves them: voice_profile on snapshot rows, voice_defaults (issue 475). 108: Coordination between agents, first part (issue 478): /log rows and the working state carry audience; an agent's note to the user (POST /agent-notes, kind note). 107: An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -246,6 +246,9 @@ FEATURES: tuple[str, ...] = (
     "speech_outcome",
     # Delete and favourite a chat's gallery images (issue 489, docs/protocol.md "Media").
     "media_manage",
+    # GET /pairing/identity without a token (server_id, name, contract.host), and a
+    # limited device may POST /paired-devices/revoke for its own device_id (R172).
+    "pairing_identity",
 )
 
 
@@ -315,6 +318,7 @@ FEATURE_CONTRACTS["compaction_outcome"] = 107
 FEATURE_CONTRACTS["voice_profile"] = 109
 FEATURE_CONTRACTS["speech_outcome"] = 109
 FEATURE_CONTRACTS["media_manage"] = 113
+FEATURE_CONTRACTS["pairing_identity"] = 114
 
 
 # Features that exist only while live events actually flow: the hub runs in
@@ -493,11 +497,22 @@ def server_id() -> str:
     return value
 
 
-def get_server_info() -> dict[str, object]:
-    server_id_value = server_id()
-    name = (get_text(_NAME_KEY).strip()
+def _name() -> str:
+    return (get_text(_NAME_KEY).strip()
             or os.environ.get("CLARP_SERVER_NAME", "").strip()
             or socket.gethostname())
+
+
+def identity() -> dict[str, object]:
+    """Who this Host is, for an app about to pair (GET /pairing/identity, no
+    token): its id, its name and its contract number, and nothing else. A
+    pairing link carries server_id; the app compares before it spends the code."""
+    return {"server_id": server_id(), "name": _name(), "contract": {"host": HOST_CONTRACT}}
+
+
+def get_server_info() -> dict[str, object]:
+    server_id_value = server_id()
+    name = _name()
     mode = os.environ.get("CLARP_DEPLOYMENT_MODE", "native").strip().lower()
     image_version = os.environ.get("CLARP_IMAGE_VERSION", "").strip()
     deployed_version = ""
