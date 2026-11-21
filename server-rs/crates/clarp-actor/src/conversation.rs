@@ -710,22 +710,32 @@ mod tests {
 
         let engine = clarp_store_mem::MemEngine::new();
         let log = engine
-            .open(Path::new("/agents/recipient"), clarp_codec::standard_set("zstd").unwrap())
+            .open(
+                Path::new("/agents/recipient"),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
             .unwrap();
         let mut recorder = Recorder::open(log).unwrap();
         let message = Message {
             id: "u-request".into(),
             text: "Look at this".into(),
-            origin: Origin::Agent { agent_id: "sender".into() },
+            origin: Origin::Agent {
+                agent_id: "sender".into(),
+            },
             ..Message::default()
         };
-        recorder.accept_message(Incoming {
-            key: Some(message.id.clone()),
-            body: serde_json::to_vec(&message).unwrap(),
-            origin: message.origin.clone(),
-            admission: Admission::Queue,
-            coordination: Some("sender".into()),
-        }, 100).unwrap();
+        recorder
+            .accept_message(
+                Incoming {
+                    key: Some(message.id.clone()),
+                    body: serde_json::to_vec(&message).unwrap(),
+                    origin: message.origin.clone(),
+                    admission: Admission::Queue,
+                    coordination: Some("sender".into()),
+                },
+                100,
+            )
+            .unwrap();
         let mut batch = recorder.batch();
         let reply = Entry::Reply(Reply {
             id: "assistant-row".into(),
@@ -736,23 +746,40 @@ mod tests {
         batch.item(reply.to_item(200).unwrap());
         batch.commit().unwrap();
         let cursor = recorder.conversation_seq() * REVISION_STEP;
-        assert_eq!(mark_of(recorder.log(), 1).unwrap().as_deref(), Some("sender"));
+        assert_eq!(
+            mark_of(recorder.log(), 1).unwrap().as_deref(),
+            Some("sender")
+        );
 
         let mut batch = recorder.batch();
         assert!(loosen(&mut batch, TurnId(1), 300).unwrap());
         batch.commit().unwrap();
-        let span = Span { floor: 0, head_revision: recorder.conversation_seq() * REVISION_STEP };
+        let span = Span {
+            floor: 0,
+            head_revision: recorder.conversation_seq() * REVISION_STEP,
+        };
         let first = after(recorder.log(), cursor, &[], span, 1, Which::All).unwrap();
         assert!(first.has_more);
         assert_eq!(first.entries[0].entry.id(), "u-request");
         assert_eq!(first.entries[0].ts_ms, 100);
         assert!(first.entries[0].coordination.is_none());
-        let next = after(recorder.log(), first.latest_revision, &[], span, 1, Which::All).unwrap();
+        let next = after(
+            recorder.log(),
+            first.latest_revision,
+            &[],
+            span,
+            1,
+            Which::All,
+        )
+        .unwrap();
         assert!(!next.has_more);
         assert_eq!(next.entries[0].entry.id(), "assistant-row");
         assert_eq!(next.entries[0].ts_ms, 200);
         assert!(next.entries[0].coordination.is_none());
-        assert_eq!(original_mark(recorder.log(), 1).unwrap().as_deref(), Some("sender"));
+        assert_eq!(
+            original_mark(recorder.log(), 1).unwrap().as_deref(),
+            Some("sender")
+        );
         assert!(!loosen(&mut recorder.batch(), TurnId(1), 400).unwrap());
     }
 

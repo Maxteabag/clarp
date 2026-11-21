@@ -257,6 +257,7 @@ impl State {
                 cost_so_far: None,
                 total: None,
                 limits: None,
+                note_count: 0,
             };
             batch.item(written(&Entry::TurnEnd(end), now_ms)?);
         }
