@@ -314,8 +314,9 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
             return Err(match why {
                 crate::gallery::Failure::Busy
                 | crate::gallery::Failure::Stopped
-                | crate::gallery::Failure::TimedOut =>
-                    ApiError::new(StatusCode::SERVICE_UNAVAILABLE, why.words()),
+                | crate::gallery::Failure::TimedOut => {
+                    ApiError::new(StatusCode::SERVICE_UNAVAILABLE, why.words())
+                }
                 _ => declined(kept::ASSET_GONE),
             });
         }
