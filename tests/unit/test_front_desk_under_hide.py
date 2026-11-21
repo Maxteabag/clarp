@@ -57,7 +57,7 @@ def _visible(agent_id):
 
 
 def test_a_front_desk_relay_is_recorded_shown_and_another_agents_message_is_not(tmp_path):
-    world = World(tmp_path)
+    world = World(tmp_path, coordination_visibility="hide")
     desk = _desk(tmp_path)
     _write(world, "relay", sender=desk, user_word=True)
     _write(world, "peer", sender=desk, user_word=False)
@@ -76,7 +76,7 @@ def test_a_front_desk_relay_is_recorded_shown_and_another_agents_message_is_not(
 
 def test_a_relay_written_under_a_trace_already_marked_shows_it(tmp_path):
     """A retry of the relay under a trace an earlier attempt marked 'agents'."""
-    world = World(tmp_path)
+    world = World(tmp_path, coordination_visibility="hide")
     desk = _desk(tmp_path)
     database = agents_db.conn()
     database.execute(
@@ -87,7 +87,7 @@ def test_a_relay_written_under_a_trace_already_marked_shows_it(tmp_path):
 
 
 def test_a_relay_steered_into_a_coordination_turn_shows_that_turn(tmp_path):
-    world = World(tmp_path)
+    world = World(tmp_path, coordination_visibility="hide")
     desk = _desk(tmp_path)
     _write(world, "peer", sender=desk, user_word=False)
     agents_db.conn().execute(
@@ -99,7 +99,7 @@ def test_a_relay_steered_into_a_coordination_turn_shows_that_turn(tmp_path):
 
 
 def test_another_agents_message_steered_in_leaves_the_turn_hidden(tmp_path):
-    world = World(tmp_path)
+    world = World(tmp_path, coordination_visibility="hide")
     desk = _desk(tmp_path)
     _write(world, "peer", sender=desk, user_word=False)
     agents_db.conn().execute(
