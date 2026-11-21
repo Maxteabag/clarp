@@ -3438,6 +3438,14 @@ Host's tests: each names `--host`, because told none these take `127.0.0.1:7690`
 weakness, section 7). The unit tests that run themselves again as a child give the child nothing of the runner's
 either.
 
+**Portrait gallery hints** (21 Nov 2026, the Python Host's PR 510). When a portrait job
+ends, its images are found by chat, producer prefix and the inclusive creation window.
+A durable successful delivery carries the exact terminal window, including across a restart.
+Other terminal changes give that window to the gallery after the fleet commit. The gallery
+writer claims each asset and change before broadcasting, in event-time and asset id order.
+The claim is advisory and takes nothing away from the committed images or portraits if it
+fails. Late updates and replays of a delivered job add no duplicate created hint.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |

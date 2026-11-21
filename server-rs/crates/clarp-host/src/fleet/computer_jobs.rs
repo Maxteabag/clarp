@@ -150,7 +150,17 @@ impl Fleet {
     pub(super) fn change_computer_job(
         &mut self,
         command: JobCommand,
+        writes: Vec<clarp_ports::kv::Write>,
+    ) -> Result<Result<JobChange, ComputerJobRefusal>, Unavailable> {
+        let now = self.now_ms();
+        self.change_computer_job_at(command, writes, now)
+    }
+
+    pub(super) fn change_computer_job_at(
+        &mut self,
+        command: JobCommand,
         mut writes: Vec<clarp_ports::kv::Write>,
+        now: i64,
     ) -> Result<Result<JobChange, ComputerJobRefusal>, Unavailable> {
         let id = command.id().trim();
         if let Some(agent_id) = self.jobs.get(id) {
@@ -159,7 +169,8 @@ impl Fleet {
                 agent_id: agent_id.clone(),
             }));
         }
-        let now = self.now_ms();
+        let before = self.computer_jobs.book.get(id).map(|job| (job.generation, job.status));
+        let deferred = writes.iter().any(|(table, _, _)| table == &shelf(super::portrait_jobs::PENDING));
         let mut change = match self.computer_jobs.book.decide(command, now, 0) {
             Ok(change) => change,
             Err(why) => return Ok(Err(ComputerJobRefusal::Kernel(why))),
@@ -208,6 +219,19 @@ impl Fleet {
             .insert(job.id.clone(), row.timeline);
         if let Some(record) = &change.record {
             self.computer_jobs.book.apply(record);
+            // A successful publication has a durable delivery that announces only after the
+            // gallery is updated. Other terminal transitions can announce after this commit.
+            if job.kind == clarp_kernel::portrait_generation::KIND
+                && job.status.is_terminal()
+                && before.is_none_or(|(generation, status)| {
+                    generation != job.generation || !status.is_terminal()
+                })
+                && !deferred
+                && let Some(announcer) = self.works.portrait_hints.clone()
+            {
+                let window = clarp_kernel::portrait_generation::MediaWindow::of(job);
+                self.works.runtime.spawn(async move { announcer.tell(window).await });
+            }
             self.computer_jobs.notify_producers(job);
             let computer_id = &self.computer_jobs.computer_id;
             self.works.hub.publish(serde_json::json!({

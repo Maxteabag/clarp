@@ -245,6 +245,12 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     assert!(requests.try_recv().is_err());
     let gallery = |host: &Host| host.get(&format!("/agent-portraits?session={sid}"));
     let original = gallery(&host);
+    let heard = host.listen_at("/events?token=fixture");
+    let hints = || {
+        heard.lock().unwrap().iter().filter(|event| {
+            event["type"] == "media-changed" && event["session"] == sid
+        }).cloned().collect::<Vec<_>>()
+    };
     // The duplicate request reuses a Computer job. The second request is not sent until the first edit succeeds.
     let (status, first) = post(&host, sid);
     assert_eq!(status, 202, "{first}");
@@ -286,6 +292,7 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     let (body, finish) = receive();
     assert!(body.contains("everyday-life scene") && body.contains("primary"));
     assert_eq!(gallery(&host), original);
+    assert!(hints().is_empty(), "nothing is announced while the second edit is pending");
     finish.send((200, reply("two"))).unwrap();
     wait_for("both alternatives and their publication", || {
         gallery(&host)["portraits"].as_array().unwrap().len() == 3
@@ -297,6 +304,18 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     });
     let kept = gallery(&host);
     let images = host.get(&format!("/media?session={sid}"));
+    wait_for("the committed gallery changes", || hints().len() >= 2);
+    let mut published: Vec<_> = images["assets"].as_array().unwrap().iter().collect();
+    published.sort_by_key(|asset| (asset["created_at"].as_i64(), asset["asset_id"].as_str()));
+    let events = hints();
+    assert_eq!(events.len(), 2);
+    for (event, asset) in events.iter().zip(published) {
+        assert_eq!(event["change"], "created");
+        assert_eq!(event["asset_id"], asset["asset_id"]);
+        assert_eq!(event["at"], asset["created_at"]);
+        assert_eq!(event["agent_id"], made["agent_id"]);
+        assert!(event.get("favorite").is_none());
+    }
     let mut captions = Vec::new();
     for pic in images["assets"].as_array().unwrap() {
         assert_eq!(pic["session"], sid);
@@ -327,6 +346,7 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     receive().1.send((200, reply("unkept"))).unwrap();
     receive().1.send((500, "made-up-key".into())).unwrap();
     wait_for("the failed pair", || job(&host, id)["status"] == "failed");
+    assert_eq!(hints(), events, "the failed run kept no image");
     assert!(!job(&host, id).to_string().contains("made-up-key"));
     assert_eq!(gallery(&host), kept);
     assert_eq!(
