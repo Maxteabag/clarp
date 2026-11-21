@@ -188,7 +188,11 @@ fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
                 };
                 let _ = answer.send(end);
             }
-            ToSpool::MarkTakeover { fence, replaced_by, done } => {
+            ToSpool::MarkTakeover {
+                fence,
+                replaced_by,
+                done,
+            } => {
                 let mark = if complete {
                     writer.append_at_and_sync(
                         fence,
@@ -727,7 +731,11 @@ impl Control {
         let (done, wait) = mpsc::channel();
         if self
             .to_spool
-            .send(ToSpool::MarkTakeover { fence, replaced_by, done })
+            .send(ToSpool::MarkTakeover {
+                fence,
+                replaced_by,
+                done,
+            })
             .is_err()
         {
             return Reply::failed("the takeover marker could not be written");
@@ -741,7 +749,9 @@ impl Control {
         // The expired timer cannot resume the group after this request has committed.
         let signal = killpg(self.group(), Signal::SIGKILL);
         if let Err(error) = signal {
-            log(&format!("clarp-shim: cannot end a held tool for takeover: {error}"));
+            log(&format!(
+                "clarp-shim: cannot end a held tool for takeover: {error}"
+            ));
             return Reply::failed("the held tool could not be ended");
         }
         *hold = Hold::Ended;
@@ -960,9 +970,13 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
         let text = serde_json::to_string(&reply).map(|text| text + "\n");
         let consumed = reply.killed == Some(true);
         let can_write = !consumed
-            || write_half.set_write_timeout(Some(Duration::from_millis(100))).is_ok();
+            || write_half
+                .set_write_timeout(Some(Duration::from_millis(100)))
+                .is_ok();
         let written = can_write
-            && text.as_ref().is_ok_and(|text| write_half.write_all(text.as_bytes()).is_ok());
+            && text
+                .as_ref()
+                .is_ok_and(|text| write_half.write_all(text.as_bytes()).is_ok());
         if consumed {
             *lock(&control.stage) = StopStage::Signalled;
             control.changed.notify_all();

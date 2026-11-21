@@ -131,7 +131,11 @@ fn logins(home: &Path) -> [u8; 32] {
 
 /// Starts a tool for one answer about itself: how it ended and what it printed. What it
 /// writes aside is not read. `None`: it could not be started, or did not answer in time.
-pub(crate) async fn asked(program: &Path, args: &[String], within: Duration) -> Option<(i32, String)> {
+pub(crate) async fn asked(
+    program: &Path,
+    args: &[String],
+    within: Duration,
+) -> Option<(i32, String)> {
     let mut command = crate::child::asynchronous(program);
     command
         .args(args)
