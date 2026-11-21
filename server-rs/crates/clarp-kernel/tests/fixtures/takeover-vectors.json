@@ -531,5 +531,77 @@
       "first": "first",
       "allowed": true
     }
+  ],
+  "versions": [
+    {
+      "provider": "claude",
+      "output": "none",
+      "allowed": false
+    },
+    {
+      "provider": "claude",
+      "output": "2.1.222",
+      "allowed": false
+    },
+    {
+      "provider": "claude",
+      "output": "2.1.223",
+      "allowed": true
+    },
+    {
+      "provider": "claude",
+      "output": "2.1.321 (Claude Code)",
+      "allowed": true
+    },
+    {
+      "provider": "claude",
+      "output": "2.2.0",
+      "allowed": true
+    },
+    {
+      "provider": "claude",
+      "output": "1.9.999",
+      "allowed": false
+    },
+    {
+      "provider": "claude",
+      "output": "2.1",
+      "allowed": false
+    },
+    {
+      "provider": "agy",
+      "output": "unknown",
+      "allowed": false
+    },
+    {
+      "provider": "agy",
+      "output": "agy 1.5.12",
+      "allowed": false
+    },
+    {
+      "provider": "agy",
+      "output": "agy 1.5.13",
+      "allowed": true
+    },
+    {
+      "provider": "agy",
+      "output": "1.5.14",
+      "allowed": true
+    },
+    {
+      "provider": "agy",
+      "output": "1.6.0",
+      "allowed": true
+    },
+    {
+      "provider": "agy",
+      "output": "1.4.99",
+      "allowed": false
+    },
+    {
+      "provider": "agy",
+      "output": "2.0.0",
+      "allowed": true
+    }
   ]
 }

@@ -131,8 +131,24 @@ def capture(place):
     ]:
         agy_guards.append(dict(turns=turns, first=first,
                                allowed=takeover.agy_plan(turns, first) is not None))
+    versions = []
+    executable = place / "fake-tool"
+    executable.write_text("only the stat is used")
+    for provider, ready, outputs in (
+        ("claude", takeover.claude_version_ok,
+         ["none", "2.1.222", "2.1.223", "2.1.321 (Claude Code)", "2.2.0", "1.9.999", "2.1"]),
+        ("agy", takeover.agy_version_ok,
+         ["unknown", "agy 1.5.12", "agy 1.5.13", "1.5.14", "1.6.0", "1.4.99", "2.0.0"]),
+    ):
+        for output in outputs:
+            takeover._cli_version.cache_clear()
+            with patch.object(takeover.shutil, "which", return_value=str(executable)), \
+                    patch.object(takeover.subprocess, "run", return_value=SimpleNamespace(stdout=output)):
+                allowed = ready("fake-tool")
+            versions.append(dict(provider=provider, output=output, allowed=allowed))
+
     return dict(uuids=uuids, launches=launches, streams=streams, transcripts=transcripts,
-                agy_guards=agy_guards)
+                agy_guards=agy_guards, versions=versions)
 
 
 if __name__ == "__main__":
