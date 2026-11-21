@@ -409,7 +409,7 @@ def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: byte
             # The own engine is off or unavailable: the recording cannot be heard as
             # configured, which is the typed refusal with words, never a bare 500.
             log_exception("sttLanguageSetOwnEngineFail", e, detail=engine)
-            own_refusal = f"the Host's own engine could not hear it: {str(e)[:200]}"
+            own_refusal = stt_providers.OWN_ENGINE_FAILED     # the detail is in the log
     log("sttLanguageSetRefused", f"session={focus or '-'} {engine} languages={','.join(languages)}"
         f" own={own_refusal}")
     raise stt_providers.LanguageSetRefused(engine=engine, languages=languages,

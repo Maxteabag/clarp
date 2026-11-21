@@ -73,6 +73,8 @@ FULL_SAMPLES = {
         queue_started=False, queue_revision=1, client_msg_id="m"),
     SSEType.ARTIFACT_UPDATED: lambda: events.artifact_updated(
         session="s", agent_id="a", artifact_id="x"),
+    SSEType.MEDIA_CHANGED: lambda: events.media_changed(
+        session="s", agent_id="a", asset_id="x", change="favorite", favorite=True, at=1),
     SSEType.ATTENTION_UPDATED: lambda: events.attention_updated(attention_count=0),
     SSEType.BACKGROUND_JOB_UPDATED: lambda: events.background_job_updated(
         change_revision=1, observed_at=1, job_id="j", session="s",

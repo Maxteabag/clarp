@@ -538,6 +538,7 @@ Event types and payloads:
 | `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
 | `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. |
 | `artifact-updated` | `session`, `agent_id`, `artifact_id` | An artifact was published or resolved; refetch `/artifacts/<id>`. Extension surface. |
+| `media-changed` | `session`, `agent_id`, `asset_id`, `change` ∈ created, deleted, favorite; `favorite` (only with change favorite); `at` (ms) | A chat's gallery changed (feature `media_manage`): re-read or patch `GET /media`; on `deleted` drop cached bytes of the image. Extension surface. |
 | `attention-updated` | `attention_count` | The number of items awaiting the user changed. Extension surface. |
 | `background-job-updated` | `change_revision`, `observed_at`, `job_id`, `session`, `agent_id`, `status`, `job` | A durable background job changed; `job` is the full row. Extension surface. |
 | `location-request` | `session` | An agent asked for the user's location; show the one-tap share prompt for that session. Extension surface. |
@@ -837,7 +838,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Harness sign-in and usage | `/backend-auth` (`?harnesses=all` lists every harness), `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
 | Hotseat account status (read-only snapshot, `accounts_hotseat`) | `/hotseat/status` | `hotseat_status.py` |
 | Model providers inside a harness (OpenCode, DeepSeek card) | `GET /harness-providers?harness=`, `GET /harness-providers/models?harness=&provider=`, `POST /harness-providers/login` (`key`, or `method` for OpenCode's own device/OAuth flow), `/harness-providers/login-code`, `/harness-providers/logout`; full-device scope; keys go to OpenCode's own `auth.json` and are never returned (see `docs/compatibility.md` row 75) | `harness_providers.py` |
-| Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
+| Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/media/<id>/favorite`, `DELETE /media/<id>`, `/media/delete`, `/media/deleted`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
 | Artifacts and decisions | `/artifacts`, `/artifacts/<id>`, `/decisions`, `/decisions/<id>/resolve`, `/task-plan` | `artifacts.py`, `task_plans.py` |
 | Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings`, `/avatar-settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py`, `model_avatars.py` |
 | Teams | `/teams`, `/teams/<id>`, `/teams/<id>/members`, `/teams/<id>/messages`, `/team-nudging` | `team_store.py`, `team_leader.py` |
@@ -1119,6 +1120,84 @@ turn when the artifact is created. A card published after its turn ended, by a j
 started for example, has `''` and is placed by time. A Codex agent through the shared
 app-server has no per-turn token, so its artifacts have `''` too. A later revision of the
 artifact keeps the trace it was created with. `source_message_id` stays `''`.
+
+### A chat's gallery: list, favourite, delete (feature `media_manage`)
+
+The images of one chat are what `GET /media?session=<session>` lists. A Host that does
+not advertise `media_manage` answers `404` on the three writes below, and its rows have
+no `favorite` key: show no heart and no bin there.
+
+**The row.** Every asset row (in `GET /media`, in the favourite answer, in a publish
+answer) carries, besides its other keys, `favorite` (bool), `favorite_at` (ms the mark
+was set, else `null`) and `used_as`: a list of `{"kind": "portrait", "agent_id",
+"persona"}` for each agent whose live portrait is this picture (made from this image, or
+the very same file), usually empty.
+
+**The list.** `GET /media?session=…` takes, all optional: `limit` (1 to 500, default
+100), `before` (the `next_before` of the previous answer, an opaque string; a string the
+Host did not write answers `400 {"error": "bad before"}`) and `favorites=1` (only
+favourites, newest mark first, paged with the same `before`). The answer is
+`{"session", "assets", "next_before", "total", "favorites_total"}`: `next_before` is
+`null` on the last page, `total` counts the chat's images that are not deleted and
+`favorites_total` its favourites. Order without `favorites`: newest first by
+`created_at`, ties by `asset_id` (descending). A deleted image is never listed.
+
+**Favourite.** `POST /media/<asset_id>/favorite` with `{"favorite": true}` or
+`{"favorite": false}` answers `200` with the asset's row. Setting what is already set
+answers the same row and leaves `favorite_at` as it was. `400` for a body without a
+boolean `favorite`, `404` for an unknown id, `410` (below) for a deleted image, `422
+{"error": "not_an_image"}` for a file, audio or other asset that is not an image.
+
+**Delete.** `DELETE /media/<asset_id>` answers `200 {"asset_id", "deleted": true,
+"deleted_at", "still_used_as"}`; `still_used_as` is the row's `used_as` (a portrait made
+from the image is not affected: it keeps showing). Repeating it answers the same `200`
+with the first `deleted_at`. `404 {"error": "not_found"}` for an unknown id, `422
+{"error": "not_an_image"}` as above. Several at once: `POST /media/delete` with
+`{"asset_ids": [...]}` (1 to 200 ids, else `400`) answers `200 {"results": [...]}`, one
+entry per id in the order sent: the delete answer above, or `{"asset_id", "deleted":
+false, "error": "not_found" | "not_an_image"}`. One bad id does not stop the others.
+
+The image's bytes leave the Host's disk. Images are stored by content, so when another
+image that is not deleted, a portrait or an avatar holds the very same file, the file
+stays for it and goes with the last of them. The row is marked deleted first and the
+file removed after; a crash between the two leaves the file, and the next delete of the
+same id removes it.
+
+**Afterwards.** `GET /media/<asset_id>` (also the media url of an artifact that points at
+the image) answers `410 {"error": "removed", "asset_id", "deleted_at"}` for ever: show
+"Image removed" and offer no retry. `404` stays an id the Host never had; any other
+status that is not `200` is "not reachable", retry as before. The chat's `/log` row is not
+rewritten: it keeps its `clarp-media://asset/<id>` markdown. Drop a cached copy of the
+image on the `410` or on the event below.
+
+**A device that was away.** The events stream does not promise to replay
+`media-changed` after a reconnect, and a device with the bytes in its own cache never meets
+the `410`. So ask `GET /media/deleted?since=<ms>` (optional `&session=…`, without it every
+chat; optional `limit`, 1 to 1,000, default 1,000) when the app starts and whenever the
+events stream comes back, then drop the cached bytes of every id listed. It answers `200
+{"deleted": [{"asset_id", "session", "deleted_at"}, …], "next_since": <ms> | null,
+"server_now": <ms>}`: the images deleted strictly after `since`, oldest first by
+`deleted_at`, ties by `asset_id`. A page never ends inside a millisecond: when the limit
+falls among images deleted in the same millisecond, the page takes all of that millisecond,
+so a page may exceed `limit` by the size of one millisecond. `next_since` is the
+`deleted_at` (an integer of ms) of the page's last image when more remain, else `null`; ask
+again at once with `since=next_since`: it never repeats an image, never skips one and always
+advances. `since` is a Host time: when `next_since` is `null`, keep the answer's
+`server_now` for the next time (use `since=0` on the very first call). Every image deleted
+after `server_now` comes in a later answer; one deleted in the millisecond of the read may
+come twice. The Host keeps the record of a deleted image for good. `400` for a missing or
+negative `since` or a `limit` that is not a number from 1 to 1,000. Any device that may read `GET /media`
+may read this.
+
+**Freshness.** `media-changed` (see the event table) is sent for an image published
+into a chat through `POST /media` (`change: "created"`), once per image a delete
+removed, also from the batch call (`"deleted"`), and for each favourite change that
+changed something (`"favorite"`, with `favorite`). `at` is the change's time in ms.
+
+**Who may.** A full device and the administrator. A limited device is refused the three
+writes with `403 full device access required`; it still reads `GET /media`, new keys
+included. A request carrying a turn token (`X-Clarp-Turn`, an agent's) is refused `403
+{"error": "agents_may_not"}`. Publishing is unchanged.
 
 ### Artifact list summaries: `representation=summary-v1`
 

@@ -168,6 +168,12 @@ def _primary(code: str) -> str:
     return _SAME_LANGUAGE.get(primary, primary)
 
 
+# Fixed words for an own engine that cannot answer or failed; its error text, which
+# can name local paths, goes only to the Host's log.
+OWN_ENGINE_UNAVAILABLE = "the Host's own engine is unavailable"
+OWN_ENGINE_FAILED = "the Host's own engine could not hear it"
+
+
 def own_engine_refusal(cfg, languages: list[str]) -> str:
     """Why the Host's own engine cannot hear a recording that may be in any of
     `languages`, or "" when it can (R152). Read from the model's declared
@@ -181,7 +187,11 @@ def own_engine_refusal(cfg, languages: list[str]) -> str:
     try:
         declared = declared_languages(model_id)
     except Exception as e:  # noqa: BLE001 - an adapter that cannot answer is not used
-        return f"the Host's own engine is unavailable: {e}"
+        # The adapter's words can name local paths: they stay in the Host's log, the
+        # answer says a fixed sentence.
+        from .log import log_exception
+        log_exception("sttOwnEngineLanguagesFail", e, detail=model_id)
+        return OWN_ENGINE_UNAVAILABLE
     if declared is None:
         declared = ["en"] if model_id.endswith(".en") else ["multilingual"]
     if "multilingual" in declared:
