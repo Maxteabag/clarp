@@ -710,12 +710,8 @@ impl Agent {
     fn continues_user_queue(&self, next: &Queued) -> bool {
         self.user_stop_floor.is_some_and(|floor| {
             next.id.0 >= floor
-                && next.origin.is_user()
+                && next.origin.is_user_send()
                 && matches!(next.admission, Admission::Queue | Admission::Later)
-                && self
-                    .mailbox
-                    .iter()
-                    .any(|held| held.id.0 < floor && held.origin.is_user())
         })
     }
 
@@ -732,7 +728,7 @@ impl Agent {
                     return false;
                 }
                 match waiting.admission {
-                    Admission::Queue => waiting.origin.is_user(),
+                    Admission::Queue => waiting.origin.is_user_send(),
                     Admission::Later => {
                         waiting.user_word && matches!(waiting.origin, Origin::Agent { .. })
                     }
@@ -860,7 +856,11 @@ impl Agent {
                     turn,
                     at_ms: now_ms,
                 });
-                work.continued_queue(continues, now_ms);
+                // A recovered read of a pre-Stop message can empty the queue.
+                // The recovery itself must leave the Stop's pause in force.
+                if continues {
+                    work.resume_user_queue(now_ms);
+                }
             }
             Command::JoinSettled { turn } => {
                 if !work
@@ -1761,20 +1761,18 @@ impl Work {
         self.decision
             .effects
             .push(Effect::StartTurn { turn, message_seq });
-        if continues || self.agent.live_from_queue() {
-            self.continued_queue(continues, now_ms);
+        if continues {
+            self.resume_user_queue(now_ms);
+        } else if self.agent.live_from_queue() {
+            self.let_go_of_nothing(DRAINED, now_ms);
         }
     }
 
-    fn continued_queue(&mut self, continues: bool, now_ms: i64) {
-        if continues {
-            self.record(AgentEvent::Resumed {
-                by: crate::control::USER.to_string(),
-                at_ms: now_ms,
-            });
-        } else {
-            self.let_go_of_nothing(DRAINED, now_ms);
-        }
+    fn resume_user_queue(&mut self, now_ms: i64) {
+        self.record(AgentEvent::Resumed {
+            by: crate::control::USER.to_string(),
+            at_ms: now_ms,
+        });
     }
 
     /// A hold holds what waits. When the last of it has left the queue, taken back or gone
@@ -2308,6 +2306,116 @@ mod tests {
             vec![TurnId(1), TurnId(2), TurnId(3), TurnId(4)],
             "nothing was left behind by the stop"
         );
+    }
+
+    #[test]
+    fn an_oracle_send_passes_the_stop_and_releases_users_first_in_queue_order() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.background(11);
+        a.user(12);
+        a.user(13);
+        a.send(Command::Stop {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        assert!(a.finish(1).is_empty());
+        assert_eq!(a.waiting(), vec![3, 4, 2]);
+        assert!(a.agent.is_paused());
+
+        a.send(Command::Accept {
+            message_seq: 14,
+            origin: Origin::Trigger {
+                name: "oracle".into(),
+            },
+            admission: Admission::Queue,
+            coordination: None,
+            user_word: false,
+        })
+        .unwrap();
+        assert_eq!(a.live(), Some(5));
+        assert!(!a.agent.is_paused());
+        for turn in [5, 3, 4, 2] {
+            a.finish(turn);
+        }
+        assert_eq!(a.started, [1, 5, 3, 4, 2].map(TurnId));
+    }
+
+    #[test]
+    fn a_confirmed_new_follow_up_releases_the_hold_but_an_old_read_repair_does_not() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.send(Command::Join {
+            turn: TurnId(2),
+            join: Join {
+                into: TurnId(1),
+                uuid: "pre-stop".into(),
+                recovery: None,
+            },
+        })
+        .unwrap();
+        a.send(Command::Stop {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        a.send(Command::JoinRead { turn: TurnId(2) }).unwrap();
+        assert!(a.waiting().is_empty());
+        assert!(
+            a.agent.is_paused(),
+            "recovering the old read did not resume the queue"
+        );
+        a.finish(1);
+        a.agent = Agent::replay(&a.history).unwrap();
+        assert!(a.agent.is_paused());
+        a.user(12);
+        assert!(
+            !a.agent.is_paused(),
+            "the fresh user message also ends an empty hold"
+        );
+
+        a.user(13);
+        a.user(14);
+        a.send(Command::Stop {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        a.finish(3);
+        a.send(Command::SendNow {
+            turn: TurnId(4),
+            by: "user".into(),
+        })
+        .unwrap();
+        assert!(
+            a.agent.is_paused(),
+            "Send Now does not release the other held message"
+        );
+        a.send(Command::Accept {
+            message_seq: 15,
+            origin: Origin::Trigger {
+                name: "oracle".into(),
+            },
+            admission: Admission::Queue,
+            coordination: None,
+            user_word: false,
+        })
+        .unwrap();
+        a.send(Command::Join {
+            turn: TurnId(6),
+            join: Join {
+                into: TurnId(4),
+                uuid: "post-stop".into(),
+                recovery: None,
+            },
+        })
+        .unwrap();
+        assert!(a.agent.is_paused(), "reservation alone is not a read");
+        a.send(Command::JoinRead { turn: TurnId(6) }).unwrap();
+        assert!(!a.agent.is_paused());
+        assert_eq!(a.waiting(), vec![5]);
+        assert_eq!(a.live(), Some(4));
+        a.finish(4);
+        assert_eq!(a.live(), Some(5));
     }
 
     #[test]
