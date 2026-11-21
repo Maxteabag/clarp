@@ -183,6 +183,21 @@ class World:
                     (*parameters, revision, f"live-{name}")).rowcount == 1
                 self._head(other, revision)
 
+    def restamp(self, trace):
+        """What message_writes.restamp_trace does when a coordination turn is
+        made visible: each row of the trace under a new revision of its own."""
+        for database in (self.reference, self.candidate):
+            with sqlite3.connect(database) as other:
+                ids = [row[0] for row in other.execute(
+                    "SELECT message_id FROM messages WHERE agent_id=? AND trace_id=?",
+                    (corpus.AGENT, trace))]
+                assert ids
+                for message_id in ids:
+                    revision = self.next_revision(other)
+                    other.execute("UPDATE messages SET revision=? WHERE message_id=?",
+                                  (revision, message_id))
+                    self._head(other, revision)
+
     def turn_row(self, trace, *, at, settled=None, outcome=None):
         self.write("INSERT INTO turns(agent_id,source,trace_id,started_at,ended_at,settled_at,outcome) "
                    "VALUES (?,'pwa',?,?,?,?,?)",
@@ -335,6 +350,29 @@ def test_a_message_that_came_after_the_full_import_is_an_old_row_once_a_tail_has
         world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == ("full_carry_inputs_changed", ["row_send"])
         world.grow(_turn(backend, ordinal + 2))
+        assert world.imported() == ("tail_applied", [])
+
+
+@pytest.mark.parametrize("twin", [False, True], ids=["restamped", "restamped and reworded"])
+@BACKENDS
+def test_a_coordination_turn_made_visible_is_a_tail(tmp_path, backend, twin):
+    """A coordination turn the user's word made visible: every row of its trace
+    takes a new revision (lib.coordination.loosen) and nothing else changes. Its
+    prompt, a /send row linked before the boundary, and its replies are old rows
+    above the mark; put back at their recorded revisions they are the published
+    rows, and the import is a tail equal to the full replay. The twin: the same,
+    and the prompt reworded, which a full replay no longer links."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        world.turn_row("coord", at=1800)
+        world.send("coord", "synthetic request 2", at=1900, trace="coord")
+        ordinal = world.started(6)
+        world.restamp("coord")
+        if twin:
+            world.write("UPDATE messages SET text='other words now' WHERE message_id='u-coord'")
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == (("full_carry_inputs_changed", ["row_send"]) if twin
+                                    else ("tail_applied", []))
+        world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == ("tail_applied", [])
 
 

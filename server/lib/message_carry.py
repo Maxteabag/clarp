@@ -38,6 +38,16 @@ lane (``tests/readmodel/test_rm_n14_carry.py``) runs every rule in pairs: the
 change it lets through is a tail and equals the full replay, the nearest
 change it does not let through is a full import and equals it too.
 
+A coordination turn the user's word made visible (lib.coordination.loosen)
+gives every row of its trace a new revision and changes nothing else
+(message_writes.restamp_trace), so that delta clients fetch the rows they had
+left out. Such a row is above the mark and missing from the old digests. The
+record keeps the revision of every row of the newest turns (``restamp``); a
+row of those that has moved above the mark is put back at its recorded
+revision before anything is compared. If anything but the revision changed,
+the digests still say so. Nothing a replay decides reads an old row's
+revision: the latest user row breaks ties by it and is checked by itself.
+
 What stays a full import on purpose: any change to a row of this session
 that is not a new /send row (a streamed reply's live row, a finalized row, a
 turn's rows re-stamped when it settles), a turn row that began before the
@@ -165,6 +175,11 @@ _TURN_COLUMNS = ("trace_id", "started_at", "settled_at", "outcome")
 # What stamp_turn writes on a row, and the two that every write moves.
 _STAMPED = frozenset({"tools_json", "display_cells_json", "turn_json", "revision", "updated_at"})
 _VERSION = 3
+# The rows of this many of the newest turns keep their revisions in the record
+# (``restamp``), at most this many rows; beyond that none are kept, and a
+# restamped row is refused as before.
+_RESTAMP_TURNS = 2
+_RESTAMP_ROWS = 256
 _ABSENT = "\x00absent"
 
 
@@ -415,7 +430,40 @@ def record(raw_inputs, *, carry=None, source_file: str = "", backend_session_id:
                       if trace is not None else ()),
         "user": _digest(tuple(user)),
         "oracle": _oracle(oracle),
+        "restamp": _restampable(table, turn_values),
     }
+
+
+def _restampable(table: _Rows, turn_values: list[tuple]) -> dict[str, int]:
+    """{message_id: revision} of the rows of the newest turns: the turns a
+    coordination turn made visible can be (a running turn, or the message being
+    recorded). Empty when there are more rows than _RESTAMP_ROWS."""
+    trace, ident, revision = (table.at.get(name) for name in ("trace_id", "message_id", "revision"))
+    if trace is None or ident is None or revision is None:
+        return {}
+    newest = {row[0] for row in turn_values[-_RESTAMP_TURNS:] if row[0]}
+    if not newest:
+        return {}
+    rows = [row for row in table.values if row[trace] in newest]
+    if len(rows) > _RESTAMP_ROWS:
+        return {}
+    return {str(row[ident]): int(row[revision] or 0) for row in rows}
+
+
+def _put_back(table: _Rows, recorded: dict) -> int:
+    """Put every row of the record's ``restamp`` that has moved above the mark
+    back at its recorded revision, in ``table``. How many were put back."""
+    kept = recorded.get("restamp") or {}
+    ident, revision = table.at.get("message_id"), table.at.get("revision")
+    if not kept or ident is None or revision is None:
+        return 0
+    moved = 0
+    for index, row in enumerate(table.values):
+        was = kept.get(str(row[ident]))
+        if was is not None and int(row[revision] or 0) > recorded["mark"]:
+            table.values[index] = row[:revision] + (was,) + row[revision + 1:]
+            moved += 1
+    return moved
 
 
 def dumps(recorded: dict) -> str:
@@ -441,6 +489,10 @@ def loads(text) -> dict | None:
             or any(not isinstance(part, dict) or set(part) != set(KINDS)
                    for part in recorded["rows"].values())):
         return None
+    restamp = recorded.get("restamp")
+    if not isinstance(restamp, dict) or not all(
+            isinstance(key, str) and isinstance(value, int) for key, value in restamp.items()):
+        recorded["restamp"] = {}     # a record written before it was kept, or not one
     return recorded
 
 
@@ -473,6 +525,9 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     turns, _sends, user, rows, oracle = current
     found: set[str] = set()
     table = _Rows(rows)
+    # Rows a coordination turn's restamp moved above the mark go back to their
+    # recorded revision: then they are judged, like every old row, by the digests.
+    _put_back(table, recorded)
     base, since, new = table.split(recorded["base"], recorded["mark"])
     # Every row the frontier was published with is at or below the mark. They
     # are all there and unchanged exactly when each kind hashes as recorded,
