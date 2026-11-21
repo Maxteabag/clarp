@@ -373,7 +373,8 @@ def test_a_front_desk_relay_goes_first_and_stays_an_agents_message(tmp_path):
     marked = agents_db.conn().execute(
         "SELECT audience, sender_agent_id FROM coordination_traces WHERE trace_id = 't-desk'"
     ).fetchone()
-    assert marked is not None and tuple(marked) == ("agents", "desk-agent")
+    # A verified front-desk relay is the user's word: marked, but shown ('mixed', PR 506).
+    assert marked is not None and tuple(marked) == ("mixed", "desk-agent")
 
 
 # --- the two stores agree ------------------------------------------------------
