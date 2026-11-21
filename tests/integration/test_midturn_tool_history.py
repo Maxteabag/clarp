@@ -172,6 +172,12 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
     assert message_store.mark_live_message_final(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
         trace_id=trace, item_key="overlapping-commentary")
+    # The provider has already begun its next reply, other words, still
+    # streaming: an import of the commentary must leave it where it is shown.
+    next_reply = message_store.upsert_live_assistant_message(
+        agent_id=agent["agent_id"], backend_session_id="synthetic-native",
+        trace_id=trace, text="Running the probe now", item_key="next-reply")
+    assert next_reply is not None
     transcript_incremental.import_transcript(
         backend=backend, path=transcript, agent_id=agent["agent_id"],
         backend_session_id="synthetic-native")
@@ -179,6 +185,13 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         "SELECT replace_revision FROM conversation_heads WHERE agent_id=? AND backend_session_id=?",
         (agent["agent_id"], "synthetic-native")).fetchone()[0]
     assert head > before["latest_revision"]
+    imported = _log(base)["turns"]
+    # One copy of the commentary, under the id the client already holds.
+    assert [r["id"] for r in imported if r["role"] == "assistant"
+            and r["text"].strip() == "Looking at 0."] == [streamed["id"]]
+    # The reply still streaming is kept, once, with its words.
+    assert [(r["id"], r["text"]) for r in imported if r["id"] == next_reply["id"]] == [
+        (next_reply["id"], "Running the probe now")]
 
     with _held_import(monkeypatch, transcript) as (entered, release):
         # Hold the real background import queue: live activity can reach the
@@ -232,8 +245,8 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         refreshed = _log(base)
         imported_calls = [t.get("id") for r in refreshed["turns"]
                           for t in r["tools"] + r["display_cells"]]
-        assert call in imported_calls
-        assert call in calls, "a replacement snapshot must retain the tool already shown live"
+        assert imported_calls.count(call) == 1
+        assert calls.count(call) == 1, "a replacement snapshot must retain the tool already shown live"
 
 
 @pytest.mark.parametrize("queue", [True, False])
