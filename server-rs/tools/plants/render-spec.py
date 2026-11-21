@@ -369,7 +369,7 @@ PLANTS = [
     (L, 'host', 'what is done with a spec is answered as to a client that cannot see', '    let artifact = shown(app, done.artifact, "", capable).await;', '    let artifact = shown(app, done.artifact, "", false).await;'),
     (L, 'host', 'Updates are answered as to a client that cannot see', '        "artifacts": all_shown(&app, page.artifacts, representation, render_spec::capable(&app, &headers)).await,', '        "artifacts": all_shown(&app, page.artifacts, representation, false).await,'),
     (L, 'host', 'the catalog is at another address', '        .route("/artifact-catalogs/clarp.form/1", get(render_spec::catalog))', '        .route("/artifact-catalogs/clarp.form/2", get(render_spec::catalog))'),
-    (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 117;', 'pub const HOST_CONTRACT: u64 = 116;'),
+    (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 118;', 'pub const HOST_CONTRACT: u64 = 117;'),
     (E, 'host', 'the feature came with the contract before', '    ("render_spec", 102),', '    ("render_spec", 101),'),
     # The texts besides a payload (the reference's PR 438: R71, R72).
     (R, 'vectors', 'a text of the envelope with half a pair is text', '            && !matches!(value, J::Text(Text::Valid(_)))', '            && !matches!(value, J::Text(_))'),
