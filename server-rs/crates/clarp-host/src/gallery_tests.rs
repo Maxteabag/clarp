@@ -175,15 +175,18 @@ async fn a_media_request_times_out_and_a_queued_mutation_is_skipped() {
             let _ = entered.send(());
             let _ = blocked.recv_timeout(WAIT * 3);
             Ok(())
-        }).await
+        })
+        .await
     });
     waiting.await.unwrap();
     let ran = Arc::new(AtomicBool::new(false));
     let marked = ran.clone();
-    let refused = writer.ask(move |_| {
-        marked.store(true, Ordering::SeqCst);
-        Ok(())
-    }).await;
+    let refused = writer
+        .ask(move |_| {
+            marked.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .await;
     assert!(matches!(refused, Err(Failure::TimedOut)));
     release.send(()).unwrap();
     let _ = stalled.await.unwrap();

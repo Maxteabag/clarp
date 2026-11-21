@@ -98,7 +98,10 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     }
     assert_eq!(host.ask("GET", "/media/deleted", None).0, 400);
     assert_eq!(host.ask("GET", "/media/deleted?since=-1", None).0, 400);
-    assert_eq!(host.ask("GET", "/media/deleted?since=0&limit=bad", None).0, 400);
+    assert_eq!(
+        host.ask("GET", "/media/deleted?since=0&limit=bad", None).0,
+        400
+    );
     let batch = host.post(
         "/media/delete",
         json!({"asset_ids": [first, "unknown", text, first]}),
