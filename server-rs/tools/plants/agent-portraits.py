@@ -141,7 +141,7 @@ change(J,'generation',[
     ('stale queued generations stay active','"expire_queued":true','"expire_queued":false'),
 ])
 change(W,'generation',[
-    ('misidentify the publisher','"portrait_generation:openai".into()','"agent".into()'),
+    ('misidentify the publisher','format!("{}openai", rules::CREATED_BY_PREFIX)','"agent".into()'),
     ('lose alternative number in caption','Generated portrait alternative {index}','Generated portrait alternative'),
 ])
 PLANTS.append((H,'generation','wrong feature contract','("agent_portraits", 1)', '("agent_portraits", 2)'))

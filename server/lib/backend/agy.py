@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import agy_transcript, transcript_paths
 from .. import provider_capabilities
+from .. import takeover as turn_takeover_steps
 from .. import server_identity
 from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception, log_fault
@@ -378,6 +379,23 @@ def _conversation_id_from_log(log_path: str) -> str:
     return ""
 
 
+
+def note_output(handle, event: dict) -> None:
+    """What a takeover judges (issue 491, part B): every line agy has printed,
+    and whether any was output: answer text (an ``agent_response`` step with a
+    text delta) or a tool step. The init, a user step and a checkpoint are not."""
+    if handle is None:
+        return
+    handle.lines_read = int(getattr(handle, "lines_read", 0)) + 1
+    if event.get("event") != "step_update" or not isinstance(event.get("step_update"), dict):
+        return
+    update = event["step_update"]
+    step_type = str(update.get("step_type") or "")
+    if step_type == "tool" or (step_type == "agent_response"
+                               and str(update.get("text_delta") or "").strip()):
+        handle.output_seen = True
+
+
 def _turn_evidence_scope(agent_id: str, trace_id: str) -> dict[str, Any]:
     computer_id = server_identity.get_server_info()["server_id"]
     row = None
@@ -682,6 +700,29 @@ class AgyBackend(StreamJsonBackend):
     # turns.
     print_timeout = "24h"
 
+    # Resume the same conversation with both messages in one --print input, guarded by
+    # the one recorded trial (message 1 must not be in the transcript yet).
+    takeover_strategy = "same_conversation"
+
+    def takeover_ready(self) -> bool:
+        from .. import takeover
+        return takeover.agy_version_ok(self.required_binary)
+
+    def takeover_plan(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                      running_trace: str, first_text: str) -> dict | None:
+        """The judge reads the conversation's own transcript (none, or unreadable: no
+        takeover)."""
+        from .. import takeover
+        path = agy_transcript.find_latest_jsonl(session_id)
+        if path is None:
+            return None
+        try:
+            turns = agy_transcript.parse_turns(pathlib.Path(path))
+        except Exception as exc:  # noqa: BLE001 - unreadable: no takeover
+            log_exception("takeoverAgyTranscriptFail", exc, detail=str(path))
+            return None
+        return takeover.agy_plan(turns, first_text)
+
     def prompt_limit_bytes(self) -> int | None:
         """agy takes the prompt only as ``--print=<prompt>`` (its stdin form
         is stream-json, a protocol of its own); the restore block's
@@ -749,8 +790,17 @@ class AgyBackend(StreamJsonBackend):
         effort: str = "",
         run_if_owned: Optional[Callable[[Callable[[], None]], bool]] = None,
         isolated: bool = False,
+        takeover: Optional[dict] = None,
     ) -> TurnHandle:
-        """Spawn one AGY turn and normalize its NDJSON stream asynchronously."""
+        """Spawn one AGY turn and normalize its NDJSON stream asynchronously.
+
+        ``takeover`` (issue 491, part B): this turn takes over one that was
+        ended before it printed anything and before its message reached the
+        conversation. The same conversation is resumed and given BOTH messages
+        as one ``--print`` input, message 1 first (the recorded seeded resume:
+        one answer covering both, each message once)."""
+        if takeover:
+            text = f"{takeover.get('first') or ''}\n\n{text}"
         agy_bin = self.required_binary
         if shutil.which(agy_bin) is None:
             raise CliMissing(
@@ -829,6 +879,10 @@ class AgyBackend(StreamJsonBackend):
                 pass
             raise
         handle = make_handle(proc)
+        # A takeover may judge this turn (issue 491, part B): the drain tells
+        # it what agy has printed; the process group lets it freeze.
+        handle.takeover_capable = bool(runtime_agent_id) and handle.process_group is not None
+        handle.takeover_of = bool(takeover)
         self.register_handle(runtime_agent_id, handle)
         self.start_drain(
             handle, self._drain_stream,
@@ -860,7 +914,7 @@ class AgyBackend(StreamJsonBackend):
             st.evidence_scope = _turn_evidence_scope(agent_id, trace_id)
             revision = 0
             if proc.stdout is not None:
-                for raw_line in proc.stdout:
+                for raw_line in turn_takeover_steps.read_lines(proc.stdout, handle):
                     if st.terminal:
                         continue
                     line = raw_line.strip()
@@ -872,6 +926,7 @@ class AgyBackend(StreamJsonBackend):
                         continue  # bounded stdout noise is only terminal if no result
                     if not isinstance(event, dict):
                         continue
+                    note_output(handle, event)
                     revision += 1
                     try:
                         if not run_if_owned(lambda: self._handle_event(

@@ -150,10 +150,10 @@ def test_a_park_no_process_ran_for_moves_to_the_head_and_the_runtime_seals(
         assert runtime._draining is True
     finally:
         runtime.server_close()
-    # One durable row per message, the parked turn first.
-    rows = turn_queue.parked(agent)
-    assert [row["queue_id"] for row in rows] == [
-        "recovery-park-t-work", "drain-park-t-next"]
+    # One durable row per message, the parked turn first. The held arrival is its own
+    # queue item since issue 491 (a send that waits), not a drain-park row.
+    assert _rows(agent) == [("recovery-park-t-work", "parked"), ("next", "queued")]
+    rows = turn_queue.parked(agent) + turn_queue.pending(agent)
     assert [row["text"] for row in rows] == ["work", "next"]
     assert rows[0]["client_msg_id"] == "work"
     assert rows[0]["allow_paused"] == 0
@@ -228,7 +228,7 @@ def test_a_crash_before_the_transfer_persists_changes_nothing(
     assert blockers["claude_account_recovery"] == [agent]
     assert blockers["account_recovery_refused"] == [f"{agent}:persist_failed"]
     assert runtime._draining is False
-    assert [r["queue_id"] for r in turn_queue.parked(agent)] == ["drain-park-t-next"]
+    assert _rows(agent) == [("next", "queued")]     # the held arrival's queue item
     assert pool.coordinator.status()["waiting"] == [agent]   # still parked
     assert td._INFLIGHT[agent] == "t-work"
     assert [t["trace_id"] for t in turn_lifecycle.open_turns()
@@ -315,7 +315,7 @@ def test_uncertain_parked_work_keeps_its_blocker(
     assert agent in (blockers.get("claude_account_recovery") or [])
     if reason:
         assert f"{agent}:{reason}" in blockers["account_recovery_refused"]
-    assert [r["queue_id"] for r in turn_queue.parked(agent)] == ["drain-park-t-next"]
+    assert _rows(agent) == [("next", "queued")]     # the held arrival's queue item
     assert td._INFLIGHT[agent] == "t-work"
     assert pool.coordinator.attempts[agent].trace_id == "t-work"
 
@@ -351,7 +351,7 @@ def test_other_owners_keep_the_seal_and_nothing_is_transferred(
     assert blockers["provider_turns"] == ["codex-agent"]
     assert runtime._draining is False
     assert pool.coordinator.attempts[agent].trace_id == "t-work"
-    assert [r["queue_id"] for r in turn_queue.parked(agent)] == ["drain-park-t-next"]
+    assert _rows(agent) == [("next", "queued")]     # the held arrival's queue item
 
 
 def test_without_a_carry_path_parks_block_as_before(tmp_path, monkeypatch, selector_configured):
@@ -416,7 +416,7 @@ def test_a_resume_that_already_happened_leaves_nothing_to_transfer(
         runtime.server_close()
     assert provider.texts() == ["work"]         # it runs here, once
     assert agent in blockers["active"]
-    assert [r["queue_id"] for r in turn_queue.parked(agent)] == ["drain-park-t-next"]
+    assert _rows(agent) == [("next", "queued")]     # the held arrival's queue item
 
 
 # --- Stop, revert, rollback ------------------------------------------------------
@@ -561,7 +561,7 @@ def test_a_queued_turn_parked_for_an_account_runs_once_after_the_handoff(
     finally:
         runtime.server_close()
     # The existing row is taken over (same id), not duplicated, and heads the queue.
-    assert _rows(agent) == [("work", "parked"), ("drain-park-t-next", "parked")]
+    assert _rows(agent) == [("work", "parked"), ("next", "queued")]
     new_service, new_provider, new_pool = _restart(tmp_path, monkeypatch)
     new_pool.run_timers()
     for _ in range(3):

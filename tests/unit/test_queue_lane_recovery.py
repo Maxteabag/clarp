@@ -155,8 +155,9 @@ def test_messages_arriving_after_a_failed_handoff_run_in_order(tmp_path, monkeyp
 
 
 def test_memory_only_send_survives_a_failed_handoff(tmp_path, monkeypatch):
-    # A plain send admitted during Stop waits only in memory; a failed launch
-    # must retry it, not drop it.
+    # A plain send admitted during Stop waits (since issue 491 as a queue item,
+    # its row written when its turn starts); a failed launch must retry it, not
+    # drop it.
     service, backends, agent_id, scheduled = _service(tmp_path)
     backends.live = False
     _td._INFLIGHT[agent_id] = _td._STOPPING_SENTINEL
@@ -171,11 +172,11 @@ def test_memory_only_send_survives_a_failed_handoff(tmp_path, monkeypatch):
     _td.finish_stop(service.ctx, agent_id, backend_registry=backends)
 
     assert agent_id not in _td.runtime_status()["spawning"]
-    # Until it launches, its park row keeps it across a runtime restart.
-    assert turn_queue.status("stop-park-t-new") == "parked"
+    # Until it launches, its queue item keeps it across a runtime restart.
+    assert turn_queue.status("u-new") == "queued"
     _drain(scheduled)
     assert _texts(backends) == ["new work after stop"]
-    assert turn_queue.status("stop-park-t-new") == ""
+    assert turn_queue.status("u-new") not in ("queued", "claimed", "parked")
 
 
 # --- (a) defence in depth: an orphaned spawning slot is released ------------

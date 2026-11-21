@@ -18,6 +18,18 @@ from tests.integration.test_server_di import (  # noqa: F401
 )
 
 
+
+# The transcript's copy of the request is dated by the corpus (2026-10-11T08:20:00Z on), while the
+# request was sent and its turn begun at the real time: a copy before its own send, which a copy
+# cannot be (a transcript line is written after its turn has begun). As 505a7b0a did for three
+# other files: this file's clock starts two seconds before the corpus's first line and runs on at
+# the real pace, so each send and turn comes just before its copy (R107).
+@pytest.fixture(autouse=True)
+def _clock_before_the_corpus(monkeypatch):
+    real = time.time
+    offset = (corpus.BASE_S - 2) - real()
+    monkeypatch.setattr(time, "time", lambda: real() + offset)
+
 def _active_turn(running_server, monkeypatch, tmp_path, backend):
     from lib import tool_explanation_settings
     tool_explanation_settings.update({"enabled": False})
@@ -137,6 +149,11 @@ def _held_import(monkeypatch, transcript):
 @pytest.mark.parametrize("backend,queue", [("claude", True), ("codex", True), ("codex", False)])
 def test_replacement_after_send_keeps_live_tools_awaiting_import(
         running_server, monkeypatch, tmp_path, backend, queue):
+    # The streamed commentary overlaps commentary already imported: under R108 the import took the
+    # stream's id and that write is refused, so the overlap arises only for a row stored before
+    # R108. This pins R107's retraction as that fallback.
+    from lib import message_writes
+    monkeypatch.setattr(message_writes, "_keyed_line_id", lambda *a, **k: "")
     base, agent, transcript, source, spawned, steered, trace = _active_turn(
         running_server, monkeypatch, tmp_path, backend)
     _written_now(source)
@@ -144,14 +161,23 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
     if backend == "claude":
         commentary = json.loads(json.dumps(first[1]))
         commentary["message"]["content"] = commentary["message"]["content"][:1]
+        # Every real Claude line carries its message's id, which its stream is keyed by (R107).
+        commentary["message"]["id"] = own_id = "msg_commentary_0"
         initial = [first[0], commentary]
         tool_line = json.loads(json.dumps(first[1]))
         tool_line["uuid"] = "synthetic-tool-only"
+        tool_line["message"]["id"] = own_id
         tool_line["message"]["content"] = tool_line["message"]["content"][1:]
         later = [tool_line, first[2]]
         call = "toolu_0"
     else:
         initial, later, call = first[:4], first[4:6], "call_0"
+        # A modern rollout names each completed message by the item id its stream is keyed by (R107).
+        own_id = "item_commentary_0"
+        initial = initial + [{"timestamp": initial[-1]["timestamp"], "type": "event_msg", "payload": {
+            "type": "item_completed", "turn_id": "turn-0", "item": {
+                "type": "AgentMessage", "id": own_id, "phase": "commentary",
+                "content": [{"type": "Text", "text": "Looking at 0."}]}}}]
         # Exploration commands coalesce under a display-cell group id;
         # this probe needs the tool's exact identity for the recovery check.
         later[0]["payload"]["arguments"] = json.dumps({"cmd": "printf synthetic"})
@@ -167,11 +193,13 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
     # test_live_import_identity covers that rule.)
     streamed = message_store.upsert_live_assistant_message(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
-        trace_id=trace, text="Looking at 0.", item_key="overlapping-commentary")
+        trace_id=trace, text="Looking at 0.", item_key=own_id)
     assert streamed is not None
+    # Finished as production finishes it: under the key its stream wrote it with (Claude's
+    # message-stop and Codex's item.completed settle the row they streamed).
     assert message_store.mark_live_message_final(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
-        trace_id=trace, item_key="overlapping-commentary")
+        trace_id=trace, item_key=own_id)
     # The provider has already begun its next reply, other words, still
     # streaming: an import of the commentary must leave it where it is shown.
     next_reply = message_store.upsert_live_assistant_message(

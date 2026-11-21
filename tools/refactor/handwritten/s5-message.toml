@@ -18,6 +18,9 @@ names = [
     "_parse_timestamp",
     "_is_retry_echo",
     "_PARKED_SEQ_BASE",
+    "_PARKED_POSITIONAL_SEQ_BASE",
+    "_identity_id",
+    "IDENTITY_BLOCK_PREFIX",
     "_client_provenance_rows",
     "_client_provenance",
 ]
@@ -26,6 +29,8 @@ names = [
 module = "lib/message_import_rows.py"
 names = [
     "_park_adopted_occupant",
+    "_park_positional_occupant",
+    "_identity_row",
     "_seq_taken",
     "_restore_unadopted_parked",
     "_parked_twin",

@@ -305,7 +305,7 @@ def test_exhausted_standalone_admission_keeps_hub_failure_fanout_without_id(tmp_
     assert connection.execute("SELECT COUNT(*) FROM sse_events").fetchone()[0] == 0
     assert not connection.in_transaction
     assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 20
-    assert "locked" in health.snapshot()["sse"]["last_error"]
+    assert health.snapshot()["sse"]["last_error"] == "OperationalError"     # the type, never its text
 
 
 def test_nested_record_never_starts_or_commits_a_separate_transaction():
