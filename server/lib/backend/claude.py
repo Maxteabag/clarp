@@ -515,6 +515,33 @@ class ClaudeBackend(Backend):
         version = takeover._cli_version(self.executable(_config.load()))
         return version is not None and version >= STEER_MIN_VERSION
 
+    def steer_was_read(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                       trace_id: str) -> bool | None:
+        """Whether the CLI read a follow-up written into its stdin: the session file holds a
+        user entry with the uuid its line carried (prompt_uuid). None: the file cannot be
+        found or read."""
+        if not session_id:
+            return None
+        path = self.find_transcript(session_id, home, cwd=cwd)
+        if path is None:
+            return None
+        uid = prompt_uuid(trace_id)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as lines:
+                for line in lines:
+                    if uid not in line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue          # a half line a killed write left
+                    if isinstance(entry, dict) and entry.get("type") == "user" \
+                            and str(entry.get("uuid") or "") == uid:
+                        return True
+        except OSError:
+            return None
+        return False
+
     def steer(self, agent_id: str, text: str, *, client_msg_id: str = "",
               synthesize_audio: bool = False, trace_id: str = "",
               on_read=None, on_unread=None) -> bool:

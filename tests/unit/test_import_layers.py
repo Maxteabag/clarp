@@ -97,6 +97,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     'url_destination',
     'settings_store',
     'status_labels',
+    'steer_records',
     'stream_pacing',
     'telemetry',
     'text_util',
