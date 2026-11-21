@@ -553,12 +553,28 @@ def test_v131_adds_the_favourite_mark_who_deleted_and_the_gallery_indexes(tmp_pa
     path = tmp_path / "v130.sqlite"
     db.reset_for_tests(path)
     con = db.conn()
-    con.execute("DROP INDEX idx_media_assets_session_favorite")
-    con.execute("DROP INDEX idx_media_assets_session_page")
-    con.execute("CREATE INDEX idx_media_assets_session_created"
-                " ON media_assets(session, created_at DESC) WHERE deleted_at IS NULL")
-    con.execute("ALTER TABLE media_assets DROP COLUMN favorite_at")
-    con.execute("ALTER TABLE media_assets DROP COLUMN deleted_by")
+    # The v130 table as v130 created it (db_schema at 91f72f99), rebuilt rather than reached by
+    # DROP COLUMN: SQLite 3.50.4 refuses to drop a column of this table ("error in table
+    # media_assets after drop column: incomplete input"); only this setup ever did (R180).
+    con.executescript("""
+        DROP TABLE media_assets;
+        CREATE TABLE media_assets (
+            asset_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, session TEXT NOT NULL,
+            source_name TEXT NOT NULL, sha256 TEXT NOT NULL, mime_type TEXT NOT NULL,
+            bytes INTEGER NOT NULL, width INTEGER, height INTEGER, storage_path TEXT NOT NULL,
+            caption TEXT, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+            deleted_at INTEGER
+        );
+        CREATE INDEX idx_media_assets_session_created ON media_assets(session, created_at DESC)
+            WHERE deleted_at IS NULL;
+        CREATE INDEX idx_media_assets_agent_created ON media_assets(agent_id, created_at DESC)
+            WHERE deleted_at IS NULL;
+        CREATE INDEX idx_media_assets_sha ON media_assets(sha256);
+    """)
+    # The setup really is v130: without the two columns the migration must add (it skips a
+    # column that exists, so a setup that kept one would pass unnoticed).
+    before = [r[1] for r in con.execute("PRAGMA table_info(media_assets)")]
+    assert "favorite_at" not in before and "deleted_by" not in before, before
     con.execute("INSERT INTO media_assets(asset_id, agent_id, session, source_name, sha256, mime_type, "
                 "bytes, storage_path, created_by, created_at) "
                 "VALUES ('asset_a', 'ag', 's', 'a.png', 'x', 'image/png', 1, '/p', 'agent', 1)")
@@ -571,7 +587,8 @@ def test_v131_adds_the_favourite_mark_who_deleted_and_the_gallery_indexes(tmp_pa
                       "WHERE asset_id='asset_a'").fetchone()
     assert tuple(row) == (None, None, None)
     indexes = _names(con, "index")
-    assert {"idx_media_assets_session_favorite", "idx_media_assets_session_page"} <= indexes
+    assert {"idx_media_assets_session_favorite", "idx_media_assets_session_page",
+            "idx_media_assets_deleted", "idx_media_assets_session_deleted"} <= indexes
     assert "idx_media_assets_session_created" not in indexes
     db_migrations._migrate_to_v131(con)
     columns = [r[1] for r in con.execute("PRAGMA table_info(media_assets)")]

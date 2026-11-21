@@ -64,8 +64,17 @@ pub fn selectors(file: &Table) -> Vec<(&'static str, Vec<String>)> {
 /// each without the space around it, the empty ones and what is no text passed over, each once in
 /// the order written. Anything else names nobody.
 pub fn on_behalf_sessions(file: &Table) -> Vec<String> {
+    designated_sessions(file, "decision_on_behalf_sessions")
+}
+
+/// The sessions whose verified local turns may relay the owner's words first.
+pub fn front_desk_sessions(file: &Table) -> Vec<String> {
+    designated_sessions(file, "front_desk_sessions")
+}
+
+fn designated_sessions(file: &Table, key: &str) -> Vec<String> {
     let listed = file.get("agents").and_then(Value::as_table);
-    let listed = listed.and_then(|agents| agents.get("decision_on_behalf_sessions"));
+    let listed = listed.and_then(|agents| agents.get(key));
     let Some(listed) = listed.and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -282,8 +291,16 @@ impl OwnerFile {
     /// The file as it is now. `None`: no file was named, it is not there, or what is in it
     /// is no TOML.
     pub fn read(&self) -> Option<Table> {
-        let text = std::fs::read_to_string(self.path.as_ref()?).ok()?;
-        text.parse::<Table>().ok()
+        self.read_text()?.parse::<Table>().ok()
+    }
+
+    /// Read the owner's TOML with the written order of entries preserved for diagnostics.
+    pub(crate) fn read_document(&self) -> Option<toml_edit::DocumentMut> {
+        self.read_text()?.parse().ok()
+    }
+
+    fn read_text(&self) -> Option<String> {
+        std::fs::read_to_string(self.path.as_ref()?).ok()
     }
 
     /// The key of a provider of speech: what the owner's file has for it, else what this

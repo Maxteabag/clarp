@@ -64,14 +64,14 @@ FULL_SAMPLES = {
         server_now_ms=1, ops=[{"op": "status", "conv": "c", "activity": {"state": "idle"}}]),
     SSEType.AGENT_ROSTER: lambda: events.agent_roster(
         "created", session="s", persona="P", voice_id="v", backend="claude",
-        name="N", voice_profile={"speech": {}, "hearing": {}}),
+        name="N", voice_profile={"speech": {}, "hearing": {}}, coordination_visibility="hide"),
     SSEType.AGENT_FOCUS: lambda: events.agent_focus(session="s", agent_id="a"),
     SSEType.TRANSCRIPT_UPDATED: lambda: events.transcript_updated(
         agent_id="a", session="s", backend_session_id="b"),
     SSEType.QUEUE_UPDATED: lambda: events.queue_updated(
         session="s", agent_id="a", queue_depth=0, queue_paused=False,
         queue_started=False, queue_revision=1, client_msg_id="m",
-        queue_change="edited", text="t"),
+        queue_change="edited", text="t", origin="agent", sender={"agent_id": "b", "name": "B"}),
     SSEType.ARTIFACT_UPDATED: lambda: events.artifact_updated(
         session="s", agent_id="a", artifact_id="x"),
     SSEType.MEDIA_CHANGED: lambda: events.media_changed(

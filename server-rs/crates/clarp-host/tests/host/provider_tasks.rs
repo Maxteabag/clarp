@@ -166,16 +166,10 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     let detail = host.get(&path);
     assert_eq!(detail["job"]["revision"], shown["revision"]);
     assert_eq!(detail["timeline"].as_array().unwrap().len(), 2);
-    // A limited device can inspect canonical state and progress, but the
-    // provider's output path and bytes are withheld before any file read.
     let (limited, _) = pair(&host, "Task observer", "limited");
-    let (status, restricted) = host.ask_as(&limited, "GET", &path, None);
-    assert_eq!(status, 200);
-    assert_eq!(restricted["timeline"], detail["timeline"]);
-    assert_eq!(restricted["progress"], detail["progress"]);
     assert_eq!(
-        restricted["log"],
-        json!({"path":"","available":false,"reason":"forbidden","text":"","size":0,"truncated":false})
+        host.ask_as(&limited, "GET", &path, None),
+        (403, json!({"error":"full device access required"}))
     );
     // A stale generation and an unsupported cancellation are separate
     // refusals and leave the job and its timeline at the same revision.
@@ -206,7 +200,8 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
         },
     );
     let register = |host: &Host, raw: &str| {
-        let result = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        let result = place
+            .host_command()
             .args([
                 "tool",
                 "clarp-agent-bg",
@@ -216,7 +211,6 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
                 "fixture",
                 "Explicit job",
             ])
-            .env_clear()
             .env("HOME", &place.root)
             .env("CLARP_HOST_ADDR", &host.address)
             .env("CLARP_HOST_TOKEN", &host.token)
@@ -371,12 +365,12 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     let launcher = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../skills/clarp-background-jobs/scripts/run_detached_job.sh");
     let run = |id: &str, key: &str| {
-        Command::new(&launcher)
+        place.command(&launcher)
             .args(["--goal",id,&keeper,key,"fixture","Fixture command"])
             .arg(cwd.join(format!("{key}.log"))).args(["--","sh","-c",
                 "printf 'started' > \"$1\"; while [ -d \"$3\" ] && [ ! -f \"$2\" ]; do sleep 0.05; done; printf 'done\\n'","fixture"])
             .arg(cwd.join(format!("{key}.started"))).arg(cwd.join("allow-end")).arg(&cwd)
-            .env_clear().env("PATH",format!("{}:/usr/bin:/bin",bin.display()))
+            .env("PATH",format!("{}:/usr/bin:/bin",bin.display()))
             .env("FIXTURE_STALE_REVISION",if key=="refused-write"{"yes"}else{"no"}).env("CLARP_SESSION",&keeper).env("CLAUDE_PWA_SESSION",&keeper)
             .env("HOME",&place.root).env("CLARP_HOST_ADDR",&host.address)
             .env("CLARP_HOST_TOKEN",&host.token).current_dir(&cwd).ended()

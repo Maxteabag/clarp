@@ -83,12 +83,13 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
     SSEType.AGENT_ROSTER: (
         "kind", "session", "persona", "voice_id", "backend", "name", "voice_profile",
+        "coordination_visibility",
     ),
     SSEType.AGENT_FOCUS: ("session", "agent_id"),
     SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session", "backend_session_id"),
     SSEType.QUEUE_UPDATED: (
         "agent_id", "session", "queue_depth", "queue_paused", "queue_started",
-        "queue_revision", "client_msg_id", "queue_change", "text",
+        "queue_revision", "client_msg_id", "queue_change", "text", "origin", "sender",
     ),
     SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
@@ -284,7 +285,8 @@ def heartbeat(*, ts: int) -> Event:
 def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
                  persona: Any = OMIT, voice_id: Any = OMIT,
                  backend: Any = OMIT, name: Any = OMIT,
-                 voice_profile: Any = OMIT) -> Event:
+                 voice_profile: Any = OMIT,
+                 coordination_visibility: Any = OMIT) -> Event:
     """Refetch the snapshot. Without ``kind`` it is the reconnect nudge.
     ``voice_profile`` is the agent's resolved voice and hearing (feature
     voice_profile) when the event is about one agent's voice."""
@@ -296,6 +298,7 @@ def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
         ("backend", backend),
         ("name", name),
         ("voice_profile", voice_profile),
+        ("coordination_visibility", coordination_visibility),
     ])
 
 
@@ -317,9 +320,11 @@ def transcript_updated(*, agent_id: str, session: str | None,
 def queue_updated(*, session: str, agent_id: str, queue_depth: int,
                   queue_paused: bool, queue_started: bool,
                   queue_revision: int, client_msg_id: Any = OMIT,
-                  queue_change: Any = OMIT, text: Any = OMIT) -> Event:
+                  queue_change: Any = OMIT, text: Any = OMIT,
+                  origin: Any = OMIT, sender: Any = OMIT) -> Event:
     """``queue_change`` (``edited`` with ``text``, or ``deleted``) names what
-    happened to the item ``client_msg_id`` (feature waited_send_order)."""
+    happened to the item ``client_msg_id`` (feature waited_send_order); an event
+    that names an item also says who it is from (``origin``, ``sender``; R182)."""
     return _build(SSEType.QUEUE_UPDATED, [
         ("session", session),
         ("agent_id", agent_id),
@@ -330,6 +335,8 @@ def queue_updated(*, session: str, agent_id: str, queue_depth: int,
         ("queue_revision", queue_revision),
         ("queue_change", queue_change),
         ("text", text),
+        ("origin", origin),
+        ("sender", sender),
     ])
 
 

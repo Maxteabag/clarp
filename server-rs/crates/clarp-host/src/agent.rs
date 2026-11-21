@@ -7,15 +7,16 @@
 //! When the actor reports that its log or files failed, the thread drops it and opens it again
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
-    Action, Actor, ActorError, ByHand, Changed, ImportedRow, Kept, Outputs, Profile, QueueState,
-    Sent, ShimOrder, Status, TurnFate, Waiting,
+    Action, Actor, ActorError, ByHand, Changed, ImportedRow, JoinedRead, Kept, Outputs, Profile,
+    QueueState, Sent, ShimOrder, Status, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
@@ -414,6 +415,10 @@ enum Ask {
         answer: Answer<bool>,
     },
     /// From a turn's thread: the live turn's spool may have grown.
+    TakeoverHeld {
+        offer: clarp_actor::takeover::Offer,
+        held: clarp_shim::Held,
+    },
     SpoolChanged,
     /// From a turn's thread: nothing answers at the shim of this attempt of the turn any more.
     ShimGone {
@@ -1226,6 +1231,7 @@ pub(crate) fn never_ran() -> Status {
         live: None,
         last: None,
         waiting: Vec::new(),
+        queue_depth: 0,
         paused: false,
         queue_revision: 0,
         stop_generation: 0,
@@ -1270,11 +1276,13 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         told: None,
         passed: Vec::new(),
         held: None,
+        followups: None,
         pooled: None,
         terminals: 0,
         behind_terminal: None,
         let_go_by_hand: false,
-        reworded: false,
+        queue_edit: None,
+        takeover_wait: VecDeque::new(),
         newest: None,
         ended: None,
         finished: None,
@@ -1312,6 +1320,11 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     }
 }
 
+enum QueueEdit {
+    Edited { item: Waiting, text: String },
+    Deleted(Waiting),
+}
+
 struct Worker {
     setup: Setup,
     actor: Option<Actor>,
@@ -1326,6 +1339,8 @@ struct Worker {
     /// The launch of an attempt that waits for an account: carried out when the pool of the
     /// tool's accounts takes the turn up.
     held: Option<ShimOrder>,
+    /// Socket requests from this agent are written in the order it accepted them.
+    followups: Option<mpsc::Sender<(PathBuf, String)>>,
     /// The turn the pool was last told of.
     pooled: Option<TurnId>,
     /// How many terminals are open on the agent's own tool.
@@ -1336,9 +1351,10 @@ struct Worker {
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
     let_go_by_hand: bool,
-    /// The words of a waiting message were changed a moment ago: the clients are told how
-    /// the queue stands, so that they read it again.
-    reworded: bool,
+    /// The edit or withdrawal committed by the request this worker is handling.
+    queue_edit: Option<QueueEdit>,
+    /// Commands that could change the selected turns while a consume verdict is uncertain.
+    takeover_wait: VecDeque<Ask>,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
     /// How the last turn ended.
@@ -1390,7 +1406,7 @@ fn seen_end(last: &Settled) -> Option<TurnSeen> {
         Outcome::Failed { reason, .. } => ("failed", reason.clone()),
         Outcome::Interrupted { reason } => ("interrupted", reason.clone()),
         Outcome::Stopped { by, .. } => ("interrupted", format!("Stopped by {by}")),
-        Outcome::Withdrawn { .. } => return None,
+        Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => return None,
     };
     Some(TurnSeen {
         outcome: outcome.to_string(),
@@ -1616,7 +1632,17 @@ impl Worker {
             .into_iter()
             .flatten()
             .min();
-            let ask = match mailbox.next(rx, due, Instant::now()) {
+            let resolved = self
+                .actor
+                .as_ref()
+                .is_some_and(|actor| actor.selected_takeover().is_none());
+            let queued = if resolved {
+                self.takeover_wait.pop_front()
+            } else {
+                None
+            };
+            let request = queued.map_or_else(|| mailbox.next(rx, due, Instant::now()), Ok);
+            let ask = match request {
                 Ok(ask) => ask,
                 Err(RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
@@ -2410,6 +2436,42 @@ impl Worker {
     }
 
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
+        if matches!(
+            &ask,
+            Ask::Stop { .. }
+                | Ask::Hold { .. }
+                | Ask::Withdraw { .. }
+                | Ask::Reword { .. }
+                | Ask::SendNow { .. }
+                | Ask::Send {
+                    admission: Admission::Direct,
+                    ..
+                }
+        ) && let Some((from, socket)) = self
+            .actor
+            .as_ref()
+            .and_then(Actor::selected_takeover_socket)
+        {
+            // Release is ordered against the consume in the shim. Once it replies, a
+            // missing marker means the old tool was never committed for takeover. If
+            // the commit won, finish its journal batch before applying this command.
+            let replied = crate::launcher::takeover_request(&socket, clarp_shim::Request::Release)
+                .and_then(|reply| reply.let_go)
+                .is_some();
+            let now = self.now_ms();
+            if let Some(actor) = self.actor.as_mut() {
+                let out = actor.spool_changed(now)?;
+                if replied && !actor.selected_takeover_has_marker()? {
+                    actor.clear_takeover(from, now)?;
+                }
+                let defer = actor.selected_takeover().is_some();
+                self.after(out);
+                if defer {
+                    self.takeover_wait.push_back(ask);
+                    return Ok(());
+                }
+            }
+        }
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::TakePlans {
@@ -2505,6 +2567,21 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
+        if self.setup.record.backend == "claude"
+            && let Ask::Send {
+                message,
+                admission: Admission::Queue,
+                reservation: None,
+                ..
+            } = &ask
+            && message.origin.is_user()
+            && let Some(actor) = self.actor.as_mut()
+        {
+            // Read a tool call which reached the spool before this send, even if its wakeup
+            // is still behind the send in the mailbox.
+            let read = actor.spool_changed(now)?;
+            self.after(read);
+        }
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
@@ -2528,18 +2605,62 @@ impl Worker {
                 marks,
                 answer,
             } => {
-                let sent = actor
+                let can_offer_steering = reservation.is_none()
+                    && admission == Admission::Queue
+                    && message.origin.is_user()
+                    && marks.coordination.is_none()
+                    && self.setup.record.backend == "claude";
+                let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
                     .map(|sent| match sent {
                         Ok((sent, out)) => (Ok(sent), out),
                         Err(taken) => (Err(taken), Outputs::default()),
                     });
-                if let Ok((Ok(sent), _)) = &sent
+                if let Ok((Ok(sent), out)) = &mut sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
-                    && let Some(c) = &self.setup.hub.capture
                 {
-                    c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
+                    if let Some(c) = &self.setup.hub.capture {
+                        c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
+                    }
+                    let steer = if sent.queued
+                        && can_offer_steering
+                        && let Some(uuid) = message
+                            .trace_id
+                            .as_deref()
+                            .and_then(clarp_kernel::takeover::prompt_uuid)
+                    {
+                        actor.steer_active(turn, uuid, &message.text, now)?
+                    } else {
+                        None
+                    };
+                    if let Some(action) = steer {
+                        out.actions.push(action);
+                    } else if sent.queued
+                        && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
+                        && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
+                        && let Some(program) = clarp_backend::program(&self.setup.record.backend)
+                    {
+                        let tx = self.tx.clone();
+                        let backend = self.setup.record.backend.clone();
+                        self.setup.runtime.spawn(async move {
+                            if !crate::takeover::can_use(&backend, program.into()).await {
+                                return;
+                            }
+                            let socket = offer.socket.clone();
+                            let request = clarp_shim::Request::Hold {
+                                ms: clarp_shim::HOLD_MOST_MS,
+                            };
+                            let held = tokio::task::spawn_blocking(move || {
+                                crate::launcher::takeover_request(&socket, request)
+                                    .and_then(|reply| reply.held)
+                            })
+                            .await;
+                            if let Ok(Some(held)) = held {
+                                let _ = tx.send(Ask::TakeoverHeld { offer, held });
+                            }
+                        });
+                    }
                 }
                 answered(sent, answer)?
             }
@@ -2746,14 +2867,21 @@ impl Worker {
                 return Ok(());
             }
             Ask::Withdraw { turn, by, answer } => {
+                let item = actor.queue_item(turn)?;
                 let withdrawn = actor.withdraw(turn, &by, now);
+                if matches!(withdrawn, Ok((true, _))) {
+                    self.queue_edit = item.map(QueueEdit::Deleted);
+                }
                 let queue = actor.queue_state();
                 answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
             }
             Ask::SendNow { turn, by, answer } => answered(actor.send_now(turn, &by, now), answer)?,
             Ask::Reword { turn, text, answer } => {
+                let item = actor.queue_item(turn)?;
                 let reworded = actor.reword(turn, &text, now);
-                self.reworded = matches!(reworded, Ok((Reworded::Done, _)));
+                if matches!(reworded, Ok((Reworded::Done, _))) {
+                    self.queue_edit = item.map(|item| QueueEdit::Edited { item, text });
+                }
                 answered(reworded, answer)?
             }
             Ask::Note { id, text, answer } => answered(actor.note(&id, &text, now), answer)?,
@@ -2956,6 +3084,53 @@ impl Worker {
             | Ask::LineEnded { .. }
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
+            Ask::TakeoverHeld { offer, held } => {
+                let release = || {
+                    crate::launcher::takeover_request(&offer.socket, clarp_shim::Request::Release);
+                };
+                let plan = if held.partial_out == 0
+                    && held.partial_err == 0
+                    && held.partial_reports == 0
+                    && held.left_ms > 0
+                    && actor.takeover_quiet(&offer, held.spool)?
+                {
+                    crate::takeover::plan(
+                        &self.setup.record.backend,
+                        &crate::config::home(),
+                        &self.setup.record.cwd,
+                        &self.setup.record.agent_id,
+                        &offer,
+                    )
+                } else {
+                    None
+                };
+                let Some((session, input)) = plan else {
+                    release();
+                    return Ok(());
+                };
+                if !actor.select_takeover(&offer, held.spool, session, input, now)? {
+                    release();
+                    return Ok(());
+                }
+                let reply = crate::launcher::takeover_request(
+                    &offer.socket,
+                    clarp_shim::Request::ConsumeHold {
+                        fence: held.spool,
+                        replaced_by: offer.into.0,
+                    },
+                );
+                let now = self.setup.clock.now_ms();
+                let out = match reply.and_then(|reply| reply.killed) {
+                    Some(true) => actor.finish_takeover(offer.from, now)?,
+                    Some(false) => {
+                        actor.clear_takeover(offer.from, now)?;
+                        release();
+                        Outputs::default()
+                    }
+                    None => actor.spool_changed(now)?,
+                };
+                (out, nobody())
+            }
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::TerminalFacts { answer } => {
@@ -3137,7 +3312,7 @@ impl Worker {
             self.setup.speaks.wake(&self.setup.record.agent_id);
         }
         self.tell_deliveries();
-        self.show(out.changed);
+        self.show(out.changed, &out.joined_reads);
     }
 
     /// A user send's delivery moved (fenced by the user's Stop, or handed over): the apps are
@@ -3288,9 +3463,7 @@ impl Worker {
                         }
                     }
                 }
-                if let Some(pool) = self.setup.pool() {
-                    pool.guard_turn(&mut order);
-                }
+                let pool = self.setup.pool().cloned();
                 // Whose turn this is: a Clarp tool of the turn that presents its token is known
                 // to be this agent's. Nothing is written for it.
                 let agent_id = &self.setup.record.agent_id;
@@ -3304,6 +3477,10 @@ impl Worker {
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
+                        launcher::gate_steering(&mut order);
+                        if let Some(pool) = pool {
+                            pool.guard_turn(&mut order);
+                        }
                         if let Some(opening) = order.opening.as_deref() {
                             let (id, trace) = (opening.id.as_str(), opening.trace.as_str());
                             use crate::launcher::Launched;
@@ -3371,9 +3548,40 @@ impl Worker {
             } => std::thread::Builder::new()
                 .name("stop".to_string())
                 .spawn(move || launcher::stop(&socket, grace_ms)),
+            Action::Steer { socket, input } => {
+                self.write_followup(socket, input);
+                return;
+            }
         };
         if let Err(error) = spawned {
             eprintln!("clarp-host: a turn's thread could not be started: {error}");
+        }
+    }
+
+    fn write_followup(&mut self, socket: PathBuf, input: String) {
+        if self.followups.is_none() {
+            let (send, receive) = mpsc::channel::<(PathBuf, String)>();
+            if let Err(error) = std::thread::Builder::new()
+                .name("follow-up-input".to_string())
+                .spawn(move || {
+                    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    else {
+                        return;
+                    };
+                    for (socket, input) in receive {
+                        runtime.block_on(launcher::steer(&socket, input));
+                    }
+                })
+            {
+                eprintln!("clarp-host: follow-up input thread could not be started: {error}");
+                return;
+            }
+            self.followups = Some(send);
+        }
+        if let Some(send) = &self.followups {
+            let _ = send.send((socket, input));
         }
     }
 
@@ -3461,8 +3669,13 @@ impl Worker {
                     // queue, where an app shows it while it waits. A hold that was placed
                     // before does not hold it: a goal that is being worked was resumed or made
                     // after the last Stop.
-                    let woken =
-                        actor.keep_with(&kept_goal(&change), &message, Admission::Later, now)?;
+                    let woken = actor.keep_with(
+                        &kept_goal(&change),
+                        &message,
+                        Admission::Later,
+                        &clarp_actor::Marks::default(),
+                        now,
+                    )?;
                     outs.push(woken.1);
                 }
             }
@@ -3581,9 +3794,9 @@ impl Worker {
     }
 
     /// Publishes the agent's view and tells the clients what changed since they were last told.
-    fn show(&mut self, changed: Changed) {
+    fn show(&mut self, changed: Changed, joined_reads: &[JoinedRead]) {
         let by_hand = std::mem::take(&mut self.let_go_by_hand);
-        let reworded = std::mem::take(&mut self.reworded);
+        let queue_edit = self.queue_edit.take();
         let passed = std::mem::take(&mut self.passed);
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
@@ -3601,7 +3814,7 @@ impl Worker {
         let before = self.told.take();
         let was_live = before.as_ref().and_then(|told| told.live.as_ref());
         let was_waiting: &[TurnId] = before.as_ref().map_or(&[], |told| told.waiting.as_slice());
-        // The ids of the messages that have joined the queue since the clients were last told.
+        // The messages that have joined the queue since the clients were last told.
         let joined: Vec<String> = if status
             .waiting
             .iter()
@@ -3710,9 +3923,20 @@ impl Worker {
         // The queue: a message joined it, one left it to run, it was held or let go.
         for client_id in &joined {
             hub.publish(
-                wire::queue_updated(&record, &status, Some(client_id), false),
+                wire::queue_updated(&record, &status, wire::QueueUpdate::Joined(client_id)),
                 now,
             );
+        }
+        for read in joined_reads {
+            let mut event = wire::queue_updated(
+                &record,
+                &status,
+                wire::QueueUpdate::Started(&read.client_id),
+            );
+            event["queue_depth"] = json!(read.queue.waiting);
+            event["queue_paused"] = json!(read.queue.paused);
+            event["queue_revision"] = json!(read.queue.revision);
+            hub.publish(event, now);
         }
         // A turn began: the word a send is answered with, for every client that did not send it.
         if let Some(live) = &status.live
@@ -3722,7 +3946,11 @@ impl Worker {
             // nothing was in its way.
             if live.from_queue {
                 hub.publish(
-                    wire::queue_updated(&record, &status, Some(&live.client_id), true),
+                    wire::queue_updated(
+                        &record,
+                        &status,
+                        wire::QueueUpdate::Started(&live.client_id),
+                    ),
                     now,
                 );
             }
@@ -3730,7 +3958,7 @@ impl Worker {
                 wire::dispatched(
                     &record,
                     live,
-                    status.waiting.len(),
+                    status.queue_depth,
                     &working_with(actor, live),
                 ),
                 now,
@@ -3747,7 +3975,7 @@ impl Worker {
                 wire::dispatched(
                     &record,
                     live,
-                    status.waiting.len(),
+                    status.queue_depth,
                     &working_with(actor, live),
                 ),
                 now,
@@ -3766,11 +3994,29 @@ impl Worker {
         let told_with_its_turn = !status.paused && !by_hand && began_from_the_queue;
         let taken_back = was_waiting.iter().any(|turn| {
             !status.waiting.contains(turn)
+                && !joined_reads.iter().any(|read| read.turn == *turn)
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
-        if (held_or_let_go && !told_with_its_turn) || taken_back || reworded {
-            hub.publish(wire::queue_updated(&record, &status, None, false), now);
+        let directory = queue_edit.as_ref().and_then(|_| hub.queue_directory());
+        let name = |item: &Waiting| wire::queue_sender_name(item, directory.as_deref());
+        let update = match &queue_edit {
+            Some(QueueEdit::Edited { item, text }) => Some(wire::QueueUpdate::Edited {
+                item,
+                text,
+                sender_name: name(item),
+            }),
+            Some(QueueEdit::Deleted(item)) => Some(wire::QueueUpdate::Deleted {
+                item,
+                sender_name: name(item),
+            }),
+            None if (held_or_let_go && !told_with_its_turn) || taken_back => {
+                Some(wire::QueueUpdate::Mailbox)
+            }
+            None => None,
+        };
+        if let Some(update) = update {
+            hub.publish(wire::queue_updated(&record, &status, update), now);
         }
         // What the agent passed through on the way: each state in its turn, as it stood. A
         // tool that prints a whole turn in one breath is told as one that took its time.
@@ -4107,6 +4353,7 @@ fn refuse_for(
             ) => drop(answer.send(Err(refusal()))),
             Ok(
                 Ask::SpoolChanged
+                | Ask::TakeoverHeld { .. }
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged

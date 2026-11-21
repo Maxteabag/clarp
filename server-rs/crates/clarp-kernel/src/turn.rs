@@ -89,17 +89,17 @@ pub fn silent_when_failed(origin: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Admission {
-    /// Said to the agent: it is in the conversation from now on, and the agent comes to it when
-    /// it is free. A hold that was placed before it came does not hold it: someone said this
-    /// after the stop, and means it.
+    /// Said to the agent: the agent comes to it when it is free. A hold that was placed before
+    /// it came does not hold it: someone said this after the stop, and means it. Like every
+    /// message, it enters the conversation when its turn starts; while it waits it keeps its
+    /// delivery receipt, and it can be reworded or taken back in the queue.
     #[default]
     Queue,
     /// The user wants it now: it ends the live turn, goes ahead of what waits its turn, and runs
     /// even while the agent is paused, without lifting the pause.
     Direct,
-    /// Left for later by someone: it waits its turn like a message that was said, but stays
-    /// out of the conversation until its turn starts. Until then it is in the queue, where it
-    /// can be taken back.
+    /// Left for later by someone: it waits its turn like a message that was said, in the queue,
+    /// where it can be taken back, and goes through the queue even when nothing is in its way.
     Later,
     /// Work nobody sits waiting for: it waits in the queue like `Later`, and a hold holds it
     /// like everything that waited when the hold was placed.
@@ -111,8 +111,9 @@ impl Admission {
         *self == Self::Queue
     }
 
-    /// Whether a message admitted this way stays out of the conversation while it waits.
-    pub fn waits_outside(self) -> bool {
+    /// Whether a message admitted this way was left for later: it goes through the queue even
+    /// when nothing is in its way.
+    pub fn left_for_later(self) -> bool {
         matches!(self, Self::Later | Self::Background)
     }
 }
@@ -158,6 +159,12 @@ pub enum Outcome {
     /// The tool process went away under the turn: a crash, a killed shim, a lost machine.
     Interrupted {
         reason: String,
+    },
+    /// A quiet turn superseded by the next user's message. Its receipt is still handed over.
+    Replaced {
+        by: TurnId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace: Option<String>,
     },
     /// Taken back before it started.
     Withdrawn {
@@ -232,9 +239,14 @@ pub enum TurnEvent {
         /// (`c-<turn>`): no restart falls between the two, and nothing loosens it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         coordination: Option<String>,
+        /// Absent on older journals, whose original placement still replays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user_word: Option<bool>,
     },
     Started {
         at_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        takeover: Option<crate::takeover::Start>,
     },
     /// The tool told us which of its own sessions carries this turn.
     Bound {
@@ -306,6 +318,7 @@ pub struct Queued {
     pub origin: Origin,
     pub admission: Admission,
     pub accepted_at_ms: i64,
+    pub user_word: bool,
 }
 
 /// A turn whose tool process is being started: for the first time, or again.
@@ -423,6 +436,7 @@ impl Queued {
         admission: Admission,
         at_ms: i64,
     ) -> (Self, TurnEvent) {
+        let user_word = crate::user_word::is_user_word(origin.name(), "", "");
         let event = TurnEvent::Accepted {
             turn,
             message_seq,
@@ -430,6 +444,7 @@ impl Queued {
             admission,
             at_ms,
             coordination: None,
+            user_word: Some(user_word),
         };
         (
             Self {
@@ -438,6 +453,7 @@ impl Queued {
                 origin,
                 admission,
                 accepted_at_ms: at_ms,
+                user_word,
             },
             event,
         )
@@ -456,7 +472,13 @@ impl Queued {
             account: AccountWaits::default(),
             recovering: false,
         };
-        (next, TurnEvent::Started { at_ms })
+        (
+            next,
+            TurnEvent::Started {
+                at_ms,
+                takeover: None,
+            },
+        )
     }
 
     pub fn withdraw(self, by: String, at_ms: i64) -> (Settled, TurnEvent) {
@@ -760,10 +782,16 @@ impl Turn {
                 origin,
                 admission,
                 at_ms,
+                user_word,
                 ..
-            } => Ok(Self::Queued(
-                Queued::accept(*turn, *message_seq, origin.clone(), *admission, *at_ms).0,
-            )),
+            } => {
+                let mut queued =
+                    Queued::accept(*turn, *message_seq, origin.clone(), *admission, *at_ms).0;
+                if let Some(mark) = user_word {
+                    queued.user_word = *mark;
+                }
+                Ok(Self::Queued(queued))
+            }
             other => Err(IllegalTransition {
                 turn: TurnId(0),
                 state: "nothing",
@@ -780,7 +808,7 @@ impl Turn {
             event: event.name(),
         };
         match (self, event) {
-            (Self::Queued(t), TurnEvent::Started { at_ms }) => {
+            (Self::Queued(t), TurnEvent::Started { at_ms, .. }) => {
                 Ok(Self::Starting(t.start(*at_ms).0))
             }
             (
@@ -799,9 +827,10 @@ impl Turn {
             ) => Ok(Self::Running(t.running(*at_ms).0)),
             // An ended turn is as its log says it ended: nothing is read a second time.
             (Self::Starting(t), TurnEvent::Settled { outcome, at_ms }) => match outcome {
-                Outcome::Failed { .. } | Outcome::Stopped { .. } | Outcome::Interrupted { .. } => {
-                    Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
-                }
+                Outcome::Failed { .. }
+                | Outcome::Stopped { .. }
+                | Outcome::Interrupted { .. }
+                | Outcome::Replaced { .. } => Ok(Self::Settled(t.ended(outcome.clone(), *at_ms))),
                 Outcome::Completed | Outcome::Withdrawn { .. } => Err(illegal(&Self::Starting(t))),
             },
             (Self::Running(t), TurnEvent::Bound { backend_session }) => {
@@ -814,9 +843,8 @@ impl Turn {
                 Outcome::Completed
                 | Outcome::Failed { .. }
                 | Outcome::Stopped { .. }
-                | Outcome::Interrupted { .. } => {
-                    Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
-                }
+                | Outcome::Interrupted { .. }
+                | Outcome::Replaced { .. } => Ok(Self::Settled(t.ended(outcome.clone(), *at_ms))),
                 Outcome::Withdrawn { .. } => Err(illegal(&Self::Running(t))),
             },
             (
@@ -838,7 +866,9 @@ impl Turn {
                 Outcome::Failed { .. } | Outcome::Stopped { .. } | Outcome::Interrupted { .. } => {
                     Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
                 }
-                Outcome::Completed | Outcome::Withdrawn { .. } => Err(illegal(&Self::Parked(t))),
+                Outcome::Completed | Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => {
+                    Err(illegal(&Self::Parked(t)))
+                }
             },
             (state, _) => Err(illegal(&state)),
         }
@@ -969,7 +999,10 @@ mod tests {
                 activity: Activity::Thinking,
                 at_ms: 1_400,
             },
-            TurnEvent::Started { at_ms: 1_400 },
+            TurnEvent::Started {
+                at_ms: 1_400,
+                takeover: None,
+            },
         ] {
             let mut wrong = waited.to_vec();
             wrong.push(illegal);
@@ -1141,7 +1174,10 @@ mod tests {
     #[test]
     fn a_log_that_makes_no_sense_is_refused() {
         let (_, accepted) = accepted();
-        let started = TurnEvent::Started { at_ms: 2 };
+        let started = TurnEvent::Started {
+            at_ms: 2,
+            takeover: None,
+        };
         let thinking = TurnEvent::Moved {
             activity: Activity::Thinking,
             at_ms: 3,

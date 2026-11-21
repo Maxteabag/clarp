@@ -29,8 +29,9 @@ DEMAND_RUN_TTL_MS = 180_000  # Two bounded 60-second routing probes plus overhea
 _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "item_count",
     "detail_level", "target_count", "target_agent_id", "policy_revision", "summary", "status", "reason",
     "decision_id", "http_status",
-    # What a routing run's first answer said, so a replay answers the same (R83).
-    "answer_session", "answer_dispatch", "answer_status"})
+    # What a routing run's first answer said, so a replay answers the same (R83), its decision
+    # included: its row by decision_id, and the two keys the row does not hold (R134).
+    "answer_session", "answer_dispatch", "answer_status", "decision_target", "decision_action"})
 
 
 def _role(role: str) -> str:
@@ -177,6 +178,11 @@ def select(configs: list[dict], target: dict | None) -> dict | None:
               if (janitors._in_scope(config["scope"], target) if target is not None
                   else not (config["scope"].get("agent_ids") or config["scope"].get("exclude_agent_ids")))]
     return chosen[0] if len(chosen) == 1 else None
+
+
+def run_id_for(role: str, request_id: str) -> str:
+    """The run id a demand request of this role gets (read-only; begin_run is unchanged)."""
+    return _request_run_id(role, request_id)
 
 
 def _request_run_id(role: str, request_id: str) -> str:

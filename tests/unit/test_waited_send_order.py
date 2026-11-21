@@ -652,6 +652,24 @@ def test_m20_m18_a_shown_item_is_neither_deletable_nor_counted(tmp_path, clock, 
     assert turn_queue.state(world.agent)["count"] == 0
 
 
+def test_a_started_item_an_older_host_emptied_is_not_shown_as_waiting(tmp_path, clock):
+    """An item an older Host started cleared its words then and wrote its row at the start:
+    after the upgrade it has no shown_at but is no waiting message. The queue read and the
+    count leave it out (review2's edge to 874fd435); recovery skips it as well."""
+    world = _World(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    clock.at(7_600)
+    _send(world, "two")
+    assert [c for c, _t, _k in _queue(world)] == ["two"]
+    db.conn().execute("UPDATE queued_turns SET status = 'started', text = '' "
+                      "WHERE queue_id = 'two'")
+    assert not any(c == "two" for c, _t, _k in _queue(world))
+    assert turn_queue.state(world.agent)["count"] == 0
+    assert turn_queue.started_unshown() == []
+
+
 def test_m6_m7_an_item_being_handed_to_a_steer_is_neither_edited_nor_deleted(tmp_path, clock):
     """M6, M7: once its launch receipt says the prompt may have left, edit and delete refuse:
     never a row with one text and a turn run on another (ruling e)."""
@@ -803,6 +821,7 @@ def test_a_turn_with_no_session_at_its_handoff_keeps_its_message_in_one_read(
     assert world.started == ["one", "two"]
     assert turn_queue.status("two") == "started"
     assert _where(world, "two") == "queue"            # between spawn and init: still queued
+    assert turn_queue.state(world.agent)["count"] == 1  # and counted (review2, M18b)
     no_session["on"] = False
     if then == "init arrives":
         call = [c for c in world.provider.spawned if c["text"] == "two"][0]

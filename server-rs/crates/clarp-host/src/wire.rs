@@ -6,7 +6,7 @@
 //! nothing to say about is sent as the Python Host sends it when it has nothing to say.
 
 use clarp_actor::conversation::{Page, Versioned};
-use clarp_actor::{LiveStatus, LiveTool, Status};
+use clarp_actor::{LiveStatus, LiveTool, Status, Waiting};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::control;
 use clarp_kernel::conversation::{Entry, Notice, ToolCall, ToolStatus, TurnEnd};
@@ -23,7 +23,7 @@ use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
 use serde_json::{Map, Value, json};
 
-use crate::fleet::AgentRecord;
+use crate::fleet::{AgentRecord, Directory};
 
 /// A time as the contract writes it: `2026-09-02T05:41:00.123Z`.
 pub fn iso(ms: i64) -> String {
@@ -112,7 +112,7 @@ pub fn state_kind(status: &Status) -> AgentStateKind {
             Outcome::Stopped { .. } | Outcome::Interrupted { .. } | Outcome::Failed { .. } => {
                 AgentStateKind::Interrupted
             }
-            Outcome::Withdrawn { .. } => AgentStateKind::Idle,
+            Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => AgentStateKind::Idle,
         },
     }
 }
@@ -294,7 +294,7 @@ fn ending_detail(last: &Settled, backend: &str, model: &str, end: Option<&TurnEn
             "message": reason,
             "source": "turn_failed",
         }),
-        Outcome::Completed | Outcome::Withdrawn { .. } => json!({}),
+        Outcome::Completed | Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => json!({}),
     }
 }
 
@@ -611,27 +611,107 @@ pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
     })
 }
 
-/// The queue changed. `message_id` names the message the change is about, when it is about
-/// one: a message that joined the queue, or one that left it to run (`started`).
-pub fn queue_updated(
-    record: &AgentRecord,
-    status: &Status,
-    client_id: Option<&str>,
-    started: bool,
-) -> Value {
+/// A waiting item's sender name comes from the current roster, by agent id only.
+pub(crate) fn queue_sender_name<'a>(
+    message: &Waiting,
+    directory: Option<&'a Directory>,
+) -> Option<&'a str> {
+    let id = message.sender_agent_id.as_deref()?;
+    let name = directory?.by_id(id)?.record.persona.as_str();
+    (!name.is_empty()).then_some(name)
+}
+
+fn queue_provenance(message: &Waiting, sender_name: Option<&str>) -> [(String, Value); 2] {
+    let origin = message.origin.name();
+    let origin = if origin.is_empty() { "user" } else { origin };
+    let sender = message
+        .sender_agent_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .map(|id| json!({"agent_id": id, "name": sender_name}));
+    [
+        ("origin".into(), json!(origin)),
+        ("sender".into(), json!(sender)),
+    ]
+}
+
+/// One item from `GET /turn-queue`, including the original fields for older clients.
+pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
+    let kind = if message.admission.left_for_later() {
+        "later"
+    } else {
+        "waiting"
+    };
+    let mut item = Map::from_iter([
+        ("client_msg_id".into(), json!(message.told_id)),
+        ("text".into(), json!(message.text)),
+        ("sent_at".into(), json!(iso(message.accepted_at_ms))),
+        ("kind".into(), json!(kind)),
+    ]);
+    item.insert("id".into(), json!(message.client_id));
+    item.insert("enqueued_at".into(), json!(message.accepted_at_ms));
+    item.insert("synthesize_audio".into(), json!(message.speak));
+    item.extend(queue_provenance(
+        message,
+        queue_sender_name(message, Some(directory)),
+    ));
+    Value::Object(item)
+}
+
+#[derive(Clone, Copy)]
+pub enum QueueUpdate<'a> {
+    Mailbox,
+    Joined(&'a str),
+    Started(&'a str),
+    Edited {
+        item: &'a Waiting,
+        text: &'a str,
+        sender_name: Option<&'a str>,
+    },
+    Deleted {
+        item: &'a Waiting,
+        sender_name: Option<&'a str>,
+    },
+}
+
+/// The queue changed, with the item that changed when there is one.
+pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<'_>) -> Value {
     let mut event = json!({
         "type": "queue-updated",
         "agent_id": record.agent_id,
         "session": record.session,
-        "queue_depth": status.waiting.len(),
+        "queue_depth": status.queue_depth,
         "queue_paused": status.paused,
-        "queue_started": started,
+        "queue_started": matches!(update, QueueUpdate::Started(_)),
         "queue_revision": status.queue_revision,
     });
-    if let Some(client_id) = client_id {
-        event["client_msg_id"] = json!(client_id);
+    match update {
+        QueueUpdate::Joined(id) | QueueUpdate::Started(id) => event["client_msg_id"] = json!(id),
+        QueueUpdate::Edited {
+            item,
+            text,
+            sender_name,
+        } => {
+            event["queue_change"] = json!("edited");
+            event["text"] = json!(text);
+            tell_queue_item(&mut event, item, sender_name);
+        }
+        QueueUpdate::Deleted { item, sender_name } => {
+            event["queue_change"] = json!("deleted");
+            tell_queue_item(&mut event, item, sender_name);
+        }
+        QueueUpdate::Mailbox => {}
     }
     event
+}
+
+fn tell_queue_item(event: &mut Value, item: &Waiting, sender_name: Option<&str>) {
+    if !item.told_id.is_empty() {
+        event["client_msg_id"] = json!(item.told_id);
+    }
+    for (key, value) in queue_provenance(item, sender_name) {
+        event[key] = value;
+    }
 }
 
 /// A background job as the apps are given it: what is kept of it, and what is read off it
@@ -1197,6 +1277,9 @@ fn turn_end(end: &TurnEnd) -> Value {
     if end.note_count > 0 {
         summary["note_count"] = json!(end.note_count);
     }
+    if let Some(replaced_by) = &end.replaced_by {
+        summary["replaced_by"] = json!(replaced_by);
+    }
     summary
 }
 
@@ -1331,6 +1414,9 @@ pub fn row(version: &Versioned) -> Value {
     match &version.entry {
         Entry::Message(message) => {
             row["role"] = json!("user");
+            if let Some(sent_at_ms) = message.sent_at_ms {
+                row["sent_at"] = json!(iso(sent_at_ms));
+            }
             row["text"] = match automated_prompt(kind) {
                 Some(shown) => json!(shown),
                 None => json!(markup::strip_hidden_blocks(&message.text)),
@@ -1790,7 +1876,7 @@ pub fn summary(
         // What the user's last compaction did, from numbers: null until the first
         // (compaction_outcome).
         "last_compaction": status.last_compaction,
-        "queued_turn_count": status.waiting.len(),
+        "queued_turn_count": status.queue_depth,
         "queued_turn_revision": status.queue_revision,
         "queue_paused": status.paused,
         "backend_quota": null,
@@ -1808,6 +1894,79 @@ mod tests {
     use clarp_protocol::snapshot::AgentSummary;
 
     use super::*;
+
+    #[test]
+    fn queue_provenance_uses_the_pythons_item_and_event_shapes() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/queue-provenance.json")).unwrap();
+        let waiting = |origin: &str, sender_agent_id| Waiting {
+            turn: TurnId(1),
+            message_id: "u-m2".into(),
+            client_id: "m2".into(),
+            told_id: "m2".into(),
+            text: "old".into(),
+            speak: false,
+            accepted_at_ms: 1,
+            admission: clarp_kernel::turn::Admission::Later,
+            origin: Origin::Trigger {
+                name: origin.into(),
+            },
+            sender_agent_id,
+        };
+        for row in fixture["rows"].as_array().unwrap() {
+            let origin = row["origin"].as_str().unwrap_or_default();
+            let item = waiting(origin, row["sender_agent_id"].as_str().map(str::to_owned));
+            let actual = Value::Object(
+                queue_provenance(&item, row["name"].as_str())
+                    .into_iter()
+                    .collect(),
+            );
+            assert_eq!(actual, row["provenance"], "{row}");
+        }
+        let record = AgentRecord {
+            agent_id: "a".into(),
+            session: "s".into(),
+            ..record()
+        };
+        let status = Status {
+            queue_depth: 1,
+            paused: true,
+            queue_revision: 7,
+            ..status(None, None)
+        };
+        let edited = waiting("agent", Some("mike".into()));
+        let deleted = Waiting {
+            told_id: "m1".into(),
+            ..waiting("user", None)
+        };
+        for (name, update) in [
+            ("mailbox", QueueUpdate::Mailbox),
+            (
+                "edited",
+                QueueUpdate::Edited {
+                    item: &edited,
+                    text: "changed",
+                    sender_name: Some("Mike"),
+                },
+            ),
+            (
+                "deleted",
+                QueueUpdate::Deleted {
+                    item: &deleted,
+                    sender_name: None,
+                },
+            ),
+        ] {
+            let event = queue_updated(&record, &status, update);
+            assert_eq!(event, fixture["events"][name]);
+        }
+        // Both explicit null and a missing field survive the typed event contract.
+        for name in ["mailbox", "edited", "deleted", "retired"] {
+            let event = &fixture["events"][name];
+            let typed: Envelope = serde_json::from_value(event.clone()).unwrap();
+            assert_eq!(serde_json::to_value(typed).unwrap(), *event);
+        }
+    }
 
     #[test]
     fn a_time_is_read_back_as_it_was_written() {
@@ -1896,6 +2055,7 @@ mod tests {
                 account_waits: 0,
             }),
             waiting: vec![TurnId(3)],
+            queue_depth: 1,
             paused: true,
             queue_revision: 7,
             stop_generation: 0,
@@ -1995,6 +2155,7 @@ mod tests {
             turn: 1,
             closes: "r-1".to_string(),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(10),
             ended_at_ms: 40,
             tool_count: 3,
@@ -2280,6 +2441,7 @@ mod tests {
             turn: 1,
             closes: "r-1".to_string(),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(1_100),
             ended_at_ms: 4_000,
             tool_count: 0,
@@ -2711,7 +2873,7 @@ mod tests {
             )
         );
 
-        let held = queue_updated(&record(), &thinking, None, false);
+        let held = queue_updated(&record(), &thinking, QueueUpdate::Mailbox);
         assert_eq!(
             (
                 &held["queue_depth"],
@@ -2722,7 +2884,7 @@ mod tests {
             (&json!(1), &json!(true), &json!(7), &json!(false))
         );
         assert!(held.get("client_msg_id").is_none());
-        let left = queue_updated(&record(), &thinking, Some("m2"), true);
+        let left = queue_updated(&record(), &thinking, QueueUpdate::Started("m2"));
         assert_eq!(
             (&left["client_msg_id"], &left["queue_started"]),
             (&json!("m2"), &json!(true))
@@ -2856,6 +3018,7 @@ mod tests {
             turn: 1,
             closes: "r-1".to_string(),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(10),
             ended_at_ms,
             tool_count: 0,

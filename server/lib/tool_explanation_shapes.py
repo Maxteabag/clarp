@@ -644,12 +644,43 @@ def _tool_part(activity):
                 exact_key=f"x:{program} #{_key('exact', text)}", program=program, slots=shaper.slots)
 
 
-def split(activity):
-    """Parts of one normalized activity (see tool_explanations.normalize_activity)."""
+SHELL_TOOLS = frozenset({"bash", "shell", "exec_command", "local_shell"})
+
+
+def _shell_command(activity):
+    tool_kind = str(activity.get("kind") or "").strip()
+    return templates._field(activity, "command", "cmd") or (
+        str(activity.get("summary") or "").strip() if tool_kind == "command" else "")
+
+
+def lacks_command(activity):
+    """Whether this is a shell tool's call without the command it runs (R184).
+
+    A shell tool does whatever its command says, so without the command there
+    is nothing to explain: not its description (another call's words), and not
+    its own name sent where the command belongs (`Bash`, as a live item has it
+    before the call's input arrives). Such a call is never shaped or learned.
+    """
     name = str(activity.get("name") or "").strip().lower()
     tool_kind = str(activity.get("kind") or "").strip()
-    command = templates._field(activity, "command", "cmd") or (activity.get("summary", "") if tool_kind == "command" else "")
-    if (name in {"bash", "shell", "exec_command", "local_shell"} or tool_kind == "command") and command:
+    if name not in SHELL_TOOLS and tool_kind != "command":
+        return False
+    if templates.shell_label(activity):
+        return False
+    command = _shell_command(activity).strip().lower()
+    return not command or command in SHELL_TOOLS or command == name
+
+
+def split(activity):
+    """Parts of one normalized activity (see tool_explanations.normalize_activity).
+
+    A shell tool's call without its command has no parts (`lacks_command`)."""
+    if lacks_command(activity):
+        return []
+    name = str(activity.get("name") or "").strip().lower()
+    tool_kind = str(activity.get("kind") or "").strip()
+    command = _shell_command(activity)
+    if (name in SHELL_TOOLS or tool_kind == "command") and command:
         return _shell_parts(command)
     label = templates.shell_label(activity)
     if label:
@@ -723,7 +754,25 @@ def parameterise(text, template, slots):
         return None, "literal_value"
     if any(name.startswith("num") for name in slots) and (re.search(r"\d", bare) or _NUMBER_WORDS.search(bare)):
         return None, "literal_number"
+    if _specific_literal(_PLACEHOLDER.sub(" ", template)):
+        return None, "specific_literal"
     return template, ""
+
+
+def _specific_literal(fixed):
+    """Whether a template's fixed words name a specific value (R184): a path, a
+    dotted or underscored name, a number, or an identifier of three or more
+    hyphenated parts. Its source call put it there; reused for another call it
+    is wrong, and in another agent's chat it is that call's data. The sentence
+    is then kept for its own identical call only."""
+    for token in re.findall(r"[^\s,;:()\[\]{}\"'`]+", fixed):
+        token = token.rstrip(".!?")
+        if not token:
+            continue
+        if "/" in token or token.startswith("~") or re.search(r"\d", token) or "_" in token \
+                or re.search(r"[A-Za-z0-9]\.[A-Za-z0-9]", token) or len(token.split("-")) >= 3:
+            return True
+    return False
 
 
 def join(texts):

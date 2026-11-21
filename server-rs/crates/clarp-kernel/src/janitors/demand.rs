@@ -31,7 +31,7 @@ const REQUEST_MOST: usize = 160;
 const TEXT_MOST: usize = 500;
 const NUMBER_MOST: i64 = 1_000_000_000_000;
 /// What a request and a result may say of themselves.
-const SAID: [&str; 16] = [
+const SAID: [&str; 18] = [
     "input_hash",
     "request_hash",
     "candidate_count",
@@ -49,6 +49,8 @@ const SAID: [&str; 16] = [
     "answer_session",
     "answer_dispatch",
     "answer_status",
+    "decision_target",
+    "decision_action",
 ];
 const GIVEN_UP: &str = "Demand run expired before completion";
 const EPHEMERAL: &str = "ephemeral";

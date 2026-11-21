@@ -89,7 +89,7 @@ Zero bytes of repo content — the tree was already identical, hash-verified.
 ## 1. Survey the source
 
 ```bash
-DB=~/.local/share/clarp/state.sqlite
+DB=~/.local/share/clarp/state.sqlite   # the Python Host's database; a Rust Host keeps its own
 sqlite3 -json "file:$DB?immutable=1" "SELECT session,persona,backend,model,cwd,voice_id,
   personality,avatar_path FROM agents WHERE deleted_at IS NULL AND archived_at IS NULL;"
 sqlite3 "file:$DB?immutable=1" "SELECT session,backend_session_id,ended_at FROM runtimes
@@ -218,7 +218,7 @@ the target silently falls back to defaults — check and repair:
 ```bash
 curl -X POST "$API/agent-voice" -H "Authorization: Bearer $TOKEN" \
   -d '{"session":"opus-7722","provider":"cartesia","voice_id":"..."}'
-scp avatars/<hash>.jpg TARGET:~/.local/share/clarp/avatars/
+scp avatars/<hash>.jpg TARGET:~/.local/share/clarp/avatars/   # a Python Host target; a Rust Host takes an avatar by its route
 sqlite3 "$DB" "UPDATE agents SET avatar_path='...' WHERE session='opus-7722';"
 ```
 
@@ -311,7 +311,7 @@ If the API is unreachable (Clarp binds loopback; the tailnet port is firewalled 
 the tailscale interface), go through SQLite — back it up first:
 
 ```bash
-cp -a "$DB" state.sqlite.bak
+cp -a "$DB" state.sqlite.bak   # $DB: the Python Host's database (section 1)
 NOW=$(python3 -c 'import time;print(int(time.time()*1000))')
 sqlite3 "$DB" "UPDATE runtimes SET ended_at=$NOW WHERE ended_at IS NULL AND session IN (...);
                UPDATE agents   SET deleted_at=$NOW WHERE deleted_at IS NULL AND session IN (...);"
@@ -346,8 +346,8 @@ Reversible by clearing `deleted_at`.
   achieves nothing on that front; say so before doing the work.
 - **Pairing** — the phone pairs with a *server*. Clarp peers are only cross-server
   message delivery (`POST /send`); they do not surface another host's agents in the app.
-- **Task plans are per-server.** `task_plans` / `task_items` live in the host's
-  `state.sqlite`. The plan does not travel. Put its item list and per-item status in the
+- **Task plans are per-server.** `task_plans` / `task_items` live in the Python Host's
+  `state.sqlite` (a Rust Host keeps them in its own store). The plan does not travel. Put its item list and per-item status in the
   briefing and tell the agent to recreate it on the target.
 - **Databases and containers do not travel.** A target running its own `mssql` / `azurite`
   container has *its own data*. Migrations and seed rows the agent applied on the source
