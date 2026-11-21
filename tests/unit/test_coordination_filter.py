@@ -270,3 +270,30 @@ def test_a_capped_count_is_the_same_whatever_the_page_size(chat, monkeypatch):
                 break
             answer = chat.log(limit=limit, before_message_id=answer["turns"][0]["id"])
     assert len(counts) == 1 and "'capped': True" in counts.pop()
+
+
+def test_an_ordinary_chat_under_hide_reads_its_counts_in_a_few_statements_whatever_the_page(chat):
+    """No row was left out between two rows of the page: no count is asked for that gap. Before,
+    every visible row cost a count query (15 ms against 0.9 for a page of 100)."""
+    for n in range(60):
+        chat.user_turn(f"u{n}")
+    seen: list[str] = []
+    con = db.conn()
+    con.set_trace_callback(seen.append)
+    try:
+        answer = chat.log(limit=100)
+    finally:
+        con.set_trace_callback(None)
+    assert len(answer["turns"]) == 100 and "hidden_after" not in answer
+    assert len([s for s in seen if "CASE WHEN" in s]) <= 2, len(seen)
+
+
+def test_a_gap_found_by_the_page_keys_is_still_counted(chat):
+    rows = chat.user_turn("u1")
+    chat.coordination_turn("c1")
+    after = chat.user_turn("u2")
+    chat.untraced()
+    answer = chat.log(limit=10)
+    by_id = {t["id"]: t for t in answer["turns"]}
+    assert by_id[after[0]]["hidden_before"]["messages"] == 2
+    assert "hidden_before" not in by_id[rows[1]] and "hidden_before" not in by_id[after[1]]

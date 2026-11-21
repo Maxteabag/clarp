@@ -299,9 +299,12 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
                 + ",".join("?" for _ in chunk) + ")", chunk):
             keys[r["message_id"]] = (r["t"], int(r["seq"]), r["message_id"])
     ordered = sorted((keys[i] for i in ids if i in keys))
+    busy = _gaps_with_rows(database, scope, scope_params, ordered)
     before: dict[str, dict[str, Any]] = {}
     after_tail: dict[str, Any] | None = None
     for index, key in enumerate(ordered):
+        if index and busy is not None and index not in busy:
+            continue        # no row at all between this row and the one before it: nothing was left out
         # In a contiguous page the previous row of the page is the previous visible row of the chat.
         low = ordered[index - 1] if contiguous and index else previous_visible(key)
         if c := run(low, key, from_high=True):
@@ -310,6 +313,40 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
         newest = ordered[-1] if contiguous and ordered else previous_visible(None)
         after_tail = run(newest, None, from_high=False)
     return before, after_tail
+
+
+# How many rows beyond the page's own one read may look at to tell which gaps hold rows.
+GAP_SCAN_SLACK = 2000
+
+
+def _gaps_with_rows(database, scope: str, scope_params: list[Any], ordered: list[tuple]) -> set[int] | None:
+    """The indexes i of ``ordered`` (the page's rows, in display order) with some other row of the
+    chat between ordered[i-1] and ordered[i]: only those gaps can hold rows that were left out, so
+    an ordinary chat read under 'hide' costs one read of its page's keys, not a count per row.
+    None when there are more than GAP_SCAN_SLACK such rows (every gap is then counted)."""
+    if len(ordered) < 2:
+        return None
+    low_sql, low_params = _key_cmp(">", ordered[0])
+    high_sql, high_params = _key_cmp("<", ordered[-1])
+    limit = len(ordered) + GAP_SCAN_SLACK
+    found = database.execute(
+        f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id FROM messages m
+             WHERE {scope} AND {low_sql} AND {high_sql}
+             ORDER BY {_KEY_SQL}, m.seq, m.message_id LIMIT ?""",
+        [*scope_params, *low_params, *high_params, limit + 1]).fetchall()
+    if len(found) > limit:
+        return None
+    page = {key[2] for key in ordered}
+    busy: set[int] = set()
+    position = 0
+    for r in found:
+        if r["message_id"] in page:
+            continue
+        key = (r["t"], int(r["seq"]), r["message_id"])
+        while position < len(ordered) and ordered[position] < key:
+            position += 1
+        busy.add(position)
+    return busy
 
 
 def _turn_field(raw: Any) -> dict[str, Any]:
