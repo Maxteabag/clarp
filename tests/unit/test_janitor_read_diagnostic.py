@@ -94,3 +94,16 @@ def test_twentieth_report_reaches_journal_with_capture_off(capfd):
             "SELECT detail FROM diagnostic_events WHERE event=?", ("janitorAutonomyReads",)
         )
         assert [json.loads(row[0]) for row in rows] == ([detail] if enabled else [])
+
+
+def test_a_lane_whose_disk_cannot_be_read_says_so(monkeypatch):
+    """A pass whose storage reads could not be measured reports sample_unavailable, not 0."""
+    from lib import janitor_read_diagnostic as diag
+    monkeypatch.setattr(diag, "thread_rchar", lambda: (0, 0))
+
+    def unreadable():
+        raise OSError("synthetic: no /proc")
+    monkeypatch.setattr(diag, "thread_disk", unreadable)
+    meter = diag.ReadMeter()
+    meter.lane("quota", lambda: None)
+    assert meter.unavailable and meter.lane_disk["quota"] == 0
