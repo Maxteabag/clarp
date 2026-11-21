@@ -9,6 +9,7 @@ struct Vectors {
     streams: Vec<StreamCase>,
     transcripts: Vec<TranscriptCase>,
     agy_guards: Vec<AgyCase>,
+    versions: Vec<VersionCase>,
 }
 
 #[derive(Deserialize)]
@@ -43,6 +44,13 @@ struct TranscriptCase {
 struct AgyCase {
     turns: Option<Vec<Value>>,
     first: String,
+    allowed: bool,
+}
+
+#[derive(Deserialize)]
+struct VersionCase {
+    provider: String,
+    output: String,
     allowed: bool,
 }
 
@@ -99,6 +107,50 @@ fn provider_takeover_evidence_matches_the_reference() {
         );
         count += 1;
     }
-    assert_eq!(count, 49);
+    for case in vectors.versions {
+        assert_eq!(
+            takeover::supported_version(&case.provider, &case.output),
+            case.allowed,
+            "{}: {}",
+            case.provider,
+            case.output
+        );
+        count += 1;
+    }
+    assert_eq!(count, 63);
     println!("{count} provider takeover reference cases");
+}
+
+#[test]
+fn a_claude_takeover_preserves_the_point_before_the_old_prompt() {
+    use takeover::Input;
+
+    let choose = |facts, first_turn| {
+        takeover::claude_input(facts, first_turn, "first".to_string(), "prompt-id".to_string())
+    };
+    assert_eq!(
+        choose(ClaudeFacts::default(), true),
+        Some(Input::ClaudeFresh {
+            first: "first".to_string(),
+        })
+    );
+    assert_eq!(choose(ClaudeFacts::default(), false), None);
+    let prior = ClaudeFacts {
+        readable: true,
+        found: true,
+        resume_at: "prior".to_string(),
+        answered: false,
+    };
+    assert_eq!(
+        choose(prior.clone(), false),
+        Some(Input::ClaudeResume {
+            first: "first".to_string(),
+            resume_at: "prior".to_string(),
+            drops_turn: "prompt-id".to_string(),
+        })
+    );
+    assert_eq!(
+        choose(ClaudeFacts { answered: true, ..prior }, true),
+        None
+    );
 }
