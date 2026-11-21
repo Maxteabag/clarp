@@ -156,7 +156,8 @@ impl Store {
                 return Err(Failure::Taken);
             }
         }
-        let replace = existing.is_none_or(|known| known.asset.named_only && !image.asset.named_only);
+        let replace =
+            existing.is_none_or(|known| known.asset.named_only && !image.asset.named_only);
         let mut canonical = if replace {
             image.clone()
         } else {
@@ -167,7 +168,10 @@ impl Store {
         }
         let delivery = serde_json::to_vec(image).map_err(|why| Failure::Store(why.to_string()))?;
         let key = Self::delivery_key(&image.agent_id, id);
-        let writes = [Self::record(&canonical)?, (PUBLICATIONS.to_owned(), key, Some(delivery))];
+        let writes = [
+            Self::record(&canonical)?,
+            (PUBLICATIONS.to_owned(), key, Some(delivery)),
+        ];
         Ok((canonical, replace, writes))
     }
 
@@ -244,8 +248,13 @@ impl Store {
 
     fn release_due(&mut self) {
         for name in std::mem::take(&mut self.due) {
-            if self.reclaim && let Err(why) = self.release(&name) {
-                eprintln!("clarp-host: gallery removal remains pending: {}", why.words());
+            if self.reclaim
+                && let Err(why) = self.release(&name)
+            {
+                eprintln!(
+                    "clarp-host: gallery removal remains pending: {}",
+                    why.words()
+                );
             }
         }
     }
@@ -255,7 +264,10 @@ impl Store {
         if let Some(deletion) = &image.deletion {
             return Err(Refusal::Removed(deletion.at).into());
         }
-        let total = self.blobs.len(&image.asset.blob())?.ok_or(Refusal::Unknown)?;
+        let total = self
+            .blobs
+            .len(&image.asset.blob())?
+            .ok_or(Refusal::Unknown)?;
         Ok((image.clone(), total))
     }
 
