@@ -303,6 +303,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v131(con)
         if version < 132:
             _migrate_to_v132(con)
+        if version < 133:
+            _migrate_to_v133(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1125,6 +1127,29 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v133(con: sqlite3.Connection) -> None:
+    """The user's word goes first in an agent's queue (issue 481): a queue row
+    carries the mark the Host stamped at admission. Waiting rows of the user's
+    own origin are marked once here; their order is left as it was. Older code
+    ignores the columns and the index, so a rollback needs no down-step."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(queued_turns)")}
+    if "user_word" not in columns:
+        con.execute("ALTER TABLE queued_turns"
+                    " ADD COLUMN user_word INTEGER NOT NULL DEFAULT 0")
+        con.execute("UPDATE queued_turns SET user_word = 1"
+                    " WHERE origin IN ('user', 'oracle')")
+    if "taken" not in columns:
+        # Work already chosen once and parked back at the head (a send that
+        # preempted a running process, the release drain's hand-over): the
+        # user's word never overtakes it.
+        con.execute("ALTER TABLE queued_turns"
+                    " ADD COLUMN taken INTEGER NOT NULL DEFAULT 0")
+    # One agent's waiting rows in queue order, by seek: the queue read, the
+    # parked read and the placement of the user's word.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_queued_turns_waiting"
+                " ON queued_turns(agent_id, status, queue_seq)")
 
 
 def _migrate_to_v131(con: sqlite3.Connection) -> None:
