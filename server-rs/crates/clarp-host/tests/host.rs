@@ -700,6 +700,15 @@ fn a_message_is_answered_and_the_apps_are_told() {
 
 #[test]
 fn a_new_user_send_after_stop_runs_then_releases_what_waited() {
+    a_fresh_send_releases_the_held_queue("user", false);
+}
+
+#[test]
+fn a_new_oracle_send_after_stop_runs_then_releases_what_waited() {
+    a_fresh_send_releases_the_held_queue("oracle", true);
+}
+
+fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
     let place = Place::new("stop");
     let host = place.start();
     let session = host.new_agent("Stopper");
@@ -754,7 +763,13 @@ fn a_new_user_send_after_stop_runs_then_releases_what_waited() {
     );
 
     // A fresh send goes first. Once it starts, the older messages can run after it.
-    let now = host.send(&session, "this instead", "m3");
+    let now = host.post(
+        "/send",
+        json!({
+            "session": session, "text": "this instead", "client_msg_id": "m3",
+            "origin": origin, "queue_if_busy": later
+        }),
+    );
     assert_eq!(
         (&now["queued"], &now["queue_depth"], &now["queue_revision"]),
         (&json!(false), &json!(0), &json!(0))

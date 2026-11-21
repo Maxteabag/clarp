@@ -5286,7 +5286,7 @@ impl Actor {
                             let speak = if let Some(separate) = &live.steering.separate {
                                 reply.turn = separate.turn.0;
                                 reply.trace_id.clone_from(&separate.message.trace_id);
-                                reply.origin = Origin::User;
+                                reply.origin = separate.reply_origin();
                                 separate.message.speak
                             } else {
                                 live.speak
@@ -5332,7 +5332,7 @@ impl Actor {
                             if let Some(separate) = &live.steering.separate {
                                 call.turn = separate.turn.0;
                                 call.trace_id.clone_from(&separate.message.trace_id);
-                                call.origin = Origin::User;
+                                call.origin = separate.reply_origin();
                             }
                             // A call no message carries is a row, and work, when it begins.
                             let known = live.tools.iter().any(|tool| tool.id == call.id);
