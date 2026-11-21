@@ -830,3 +830,25 @@ def test_a_visit_does_not_look_for_turns_to_prune(case):
     finally:
         db.conn().set_trace_callback(None)
     assert not [s for s in statements if 'exited_at<' in s], statements
+
+
+def test_a_session_that_went_live_during_the_round_is_not_visited_as_ended(case, monkeypatch):
+    """The round keeps its order, not whether each session is live: that is asked at the
+    visit. A session that had ended when the round began, then started a turn and launched
+    a background task before its visit, is live; its new task must not be closed as
+    'unknown' because the round remembered it ended (reviewer 1 on 598)."""
+    from lib import backends
+    owner, path, ident = case
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at,ended_at)'
+                      ' VALUES(?,?,?,?,?)', (owner['agent_id'], owner['session'], NATIVE,
+                                             db.now_ms() - 7_200_000, db.now_ms() - 3_600_000))
+    monkeypatch.setattr(backends.by_id('claude'), 'find_transcript', lambda native: path)
+    observer = provider.ProviderJobObserver()
+    observer._round = observer._transcripts()                    # the round begins: ended
+    assert [(r['backend_session_id'], r['live']) for r in observer._round] == [(NATIVE, 0)]
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at)'
+                      ' VALUES(?,?,?,?)', (owner['agent_id'], owner['session'], NATIVE, db.now_ms()))
+    append(path, launch(), receipt())                             # a turn launches a task
+    observer.poll_once()
+    job = jobs.get(ident)
+    assert job['status'] == 'running' and job['outcome_state'] != 'unknown', job
