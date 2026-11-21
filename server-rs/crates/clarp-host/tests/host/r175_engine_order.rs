@@ -160,7 +160,11 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
     clarp_store_sqlite::SqliteKeyValue
         .open(&place.root.join("data/fleet.db"))
         .unwrap()
-        .put("setting", CALL_ENGINES_KEY, format!("{NOVA},{NOVA}").as_bytes())
+        .put(
+            "setting",
+            CALL_ENGINES_KEY,
+            format!("{NOVA},{NOVA}").as_bytes(),
+        )
         .unwrap();
     let host = start();
     let policy = host.get("/transcription-providers");
@@ -194,10 +198,12 @@ fn a_recording_reaches_a_provider_once_across_its_models() {
     assert_eq!(own_count(), before + 1);
     wait_for("each duplicate own alias to be logged", || {
         let heard = host.heard.lock().unwrap();
-        ["server-default", "faster-whisper:small"].iter().all(|alias| {
-            heard.contains(&format!(
-                "sttEngineRepeatSkipped session={session} {alias} (listed before)"
-            ))
-        })
+        ["server-default", "faster-whisper:small"]
+            .iter()
+            .all(|alias| {
+                heard.contains(&format!(
+                    "sttEngineRepeatSkipped session={session} {alias} (listed before)"
+                ))
+            })
     });
 }
