@@ -317,3 +317,56 @@ def test_a_claude_older_than_the_recording_is_not_steered(world):
     time.sleep(0.3)
     assert _read(w, 1) == []
     (w.dir / "release-1").write_text("1")
+
+
+@pytest.mark.parametrize("in_session", [True, False], ids=["read by the CLI", "never read"])
+def test_a_runtime_that_dies_before_the_echo_settles_the_follow_up_at_its_start(
+        world, monkeypatch, tmp_path, in_session):
+    """Reviewer 4 on 7e351ba4 (the C5 class): from the stdin write until the CLI's echo the
+    follow-up is 'queued', not shown, its receipt 'attempted'. A runtime that dies there left
+    it to nobody. Now the next runtime's start looks its uuid up in the session file: there,
+    its row is written and it is started, never run; not there, it runs as its own turn, once.
+    Either way: exactly one read, never run twice, never left queued."""
+    from lib import settings_store
+    w = world
+    _first_turn(w, "joined")
+    (w.dir / "mode-2").write_text("answer")
+    _send(w, "m2")
+    assert _wait(lambda: len(_read(w, 1)) == 1)              # the CLI has it on its stdin
+    assert settings_store.keys_with_prefix("steer.written.") == ["steer.written.t-m2"]
+    # The runtime dies: its memory of the written follow-up is gone, then the group.
+    for handle in real_backends.active_handles("claude", w.agent):
+        handle.steer_state.pending.clear()
+    os.killpg(int((w.dir / "pid-1").read_text()), signal.SIGKILL)
+    assert _wait(lambda: not real_backends.active_handles("claude", w.agent))
+    session = tmp_path / "session-file.jsonl"
+    lines = [{"type": "user", "uuid": "an-earlier-entry", "message": {"content": "m1"}}]
+    if in_session:
+        lines.append({"type": "user", "uuid": prompt_uuid("t-m2"), "message": {"content": "m2"}})
+    session.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    monkeypatch.setattr(by_id("claude"), "find_transcript", lambda *a, **k: session)
+    td.reset_for_tests()                                      # the next runtime starts
+    w.service.recover_queued()
+    for _ in range(3):
+        for fn in list(w.scheduled):
+            fn()
+        w.service.recover_queued()
+        time.sleep(0.2)
+    item = db.conn().execute("SELECT status, shown_at FROM queued_turns "
+                             "WHERE client_msg_id = 'm2'").fetchone()
+    if in_session:
+        assert _calls(w) == 1                                 # never run
+        assert item["status"] != "queued" and item["shown_at"] is not None
+    else:
+        assert _wait(lambda: _calls(w) == 2)                  # runs as its own turn
+        second = json.loads((w.dir / "call-2.json").read_text())["first"]
+        assert [b["text"] for b in second["message"]["content"]][-1].endswith("m2")
+        assert _wait(lambda: _row(w, "m2") is not None)
+        for fn in list(w.scheduled):
+            fn()
+        time.sleep(0.3)
+        assert _calls(w) == 2                                 # once
+    rows = [t for t in agents_db.list_messages(agent_id=w.agent, limit=100) if t["id"] == "u-m2"]
+    assert len(rows) == 1 and "m2" not in _queued(w)          # exactly one read
+    assert settings_store.keys_with_prefix("steer.written.") == []
+

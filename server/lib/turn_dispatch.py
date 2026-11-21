@@ -16,7 +16,7 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
-from . import launch_receipts, recovery_backoff, turn_lifecycle, turn_slots
+from . import launch_receipts, recovery_backoff, steer_records, turn_lifecycle, turn_slots
 from . import events
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
@@ -450,12 +450,22 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                         self._steer_read(s, a, joined),
                     "on_unread": lambda s=spec: self._steer_unread(s),
                 }
+            if read_later:
+                # Durable before the write: a runtime that dies before the CLI's echo
+                # leaves the next one what to look up (turn_recovery).
+                steer_records.record(
+                    agent_id=spec.agent_id, trace_id=spec.trace_id, queue_id=spec.queue_id,
+                    backend=spec.backend, cwd=str(spec.cwd),
+                    session_id=(agents_db.live_backend_session(spec.agent_id)
+                                or spec.backend_session_id or ""))
             accepted = bool(steer(
                 spec.backend, spec.agent_id, steer_text,
                 client_msg_id=spec.client_msg_id,
                 synthesize_audio=spec.synthesize_audio,
                 **read_later,
             ))
+            if read_later and not accepted:
+                steer_records.clear(spec.trace_id)
         except Exception as e:  # noqa: BLE001
             log_exception("turnSteerFail", e, detail=spec.agent_id)
             # A peer message falls through to wait behind the turn (it is
@@ -506,6 +516,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 f"agent={spec.agent_id} trace={spec.trace_id} running={active_trace}")
         self._steered_into(spec, active_trace)
         self._start_queued_row(spec, steered=True, start_item=True)
+        steer_records.clear(spec.trace_id)
         self._broadcast_queue_state(spec, started=True)
 
     def _steer_unread(self, spec: _TurnSpec) -> None:
@@ -514,6 +525,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         (recovery hands it on; it is never run twice: until here its receipt said it may
         have left)."""
         launch_receipts.withdraw_attempt(spec.trace_id)
+        steer_records.clear(spec.trace_id)
         log("steerUnread", f"agent={spec.agent_id} trace={spec.trace_id}")
         try:
             self.retry_scheduler(0.0, self.recover_queued)
