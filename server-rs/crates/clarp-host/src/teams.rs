@@ -1,5 +1,6 @@
 //! The Host's durable team directory, messages, and per-recipient inbox.
 
+pub(crate) mod leader_memory;
 mod routes;
 pub mod runtime;
 pub(crate) use routes::routes;
@@ -25,6 +26,7 @@ struct Stored {
     teams: Teams,
     delivery: Deliveries,
     delivery_order: u64,
+    latest_promotion: i64,
 }
 
 #[derive(Debug)]
@@ -62,6 +64,7 @@ fn erase(table: &str, id: &str) -> Write {
 
 impl Desk {
     pub fn open(disk: Box<dyn KeyValue>) -> Result<Self, StoreError> {
+        let latest_promotion = leader_memory::promotion_on_disk(&*disk)?;
         let teams = read::<Team>(&*disk, TEAMS)?
             .into_iter()
             .map(|team| (team.team_id.clone(), team))
@@ -80,6 +83,7 @@ impl Desk {
             teams,
             delivery,
             delivery_order,
+            latest_promotion,
         })))
     }
 

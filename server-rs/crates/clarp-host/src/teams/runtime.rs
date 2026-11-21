@@ -42,14 +42,22 @@ impl clarp_actor::teams::Runtime for TurnTeams {
     fn brief(&self, agent: &str, session: &str, origin: &str) -> Brief {
         let directory = self.hub.queue_directory();
         let person = |agent: &str| person(directory.as_deref(), agent);
-        self.desk.read(|teams, deliveries| {
+        let (teams, digest, ids) = self.desk.read(|teams, deliveries| {
             let (digest, ids) = runtime::pending(teams, deliveries, agent, &person);
-            Brief {
-                protocol: runtime::protocol(teams, agent, session, origin, &person),
-                digest,
-                ids,
-            }
-        })
+            let teams = teams
+                .iter()
+                .filter(|(_, team)| team.archived_at.is_none() && team.has(agent))
+                .map(|(id, team)| (id.clone(), team.clone()))
+                .collect();
+            (teams, digest, ids)
+        });
+        Brief {
+            protocol: runtime::protocol(&teams, agent, session, origin, &person, || {
+                super::leader_memory::context(session)
+            }),
+            digest,
+            ids,
+        }
     }
 
     fn apply(&self, agent: &str, effect: &Effect, at: i64) -> Result<(), String> {
