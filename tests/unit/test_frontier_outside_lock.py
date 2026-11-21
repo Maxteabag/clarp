@@ -254,3 +254,8 @@ def test_a_checkpoint_that_moved_before_the_frontiers_write_gets_no_frontier(tmp
     other = inc.load_frontier(db.conn(), moved[0])                  # not overwritten by this one's
     assert other is not None and other["file_hash"] == "the other import's hash"
     assert codes.count("frontier_not_published_checkpoint_moved") == 1
+    # The stronger pin (469's reviewer): what the NEXT import does. With the check it finds
+    # nothing to do; without it, this import's record entered the in-process cache over a
+    # frontier that was never stored, and the next import fell back to a full read.
+    monkeypatch.setattr(inc, "frontier_after_commit", real)
+    assert _import(transcript).get("apply_mode") == "unchanged"

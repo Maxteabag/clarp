@@ -320,7 +320,7 @@ PLANTS = [
     (K, 'vectors', 'a message sent again is answered the requested session though an odd one was kept', '        let readable = said_session.as_ref().is_none_or(Option::is_some);', '        let readable = true;'),
     (K, 'vectors', 'a message sent again is answered a tool kept as a number in words', '            outcome.dispatch = dispatched.unwrap_or_default().to_string();', '            outcome.dispatch = dispatched.map_or_else(|| receipt["answer_dispatch"].to_string(), str::to_string);'),
     (K, 'vectors', "an older receipt's status of failure is taken whatever it is", '            let said = receipt.get("http_status").and_then(answerable);', '            let said = receipt.get("http_status").and_then(Value::as_u64).and_then(|status| u16::try_from(status).ok());'),
-    (K, 'least', 'the least receipt keeps what a retry needs', '    const KEPT: [&str; 6] = [\n', '    const KEPT: [&str; 7] = [\n        "reason",\n'),
+    (K, 'least', 'the least receipt keeps what a retry needs', '    const KEPT: [&str; 9] = [\n', '    const KEPT: [&str; 10] = [\n        "reason",\n'),
     (K, 'least', 'the least receipt is the action alone at once', '    let mut least = Value::Object(kept.collect());', '    let mut least = Value::Object(kept.filter(|_| false).collect());'),
     (K, 'least', 'the least receipt keeps a session that does not fit', '        && let Some(least) = least.as_object_mut()\n', '        && let Some(least) = least.as_object_mut().filter(|_| false)\n'),
     (D, 'demand', "the history does not take the session a routing run answered", '    "answer_session",\n', '    "answer_sessions",\n'),

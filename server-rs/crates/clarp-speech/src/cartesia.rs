@@ -26,49 +26,34 @@ const VOICES_VERSION: &str = "2026-08-14";
 /// most. The key is presented the three ways Cartesia has taken one, each tried when the
 /// one before was refused (the Python Host's `cartesia_voices.py`).
 pub fn voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, String> {
-    let config = ureq::Agent::config_builder()
-        .max_redirects(0)
-        .timeout_global(Some(Duration::from_secs(15)))
-        .http_status_as_error(false)
-        .build();
-    let agent: ureq::Agent = config.into();
-    let bearer = format!("Bearer {key}");
-    let ways = [
-        ("Authorization", bearer.as_str()),
-        ("Authorization", key),
-        ("X-API-Key", key),
-    ];
+    catalogue(key, endpoint, true, 8)
+}
+
+pub fn all_voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, String> {
+    catalogue(key, endpoint, false, 20)
+}
+
+pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<serde_json::Value, String> {
+    let path = crate::voice_names::segment(id);
+    voice_json(key, &format!("{}/{path}", endpoint.trim_end_matches('/')))
+}
+
+fn catalogue(
+    key: &str,
+    endpoint: &str,
+    english: bool,
+    pages: usize,
+) -> Result<Vec<serde_json::Value>, String> {
     let mut voices = Vec::new();
     let mut after = String::new();
-    for _ in 0..8 {
-        let mut url = format!("{endpoint}?limit=100&language=en&expand%5B%5D=preview_file_url");
+    for _ in 0..pages {
+        let language = if english { "&language=en" } else { "" };
+        let mut url = format!("{endpoint}?limit=100{language}&expand%5B%5D=preview_file_url");
         if !after.is_empty() {
-            url.push_str(&format!("&starting_after={after}"));
+            let cursor = crate::voice_names::segment(&after);
+            url.push_str(&format!("&starting_after={cursor}"));
         }
-        let mut page: Option<serde_json::Value> = None;
-        for (place, (header, value)) in ways.iter().enumerate() {
-            let mut response = agent
-                .get(&url)
-                .header(*header, *value)
-                .header("Cartesia-Version", VOICES_VERSION)
-                .call()
-                .map_err(|error| format!("request failed: {error}"))?;
-            let status = response.status().as_u16();
-            if status == 401 && place + 1 < ways.len() {
-                continue;
-            }
-            if !(200..300).contains(&status) {
-                return Err(format!("HTTP {status}"));
-            }
-            let said = response
-                .body_mut()
-                .read_to_string()
-                .map_err(|error| format!("request failed: {error}"))?;
-            let read = serde_json::from_str(&said);
-            page = Some(read.map_err(|error| format!("request failed: {error}"))?);
-            break;
-        }
-        let Some(page) = page else { break };
+        let page = voice_json(key, &url)?;
         voices.extend(page["data"].as_array().cloned().unwrap_or_default());
         after = match &page["next_page"] {
             serde_json::Value::String(next) => next.clone(),
@@ -80,6 +65,19 @@ pub fn voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, Strin
         }
     }
     Ok(voices)
+}
+
+fn voice_json(key: &str, url: &str) -> Result<serde_json::Value, String> {
+    let bearer = format!("Bearer {key}");
+    crate::voice_names::get(
+        url,
+        &[
+            ("Authorization", &bearer),
+            ("Authorization", key),
+            ("X-API-Key", key),
+        ],
+        Some(("Cartesia-Version", VOICES_VERSION)),
+    )
 }
 
 pub struct Cartesia {

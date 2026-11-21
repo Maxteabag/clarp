@@ -14,6 +14,27 @@ SENTENCE = "A text in this request holds a character that cannot be stored."
 _FAMILIES = ("/artifacts", "/decisions")
 
 
+class BodyValueNotText(ValueError):
+    """A JSON body value that a route reads as text is a number, a list, an object or true (R146)."""
+
+    def __init__(self, key: str):
+        super().__init__(f"{key} must be text")
+        self.key = key
+
+
+def body_text(data: dict, key: str, *, strip: bool = True) -> str:
+    """The text ``data[key]`` holds, "" when it is absent or empty. A value of another JSON type
+    raises BodyValueNotText, which the route dispatch answers 400 '<key> must be text': before,
+    such a value reached a string method and the caller got no answer, only a traceback in the
+    Host's log (R146: 'a JSON value of the wrong type in a body reaches a string method')."""
+    value = data.get(key)
+    if not value:
+        return ""
+    if not isinstance(value, str):
+        raise BodyValueNotText(str(key))
+    return value.strip() if strip else value
+
+
 def lone_surrogate(value: Any) -> bool:
     """Whether any string in ``value`` (keys included) cannot be encoded as UTF-8."""
     stack = [value]

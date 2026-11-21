@@ -122,7 +122,7 @@ PLANTS = [
     (AL, 'actor', "a turn's end does not carry its notes", '    end.note_count = facts.notes;', '    end.note_count = 0;'),
     (AL, 'actor', "another turn's notes are counted", '    if kept.0 == turn.0 { kept.1 } else { 0 }', '    kept.1'),
     (AL, 'actor', 'a note tells nobody the conversation changed', '            changed: Changed {\n                conversation: true,\n                ..Changed::default()\n            },\n            ..Outputs::default()\n        };\n        Ok((\n            Noted::Written {', '            ..Outputs::default()\n        };\n        Ok((\n            Noted::Written {'),
-    (AC, 'actor', "a row does not read its turn's mark", '            row.coordination = self.mark(turn)?;', '            row.coordination = None;'),
+    (AC, 'actor', "a row does not read its turn's mark", '            row.coordination = marked;', '            row.coordination = None;'),
     (AC, 'actor', "a turn's mark is read from another turn", '    let Some(stored) = log.find(&coordination_key(turn))? else {', '    let Some(stored) = log.find(&coordination_key(turn + 1))? else {'),
     (KV, 'actor', 'a note is no row of the turn', '            Self::Note(note) => Some(note.turn),', '            Self::Note(_) => None,'),
     # The live turn (the kernel, as the actor shows it).

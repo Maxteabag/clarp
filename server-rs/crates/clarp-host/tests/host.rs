@@ -69,6 +69,8 @@ mod pairing_identity;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/queue_provenance.rs"]
+mod queue_provenance;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
 #[path = "host/r175_engine_order.rs"]
@@ -85,12 +87,18 @@ mod source_trace;
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
+#[path = "host/steer_c.rs"]
+mod steer_c;
+#[path = "host/takeover_b.rs"]
+mod takeover_b;
 #[path = "host/transcription_errors.rs"]
 mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
 #[path = "host/voice_events.rs"]
 mod voice_events;
+#[path = "host/voice_names.rs"]
+mod voice_names;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
 
@@ -573,7 +581,8 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 115);
+    assert_eq!(info["contract"]["host"], 118);
+    assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["speech_outcome"], 109);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
@@ -9137,7 +9146,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 115);
+    assert_eq!(info["contract"]["host"], 118);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -9894,7 +9903,15 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("limited");
     let host = place.start_with_token(ADMIN);
-    host.new_agent("Echo");
+    let live = host.new_agent("Echo");
+    let archived = host.new_agent("Archived fixture");
+    assert_eq!(
+        host.post(
+            "/agent-archive",
+            json!({"session": archived, "archived": true})
+        )["ok"],
+        true
+    );
     let (limited, _) = pair(&host, "A limited watch", "limited");
     let (full, _) = pair(&host, "A full phone", "full");
     let ask = |token: &str, method: &str, path: &str, body: &[u8]| {
@@ -9928,6 +9945,15 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
         ("DELETE", "/agents/echo", b""),
         ("PUT", "/agents/echo", b"{}"),
         ("PATCH", "/schedules/s1", b"{}"),
+        ("PATCH", "/agents/echo", b"{}"),
+        ("GET", "/pairing/issue", b""),
+        ("GET", "/terminal", b""),
+        ("GET", "/artifacts/none/export", b""),
+        ("GET", "/artifacts/none/export/?format=json", b""),
+        ("GET", "/a-path-no-route-serves?ignored=1", b""),
+        ("GET", "/server-info/extra", b""),
+        ("GET", "/%73erver-info", b""),
+        ("GET", "/media%2Fx", b""),
     ] {
         assert_eq!(
             ask(&limited, method, path, body),
@@ -9939,19 +9965,78 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
     for path in ["/dirs", "/past-sessions", "/backend-auth"] {
         assert_ne!(ask(&full, "GET", path, b""), refused, "{path}");
     }
+    assert_eq!(ask(&full, "GET", "/a-path-no-route-serves", b"").0, 404);
+    for path in ["/transcription-capabilities", "/transcription-providers"] {
+        assert_eq!(ask(&limited, "GET", path, b"").0, 200, "{path}");
+    }
+    assert_eq!(
+        host.ask_as(
+            &limited,
+            "GET",
+            "/transcription-audio?trace_id=absent",
+            None
+        ),
+        (404, json!({"error":"no retained audio for that trace"}))
+    );
+    let (status, info) = host.ask_as(&limited, "GET", "/server-info", None);
+    assert_eq!(status, 200);
+    let full_info = host.ask_as(&full, "GET", "/server-info", None).1;
+    assert!(full_info.get("default_cwd").is_some());
+    let allowed_keys = [
+        "server_id",
+        "name",
+        "deployment_mode",
+        "version",
+        "image_version",
+        "clarp_version",
+        "min_app_version",
+        "capabilities",
+        "contract",
+        "client",
+        "local_connection",
+    ];
+    assert_eq!(info.as_object().unwrap().len(), allowed_keys.len());
+    for key in allowed_keys {
+        assert!(info.get(key).is_some(), "{key}");
+        assert_eq!(info[key], full_info[key], "{key}");
+    }
+    // A limited snapshot keeps cwd as a string, including for archived rows.
+    for include_archived in [true, false] {
+        let path = if include_archived {
+            "/agents/snapshot"
+        } else {
+            "/agents/snapshot?include_archived=0"
+        };
+        let (status, snapshot) = host.ask_as(&limited, "GET", path, None);
+        assert_eq!(status, 200);
+        let rows = snapshot["agents"].as_array().unwrap();
+        assert!(rows.iter().any(|row| row["session"] == live));
+        assert_eq!(
+            rows.iter().any(|row| row["session"] == archived),
+            include_archived
+        );
+        for row in rows {
+            assert_eq!(row.get("cwd"), Some(&json!("")), "{row}");
+        }
+        let (status, snapshot) = host.ask_as(&full, "GET", path, None);
+        assert_eq!(status, 200);
+        let rows = snapshot["agents"].as_array().unwrap();
+        for session in std::iter::once(&live).chain(include_archived.then_some(&archived)) {
+            let row = rows.iter().find(|row| row["session"] == *session).unwrap();
+            assert!(row["cwd"].as_str().is_some_and(|cwd| !cwd.is_empty()));
+        }
+    }
     // A head is asked as a read: refused where a read is, let through where a read is.
     assert_eq!(ask(&limited, "HEAD", "/paired-devices", b"").0, 403);
     assert_ne!(ask(&limited, "HEAD", "/log?session=echo", b"").0, 403);
-    // Refused by the route itself, in the same words: a report's page, the push rows.
+    // A report's page can still require more scope inside an allowed family.
     assert_eq!(ask(&limited, "GET", "/artifacts/none/html", b""), refused);
     assert_eq!(ask(&limited, "GET", "/devices/push-tokens", b""), refused);
-    // Let through where the Python Host lets it through: what it reads, what it sends, an
-    // action it invokes, a PATCH outside the schedules, and a read of what it may not do.
+    // Requests on the allowlist reach their route's own handling.
     for (method, path, body) in [
         ("GET", "/log?session=echo", &b""[..]),
         ("GET", "/agents/snapshot", b""),
-        ("GET", "/pairing/issue", b""),
-        ("GET", "/terminal", b""),
+        ("GET", "/media/%78", b""),
         (
             "POST",
             "/send",
@@ -9960,7 +10045,6 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
         ("POST", "/calendar/response", b"{}"),
         ("POST", "/remote-action", b"{}"),
         ("POST", "/controller-actions/a/invoke", b"{}"),
-        ("PATCH", "/agents/echo", b"{}"),
     ] {
         let (status, said) = ask(&limited, method, path, body);
         assert_ne!(
@@ -13946,8 +14030,15 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
             &decided["action"],
             &decided["decision_id"]
         ),
-        (200, &json!("anna"), &json!("route"), &Value::Null),
+        (200, &json!("anna"), &json!("route"), &json!(1)),
         "{again}"
+    );
+    assert_eq!(again["orchestrator"], sent["orchestrator"]);
+    assert_eq!(again["trace_id"], sent["trace_id"]);
+    assert!(
+        sent["trace_id"]
+            .as_str()
+            .is_some_and(|trace| !trace.is_empty())
     );
     assert_eq!((questions().len(), told_by_people(&anna)), (2, 1));
     // The same id for other words is other work, and refused.
@@ -13993,6 +14084,12 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         })
     });
     assert_eq!(told_by_people(&anna), 1);
+    let asked_before_replay = questions().len();
+    let (status, still_unsure) = dictate("maybe ship it", "r-2");
+    assert_eq!(status, 200, "{still_unsure}");
+    assert_eq!(still_unsure["orchestrator"], unsure["orchestrator"]);
+    assert_eq!(still_unsure["trace_id"], unsure["trace_id"]);
+    assert_eq!(questions().len(), asked_before_replay);
     let (status, yes) = dictate("yes", "r-3");
     assert_eq!(
         (status, &yes["session"], &yes["orchestrator"]["action"]),
@@ -14137,6 +14234,8 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         (200, &json!(mike), &json!("clarify")),
         "{sent}"
     );
+    assert_eq!(sent["orchestrator"], unsure["orchestrator"]);
+    assert_eq!(sent["trace_id"], unsure["trace_id"]);
     assert_eq!(questions().len(), before);
     let screen = host.get("/orchestrator/settings");
     assert_eq!(
@@ -31256,7 +31355,7 @@ else:print(json.dumps({"type":"item.completed","item":{"type":"agent_message","t
     let (limited, _) = pair(&h, "Read policy", "limited");
     assert_eq!(
         h.ask_as(&limited, "GET", policy, None),
-        (200, h.get(policy))
+        (403, json!({"error":"full device access required"}))
     );
     assert_eq!(
         h.ask_as(&limited, "POST", policy, Some(&update)),
@@ -32402,10 +32501,10 @@ fn the_desk_of_the_seats_is_read_with_the_owners_tool_when_an_app_asks_and_is_ke
     assert_eq!(again["accounts"], desk["accounts"]);
     assert_eq!(seats_asked(&place).len(), 3);
 
-    // A device of limited scope is not shown the desk; the strict answer it may read.
+    // Both seat reads require full scope.
     let (limited, _) = pair(&host, "Watch", "limited");
     assert_eq!(host.ask_as(&limited, "GET", "/hotseat/desk", None).0, 403);
-    assert_eq!(host.ask_as(&limited, "GET", "/hotseat/status", None).0, 200);
+    assert_eq!(host.ask_as(&limited, "GET", "/hotseat/status", None).0, 403);
 
     // A Host that is killed and started has kept the desk and the strict answer, and still
     // holds a reading off for as long as it would have.
@@ -42516,7 +42615,7 @@ fn transcription_guidance_reaches_the_phone_and_the_speech_engine() {
     );
     assert_eq!(
         host.ask_as(&limited, "GET", ROUTE, None),
-        (200, before.clone())
+        (403, json!({"error":"full device access required"}))
     );
     assert_eq!(
         host.ask_as(&limited, "POST", ROUTE, Some(&json!({}))).0,
@@ -42821,8 +42920,11 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
         &json!({"message":"transcription failed","stage":"stt"})
     );
     assert!(!events.to_string().contains(PRIVATE));
-    let (status, health) = host.ask_as(&limited, "GET", "/diagnostics/health", None);
-    assert_eq!(status, 200);
+    assert_eq!(
+        host.ask_as(&limited, "GET", "/diagnostics/health", None).0,
+        403
+    );
+    let health = host.get("/diagnostics/health");
     assert_eq!(
         health["subsystems"]["stt"]["last_error"],
         "transcription failed"
