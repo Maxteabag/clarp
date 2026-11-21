@@ -414,6 +414,10 @@ enum Ask {
         answer: Answer<bool>,
     },
     /// From a turn's thread: the live turn's spool may have grown.
+    TakeoverHeld {
+        offer: clarp_actor::takeover::Offer,
+        held: clarp_shim::Held,
+    },
     SpoolChanged,
     /// From a turn's thread: nothing answers at the shim of this attempt of the turn any more.
     ShimGone {
@@ -2542,9 +2546,34 @@ impl Worker {
                 if let Ok((Ok(sent), _)) = &sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
-                    && let Some(c) = &self.setup.hub.capture
                 {
-                    c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
+                    if let Some(c) = &self.setup.hub.capture {
+                        c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
+                    }
+                    if sent.queued
+                        && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
+                        && let Ok(Some(offer)) = actor.takeover_offer(turn)
+                        && let Some(program) = clarp_backend::program(&self.setup.record.backend)
+                    {
+                        let tx = self.tx.clone();
+                        let backend = self.setup.record.backend.clone();
+                        self.setup.runtime.spawn(async move {
+                            if !crate::takeover::can_use(&backend, program.into()).await {
+                                return;
+                            }
+                            let socket = offer.socket.clone();
+                            let request = clarp_shim::Request::Hold {
+                                ms: clarp_shim::HOLD_MOST_MS,
+                            };
+                            let held = tokio::task::spawn_blocking(move || {
+                                crate::launcher::takeover_request(&socket, request)
+                                    .and_then(|reply| reply.held)
+                            }).await;
+                            if let Ok(Some(held)) = held {
+                                let _ = tx.send(Ask::TakeoverHeld { offer, held });
+                            }
+                        });
+                    }
                 }
                 answered(sent, answer)?
             }
@@ -2971,6 +3000,53 @@ impl Worker {
             | Ask::LineEnded { .. }
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
+            Ask::TakeoverHeld { offer, held } => {
+                let release = || {
+                    crate::launcher::takeover_request(&offer.socket, clarp_shim::Request::Release);
+                };
+                let plan = if held.partial_out == 0
+                    && held.partial_err == 0
+                    && held.partial_reports == 0
+                    && held.left_ms > 0
+                    && actor.takeover_quiet(&offer, held.spool)?
+                {
+                    crate::takeover::plan(
+                        &self.setup.record.backend,
+                        &crate::config::home(),
+                        &self.setup.record.cwd,
+                        &self.setup.record.agent_id,
+                        &offer,
+                    )
+                } else {
+                    None
+                };
+                let Some((session, input)) = plan else {
+                    release();
+                    return Ok(());
+                };
+                if !actor.select_takeover(&offer, held.spool, session, input, now)? {
+                    release();
+                    return Ok(());
+                }
+                let reply = crate::launcher::takeover_request(
+                    &offer.socket,
+                    clarp_shim::Request::ConsumeHold {
+                        fence: held.spool,
+                        replaced_by: offer.into.0,
+                    },
+                );
+                let now = self.setup.clock.now_ms();
+                let out = match reply.and_then(|reply| reply.killed) {
+                    Some(true) => actor.finish_takeover(offer.from, now)?,
+                    Some(false) => {
+                        actor.clear_takeover(offer.from, now)?;
+                        release();
+                        Outputs::default()
+                    }
+                    None => actor.spool_changed(now)?,
+                };
+                (out, nobody())
+            }
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::TerminalFacts { answer } => {
@@ -4136,6 +4212,7 @@ fn refuse_for(
             ) => drop(answer.send(Err(refusal()))),
             Ok(
                 Ask::SpoolChanged
+                | Ask::TakeoverHeld { .. }
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged

@@ -137,6 +137,12 @@ enum ToSpool {
     Follow(UnixStream),
     /// Say how far the spool goes, once everything sent before this is written.
     End(Sender<std::io::Result<u64>>),
+    /// Append the durable takeover marker only while the spool still ends at the held fence.
+    MarkTakeover {
+        fence: u64,
+        replaced_by: u64,
+        done: Sender<std::io::Result<bool>>,
+    },
 }
 
 /// What is sent to the one thread that owns the tool's standard input.
@@ -181,6 +187,21 @@ fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
                     Err(std::io::Error::other("the spool has an unwritten record"))
                 };
                 let _ = answer.send(end);
+            }
+            ToSpool::MarkTakeover { fence, replaced_by, done } => {
+                let mark = if complete {
+                    writer.append_at_and_sync(
+                        fence,
+                        &Record {
+                            t: now_ms(),
+                            entry: Entry::Shim(ShimEvent::Takeover { fence, replaced_by }),
+                        },
+                    )
+                } else {
+                    Ok(false)
+                };
+                complete &= mark.is_ok();
+                let _ = done.send(mark);
             }
         }
         // Whoever follows is told there is more to read. A follower that is not reading already
@@ -355,7 +376,12 @@ enum Hold {
     #[default]
     Free,
     /// Every process of the tool's group is sent SIGSTOP, and is let go at `until` at the latest.
-    Held { until: Instant, timing: Timing },
+    Held {
+        until: Instant,
+        timing: Timing,
+        /// A confirmed hold with an intact fence and no incomplete output or reports.
+        fence: Option<u64>,
+    },
     /// Let go: by a release, or by the bound.
     Released,
     /// Killed while it was held, without running again.
@@ -376,6 +402,7 @@ impl Hold {
     fn held(until: Instant) -> Self {
         Self::Held {
             until,
+            fence: None,
             timing: Timing {
                 began: Instant::now(),
                 still: None,
@@ -511,6 +538,7 @@ impl Control {
     fn handle(self: &Arc<Self>, request: Request, own: &Arc<Connection>) -> Reply {
         match request {
             Request::Hold { ms } => self.hold(ms, own),
+            Request::ConsumeHold { fence, replaced_by } => self.consume_hold(fence, replaced_by),
             Request::Release => Reply {
                 let_go: Some(self.let_go("let go by request")),
                 ..Reply::ok(Some(self.pid))
@@ -652,9 +680,12 @@ impl Control {
             timing.drained = Some(stood.elapsed());
         }
         let left = until.saturating_duration_since(Instant::now());
-        match (counted, &*hold) {
+        match (counted, &mut *hold) {
             (_, Hold::Ended) => Reply::failed(ENDED_WHILE_HELD),
-            (Some(mut held), Hold::Held { .. }) if !left.is_zero() => {
+            (Some(mut held), Hold::Held { fence, .. }) if !left.is_zero() => {
+                if held.partial_out == 0 && held.partial_err == 0 && held.partial_reports == 0 {
+                    *fence = Some(held.spool);
+                }
                 held.left_ms = u64::try_from(left.as_millis()).unwrap_or(u64::MAX);
                 Reply {
                     held: Some(held),
@@ -667,6 +698,62 @@ impl Control {
                 self.let_go(&format!("refused: {why}"));
                 Reply::failed(why)
             }
+        }
+    }
+
+    /// With the locks that own expiry and release held, commit the marker before killing.
+    fn consume_hold(&self, fence: u64, replaced_by: u64) -> Reply {
+        let not_held = || Reply {
+            killed: Some(false),
+            ..Reply::ok(Some(self.pid))
+        };
+        let mut stage = lock(&self.stage);
+        if !stage.ready() || self.leader_exited.load(Ordering::SeqCst) || replaced_by == 0 {
+            return not_held();
+        }
+        let mut hold = lock(&self.hold);
+        let Hold::Held {
+            until,
+            timing,
+            fence: Some(held_at),
+        } = *hold
+        else {
+            return not_held();
+        };
+        if held_at != fence || Instant::now() >= until {
+            return not_held();
+        }
+
+        let (done, wait) = mpsc::channel();
+        if self
+            .to_spool
+            .send(ToSpool::MarkTakeover { fence, replaced_by, done })
+            .is_err()
+        {
+            return Reply::failed("the takeover marker could not be written");
+        }
+        match wait.recv() {
+            Ok(Ok(true)) => {}
+            Ok(Ok(false)) => return not_held(),
+            _ => return Reply::failed("the takeover marker could not be written"),
+        }
+
+        // The expired timer cannot resume the group after this request has committed.
+        let signal = killpg(self.group(), Signal::SIGKILL);
+        if let Err(error) = signal {
+            log(&format!("clarp-shim: cannot end a held tool for takeover: {error}"));
+            return Reply::failed("the held tool could not be ended");
+        }
+        *hold = Hold::Ended;
+        // The usual observer may write Exited immediately. Keep it from leaving the shim
+        // until this connection has made its bounded attempt to return the commit result.
+        *stage = StopStage::Asked;
+        self.hold_changed.notify_all();
+        self.changed.notify_all();
+        log(&hold_line(Some(&timing), "taken over while held"));
+        Reply {
+            killed: Some(true),
+            ..Reply::ok(Some(self.pid))
         }
     }
 
@@ -871,9 +958,16 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
         };
         drop(turn);
         let text = serde_json::to_string(&reply).map(|text| text + "\n");
-        let written = text
-            .as_ref()
-            .is_ok_and(|text| write_half.write_all(text.as_bytes()).is_ok());
+        let consumed = reply.killed == Some(true);
+        let can_write = !consumed
+            || write_half.set_write_timeout(Some(Duration::from_millis(100))).is_ok();
+        let written = can_write
+            && text.as_ref().is_ok_and(|text| write_half.write_all(text.as_bytes()).is_ok());
+        if consumed {
+            *lock(&control.stage) = StopStage::Signalled;
+            control.changed.notify_all();
+            break;
+        }
         // Whether or not the answer could be given, what was asked is done.
         if let Some(grace_ms) = stop {
             control.stop(grace_ms);

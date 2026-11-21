@@ -1363,6 +1363,10 @@ impl Actor {
         if let Some((turn, message_seq)) = noting {
             actor.turn_notes = (turn.0, actor.notes_since(turn, message_seq)?);
         }
+        if let Some(mut recovered) = actor.recover_takeover(now_ms)? {
+            recovered.changed.speech |= out.changed.speech;
+            return Ok((actor, recovered));
+        }
         let live = match actor.recorder.agent().live() {
             Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt, true)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt, false)),
@@ -4312,6 +4316,13 @@ impl Actor {
 
     /// Reads what is new in the live turn's spool and writes what it means to the log.
     fn pump(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
+        if let Some(recovered) = self.recover_takeover(now_ms)? {
+            out.actions.extend(recovered.actions);
+            out.changed.conversation = true;
+            out.changed.status = true;
+            out.changed.queue = true;
+            return Ok(());
+        }
         loop {
             // The turn is shown from before its first record is read, and its end after its
             // last one was.

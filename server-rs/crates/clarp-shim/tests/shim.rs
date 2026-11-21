@@ -1514,3 +1514,92 @@ time.sleep(300)'"#;
     ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
+#[test]
+fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
+    const NEXT: u64 = 42;
+    for case in ["unheld", "released", "expired", "late-hook", "partial", "current"] {
+        let name = format!("consume-{case}");
+        let marker = dir_of(&name).join("ready");
+        let partial = if case == "partial" { "printf partial;" } else { "" };
+        let script = format!(
+            "printf 'ready\\n'; {partial} : > '{}'; read line; printf 'read:%s\\n' \"$line\"",
+            marker.display()
+        );
+        let mut running = start(&name, &script);
+        wait_for("the fixture to wait for input", || {
+            marker.exists() && outs(&records(&running.spool)).contains(&"ready")
+        });
+        let mut fence = spool_len(&running.spool);
+        if case != "unheld" {
+            let ms = if case == "expired" { 500 } else { 2_000 };
+            let held = hold(&running.socket, ms).held.unwrap();
+            fence = held.spool;
+            if case == "partial" {
+                assert_eq!(held.partial_out, 7);
+            }
+            if case == "released" {
+                assert_eq!(release(&running.socket).let_go, Some(true));
+            }
+            if case == "expired" {
+                wait_for("the shim to auto-release the held tool", || {
+                    hold_lines(&running.dir)
+                        .iter()
+                        .any(|line| hold_end(line) == "let go at the bound")
+                });
+            }
+            if case == "late-hook" {
+                assert!(
+                    ask(
+                        &running.socket,
+                        &Request::Hook {
+                            name: "late".to_string(),
+                            data: serde_json::Value::Null,
+                        },
+                    )
+                    .ok
+                );
+            }
+        }
+
+        let reply = ask(
+            &running.socket,
+            &Request::ConsumeHold {
+                fence,
+                replaced_by: NEXT,
+            },
+        );
+        assert_eq!(reply.killed, Some(case == "current"), "{case}: {reply:?}");
+        if case != "current" {
+            // A refusal leaves the existing tool able to take input.
+            release(&running.socket);
+            assert!(
+                ask(
+                    &running.socket,
+                    &Request::Stdin { data: "still here\n".to_string() },
+                )
+                .ok
+            );
+        }
+        ends(&mut running.shim);
+        let all = records(&running.spool);
+        if case == "current" {
+            let tail = after(&running.spool, fence);
+            assert_eq!(
+                tail[0].entry,
+                Entry::Shim(ShimEvent::Takeover { fence, replaced_by: NEXT })
+            );
+            assert_eq!(
+                tail.last().unwrap().entry,
+                Entry::Shim(ShimEvent::Exited { code: None, signal: Some(9) })
+            );
+        } else {
+            assert!(all.iter().all(|record| !matches!(record.entry, Entry::Shim(ShimEvent::Takeover { .. }))));
+            assert!(outs(&all).iter().any(|line| line.ends_with("read:still here")));
+            assert_eq!(
+                all.last().unwrap().entry,
+                Entry::Shim(ShimEvent::Exited { code: Some(0), signal: None })
+            );
+        }
+        std::fs::remove_dir_all(&running.dir).unwrap();
+    }
+}

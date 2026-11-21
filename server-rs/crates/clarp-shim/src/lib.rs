@@ -49,6 +49,8 @@ pub enum Request {
     Hold {
         ms: u64,
     },
+    /// End the tool only under an acknowledged, unexpired hold at this spool fence.
+    ConsumeHold { fence: u64, replaced_by: u64 },
     /// Let a held tool go on. A tool that is not held is left as it is.
     Release,
 }
@@ -66,6 +68,9 @@ pub struct Reply {
     /// The answer to a release: whether it was this release that let the tool go.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub let_go: Option<bool>,
+    /// Whether this consume request ended its held tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub killed: Option<bool>,
 }
 
 /// What a hold found once the tool stood still and all it had printed was in the spool.
@@ -94,6 +99,7 @@ impl Reply {
             error: None,
             held: None,
             let_go: None,
+            killed: None,
         }
     }
 
@@ -104,6 +110,7 @@ impl Reply {
             error: Some(error.into()),
             held: None,
             let_go: None,
+            killed: None,
         }
     }
 }

@@ -159,6 +159,33 @@ impl Actor {
         Ok(())
     }
 
+    /// Recovery uses the old attempt's spool rather than a possibly lost socket reply.
+    /// Only the exact marker and a terminal SIGKILL confirm consumption.
+    pub(super) fn recover_takeover(&mut self, now_ms: i64) -> Result<Option<Outputs>, ActorError> {
+        let Some(selected) = self.selected_takeover() else {
+            return Ok(None);
+        };
+        let (from, attempt, fence, into) = (
+            selected.start.from, selected.attempt, selected.fence, selected.into.0,
+        );
+        let path = self.profile.spool_path_of(from, attempt);
+        let read = SpoolReader::new(&path)
+            .read_window(fence, u64::MAX, 8)
+            .map_err(|error| super::io_error(&path, error))?;
+        let Some(first) = read.records.first() else {
+            return Ok(None);
+        };
+        if read.damaged.is_empty()
+            && first.entry == Entry::Shim(ShimEvent::Takeover { fence, replaced_by: into })
+            && read.records.iter().any(|record| {
+                matches!(record.entry, Entry::Shim(ShimEvent::Exited { signal: Some(9), .. }))
+            })
+        {
+            return self.finish_takeover(from, now_ms).map(Some);
+        }
+        Ok(None)
+    }
+
     /// A confirmed takeover ends on the original user row. The first end, the second row and
     /// the second start commit together, including its launch plan for recovery.
     pub fn finish_takeover(&mut self, from: TurnId, now_ms: i64) -> Result<Outputs, ActorError> {
