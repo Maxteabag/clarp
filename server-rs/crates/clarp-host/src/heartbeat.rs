@@ -125,6 +125,7 @@ struct Seen {
     /// When a person last said something to it, or it answered a person, in milliseconds.
     /// Nothing: not within what was looked through.
     last_person_ms: i64,
+    team_activity_ms: i64,
     /// The heartbeat's turn that ended last, by a name no other turn has, and what its
     /// answers count as.
     turn: Option<(String, Counted)>,
@@ -164,7 +165,7 @@ fn of_a_person(row: &Versioned) -> bool {
     matches!(row.entry, Entry::Message(_) | Entry::Reply(_)) && row.entry.origin_name() == "user"
 }
 
-async fn seen(member: &Member) -> Seen {
+async fn seen(app: &App, member: &Member) -> Seen {
     let view = member.agent.view();
     let (status, record) = (&view.status, &member.record);
     let kind = wire::state_name(&wire::state_kind(status));
@@ -264,6 +265,7 @@ async fn seen(member: &Member) -> Seen {
         busy: status.live.is_some() || !status.waiting.is_empty(),
         held: status.paused,
         last_person_ms: last_person_ms.unwrap_or(0),
+        team_activity_ms: crate::teams::runtime::latest_activity(app, &record.agent_id),
         turn,
         woken_by_a_goal,
         plan,
@@ -298,7 +300,7 @@ fn caught_up<'a>(book: &'a mut Book, agent_id: &str, seen: &Seen) -> &'a mut rul
         }
         counted.insert(agent_id.to_string(), turn.clone());
     }
-    state.woken_by(seen.last_person_ms);
+    state.woken_by(seen.last_person_ms.max(seen.team_activity_ms));
     state
 }
 
@@ -330,7 +332,7 @@ fn due(book: &mut Book, agent_id: &str, seen: &Seen, now_ms: i64) -> Option<Stri
     if !why_not.is_empty() {
         return None;
     }
-    state.started(now, seen.last_person_ms);
+    state.started(now, seen.last_person_ms.max(seen.team_activity_ms));
     let interrupted = seen.latest.interrupted() && !seen.latest.taken_down_by_a_restart();
     let plan = seen.plan.as_ref();
     let plan = plan.map(|(title, lines)| (title.as_str(), lines.as_slice()));
@@ -350,7 +352,7 @@ async fn tick(app: &App) {
         if !record.heartbeat_enabled || !here || member.agent.view().status.moved.is_some() {
             continue;
         }
-        let seen = seen(member).await;
+        let seen = seen(app, member).await;
         if seen.woken_by_a_goal {
             continue;
         }
@@ -505,7 +507,7 @@ async fn status(State(app): State<App>, Query(asked): Query<HashMap<String, Stri
     let Some(member) = directory.named(session) else {
         return refuse(StatusCode::NOT_FOUND, "no such agent");
     };
-    let seen = seen(member).await;
+    let seen = seen(&app, member).await;
     let now = seconds(app.clock.now_ms());
     let enabled = member.record.heartbeat_enabled;
     let agent_id = member.record.agent_id.clone();
@@ -549,6 +551,35 @@ pub fn routes() -> Router<App> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod due_work_tests {
     use super::*;
+
+    #[test]
+    fn teams_runtime_new_team_activity_wakes_a_dormant_heartbeat_only_once() {
+        let id = "agent";
+        let mut book = Book::default();
+        book.agents.entry(id.into()).or_default().dormant = true;
+        let mut seen = Seen {
+            latest: Latest {
+                kind: "idle".into(),
+                ts_ms: 0.0,
+                detail: Value::Null,
+            },
+            busy: false,
+            held: false,
+            last_person_ms: 0,
+            team_activity_ms: 5_000,
+            turn: None,
+            woken_by_a_goal: false,
+            plan: None,
+            history: Vec::new(),
+        };
+        let state = caught_up(&mut book, id, &seen);
+        assert!(!state.dormant);
+        assert_eq!(state.last_wake_signal_ms, 5_000);
+        state.dormant = true;
+        assert!(caught_up(&mut book, id, &seen).dormant);
+        seen.team_activity_ms = 6_000;
+        assert!(!caught_up(&mut book, id, &seen).dormant);
+    }
 
     #[tokio::test]
     async fn the_cached_book_matches_what_the_store_accepted() {

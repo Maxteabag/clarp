@@ -11,7 +11,7 @@
 //! heard its beginning then, or was not listening any more (the Python Host's rule for its
 //! queue of speech, `tts_queue_records.py` and `tts_worker.recover_in_flight`).
 
-use clarp_speech::markup::{speak_blocks, spoken_chunks_for_tts};
+use clarp_speech::markup::{speak_blocks, spoken_chunks_for_tts, strip_team_blocks};
 use serde::{Deserialize, Serialize};
 
 /// The most signs of one line: what an engine takes of a text at once.
@@ -134,7 +134,7 @@ pub fn lines_of(
 ) -> Vec<Line> {
     let name = reply.strip_prefix("r-").unwrap_or(reply);
     let mut lines = Vec::new();
-    for block in speak_blocks(text, false) {
+    for block in speak_blocks(&strip_team_blocks(text), false) {
         for (place, piece) in spoken_chunks_for_tts(block.trim(), MOST_SIGNS)
             .into_iter()
             .enumerate()
