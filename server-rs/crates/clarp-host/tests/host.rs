@@ -87,6 +87,8 @@ mod source_trace;
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
+#[path = "host/steer_c.rs"]
+mod steer_c;
 #[path = "host/takeover_b.rs"]
 mod takeover_b;
 #[path = "host/transcription_errors.rs"]

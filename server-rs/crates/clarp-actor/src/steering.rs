@@ -3,7 +3,7 @@
 use clarp_kernel::agent::{Agent, Command};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::journal::Batch;
-use clarp_kernel::steering::{self, Join, Observation};
+use clarp_kernel::steering::{self, Join, Observation, Stage};
 use clarp_kernel::turn::{Origin, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
@@ -14,11 +14,13 @@ use super::{Action, Actor, ActorError, Facts, Outputs, message_at, written};
 pub(super) struct State {
     enabled: bool,
     stream: steering::Stream,
+    primary_uuid: Option<String>,
     parent: Option<(RunOutcome, Facts, String)>,
     /// The process is answering another user message past its first result.
     pub(super) separate: Option<Separate>,
     /// Once a separate turn was read, the process's exit is no longer the parent's verdict.
     crossed: bool,
+    pub(super) joined_speech: bool,
 }
 
 pub(super) struct Separate {
@@ -47,21 +49,25 @@ impl State {
     ) -> Result<(), ActorError> {
         match self.stream.observe(event) {
             Observation::Echo(uuid) => {
-                if self.parent.is_some()
-                    && self.separate.is_none()
-                    && let Some((turn, follow)) = agent
-                        .joins()
-                        .iter()
-                        .find(|(_, follow)| follow.join.uuid == uuid)
-                {
-                    self.separate(*turn, message_at(log, follow.message_seq)?);
+                let follow = agent.joins().iter().find(|(_, follow)| follow.join.uuid == uuid);
+                match follow {
+                    Some((_, follow)) if self.parent.is_none() => {
+                        self.joined_speech |= message_at(log, follow.message_seq)?.speak;
+                    }
+                    Some((turn, follow)) if self.separate.is_none() => {
+                        self.separate(*turn, message_at(log, follow.message_seq)?);
+                    }
+                    None if self.primary_uuid.is_none() => self.primary_uuid = Some(uuid.to_owned()),
+                    _ => {}
                 }
             }
             Observation::Result { prompts, failed } if !prompts.is_empty() => {
-                if self.parent.is_some() {
-                    self.crossed = true;
+                if self.separate.as_ref().and_then(|turn| agent.joins().get(&turn.turn))
+                    .is_some_and(|follow| contains_uuid(prompts, &follow.join.uuid))
+                {
+                    self.separate = None;
                 }
-                self.remember(failed, event, facts, closes);
+                self.remember(prompts, failed, event, facts, closes);
             }
             _ => {}
         }
@@ -81,9 +87,12 @@ impl State {
             Observation::Echo(uuid) => {
                 let Some((&turn, follow)) =
                     batch.agent().joins().iter().find(|(_, follow)| {
-                        follow.join.uuid == uuid && follow.read_at_ms.is_none()
+                        follow.join.uuid == uuid && follow.stage == Stage::Pending
                     })
                 else {
+                    if self.primary_uuid.is_none() {
+                        self.primary_uuid = Some(uuid.to_owned());
+                    }
                     return Ok(None);
                 };
                 let message = message_at(batch.log(), follow.message_seq)?;
@@ -105,10 +114,8 @@ impl State {
                     .joins()
                     .iter()
                     .filter_map(|(&turn, follow)| {
-                        let read_at = follow.read_at_ms?;
-                        prompts
-                            .iter()
-                            .any(|item| item.as_str() == Some(follow.join.uuid.as_str()))
+                        let read_at = follow.stage.read_at()?;
+                        contains_uuid(prompts, &follow.join.uuid)
                             .then_some((turn, read_at))
                     })
                     .collect();
@@ -121,7 +128,7 @@ impl State {
                         now_ms,
                     )?;
                 }
-                self.remember(failed, event, facts, closes);
+                self.remember(prompts, failed, event, facts, closes);
             }
             _ => {}
         }
@@ -137,8 +144,8 @@ impl State {
         });
     }
 
-    fn remember(&mut self, failed: bool, event: &Value, facts: Facts, closes: &str) {
-        if self.parent.is_none() {
+    fn remember(&mut self, prompts: &[Value], failed: bool, event: &Value, facts: Facts, closes: &str) {
+        if self.parent.is_none() && self.primary_uuid.as_ref().is_some_and(|uuid| contains_uuid(prompts, uuid)) {
             let outcome = if failed {
                 RunOutcome::Failed {
                     reason: event["result"]
@@ -168,7 +175,7 @@ impl State {
             .agent()
             .joins()
             .iter()
-            .filter_map(|(&turn, follow)| follow.read_at_ms.map(|at| (turn, at)))
+            .filter_map(|(&turn, follow)| follow.stage.read_at().map(|at| (turn, at)))
             .collect();
         for (turn, read_at) in read {
             self.finish(batch, turn, read_at, "interrupted", now_ms)?;
@@ -213,6 +220,10 @@ impl State {
         }
         Ok(())
     }
+}
+
+fn contains_uuid(prompts: &[Value], uuid: &str) -> bool {
+    prompts.iter().any(|prompt| prompt.as_str() == Some(uuid))
 }
 
 impl Actor {
