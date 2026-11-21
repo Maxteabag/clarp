@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 126;
+pub const HOST_CONTRACT: u64 = 127;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -3097,8 +3097,7 @@ async fn send_as(
         if matches!(name.as_str(), "heartbeat" | "leader_tick" | "dreaming" | "janitor"));
     // Only a person moves the focus: the user, and the Oracle acting on what the user said
     // (the Python Host's `origins.FOCUS_ORIGINS`).
-    let by_a_person =
-        origin_is_user || matches!(&origin, Origin::Trigger { name } if name == "oracle");
+    let by_a_person = origin.is_user_send();
     // A message to an agent that is busy waits its turn, as on the Python Host, in the queue,
     // and enters the conversation when its turn starts, whoever sent it (issue 491). What
     // differs is what is told of it. A plain message was said: it keeps its delivery receipt
@@ -3110,7 +3109,7 @@ async fn send_as(
     // it waits behind it like one left for later, and a Stop that came before does not hold
     // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).
     let from_peer = matches!(&origin, Origin::Agent { agent_id } if !agent_id.is_empty());
-    let admission = match (request.queue_if_busy.unwrap_or(false), origin_is_user) {
+    let admission = match (request.queue_if_busy.unwrap_or(false), by_a_person) {
         (false, _) if from_peer => Admission::Later,
         (false, _) => Admission::Queue,
         (true, true) => Admission::Later,

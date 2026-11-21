@@ -12,7 +12,8 @@ fn a_thinking_only_turn_is_replaced_and_the_third_message_waits() {
 import json, os, pathlib, sys, time
 root = pathlib.Path(__file__).parent
 if "--version" in sys.argv:
-    print("2.1.321 (Claude Code)")
+    # This CLI supports takeover and predates stream-input steering.
+    print("2.1.300 (Claude Code)")
     raise SystemExit(0)
 arg = "--resume" if "--resume" in sys.argv else "--session-id"
 session = sys.argv[sys.argv.index(arg) + 1]
@@ -62,6 +63,13 @@ say("result", subtype="success", result=answer)
     wait_for("the first tool to report its thinking", || {
         launches().len() == 1
     });
+    assert!(
+        !launches()[0]["argv"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("--replay-user-messages")),
+        "this fixture exercises takeover when streaming steering is unavailable"
+    );
     host.send("ada", "second", "second");
     wait_for("the replacement tool", || launches().len() == 2);
     let saw = launches();
@@ -102,4 +110,11 @@ say("result", subtype="success", result=answer)
         .collect::<Vec<_>>();
     assert_eq!(answers, ["first / second"], "{rows:?}");
     release(&launches()[2]);
+    wait_for("the third message to finish", || {
+        host.state("ada") == "done"
+            && host
+                .turns("ada")
+                .iter()
+                .any(|row| row["role"] == "assistant" && row["text"] == "third")
+    });
 }
