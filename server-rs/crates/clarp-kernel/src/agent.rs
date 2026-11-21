@@ -346,6 +346,8 @@ pub struct Agent {
     /// Who last repaired the agent, why, and when: while nothing about its state changed since.
     note: Option<Note>,
     paused: bool,
+    /// First turn number after the most recent explicit user Stop.
+    user_stop_floor: Option<u64>,
     moved: Option<crate::agent_moves::Mark>,
     stop_generation: u64,
     settled: u64,
@@ -428,6 +430,7 @@ impl Default for Agent {
             stopping_since_ms: None,
             note: None,
             paused: false,
+            user_stop_floor: None,
             moved: None,
             settled: 0,
             queue_revision: 0,
@@ -688,6 +691,20 @@ impl Agent {
         })
     }
 
+    /// A fresh user message reaching the agent is a continuation after a user Stop.
+    /// An older message selected by Send Now and automatic work do not release the hold.
+    fn continues_user_queue(&self, next: &Queued) -> bool {
+        self.user_stop_floor.is_some_and(|floor| {
+            next.id.0 >= floor
+                && next.origin.is_user()
+                && matches!(next.admission, Admission::Queue | Admission::Later)
+                && self
+                    .mailbox
+                    .iter()
+                    .any(|held| held.id.0 < floor && held.origin.is_user())
+        })
+    }
+
     fn can_join(&self, turn: TurnId, join: &Join) -> bool {
         self.moved.is_none()
             && self
@@ -819,11 +836,17 @@ impl Agent {
                 {
                     return Err(Refusal::NotWaiting(turn));
                 }
+                let continues = work
+                    .agent
+                    .mailbox
+                    .iter()
+                    .find(|queued| queued.id == turn)
+                    .is_some_and(|queued| work.agent.continues_user_queue(queued));
                 work.record(AgentEvent::JoinRead {
                     turn,
                     at_ms: now_ms,
                 });
-                work.let_go_of_nothing(DRAINED, now_ms);
+                work.continued_queue(continues, now_ms);
             }
             Command::JoinSettled { turn } => {
                 if !work
@@ -1255,10 +1278,12 @@ impl Agent {
                     self.queue_revision += 1;
                 }
                 self.paused = true;
+                self.user_stop_floor = (by == crate::control::USER).then_some(self.next_turn);
                 self.unheld.clear();
             }
             AgentEvent::Resumed { .. } => {
                 self.paused = false;
+                self.user_stop_floor = None;
                 self.unheld.clear();
                 self.queue_revision += 1;
             }
@@ -1700,6 +1725,7 @@ impl Work {
         let Some(next) = self.agent.next_to_run() else {
             return;
         };
+        let continues = self.agent.continues_user_queue(next);
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
             turn,
@@ -1711,7 +1737,18 @@ impl Work {
         self.decision
             .effects
             .push(Effect::StartTurn { turn, message_seq });
-        if self.agent.live_from_queue() {
+        if continues || self.agent.live_from_queue() {
+            self.continued_queue(continues, now_ms);
+        }
+    }
+
+    fn continued_queue(&mut self, continues: bool, now_ms: i64) {
+        if continues {
+            self.record(AgentEvent::Resumed {
+                by: crate::control::USER.to_string(),
+                at_ms: now_ms,
+            });
+        } else {
             self.let_go_of_nothing(DRAINED, now_ms);
         }
     }

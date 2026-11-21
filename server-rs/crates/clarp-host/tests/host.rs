@@ -699,7 +699,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
 }
 
 #[test]
-fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
+fn a_new_user_send_after_stop_runs_then_releases_what_waited() {
     let place = Place::new("stop");
     let host = place.start();
     let session = host.new_agent("Stopper");
@@ -753,37 +753,27 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
         "what was left for later is in the queue, not yet in the conversation"
     );
 
-    // The user says something new. It runs although the queue is held, and the hold stays.
+    // A fresh send goes first. Once it starts, the older messages can run after it.
     let now = host.send(&session, "this instead", "m3");
     assert_eq!(
         (&now["queued"], &now["queue_depth"], &now["queue_revision"]),
         (&json!(false), &json!(0), &json!(0))
     );
-    wait_for("the new message to be answered", || {
-        host.conversation(&session)
-            .contains(&said("assistant", "this instead"))
-    });
-    let held = host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(
-        (&held["paused"], held["items"].as_array().unwrap().len()),
-        (&json!(true), 1),
-        "what was held is still held"
-    );
-
-    let resumed = host.post("/turn-queue/resume", json!({ "session": session }));
-    assert_eq!(
-        (&resumed["paused"], &resumed["count"]),
-        (&json!(false), &json!(0))
-    );
-    assert!(resumed["revision"].as_u64().unwrap() > held["revision"].as_u64().unwrap());
     wait_for("the held message to be answered", || {
         host.conversation(&session)
             .contains(&said("assistant", "later"))
     });
-    // It entered the conversation when its turn started: after what was said in between.
+    let queue = host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(
+        (&queue["paused"], &queue["items"]),
+        (&json!(false), &json!([]))
+    );
+    assert!(queue["revision"].as_u64().unwrap() > held["revision"].as_u64().unwrap());
+    // Both messages reached the agent, and the new turn finished before the held one began.
     let conversation = host.conversation(&session);
-    let place = |row: (String, String)| conversation.iter().position(|known| *known == row);
-    assert!(place(said("user", "this instead")) < place(said("user", "later")));
+    let place =
+        |row: (String, String)| conversation.iter().position(|known| *known == row).unwrap();
+    assert!(place(said("assistant", "this instead")) < place(said("user", "later")));
     wait_for("the agent to be done", || host.state(&session) == "done");
 }
 
