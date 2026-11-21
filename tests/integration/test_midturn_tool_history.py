@@ -195,9 +195,11 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
         trace_id=trace, text="Looking at 0.", item_key=own_id)
     assert streamed is not None
+    # Finished as production finishes it: under the key its stream wrote it with (Claude's
+    # message-stop and Codex's item.completed settle the row they streamed).
     assert message_store.mark_live_message_final(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
-        trace_id=trace, item_key="overlapping-commentary")
+        trace_id=trace, item_key=own_id)
     # The provider has already begun its next reply, other words, still
     # streaming: an import of the commentary must leave it where it is shown.
     next_reply = message_store.upsert_live_assistant_message(
