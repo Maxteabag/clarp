@@ -50,6 +50,11 @@ class GenerationCancelled(GenerationError):
     pass
 
 
+# The created_by of every image a generation run publishes; the Host's job watcher finds a
+# run's images by it to announce them (background_job_watcher._portrait_media_changed).
+CREATED_BY_PREFIX = "portrait_generation:"
+
+
 def job_id_for(agent_id: str) -> str:
     return "portrait-generation-" + hashlib.sha256(agent_id.encode()).hexdigest()[:20]
 
@@ -204,7 +209,7 @@ def generate_two(
                 source_name=f"generated-portrait-{index}.{extension}",
                 content_type=generated_mime,
                 caption=f"Generated portrait alternative {index}",
-                created_by=f"portrait_generation:{PROVIDER}",
+                created_by=f"{CREATED_BY_PREFIX}{PROVIDER}",
                 media_dir=media_dir or _media_dir(),
             ))
         return agent_portraits.replace_alternates_with_media_assets(
@@ -224,7 +229,7 @@ def _discard_assets(assets: list[dict]) -> None:
     from . import db
     con = db.conn()
     rows = [media_store.get(str(asset.get("asset_id") or "")) for asset in assets]
-    paths = {str(row.get("storage_path") or "") for row in rows if row}
+    files = {(str(row.get("storage_path") or ""), str(row.get("sha256") or "")) for row in rows if row}
     con.execute("BEGIN IMMEDIATE")
     try:
         for asset in assets:
@@ -235,23 +240,8 @@ def _discard_assets(assets: list[dict]) -> None:
     except Exception:
         con.execute("ROLLBACK")
         raise
-    for raw_path in paths:
-        if not raw_path:
-            continue
-        referenced = con.execute(
-            """SELECT 1 FROM media_assets
-                 WHERE storage_path=? AND deleted_at IS NULL
-               UNION ALL
-               SELECT 1 FROM agent_portraits
-                 WHERE storage_path=? AND deleted_at IS NULL
-               LIMIT 1""",
-            (raw_path, raw_path),
-        ).fetchone()
-        if not referenced:
-            try:
-                pathlib.Path(raw_path).unlink()
-            except FileNotFoundError:
-                pass
+    for raw_path, sha256 in files:
+        media_store.release_blob(raw_path, sha256)
 
 
 def _request_edit(*, api_key: str, source: bytes, source_mime: str,

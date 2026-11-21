@@ -41,6 +41,7 @@ use clarp_kernel::conversation::{
 };
 use clarp_kernel::failures;
 pub mod bookkeeping;
+use clarp_kernel::launch_refused;
 pub mod delegation;
 mod goal_ledger;
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
@@ -622,6 +623,12 @@ pub struct Actor {
     held_for_an_account: bool,
     /// The turn waits for an account that serves its model, while the rest of the pool works.
     for_its_model: bool,
+    /// The refusals of the live turn's launch so far (R121), counted as the Python Host counts
+    /// them: in memory, so a Host that starts again counts from nothing, as that one does.
+    refused: Option<(TurnId, launch_refused::Refusals)>,
+    /// What the sender of the live turn is told when its launch, refused once too often, ends
+    /// it: the next end of the turn says it.
+    never_run: Option<String>,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
     job_events: Vec<JobEvent>,
@@ -806,6 +813,68 @@ struct Failure<'a> {
 /// 43741530173 show it: a turn that put something into the conversation is closed by this
 /// row, below what it said; a turn that said nothing is closed by its message, and this row
 /// stands below the turn's end ([`closed_by_marker`]).
+/// What a refused launch is called, as one refusal is told from another (R121): the launcher
+/// could not start the shim, or the shim could not start the tool. Neither gave the tool
+/// anything.
+const NO_SHIM: &str = "LaunchFailed";
+const NO_TOOL: &str = "SpawnFailed";
+
+/// What follows a launch of the live turn that was refused before its tool was given anything.
+enum AfterRefusal {
+    /// The turn waits, and is tried again then.
+    Wait { until_ms: i64 },
+    /// The turn ends failed, and its sender is told so in these words.
+    End { notice: String },
+}
+
+/// The Python Host's rule for a launch it refused before anything was sent (R121,
+/// `recovery_backoff`): a send's own try (the first attempt of a turn that started when it was
+/// sent) is tried again a second later; every refusal from there on is counted, and the turn
+/// waits as [`launch_refused::Refusals`] says, or ends at the eighth of one refusal. `refused`
+/// is the live turn's count, begun anew for another turn.
+fn after_refusal(
+    refused: &mut Option<(TurnId, launch_refused::Refusals)>,
+    live: Option<&Turn>,
+    turn: TurnId,
+    kind: &str,
+    reason: &str,
+    now_ms: i64,
+) -> AfterRefusal {
+    let own = matches!(live, Some(Turn::Starting(start))
+        if start.id == turn && start.attempt == 1 && start.started_at_ms == start.accepted_at_ms);
+    if own || refused.as_ref().is_none_or(|(counted, _)| *counted != turn) {
+        *refused = Some((turn, launch_refused::Refusals::default()));
+    }
+    if own {
+        return AfterRefusal::Wait {
+            until_ms: now_ms.saturating_add(launch_refused::FIRST_WAIT_MS),
+        };
+    }
+    let refusals = &mut refused
+        .get_or_insert_with(|| (turn, launch_refused::Refusals::default()))
+        .1;
+    match refusals.failed(kind, reason) {
+        launch_refused::Next::Wait { ms } => AfterRefusal::Wait {
+            until_ms: now_ms.saturating_add(ms),
+        },
+        launch_refused::Next::End => AfterRefusal::End {
+            notice: launch_refused::notice(refusals.failures, &refusals.error),
+        },
+    }
+}
+
+/// The row that tells the sender a message was never run (R121): where the turn's failure is
+/// told, in the Python Host's words.
+fn never_run(turn: TurnId, message_id: &str, text: String, trace_id: Option<String>) -> Entry {
+    Entry::Notice(Notice {
+        id: format!("marker-{message_id}"),
+        turn: Some(turn.0),
+        code: Notice::TURN_FAILED.to_string(),
+        text,
+        trace_id,
+    })
+}
+
 fn failure_marker(failed: Failure<'_>) -> Option<Entry> {
     if failed.kind == failures::INTERRUPTED || silent_when_failed(failed.origin.name()) {
         return None;
@@ -1112,6 +1181,8 @@ impl Actor {
             stopped_for_pool: false,
             held_for_an_account: false,
             for_its_model: false,
+            refused: None,
+            never_run: None,
             shown,
             shown_turn: None,
             shown_events: Vec::new(),
@@ -2566,6 +2637,18 @@ impl Actor {
             ..Changed::default()
         };
         self.carry_out(accepted.effects, &mut out)?;
+        // A send of a user, an agent or the Oracle asks for the agent again: a turn that waits
+        // because its launch was refused is tried at once, on a count begun anew (R121,
+        // `clear_recovery_backoff`). It is still the agent's turn: the send waits behind it.
+        let asks_again = matches!(message.origin.name(), "user" | "agent" | "oracle");
+        let waits_on_refusal = matches!(self.recorder.agent().live(),
+            Some(Turn::Parked(parked)) if self.refused_launch(parked));
+        if asks_again && waits_on_refusal {
+            self.refused = None;
+            let again = self.retry(now_ms)?;
+            out.actions.extend(again.actions);
+            out.changed.status |= again.changed.status;
+        }
         let sent = Sent {
             message_seq: accepted.message_seq,
             turn: accepted.turn,
@@ -2939,6 +3022,44 @@ impl Actor {
         if !self.follows(turn, attempt) {
             return Ok(Outputs::default());
         }
+        // Nothing was given to the tool: the turn is tried again, or ends with its sender told
+        // (R121). An opening has a rule of its own, and a turn that is stopped ends.
+        let refusable = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.turn == turn && !live.opening)
+            && self.recorder.agent().stopping().is_none()
+            && matches!(self.recorder.agent().live(), Some(Turn::Starting(start)) if start.id == turn);
+        if refusable {
+            let live = self.recorder.agent().live().cloned();
+            let after = after_refusal(
+                &mut self.refused,
+                live.as_ref(),
+                turn,
+                NO_SHIM,
+                reason,
+                now_ms,
+            );
+            match after {
+                AfterRefusal::Wait { until_ms } => {
+                    let parked = Command::TurnParked {
+                        turn,
+                        wait: Wait::Retry { until_ms },
+                        kind: failures::NOT_STARTED.to_string(),
+                        reason: reason.to_string(),
+                    };
+                    let mut out = Outputs::default();
+                    let mut batch = self.recorder.batch();
+                    if batch.command(parked, now_ms).is_ok() {
+                        let effects = batch.commit()?.effects;
+                        out.changed.status = true;
+                        self.carry_out(effects, &mut out)?;
+                        return Ok(out);
+                    }
+                }
+                AfterRefusal::End { notice } => self.never_run = Some(notice),
+            }
+        }
         let command = Command::StartFailed {
             turn,
             reason: reason.to_string(),
@@ -3059,6 +3180,13 @@ impl Actor {
         // What is said of the end, and whether that row closes the turn.
         let told = match &command {
             _ if batch.agent().stopping().is_some() => None,
+            Command::StartFailed { .. } if self.never_run.is_some() => {
+                let text = self.never_run.take().unwrap_or_default();
+                Some((
+                    never_run(turn, &message_id, text, facts.trace_id.clone()),
+                    false,
+                ))
+            }
             Command::StartFailed { reason, .. } => failure_marker(Failure {
                 turn,
                 message_id: &message_id,
@@ -3093,6 +3221,7 @@ impl Actor {
         }
         let effects = batch.commit()?.effects;
         self.unstored_changes = 0;
+        self.never_run = None;
         self.forget_live();
         out.changed.status = true;
         out.changed.conversation = true;
@@ -3559,9 +3688,32 @@ impl Actor {
     /// waits for that.
     pub fn retry_at(&self) -> Option<i64> {
         match self.recorder.agent().live() {
+            // A turn whose launch was refused, and whose count a Host that started since has
+            // not: the Python Host's queue tries it at once when it starts (R121).
+            Some(Turn::Parked(parked)) if self.refusal_uncounted(parked) => Some(parked.since_ms),
             Some(Turn::Parked(parked)) => Some(parked.wait.until_ms()),
             _ => None,
         }
+    }
+
+    /// Whether the turn waits on a refusal of its launch (R121) that this Host has not counted.
+    fn refusal_uncounted(&self, parked: &Parked) -> bool {
+        self.refused_launch(parked)
+            && self
+                .refused
+                .as_ref()
+                .is_none_or(|(counted, _)| *counted != parked.id)
+    }
+
+    /// Whether the turn waits because its launch was refused before its tool was given
+    /// anything (R121), and not as an opening, which has a rule of its own.
+    fn refused_launch(&self, parked: &Parked) -> bool {
+        parked.kind == failures::NOT_STARTED
+            && matches!(parked.wait, Wait::Retry { .. })
+            && self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.turn == parked.id && !live.opening)
     }
 
     /// Starts the next attempt of a turn whose wait is over. Nothing happens before then.
@@ -3770,29 +3922,58 @@ impl Actor {
                 // command the agent refuses is about a turn that is no longer live: late news.
                 match &record.entry {
                     Line::Shim(ShimEvent::Spawned { .. }) => {
+                        // A launch that went through ends the count of its refusals.
+                        self.refused = None;
                         let _ = batch.command(Command::TurnStarted { turn }, t);
                     }
                     Line::Shim(ShimEvent::SpawnFailed { error }) => {
                         let reason = error.clone();
                         let stopping = batch.agent().stopping().is_some();
-                        if live.opening && !stopping {
-                            let park = Command::TurnParked {
-                                turn,
-                                wait: Wait::Retry {
+                        // Nothing was given to the tool: tried again a second later where it
+                        // is an opening, and otherwise as the Python Host tries a launch it
+                        // refused before anything was sent, or ended with its sender told
+                        // (R121).
+                        let mut said = None;
+                        if !stopping {
+                            let after = if live.opening {
+                                AfterRefusal::Wait {
                                     until_ms: t.saturating_add(1_000),
-                                },
-                                kind: failures::NOT_STARTED.into(),
-                                reason: reason.clone(),
+                                }
+                            } else {
+                                let starting = batch.agent().live().cloned();
+                                after_refusal(
+                                    &mut self.refused,
+                                    starting.as_ref(),
+                                    turn,
+                                    NO_TOOL,
+                                    &reason,
+                                    t,
+                                )
                             };
-                            if batch.command(park, t).is_ok() {
-                                live.over = true;
-                                continue;
+                            match after {
+                                AfterRefusal::Wait { until_ms } => {
+                                    let park = Command::TurnParked {
+                                        turn,
+                                        wait: Wait::Retry { until_ms },
+                                        kind: failures::NOT_STARTED.into(),
+                                        reason: reason.clone(),
+                                    };
+                                    if batch.command(park, t).is_ok() {
+                                        live.over = true;
+                                        continue;
+                                    }
+                                }
+                                AfterRefusal::End { notice } => said = Some(notice),
                             }
                         }
                         let failed = batch
                             .command(Command::StartFailed { turn, reason }, t)
                             .is_ok();
-                        if failed
+                        if failed && let Some(notice) = said {
+                            let told =
+                                never_run(turn, &live.message_id, notice, live.trace_id.clone());
+                            batch.item(written(&told, t)?);
+                        } else if failed
                             && !stopping
                             && let Some(marker) = failure_marker(Failure {
                                 turn,

@@ -230,6 +230,7 @@ def spoken_to() -> dict:
     read, and what a change of them leaves."""
     settings = Settings()
     names = ['LANGUAGE_KEY', 'AGENT_LANGUAGES_KEY', 'AGENT_ENGINES_KEY', 'DEFAULT_LANGUAGE', '_CODE', 'selected',
+             'parse_language', 'parse_map', 'parse_agent_languages', 'split_engines', 'match',
              '_map', 'agent_languages', 'agent_engines', 'engines_for', 'validate', 'validate_agent',
              'merge_agent_engines', 'merge_agent_languages']
     # Whose entry it is, is decided by the agent's name, persona and session, which are not

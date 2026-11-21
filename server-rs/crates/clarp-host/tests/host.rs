@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
 #[path = "host/agent_portraits.rs"]
 mod agent_portraits;
+#[path = "host/backend_auth.rs"]
+mod backend_auth;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
@@ -29,6 +31,8 @@ mod diagnostics;
 mod goal_ledger;
 #[path = "host/harness.rs"]
 mod harness;
+#[path = "host/harness_providers.rs"]
+mod harness_providers;
 #[path = "host/import_render_specs.rs"]
 mod import_render_specs;
 #[path = "host/installer.rs"]
@@ -37,6 +41,10 @@ mod installer;
 mod janitor_attention;
 #[path = "host/launch_directories.rs"]
 mod launch_directories;
+#[path = "host/launch_refused.rs"]
+mod launch_refused;
+#[path = "host/managed_skills.rs"]
+mod managed_skills;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
 #[path = "host/pictures.rs"]
@@ -2911,8 +2919,9 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
     wait_for("the agent to be done", || host.state(&agent) == "done");
     drop(host);
 
-    // A launch that never starts (no shim to start the turn with): the turn fails at once, and
-    // the next message is taken too; the agent is never left busy.
+    // A launch that never starts (no shim to start the turn with): nothing was given to the
+    // tool, so the turn waits to be tried again and holds the agent (R121), the next message
+    // waits behind it, and the user's Stop ends it at once; the agent is not left busy.
     let place = Place::new("no-shim");
     let nowhere = place.root.join("no-shim-here");
     let shim = ["--shim", nowhere.to_str().unwrap()];
@@ -2928,15 +2937,16 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
             .find(|row| row["session"] == agent.as_str())
             .unwrap()
     };
-    wait_for("both turns to have ended", || {
-        let turns = host.turns(&agent);
-        let ended = turns
-            .iter()
-            .filter(|turn| turn["turn"]["status"] == "failed")
-            .count();
-        ended == 2 && row(&host)["busy"] == false
+    wait_for("the first to wait, and the second behind it", || {
+        let row = row(&host);
+        row["busy"] == true && row["queued_turn_count"] == 1
     });
-    assert_eq!(row(&host)["queued_turn_count"], 0);
+    host.post("/stop", json!({ "session": agent }));
+    wait_for("the first to have ended, and the agent to be free", || {
+        let turns = host.turns(&agent);
+        let failed = turns.iter().any(|turn| turn["turn"]["status"] == "failed");
+        !failed && row(&host)["busy"] == false
+    });
     drop(host);
 
     // A turn that waits for an account when the Host restarts: still the account's to take up,
@@ -23083,7 +23093,18 @@ fn the_owner_turns_the_desk_of_the_seats_off_and_its_doors_are_no_routes() {
 fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_no_route() {
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("action-doors");
-    let host = place.start_with_token(ADMIN);
+    // A home of its own: no Host of a test reads the machine's tools' stores.
+    let home = place.root.join("home");
+    let homes = [
+        ("HOME", home.clone()),
+        ("XDG_CACHE_HOME", home.join(".cache")),
+        ("XDG_DATA_HOME", home.join(".local/share")),
+    ];
+    let world: Vec<(&str, &str)> = homes
+        .iter()
+        .map(|(name, path)| (*name, path.to_str().unwrap()))
+        .collect();
+    let host = place.start_in(ADMIN, &[], &world);
     let echo = host.new_agent("Echo");
     let change = |path: &str| {
         let body = json!({ "session": echo, "backend": "claude", "harness": "opencode" });
@@ -23099,26 +23120,6 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
     };
     // What the Python Host registers and this Host has not built: refused in words.
     for (path, what) in [
-        (
-            "/backend-auth/login",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/backend-auth/login-code",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/backend-auth/logout",
-            "Signing a tool in or out from an app is",
-        ),
-        (
-            "/harness-providers/login",
-            "Signing a harness in to a provider of models is",
-        ),
-        (
-            "/harness-providers/logout",
-            "Signing a harness in to a provider of models is",
-        ),
         ("/agent-goal/pause", "A goal of this kind is"),
         ("/agent-goal/clear", "A goal of this kind is"),
         ("/oracle/calls", "The Oracle is"),
@@ -23137,6 +23138,17 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
             "{path}"
         );
     }
+    // A Host that does not keep this machine's tools refuses to sign a harness in or out.
+    for path in [
+        "/harness-providers/login",
+        "/harness-providers/login-code",
+        "/harness-providers/logout",
+    ] {
+        let (status, said) = change(path);
+        let words = clarp_kernel::harness_providers::NOT_KEPT;
+        let error = serde_json::from_str::<Value>(&said).unwrap()["error"].clone();
+        assert_eq!((status, error), (409, json!(words)), "{path}");
+    }
     // Anything else under those doors is no route, as there: the plain 404.
     for path in [
         "/backend-auth/whoami",
@@ -23147,6 +23159,7 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
         "/agent-goal/start",
         "/agent-goal/stop",
         "/oracle/nothing-there",
+        "/oracle/vo%69ce-provider",
         "/oracle/calls/x",
         "/oracle/v2/calls/status",
         "/oracle/realtime",
@@ -23158,7 +23171,19 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
 #[test]
 fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refused_in_words() {
     let place = Place::new("screens");
-    let host = place.start();
+    // A home of its own: what is read of OpenCode is empty on every machine, and no Host of a
+    // test reads the machine's own catalogue or store (found on the build machine, 20 Nov 2026).
+    let home = place.root.join("home");
+    let homes = [
+        ("HOME", home.clone()),
+        ("XDG_CACHE_HOME", home.join(".cache")),
+        ("XDG_DATA_HOME", home.join(".local/share")),
+    ];
+    let world: Vec<(&str, &str)> = homes
+        .iter()
+        .map(|(name, path)| (*name, path.to_str().unwrap()))
+        .collect();
+    let host = place.start_in("", &[], &world);
     let echo = host.new_agent("Echo");
 
     // What is read: nothing of the kind is here, said in the Python Host's own fields.
@@ -23444,19 +23469,9 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     for (path, body) in [
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
-        ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
-        (
-            "/harness-providers/login",
-            json!({ "harness": "opencode", "provider": "p" }),
-        ),
         ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
         ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
-        (
-            "/managed-skills",
-            json!({ "id": "clarp-media", "enabled": true }),
-        ),
-        ("/backend-auth/logout", json!({ "backend": "claude" })),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));
         let why = said["error"].as_str().unwrap_or("");
