@@ -179,3 +179,41 @@ pub fn agy_can_take_over(turns: Option<&[Value]>, first: &str) -> bool {
             })
         })
 }
+
+/// The minimum version that provides the recorded takeover operations on each backend.
+pub fn supported_version(backend: &str, output: &str) -> bool {
+    let minimum = match backend {
+        "claude" => [2, 1, 223],
+        "agy" => [1, 5, 13],
+        _ => return false,
+    };
+    let Ok(pattern) = regex::Regex::new(r"([0-9]+)\.([0-9]+)\.([0-9]+)") else {
+        return false;
+    };
+    let Some(version) = pattern.captures(output) else {
+        return false;
+    };
+    let digits = [1, 2, 3].map(|index| version[index].parse::<u32>().ok());
+    matches!(digits, [Some(major), Some(minor), Some(patch)] if [major, minor, patch] >= minimum)
+}
+
+/// The prior provider transcript is the authority for a resume point. A fresh first
+/// turn has no prior provider history to preserve and can use a new provider session.
+pub fn claude_input(
+    facts: ClaudeFacts,
+    first_turn: bool,
+    first: String,
+    drops_turn: String,
+) -> Option<Input> {
+    if facts.answered {
+        return None;
+    }
+    if facts.readable && !facts.resume_at.is_empty() {
+        return Some(Input::ClaudeResume {
+            first,
+            resume_at: facts.resume_at,
+            drops_turn,
+        });
+    }
+    first_turn.then_some(Input::ClaudeFresh { first })
+}
