@@ -66,10 +66,15 @@ class Provider:
         return True
 
     def texts(self):
-        return [call["text"] for call in self.spawned]
+        # The words each turn was given: another agent's message carries the team
+        # context block in front of them (a coordination turn), as the import strips it.
+        from lib.message_text import strip_injected_team_context
+        return [strip_injected_team_context(call["text"]) for call in self.spawned]
 
     def finish(self, text):
-        call = next(c for c in self.spawned if c["text"] == text)
+        from lib.message_text import strip_injected_team_context
+        call = next(c for c in self.spawned
+                    if strip_injected_team_context(c["text"]) == text)
         self.live.discard(call["agent_id"])
         call["on_result"]({"result": "done"})
 
