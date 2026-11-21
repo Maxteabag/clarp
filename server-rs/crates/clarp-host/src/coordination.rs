@@ -79,11 +79,43 @@ pub(crate) async fn made(
     })
 }
 
+pub(crate) async fn front_desk_word(app: &App, made: &Made) -> bool {
+    let Some((_, Some(session))) = made.turn.as_ref().filter(|_| !made.peer) else {
+        return false;
+    };
+    let owners = crate::owner::OwnerFile::new(app.config.speech_keys.clone());
+    let sessions = tokio::task::spawn_blocking(move || {
+        owners
+            .read()
+            .as_ref()
+            .map_or_else(Vec::new, crate::owner::front_desk_sessions)
+    })
+    .await
+    .unwrap_or_default();
+    sessions.contains(session)
+}
+
 /// Whether a request says it comes from a peer Host.
 pub(crate) fn from_a_peer(headers: &HeaderMap) -> bool {
     headers
         .get(PEER_HEADER)
         .is_some_and(|peer| !peer.as_bytes().is_empty())
+}
+
+/// Whether the request carries a non-blank turn or paired-Host claim.
+pub(crate) fn from_an_agent(headers: &HeaderMap) -> bool {
+    [crate::turn_identity::HEADER, PEER_HEADER]
+        .into_iter()
+        .any(|name| {
+            headers.get(name).is_some_and(|value| {
+                value
+                    .as_bytes()
+                    .iter()
+                    .copied()
+                    .map(char::from)
+                    .any(|character| !character.is_whitespace())
+            })
+        })
 }
 
 /// `POST /agent-notes {session, text, note_id?}`: an agent's note to its user, from its own

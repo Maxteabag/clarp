@@ -456,6 +456,9 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 # leaves the next one what to look up (turn_recovery).
                 running = _alive(list(self.backends.active_handles(
                     spec.backend, spec.agent_id) or ()))
+                # The handle the follow-up is written to (the one with an open stdin).
+                running = ([h for h in running if getattr(h, "steer_state", None) is not None]
+                           or running)
                 proc_pid = int(getattr(running[0], "pid", 0) or 0) if running else 0
                 steer_records.record(
                     agent_id=spec.agent_id, trace_id=spec.trace_id, queue_id=spec.queue_id,
@@ -970,6 +973,7 @@ def finish_compaction(service, agent_id: str) -> None:
             if _SLOTS.get(agent_id) == next_spec.trace_id:
                 _SLOTS.requeue_front(agent_id, next_spec)
                 _SLOTS.release(agent_id, next_spec.trace_id)
+        turn_queue.mark_taken(next_spec.queue_id or next_spec.park_id)
         log("compactionQueueLeft", f"agent={agent_id} — no dispatcher; queue kept")
         return
     service._spawn_next(agent_id, next_spec)

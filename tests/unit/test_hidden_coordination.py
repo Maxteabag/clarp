@@ -762,7 +762,7 @@ def test_an_agent_that_cannot_leave_a_note_is_never_hidden(tmp_path, backend, hi
     agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-boss",
                                text="Report", trace_id="t-boss", origin="agent", sender_agent_id=boss)
     assert db.conn().execute("SELECT audience FROM coordination_traces WHERE trace_id='t-boss'").fetchone()[0] \
-        == "agents"
+        == ("agents" if hidden else "mixed")
     assert coordination.can_leave_note(agent_id) is hidden
     rows = agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50)
     assert [row["audience"] for row in rows] == ["agents" if hidden else "user"]
@@ -861,4 +861,103 @@ def test_every_lookup_of_a_turn_s_rows_goes_by_its_trace_never_by_the_agent(worl
         assert statements, f"{name} ran no lookup of messages by trace"
         for sql in statements:
             assert _reads_by_trace(sql), (name, sql)
+    db.close_local()
+
+
+def test_the_working_state_and_live_turn_read_a_mark_on_the_users_turn_as_the_users(world):
+    """audience_of and sender_of (agent-state, the live turn) apply the same wall as /log: a mark
+    forced onto a trace that holds the user's own word reads as the user's."""
+    world.send("t-user", "the user's words")
+    with db.conn() as con:
+        con.execute("INSERT INTO coordination_traces(agent_id, trace_id, sender_agent_id, audience, created_at,"
+                    " updated_at) VALUES (?, 't-user', ?, 'agents', 1, 1)", (world.id, world.boss))
+    db.close_local()
+    assert coordination.audience_of(world.id, "t-user") == "user"
+    assert coordination.sender_of(world.id, "t-user") is None
+
+
+
+def test_a_turn_from_a_period_without_notes_stays_shown_after_a_backend_switch(tmp_path):
+    """F6B: the agent was on Codex (no turn token, no note possible) when the turn was marked;
+    it moves to Claude. Its old turn stays shown under 'hide'; a new turn on Claude hides."""
+    from lib import settings_store
+    settings_store.set_text(coordination.GLOBAL_KEY, "hide")
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="codex")
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    agents.bind_backend_session(agent_id, "native")
+    agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-old",
+                               text="Report", trace_id="t-codex", origin="agent", sender_agent_id=boss)
+    agents.update_agent(agent_id, backend="claude")
+    agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-new",
+                               text="Report again", trace_id="t-claude", origin="agent", sender_agent_id=boss)
+    assert coordination.audience_of(agent_id, "t-codex") == "user"
+    assert coordination.audience_of(agent_id, "t-claude") == "agents"
+    shown = agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50, hide_coordination=True)
+    assert [row["id"] for row in shown] == ["u-c-old"]
+
+
+def test_a_turn_parked_for_its_account_stays_parked_under_a_later_row_about_nothing_in_particular(tmp_path, pushes):
+    """The reviewer's running_trace LOW: an audit note repeating the state, newer than the park,
+    read the parked turn as running again. A row that names the trace resumes it."""
+    from lib import turn_identity
+    service, backends, agent_id = _dispatched(tmp_path)
+    _start(service, "t-acct")
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.ACCOUNT_RECOVERY_WAIT, {
+        "dispatch": "claude", "trace_id": "t-acct", "account_recovery": "waiting", "message": "waiting"})
+    assert turn_identity.running_trace(agent_id, "t-acct") is False
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.AUDIT_NOTED, {
+        "source": "slot_repair", "repair_actor": "user", "repair_reason": "look"})
+    assert turn_identity.running_trace(agent_id, "t-acct") is False
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.SPAWN_STARTED, {"trace_id": "t-acct"})
+    assert turn_identity.running_trace(agent_id, "t-acct") is True
+
+
+def test_the_hide_filter_looks_each_judged_row_up_by_its_trace(world):
+    """Part 4's filter (HIDDEN_ROW_SQL, on a page, a delta and the counts of what it left out)
+    reads the user's word by trace, never by agent: the lesson of the read wall (PR 488)."""
+    from lib import message_previews
+    _marked_conversation(world, marked=3, filler=3)
+    rows = agents.list_messages(agent_id=world.id, backend_session_id="native", limit=100)
+    reads = (
+        lambda: agents.list_messages(agent_id=world.id, backend_session_id="native", limit=100,
+                                     hide_coordination=True),
+        lambda: agents.list_messages(agent_id=world.id, backend_session_id="native", after_revision=1,
+                                     hide_coordination=True),
+        lambda: message_previews.coordination_gaps(agent_id=world.id, sessions=["native"], rows=rows,
+                                                   include_automated=True, contiguous=True, tail=True),
+        lambda: message_previews.coordination_gaps(agent_id=world.id, sessions=["native"], rows=rows[-2:],
+                                                   include_automated=True, contiguous=False, tail=False),
+    )
+    for read in reads:
+        judged = [sql for sql in _statements(read) if "messages hu" in sql]
+        assert judged, "the read ran no statement that judges rows by the filter"
+        for sql in judged:
+            wall = [row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + sql)
+                    if row[3].split()[:2] in (["SEARCH", "hu"], ["SCAN", "hu"])]
+            assert wall and set(wall) == {"SEARCH hu USING INDEX idx_messages_trace (trace_id=?)"}, wall
+    db.close_local()
+
+
+
+@pytest.mark.parametrize("read", ["audience_of", "sender_of"])
+def test_the_working_state_reads_a_turn_by_its_trace(world, read):
+    """audience_of and sender_of (agent-state, the live turn) look a turn's rows and admissions up by
+    trace (idx_messages_trace, idx_prompt_admissions_trace), never by agent: they run on every turn
+    start and live op, on conversations of any length."""
+    _marked_conversation(world, marked=2, filler=3)
+    seen: list[str] = []
+    con = db.conn()
+    con.set_trace_callback(seen.append)
+    try:
+        getattr(coordination, read)(world.id, "t-agent-0")
+    finally:
+        con.set_trace_callback(None)
+    lookups = [sql for sql in seen if sql.lstrip().upper().startswith("SELECT")
+               and ("FROM messages" in sql or "FROM prompt_admissions" in sql)]
+    assert lookups, "no lookup of the turn's rows ran"
+    for sql in lookups:
+        plan = [row[3] for row in con.execute("EXPLAIN QUERY PLAN " + sql)]
+        table = "messages" if "FROM messages" in sql else "prompt_admissions"
+        want = "idx_messages_trace" if table == "messages" else "idx_prompt_admissions_trace"
+        assert any(f"SEARCH {table} USING INDEX {want} (trace_id=?)" in step for step in plan), plan
     db.close_local()

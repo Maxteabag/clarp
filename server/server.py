@@ -560,6 +560,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-humanness": "_handle_voice_humanness_get",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
+        "/coordination-settings": "_handle_coordination_settings_get",
         "/avatar-settings": "_handle_avatar_settings_get",
         "/agent-model-options": "_handle_agent_model_options",
         "/favorite-paths": "_handle_favorite_paths",
@@ -669,6 +670,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
         "/agent-notes": "_handle_agent_note",
+        "/agent-coordination": "_handle_agent_coordination",
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
@@ -681,6 +683,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/judgments/settings": "_handle_judgments_settings_post",
         "/personalities/settings": "_handle_personalities_settings_post",
         "/automation-settings": "_handle_automation_settings_post",
+        "/coordination-settings": "_handle_coordination_settings_post",
         "/avatar-settings": "_handle_avatar_settings_post",
         "/preview": "_handle_preview",
         "/stop": "_handle_stop",
@@ -1216,6 +1219,36 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-events",
     })
 
+    # What a limited app needs to chat, speak and answer decisions, and nothing else (R123): a
+    # limited device may GET exactly these routes and route families; every other GET is refused
+    # as /dirs is. Not on the list, because their answers are the owner's setup or data: the
+    # owner's directories, settings, providers, accounts and background jobs (whose answer
+    # carries the worker's folder and log path).
+    _LIMITED_DEVICE_GET_EXACT = frozenset({
+        "/server-info", "/events", "/live", "/status",
+        "/agents/snapshot", "/log", "/message-tool-details", "/turn-queue", "/location",
+        "/attention", "/attention/inbox", "/artifacts", "/pinned-artifacts",
+        "/task-plan", "/task-plans", "/task-plan/document", "/goal-ledger",
+        "/clips/message", "/clips/recoverable", "/media",
+        "/voice-events", "/voice-events/utterances", "/voices", "/voice-catalog",
+        "/voice-preview", "/voice-humanness", "/transcription-guidance",
+        # Speech the phones read on a limited device too: the recording models (a stale saved model is
+        # dropped), the live captions' language and turn taking, and replay of the user's retained audio.
+        "/transcription-capabilities", "/transcription-providers", "/transcription-audio",
+        "/controller-actions", "/controller-narration",
+    })
+    _LIMITED_DEVICE_GET_PREFIXES = (
+        "/artifacts/", "/artifact-catalogs/", "/clips/", "/media/", "/audio/", "/avatars/",
+        "/stt/stream", "/controller-actions/",
+    )
+
+    def _limited_get_allowed(self, path: str) -> bool:
+        # An artifact's export (/artifacts/<id>/export) is the administrator's: the whole stored
+        # request, refused to a limited device though the family is on the list.
+        if path.startswith("/artifacts/") and path.rstrip("/").endswith("/export"):
+            return False
+        return path in self._LIMITED_DEVICE_GET_EXACT or path.startswith(self._LIMITED_DEVICE_GET_PREFIXES)
+
     def _device_forbidden(self, path: str, method: str) -> bool:
         if getattr(self, "_request_device_scope", "") != "limited":
             return False
@@ -1226,7 +1259,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
         ):
             return True
-        # Exactly the routes, so unmatched paths keep their 404 (HTTP-01/03).
+        # Named routes before the allow-list. A limited device's GET outside the allow-list is
+        # refused, a path no route serves included; a full device keeps its 404 (HTTP-01/03).
         # /past-sessions with any scope: a caller-chosen cwd lists that
         # directory's sessions and their first messages (HTTP-03b).
         # /launch-directories and /favorite-paths: the owner's directories, for
@@ -1235,7 +1269,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 path.startswith("/terminal/") and method == "GET"):
             return True
         if method == "GET":
-            return False
+            return not self._limited_get_allowed(path)
         from lib import controller_actions_http
         if controller_actions_http.handles(path):
             return not controller_actions_http.limited_device_allowed(path, method)
@@ -1735,6 +1769,13 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         include_tool_details = str(
             qs.get("include_tool_details", ["1"])[0]
         ).lower() not in {"0", "false", "no"}
+        # Coordination between agents (issue 478): auto | hide | show; absent = today's answer.
+        # coordination_read: the policy a delta's cache was read under (its echo's visibility).
+        coordination_mode = (qs.get("coordination", [""])[0] or "").strip().lower()
+        coordination_read = (qs.get("coordination_read", [""])[0] or "").strip().lower()
+        from lib import coordination as _coordination
+        if coordination_mode and coordination_mode not in _coordination.MODES:
+            return self._json_error(400, "coordination must be auto, hide or show")
         from lib import agent_conversations
         from lib.message_previews import UnknownHistoryCursor
         if agent_conversations.is_pair_session(session):
@@ -1755,7 +1796,15 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 include_tool_details=include_tool_details,
                 interaction_id=self._interaction_id(),
                 background_import=True,
+                coordination_mode=coordination_mode,
+                coordination_read=coordination_read,
             )
+            if coordination_mode and "coordination" not in body_obj:
+                # A chat with no conversation yet says the policy too (every answer does).
+                agent = agents_db.get_by_session(session)
+                if agent:
+                    policy = _coordination.read_policy(agent["agent_id"], coordination_mode)
+                    body_obj["coordination"] = {key: policy[key] for key in ("hidden", "source", "visibility")}
         except UnknownHistoryCursor:
             return self._json_error(409, "unknown history cursor")
         except OSError as e:
@@ -2561,8 +2610,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         if not self._authorized():
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
-        if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):
-            # Only the route: an unmatched PATCH keeps its 404 (HTTP-02).
+        if self._device_forbidden(path, "PATCH"):
+            # A limited device is refused every PATCH, before routing (R123).
             return self._json_error(403, "full device access required")
         return route_registry.dispatch(self, "PATCH", path)
 
@@ -2619,6 +2668,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             "client_msg_id": row["client_msg_id"] or "",
             "sent_at": iso_from_ms(int(row["enqueued_at"])),
             "kind": row["kind"] or turn_queue.KIND_LATER,
+            **turn_queue.item_provenance(row),
         } for row in turn_queue.waiting_items(agent["agent_id"])]
         return self._json_ok({
             "items": items,
@@ -2656,7 +2706,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     def _broadcast_turn_queue(self, agent_id: str, session: str, *,
                               client_msg_id: str = "", change: str = "",
-                              text: str | None = None) -> None:
+                              text: str | None = None, provenance: dict | None = None) -> None:
         """queue-updated. For an edit or a deletion of one item it names the
         item (client_msg_id) and what changed (``queue_change``: edited, with
         the new ``text``, or deleted), so a device's waiting bubble follows."""
@@ -2670,7 +2720,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             queue_started=False, queue_revision=state["revision"],
             **({"client_msg_id": client_msg_id} if client_msg_id else {}),
             **({"queue_change": change} if change else {}),
-            **({"text": text} if text is not None else {}))
+            **({"text": text} if text is not None else {}),
+            **(provenance or {}))
         events.broadcast(self.ctx.stream, event)
 
     def _handle_turn_queue_update(self, queue_id: str):
@@ -2691,7 +2742,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
                                    client_msg_id=str(row["client_msg_id"] or ""),
-                                   change="edited", text=text)
+                                   change="edited", text=text,
+                                   provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_delete(self, queue_id: str):
@@ -2706,7 +2758,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
                                    client_msg_id=str(row["client_msg_id"] or ""),
-                                   change="deleted")
+                                   change="deleted", provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_send(self, queue_id: str):
@@ -2905,6 +2957,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 prompt_admission=prompt_admission,
                 queue_if_busy=req.queue_if_busy,
                 unheard_audio_sessions=tuple(req.unheard_audio_sessions),
+                user_word=req.front_desk,
             ))
         except DispatchError as e:
             if opening is not None and opening["route"] == "greeting":

@@ -32,12 +32,26 @@ pub enum ShimEvent {
     Spawned {
         pid: u32,
     },
+    /// The launch opted into streaming input until this record type.
+    InputOpen {
+        shim_pid: u32,
+        shim_start: String,
+        tool_pid: u32,
+        tool_start: String,
+        group: u32,
+        projects: PathBuf,
+    },
     SpawnFailed {
         error: String,
     },
     /// Someone asked for the process to end; this is the signal it was sent.
     Stopping {
         signal: String,
+    },
+    /// The shim committed a hold's consumption before sending SIGKILL.
+    Takeover {
+        fence: u64,
+        replaced_by: u64,
     },
     /// The process is gone. A process that was killed has a signal and no code.
     Exited {
@@ -106,6 +120,20 @@ impl SpoolWriter {
         let mut line = serde_json::to_vec(record).map_err(io::Error::other)?;
         line.push(b'\n');
         self.file.write_all(&line)
+    }
+
+    /// Commit a marker only if no byte has arrived after a fence. The single spool writer
+    /// owns this check and append together. A failed write is rolled back to the fence.
+    pub fn append_at_and_sync(&mut self, fence: u64, record: &Record) -> io::Result<bool> {
+        if self.file.metadata()?.len() != fence {
+            return Ok(false);
+        }
+        if let Err(error) = self.append(record).and_then(|()| self.sync()) {
+            self.file.set_len(fence)?;
+            self.sync()?;
+            return Err(error);
+        }
+        Ok(true)
     }
 
     /// Makes what was appended survive a power loss. The shim does this for its own events.
@@ -289,6 +317,32 @@ mod tests {
             "and nothing twice"
         );
         assert_eq!(second.next_offset, std::fs::metadata(&path).unwrap().len());
+    }
+
+    #[test]
+    fn a_marker_only_commits_at_the_exact_spool_fence() {
+        let path = scratch("fence");
+        let mut writer = SpoolWriter::create(&path).unwrap();
+        writer.append(&out(1, "before the fence")).unwrap();
+        let fence = std::fs::metadata(&path).unwrap().len();
+
+        writer.append(&out(2, "late output")).unwrap();
+        let marker = out(3, "decision");
+        assert!(!writer.append_at_and_sync(fence, &marker).unwrap());
+        assert_eq!(
+            SpoolReader::new(&path).read_from(fence).unwrap().records,
+            [out(2, "late output")]
+        );
+
+        let new_fence = std::fs::metadata(&path).unwrap().len();
+        assert!(writer.append_at_and_sync(new_fence, &marker).unwrap());
+        assert_eq!(
+            SpoolReader::new(&path)
+                .read_from(new_fence)
+                .unwrap()
+                .records,
+            [marker]
+        );
     }
 
     #[test]

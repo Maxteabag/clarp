@@ -41,6 +41,16 @@ fn is_code(text: &str) -> bool {
     (2..=3).contains(&text.len()) && text.bytes().all(|sign| sign.is_ascii_lowercase())
 }
 
+/// The primary language subtag, including the Norwegian aliases used by speech engines.
+pub(crate) fn primary(code: &str) -> String {
+    let code = strip(code);
+    let code = code.split(['-', '_']).next().unwrap_or("").to_lowercase();
+    match code.as_str() {
+        "nb" | "nn" => "no".to_string(),
+        _ => code,
+    }
+}
+
 /// One language: two or three letters, written small.
 pub fn code(value: &Value) -> Result<String, &'static str> {
     let Value::String(text) = value else {
@@ -123,11 +133,15 @@ pub fn of_agent<'a>(entries: &'a [(String, String)], who: Who<'_>) -> Option<&'a
     })
 }
 
-/// The engines an entry names, in the order they are tried.
+fn named_engines(value: &str) -> impl Iterator<Item = &str> {
+    value.split(',').map(strip).filter(|part| !part.is_empty())
+}
+
+/// The engines an entry names, each at its first place.
 pub fn engines(value: &str) -> Vec<String> {
-    let parts = value.split(',').map(strip);
-    parts
-        .filter(|part| !part.is_empty())
+    let mut seen = std::collections::HashSet::new();
+    named_engines(value)
+        .filter(|part| seen.insert(*part))
         .map(str::to_string)
         .collect()
 }
@@ -170,12 +184,11 @@ pub fn engines_changed(
             Value::Null => None,
             Value::String(text) if text.is_empty() => None,
             Value::String(text) => {
-                let listed = engines(text);
-                let known = listed.iter().all(|engine| is_valid(engine));
+                let known = named_engines(text).all(is_valid);
                 if !known || text.trim_matches([' ', ',']).is_empty() {
                     return Err(unknown());
                 }
-                Some(listed.join(","))
+                Some(engines(text).join(","))
             }
             _ => return Err(unknown()),
         };

@@ -391,11 +391,11 @@ async fn say(app: &App, say: &Say) {
     if let Some(speaker) = speaker {
         if let Some(phrase) = clarp_kernel::router::flow::phrase_key(&say.text) {
             let owners = app.mouth.owners();
-            for (voice, primary) in crate::voice::phrase_voices(&owners, &speaker) {
+            for voice in crate::voice::phrase_voices(&app.mouth, &directory, &owners, &speaker) {
                 if !app
                     .router
                     .phrases
-                    .say(app, &speaker, &say.text, phrase, (voice, primary), &owners)
+                    .say(app, &speaker, &say.text, phrase, voice, &owners)
                     .await
                 {
                     break;
@@ -642,7 +642,11 @@ fn reply(outcome: Outcome, trace_id: &str) -> Routed {
         ok: outcome.ok,
         session: outcome.session,
         dispatch: outcome.dispatch,
-        trace_id: trace_id.to_string(),
+        trace_id: if outcome.trace_id.is_empty() {
+            trace_id.to_string()
+        } else {
+            outcome.trace_id
+        },
         error: Some(outcome.error).filter(|error| !error.is_empty()),
         orchestrator: Some(decided),
         ..SendResponse::default()

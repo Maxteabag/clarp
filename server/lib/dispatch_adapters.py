@@ -19,7 +19,7 @@ import time
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import backends, events
+from . import backends, events, origins
 from . import trace as _trace
 from .log import log_exception
 from .timing import SERVER_TIMING
@@ -137,7 +137,8 @@ class DispatchAdapters:
             session=row["session"], agent_id=row["agent_id"],
             client_msg_id=row["client_msg_id"], queue_depth=state["count"],
             queue_paused=state["paused"], queue_started=False,
-            queue_revision=state["revision"]))
+            queue_revision=state["revision"],
+            **(turn_queue.item_provenance(row) if "origin" in row.keys() else {})))
 
     def scheduled_job(self, session: str, text: str) -> None:
         """AgentScheduleRunner: a due schedule for an agent that still exists."""
@@ -211,7 +212,13 @@ class DispatchAdapters:
             self._dispatch(
                 pending["session"], text, origin=ORIGIN_AUTOMATION,
                 client_msg_id=f"decision-{decision_id}",
-                queue_if_busy=decision_queues_if_busy(pending))
+                queue_if_busy=decision_queues_if_busy(pending),
+                # The user answered it in the app: the user's word, first in
+                # the agent's queue (issue 481). Expired is not an answer.
+                user_word=origins.is_user_word(
+                    ORIGIN_AUTOMATION,
+                    card_answered_by=str(pending.get("resolved_by") or ""),
+                    card_choice=str(pending.get("choice") or "")))
             artifacts.mark_delivered(decision_id)
             return True
         except Exception as exc:

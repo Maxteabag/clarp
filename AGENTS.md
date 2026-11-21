@@ -64,16 +64,28 @@ Check for uncommitted changes before running `git checkout` on a path. This is a
 shared working tree; if the file is dirty, the checkout destroys work that
 exists nowhere else.
 
-## A test run is green only when you read its result
+## Tests run once, at the end of a piece of work
 
-The gate before pushing is `make test-critical` (serial, about a minute; the
-list is `tests/critical.txt`), `make test-guards` (every structural test
-file, those marked `pytest.mark.structural`; `tests/unit/test_guards_list.py`
-fails when one is left out) plus the test files for the code you changed.
-Do not run the full suite (`make test`) locally: forty agents doing so overload
-the owner's laptops. The full suite never runs automatically, on GitHub or anywhere:
-only the critical gate does. Start the full suite by hand on GitHub ("Run workflow"
-on Tests) when a change is broad enough to want it.
+Peter, 21 Nov 2026: "Remove all tests from the pipeline. We will do one single
+test at the very end when [the work is] 100% done ... Avoid making tests the
+bottleneck in developing." On 10 Nov: "I don't want tests to run automatically.
+Ever."
+
+- While a change is being built, do not run test suites, gates, mutation or
+  planted-rule runs, or CI checks on each change, push or pull request. Write
+  the tests a change needs; do not run suites to gate it. A quick run of one
+  test to understand a failure you are fixing is fine; it is not a gate.
+- A change lands once it builds and a reviewer has read it. Review is by reading.
+- No workflow starts by itself on a push or pull request; they run only when
+  someone starts them ("Run workflow", or `gh workflow run`). Version tags still
+  publish the Docker image, and main's `desktop.yml` still publishes the desktop
+  binary: those are releases, not tests.
+- When the owner of the work considers it complete, run one full test pass
+  (`make test-critical`, `make test-guards` and the tests of what changed, or the
+  Tests workflow started by hand), fix what it finds, and only then install it
+  on Peter's Hosts, which are live.
+- Do not run the full suite (`make test`) locally: forty agents doing so overload
+  the owner's laptops.
 
 When you run a test command in the background through a wrapper such as
 `pytest > log; echo "exit=$?" >> log`, the wrapper exits 0 whether or not the
@@ -89,7 +101,7 @@ alone before treating it as a regression, and say which it was.
 ## Push to main
 
 Never end a turn by silently leaving the work you produced uncommitted. Once
-the relevant gates above have passed, push it to main yourself. Always. Do
+it builds and a reviewer has read it, push it to main yourself. Always. Do
 not open a pull request and wait, and do not raise a question asking whether
 to commit — commit and push is the default action, not something that needs
 asking.
@@ -102,7 +114,7 @@ opening a merge commit. If `origin/main` moved and no longer fast-forwards
 cleanly, rebase again rather than forcing.
 
 Report the change in your answer as usual: what you pushed, the commit, and
-the evidence that it passed. A passing test run is not itself permission to
+who reviewed it. A passing test run is not itself permission to
 skip verifying the change does what was asked; say plainly what you checked.
 
 ## Fleet-map vision and decisions
@@ -145,15 +157,16 @@ touch it: it names the lead, the rules, and who owns which crate. Its Rust compi
 `server-rs/tools/build` (one build at a time, Peter's word of 15 Nov 2026) and in the `Server (Rust)` workflow,
 which runs only when started by hand. The
 rule in the next section still holds on elitebook and laptopstudio, for `server-rs` too. Nothing in `server/` changes
-for it: the Python Host and its gates are as before.
+for it: the Python Host is as before.
 
 ## The Rust desktop compiles only in GitHub Actions
 
 Never run `cargo build`, `cargo test`, `cargo check`, `clippy` or
 `desktop-rs/slint-app/tests/check.sh` (it builds) on the owner's machines
 (laptopstudio included): parallel Rust builds there pushed the load to ~97 and
-starved the live Host. Push your branch instead; `.github/workflows/desktop-checks.yml`
-runs the unit tests, the headless checks (with one rerun for load-sensitive
+starved the live Host. Push your branch and start `.github/workflows/desktop-checks.yml` on it by hand
+(`gh workflow run desktop-checks.yml -R Maxteabag/clarp --ref <branch>`; it no
+longer starts on a push). It runs the unit tests, the headless checks (with one rerun for load-sensitive
 ones) and a release build, and uploads `cargo-test-log`, `checks` (logs and
 screenshots) and `clarp-slint-x86_64-linux` as artifacts
 (`gh run download <run> -R Maxteabag/clarp -n checks`). Run a subset by hand

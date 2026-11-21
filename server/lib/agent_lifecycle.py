@@ -10,7 +10,6 @@ import os
 import pathlib
 import secrets
 import tempfile
-import threading
 from dataclasses import dataclass, replace
 
 from . import agents as agents_db
@@ -21,6 +20,7 @@ from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, NeedsContact, RosterView, SpecError
 from . import personas as persona_store
+from . import voice_pool
 
 
 class AgentLifecycleError(RuntimeError):
@@ -45,7 +45,9 @@ class AgentLifecycleResult:
 
 
 class AgentLifecycleService:
-    _create_lock = threading.RLock()
+    # The voice pool's lock: an agent's pick and insert and a contact's (personas.create) are
+    # serialised against each other, so two at once never get the same pool voice.
+    _create_lock = voice_pool.assigning()
 
     def __init__(self, ctx):
         self.ctx = ctx
@@ -108,6 +110,14 @@ class AgentLifecycleService:
             )
         if parsed.recommendation:
             log(parsed.recommendation)
+        if (not janitor and not parsed.replace_sid and not parsed.fork_id
+                and parsed.role == "agent"):
+            # V2b: a new agent ends with a working voice under the configured provider and
+            # fallback; a relaunch, a helper and a fork keep theirs (helpers: V2c, through
+            # the parent), and a Janitor stays voiceless.
+            from . import config as app_config, voice_pool
+            parsed = replace(parsed, voice_id=voice_pool.assign(
+                app_config.load(), parsed.persona, parsed.voice_id))
         spec = parsed if parsed.session else replace(
             parsed, session=self._mint_session(parsed.persona))
         resume_session_id = self._fork_or_resume(spec)
@@ -161,7 +171,9 @@ class AgentLifecycleService:
             default_model=lambda backend: backends.default_model_effort(backend, cfg)[0],
             global_mcp_servers=app_config.read_global_mcp_servers(),
             cartesia_voice_for=cfg.cartesia_voice_for,
-            default_roster_voice=next(iter(AGENT_ROSTER.values())),
+            # A name no contact or roster entry has gets its voice from the pool
+            # (voice_pool), no longer the first roster voice every such agent shared.
+            default_roster_voice="{}",
             resolve_agent=lambda raw: getattr(identity.resolve(raw), "agent_id", ""),
             ancestors=agents_db.ancestors,
         )

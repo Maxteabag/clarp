@@ -158,6 +158,12 @@ impl Rows {
             if op["op"] != "upsert" || op["kind"] != "tool" || !tool.is_object() || !named {
                 continue;
             }
+            if activity(tool)
+                .as_object()
+                .is_some_and(super::shapes::lacks_command)
+            {
+                continue;
+            }
             let about = first_said(&[tool.get("command"), tool.get("label")]);
             let key = format!("{}\0{about}", said(tool.get("name")));
             let item_id = first_said(&[op.get("id")]);

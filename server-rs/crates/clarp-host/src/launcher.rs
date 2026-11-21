@@ -11,7 +11,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use clarp_actor::ShimOrder;
-use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Request};
+use clarp_kernel::steering::REPLAY_USER_MESSAGES;
+use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request};
 
 use crate::ids;
 
@@ -123,6 +124,9 @@ impl Launcher {
         if order.prompt_as_file {
             command.arg("--prompt-as-file");
         }
+        if order.args.iter().any(|arg| arg == REPLAY_USER_MESSAGES) {
+            command.args(["--stdin-until", "result"]);
+        }
         if let Some(session) = &order.named_session {
             command.arg("--named-session").arg(session);
         }
@@ -203,6 +207,29 @@ impl Launcher {
     }
 }
 
+pub(crate) fn gate_steering(order: &mut ShimOrder) {
+    if !order.args.iter().any(|arg| arg == REPLAY_USER_MESSAGES) {
+        return;
+    }
+    // This is the launch thread. Dispatch consults what the shim recorded; it does not probe.
+    let version = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()
+        .and_then(|runtime| {
+            runtime.block_on(crate::models::asked(
+                Path::new(&order.program),
+                &["--version".into()],
+                Duration::from_millis(2_500),
+            ))
+        });
+    if !version.is_some_and(|(code, version)| {
+        code == 0 && clarp_kernel::steering::supported_version(&version)
+    }) {
+        order.args.retain(|arg| arg != REPLAY_USER_MESSAGES);
+    }
+}
+
 /// Follows the shim at this socket until it is gone: says when its spool may have grown, and
 /// at the end that nothing answers any more. Blocks for as long as the shim lives.
 pub fn follow(socket: &Path, tell: &dyn Fn(Told)) {
@@ -224,6 +251,23 @@ pub fn follow(socket: &Path, tell: &dyn Fn(Told)) {
     tell(Told::Gone);
 }
 
+/// A bounded takeover exchange on a fresh connection. An absent reply is uncertain
+/// because the shim may already have recorded the decision.
+pub(crate) fn takeover_request(socket: &Path, request: Request) -> Option<Reply> {
+    let mut shim = UnixStream::connect(socket).ok()?;
+    shim.set_read_timeout(Some(STOP_TIMEOUT)).ok()?;
+    shim.set_write_timeout(Some(STOP_TIMEOUT)).ok()?;
+    let mut line = serde_json::to_vec(&request).ok()?;
+    line.push(b'\n');
+    shim.write_all(&line).ok()?;
+    let mut answer = String::new();
+    BufReader::new(shim)
+        .take(4096)
+        .read_line(&mut answer)
+        .ok()?;
+    serde_json::from_str(&answer).ok()
+}
+
 /// Asks the shim at this socket to end its tool. A shim that is not there has nothing to end.
 pub fn stop(socket: &Path, grace_ms: u64) {
     let Ok(mut shim) = UnixStream::connect(socket) else {
@@ -238,6 +282,22 @@ pub fn stop(socket: &Path, grace_ms: u64) {
         let mut reply = String::new();
         let _ = BufReader::new(shim).read_line(&mut reply);
     }
+}
+
+/// Try once. After an ambiguous socket outcome the actor still waits for stdout evidence.
+pub async fn steer(socket: &Path, input: String) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let Ok(line) = serde_json::to_string(&Request::Stdin { data: input }) else {
+        return;
+    };
+    let attempt = async {
+        let mut shim = tokio::net::UnixStream::connect(socket).await?;
+        shim.write_all(format!("{line}\n").as_bytes()).await?;
+        let mut reply = String::new();
+        tokio::io::BufReader::new(shim).read_line(&mut reply).await
+    };
+    let _ = tokio::time::timeout(STOP_TIMEOUT, attempt).await;
 }
 
 #[cfg(test)]
@@ -339,6 +399,7 @@ mod tests {
             "launcher::tests::a_shim_uses_its_own_turn_identity_and_inherits_provider_settings";
         if std::env::var_os("FIXTURE_LAUNCH_PARENT").is_none() {
             let status = Command::new(std::env::current_exe().unwrap())
+                .env_clear()
                 .args(["--exact", HERE])
                 .env("FIXTURE_LAUNCH_PARENT", "1")
                 .env("CLARP_BACKGROUND_ORIGIN", "foreign-origin")

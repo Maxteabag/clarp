@@ -12,9 +12,22 @@ from . import turn_queue
 from . import recovery_backoff, turn_lifecycle
 from . import events
 from .turn_lifecycle import TurnEvent
+from .turn_slots import SENTINELS
 from .log import log, log_exception
-from .turn_dispatch_state import _TURN_LOCK, _SLOTS, account_failover, _INFLIGHT, _RECOVERY_LOCK, _RECOVERY_BACKOFF, _NO_LOCK, LEAKED_SLOT_GRACE_MS, ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launch_running
+from .turn_dispatch_state import _TURN_LOCK, _SLOTS, account_failover, _INFLIGHT, _RECOVERY_LOCK, _RECOVERY_BACKOFF, _NO_LOCK, LEAKED_SLOT_GRACE_MS, ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launch_running, _PROCESS_OWNER_PREFIX
 from .turn_command import _can_steer, _TurnSpec, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _recovered_janitor_run, _REGENERATED_ORIGINS, _remove_queued_run, DispatchCommand, _preinvoke_failure, _QueuedReceiptUnavailable, _launch_refused
+
+
+def _queues_behind_own_turn(agent_id: str) -> bool:
+    """The agent is busy with a turn this runtime owns and work already waits
+    in its memory queue (a user's word that ran past a Stop's pause): a row
+    re-admitted now queues behind that turn in the durable order, instead of
+    waiting until the turn ends and the memory head overtakes it (#481)."""
+    with _TURN_LOCK:
+        owner = _SLOTS.get(agent_id)
+        return (bool(owner) and owner not in SENTINELS
+                and not owner.startswith(_PROCESS_OWNER_PREFIX)
+                and _SLOTS.queue_depth(agent_id) > 0)
 
 
 class RecoveryMixin:
@@ -118,6 +131,7 @@ class RecoveryMixin:
         from .backend.registry import by_id
         for entry in steer_records.left():
             trace_id, queue_id = str(entry["trace_id"]), str(entry.get("queue_id") or "")
+            keep = False
             try:
                 item = db.conn().execute(
                     "SELECT * FROM queued_turns WHERE queue_id = ?", (queue_id,)).fetchone()
@@ -129,9 +143,16 @@ class RecoveryMixin:
                 # would read the line when its tool returns: it is ended first (only while
                 # its pid is still that process), so "not in the file" means never read.
                 from . import takeover
-                if takeover.kill_group_if_same(int(entry.get("pid") or 0),
-                                               int(entry.get("pgid") or 0),
-                                               entry.get("start_ticks")):
+                ended = takeover.kill_group_if_same(int(entry.get("pid") or 0),
+                                                    int(entry.get("pgid") or 0),
+                                                    entry.get("start_ticks"))
+                if ended is None:
+                    # Still there after the kill: it could still read the line. Nothing is
+                    # judged; the record stays for the next start (reviewer 4).
+                    keep = True
+                    log("steerOrphanStillAlive", f"agent={item['agent_id']} queue={queue_id}")
+                    continue
+                if ended:
                     log("steerOrphanEnded", f"agent={item['agent_id']} queue={queue_id}")
                 try:
                     read = by_id(str(entry.get("backend") or "")).steer_was_read(
@@ -148,7 +169,8 @@ class RecoveryMixin:
                     log("steerUnreadAtStart" if read is False else "steerUnknownAtStart",
                         f"agent={item['agent_id']} queue={queue_id}")
             finally:
-                steer_records.clear(trace_id)
+                if not keep:
+                    steer_records.clear(trace_id)
 
     def _show_steer_read(self, item: dict, steered_session: str) -> None:
         """A follow-up the CLI read: its row in the live session, shown and started in one
@@ -277,7 +299,8 @@ class RecoveryMixin:
             if turn_queue.is_paused(row["agent_id"]) and not pause_exempt:
                 continue
             if agent and self.backends.active_handles(
-                    self.backends.normalize(agent.get("backend")), row["agent_id"]):
+                    self.backends.normalize(agent.get("backend")), row["agent_id"]) \
+                    and not _queues_behind_own_turn(row["agent_id"]):
                 deferred = True
                 continue
             already_memory_queued = _SLOTS.has_queued(
@@ -315,6 +338,8 @@ class RecoveryMixin:
                     durable_queue_id=row["queue_id"],
                     allow_paused_queue=pause_exempt,
                     janitor_run_id=_recovered_janitor_run(row),
+                    user_word=bool(row.get("user_word")),
+                    taken=turn_queue.row_taken(row),
                 ))
                 recovered += 1
                 readmitted.setdefault(row["agent_id"], []).append(str(row["queue_id"]))
@@ -335,6 +360,9 @@ class RecoveryMixin:
         for agent_id, rows in sorted(readmitted.items()):
             log("queuedRecoveredOrder", f"agent={agent_id} n={len(rows)} "
                                         f"rows={','.join(rows)}")
+            # A queue that already held work (a user's word that ran past a
+            # Stop's pause) takes the re-admitted rows in the durable order.
+            _SLOTS.follow(agent_id, turn_queue.waiting_ids(agent_id))
         if deferred or turn_queue.claimed_count() > 0:
             self.retry_scheduler(1.0, self.recover_queued)
         if next_try is not None and _RECOVERY_BACKOFF.claim_wake(next_try):
