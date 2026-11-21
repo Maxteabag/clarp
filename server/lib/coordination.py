@@ -281,6 +281,47 @@ def effective_visibility(agent_id: str) -> str:
     return chat_visibility(agent_id) or global_visibility()
 
 
+def hiding_agents(*, database=None) -> set[str]:
+    """The agents whose chat leaves coordination out under 'auto' (their effective visibility is
+    'hide' and they can leave a note, as /log decides it), read for the whole roster at once: the
+    snapshot's previews and the working state follow the same rule as GET /log."""
+    if database is None:
+        from .db import conn
+        database = conn()
+    from . import backends
+    from .turn_identity import IDENTITY_BACKENDS
+    host = global_visibility()
+    return {row["agent_id"] for row in database.execute(
+                "SELECT agent_id, backend, coordination_visibility FROM agents WHERE deleted_at IS NULL")
+            if (normalize_visibility(row["coordination_visibility"]) or host) == HIDE
+            and backends.normalize(row["backend"]) in IDENTITY_BACKENDS}
+
+
+def working_with(agent_id: str, trace_id: str | None) -> dict[str, Any]:
+    """Who a running turn is for: {"audience": "user"} or {"audience": "agents"} with
+    ``sender_agent_id`` and ``sender_name`` when another agent of this Host started it, so an
+    app can say who the agent is working with. {} when there is no turn to judge."""
+    if not agent_id or not (trace_id or "").strip():
+        return {}
+    sender = sender_of(agent_id, trace_id)
+    if sender is None:
+        return {"audience": USER}
+    out: dict[str, Any] = {"audience": AGENTS}
+    if sender:
+        from . import agents
+        agent = agents.get_by_agent_id(sender)
+        if agent:
+            out.update(sender_agent_id=sender, sender_name=agent.get("persona") or "")
+    return out
+
+
+def veiled(working: dict[str, Any]) -> str:
+    """The words a working state shows for a coordination turn its chat hides: who the agent
+    works with, never what it does in that turn (a tool's label, a reasoning title)."""
+    name = (working or {}).get("sender_name") or ""
+    return f"Working with {name}" if name else "Working with another agent"
+
+
 ROSTER_KIND = "coordination-changed"
 DEFAULT_CHOICE = "default"   # POST /agent-coordination: follow the Host's setting again
 
