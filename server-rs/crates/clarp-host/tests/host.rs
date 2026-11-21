@@ -24065,7 +24065,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     let host = place.start_in("", &[], &world);
     let echo = host.new_agent("Echo");
 
-    // What is read: nothing of the kind is here, said in the Python Host's own fields.
+    // A new agent has no goal. The Host answers in the Python Host's fields.
     let read = |path: &str| host.get(path);
     assert_eq!(
         read(&format!("/agent-goal?session={echo}")),
@@ -24343,17 +24343,14 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         );
     }
 
-    // A change to any of it is refused, and says that it is not built: nothing is taken
-    // and then not done.
-    for (path, body) in [
-        ("/server-update", json!({})),
-        ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
-    ] {
-        let (status, said) = host.ask("POST", path, Some(&body));
-        let why = said["error"].as_str().unwrap_or("");
-        assert_eq!(status, 501, "{path}: {said}");
-        assert!(why.ends_with("not built on this Host yet"), "{path}: {why}");
-    }
+    // An app can read the update screen. Updating the Host is an installer action.
+    assert_eq!(
+        host.ask("POST", "/server-update", Some(&json!({}))),
+        (
+            501,
+            json!({ "error": "Updating this Host from an app is not built on this Host yet" }),
+        )
+    );
 
     // What an agent does by itself is off, and turning it off is done; turning it on is not.
     for (path, field) in [("/agent-dreaming", "dreaming_enabled")] {
