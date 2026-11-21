@@ -33,6 +33,7 @@ HEAD_HELPERS = ("_row_with_its_head",)
 INSIDE_THE_IMPORT = {
     ("message_import_rows", "_delete_slot"): "import transaction; batch head / _finish_import",
     ("message_import_rows", "_park_adopted_occupant"): "import transaction; stamps the row, batch head",
+    ("message_import_rows", "_park_positional_occupant"): "import transaction; stamps the row, batch head",
     ("message_import_rows", "_resolve_reply_id"): "import transaction; batch head / _finish_import",
     ("message_import_rows", "_restore_unadopted_parked"): "import transaction; stamps the row, _finish_import",
     ("message_import_rows", "_upsert_row"): "import transaction; the row's revision is folded into latest_revision",

@@ -5,7 +5,8 @@
 // delivered when `/log` returns a turn with the id the client minted.
 
 import {
-  DeliveryState, createDeliveryLog, markState, recordSend, serverIdFor, staleSends,
+  DeliveryState, createDeliveryLog, dropSend, markState, markWaiting, recordSend,
+  serverIdFor, staleSends,
 } from '@core/delivery.js';
 
 export const delivery = $state(createDeliveryLog(60));
@@ -13,6 +14,29 @@ export const delivery = $state(createDeliveryLog(60));
 /** Late import breaks the cycle conversations → delivery → conversations. */
 let markFailed = () => {};
 export function bindDeliveryFailure(fn) { markFailed = fn; }
+let markWaitingTurn = () => {};
+let dropTurn = () => {};
+/** The bubble side of a waiting send: draw it as waiting; remove it once deleted. */
+export function bindDeliveryWaiting(waiting, dropped) {
+  markWaitingTurn = waiting;
+  dropTurn = dropped;
+}
+
+/** /send answered `queued: true`: the send waits for the running turn as a
+ *  queue item and gets its row only when its turn starts. Never swept. */
+export function noteSendQueued(clientMsgId) {
+  markWaiting(delivery, clientMsgId);
+  const entry = delivery.entries.find(e => e.id === clientMsgId);
+  if (entry && entry.waiting) markWaitingTurn(entry.session, entry.serverId);
+}
+
+/** queue-updated said this waiting send was deleted from the queue. */
+export function noteQueuedSendDeleted(clientMsgId) {
+  const entry = delivery.entries.find(e => e.id === clientMsgId);
+  if (!entry) return;
+  dropSend(delivery, clientMsgId);
+  dropTurn(entry.session, entry.serverId);
+}
 
 export function noteSendStarted(clientMsgId, session, text) {
   recordSend(delivery, { id: clientMsgId, session, text });
