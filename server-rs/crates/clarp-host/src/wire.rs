@@ -302,19 +302,17 @@ fn ending_detail(last: &Settled, backend: &str, model: &str, end: Option<&TurnEn
             Value::Object(detail)
         }
         Outcome::Failed { reason, kind } => {
-            let (kind, told) = failure(reason, kind, model);
-            json!({
-                // Every failure names its turn's trace.
-                "trace_id": trace,
-                // Tries against failures that pass: a wait for an account is none.
-                "attempts": last.attempts.saturating_sub(last.account_waits).max(1),
-                "dispatch": backend,
-                "error": told.error,
-                "message": told.message,
-                "provider_message": told.provider_message,
-                "reason": kind,
-                "summary": told.summary,
-            })
+            ending_failure(last, backend, model, trace, kind, reason)
+        }
+        Outcome::Interrupted { reason } if reason == clarp_kernel::agent_moves::MOVED => {
+            ending_failure(
+                last,
+                backend,
+                model,
+                trace,
+                reason,
+                clarp_kernel::agent_moves::CONTINUATION_ERROR,
+            )
         }
         Outcome::Interrupted { reason } => json!({
             "message": reason,
@@ -322,6 +320,27 @@ fn ending_detail(last: &Settled, backend: &str, model: &str, end: Option<&TurnEn
         }),
         Outcome::Completed | Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => json!({}),
     }
+}
+
+fn ending_failure(
+    last: &Settled,
+    backend: &str,
+    model: &str,
+    trace: String,
+    kind: &str,
+    reason: &str,
+) -> Value {
+    let (kind, told) = failure(reason, kind, model);
+    json!({
+        "trace_id": trace,
+        "attempts": last.attempts.saturating_sub(last.account_waits).max(1),
+        "dispatch": backend,
+        "error": told.error,
+        "message": told.message,
+        "provider_message": told.provider_message,
+        "reason": kind,
+        "summary": told.summary,
+    })
 }
 
 /// The name the Python Host's Claude runner goes by when it reports a finished turn. Everything
@@ -573,6 +592,19 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
             kind: failure_kind,
         }) if kind == AgentStateKind::Interrupted => {
             Some(failure(reason, failure_kind, &record.model).1)
+        }
+        Some(Outcome::Interrupted { reason })
+            if kind == AgentStateKind::Interrupted
+                && reason == clarp_kernel::agent_moves::MOVED =>
+        {
+            Some(
+                failure(
+                    clarp_kernel::agent_moves::CONTINUATION_ERROR,
+                    reason,
+                    &record.model,
+                )
+                .1,
+            )
         }
         _ => None,
     };
@@ -1431,12 +1463,6 @@ pub fn row(version: &Versioned) -> Value {
         let mut row = imported.row.clone();
         if row.is_object() {
             row["revision"] = json!(version.revision);
-            if row["role"] == "assistant"
-                && let Some(text) = row["text"].as_str()
-                && let std::borrow::Cow::Owned(visible) = markup::strip_team_blocks(text)
-            {
-                row["text"] = json!(visible);
-            }
         }
         return row;
     }
@@ -1486,10 +1512,9 @@ pub fn row(version: &Versioned) -> Value {
             }
         }
         Entry::Reply(reply) => {
-            // Team broadcasts are private to their feed. Keep the voice markup that the
-            // app uses to speak the rest of the reply.
+            // The app gets the saved voice and team markup and hides it in its display.
+            // Internal metadata remains on the Host.
             let said = markup::strip_hidden_blocks(&reply.text);
-            let said = markup::strip_team_blocks(&said);
             row["text"] = match automated_reply(kind, &said) {
                 Some(shown) => json!(shown),
                 None => json!(said),

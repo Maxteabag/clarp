@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use clarp_kernel::hidden_coordination::{self as rules, Mode, Visibility};
+use clarp_kernel::teams::runtime::Brief;
 use serde_json::{Value, json};
 
 #[test]
@@ -41,4 +42,23 @@ fn coordination_choices_and_policy_follow_the_reference() {
     assert_eq!(choices.len(), 27);
     assert_eq!(inputs.len(), 6);
     assert_eq!(rules::reminder("ivy", Some("Boss")), vectors["reminder"]);
+}
+
+#[test]
+fn launch_and_steering_prompts_keep_the_reference_envelope() {
+    let vectors: Value =
+        serde_json::from_str(include_str!("fixtures/hidden-coordination-vectors.json")).unwrap();
+    let prompts = vectors["prompts"].as_array().unwrap();
+    assert_eq!(prompts.len(), 2);
+    for row in prompts {
+        let text = |key: &str| row[key].as_str().unwrap();
+        let mut brief = Brief {
+            protocol: text("protocol").to_owned(),
+            digest: text("digest").to_owned(),
+            ids: Vec::new(),
+        };
+        assert_eq!(brief.prompt(text("text")), row["steer"]);
+        brief.append_protocol(&rules::reminder("ivy", Some("Boss")));
+        assert_eq!(brief.prompt(text("text")), row["start"]);
+    }
 }

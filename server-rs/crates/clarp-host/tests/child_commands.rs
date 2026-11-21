@@ -124,6 +124,10 @@ const EXEMPT: &[(&str, &str)] = &[
         "Standalone shim executable starts the assigned tool after the Host supplied its environment.",
     ),
     (
+        "crates/clarp-shim/src/codex_lane_runtime.rs",
+        "Only the standalone goal-lane shim starts this app-server. The Host already prepared its environment, including the assigned agent session and no per-turn token.",
+    ),
+    (
         "crates/clarp-shim/src/opencode.rs",
         "Only the shim binary's main declares this module and runs the OpenCode driver; it is absent from the linked protocol library.",
     ),

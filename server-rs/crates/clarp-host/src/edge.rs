@@ -515,12 +515,18 @@ pub struct Asker {
 pub struct ApiError {
     status: StatusCode,
     error: String,
-    plain: bool,
-    /// What is answered under `error` where it is more than words: a render spec's refusal.
-    detail: Option<Value>,
-    /// Says to the caller that the same request may well be met when it is asked again.
-    retryable: bool,
-    body: Option<Value>,
+    body: ErrorBody,
+}
+
+#[derive(Debug)]
+enum ErrorBody {
+    Message,
+    Plain,
+    Retryable,
+    /// A value under `error`, as in a render spec's refusal.
+    Detail(Box<Value>),
+    /// The complete JSON response, as in a moved-agent refusal.
+    Custom(Box<Value>),
 }
 
 impl ApiError {
@@ -528,10 +534,7 @@ impl ApiError {
         Self {
             status,
             error: error.into(),
-            plain: false,
-            detail: None,
-            retryable: false,
-            body: None,
+            body: ErrorBody::Message,
         }
     }
 
@@ -539,7 +542,7 @@ impl ApiError {
     /// the Python Host answers a turn's identity it could not look up.
     pub(crate) fn retryable(status: StatusCode, error: impl Into<String>) -> Self {
         Self {
-            retryable: true,
+            body: ErrorBody::Retryable,
             ..Self::new(status, error)
         }
     }
@@ -547,7 +550,7 @@ impl ApiError {
     /// An error whose `error` is this value; `error` says it in words, for a tool.
     pub(crate) fn detailed(status: StatusCode, error: impl Into<String>, detail: Value) -> Self {
         Self {
-            detail: Some(detail),
+            body: ErrorBody::Detail(Box::new(detail)),
             ..Self::new(status, error)
         }
     }
@@ -564,18 +567,17 @@ impl ApiError {
 
     pub(crate) fn plain(status: StatusCode, text: impl Into<String>) -> Self {
         Self {
-            status,
-            error: text.into(),
-            plain: true,
-            detail: None,
-            retryable: false,
-            body: None,
+            body: ErrorBody::Plain,
+            ..Self::new(status, text)
         }
     }
 
     /// What is answered under `error`, where it is more than words.
     pub(crate) fn detail(&self) -> Option<&Value> {
-        self.detail.as_ref()
+        match &self.body {
+            ErrorBody::Detail(detail) => Some(detail.as_ref()),
+            _ => None,
+        }
     }
 }
 
@@ -608,7 +610,7 @@ impl From<Unavailable> for ApiError {
             _ => return Self::new(StatusCode::SERVICE_UNAVAILABLE, unavailable.0),
         };
         Self {
-            body: Some(body),
+            body: ErrorBody::Custom(Box::new(body)),
             ..Self::new(StatusCode::CONFLICT, unavailable.0)
         }
     }
@@ -616,18 +618,22 @@ impl From<Unavailable> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        if let Some(body) = self.body {
-            (self.status, Json(body)).into_response()
-        } else if self.plain {
-            let kind = [(header::CONTENT_TYPE, "text/plain")];
-            (self.status, kind, self.error).into_response()
-        } else if let Some(detail) = self.detail {
-            (self.status, Json(json!({ "error": detail }))).into_response()
-        } else if self.retryable {
-            let body = json!({ "error": self.error, "retryable": true });
-            (self.status, Json(body)).into_response()
-        } else {
-            (self.status, Json(json!({ "error": self.error }))).into_response()
+        match self.body {
+            ErrorBody::Message => {
+                (self.status, Json(json!({ "error": self.error }))).into_response()
+            }
+            ErrorBody::Plain => {
+                let kind = [(header::CONTENT_TYPE, "text/plain")];
+                (self.status, kind, self.error).into_response()
+            }
+            ErrorBody::Retryable => {
+                let body = json!({ "error": self.error, "retryable": true });
+                (self.status, Json(body)).into_response()
+            }
+            ErrorBody::Detail(detail) => {
+                (self.status, Json(json!({ "error": *detail }))).into_response()
+            }
+            ErrorBody::Custom(body) => (self.status, Json(*body)).into_response(),
         }
     }
 }
@@ -1724,10 +1730,11 @@ async fn started_again(
 ) -> Result<Result<AgentRecord, NotMade>, (StatusCode, Value)> {
     let unavailable = |why: Unavailable| {
         let why = ApiError::from(why);
-        (
-            why.status,
-            why.body.unwrap_or_else(|| json!({"error":why.error})),
-        )
+        let body = match why.body {
+            ErrorBody::Custom(body) => *body,
+            _ => json!({ "error": why.error }),
+        };
+        (why.status, body)
     };
     let checked = app
         .fleet

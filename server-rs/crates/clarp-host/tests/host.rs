@@ -5280,10 +5280,23 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         all.extend_from_slice(args);
         tool(&host, &dir, None, &all)
     };
-    let over = |text: &str| {
-        let reply = said("assistant", text);
-        wait_for("the answer", || host.conversation(&worker).contains(&reply));
-        wait_for("the turn to be over", || host.state(&worker) == "done");
+    let shown = |at: &Host, session: &str| {
+        at.get(&format!("/log?session={session}&coordination=show"))["turns"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let over = |at: &Host, session: &str, trace: &Value| {
+        assert!(trace.as_str().is_some_and(|trace| !trace.is_empty()));
+        // The scripted tool echoes only the first line, which can be Host context.
+        wait_for("an answer on the delivered trace", || {
+            shown(at, session).iter().any(|row| {
+                row["role"] == "assistant"
+                    && row["trace_id"] == *trace
+                    && row["text"].as_str().is_some_and(|reply| !reply.is_empty())
+            })
+        });
+        wait_for("the turn to be over", || at.state(session) == "done");
     };
 
     // One agent hands another something, as the skill tells it to.
@@ -5302,8 +5315,8 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (&sent["ok"], &sent["session"], &sent["queued"]),
         (&json!(true), &json!(worker), &json!(false))
     );
-    over("please look at the build");
-    let rows = host.turns(&worker);
+    over(&host, &worker, &sent["trace_id"]);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (
             &rows[0]["origin"],
@@ -5312,7 +5325,11 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         ),
         (&json!("agent"), &json!(asker), &json!("Asker"))
     );
+    assert_eq!(rows[0]["text"], "please look at the build");
     assert_eq!(rows[1]["origin"], "agent");
+    let hidden = host.get(&format!("/log?session={worker}&coordination=auto"));
+    assert_eq!(hidden["coordination"]["visibility"], "hide");
+    assert!(hidden["turns"].as_array().unwrap().is_empty());
     // The writer is named as the roster has it when the row is read: renamed, the row says the
     // new name, and its revision does not move (a follower learns of it from the roster).
     let revision = rows[0]["revision"].clone();
@@ -5321,7 +5338,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         json!({ "session": asker, "name": "Asker Renamed" }),
     );
     assert_eq!(renamed["name"], "Asker Renamed", "{renamed}");
-    let rows = host.turns(&worker);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (
             &rows[0]["sender_name"],
@@ -5342,7 +5359,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     assert_eq!(host.get("/agents/snapshot")["focus"], focus_before);
 
     // Something that runs by itself writes without a sender.
-    let (code, _, err) = admin(&[
+    let (code, out, err) = admin(&[
         "prompt",
         "--to",
         &worker,
@@ -5352,8 +5369,9 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         "the queue is long",
     ]);
     assert_eq!(code, 0, "{err}");
-    over("the queue is long");
-    let rows = host.turns(&worker);
+    let sent: Value = serde_json::from_str(&out).unwrap();
+    over(&host, &worker, &sent["trace_id"]);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (&rows[2]["origin"], &rows[2]["text"], &rows[2]["automated"]),
         (
@@ -5391,7 +5409,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (stranger.0, stranger.2.as_str()),
         (1, "clarp-admin prompt: unknown or disabled peer: work\n")
     );
-    assert_eq!(host.turns(&worker).len(), 4, "nothing else was sent");
+    assert_eq!(shown(&host, &worker).len(), 4, "nothing else was sent");
 
     // Another Host, which the owner names: an agent here writes to an agent there.
     let elsewhere = Place::new("message-elsewhere");
@@ -5456,11 +5474,9 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     assert_eq!(code, 0, "{err}");
     let sent: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(sent["session"], remote.as_str());
-    let reply = said("assistant", "greetings from the other host");
-    wait_for("the answer on the other Host", || {
-        other.conversation(&remote).contains(&reply)
-    });
-    let rows = other.turns(&remote);
+    over(&other, &remote, &sent["trace_id"]);
+    let rows = shown(&other, &remote);
+    assert_eq!(rows[0]["text"], "greetings from the other host");
     assert_eq!(
         (&rows[0]["origin"], &rows[0]["sender_session"]),
         (&json!("agent"), &json!(asker)),
@@ -5491,7 +5507,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     // so after the Host was started again.
     assert_eq!(host.ask("DELETE", &format!("/agents/{asker}"), None).0, 200);
     let named = |host: &Host| {
-        let rows = host.turns(&worker);
+        let rows = shown(&host, &worker);
         (
             rows[0]["sender_name"].clone(),
             rows[0]["sender_session"].clone(),
@@ -10300,11 +10316,34 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
          there was nothing to bring. If another Host has it, `clarp-host import --files --from \
          {old} --session {session} --files-from ADDR:PORT` brings it from there.\nIt is heard \
          here as it was there: in no,en, by elevenlabs:scribe_v2, then google:chirp_3.\nIt is \
-         still on the Host at",
+         marked moved on the Host at {old}. Its turn-start doors there now refuse it. It is resumed here.",
         old = old_host.address
     );
     assert!(told.contains(&said_of_it), "{told}");
     assert!(!told.contains("did not arrive"), "{told}");
+    let identity = new_host.get("/pairing/identity");
+    let (status, refused) = old_host.ask(
+        "POST",
+        "/send",
+        Some(&json!({
+            "session": session, "text": "This must run on the destination",
+            "client_msg_id": "after-move-on-source",
+        })),
+    );
+    let moved_at = refused["moved_at"].as_i64().unwrap();
+    assert!(moved_at > 0);
+    assert_eq!(
+        (status, refused),
+        (
+            409,
+            json!({
+                "ok": false, "error": "agent_moved",
+                "moved_to": {"host": identity["name"], "id": identity["server_id"]},
+                "moved_at": moved_at,
+            })
+        )
+    );
+    assert_eq!(old_host.conversation(&session), before);
     let heard_here = new_host.get("/transcription-providers");
     let heard_by_both = |text: &str| json!({(&session):text, (&agent_id):text});
     assert_eq!(
@@ -10377,11 +10416,9 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let waiting = new_host.get("/attention");
     assert_eq!(waiting["count"], 1, "{waiting}");
     assert_eq!(waiting["items"][0]["decision_id"], decision_id.as_str());
-    // It arrived held: until its owner resumes it here, nothing starts by itself, because
-    // until then it is on the first Host too. Its goals are as they were, not paused.
-    assert!(told.contains("Here it is held until then"), "{told}");
+    // Marking the source lets the imported mailbox resume. Its goals are as they were.
     let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
+    assert_eq!(queue["paused"], false, "{queue}");
     assert_eq!(plan_here["status"], "active");
     // And the agent goes on with it here: the next step follows the revision it had.
     let revision = plan_before["revision"].as_i64().unwrap().to_string();
@@ -10574,14 +10611,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         new_host.conversation(&session)[5],
         said("assistant", "and now?")
     );
-    // What its user said ran, and it is still held; a resume lets it go.
-    let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
-    let resumed = new_host.post("/turn-queue/resume", json!({ "session": session }));
-    assert_eq!(resumed["paused"], false, "{resumed}");
-    let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], false, "{queue}");
-    // The first Host was read, not changed; and an agent arrives once.
+    // The source mark leaves its conversation intact. The destination imports it once.
     assert_eq!(old_host.conversation(&session), before);
     let again = third_place
         .host_command()
@@ -10609,7 +10639,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     assert!(
         told.contains(
-            "with the 2 rows of its conversation and the one file it published or shows.\nIt is still"
+            "with the 2 rows of its conversation and the one file it published or shows.\nIt is marked moved"
         ),
         "{told}"
     );
@@ -24051,7 +24081,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     let host = place.start_in("", &[], &world);
     let echo = host.new_agent("Echo");
 
-    // What is read: nothing of the kind is here, said in the Python Host's own fields.
+    // A new agent has no goal. The Host answers in the Python Host's fields.
     let read = |path: &str| host.get(path);
     assert_eq!(
         read(&format!("/agent-goal?session={echo}")),
@@ -24329,17 +24359,14 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         );
     }
 
-    // A change to any of it is refused, and says that it is not built: nothing is taken
-    // and then not done.
-    for (path, body) in [
-        ("/server-update", json!({})),
-        ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
-    ] {
-        let (status, said) = host.ask("POST", path, Some(&body));
-        let why = said["error"].as_str().unwrap_or("");
-        assert_eq!(status, 501, "{path}: {said}");
-        assert!(why.ends_with("not built on this Host yet"), "{path}: {why}");
-    }
+    // An app can read the update screen. Updating the Host is an installer action.
+    assert_eq!(
+        host.ask("POST", "/server-update", Some(&json!({}))),
+        (
+            501,
+            json!({ "error": "Updating this Host from an app is not built on this Host yet" }),
+        )
+    );
 
     // What an agent does by itself is off, and turning it off is done; turning it on is not.
     for (path, field) in [("/agent-dreaming", "dreaming_enabled")] {
@@ -41049,6 +41076,10 @@ fn a_call_of_the_oracle_is_told_of_what_agents_finished_and_nobody_wrote_to_sinc
         ("OPENAI_API_KEY", "a-key-of-the-test"),
     ];
     let host = place.start_in(ADMIN, &[], &world);
+    // The scripted tool reads only the first line. Keep the coordination reminder
+    // out of this fixture's prompts so its agent-origin sleep actually holds the turn.
+    let show = json!({"coordination_visibility":"show"});
+    assert_eq!(host.post("/coordination-settings", show.clone()), show);
     let events = host.listen_at(&format!("/events?token={ADMIN}"));
     let names = ["Ida", "Mike", "Zoe", "Theo", "Nora", "Dora", "Rhea", "Ada"];
     let [ida, mike, zoe, theo, nora, dora, rhea, ada] = names.map(|name| host.new_agent(name));

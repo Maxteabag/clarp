@@ -15,7 +15,7 @@ RUNS = {
 }
 PLANTS = [
     (W, "wire", "a failure without its trace",
-     '// Every failure names its turn\'s trace.\n                "trace_id": trace,', '// Every failure names its turn\'s trace.'),
+     '        "trace_id": trace,\n', ''),
     (W, "wire", "the trace of any turn that ended",
      '.filter(|end| end.turn == last.id.0)\n        .and_then(|end| end.trace_id.clone())', '.and_then(|end| end.trace_id.clone())'),
     (W, "stop", "a Stop that names no trace",

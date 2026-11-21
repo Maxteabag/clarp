@@ -54,11 +54,12 @@ def release(name):
         time.sleep(.02)
 
 first, text = prompt()
-# A hidden coordination prompt starts with the Host's reminder. Keep the case label
-# separate, and check that only the two coordination turns receive the reminder.
-reminder, separator, request = text.partition("\n\n")
-has_reminder = bool(separator) and reminder.startswith(
-    "Coordination: this turn answers a message from another agent")
+# An initial hidden coordination prompt carries the reminder inside the team envelope.
+opening = "--- Clarp team context ---\n"
+closing = "\n--- End Clarp team context ---\n\n"
+context, separator, request = text.partition(closing)
+has_reminder = bool(separator) and context.startswith(
+    opening + "Coordination: this turn answers a message from another agent")
 if has_reminder:
     text = request
 assert has_reminder == (text in ("case-mixed", "case-relayed"))
@@ -93,6 +94,7 @@ if mode == "large":
 more = []
 for index in range(2 if mode == "double" else 1):
     uid, follow = prompt()
+    assert "Coordination: this turn answers a message from another agent" not in follow
     if mode == "large":
         identifier, _, content = follow.partition(" ")
         assert len(content) == 256 * 1024

@@ -4722,6 +4722,71 @@ fn a_bookkeeping_page_counts_only_eligible_rows_before_each_limit() {
     }
 }
 
+#[test]
+fn a_move_settles_a_parked_attempt_and_keeps_its_waiting_messages() {
+    use clarp_kernel::agent_moves::{MOVED, Target};
+
+    for account in [false, true] {
+        let label = if account {
+            "moved-account"
+        } else {
+            "moved-reconnect"
+        };
+        let mut world = World::new(label);
+        if account {
+            world.profile.accounts = clarp_kernel::recovery::Accounts::Select;
+        }
+        let mut actor = world.open();
+        world.send(&mut actor, "u-running", "go", Admission::Queue);
+        world.says(1, r#"{"session": "session-1"}"#);
+        world.hint(&mut actor);
+        world.send(&mut actor, "u-waiting", "later", Admission::Queue);
+        if account {
+            let out = actor.stop_for_an_account(world.tick()).unwrap();
+            world.carry_out(&mut actor, out);
+            world.exits(1, None, Some(15));
+        } else {
+            world.write(1, Line::Err("API Error: socket hang up".into()));
+            world.exits(1, Some(1), None);
+        }
+        world.hint(&mut actor);
+        let retry_at = actor.retry_at();
+        assert!(if account {
+            actor.waits_for_an_account().is_some()
+        } else {
+            retry_at.is_some()
+        });
+
+        let target = Target {
+            host: "Destination".into(),
+            id: "agent-y".into(),
+        };
+        let (receipt, out) = actor.set_move(Some(target), None, world.tick()).unwrap();
+        assert!(receipt.changed);
+        assert!(
+            !out.actions
+                .iter()
+                .any(|action| matches!(action, Action::Launch(_)))
+        );
+        let status = actor.status();
+        assert!(status.live.is_none());
+        assert!(
+            matches!(status.last.unwrap().outcome, Outcome::Interrupted { reason } if reason == MOVED)
+        );
+        assert_eq!(actor.queue().unwrap().len(), 1);
+        assert!(actor.tail(5).unwrap().entries.iter().any(|row| {
+            matches!(&row.entry, Entry::Notice(notice) if notice.text.starts_with("The agent moved to another Host"))
+        }));
+        let out = if account {
+            actor.login_changed(world.tick()).unwrap()
+        } else {
+            actor.retry_due(retry_at.unwrap()).unwrap()
+        };
+        assert!(out.actions.is_empty());
+        assert_eq!(actor.queue().unwrap().len(), 1);
+    }
+}
+
 // ---- the turn an artifact names (R102) -------------------------------------------------------
 
 /// The trace of the agent's running turn, as its rows carry it, is what an artifact published in
