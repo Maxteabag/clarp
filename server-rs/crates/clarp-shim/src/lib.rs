@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+pub mod codex_app;
+pub mod codex_turn;
 
 /// The environment variable that tells a hook where its shim listens.
 pub const SOCKET_ENV: &str = "CLARP_SHIM_SOCKET";
