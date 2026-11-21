@@ -31061,7 +31061,7 @@ else:
 fn inherited_models_retry_only_the_isolated_question_and_record_the_actual_model() {
     let place = Place::new("model-fallbacks");
     let scripts = r#"#!/usr/bin/env python3
-import json,sys,pathlib,time
+import json,os,sys,pathlib,time
 root=pathlib.Path(__file__).parent
 provider=pathlib.Path(__file__).name
 args=sys.argv[1:]
@@ -31078,12 +31078,15 @@ if provider=="codex" and mode in ("decline","unavailable","slow"):
     print("permission denied" if mode=="decline" else "fetch failed",file=sys.stderr)
     sys.exit(1)
 if mode=="slow":
-    (root/"alternate-entered").touch()
+    parent=os.getppid()
+    (root/"alternate-entered").write_text(str(os.getpid()))
     for _ in range(100):
+        # The crash case deliberately kills the Host without running its cleanup.
+        if os.getppid()!=parent:sys.exit(0)
         if (root/"release").exists():break
         time.sleep(.05)
 if model=="timeout-explanation":
-    (root/"slow-explanation-started").touch()
+    (root/"slow-explanation-started").write_text(str(os.getpid()))
     time.sleep(120)
     sys.exit(9)
 if mode=="reads":
@@ -31722,6 +31725,18 @@ else:print(answer)
     wait_for("the explanation model's timeout", || {
         slow_explanation()["items"][0]["status"] == "failed"
     });
+    let fixture_pid = |file: &str| -> Option<u32> {
+        std::fs::read_to_string(place.root.join(file))
+            .ok()?
+            .parse()
+            .ok()
+    };
+    // A zombie has no executable image; the build supervisor or init can reap it.
+    let is_running = |pid| std::fs::read_link(format!("/proc/{pid}/exe")).is_ok();
+    let explanation = fixture_pid("slow-explanation-started").unwrap();
+    wait_for("the timed-out explanation's process to end", || {
+        !is_running(explanation)
+    });
     assert_eq!(
         slow_explanation()["items"],
         json!([{"id":"slow","status":"failed","reason":"timeout"}])
@@ -31761,10 +31776,23 @@ else:print(answer)
     let mut socket = TcpStream::connect(&h.address).unwrap();
     write!(socket,"POST /send HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",h.token,interrupted.len(),interrupted).unwrap();
     wait_for("the alternate to start before the crash", || {
-        place.root.join("alternate-entered").exists()
+        fixture_pid("alternate-entered").is_some()
     });
+    let alternate = fixture_pid("alternate-entered").unwrap();
+    assert!(
+        is_running(alternate),
+        "the alternate was already gone before the crash"
+    );
     h.kill();
     drop(socket);
+    let after_crash = Instant::now();
+    while is_running(alternate) && after_crash.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !is_running(alternate),
+        "slow fallback {alternate} survived the Host crash"
+    );
     let crash_request = clarp_kernel::router::flow::request_id(None, "u-claim-at-crash");
     let crash_run =
         clarp_kernel::janitors::demand::request_run_id("message-delegator", &crash_request)
