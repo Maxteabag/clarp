@@ -5194,6 +5194,30 @@ fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
 }
 
 #[test]
+fn a_turn_accepted_without_a_note_capability_stays_visible_when_that_capability_returns() {
+    let mut world = World::new("coordination-without-notes");
+    let mut actor = world.open();
+    actor.hide_coordination(false);
+    let (message, marks) = from_an_agent("u-without-notes", "tr-without-notes");
+    let now = world.tick();
+    let (sent, _) = actor
+        .send_marked(&message, Admission::Queue, None, &marks, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(sent.turn, Some(TurnId(1)));
+    actor.hide_coordination(true);
+
+    let page = actor.tail_of(4, Which::WithoutCoordination).unwrap();
+    assert!(
+        page.entries
+            .iter()
+            .any(|row| row.entry.id() == "u-without-notes")
+    );
+    assert!(page.hidden_before.is_empty());
+    assert!(page.hidden_after.is_none());
+}
+
+#[test]
 fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_are_counted_into_its_end()
  {
     let mut world = World::new("coordination");

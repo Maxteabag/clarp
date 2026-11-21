@@ -3,6 +3,8 @@ import runner
 
 RUNS = {
     'vectors': ['test', '--test', 'hidden_coordination_vectors'],
+    'actor': ['test', '-p', 'clarp-actor', '--test', 'actor',
+              'a_turn_accepted_without_a_note_capability'],
     'counts': ['test', '-p', 'clarp-actor', '--lib', 'counted_runs_match'],
     'host': ['test', '--test', 'host', '--', 'a_user_can_hide_coordination'],
 }
@@ -47,6 +49,9 @@ PLANTS = [
     (E, 'host', 'a snapshot shows an empty string for a default override',
      'row["coordination_override"] = json!(choice);',
      'row["coordination_override"] = json!(choice.map_or("", |choice| choice.word()));'),
+    ('clarp-actor/src/lib.rs', 'actor', 'a turn without notes can become hidden later',
+     'coordination: if self.profile.hides_coordination {',
+     'coordination: if true {'),
     (C, 'host', 'a note from a marked turn is hidden',
      'if matches!(entry, Entry::Note(_)) {',
      'if matches!(entry, Entry::Note(_)) && item.turn.is_none() {'),
