@@ -169,3 +169,54 @@ def test_the_native_session_is_not_touched(tmp_path):
     _move(world)
     agent_moves.clear(world.agent)
     assert agents_db.live_backend_session(world.agent) == before
+
+
+# --- continuations that spawn a new process after admission ----------------------
+
+def _owning_spec(world, cid):
+    """A queued spec of the agent that now owns its slot, as a continuation's
+    spec does (the turn was admitted before the move)."""
+    spec = next(s for s in td._SLOTS.queued_specs()[world.agent] if s.client_msg_id == cid)
+    td._SLOTS.drop_queued(world.agent, lambda s: s is spec)
+    td._SLOTS.release(world.agent, td._SLOTS.get(world.agent))
+    world.provider.live.discard(world.agent)
+    td._SLOTS.claim(world.agent, spec.trace_id)
+    return spec
+
+
+def _ended_moved(world, spec):
+    from lib import agents as agents_db
+    state = agents_db.latest_state(world.agent) or {}
+    detail = state.get("detail") or {}
+    if isinstance(detail, str):
+        import json
+        detail = json.loads(detail or "{}")
+    assert detail.get("reason") == agent_moves.AGENT_MOVED, state
+    assert td._SLOTS.get(world.agent) in ("", None)          # the slot is released
+
+
+def test_a_reconnect_retry_after_the_move_ends_the_turn_and_spawns_nothing(tmp_path):
+    world = World(tmp_path)
+    world.send("t0")
+    world.send("p1", origin="agent", queue=True)
+    spec = _owning_spec(world, "p1")
+    world.service.retry_scheduler = lambda _delay, fn: fn()    # the backoff elapses now
+    _move(world)
+    before = len(world.provider.spawned)
+    world.service._schedule_retry(spec, 1, {"saw_init": True}, "connection reset")
+    assert len(world.provider.spawned) == before
+    _ended_moved(world, spec)
+
+
+def test_a_turn_resumed_after_an_account_switch_does_not_spawn_once_moved(tmp_path):
+    world = World(tmp_path)
+    world.send("t0")
+    world.send("p1", origin="agent", queue=True)
+    spec = _owning_spec(world, "p1")
+    _move(world)
+    before = len(world.provider.spawned)
+    world.service._resume_after_account_switch(spec, 1, {})
+    assert len(world.provider.spawned) == before
+    _ended_moved(world, spec)
+    # The item never started: it stays queued for the way back.
+    assert turn_queue.status("p1") == "queued"

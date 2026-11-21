@@ -152,12 +152,32 @@ class RetryMixin:
                         f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
                         f"preempted during backoff")
                     return
+            if self._moved_before_spawn(next_spec, next_attempt):
+                return
             try:
                 self._spawn_attempt(next_spec, attempt=next_attempt)
             except JanitorDispatchError:
                 self._discard_fenced_janitor(next_spec)
 
         self.retry_scheduler(delay, _retry_spawn)
+
+    def _moved_before_spawn(self, spec: _TurnSpec, attempt: int) -> bool:
+        """A continuation about to start a new process on the agent's native
+        session (a turn resumed after an account switch, a reconnect retry)
+        finds the agent moved to another Host since it was admitted: that Host
+        writes the session now (lib.agent_moves). The turn ends here,
+        interrupted with reason ``agent_moved``, and its slot is released. Its
+        queue item, if it never started, stays queued for the way back.
+        True when it ended the turn."""
+        from . import agent_moves
+        if agent_moves.moved(spec.agent_id) is None:
+            return False
+        log("spawnRefusedMoved", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
+        self._mark_interrupted(
+            spec, agent_moves.AGENT_MOVED,
+            "The agent moved to another Host; this turn does not continue here",
+            attempts=attempt)
+        return True
 
     def _mark_interrupted(self, spec: _TurnSpec, category: str,
                           message: str | None, *, attempts: int,
@@ -176,6 +196,7 @@ class RetryMixin:
             error_classify.ACCOUNT_PLAN: (
                 f"This account's plan does not include {spec.model or 'this model'}. "
                 "Switch to an account that has it or choose another model"),
+            "agent_moved": "The agent moved to another Host",
         }.get(category, "Turn failed")
         human = error_classify.explain(message) or human
         limit_event = None
