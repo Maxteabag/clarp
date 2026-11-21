@@ -571,6 +571,10 @@ def test_v131_adds_the_favourite_mark_who_deleted_and_the_gallery_indexes(tmp_pa
             WHERE deleted_at IS NULL;
         CREATE INDEX idx_media_assets_sha ON media_assets(sha256);
     """)
+    # The setup really is v130: without the two columns the migration must add (it skips a
+    # column that exists, so a setup that kept one would pass unnoticed).
+    before = [r[1] for r in con.execute("PRAGMA table_info(media_assets)")]
+    assert "favorite_at" not in before and "deleted_by" not in before, before
     con.execute("INSERT INTO media_assets(asset_id, agent_id, session, source_name, sha256, mime_type, "
                 "bytes, storage_path, created_by, created_at) "
                 "VALUES ('asset_a', 'ag', 's', 'a.png', 'x', 'image/png', 1, '/p', 'agent', 1)")

@@ -96,6 +96,7 @@ pub mod router;
 pub mod schedules;
 pub mod screens;
 pub mod seats;
+mod takeover;
 pub mod telling;
 pub mod terminal;
 pub mod tools;

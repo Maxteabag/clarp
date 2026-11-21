@@ -16,6 +16,7 @@ from lib.log import log_exception
 from lib.voices import voices_with_availability
 from lib.routes.helpers import _runtime_paths, _raw_query_value
 from lib.cartesia_preview_locks import _cartesia_preview_lock
+from lib.request_texts import body_text
 
 
 class VoiceRoutes:
@@ -30,7 +31,7 @@ class VoiceRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         if "muted" not in data:
@@ -53,11 +54,17 @@ class VoiceRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        voice_id = (data.get("voice_id") or "").strip()
-        provider = (data.get("provider") or "").strip().lower()
+        session = body_text(data, "session")
+        voice_id = body_text(data, "voice_id")
+        provider = body_text(data, "provider").lower()
         if not session or not voice_id:
             return self._json_error(400, "session and voice_id required")
+        if not provider:
+            # One stored shape (issue 476): a client that names no provider (the PWA,
+            # the desktop) gets the provider the id's form names, merged into the map,
+            # instead of a bare value that replaced every other provider's choice.
+            from lib.voice import ELEVENLABS, infer_provider
+            provider = infer_provider(voice_id) or ELEVENLABS
         if provider == "google":
             # Only the built-in google provider is validated: its voices are a fixed allowlist.
             # A legacy custom "google" adapter refuses it first, before the allowlist.
@@ -74,14 +81,11 @@ class VoiceRoutes:
         for sid, info in agents.items():
             if sid == session:
                 continue
-            occupied = ((resolve_voice((info or {}).get("voice_id"), provider)
-                         if provider else (info or {}).get("voice_id")))
+            occupied = resolve_voice((info or {}).get("voice_id"), provider)
             if occupied == voice_id:
                 return self._json(409, {"error": "voice taken",
                                         "by": (info or {}).get("name") or sid})
-        agents[session]["voice_id"] = (
-            merge_voice(agents[session].get("voice_id"), provider, voice_id)
-            if provider else voice_id)
+        agents[session]["voice_id"] = merge_voice(agents[session].get("voice_id"), provider, voice_id)
         # This agent only: the roster read above may be stale for others (TP-03).
         save_agent(session, agents[session])
         # Open apps show the voice the agent now speaks with (feature voice_profile).
@@ -101,7 +105,7 @@ class VoiceRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         if "voice_verbosity" not in data:
@@ -261,9 +265,9 @@ class VoiceRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        voice_id = (data.get("voice_id") or "").strip()
-        text = (data.get("text") or "Hi there, this is what I sound like.").strip()
-        session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
+        voice_id = body_text(data, "voice_id")
+        text = body_text(data, "text") or "Hi there, this is what I sound like."
+        session = body_text(data, "session") or self.ctx.default_session
         if not voice_id:
             return self._json_error(400, "voice_id required")
         from lib.google_tts import GoogleIdCollision

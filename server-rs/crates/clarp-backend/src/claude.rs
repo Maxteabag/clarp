@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
+use clarp_kernel::takeover::{self, Input};
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -95,32 +96,67 @@ impl Backend for Claude {
         };
         option("--model", &spec.model);
         option("--effort", &spec.effort);
-        option("--append-system-prompt", &spec.identity);
-        // A session it has: continue it. None yet: start one under the name the Host chose,
-        // or, with no name given, under one of the tool's own, which its first line tells.
-        if spec
-            .backend_session
-            .as_ref()
-            .is_some_and(|session| !session.is_empty())
+        let (first, fresh) = match &spec.takeover {
+            Some(Input::ClaudeFresh { first }) => (Some(first.as_str()), true),
+            Some(Input::ClaudeResume { first, .. }) => (Some(first.as_str()), false),
+            _ => (None, false),
+        };
+        // Normal turns keep the Host's reminder after the user's text. A takeover uses
+        // exactly two user blocks, so its reminder travels with the system instructions.
+        let reminder = spec.told.as_ref().map(|told| {
+            let said = told::beside(&told.persona, &spec.session, told.spoken);
+            let said = told::in_call(said, told.call.as_deref());
+            let (opens, ends) = REMINDER;
+            format!("{opens}\n{said}\n{ends}")
+        });
+        let identity = if first.is_some() {
+            let instructions = spec
+                .identity
+                .as_deref()
+                .into_iter()
+                .chain(reminder.as_deref())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            Some(instructions).filter(|value| !value.is_empty())
+        } else {
+            spec.identity.clone()
+        };
+        option("--append-system-prompt", &identity);
+        if !fresh
+            && spec
+                .backend_session
+                .as_ref()
+                .is_some_and(|session| !session.is_empty())
         {
             option("--resume", &spec.backend_session);
         } else {
             option("--session-id", &spec.new_session);
         }
-        let mut content = vec![json!({"type": "text", "text": spec.prompt})];
-        // What the Host says with the prompt: after the user's own words, and marked as
-        // not theirs. On the Python Host a hook of Claude Code's says it, and Claude Code
-        // hands the model what a hook says between the same marks.
-        if let Some(told) = &spec.told {
-            let said = told::beside(&told.persona, &spec.session, told.spoken);
-            let said = told::in_call(said, told.call.as_deref());
-            let (opens, ends) = REMINDER;
-            content.push(json!({"type": "text", "text": format!("{opens}\n{said}\n{ends}")}));
+        if let Some(Input::ClaudeResume {
+            resume_at,
+            drops_turn,
+            ..
+        }) = &spec.takeover
+        {
+            args.extend([
+                "--resume-session-at".to_string(),
+                resume_at.clone(),
+                "--resume-drops-turn".to_string(),
+                drops_turn.clone(),
+            ]);
         }
-        let message = json!({
-            "type": "user",
-            "message": {"role": "user", "content": content},
-        });
+        let mut texts = Vec::with_capacity(2);
+        texts.extend(first);
+        texts.push(spec.prompt.as_str());
+        if first.is_none() {
+            texts.extend(reminder.as_deref());
+        }
+        let uuid = spec
+            .trace_id
+            .as_deref()
+            .and_then(takeover::prompt_uuid)
+            .unwrap_or_else(|| takeover::untraced_uuid(&spec.agent_id, spec.turn));
+        let message = takeover::claude_user_line(&uuid, &texts);
         let mut stdin = message.to_string().into_bytes();
         stdin.push(b'\n');
         Launch {
@@ -186,6 +222,8 @@ struct Draft {
     id: String,
     /// The text blocks of the message, by their index in it.
     blocks: Vec<(u64, String)>,
+    /// A keyless draft can ignore its snapshots only while its text stream is current.
+    streamed_text: bool,
     /// The tools the message calls, by the ids of their uses, in the order it calls them.
     tools: Vec<String>,
 }
@@ -428,8 +466,8 @@ pub struct ClaudeInterpreter {
     /// The activity last reported, so that only a change is reported.
     activity: Option<Activity>,
     draft: Option<Draft>,
-    /// The messages that arrive piece by piece. Their text is taken from the pieces, so the
-    /// whole message that follows the pieces must not be taken again.
+    /// The keyed messages that arrive piece by piece. A later snapshot can name them even
+    /// after their draft settled. Keyless snapshots belong only to the current draft.
     streamed: HashSet<String>,
     replies: u32,
     /// How many replies each message has become. One, unless the tool goes on with a message
@@ -625,6 +663,7 @@ impl ClaudeInterpreter {
         self.draft.get_or_insert_with(|| Draft {
             id: id.to_string(),
             blocks: Vec::new(),
+            streamed_text: false,
             tools: Vec::new(),
         })
     }
@@ -634,8 +673,10 @@ impl ClaudeInterpreter {
         let draft = self.draft.get_or_insert_with(|| Draft {
             id: String::new(),
             blocks: Vec::new(),
+            streamed_text: false,
             tools: Vec::new(),
         });
+        draft.streamed_text = true;
         let at = match draft.blocks.iter().position(|(i, _)| *i == index) {
             Some(at) => at,
             None => {
@@ -651,6 +692,10 @@ impl ClaudeInterpreter {
         let Ok(event) = serde_json::from_str::<Value>(line) else {
             return;
         };
+        // Read receipts place user rows in the actor; they carry no tool output.
+        if event["type"] == "user" && event["isReplay"] == true {
+            return;
+        }
         // What a sub-agent says belongs to its own stream. It has no row in the parent's
         // conversation, and its raw block indexes must not replace the parent's.
         let parent = text_of(&event["parent_tool_use_id"]);
@@ -789,8 +834,13 @@ impl ClaudeInterpreter {
         match text_of(&piece["type"]) {
             "message_start" => {
                 let id = text_of(&piece["message"]["id"]).to_string();
+                if id.is_empty() {
+                    // A message start is a new boundary even when neither message has an id.
+                    self.settle(out);
+                } else {
+                    self.streamed.insert(id.clone());
+                }
                 self.draft_for(&id, out);
-                self.streamed.insert(id);
             }
             "content_block_start" => {
                 let block = &piece["content_block"];
@@ -871,6 +921,13 @@ impl ClaudeInterpreter {
                     + count("cache_creation_input_tokens"),
             });
         }
+        let streamed = if id.is_empty() {
+            self.draft
+                .as_ref()
+                .is_some_and(|draft| draft.id.is_empty() && draft.streamed_text)
+        } else {
+            self.streamed.contains(&id)
+        };
         for block in content {
             match text_of(&block["type"]) {
                 "tool_use" | "server_tool_use" => {
@@ -915,7 +972,7 @@ impl ClaudeInterpreter {
                         self.tools.insert(call_id.to_string(), call);
                     }
                 }
-                "text" if !self.streamed.contains(&id) => {
+                "text" if !streamed => {
                     let text = text_of(&block["text"]);
                     if text.is_empty() {
                         continue;
@@ -1490,6 +1547,69 @@ mod tests {
     }
 
     #[test]
+    fn a_keyless_snapshot_does_not_rewrite_streamed_paragraphs_or_hide_the_next_reply() {
+        for started in [false, true] {
+            let mut lines = vec![INIT.to_string()];
+            if started {
+                lines.push(stream(
+                    r#"{"type":"message_start","message":{"role":"assistant"}}"#,
+                ));
+            }
+            lines.extend([
+                stream(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"First."}}"#),
+                stream(r#"{"type":"content_block_stop","index":0}"#),
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"A stale snapshot."}]}}"#.to_string(),
+                r#"{"type":"assistant","message":{"content":[{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}},{"type":"web_search_tool_result","text":"Not chat words","content":[{"type":"web_search_result","title":"A fixture"}]}]}}"#.to_string(),
+                stream(r#"{"type":"content_block_start","index":3,"content_block":{"type":"text","text":"Second."}}"#),
+                stream(r#"{"type":"content_block_stop","index":3}"#),
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Second."}]}}"#.to_string(),
+                stream(r#"{"type":"message_stop"}"#),
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Whole-only first."},{"type":"thinking","thinking":"Not for chat"},{"type":"text","text":"Whole-only second."}]}}"#.to_string(),
+                RESULT.to_string(),
+            ]);
+            let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let signals = read(&lines, (Some(0), None));
+            let growing: Vec<_> = signals
+                .iter()
+                .filter_map(|signal| match signal {
+                    Signal::Live(reply) => Some(reply.text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                growing,
+                [
+                    "First.",
+                    "First.\n\nSecond.",
+                    "Whole-only first.",
+                    "Whole-only first.\n\nWhole-only second.",
+                ]
+            );
+            let replies: Vec<_> = signals
+                .iter()
+                .filter_map(|signal| match signal {
+                    Signal::Reply(reply) => Some(reply),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(replies.len(), 2);
+            assert_eq!(replies[0].text, growing[1]);
+            assert_eq!(replies[0].tools, ["srvtoolu_1"]);
+            assert_eq!(replies[1].text, growing[3]);
+            let items: HashSet<_> = signals
+                .iter()
+                .filter_map(|signal| match signal {
+                    Signal::Glimpse(Glimpse::Message {
+                        id, row: Some(row), ..
+                    }) if row == &replies[0].id => Some(id),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(items.len(), 1);
+        }
+    }
+
+    #[test]
     fn what_is_not_this_agents_reply_is_left_alone() {
         let signals = read(
             &[
@@ -1662,6 +1782,8 @@ mod tests {
             agent_id: "a1".to_string(),
             session: "maximus".to_string(),
             turn: 1,
+            trace_id: Some("trace-one".to_string()),
+            takeover: None,
             cwd: PathBuf::from("/work"),
             prompt: "say \"hi\"\nplease".to_string(),
             backend_session: None,
@@ -1700,6 +1822,7 @@ mod tests {
             "the message is one line, whatever it contains"
         );
         let sent: Value = serde_json::from_slice(&fresh.stdin).unwrap();
+        assert_eq!(sent["uuid"], "5905c1ea-7df9-5e20-9081-547464dcda44");
         assert_eq!(sent["message"]["content"][0]["text"], "say \"hi\"\nplease");
         assert_eq!(
             sent["message"]["content"].as_array().unwrap().len(),
@@ -1776,6 +1899,60 @@ mod tests {
                 .any(|pair| pair == ["--session-id", "conv-1"]),
             "a first turn starts the session under the name the Host chose"
         );
+        for (plan, expected) in [
+            (
+                Input::ClaudeResume {
+                    first: "the first message".to_string(),
+                    resume_at: "previous-uuid".to_string(),
+                    drops_turn: "first-uuid".to_string(),
+                },
+                [
+                    Some(["--resume", "sess-1"]),
+                    Some(["--resume-session-at", "previous-uuid"]),
+                    Some(["--resume-drops-turn", "first-uuid"]),
+                ],
+            ),
+            (
+                Input::ClaudeFresh {
+                    first: "the first message".to_string(),
+                },
+                [Some(["--session-id", "conv-new"]), None, None],
+            ),
+        ] {
+            let launch = Claude::new().launch(&TurnSpec {
+                backend_session: Some("sess-1".to_string()),
+                new_session: Some("conv-new".to_string()),
+                takeover: Some(plan),
+                told: Some(told::Turn {
+                    persona: "Maximus".to_string(),
+                    spoken: None,
+                    call: None,
+                }),
+                ..spec.clone()
+            });
+            for pair in expected.into_iter().flatten() {
+                assert!(launch.args.windows(2).any(|window| window == pair));
+            }
+            assert_eq!(
+                launch.args.iter().any(|arg| arg == "--resume"),
+                expected[1].is_some()
+            );
+            assert_eq!(
+                launch.stdin.iter().filter(|byte| **byte == b'\n').count(),
+                1
+            );
+            let input: Value = serde_json::from_slice(&launch.stdin).unwrap();
+            assert_eq!(
+                input["message"]["content"],
+                json!([
+                    {"type": "text", "text": "the first message"},
+                    {"type": "text", "text": spec.prompt},
+                ])
+            );
+            assert!(launch.args.windows(2).any(|pair| {
+                pair[0] == "--append-system-prompt" && pair[1].contains("<system-reminder>")
+            }));
+        }
         let resumed = Claude::with_program("/opt/claude").launch(&TurnSpec {
             backend_session: Some("sess-1".to_string()),
             new_session: Some("conv-1".to_string()),

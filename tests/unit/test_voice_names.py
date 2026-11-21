@@ -316,3 +316,72 @@ def test_an_event_about_an_archived_agent_carries_no_profile():
     assert voice_profile.for_session("ada-gone") is events.OMIT
     assert voice_profile.for_session("ada-live") is not events.OMIT
     assert live
+
+
+# ---------------------------------------------------------------- the names follow-up (live finds, 21 Nov)
+
+def test_the_same_names_keep_the_start_up_refresh_away(names_file):
+    """Reviewer 3's V6: an unchanged daily check marks the file, or after a day every
+    restart would refresh again."""
+    import os
+    import time
+    _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke"}])
+    old = time.time() - voice_names.REFRESH_SECONDS - 60
+    os.utime(names_file, (old, old))
+    assert voice_names.start_due() is True
+    _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke"}])
+    assert voice_names.start_due() is False
+
+
+def test_todays_catalogue_is_replaced_and_names_are_kept(names_file):
+    """The pool hands out only what the provider offers today."""
+    _refresh(_cfg("cartesia"), names_file, pages=[
+        {"id": ADA_CARTESIA, "name": "Brooke", "language": "en", "is_public": True, "is_owner": False},
+        {"id": NORSK, "name": "Ingrid", "language": "no", "is_public": False, "is_owner": True}])
+    assert voice_names.catalogue("cartesia") == {
+        ADA_CARTESIA: {"language": "en", "public": True, "owner": False},
+        NORSK: {"language": "no", "public": False, "owner": True}}      # as each row said
+    _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke"}])
+    assert list(voice_names.catalogue("cartesia")) == [ADA_CARTESIA]
+    assert voice_names.names("cartesia")[NORSK] == "Ingrid"           # a name is still a name
+    assert voice_names.catalogue("elevenlabs") is None
+
+
+def test_a_deleted_voice_in_use_is_gone_logged_once_and_heard_as_unavailable(names_file, monkeypatch, tmp_path):
+    """Live find (21 Nov): Cartesia had deleted 26 voices agents spoke with; they were silent
+    and nothing said why. A 404 for a voice in use marks it gone, logs voiceGone once with
+    the agents that hold it, and the profile says voice_unavailable."""
+    import urllib.error
+    from lib import agents as agents_db
+    agents_db.create_agent(persona="Gus", voice_id=json.dumps({"cartesia": OTHER}), cwd=str(tmp_path), session="gus")
+    logged = []
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a))
+
+    def deleted(key, voice_id):
+        raise urllib.error.HTTPError("https://api.cartesia.ai/voices/x", 404, "Not Found", None, None)
+    for _ in range(2):
+        voice_names.refresh(_cfg("cartesia"), path=names_file,
+                            cartesia_all=lambda key: [{"id": ADA_CARTESIA, "name": "Brooke"}],
+                            cartesia_one=deleted, eleven_one=deleted,
+                            voices_in_use=lambda _cfg: {"cartesia": {OTHER}, "elevenlabs": set()})
+    assert voice_names.gone("cartesia") == {OTHER}
+    gone_lines = [a for a in logged if a[0] == "voiceGone"]
+    assert len(gone_lines) == 1 and f"provider=cartesia id={OTHER} agents=Gus" in gone_lines[0][1]
+    speech = voice_profile.speech(_host(_cfg("cartesia")),
+                                  {"agent_id": "a", "persona": "Gus", "session": "gus",
+                                   "voice_id": json.dumps({"cartesia": OTHER})})
+    assert (speech["voice_id"], speech["silent_reason"]) == (None, "voice_unavailable")
+
+
+def test_elevenlabs_is_never_asked_for_an_id_it_cannot_hold(names_file):
+    """Live find: ~43 lookups per refresh for bare Cartesia uuids, all 400 Bad Request."""
+    done, asked = _refresh(_cfg("cartesia", cartesia_api_key=""), names_file, pages=[],
+                           eleven_in_use={ELEVEN, ADA_CARTESIA, '{"cartesia":"x"}'})
+    assert [a for a in asked if a[0] == "eleven"] == [("eleven", ELEVEN)]
+
+
+def test_a_per_agent_override_voice_is_looked_up_too():
+    cfg = _cfg("cartesia", tts_agent_overrides={"zed": {"provider": "cartesia", "cartesia_voice": OTHER},
+                                                 "bo": {"provider": "elevenlabs", "elevenlabs_voice": ELEVEN}})
+    used = voice_names.in_use(cfg)
+    assert OTHER in used["cartesia"] and ELEVEN in used["elevenlabs"]

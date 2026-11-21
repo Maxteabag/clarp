@@ -24,6 +24,7 @@
 //! words and headers.
 
 pub mod held;
+mod names;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt};
@@ -225,6 +226,7 @@ pub struct Mouth {
     clock: Arc<dyn Clock + Send + Sync>,
     /// Cartesia's own list of voices as it was last fetched, and when.
     cartesia_voices: Mutex<Option<(std::time::Instant, Arc<Vec<Value>>)>>,
+    voice_names: names::Desk,
     /// Where the previews of voices are kept: `<data>/voice-previews`.
     previews: PathBuf,
     preview_locks: [tokio::sync::Mutex<()>; 16],
@@ -343,6 +345,18 @@ impl Mouth {
             .collect()
     }
 
+    fn cartesia_list_at(&self) -> String {
+        match self.cartesia_at.as_str() {
+            "" => clarp_speech::cartesia::VOICES.to_string(),
+            // A stand-in for the engine lists its voices beside where it speaks.
+            stand_in => stand_in.replace("/tts/bytes", "/voices"),
+        }
+    }
+
+    pub(crate) fn cached_voice_names(&self) -> (clarp_kernel::voice_names::Names, Option<String>) {
+        self.voice_names.snapshot()
+    }
+
     /// Cartesia's own list of voices: the one fetched within the last quarter of an hour,
     /// or a new one. Without a key, or when Cartesia does not answer, there is none.
     pub(crate) async fn cartesia_list(self: &Arc<Self>) -> Arc<Vec<Value>> {
@@ -370,11 +384,7 @@ impl Mouth {
         let Some(key) = self.owner.key("cartesia") else {
             return Ok(Arc::default());
         };
-        let list_at = match self.cartesia_at.as_str() {
-            "" => clarp_speech::cartesia::VOICES.to_string(),
-            // A stand-in for the engine lists its voices beside where it speaks.
-            stand_in => stand_in.replace("/tts/bytes", "/voices"),
-        };
+        let list_at = self.cartesia_list_at();
         let fetched =
             tokio::task::spawn_blocking(move || clarp_speech::cartesia::voices(&key, &list_at));
         match fetched.await {
@@ -715,6 +725,7 @@ impl Waiting {
             hub: works.hub,
             clock: works.clock,
             cartesia_voices: Mutex::default(),
+            voice_names: names::Desk::new(works.config.data_dir.join("voice-names.json")),
             preview_locks: Default::default(),
             previews: works.config.data_dir.join("voice-previews"),
             herald: tokio::sync::Mutex::default(),

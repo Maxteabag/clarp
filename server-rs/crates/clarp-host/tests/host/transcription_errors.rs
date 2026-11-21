@@ -124,7 +124,10 @@ done
         events["events"][0]["detail"],
         json!({"message":"whisper busy"})
     );
-    let (status, health) = host.ask_as(&limited, "GET", "/diagnostics/health", None);
-    assert_eq!(status, 200);
+    assert_eq!(
+        host.ask_as(&limited, "GET", "/diagnostics/health", None).0,
+        403
+    );
+    let health = host.get("/diagnostics/health");
     assert_eq!(health["subsystems"]["stt"]["last_error"], "busy");
 }

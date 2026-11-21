@@ -140,14 +140,13 @@ fn the_administrator_exports_a_render_spec_with_its_accepted_answer_as_the_pytho
         other => panic!("a delivery status of no kind: {other:?}"),
     }
 
-    // Whatever a device says it can draw, it is refused: limited or full.
-    for scope in ["limited", "full"] {
+    for (scope, error) in [
+        ("limited", "full device access required"),
+        ("full", "administrator only"),
+    ] {
         let (device, _) = pair(&host, &format!("Phone {scope}"), scope);
         let (status, said) = host.ask_as(&device, "GET", "/artifacts/spec-1/export", None);
-        assert_eq!(
-            (status, said),
-            (403, json!({ "error": "administrator only" }))
-        );
+        assert_eq!((status, said), (403, json!({ "error": error })));
     }
     // The administrator's token from the Authorization header only: not in a browser's
     // cookie, nor in the address, though this Host takes it there for other routes (the

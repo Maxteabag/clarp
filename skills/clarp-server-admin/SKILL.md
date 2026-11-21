@@ -75,8 +75,8 @@ taken. Read all four before picking:
 git fetch origin
 grep -n '_SCHEMA_VERSION = ' server/lib/db_schema.py                       # your branch
 git show origin/main:server/lib/db_schema.py | grep -n '_SCHEMA_VERSION = ' # merged
-grep -n '_SCHEMA_VERSION = ' ~/.local/share/clarp/current/lib/db_schema.py  # deployed
-sqlite3 ~/.local/share/clarp/state.sqlite 'pragma user_version;'     # live DB
+grep -n '_SCHEMA_VERSION = ' ~/.local/share/clarp/current/lib/db_schema.py  # deployed (the Python Host's install)
+sqlite3 ~/.local/share/clarp/state.sqlite 'pragma user_version;'     # live DB (the Python Host's; a Rust Host keeps its own)
 ```
 
 When first assigning a migration, choose a number above the versions already
@@ -93,6 +93,7 @@ Use the helper from this skill to migrate a new private backup, never the live
 database. Choose an existing private directory for the output:
 
 ```bash
+# clarp-admin paths names the Python Host's state.sqlite
 python3 scripts/rehearse_state_upgrade.py \
   --source /path/from/clarp-admin-paths/state.sqlite \
   --server-root /candidate/checkout/server \
@@ -108,6 +109,7 @@ For a migration that intentionally inserts catalog or seed rows, opt in only
 the expected existing tables with repeatable `--allow-added-rows TABLE` flags:
 
 ```bash
+# clarp-admin paths names the Python Host's state.sqlite
 python3 scripts/rehearse_state_upgrade.py \
   --source /path/from/clarp-admin-paths/state.sqlite \
   --server-root /candidate/checkout/server \
