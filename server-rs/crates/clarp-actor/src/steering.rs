@@ -49,8 +49,10 @@ impl State {
             Observation::Echo(uuid) => {
                 if self.parent.is_some()
                     && self.separate.is_none()
-                    && let Some((turn, follow)) =
-                        agent.joins().iter().find(|(_, follow)| follow.join.uuid == uuid)
+                    && let Some((turn, follow)) = agent
+                        .joins()
+                        .iter()
+                        .find(|(_, follow)| follow.join.uuid == uuid)
                 {
                     self.separate(*turn, message_at(log, follow.message_seq)?);
                 }
@@ -77,9 +79,11 @@ impl State {
     ) -> Result<Option<bool>, ActorError> {
         match self.stream.observe(event) {
             Observation::Echo(uuid) => {
-                let Some((&turn, follow)) = batch.agent().joins().iter().find(|(_, follow)| {
-                    follow.join.uuid == uuid && follow.read_at_ms.is_none()
-                }) else {
+                let Some((&turn, follow)) =
+                    batch.agent().joins().iter().find(|(_, follow)| {
+                        follow.join.uuid == uuid && follow.read_at_ms.is_none()
+                    })
+                else {
                     return Ok(None);
                 };
                 let message = message_at(batch.log(), follow.message_seq)?;
@@ -96,13 +100,26 @@ impl State {
                 }
             }
             Observation::Result { prompts, failed } if !prompts.is_empty() => {
-                let settled: Vec<_> = batch.agent().joins().iter().filter_map(|(&turn, follow)| {
-                    let read_at = follow.read_at_ms?;
-                    prompts.iter().any(|item| item.as_str() == Some(follow.join.uuid.as_str()))
-                        .then_some((turn, read_at))
-                }).collect();
+                let settled: Vec<_> = batch
+                    .agent()
+                    .joins()
+                    .iter()
+                    .filter_map(|(&turn, follow)| {
+                        let read_at = follow.read_at_ms?;
+                        prompts
+                            .iter()
+                            .any(|item| item.as_str() == Some(follow.join.uuid.as_str()))
+                            .then_some((turn, read_at))
+                    })
+                    .collect();
                 for (turn, read_at) in settled {
-                    self.finish(batch, turn, read_at, if failed { "failed" } else { "completed" }, now_ms)?;
+                    self.finish(
+                        batch,
+                        turn,
+                        read_at,
+                        if failed { "failed" } else { "completed" },
+                        now_ms,
+                    )?;
                 }
                 self.remember(failed, event, facts, closes);
             }
@@ -113,14 +130,19 @@ impl State {
 
     fn separate(&mut self, turn: TurnId, message: Message) {
         self.crossed = true;
-        self.separate = Some(Separate { turn, closes: message.id.clone(), message });
+        self.separate = Some(Separate {
+            turn,
+            closes: message.id.clone(),
+            message,
+        });
     }
 
     fn remember(&mut self, failed: bool, event: &Value, facts: Facts, closes: &str) {
         if self.parent.is_none() {
             let outcome = if failed {
                 RunOutcome::Failed {
-                    reason: event["result"].as_str()
+                    reason: event["result"]
+                        .as_str()
                         .filter(|text| !text.trim().is_empty())
                         .unwrap_or("claude reported an error")
                         .to_owned(),
@@ -137,10 +159,17 @@ impl State {
     }
 
     /// An echoed follow-up cannot run again, even when the process was stopped after the echo.
-    pub(super) fn finish_read(&mut self, batch: &mut Batch<'_>, now_ms: i64) -> Result<(), ActorError> {
-        let read: Vec<_> = batch.agent().joins().iter().filter_map(|(&turn, follow)| {
-            follow.read_at_ms.map(|at| (turn, at))
-        }).collect();
+    pub(super) fn finish_read(
+        &mut self,
+        batch: &mut Batch<'_>,
+        now_ms: i64,
+    ) -> Result<(), ActorError> {
+        let read: Vec<_> = batch
+            .agent()
+            .joins()
+            .iter()
+            .filter_map(|(&turn, follow)| follow.read_at_ms.map(|at| (turn, at)))
+            .collect();
         for (turn, read_at) in read {
             self.finish(batch, turn, read_at, "interrupted", now_ms)?;
         }
@@ -156,7 +185,10 @@ impl State {
         now_ms: i64,
     ) -> Result<(), ActorError> {
         if batch.command(Command::JoinSettled { turn }, now_ms).is_ok()
-            && self.separate.as_ref().is_some_and(|separate| separate.turn == turn)
+            && self
+                .separate
+                .as_ref()
+                .is_some_and(|separate| separate.turn == turn)
             && let Some(separate) = self.separate.take()
         {
             let end = TurnEnd {
@@ -203,7 +235,10 @@ impl Actor {
         {
             return Ok(None);
         }
-        let join = Join { into: live.turn, uuid };
+        let join = Join {
+            into: live.turn,
+            uuid,
+        };
         let socket = self.profile.socket_path_of(live.turn, live.attempt);
         let mut batch = self.recorder.batch();
         if batch.command(Command::Join { turn, join }, now_ms).is_err() {

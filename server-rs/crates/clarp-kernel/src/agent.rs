@@ -152,9 +152,17 @@ pub enum AgentEvent {
     TakeoverCleared {
         from: TurnId,
     },
-    Joined { turn: TurnId, join: Join },
-    JoinRead { turn: TurnId, at_ms: i64 },
-    JoinSettled { turn: TurnId },
+    Joined {
+        turn: TurnId,
+        join: Join,
+    },
+    JoinRead {
+        turn: TurnId,
+        at_ms: i64,
+    },
+    JoinSettled {
+        turn: TurnId,
+    },
     /// Someone asked the live turn to stop. It settles when the tool process is gone. Whether
     /// the Host knew who asked, and why, are absent from a log written before they were kept.
     StopRequested {
@@ -599,16 +607,18 @@ impl Agent {
     /// The waiting turn that runs when the agent is free: the first one no hold holds.
     fn next_to_run(&self) -> Option<&Queued> {
         self.mailbox.iter().find(|queued| {
-            !self.joins.contains_key(&queued.id) && (!self.paused
-                || queued.admission == Admission::Direct
-                || self.unheld.contains(&queued.id))
+            !self.joins.contains_key(&queued.id)
+                && (!self.paused
+                    || queued.admission == Admission::Direct
+                    || self.unheld.contains(&queued.id))
         })
     }
 
     fn can_join(&self, turn: TurnId, join: &Join) -> bool {
-        self.live.as_ref().is_some_and(|live| {
-            live.id() == join.into && live.has_process()
-        }) && self.stopping.is_none()
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.id() == join.into && live.has_process())
+            && self.stopping.is_none()
             && self.mailbox.iter().any(|waiting| {
                 waiting.id == turn
                     && waiting.admission == Admission::Queue
@@ -677,14 +687,27 @@ impl Agent {
                 work.record(AgentEvent::Joined { turn, join });
             }
             Command::JoinRead { turn } => {
-                if !work.agent.joins.get(&turn).is_some_and(|join| join.read_at_ms.is_none()) {
+                if !work
+                    .agent
+                    .joins
+                    .get(&turn)
+                    .is_some_and(|join| join.read_at_ms.is_none())
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
-                work.record(AgentEvent::JoinRead { turn, at_ms: now_ms });
+                work.record(AgentEvent::JoinRead {
+                    turn,
+                    at_ms: now_ms,
+                });
                 work.let_go_of_nothing(DRAINED, now_ms);
             }
             Command::JoinSettled { turn } => {
-                if !work.agent.joins.get(&turn).is_some_and(|join| join.read_at_ms.is_some()) {
+                if !work
+                    .agent
+                    .joins
+                    .get(&turn)
+                    .is_some_and(|join| join.read_at_ms.is_some())
+                {
                     return Err(Refusal::NotLive(turn));
                 }
                 work.record(AgentEvent::JoinSettled { turn });
@@ -996,33 +1019,65 @@ impl Agent {
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
             AgentEvent::Joined { turn, join } => {
-                let invalid = IllegalTransition { turn: *turn, state: "unavailable", event: "joined" };
+                let invalid = IllegalTransition {
+                    turn: *turn,
+                    state: "unavailable",
+                    event: "joined",
+                };
                 if !self.can_join(*turn, join) {
                     return Err(invalid);
                 }
-                let waiting = self.mailbox.iter().find(|waiting| waiting.id == *turn).ok_or(invalid)?;
-                self.joins.insert(*turn, FollowUp {
-                    join: join.clone(),
-                    message_seq: waiting.message_seq,
-                    read_at_ms: None,
-                });
+                let waiting = self
+                    .mailbox
+                    .iter()
+                    .find(|waiting| waiting.id == *turn)
+                    .ok_or(invalid)?;
+                self.joins.insert(
+                    *turn,
+                    FollowUp {
+                        join: join.clone(),
+                        message_seq: waiting.message_seq,
+                        read_at_ms: None,
+                    },
+                );
             }
             AgentEvent::JoinRead { turn, at_ms } => {
-                let invalid = IllegalTransition { turn: *turn, state: "unavailable", event: "join-read" };
-                let position = self.mailbox.iter().position(|waiting| waiting.id == *turn).ok_or_else(|| invalid.clone())?;
-                let join = self.joins.get_mut(turn).filter(|join| join.read_at_ms.is_none()).ok_or(invalid)?;
+                let invalid = IllegalTransition {
+                    turn: *turn,
+                    state: "unavailable",
+                    event: "join-read",
+                };
+                let position = self
+                    .mailbox
+                    .iter()
+                    .position(|waiting| waiting.id == *turn)
+                    .ok_or_else(|| invalid.clone())?;
+                let join = self
+                    .joins
+                    .get_mut(turn)
+                    .filter(|join| join.read_at_ms.is_none())
+                    .ok_or(invalid)?;
                 join.read_at_ms = Some(*at_ms);
                 self.mailbox.remove(position);
                 self.unheld.remove(turn);
                 if self.waited.remove(turn) {
                     self.queue_revision += 1;
                 }
-                self.deliveries.hand(turn.0, crate::delivery::revision(self.at, 0), *at_ms);
+                self.deliveries
+                    .hand(turn.0, crate::delivery::revision(self.at, 0), *at_ms);
                 self.deliveries.launch(turn.0);
             }
             AgentEvent::JoinSettled { turn } => {
-                if !self.joins.get(turn).is_some_and(|join| join.read_at_ms.is_some()) {
-                    return Err(IllegalTransition { turn: *turn, state: "unread", event: "join-settled" });
+                if !self
+                    .joins
+                    .get(turn)
+                    .is_some_and(|join| join.read_at_ms.is_some())
+                {
+                    return Err(IllegalTransition {
+                        turn: *turn,
+                        state: "unread",
+                        event: "join-settled",
+                    });
                 }
                 self.joins.remove(turn);
                 self.deliveries.over(turn.0);
