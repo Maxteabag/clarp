@@ -120,7 +120,7 @@ def test_a_failed_fetch_never_drops_the_names_a_provider_had(names_file):
 def test_no_keys_no_call_and_the_file_untouched(names_file):
     """Reviewer 3's M10: without a Cartesia or an ElevenLabs key nothing is asked."""
     import os
-    names_file.write_text(json.dumps({"cartesia": {ADA_CARTESIA: "Brooke"}}))
+    names_file.write_text(json.dumps({"_format": voice_names.FORMAT, "cartesia": {ADA_CARTESIA: "Brooke"}}))
     os.utime(names_file, (1_700_000_000, 1_700_000_000))
     before = (names_file.read_bytes(), names_file.stat().st_mtime_ns)
     read_in_use = []
@@ -426,8 +426,8 @@ def test_a_file_from_the_old_format_is_refreshed_at_the_next_start(names_file):
 
 
 def test_a_refresh_without_a_cartesia_catalogue_still_writes_the_format(names_file):
-    """Reviewer 4 on 562: with no Cartesia key, or a failed catalogue fetch, the file must still
-    get the current format, or every start would refresh again (up to 100 ElevenLabs lookups)."""
+    """Reviewer 4 on 562: with no Cartesia key the file gets the current format (nothing will be
+    fetched for it), so starts stop refreshing; with no key at all, the same."""
     old_file = {"cartesia": {"v1": "One"},
                 "_catalogue": {"cartesia": {"v1": {"language": "en", "public": False, "owner": False}}}}
     names_file.write_text(json.dumps(old_file))                    # format 1, written just now
@@ -436,11 +436,30 @@ def test_a_refresh_without_a_cartesia_catalogue_still_writes_the_format(names_fi
              by_id={ELEVEN: {"id": ELEVEN, "name": "Brian"}}, eleven_in_use={ELEVEN})
     assert json.loads(names_file.read_text())["_format"] == voice_names.FORMAT
     assert voice_names.start_due() is False
-    # A failed Cartesia fetch on an old-format file: the stale rows (all read not public) are
-    # dropped, not trusted for another day; the names stay.
     names_file.write_text(json.dumps(old_file))
-    done, _ = _refresh(_cfg("cartesia", eleven_api_key=""), names_file, pages=[], fail=True)
+    done, asked = _refresh(_cfg("cartesia", cartesia_api_key="", eleven_api_key=""), names_file, pages=[])
     stored = json.loads(names_file.read_text())
-    assert stored["_format"] == voice_names.FORMAT and "cartesia" not in stored.get("_catalogue", {})
+    assert (done, asked) == ([], []) and stored["_format"] == voice_names.FORMAT
+    assert stored["cartesia"] == {"v1": "One"} and "_catalogue" not in stored
+    assert voice_names.start_due() is False
+    names_file.unlink()                                             # no key and no file yet: final too
+    _refresh(_cfg("cartesia", cartesia_api_key="", eleven_api_key=""), names_file, pages=[])
+    assert voice_names.start_due() is False
+
+
+def test_a_failed_fetch_with_a_key_is_not_a_refresh(names_file):
+    """Reviewer 4 on 563: a keyed Cartesia fetch that fails leaves the file's older format, so the
+    next start asks again, and the worker retries within minutes, not a day; the stale rows
+    (format 1: every voice not public) are dropped meanwhile, the names kept."""
+    old_file = {"cartesia": {"v1": "One"},
+                "_catalogue": {"cartesia": {"v1": {"language": "en", "public": False, "owner": False}}}}
+    names_file.write_text(json.dumps(old_file))
+    _refresh(_cfg("cartesia", eleven_api_key=""), names_file, pages=[], fail=True)
+    stored = json.loads(names_file.read_text())
+    assert stored.get("_format", 1) < voice_names.FORMAT and "cartesia" not in stored.get("_catalogue", {})
     assert stored["cartesia"] == {"v1": "One"}
-    assert voice_names.catalogue("cartesia") is None and voice_names.start_due() is False
+    assert voice_names.start_due() is True
+    worker = voice_names.VoiceNamesWorker()
+    assert worker.next_wait() == voice_names.RETRY_SECONDS
+    _refresh(_cfg("cartesia", eleven_api_key=""), names_file, pages=[{"id": "v1", "name": "One"}])
+    assert voice_names.start_due() is False and worker.next_wait() == voice_names.REFRESH_SECONDS
