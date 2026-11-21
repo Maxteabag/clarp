@@ -251,6 +251,8 @@ pub struct Changed {
 pub struct Outputs {
     pub actions: Vec<Action>,
     pub changed: Changed,
+    /// Follow-ups whose replay echo removed them from the queue.
+    pub joined_reads: Vec<JoinedRead>,
     /// The agent's tool named a new conversation in place of one it had let go of, and the
     /// Host carried the conversation over: from which name to which. What is bound to the
     /// agent's conversation with its tool (its goals) follows.
@@ -381,6 +383,35 @@ pub struct Waiting {
     pub admission: Admission,
     pub origin: Origin,
     pub sender_agent_id: Option<String>,
+}
+
+impl Waiting {
+    fn from_message(
+        message: &Message,
+        turn: TurnId,
+        accepted_at_ms: i64,
+        admission: Admission,
+    ) -> Self {
+        Self {
+            turn,
+            client_id: message.client_id().to_string(),
+            told_id: message.told_id().to_string(),
+            message_id: message.id.clone(),
+            text: message.text.clone(),
+            speak: message.speak,
+            accepted_at_ms,
+            admission,
+            origin: message.origin.clone(),
+            sender_agent_id: message.sender.as_ref().map(|sender| sender.agent_id.clone()),
+        }
+    }
+}
+
+/// The queue as it stood when Claude read this follow-up, even if the same batch read another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinedRead {
+    pub message: Waiting,
+    pub queue: QueueState,
 }
 
 /// A row of the conversation an agent had on another Host, on its way in.
@@ -2088,18 +2119,7 @@ impl Actor {
         admission: Admission,
     ) -> Result<Waiting, ActorError> {
         let message = self.message_at(message_seq)?;
-        Ok(Waiting {
-            turn,
-            client_id: message.client_id().to_string(),
-            told_id: message.told_id().to_string(),
-            message_id: message.id,
-            text: message.text,
-            speak: message.speak,
-            accepted_at_ms,
-            admission,
-            origin: message.origin,
-            sender_agent_id: message.sender.map(|sender| sender.agent_id),
-        })
+        Ok(Waiting::from_message(&message, turn, accepted_at_ms, admission))
     }
 
     /// The message a turn that ended answered.

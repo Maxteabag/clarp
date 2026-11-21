@@ -8,7 +8,7 @@ use clarp_kernel::turn::{Origin, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
 
-use super::{Action, Actor, ActorError, Facts, Outputs, message_at, written};
+use super::{Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, Waiting, message_at, written};
 
 #[derive(Default)]
 pub(super) struct State {
@@ -49,7 +49,10 @@ impl State {
     ) -> Result<(), ActorError> {
         match self.stream.observe(event) {
             Observation::Echo(uuid) => {
-                let follow = agent.joins().iter().find(|(_, follow)| follow.join.uuid == uuid);
+                let follow = agent
+                    .joins()
+                    .iter()
+                    .find(|(_, follow)| follow.join.uuid == uuid);
                 match follow {
                     Some((_, follow)) if self.parent.is_none() => {
                         self.joined_speech |= message_at(log, follow.message_seq)?.speak;
@@ -57,12 +60,17 @@ impl State {
                     Some((turn, follow)) if self.separate.is_none() => {
                         self.separate(*turn, message_at(log, follow.message_seq)?);
                     }
-                    None if self.primary_uuid.is_none() => self.primary_uuid = Some(uuid.to_owned()),
+                    None if self.primary_uuid.is_none() => {
+                        self.primary_uuid = Some(uuid.to_owned())
+                    }
                     _ => {}
                 }
             }
             Observation::Result { prompts, failed } if !prompts.is_empty() => {
-                if self.separate.as_ref().and_then(|turn| agent.joins().get(&turn.turn))
+                if self
+                    .separate
+                    .as_ref()
+                    .and_then(|turn| agent.joins().get(&turn.turn))
                     .is_some_and(|follow| contains_uuid(prompts, &follow.join.uuid))
                 {
                     self.separate = None;
@@ -96,8 +104,19 @@ impl State {
                     return Ok(None);
                 };
                 let message = message_at(batch.log(), follow.message_seq)?;
+                let Some(queued) = batch.agent().waiting().find(|queued| queued.id == turn) else {
+                    return Ok(None);
+                };
+                let waiting = Waiting::from_message(&message, turn, queued.accepted_at_ms, queued.admission);
                 if batch.command(Command::JoinRead { turn }, now_ms).is_ok() {
                     out.changed.queue = true;
+                    let agent = batch.agent();
+                    let queue = QueueState {
+                        waiting: agent.waiting().count(),
+                        paused: agent.is_paused(),
+                        revision: agent.queue_revision(),
+                    };
+                    out.joined_reads.push(JoinedRead { message: waiting, queue });
                     let speak = message.speak;
                     if self.parent.is_some() {
                         if self.separate.is_none() {
@@ -115,8 +134,7 @@ impl State {
                     .iter()
                     .filter_map(|(&turn, follow)| {
                         let read_at = follow.stage.read_at()?;
-                        contains_uuid(prompts, &follow.join.uuid)
-                            .then_some((turn, read_at))
+                        contains_uuid(prompts, &follow.join.uuid).then_some((turn, read_at))
                     })
                     .collect();
                 for (turn, read_at) in settled {
@@ -144,8 +162,20 @@ impl State {
         });
     }
 
-    fn remember(&mut self, prompts: &[Value], failed: bool, event: &Value, facts: Facts, closes: &str) {
-        if self.parent.is_none() && self.primary_uuid.as_ref().is_some_and(|uuid| contains_uuid(prompts, uuid)) {
+    fn remember(
+        &mut self,
+        prompts: &[Value],
+        failed: bool,
+        event: &Value,
+        facts: Facts,
+        closes: &str,
+    ) {
+        if self.parent.is_none()
+            && self
+                .primary_uuid
+                .as_ref()
+                .is_some_and(|uuid| contains_uuid(prompts, uuid))
+        {
             let outcome = if failed {
                 RunOutcome::Failed {
                     reason: event["result"]

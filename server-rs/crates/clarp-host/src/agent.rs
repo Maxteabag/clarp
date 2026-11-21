@@ -8,13 +8,14 @@
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
-    Action, Actor, ActorError, ByHand, Changed, ImportedRow, Kept, Outputs, Profile, QueueState,
+    Action, Actor, ActorError, ByHand, Changed, ImportedRow, JoinedRead, Kept, Outputs, Profile, QueueState,
     Sent, ShimOrder, Status, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
@@ -3278,7 +3279,7 @@ impl Worker {
             self.setup.speaks.wake(&self.setup.record.agent_id);
         }
         self.tell_deliveries();
-        self.show(out.changed);
+        self.show(out.changed, &out.joined_reads);
     }
 
     /// A user send's delivery moved (fenced by the user's Stop, or handed over): the apps are
@@ -3747,7 +3748,7 @@ impl Worker {
     }
 
     /// Publishes the agent's view and tells the clients what changed since they were last told.
-    fn show(&mut self, changed: Changed) {
+    fn show(&mut self, changed: Changed, joined_reads: &[JoinedRead]) {
         let by_hand = std::mem::take(&mut self.let_go_by_hand);
         let queue_edit = self.queue_edit.take();
         let passed = std::mem::take(&mut self.passed);
@@ -3880,6 +3881,21 @@ impl Worker {
                 now,
             );
         }
+        for read in joined_reads {
+            let message = &read.message;
+            let mut event = wire::queue_updated(
+                &record,
+                &status,
+                wire::QueueUpdate::Started {
+                    client_id: &message.client_id,
+                    message: Some(message),
+                },
+            );
+            event["queue_depth"] = json!(read.queue.waiting);
+            event["queue_paused"] = json!(read.queue.paused);
+            event["queue_revision"] = json!(read.queue.revision);
+            hub.publish(event, now);
+        }
         // A turn began: the word a send is answered with, for every client that did not send it.
         if let Some(live) = &status.live
             && was_live.map(|was| was.turn) != Some(live.turn)
@@ -3936,6 +3952,7 @@ impl Worker {
         let told_with_its_turn = !status.paused && !by_hand && began_from_the_queue;
         let taken_back = was_waiting.iter().any(|turn| {
             !status.waiting.contains(turn)
+                && !joined_reads.iter().any(|read| read.message.turn == *turn)
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
