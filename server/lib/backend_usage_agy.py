@@ -154,17 +154,22 @@ AGY_IN_USE_MS = 6 * 3_600_000
 
 
 def agy_in_use(now_ms: int | None = None) -> bool:
-    """Whether an Antigravity agent had a turn in the last AGY_IN_USE_MS. Each usage
+    """Whether an Antigravity agent worked in the last AGY_IN_USE_MS: a turn began, or the
+    agent recorded a state (a long turn that began earlier still records them). Each usage
     check runs agy, a 200 MB binary, at about 4 CPU-s; on a Host where nobody uses
-    Antigravity that was 12 runs an hour for numbers no one reads. One indexed read
-    (turns by agent and start)."""
+    Antigravity that was 12 runs an hour for numbers no one reads. Two covering-index
+    reads per agy agent (turns by agent and start, state_log by agent and time). A turn's
+    ended_at and settled_at are not used: they stay empty on turns that ended long ago."""
     from . import db
     now = _now_ms() if now_ms is None else now_ms
+    since = now - AGY_IN_USE_MS
     try:
         row = db.conn().execute(
-            """SELECT 1 FROM turns t JOIN agents a ON a.agent_id = t.agent_id
-                WHERE a.backend = ? AND a.deleted_at IS NULL AND t.started_at > ? LIMIT 1""",
-            (AGY, now - AGY_IN_USE_MS)).fetchone()
+            """SELECT 1 FROM agents a WHERE a.backend = ? AND a.deleted_at IS NULL AND (
+                   EXISTS (SELECT 1 FROM turns t WHERE t.agent_id = a.agent_id AND t.started_at > ?)
+                OR EXISTS (SELECT 1 FROM state_log s WHERE s.agent_id = a.agent_id AND s.ts > ?))
+                LIMIT 1""",
+            (AGY, since, since)).fetchone()
     except Exception as exc:  # noqa: BLE001 - unknown is in use: refreshed as before
         from .log import log_exception
         log_exception("agyInUseReadFail", exc)

@@ -1548,3 +1548,10 @@ def test_antigravity_usage_is_read_only_after_antigravity_work_or_when_asked(tmp
     agents.open_turn(agent_id=agent_id, source=TurnSource.PWA, trace_id="agy-turn")
     backend_usage.get_backend_usage(refresh_codex=False)
     assert runs == [1, 1]                                   # an agy agent worked just now
+    # A turn that began more than six hours ago and is still running records states.
+    from lib import db
+    db.conn().execute("UPDATE turns SET started_at = ? WHERE agent_id = ?", (db.now_ms() - 7 * 3_600_000, agent_id))
+    db.conn().commit()
+    agents.record_state(agent_id, "thinking", {"source": "pwa"})
+    backend_usage.get_backend_usage(refresh_codex=False)
+    assert runs == [1, 1, 1]
