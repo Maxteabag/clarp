@@ -257,15 +257,18 @@ def load_timeline(session: str, *, after_revision: int = 0, before_message_id: s
     else:
         sql = f"""SELECT * FROM ({_rows_sql(extra, 'DESC')} LIMIT ?) ORDER BY COALESCE(timestamp, '') ASC, seq ASC"""
     params.append(limit + 1)
+    # The head before the rows, as conversation.load_conversation reads it: a row
+    # committed between the two reads would otherwise sit at or below the
+    # returned cursor and never come in a delta.
+    head = conn().execute(f"""SELECT MAX(m.revision) FROM messages m WHERE {_PAIR_WHERE}
+        AND m.role IN ('user', 'assistant')
+        AND ((m.agent_id = ? AND m.sender_agent_id = ?) OR (m.agent_id = ? AND m.sender_agent_id = ?))""",
+        (agent_ids[0], agent_ids[1], agent_ids[1], agent_ids[0])).fetchone()[0] or 0
     rows = conn().execute(sql, tuple(params)).fetchall()
     turns = [_turn(row, agent_ids) for row in rows]
     has_more = len(turns) > limit
     if has_more:
         turns = turns[:limit] if after_revision else turns[-limit:]
-    head = conn().execute(f"""SELECT MAX(m.revision) FROM messages m WHERE {_PAIR_WHERE}
-        AND m.role IN ('user', 'assistant')
-        AND ((m.agent_id = ? AND m.sender_agent_id = ?) OR (m.agent_id = ? AND m.sender_agent_id = ?))""",
-        (agent_ids[0], agent_ids[1], agent_ids[1], agent_ids[0])).fetchone()[0] or 0
     revision = (max((turn["revision"] for turn in turns), default=after_revision)
                 if has_more and after_revision else int(head))
     return {
