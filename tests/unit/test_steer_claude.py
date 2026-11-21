@@ -379,6 +379,37 @@ def test_a_runtime_that_dies_before_the_echo_settles_the_follow_up_at_its_start(
     assert settings_store.keys_with_prefix("steer.written.") == []
 
 
+def test_a_steered_cli_that_survives_its_kill_defers_the_judgement(world, monkeypatch, tmp_path):
+    """Reviewer 4 on 6b0b0ac4: a group still there after the kill's bound could still read
+    the line, so nothing is judged: the record stays, the item is untouched and not run. The
+    next start, with the group gone, settles it."""
+    from lib import settings_store
+    w = world
+    _first_turn(w, "joined")
+    (w.dir / "mode-2").write_text("answer")
+    _send(w, "m2")
+    assert _wait(lambda: len(_read(w, 1)) == 1)
+    for handle in real_backends.active_handles("claude", w.agent):
+        handle.steer_state.pending.clear()                 # the runtime dies
+    session = tmp_path / "session-file.jsonl"
+    session.write_text(json.dumps({"type": "user", "uuid": prompt_uuid("t-m2")}) + "\n")
+    monkeypatch.setattr(by_id("claude"), "find_transcript", lambda *a, **k: session)
+    real_kill = takeover.kill_group_if_same
+    monkeypatch.setattr(takeover, "kill_group_if_same", lambda *a, **k: None)
+    td.reset_for_tests()
+    w.service.recover_queued()
+    item = db.conn().execute("SELECT status, shown_at FROM queued_turns "
+                             "WHERE client_msg_id = 'm2'").fetchone()
+    assert item["status"] == "queued" and item["shown_at"] is None and _row(w, "m2") is None
+    assert settings_store.keys_with_prefix("steer.written.") == ["steer.written.t-m2"]
+    assert _calls(w) == 1
+    monkeypatch.setattr(takeover, "kill_group_if_same", real_kill)
+    td.reset_for_tests()                                    # the next start
+    w.service.recover_queued()
+    assert _row(w, "m2") is not None and _calls(w) == 1     # read by the CLI: row, never run
+    assert settings_store.keys_with_prefix("steer.written.") == []
+
+
 def test_a_reused_pid_is_never_killed_and_the_recorded_group_is():
     """The steer record's group is ended at start only while its pid is still the process
     recorded (the same start ticks): a pid since reused by another process is left alone."""
