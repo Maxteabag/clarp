@@ -57,6 +57,26 @@ fn queued_items_and_mutation_events_keep_their_origin_and_resolve_the_current_se
         json!({"agent_id": mike_id, "name": "Mike"})
     );
 
+    let joined = || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| {
+                event["type"] == "queue-updated"
+                    && event["session"] == target
+                    && event["client_msg_id"] == "agent"
+                    && event["queue_started"] == false
+                    && event.get("queue_change").is_none()
+            })
+            .cloned()
+    };
+    wait_for("the named sender's joined event", || joined().is_some());
+    assert_eq!(
+        provenance(joined().unwrap()),
+        json!({"origin":"agent","sender":{"agent_id":mike_id,"name":"Mike"}})
+    );
+
     host.post("/agent-rename", json!({"session": mike, "name": "Michael"}));
     assert_eq!(item("agent")["sender"]["name"], "Michael");
     assert_eq!(

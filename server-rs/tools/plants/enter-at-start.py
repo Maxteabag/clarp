@@ -126,7 +126,7 @@ PLANTS = [
      '            event["queue_change"] = json!("deleted");\n',
      '            event["queue_change"] = json!("unknown");\n'),
     (H, 'host', 'the start event loses the queued item ID',
-     'wire::QueueUpdate::Started(&live.client_id)', 'wire::QueueUpdate::Started("")'),
+     'client_id: &live.client_id,', 'client_id: "",'),
     (J, 'kernel', 'a row shown by an older build also appears in the queue',
      '.filter(|queued| !self.shown_waiting.contains(&queued.id))',
      '.filter(|_| true)'),

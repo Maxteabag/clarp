@@ -421,6 +421,14 @@ fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
         &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
     );
     let session = "steer-status";
+    let heard = host.listen();
+    wait_for("the event stream", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
+    });
     host.post(
         "/agents",
         json!({"name":session, "session":session, "backend":"claude"}),
@@ -462,8 +470,19 @@ fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
     );
     assert_eq!(host.ask("DELETE", "/turn-queue/later", None).0, 200);
 
+    let before_release = heard.lock().unwrap().len();
     std::fs::write(place.root.join("release-race"), "").unwrap();
     collect_answer(&host, session, "first-race");
+    wait_for("the first reply's transcript event", || {
+        heard.lock().unwrap()[before_release..]
+            .iter()
+            .any(|event| event["session"] == session && event["type"] == "transcript-updated")
+    });
+    assert!(
+        reads(&heard, session, joined).is_empty(),
+        "no read has committed"
+    );
+    let before_echo = heard.lock().unwrap().len();
     std::fs::write(place.root.join("echo-race"), "").unwrap();
     collect_answer(&host, session, "second-race");
     assert!(
@@ -472,6 +491,31 @@ fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
             .any(|row| row["id"] == "u-add-race-0")
     );
     assert_eq!(queue()["items"], json!([]));
+    wait_for("the committed follow-up's started event", || {
+        !reads(&heard, session, joined).is_empty()
+    });
+    let heard = heard.lock().unwrap();
+    let events = &heard[before_echo..];
+    let started: Vec<_> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| {
+            event["type"] == "queue-updated"
+                && event["session"] == session
+                && event["client_msg_id"] == joined
+                && event["queue_started"] == true
+        })
+        .collect();
+    assert_eq!(started.len(), 1);
+    let (at, event) = started[0];
+    assert_eq!(event["origin"], "user");
+    assert_eq!(event.get("sender"), Some(&Value::Null));
+    assert!(
+        events[..at]
+            .iter()
+            .any(|event| { event["type"] == "transcript-updated" && event["session"] == session }),
+        "the transcript notification must precede the started event: {events:?}"
+    );
 }
 
 fn reads(heard: &Mutex<Vec<Value>>, session: &str, id: &str) -> Vec<u64> {

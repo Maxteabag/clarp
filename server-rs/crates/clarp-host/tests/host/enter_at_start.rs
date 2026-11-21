@@ -298,6 +298,8 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     });
     let started = queue_event(&heard, "m2", true, None).unwrap();
     assert_eq!(started["client_msg_id"], "m2");
+    assert_eq!(started["origin"], "user");
+    assert_eq!(started.get("sender"), Some(&Value::Null));
     assert_eq!(started["queue_depth"], 1);
     assert!(started.get("text").is_none(), "{started}");
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
