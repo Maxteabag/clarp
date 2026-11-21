@@ -236,6 +236,11 @@ item grows from that same draft and names the row the actor writes when it settl
 no reply row in the parent's log. This Host does not reconcile active replies against a provider
 transcript, so there is no live-import retraction to perform.
 
+**Claude text in a keyless reply (R143).** The growing row and its live item use the text blocks
+as paragraphs. Tool and thinking blocks are kept in their own projections. A block snapshot does
+not rewrite text already streamed into the active draft. The next keyless reply can still arrive
+whole.
+
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first (it does, since 15 Nov 17:14). Since the
