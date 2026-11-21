@@ -63,8 +63,9 @@ def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
     request = urllib.request.Request(
         "https://api.elevenlabs.io/v1/speech-to-text", data=body, method="POST",
         headers={"xi-api-key": api_key, "Content-Type": ctype})
+    from .stt_language import sending_audio
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with sending_audio(), urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")[:200]

@@ -179,5 +179,7 @@ def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
     started = time.monotonic()
     raw = websocket.create_connection(
         url, timeout=timeout, header=[f"X-API-Key: {api_key}"])
-    text = transcribe_pcm(_Socket(raw), pcm=pcm)
+    from .stt_language import sending_audio
+    with sending_audio():                 # decoded and connected: the audio leaves now
+        text = transcribe_pcm(_Socket(raw), pcm=pcm)
     return text, time.monotonic() - started
