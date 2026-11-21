@@ -2913,7 +2913,13 @@ impl Actor {
         {
             return Ok(Err(TraceTaken));
         }
-        self.take(message, admission, Vec::new(), reservation, marks, now_ms)
+        // Show this turn for good if it cannot leave a note at acceptance, even if
+        // a later key or backend change allows notes from new turns.
+        let marks = Marks {
+            coordination: if self.profile.hides_coordination { marks.coordination.clone() } else { None },
+            trace_named: marks.trace_named,
+        };
+        self.take(message, admission, Vec::new(), reservation, &marks, now_ms)
             .map(Ok)
     }
 
@@ -3868,6 +3874,17 @@ impl Actor {
             prompt
         };
         let told = self.profile.told.as_ref().filter(|_| !bare);
+        let prompt = if self.profile.hides_coordination
+            && told.is_some_and(|told| told.coordination_hidden)
+            && let Ok(Some(agent_id)) = self.mark(turn.0)
+        {
+            let sender = message.sender.as_ref().filter(|sender| sender.agent_id == agent_id)
+                .map(|sender| if sender.name.is_empty() { sender.session.as_str() } else { sender.name.as_str() });
+            let reminder = clarp_kernel::hidden_coordination::reminder(&self.profile.session, sender);
+            format!("{reminder}\n\n{prompt}")
+        } else {
+            prompt
+        };
         let named_session = self
             .backend
             .binds_at_spawn()

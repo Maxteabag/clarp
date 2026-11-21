@@ -142,6 +142,7 @@ pub struct DelegationState {
 }
 
 enum Ask {
+    RefreshTelling,
     Bookkeeping {
         cmd: crate::bookkeeping::Command,
         answer: Answer<ToolAnswer>,
@@ -608,6 +609,10 @@ pub(crate) const REMOVING: &str =
 pub(crate) const REMOVING_CODE: &str = "agent_removing";
 
 impl AgentHandle {
+    pub(crate) fn refresh_telling(&self) {
+        let _ = self.tx.send(Ask::RefreshTelling);
+    }
+
     pub(crate) fn expire_provider_links(&self, native: &str) {
         let _ = self.tx.send(Ask::ExpireProviderLinks(native.to_owned()));
     }
@@ -2810,6 +2815,10 @@ impl Worker {
                 }
                 answered(result, answer)?
             }
+            Ask::RefreshTelling => {
+                actor.retell(Some(self.setup.telling.of(&self.setup.record)));
+                return Ok(());
+            }
             Ask::ExpireProviderLinks(native) => {
                 if actor.expire_provider_links(&native, now)? {
                     self.publish_view();
@@ -4389,6 +4398,7 @@ fn refuse_for(
                 | Ask::HelperRead { .. }
                 | Ask::VisitProvider(_)
                 | Ask::ExpireProviderLinks(_)
+                | Ask::RefreshTelling
                 | Ask::HistoricalRead { .. }
                 | Ask::Terminal { .. }
                 | Ask::AccountStop
