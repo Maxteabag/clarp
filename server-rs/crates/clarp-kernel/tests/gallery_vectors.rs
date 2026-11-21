@@ -74,7 +74,12 @@ fn gallery_mutations_and_pages_follow_the_reference() {
             }
             "favorite" | "delete" => changed(&mut index, ask, at, op),
             "page" => index
-                .page(text("session"), ask["favorites"].as_bool().unwrap(), text("before"), limit())
+                .page(
+                    text("session"),
+                    ask["favorites"].as_bool().unwrap(),
+                    text("before"),
+                    limit(),
+                )
                 .map(|page| {
                     json!({
                         "assets": page.rows.into_iter().map(public).collect::<Vec<_>>(),
