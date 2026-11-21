@@ -639,6 +639,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                         model=spec.model,
                         effort=spec.effort,
                         run_if_owned=run_if_owned,
+                        **({"takeover": spec.takeover} if spec.takeover else {}),
                     )
                     state["handle"] = handle
                     if handle is not None and not self._still_owns(spec):
