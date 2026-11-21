@@ -26,7 +26,7 @@ into it is a row of its own trace and hides alone.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from .revisioned_cache import RevisionedCache
 
@@ -317,13 +317,19 @@ def hiding_from_rows(rows) -> set[str]:
 
 # Which chats hide, kept until the database's change stamp moves (revisioned_cache, as the
 # preview caches are: rule 2 of docs/architecture/state-and-boundaries.md).
-_HIDING_CACHE: RevisionedCache[str, frozenset[str]] = RevisionedCache("coordination.hiding", max_entries=1)
+class RosterView(NamedTuple):
+    """What HIDING_ROWS_SQL's one statement says for the whole roster."""
+    hiding: frozenset[str]          # the chats that leave coordination out (hiding_from_rows)
+    host: str                       # global_visibility()
+    chosen: dict[str, str]          # each chat's own choice that is set: 'show' | 'hide'
 
 
-def hiding_agents(*, database=None) -> set[str]:
-    """The agents whose chat leaves coordination out under 'auto', for the whole roster: the
-    snapshot's previews and working state, the state stream and the push follow the same rule
-    as GET /log. Kept until the database's change stamp moves (a setting change is a write), so
+_HIDING_CACHE: RevisionedCache[str, RosterView] = RevisionedCache("coordination.hiding", max_entries=1)
+
+
+def roster_view(*, database=None) -> RosterView:
+    """Which chats hide coordination, the Host's setting and each chat's own choice, from one
+    statement. Kept until the database's change stamp moves (a setting change is a write), so
     a quiet Host answers from memory; read again inside a transaction."""
     from . import db
     if database is None:
@@ -332,11 +338,23 @@ def hiding_agents(*, database=None) -> set[str]:
     if stamp is not None and stamp[0] >= 0:
         hit, cached = _HIDING_CACHE.get("all", stamp)
         if hit:
-            return set(cached)
-    hiding = hiding_from_rows(database.execute(HIDING_ROWS_SQL).fetchall())
+            return cached
+    rows = database.execute(HIDING_ROWS_SQL).fetchall()
+    # No live agent leaves no row to carry the Host's setting; nothing per chat needs it then.
+    host = (normalize_visibility(rows[0]["host"]) or DEFAULT_VISIBILITY) if rows else global_visibility()
+    chosen = {row["agent_id"]: normalize_visibility(row["coordination_visibility"]) for row in rows
+              if normalize_visibility(row["coordination_visibility"])}
+    view = RosterView(frozenset(hiding_from_rows(rows)), host, chosen)
     if stamp is not None and stamp[0] >= 0:
-        _HIDING_CACHE.put("all", stamp, frozenset(hiding))
-    return hiding
+        _HIDING_CACHE.put("all", stamp, view)
+    return view
+
+
+def hiding_agents(*, database=None) -> set[str]:
+    """The agents whose chat leaves coordination out under 'auto', for the whole roster: the
+    snapshot's previews and working state, the state stream and the push follow the same rule
+    as GET /log (roster_view)."""
+    return set(roster_view(database=database).hiding)
 
 
 def working_with(agent_id: str, trace_id: str | None) -> dict[str, Any]:
@@ -415,18 +433,6 @@ def set_chat(agent_id: str, value: Any) -> str:
     from . import agents
     agents.update_agent(agent_id, coordination_visibility=stored)
     return stored
-
-
-def overrides(*, database=None) -> dict[str, str]:
-    """Every chat's own choice that is set: {agent_id: 'show' | 'hide'}."""
-    if database is None:
-        from .db import conn
-        database = conn()
-    return {row["agent_id"]: normalize_visibility(row["coordination_visibility"])
-            for row in database.execute(
-                "SELECT agent_id, coordination_visibility FROM agents"
-                " WHERE deleted_at IS NULL AND coordination_visibility != ''")
-            if normalize_visibility(row["coordination_visibility"])}
 
 
 def snapshot_fields(agent_id: str, chosen: dict[str, str], host: str) -> dict[str, Any]:
