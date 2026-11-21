@@ -330,8 +330,10 @@ impl Attempts {
         self.rows
             .push(json!({"engine":engine,"outcome":"skipped","reason":reason}));
     }
-    pub fn failed(&mut self, engine: &str, language: Option<&str>, ms: u64, reason: &str) {
-        self.rows.push(json!({"engine":engine,"outcome":"error","language":language,"ms":ms,"reason":python::first(reason,200)}));
+    pub fn failed(&mut self, engine: &str, language: Option<&str>, ms: u64, reason: &'static str) {
+        self.rows.push(
+            json!({"engine":engine,"outcome":"error","language":language,"ms":ms,"reason":reason}),
+        );
     }
     pub fn heard(&mut self, engine: &str, language: Option<&str>, ms: u64, adapted: bool) {
         self.rows

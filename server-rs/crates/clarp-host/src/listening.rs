@@ -162,8 +162,10 @@ async fn carried(
                 let Ok(message) = serde_json::from_str::<Value>(text.as_str()) else {
                     continue;
                 };
-                if let Some(failed) = rules::failed(&message) {
-                    line.tell(said(&failed)).await;
+                if rules::failed(&message).is_some() {
+                    eprintln!("clarp-host: listening stream failed: {message}");
+                    let word = clarp_kernel::heard::Failure::Failed.client_words().1;
+                    line.tell(said(&json!({"type":"error","message":word}))).await;
                     continue;
                 }
                 let Some(event) = rules::meant(&message) else {

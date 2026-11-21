@@ -36,14 +36,34 @@ pub const INVALID_ID: &str = "invalid transcription id";
 pub const REUSED_ID: &str = "transcription id reused for different audio";
 /// What a Host says that has no engine at all.
 pub const DISABLED: &str = "server transcription disabled";
-/// What a Host says whose own engine is still loading its model.
-pub const LOADING: &str = "whisper model loading";
-/// What a Host says whose own engine did not come free in time.
-pub const BUSY: &str = "whisper busy";
+/// A transcription failure that can be told to a client (reference PR 518).
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Failure {
+    UnknownModel,
+    Loading,
+    Busy,
+    Failed,
+}
 
-/// What an engine nobody installed is refused with.
-pub fn not_installed(model: &str) -> String {
-    format!("transcription model not installed: {model}")
+impl Failure {
+    pub const fn client_words(self) -> (u16, &'static str) {
+        match self {
+            Self::UnknownModel => (400, "transcription model not installed"),
+            Self::Loading => (503, "transcription model loading"),
+            Self::Busy => (429, "whisper busy"),
+            Self::Failed => (500, "transcription failed"),
+        }
+    }
+
+    pub fn voice_detail(self) -> Option<Value> {
+        let message = self.client_words().1;
+        match self {
+            Self::Busy => Some(json!({"message":message})),
+            Self::Failed => Some(json!({"message":message,"stage":"stt"})),
+            Self::UnknownModel | Self::Loading => None,
+        }
+    }
 }
 
 /// The name an app gives a job, as it is kept: letters, digits, `.`, `_` and `-`, 128 at
@@ -640,9 +660,5 @@ mod tests {
         assert_eq!(kept("  Thank you.  "), "");
         assert_eq!(kept("[Music]"), "");
         assert_eq!(kept("  Open the log. "), "Open the log.");
-        assert_eq!(
-            not_installed("x:y"),
-            "transcription model not installed: x:y"
-        );
     }
 }

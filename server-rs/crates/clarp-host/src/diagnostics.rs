@@ -26,7 +26,7 @@ type Row = (i64, Vec<u8>);
 #[derive(Default, Clone, Copy)]
 struct LastSeen {
     success: Option<i64>,
-    error: Option<i64>,
+    error: Option<(i64, &'static str)>,
 }
 #[derive(Clone, Copy)]
 pub enum Subsystem {
@@ -155,7 +155,7 @@ impl Capture {
         );
     }
     pub(crate) fn relay_connected(&self, at: i64, session: u64) {
-        self.mark(Subsystem::Relay, true, at);
+        self.mark(Subsystem::Relay, None, at);
         self.emit(
             "network",
             at,
@@ -163,31 +163,38 @@ impl Capture {
         );
     }
     pub(crate) fn relay_lost(&self, at: i64, connected: bool, streams: (usize, usize)) {
-        self.mark(Subsystem::Relay, false, at);
+        self.mark(Subsystem::Relay, Some("failed"), at);
         self.emit("network",at,||json!({"kind":"relay_lost","connected":connected,"http_count":streams.0,"socket_count":streams.1}));
     }
     pub(crate) fn synthesis(&self, at: i64, ok: bool, bytes: u64, started: Option<Instant>) {
-        self.mark(Subsystem::Tts, ok, at);
+        self.mark(Subsystem::Tts, (!ok).then_some("speech failed"), at);
         if let Some(t) = started {
             self.emit("voice",at,||json!({"kind":"synthesis","bytes":bytes,"duration_ms":t.elapsed().as_millis(),"ok":ok}));
         }
     }
-    pub fn transcription(&self, at: i64, ok: bool, size: usize, elapsed: Option<Instant>) {
-        self.mark(Subsystem::Stt, ok, at);
+    pub(crate) fn transcription(
+        &self,
+        at: i64,
+        error: Option<&'static str>,
+        size: usize,
+        elapsed: Option<Instant>,
+    ) {
+        self.mark(Subsystem::Stt, error, at);
+        let ok = error.is_none();
         if let Some(t) = elapsed {
             self.emit("transcript",at,||json!({"kind":"transcription","size":size,"duration_ms":t.elapsed().as_millis(),"ok":ok}));
         }
     }
-    pub fn mark(&self, subsystem: Subsystem, ok: bool, at: i64) {
+    fn mark(&self, subsystem: Subsystem, error: Option<&'static str>, at: i64) {
         let mut clocks = self
             .health
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = &mut clocks[subsystem as usize];
-        if ok {
-            entry.success = Some(at);
+        if let Some(word) = error {
+            entry.error = Some((at, word));
         } else {
-            entry.error = Some(at);
+            entry.success = Some(at);
         }
     }
     fn subsystems(&self) -> Value {
@@ -200,7 +207,7 @@ impl Capture {
             let e = clocks[s as usize];
             if e.success.is_some() || e.error.is_some() {
                 let seconds = |at: i64| at as f64 / 1000.0;
-                value[s.name()] = json!({"last_success_at":e.success.map(seconds),"last_error_at":e.error.map(seconds),"last_error":e.error.map(|_|"failed")});
+                value[s.name()] = json!({"last_success_at":e.success.map(seconds),"last_error_at":e.error.map(|(at, _)| seconds(at)),"last_error":e.error.map(|(_, word)| word)});
             }
         }
         value
@@ -492,17 +499,17 @@ mod tests {
         assert_eq!(event["method"], "GET");
         assert!(event["duration_ms"].is_number());
         assert!(!record.to_string().contains("private-"));
-        capture.transcription(3000, false, 99, Some(Instant::now()));
+        capture.transcription(3000, Some("transcription failed"), 99, Some(Instant::now()));
         let record = tokio::time::timeout(Duration::from_secs(3), records.recv())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(record["event"]["size"], 99);
         assert_eq!(record["event"]["ok"], false);
-        capture.transcription(4000, true, 0, None);
+        capture.transcription(4000, None, 0, None);
         assert_eq!(
             capture.subsystems()["stt"],
-            json!({"last_success_at":4.0,"last_error_at":3.0,"last_error":"failed"})
+            json!({"last_success_at":4.0,"last_error_at":3.0,"last_error":"transcription failed"})
         );
     }
     #[test]
@@ -529,6 +536,10 @@ mod tests {
             desk.relay_connected(2, 8);
             desk.relay_lost(3, true, (11, 12));
             desk.synthesis(4, false, 17, Some(Instant::now()));
+            assert_eq!(
+                desk.subsystems()["tts_worker"]["last_error"],
+                "speech failed"
+            );
             let mut events = Vec::new();
             while let Ok((_, bytes)) = read.try_recv() {
                 let record: Value = serde_json::from_slice(&bytes).unwrap();

@@ -35,7 +35,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use clarp_kernel::heard::{self, OWN_PROVIDER, PROVIDERS, engine_order, language_set};
+use clarp_kernel::heard::{self, Failure, OWN_PROVIDER, PROVIDERS, engine_order, language_set};
 use clarp_kernel::languages;
 use clarp_kernel::said::Who;
 use clarp_speech::chirp::Chirp;
@@ -109,32 +109,53 @@ const LONG_FORM_THRESHOLD_KEY: &str = "transcription.long_form_threshold_sec";
 /// An engine that was chosen for a clip.
 struct Chosen {
     engine: Arc<dyn Listener>,
-    /// What is said while it loads.
-    loading: String,
     /// The provider of an engine over the network. `None`: the Host's own.
     provider: Option<&'static str>,
 }
 
-/// Why a clip was not turned into text: the status and the words an app is given.
-type Refused = (StatusCode, String);
-
 enum AttemptError {
     LanguageSet,
-    Failed(Told),
-}
-
-impl From<Told> for AttemptError {
-    fn from(error: Told) -> Self {
-        Self::Failed(error)
-    }
+    Disabled,
+    Failed(Failure),
 }
 
 impl AttemptError {
-    fn told(self) -> Told {
+    fn word(&self) -> &'static str {
         match self {
-            Self::LanguageSet => refuse(StatusCode::INTERNAL_SERVER_ERROR, languages::SET_NEEDS),
-            Self::Failed(error) => error,
+            Self::LanguageSet => languages::SET_NEEDS,
+            Self::Disabled => heard::DISABLED,
+            Self::Failed(kind) => kind.client_words().1,
         }
+    }
+
+    fn health_word(&self) -> &'static str {
+        match self {
+            Self::Failed(Failure::Busy) => "busy",
+            other => other.word(),
+        }
+    }
+
+    fn told(self) -> Told {
+        let status = match self {
+            Self::LanguageSet => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Disabled => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Failed(kind) => StatusCode::from_u16(kind.client_words().0)
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        };
+        refuse(status, self.word())
+    }
+}
+
+fn engine_failure(kind: Failure, detail: impl std::fmt::Display) -> AttemptError {
+    eprintln!("clarp-host: {}: {detail}", kind.client_words().1);
+    AttemptError::Failed(kind)
+}
+
+fn deaf(error: Deaf, model: &str) -> AttemptError {
+    match error {
+        Deaf::Loading => engine_failure(Failure::Loading, model),
+        Deaf::Busy => engine_failure(Failure::Busy, model),
+        Deaf::Failed(why) => engine_failure(Failure::Failed, why),
     }
 }
 
@@ -366,35 +387,29 @@ impl Ears {
         heard::is_cloud(model) || self.inventory.path(model).is_some()
     }
 
-    /// The engine a name stands for on this Host. With the engine comes what is said while
-    /// it loads.
-    fn engine_of(&self, model: &str) -> Result<Chosen, Refused> {
+    /// The engine a name stands for on this Host.
+    fn engine_of(&self, model: &str) -> Result<Chosen, AttemptError> {
         if !self.available() {
-            return Err((StatusCode::SERVICE_UNAVAILABLE, heard::DISABLED.to_string()));
+            return Err(AttemptError::Disabled);
         }
         let own_id = self.own_id();
         let is_own =
             matches!(model, "" | "local" | "server-default") || own_id.as_deref() == Some(model);
         if is_own {
             let Some((engine, _)) = &self.own else {
-                return Err((StatusCode::SERVICE_UNAVAILABLE, heard::DISABLED.to_string()));
-            };
-            let loading = match model {
-                "" => heard::LOADING.to_string(),
-                named => format!("transcription model loading: {named}"),
+                return Err(AttemptError::Disabled);
             };
             return Ok(Chosen {
                 engine: engine.clone(),
-                loading,
                 provider: None,
             });
         }
         if !heard::is_cloud(model) {
-            return Err((StatusCode::BAD_REQUEST, heard::not_installed(model)));
+            return Err(engine_failure(Failure::UnknownModel, model));
         }
         let Some((provider, _)) = heard::cloud_model(model) else {
             let unknown = format!("unknown transcription engine: {model}");
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, unknown));
+            return Err(engine_failure(Failure::Failed, unknown));
         };
         let engine = match model {
             SCRIBE => &self.scribe,
@@ -403,15 +418,14 @@ impl Ears {
             "cartesia:ink-whisper" => &self.ink_whisper,
             CHIRP => &self.chirp,
             // An engine the contract lists and this Host does not have.
-            _ => return Err((StatusCode::BAD_REQUEST, heard::not_installed(model))),
+            _ => return Err(engine_failure(Failure::UnknownModel, model)),
         };
         if !self.has(provider.id) {
             let no_key = format!("{} API key is not configured", provider.id);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, no_key));
+            return Err(engine_failure(Failure::Failed, no_key));
         }
         Ok(Chosen {
             engine: engine.clone(),
-            loading: heard::LOADING.to_string(),
             provider: Some(provider.id),
         })
     }
@@ -419,20 +433,6 @@ impl Ears {
     /// Has one engine hear a clip. `language` is the language of the agent the clip is
     /// for: an engine over the network is handed it as that engine takes it, and the
     /// Host's own is told what its model knows.
-    async fn heard_by(
-        self: &Arc<Self>,
-        model: &str,
-        language: &str,
-        listen_for: &str,
-        clip: (&axum::body::Bytes, &str),
-        observed: &mut Option<String>,
-        has_fallback: bool,
-    ) -> Result<Heard, Told> {
-        self.try_hearing(model, language, listen_for, clip, observed, has_fallback)
-            .await
-            .map_err(AttemptError::told)
-    }
-
     async fn try_hearing(
         self: &Arc<Self>,
         model: &str,
@@ -452,17 +452,12 @@ impl Ears {
             (
                 Chosen {
                     engine,
-                    loading: format!("transcription model loading: {model}"),
                     provider: None,
                 },
                 Some(guard),
             )
         } else {
-            (
-                self.engine_of(model)
-                    .map_err(|(status, why)| refuse(status, why))?,
-                None,
-            )
+            (self.engine_of(model)?, None)
         };
         let handed = match chosen.provider {
             Some(provider) => {
@@ -509,21 +504,9 @@ impl Ears {
             (result, captured)
         })
         .await;
-        let (result, captured) = said.map_err(|_| {
-            refuse(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "the clip could not be heard",
-            )
-        })?;
+        let (result, captured) = said.map_err(|why| engine_failure(Failure::Failed, why))?;
         *observed = captured;
-        match result {
-            Ok(said) => Ok(said),
-            Err(Deaf::Loading) => {
-                Err(refuse(StatusCode::SERVICE_UNAVAILABLE, chosen.loading).into())
-            }
-            Err(Deaf::Busy) => Err(refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY).into()),
-            Err(Deaf::Failed(why)) => Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, why).into()),
-        }
+        result.map_err(|error| deaf(error, model))
     }
 
     /// The one who may answer this job now. A job without a name is nobody's twice.
@@ -787,13 +770,11 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         .unwrap_or("");
     let failed = |err: Told| {
         let details = match err.0 {
-            StatusCode::TOO_MANY_REQUESTS => Some(json!({"message":"whisper busy"})),
+            StatusCode::TOO_MANY_REQUESTS => Failure::Busy.voice_detail(),
             StatusCode::UNPROCESSABLE_ENTITY if err.1["error"] == language_set::UNSUPPORTED => {
                 Some(json!({"message":language_set::UNSUPPORTED,"stage":"stt"}))
             }
-            StatusCode::INTERNAL_SERVER_ERROR => Some(
-                json!({"message":clarp_kernel::python::first(err.1["error"].as_str().unwrap_or(""),300),"stage":"stt"}),
-            ),
+            StatusCode::INTERNAL_SERVER_ERROR => Failure::Failed.voice_detail(),
             _ => None,
         };
         if let Some(detail) = details {
@@ -980,30 +961,20 @@ async fn hear_chat(
                 return hear_language_set(app, ears, fallback, language, listen_for, clip).await;
             }
             error => {
-                let log = error.told();
                 if !more {
-                    if log.0 == StatusCode::INTERNAL_SERVER_ERROR {
-                        eprintln!(
-                            "clarp-host: a clip was not turned into text ({model}): {}",
-                            log.1["error"]
-                        );
-                    }
-                    return Err(log);
+                    return Err(error.told());
                 }
                 if failure.reached {
                     attempted.push(language_set::identity(model, own.as_deref()));
                 }
                 eprintln!(
                     "clarp-host: {model} did not hear a clip, the next engine is asked: {}",
-                    log.1["error"]
+                    error.word()
                 );
             }
         }
     }
-    Err(refuse(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "no engine heard the clip",
-    ))
+    Err(engine_failure(Failure::Failed, "no engine heard the clip").told())
 }
 
 async fn chat_attempt(
@@ -1024,8 +995,12 @@ async fn chat_attempt(
     let result = ears
         .try_hearing(model, language, listen_for, clip, &mut handed, more)
         .await;
-    app.capture
-        .transcription(app.clock.now_ms(), result.is_ok(), clip.0.len(), started);
+    app.capture.transcription(
+        app.clock.now_ms(),
+        result.as_ref().err().map(AttemptError::health_word),
+        clip.0.len(),
+        started,
+    );
     (result, handed)
 }
 

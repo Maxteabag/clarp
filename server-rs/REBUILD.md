@@ -2395,6 +2395,12 @@ closes it; failing again, archived, failing once more, discarded; a restart keep
 
 **Installed transcription models.** The Linux catalog lists the five faster-whisper models and the two macOS rows. The Host checks its own registered paths for the configuration, tokenizer and model files. A regular clip or a call can select an installed variant by name. The default stays warm. One additional worker loads on demand and stays resident until a different variant replaces it, the model is removed or the Host stops. Default and variant share an inference turn. A request with a fallback gives another variant ten seconds to finish selection and inference. The final choice waits for that turn.
 
+**Transcription failure words (PR 518, 21 Nov 2026).** Missing models, loading, contention, and failed attempts
+map to fixed words and statuses. Upload voice events and call attempt reasons use the same words. Health keeps
+fixed subsystem error labels with its timestamps, including for limited devices. The Host logs the engine detail.
+The speech stream gives a fixed failure message when its provider reports an error. The reference vectors and
+the upload, call, stream and health tests hold the failure paths.
+
 The Host marks a managed model before deleting its folder. While marked it is hidden. A restart finishes pending deletions and clears the mark on a newly configured default. A stored inventory that cannot be parsed is preserved byte for byte under `records.unreadable` before the Host logs a single diagnostic and opens with an empty inventory. Store read or backup failures stop startup.
 
 The additional process holds its model and inference buffers. A published CPU small-int8 benchmark used about 1.5 GB. Resident memory varies with model and workload. An idle timeout could reclaim that memory on machines under swap pressure at the cost of another cold load. This Host retains the worker as the reference does.

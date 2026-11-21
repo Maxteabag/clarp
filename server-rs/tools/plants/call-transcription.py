@@ -78,7 +78,6 @@ changes(K, 'vectors', [
     ('"engine":engine,"outcome":"error"', '"engine":engine,"outcome":"ok"'),
     ('"engine":engine,"outcome":"ok"', '"engine":engine,"outcome":"error"'),
     ('"language":language,"ms":ms,"reason"', '"language":"auto","ms":ms,"reason"'),
-    ('python::first(reason,200)', 'python::first(reason,199)'),
     ('"first_code"', '"first_language"'),
     ('self.report["effective_engine"] = json!(engine)', 'self.report["effective_engine"] = Value::Null'),
     ('Value::Array(self.rows)','Value::Array(Vec::new())'),

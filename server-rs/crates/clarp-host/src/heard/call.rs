@@ -138,7 +138,7 @@ pub(super) async fn hear(
         let later = &steps[i + 1..];
         let result = app
             .ears
-            .heard_by(
+            .try_hearing(
                 model,
                 lang,
                 listen_for,
@@ -149,7 +149,7 @@ pub(super) async fn hear(
             .await;
         app.capture.transcription(
             app.clock.now_ms(),
-            result.is_ok(),
+            result.as_ref().err().map(AttemptError::health_word),
             clip.0.len(),
             Some(began),
         );
@@ -164,11 +164,12 @@ pub(super) async fn hear(
                 );
                 return Ok((said, report.finish(), run_id));
             }
-            Err((status, mut body)) => {
-                let reason = body["error"].as_str().unwrap_or("");
+            Err(error) => {
+                let reason = error.word();
                 report.failed(&step.engine, handed.as_deref(), elapsed, reason);
                 contacted.failed(&step.engine, handed.is_some());
                 if !rules::has_runnable_step(later, &contacted) {
+                    let (status, mut body) = error.told();
                     if status == StatusCode::INTERNAL_SERVER_ERROR {
                         body["stt"] = report.finish();
                     }
