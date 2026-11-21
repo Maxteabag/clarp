@@ -166,8 +166,10 @@ def _recognize(wav: bytes, *, credentials_file: str, project: str,
             headers={"Authorization": f"Bearer {access_token(credentials_file)}",
                      "x-goog-user-project": project,
                      "Content-Type": "application/json"})
+        from .stt_language import sending_audio
         try:
-            payload = _post(request, attempt_timeout, "Google STT")
+            with sending_audio():                    # the token and the clip are ready: audio leaves
+                payload = _post(request, attempt_timeout, "Google STT")
             break
         except GoogleSTTError as error:
             # A revoked or early-expired token: refresh once and retry.
@@ -214,6 +216,10 @@ def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
     if len(wavs) == 1:
         texts = [run(wavs[0])]
     else:
+        import contextvars
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(wavs), 4)) as pool:
-            texts = list(pool.map(run, wavs))
+            # Each piece runs in a copy of this context, so what it records at its request
+            # (stt_language.sending_audio) reaches this attempt's capture.
+            futures = [pool.submit(contextvars.copy_context().run, run, wav) for wav in wavs]
+            texts = [future.result() for future in futures]
     return " ".join(t for t in texts if t), duration

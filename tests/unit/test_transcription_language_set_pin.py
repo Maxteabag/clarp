@@ -35,7 +35,7 @@ import pathlib
 import threading
 
 from lib import agents as agents_db
-from lib import audio_duration, config, settings_store, stt_providers, transcription_results
+from lib import audio_duration, config, settings_store, stt_language, stt_providers, transcription_results
 from lib import transcription_pipeline as tp
 
 FIXTURE = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "stt_language_set_pin.json"
@@ -107,9 +107,10 @@ def _run_matrix(monkeypatch, tmp_path) -> dict:
     def edge(provider):
         def run(**kw):
             received.append([provider, kw.get("language")])
-            if state["fail"] == "set-engines-down" and provider in SET_PROVIDERS:
-                raise RuntimeError(f"{provider} 503")
-            return f"heard-{provider}", 1.0
+            with stt_language.sending_audio():       # stands where the audio leaves
+                if state["fail"] == "set-engines-down" and provider in SET_PROVIDERS:
+                    raise RuntimeError(f"{provider} 503")
+                return f"heard-{provider}", 1.0
         return run
     for provider, module in (("deepgram", lib.deepgram_stt), ("elevenlabs", lib.eleven_stt),
                              ("google", lib.google_stt), ("cartesia", lib.cartesia_stt),

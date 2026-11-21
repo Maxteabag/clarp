@@ -17,12 +17,13 @@
 //!    waits its turn, and runs even while the mailbox is held, without lifting the hold. It never
 //!    ends a turn that has not started: two direct messages in a row both run, in order.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
 use crate::compaction::LastCompaction;
 use crate::control::Control;
+use crate::steering::{FollowUp, Join, Stage};
 
 use crate::turn::{
     Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued,
@@ -48,7 +49,15 @@ pub enum Command {
         /// Another agent addresses this one: its id ("" for a peer Host's agent). `None`: the
         /// user's ([`TurnEvent::Accepted`]).
         coordination: Option<String>,
+        /// The Host verified a designated front desk or a card answered by its user.
+        user_word: bool,
     },
+    /// Reserve a queued message for input to the live turn.
+    Join { turn: TurnId, join: Join },
+    /// The live process echoed this follow-up.
+    JoinRead { turn: TurnId },
+    /// An answer settled this follow-up, or the process ended after reading it.
+    JoinSettled { turn: TurnId },
     /// Take a waiting message back.
     Withdraw { turn: TurnId, by: String },
     /// Let one waiting message run now, whatever holds the mailbox: its user sends it by
@@ -144,6 +153,17 @@ pub enum AgentEvent {
     },
     TakeoverCleared {
         from: TurnId,
+    },
+    Joined {
+        turn: TurnId,
+        join: Join,
+    },
+    JoinRead {
+        turn: TurnId,
+        at_ms: i64,
+    },
+    JoinSettled {
+        turn: TurnId,
     },
     /// Someone asked the live turn to stop. It settles when the tool process is gone. Whether
     /// the Host knew who asked, and why, are absent from a log written before they were kept.
@@ -295,6 +315,7 @@ pub struct Agent {
     latest_turn_start: Option<i64>,
     next_turn: u64,
     mailbox: VecDeque<Queued>,
+    joins: BTreeMap<TurnId, FollowUp>,
     /// The turn that holds the agent: starting or running, never anything else.
     live: Option<Turn>,
     /// Who asked the live turn to stop and why, while it has not gone yet.
@@ -377,6 +398,7 @@ impl Default for Agent {
             latest_turn_start: None,
             next_turn: 1,
             mailbox: VecDeque::new(),
+            joins: BTreeMap::new(),
             live: None,
             stopping: None,
             note: None,
@@ -413,6 +435,10 @@ impl Agent {
 
     pub fn live(&self) -> Option<&Turn> {
         self.live.as_ref()
+    }
+
+    pub fn joins(&self) -> &BTreeMap<TurnId, FollowUp> {
+        &self.joins
     }
 
     /// The position in the log of the event applied next.
@@ -501,6 +527,7 @@ impl Agent {
             && origin.is_user()
             && self.stopping.is_none()
             && self.live_takeover.is_none()
+            && self.joins.is_empty()
             && !self.paused
             && self.next_to_run().is_some_and(|next| {
                 next.id == into && next.origin.is_user() && next.admission == Admission::Queue
@@ -583,10 +610,28 @@ impl Agent {
     /// The waiting turn that runs when the agent is free: the first one no hold holds.
     fn next_to_run(&self) -> Option<&Queued> {
         self.mailbox.iter().find(|queued| {
-            !self.paused
-                || queued.admission == Admission::Direct
-                || self.unheld.contains(&queued.id)
+            !self.joins.contains_key(&queued.id)
+                && (!self.paused
+                    || queued.admission == Admission::Direct
+                    || self.unheld.contains(&queued.id))
         })
+    }
+
+    fn can_join(&self, turn: TurnId, join: &Join) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.id() == join.into && live.has_process())
+            && self.stopping.is_none()
+            && self.selected_takeover.is_none()
+            && self.mailbox.iter().any(|waiting| {
+                waiting.id == turn
+                    && waiting.admission == Admission::Queue
+                    && waiting.origin.is_user()
+            })
+            && !self.holds(turn)
+            && !join.uuid.is_empty()
+            && !self.joins.contains_key(&turn)
+            && !self.joins.values().any(|held| held.join.uuid == join.uuid)
     }
 
     /// Whether a message admitted this way now would start at once, without waiting: and so
@@ -620,15 +665,21 @@ impl Agent {
                 origin,
                 admission,
                 coordination,
+                user_word,
             } => {
                 let turn = TurnId(work.agent.next_turn);
                 let (_, mut accepted) =
                     Queued::accept(turn, message_seq, origin, admission, now_ms);
                 if let TurnEvent::Accepted {
-                    coordination: mark, ..
+                    coordination: mark,
+                    user_word: priority,
+                    ..
                 } = &mut accepted
                 {
                     *mark = coordination;
+                    if user_word {
+                        *priority = Some(true);
+                    }
                 }
                 work.record(AgentEvent::Turn {
                     turn,
@@ -639,8 +690,42 @@ impl Agent {
                     work.stop_live(Control::by(preempted_by(turn)), now_ms);
                 }
             }
+            Command::Join { turn, join } => {
+                if !work.agent.can_join(turn, &join) {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::Joined { turn, join });
+            }
+            Command::JoinRead { turn } => {
+                if !work
+                    .agent
+                    .joins
+                    .get(&turn)
+                    .is_some_and(|join| join.stage == Stage::Pending)
+                {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::JoinRead {
+                    turn,
+                    at_ms: now_ms,
+                });
+                work.let_go_of_nothing(DRAINED, now_ms);
+            }
+            Command::JoinSettled { turn } => {
+                if !work
+                    .agent
+                    .joins
+                    .get(&turn)
+                    .is_some_and(|join| join.stage.read_at().is_some())
+                {
+                    return Err(Refusal::NotLive(turn));
+                }
+                work.record(AgentEvent::JoinSettled { turn });
+            }
             Command::Withdraw { turn, by } => {
-                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                if work.agent.joins.contains_key(&turn)
+                    || !work.agent.mailbox.iter().any(|queued| queued.id == turn)
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::Turn {
@@ -653,7 +738,9 @@ impl Agent {
                 work.let_go_of_nothing(&by, now_ms);
             }
             Command::Reword { turn, message_seq } => {
-                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                if work.agent.joins.contains_key(&turn)
+                    || !work.agent.mailbox.iter().any(|queued| queued.id == turn)
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::Reworded {
@@ -941,6 +1028,69 @@ impl Agent {
     /// Changes the state by one event. The only way the state changes.
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
+            AgentEvent::Joined { turn, join } => {
+                let invalid = IllegalTransition {
+                    turn: *turn,
+                    state: "unavailable",
+                    event: "joined",
+                };
+                if !self.can_join(*turn, join) {
+                    return Err(invalid);
+                }
+                let waiting = self
+                    .mailbox
+                    .iter()
+                    .find(|waiting| waiting.id == *turn)
+                    .ok_or(invalid)?;
+                self.joins.insert(
+                    *turn,
+                    FollowUp {
+                        join: join.clone(),
+                        message_seq: waiting.message_seq,
+                        stage: Stage::Pending,
+                    },
+                );
+            }
+            AgentEvent::JoinRead { turn, at_ms } => {
+                let invalid = IllegalTransition {
+                    turn: *turn,
+                    state: "unavailable",
+                    event: "join-read",
+                };
+                let position = self
+                    .mailbox
+                    .iter()
+                    .position(|waiting| waiting.id == *turn)
+                    .ok_or_else(|| invalid.clone())?;
+                let join = self
+                    .joins
+                    .get_mut(turn)
+                    .filter(|join| join.stage == Stage::Pending)
+                    .ok_or(invalid)?;
+                join.stage = Stage::Read(*at_ms);
+                self.mailbox.remove(position);
+                self.unheld.remove(turn);
+                if self.waited.remove(turn) {
+                    self.queue_revision += 1;
+                }
+                self.deliveries
+                    .hand(turn.0, crate::delivery::revision(self.at, 0), *at_ms);
+                self.deliveries.launch(turn.0);
+            }
+            AgentEvent::JoinSettled { turn } => {
+                let join = self
+                    .joins
+                    .get_mut(turn)
+                    .filter(|join| join.stage.read_at().is_some())
+                    .ok_or(IllegalTransition {
+                        turn: *turn,
+                        state: "unread",
+                        event: "join-settled",
+                    })?;
+                join.stage = Stage::Settled;
+                self.deliveries.over(turn.0);
+                self.settled += 1;
+            }
             AgentEvent::Paused {
                 by,
                 verified,
@@ -1160,7 +1310,12 @@ impl Agent {
     }
 
     fn move_turn(&mut self, turn: TurnId, change: &TurnEvent) -> Result<(), IllegalTransition> {
-        if let TurnEvent::Accepted { turn: accepted, .. } = change {
+        if let TurnEvent::Accepted {
+            turn: accepted,
+            user_word,
+            ..
+        } = change
+        {
             if *accepted != turn || turn.0 != self.next_turn {
                 return Err(IllegalTransition {
                     turn,
@@ -1193,6 +1348,11 @@ impl Agent {
                         .position(|waiting| waiting.admission != Admission::Direct)
                         .unwrap_or(self.mailbox.len());
                     self.mailbox.insert(at, queued);
+                } else if *user_word == Some(true) {
+                    let at = crate::user_word::slot(self.mailbox.iter().map(|waiting| {
+                        waiting.user_word || waiting.admission == Admission::Direct
+                    }));
+                    self.mailbox.insert(at, queued);
                 } else {
                     self.mailbox.push_back(queued);
                 }
@@ -1210,6 +1370,7 @@ impl Agent {
             }
             match live.apply(change)? {
                 Turn::Settled(ended) => {
+                    self.joins.clear();
                     self.settled += 1;
                     self.stopping = None;
                     self.live_from_queue = false;
@@ -1219,7 +1380,12 @@ impl Agent {
                     self.selected_takeover = None;
                     self.last = Some(ended);
                 }
-                next => self.live = Some(next),
+                next => {
+                    if matches!(next, Turn::Parked(_)) {
+                        self.joins.clear();
+                    }
+                    self.live = Some(next);
+                }
             }
             return Ok(());
         }
@@ -1498,6 +1664,7 @@ mod tests {
                 origin: Origin::User,
                 admission: Admission::Queue,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1511,6 +1678,7 @@ mod tests {
                 },
                 admission: Admission::Background,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1522,6 +1690,7 @@ mod tests {
                 origin: Origin::User,
                 admission: Admission::Direct,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1576,6 +1745,7 @@ mod tests {
             },
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         };
         let said = |turn: u64, before: u64| Command::RecordCompaction {
             turn: TurnId(turn),
@@ -2142,6 +2312,7 @@ mod tests {
             origin: Origin::User,
             admission: Admission::Later,
             coordination: None,
+            user_word: false,
         };
         assert_eq!(
             a.send(later).unwrap(),
@@ -2394,6 +2565,31 @@ mod tests {
     }
 
     #[test]
+    fn prior_queue_order_is_replayed_and_old_user_words_protect_their_places() {
+        let mut a = Driven::new();
+        a.user(1);
+        a.background(2);
+        a.agent
+            .apply(&AgentEvent::Turn {
+                turn: TurnId(3),
+                change: TurnEvent::Accepted {
+                    turn: TurnId(3),
+                    message_seq: 3,
+                    origin: Origin::User,
+                    admission: Admission::Queue,
+                    at_ms: 3,
+                    coordination: None,
+                    user_word: None,
+                },
+            })
+            .unwrap();
+        a.background(4);
+        a.user(5);
+        let waiting: Vec<_> = a.agent.waiting().map(|queued| queued.id).collect();
+        assert_eq!(waiting, [TurnId(2), TurnId(3), TurnId(5), TurnId(4)]);
+    }
+
+    #[test]
     fn a_direct_message_runs_past_a_stop_and_leaves_the_rest_held() {
         let mut a = Driven::new();
         a.user(10);
@@ -2641,6 +2837,7 @@ mod tests {
                             origin,
                             admission,
                             coordination: None,
+                            user_word: false,
                         }
                     }
                     3 => Command::Stop {

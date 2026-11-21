@@ -4820,7 +4820,9 @@ def test_a_voice_change_writes_only_that_agent(running_server, monkeypatch):
     status, body = _post_status(base + "/agent-voice", {"session": "claude", "voice_id": "fresh-voice"})
     assert status == 200, body
     assert agents_db.get_by_session("latecomer") is not None
-    assert agents_db.get_by_session("claude")["voice_id"] == "fresh-voice"
+    # Issue 476: a voice picked without a provider is merged under the provider its form
+    # names (ElevenLabs for anything that is not a uuid or a Chirp name).
+    assert json.loads(agents_db.get_by_session("claude")["voice_id"])["elevenlabs"] == "fresh-voice"
 
 
 def test_the_snapshot_shows_each_agents_voice_and_changes_are_announced(running_server, monkeypatch):

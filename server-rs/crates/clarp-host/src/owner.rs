@@ -64,8 +64,17 @@ pub fn selectors(file: &Table) -> Vec<(&'static str, Vec<String>)> {
 /// each without the space around it, the empty ones and what is no text passed over, each once in
 /// the order written. Anything else names nobody.
 pub fn on_behalf_sessions(file: &Table) -> Vec<String> {
+    designated_sessions(file, "decision_on_behalf_sessions")
+}
+
+/// The sessions whose verified local turns may relay the owner's words first.
+pub fn front_desk_sessions(file: &Table) -> Vec<String> {
+    designated_sessions(file, "front_desk_sessions")
+}
+
+fn designated_sessions(file: &Table, key: &str) -> Vec<String> {
     let listed = file.get("agents").and_then(Value::as_table);
-    let listed = listed.and_then(|agents| agents.get("decision_on_behalf_sessions"));
+    let listed = listed.and_then(|agents| agents.get(key));
     let Some(listed) = listed.and_then(Value::as_array) else {
         return Vec::new();
     };

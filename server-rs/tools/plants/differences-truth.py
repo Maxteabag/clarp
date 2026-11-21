@@ -11,28 +11,18 @@ RUNS={
     'screens':['test','--test','host','a_screen_of_something_this_host_has_not_is_answered'],
 }
 PLANTS=[]
-FULL_ONLY=['/backend-auth','/harness-providers','/server-update','/managed-skills','/hotseat/desk',
-           '/hotseat/switch','/hotseat/resume','/orchestrator/','/herald/','/personalities/',
-           '/automation-settings','/avatar-settings','/paired-devices','/tts/providers','/network/',
-           '/server-terminal','/oracle/','/agent-file','/janitor-runs/','/calls']
-for entry in FULL_ONLY:
-    after = ']' if entry == '/calls' else '    "'
-    PLANTS.append((D,'scope',f'open {entry} to a limited device',f'    "{entry}",\n{after}',f'    "/never-asked{entry}",\n{after}'))
+# The GET allowlist independently denies the old full-only and disk/terminal paths.
+# The former denylist plants are obsolete because opening those guards would grant nothing.
 LIMITED_POSTS=['/send','/transcribe','/upload','/select','/focus','/clips/ack','/clog','/location',
                '/calendar/response','/remote-action','/voice-events']
-for entry in LIMITED_POSTS:
-    PLANTS.append((D,'scope',f'refuse {entry} to a limited device',f'    "{entry}",\n',f'    "/never-sent{entry}",\n'))
+for index, entry in enumerate(LIMITED_POSTS):
+    after = f'    "{LIMITED_POSTS[index + 1]}",' if index + 1 < len(LIMITED_POSTS) else '];'
+    PLANTS.append((D,'scope',f'refuse {entry} to a limited device',
+                   f'    "{entry}",\n{after}',f'    "/never-sent{entry}",\n{after}'))
 for run,label,old,new in [
     ('scope','other words','"full device access required"','"this device may not do that"'),
-    ('scope','a PATCH looked at everywhere','method == "PATCH" && !path.starts_with("/schedules/")','false'),
-    ('scope','a PATCH never looked at','method == "PATCH" && !path.starts_with("/schedules/")','method == "PATCH"'),
-    ('scope','a closed prefix without its slash is open','path == prefix.trim_end_matches(\'/\') || ',''),
-    ('scope','only the closed path itself','|| path.starts_with(*prefix)','|| path == *prefix'),
-    ('scope','the disk read open','"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"','"/past-sessions" | "/launch-directories" | "/favorite-paths"'),
-    ('scope','past sessions open','"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"','"/dirs" | "/launch-directories" | "/favorite-paths"'),
-    ('scope','a terminal read open','(path.starts_with("/terminal/") && method == "GET")','(path.starts_with("/terminal/") && method == "POST")'),
-    ('scope','the list of terminals closed','(path.starts_with("/terminal/") && method == "GET")','(path.starts_with("/terminal") && method == "GET")'),
-    ('scope','reads refused','if method == "GET" {\n        return false;','if method == "OPTIONS" {\n        return false;'),
+    ('scope','a PATCH never looked at','method != "POST" || !LIMITED_POSTS.contains(&path)','method != "PATCH" && (method != "POST" || !LIMITED_POSTS.contains(&path))'),
+    ('scope','reads refused','if method == "GET" {','if method == "OPTIONS" {'),
     ('scope','every change of an action allowed','return !(method == "POST" && invoked(path).is_some());','return false;'),
     ('scope','an invoke refused','return !(method == "POST" && invoked(path).is_some());','return true;'),
     ('scope','an invoke by any method','return !(method == "POST" && invoked(path).is_some());','return invoked(path).is_none();'),
@@ -68,8 +58,5 @@ for file,run,label,old,new in [
     ('clarp-host/src/seats.rs','desk','another table read','.and_then(|file| file.get("hotseat"))','.and_then(|file| file.get("seats"))'),
 ]:
     PLANTS.append((file,run,label,old,new))
-# Contract 104 closes these exact routes to a limited device (R123).
-PLANTS.append((D, 'scope', 'a limited device reads /launch-directories', '"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"', '"/dirs" | "/past-sessions" | "/favorite-paths"'))
-PLANTS.append((D, 'scope', 'a limited device reads /favorite-paths', '"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"', '"/dirs" | "/past-sessions" | "/launch-directories"'))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
