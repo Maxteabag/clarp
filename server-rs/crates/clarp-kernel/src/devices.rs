@@ -638,6 +638,13 @@ pub fn limited_server_info(mut info: Value) -> Value {
     info
 }
 
+/// Keep the required cwd string in each limited snapshot row without sharing its path.
+pub fn limit_snapshot_cwd(agents: &mut [Value]) {
+    for cwd in agents.iter_mut().filter_map(|agent| agent.get_mut("cwd")) {
+        *cwd = Value::String(String::new());
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RevokeRefusal {
     Missing,

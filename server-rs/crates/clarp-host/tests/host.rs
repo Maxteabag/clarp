@@ -9903,7 +9903,15 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("limited");
     let host = place.start_with_token(ADMIN);
-    host.new_agent("Echo");
+    let live = host.new_agent("Echo");
+    let archived = host.new_agent("Archived fixture");
+    assert_eq!(
+        host.post(
+            "/agent-archive",
+            json!({"session": archived, "archived": true})
+        )["ok"],
+        true
+    );
     let (limited, _) = pair(&host, "A limited watch", "limited");
     let (full, _) = pair(&host, "A full phone", "full");
     let ask = |token: &str, method: &str, path: &str, body: &[u8]| {
@@ -9991,6 +9999,32 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
     for key in allowed_keys {
         assert!(info.get(key).is_some(), "{key}");
         assert_eq!(info[key], full_info[key], "{key}");
+    }
+    // A limited snapshot keeps cwd as a string, including for archived rows.
+    for include_archived in [true, false] {
+        let path = if include_archived {
+            "/agents/snapshot"
+        } else {
+            "/agents/snapshot?include_archived=0"
+        };
+        let (status, snapshot) = host.ask_as(&limited, "GET", path, None);
+        assert_eq!(status, 200);
+        let rows = snapshot["agents"].as_array().unwrap();
+        assert!(rows.iter().any(|row| row["session"] == live));
+        assert_eq!(
+            rows.iter().any(|row| row["session"] == archived),
+            include_archived
+        );
+        for row in rows {
+            assert_eq!(row.get("cwd"), Some(&json!("")), "{row}");
+        }
+        let (status, snapshot) = host.ask_as(&full, "GET", path, None);
+        assert_eq!(status, 200);
+        let rows = snapshot["agents"].as_array().unwrap();
+        for session in std::iter::once(&live).chain(include_archived.then_some(&archived)) {
+            let row = rows.iter().find(|row| row["session"] == *session).unwrap();
+            assert!(row["cwd"].as_str().is_some_and(|cwd| !cwd.is_empty()));
+        }
     }
     // A head is asked as a read: refused where a read is, let through where a read is.
     assert_eq!(ask(&limited, "HEAD", "/paired-devices", b"").0, 403);

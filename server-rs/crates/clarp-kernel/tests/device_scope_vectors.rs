@@ -51,5 +51,12 @@ fn a_limited_device_is_refused_what_the_python_host_refuses_it() {
             "{case}"
         );
     }
+    let snapshots = vectors["snapshots"].as_array().unwrap();
+    assert_eq!(snapshots.len(), 2);
+    for case in snapshots {
+        let mut snapshot = case["full"].clone();
+        devices::limit_snapshot_cwd(snapshot["agents"].as_array_mut().unwrap());
+        assert_eq!(snapshot, case["limited"], "{case}");
+    }
     assert_eq!(devices::LIMITED_REFUSAL, "full device access required");
 }
