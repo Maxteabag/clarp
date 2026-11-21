@@ -149,6 +149,29 @@ def _agy_windows(row: dict[str, Any], provider_instance_id: str, now_ms: int) ->
     return windows
 
 
+# Antigravity counts as in use when an agy agent had a turn this recently.
+AGY_IN_USE_MS = 6 * 3_600_000
+
+
+def agy_in_use(now_ms: int | None = None) -> bool:
+    """Whether an Antigravity agent had a turn in the last AGY_IN_USE_MS. Each usage
+    check runs agy, a 200 MB binary, at about 4 CPU-s; on a Host where nobody uses
+    Antigravity that was 12 runs an hour for numbers no one reads. One indexed read
+    (turns by agent and start)."""
+    from . import db
+    now = _now_ms() if now_ms is None else now_ms
+    try:
+        row = db.conn().execute(
+            """SELECT 1 FROM turns t JOIN agents a ON a.agent_id = t.agent_id
+                WHERE a.backend = ? AND a.deleted_at IS NULL AND t.started_at > ? LIMIT 1""",
+            (AGY, now - AGY_IN_USE_MS)).fetchone()
+    except Exception as exc:  # noqa: BLE001 - unknown is in use: refreshed as before
+        from .log import log_exception
+        log_exception("agyInUseReadFail", exc)
+        return True
+    return row is not None
+
+
 def _agy_needs_refresh() -> bool:
     now = _now_ms()
     if now - _AGY_LAST_ATTEMPT_MS[0] <= CLAUDE_REFRESH_MS:
