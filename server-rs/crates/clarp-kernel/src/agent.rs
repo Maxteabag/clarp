@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compaction::LastCompaction;
 use crate::control::Control;
-use crate::steering::{FollowUp, Join};
+use crate::steering::{FollowUp, Join, Stage};
 
 use crate::turn::{
     Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued,
@@ -691,7 +691,7 @@ impl Agent {
                     .agent
                     .joins
                     .get(&turn)
-                    .is_some_and(|join| join.read_at_ms.is_none())
+                    .is_some_and(|join| join.stage == Stage::Pending)
                 {
                     return Err(Refusal::NotWaiting(turn));
                 }
@@ -706,7 +706,7 @@ impl Agent {
                     .agent
                     .joins
                     .get(&turn)
-                    .is_some_and(|join| join.read_at_ms.is_some())
+                    .is_some_and(|join| join.stage.read_at().is_some())
                 {
                     return Err(Refusal::NotLive(turn));
                 }
@@ -1037,7 +1037,7 @@ impl Agent {
                     FollowUp {
                         join: join.clone(),
                         message_seq: waiting.message_seq,
-                        read_at_ms: None,
+                        stage: Stage::Pending,
                     },
                 );
             }
@@ -1055,9 +1055,9 @@ impl Agent {
                 let join = self
                     .joins
                     .get_mut(turn)
-                    .filter(|join| join.read_at_ms.is_none())
+                    .filter(|join| join.stage == Stage::Pending)
                     .ok_or(invalid)?;
-                join.read_at_ms = Some(*at_ms);
+                join.stage = Stage::Read(*at_ms);
                 self.mailbox.remove(position);
                 self.unheld.remove(turn);
                 if self.waited.remove(turn) {
@@ -1068,18 +1068,14 @@ impl Agent {
                 self.deliveries.launch(turn.0);
             }
             AgentEvent::JoinSettled { turn } => {
-                if !self
-                    .joins
-                    .get(turn)
-                    .is_some_and(|join| join.read_at_ms.is_some())
-                {
-                    return Err(IllegalTransition {
+                let join = self.joins.get_mut(turn)
+                    .filter(|join| join.stage.read_at().is_some())
+                    .ok_or(IllegalTransition {
                         turn: *turn,
                         state: "unread",
                         event: "join-settled",
-                    });
-                }
-                self.joins.remove(turn);
+                    })?;
+                join.stage = Stage::Settled;
                 self.deliveries.over(turn.0);
                 self.settled += 1;
             }
