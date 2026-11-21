@@ -239,6 +239,9 @@ pub enum TurnEvent {
         /// (`c-<turn>`): no restart falls between the two, and nothing loosens it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         coordination: Option<String>,
+        /// Absent on older journals, whose original placement still replays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user_word: Option<bool>,
     },
     Started {
         at_ms: i64,
@@ -315,6 +318,7 @@ pub struct Queued {
     pub origin: Origin,
     pub admission: Admission,
     pub accepted_at_ms: i64,
+    pub user_word: bool,
 }
 
 /// A turn whose tool process is being started: for the first time, or again.
@@ -432,6 +436,7 @@ impl Queued {
         admission: Admission,
         at_ms: i64,
     ) -> (Self, TurnEvent) {
+        let user_word = crate::user_word::is_user_word(origin.name(), "", "");
         let event = TurnEvent::Accepted {
             turn,
             message_seq,
@@ -439,6 +444,7 @@ impl Queued {
             admission,
             at_ms,
             coordination: None,
+            user_word: Some(user_word),
         };
         (
             Self {
@@ -447,6 +453,7 @@ impl Queued {
                 origin,
                 admission,
                 accepted_at_ms: at_ms,
+                user_word,
             },
             event,
         )
@@ -775,10 +782,16 @@ impl Turn {
                 origin,
                 admission,
                 at_ms,
+                user_word,
                 ..
-            } => Ok(Self::Queued(
-                Queued::accept(*turn, *message_seq, origin.clone(), *admission, *at_ms).0,
-            )),
+            } => {
+                let mut queued =
+                    Queued::accept(*turn, *message_seq, origin.clone(), *admission, *at_ms).0;
+                if let Some(mark) = user_word {
+                    queued.user_word = *mark;
+                }
+                Ok(Self::Queued(queued))
+            }
             other => Err(IllegalTransition {
                 turn: TurnId(0),
                 state: "nothing",
