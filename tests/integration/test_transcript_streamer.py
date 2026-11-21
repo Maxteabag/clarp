@@ -787,3 +787,69 @@ def test_quiet_bind_save_failure_wakes_the_cursor_retry(streamer_env, monkeypatc
     assert written.is_set()
     assert retried.wait(2), 'a quiet bind tick must wake the dispatcher to retry its failed cursor save'
     assert not streamer.pool.watcher_for(agent_id).save_pending
+
+
+def test_a_pass_reads_no_agents_while_nothing_was_committed_and_a_change_is_seen_at_once(
+        streamer_env, monkeypatch):
+    """The bindings follow the agents and runtimes rows alone: while the database's change
+    stamp stands, a pass reads neither, and asks no backend for its executable (a
+    configuration read per agent, every second). A commit is seen on the next pass."""
+    from lib import backends, db
+    streamer, tmp_path = streamer_env
+    first, _ = _build_agent_with_transcript(tmp_path, session="one", backend_session_id="cs-one")
+    monkeypatch.setattr(backends, "capabilities",
+                        lambda *_a: pytest.fail("a pass needs only the runner's streaming flag"))
+    streamer.reconcile_once()
+    assert streamer.pool.has(first)
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        for _ in range(5):
+            streamer.reconcile_once()
+    finally:
+        db.conn().set_trace_callback(None)
+    assert not [s for s in statements if "FROM agents" in s or "FROM runtimes" in s], statements
+    second, _ = _build_agent_with_transcript(tmp_path, persona="Ross", session="two",
+                                             backend_session_id="cs-two")
+    streamer.reconcile_once()
+    assert streamer.pool.has(second)
+    agents_db.soft_delete(first)
+    streamer.reconcile_once()
+    assert not streamer.pool.has(first) and streamer.pool.has(second)
+
+
+def test_a_failed_runtimes_read_unbinds_nothing_and_the_next_pass_is_full(streamer_env, monkeypatch):
+    """When the runtimes cannot be read, the pass knows nothing about who is unbound: every
+    binding stays and no stamp is kept, so the next pass reads again in full and nothing
+    waits for some later commit."""
+    from lib import db
+    from lib import transcript_streamer as ts
+    streamer, tmp_path = streamer_env
+    agent_id, _ = _build_agent_with_transcript(tmp_path, session="kept", backend_session_id="cs-kept")
+    streamer.reconcile_once()
+    assert streamer.pool.has(agent_id)
+    agents_db.set_trace(agent_id, "trace-2")          # a commit: the next pass is a full one
+    real_conn = db.conn
+
+    class Unreadable:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *args):
+            if "FROM runtimes" in sql:
+                raise RuntimeError("synthetic: runtimes unreadable")
+            return self._inner.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+    monkeypatch.setattr(db, "conn", lambda: Unreadable(real_conn()))
+    assert ts._live_backend_sessions() is None
+    streamer.reconcile_once()
+    assert streamer.pool.has(agent_id), "a failed read must not unbind"
+    monkeypatch.setattr(db, "conn", real_conn)
+    reads = []
+    real_read = ts._live_backend_sessions
+    monkeypatch.setattr(ts, "_live_backend_sessions", lambda: (reads.append(1), real_read())[1])
+    streamer.reconcile_once()
+    assert reads == [1], "the pass after a failed read is a full one"
+    assert streamer.pool.has(agent_id)
