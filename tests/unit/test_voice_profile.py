@@ -217,7 +217,7 @@ def test_row_google_default_shared_and_off_the_allowlist(monkeypatch):
     assert pick(speech["g3"], "origin", "voice_label", "shared_with") == ("own", "Puck", 0)
     assert pick(speech["g4"], "provider", "provider_label", "voice_id", "voice_label", "origin",
                 "silent_reason", "streaming") == (                 # (c): off the allowlist
-        "google", "Google Chirp 3 HD", None, None, None, "no_voice", False)
+        "google", "Google Chirp 3 HD", None, None, None, "voice_unavailable", False)
 
 
 # ---------------------------------------------------------------- hearing
