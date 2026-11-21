@@ -62,7 +62,7 @@ def run(root):
     reminder = coordination.reminder(
         agents.get_by_agent_id(ivy), origin='agent', sender_agent_id=boss)
 
-    def gap(which, nearest, tail):
+    def gap(which, nearest, tail, *, bounded=False):
         name = f'case-{which}'
         who = agent(name)
         con = db.conn()
@@ -81,14 +81,16 @@ def run(root):
                          stamp, n, boss, trace))
         stamp = NOW if tail else NOW + len(nearest) + 1
         visible = f'visible-{which}'
-        con.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id,
-                       source_file, seq, role, timestamp, text, updated_at, revision, origin)
-                       VALUES (?, ?, 'native', 't.jsonl', 0, 'user', ?, 'visible', ?, 0, 'user')""",
-                    (visible, who, clock.iso_from_ms(stamp), stamp))
+        shown = [] if bounded and tail else [dict(id=visible)]
+        if shown:
+            con.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id,
+                           source_file, seq, role, timestamp, text, updated_at, revision, origin)
+                           VALUES (?, ?, 'native', 't.jsonl', 0, 'user', ?, 'visible', ?, 0, 'user')""",
+                        (visible, who, clock.iso_from_ms(stamp), stamp))
         con.commit()
         before, after = message_previews.coordination_gaps(
-            agent_id=who, sessions=['native'], rows=[dict(id=visible)],
-            include_automated=True, contiguous=True, tail=tail)
+            agent_id=who, sessions=['native'], rows=shown,
+            include_automated=True, contiguous=not bounded or tail, tail=tail)
         return dict(nearest=nearest, tail=tail, answer=after if tail else before.get(visible))
 
     counts = [gap(n, shape, tail) for n, (shape, tail) in enumerate((
@@ -100,7 +102,10 @@ def run(root):
         ('m' * 100 + 't' * 3 + 'm', False),
         ('', True),
     ))]
-    return dict(choices=choices, inputs=invalid, reminder=reminder, counts=counts)
+    look_back = [gap('hidden-tail', 'm' + 't' * 401 + 'mm', True, bounded=True),
+                 gap('hidden-delta', 'm' + 't' * 402, False, bounded=True)]
+    return dict(choices=choices, inputs=invalid, reminder=reminder, counts=counts,
+                look_back=look_back)
 
 
 def main():

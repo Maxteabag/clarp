@@ -26,10 +26,7 @@ pub(crate) fn visibility(
 }
 
 fn owner(headers: &HeaderMap) -> Result<(), ApiError> {
-    if ["x-clarp-turn", "x-clarp-peer"]
-        .into_iter()
-        .any(|name| !python::strip(&crate::media::header_text(headers, name)).is_empty())
-    {
+    if crate::coordination::from_an_agent(headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));
     }
     Ok(())
