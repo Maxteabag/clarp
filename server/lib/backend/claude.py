@@ -44,6 +44,7 @@ from .. import agents as agents_db
 from .. import config as _config
 from .. import events
 from .claude_models import claude_model_pin
+from .. import takeover as turn_takeover_steps
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..stream_pacing import LivePacer
@@ -688,7 +689,7 @@ class ClaudeBackend(Backend):
         try:
             if proc.stdout is None:
                 return
-            for line in proc.stdout:
+            for line in turn_takeover_steps.read_lines(proc.stdout, handle):
                 line = line.rstrip("\n")
                 if not line:
                     continue

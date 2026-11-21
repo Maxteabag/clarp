@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 from .. import agents as agents_db
 from .. import agy_transcript, transcript_paths
 from .. import provider_capabilities
+from .. import takeover as turn_takeover_steps
 from .. import server_identity
 from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception, log_fault
@@ -913,7 +914,7 @@ class AgyBackend(StreamJsonBackend):
             st.evidence_scope = _turn_evidence_scope(agent_id, trace_id)
             revision = 0
             if proc.stdout is not None:
-                for raw_line in proc.stdout:
+                for raw_line in turn_takeover_steps.read_lines(proc.stdout, handle):
                     if st.terminal:
                         continue
                     line = raw_line.strip()
