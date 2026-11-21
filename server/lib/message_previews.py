@@ -239,15 +239,29 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
         visible += " AND " + sql
         visible_params += extra
 
-    def previous_visible(key: tuple | None) -> tuple | None:
-        where, params = f"{scope} AND {visible}", [*scope_params, *visible_params]
+    def previous_visible(key: tuple | None) -> tuple[tuple | None, bool]:
+        """The previous visible row before ``key`` (None: the chat's end), looking back at most
+        COUNT_ROW_CAP + 1 rows of any kind by the display-order index: (its key, False). When none
+        of those is visible, (the farthest of them, True): the count reads no further than that
+        anyway and says capped. (None, False) when the chat starts within them. Without the bound
+        a stretch with no visible row was walked to the chat's start, judging every row (a delta
+        poll on a mostly-coordination chat: 356 ms of counts at 300k rows; the review's weigh point)."""
+        where, params = scope, list(scope_params)
         if key is not None:
             cmp_sql, cmp_params = _key_cmp("<", key)
             where, params = where + " AND " + cmp_sql, params + cmp_params
-        row = database.execute(
-            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id FROM messages m WHERE {where}
-                ORDER BY {_KEY_SQL} DESC, m.seq DESC, m.message_id DESC LIMIT 1""", params).fetchone()
-        return (row["t"], int(row["seq"]), row["message_id"]) if row is not None else None
+        rows = database.execute(
+            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id, CASE WHEN {visible} THEN 1 ELSE 0 END AS shown
+                  FROM messages m WHERE {where}
+                 ORDER BY {_KEY_SQL} DESC, m.seq DESC, m.message_id DESC LIMIT ?""",
+            [*visible_params, *params, coordination.COUNT_ROW_CAP + 1]).fetchall()
+        for row in rows:
+            if row["shown"]:
+                return (row["t"], int(row["seq"]), row["message_id"]), False
+        if len(rows) > coordination.COUNT_ROW_CAP:
+            far = rows[-1]
+            return (far["t"], int(far["seq"]), far["message_id"]), True
+        return None, False
 
     def run(low: tuple | None, high: tuple | None, *, from_high: bool) -> dict[str, Any] | None:
         """The hidden rows strictly between two keys (None: open), read nearest ``high`` (or
@@ -318,12 +332,15 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
         if index and busy is not None and index not in busy:
             continue        # no row at all between this row and the one before it: nothing was left out
         # In a contiguous page the previous row of the page is the previous visible row of the chat.
-        low = ordered[index - 1] if contiguous and index else previous_visible(key)
+        low, cut = (ordered[index - 1], False) if contiguous and index else previous_visible(key)
         if c := run(low, key, from_high=True):
+            c["capped"] = c["capped"] or cut
             before[key[2]] = c
     if tail or not contiguous:
-        newest = ordered[-1] if contiguous and ordered else previous_visible(None)
+        newest, cut = (ordered[-1], False) if contiguous and ordered else previous_visible(None)
         after_tail = run(newest, None, from_high=False)
+        if after_tail is not None:
+            after_tail["capped"] = after_tail["capped"] or cut
     return before, after_tail
 
 

@@ -325,3 +325,57 @@ def test_the_row_cap_says_capped_only_when_a_message_lies_beyond_it(chat, monkey
     assert after["messages"] == 2 and after["capped"] is False
     chat.coordination_turn("c2")
     assert chat.log()["hidden_after"]["capped"] is True
+
+
+def _vm_steps(fn) -> int:
+    count = [0]
+    con = db.conn()
+
+    def tick():
+        count[0] += 1
+        return 0
+    con.set_progress_handler(tick, 1000)
+    try:
+        fn()
+    finally:
+        con.set_progress_handler(None, 0)
+    return count[0]
+
+
+@pytest.mark.parametrize("read", ["tail", "delta"])
+def test_the_look_back_of_a_count_is_bounded_on_a_chat_with_no_visible_row(chat, monkeypatch, read):
+    """The review's weigh point: with no visible row in reach, the look-back to the previous
+    visible row reads at most the count's own row cap and says capped; its work does not grow
+    with the chat (a delta poll cost 356 ms of counts at 300k rows)."""
+    from lib import message_previews
+    monkeypatch.setattr(coordination, "COUNT_ROW_CAP", 30)
+
+    def gaps():
+        rows = [] if read == "tail" else [{"id": chat.user_turn(f"late{chat.seq}")[0]}]
+        return lambda: message_previews.coordination_gaps(
+            agent_id=chat.id, sessions=["native"], rows=rows, include_automated=True,
+            contiguous=read == "tail", tail=read == "tail")
+
+    for k in range(60):
+        chat.coordination_turn(f"a{k}")
+    small_read = gaps()
+    small = _vm_steps(small_read)
+    before, after = small_read()
+    count = after if read == "tail" else next(iter(before.values()))
+    assert count["capped"] is True
+    for k in range(240):
+        chat.coordination_turn(f"b{k}")
+    large = _vm_steps(gaps())
+    assert large <= small * 1.5 + 5, (small, large)
+
+
+def test_a_previous_visible_row_within_the_cap_gives_the_same_count_as_before(chat):
+    first = chat.user_turn("u1")
+    for k in range(3):
+        chat.coordination_turn(f"c{k}")
+    after = chat.user_turn("u2")
+    delta = chat.log(after_revision=1)
+    by_id = {t["id"]: t for t in delta["turns"]}
+    assert by_id[after[0]]["hidden_before"] == {
+        "messages": 6, "exchanges": 3, "agents": [{"agent_id": chat.boss, "name": "Boss"}], "capped": False}
+    assert "hidden_before" not in by_id[first[0]]
