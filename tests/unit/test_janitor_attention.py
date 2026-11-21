@@ -189,3 +189,16 @@ def test_stable_reconcile_never_takes_the_write_lock(setup):
     statements = _statements(attention.reconcile)
     assert sum(s.startswith("BEGIN") for s in statements) == 1
     assert attention.pending()[0]["failure_count"] == 3
+
+
+def test_a_quiet_janitor_is_not_searched_for_its_episode(setup):
+    """Neither failing nor alerted: nothing the episode says can change an artifact, so
+    its scan of every completed run and their receipts is skipped. Once it fails, and while
+    an alert stays open after a harmless skip, the episode is read as before."""
+    run(setup, outcome="insufficient_context")
+    assert attention.reconcile() == 0
+    assert not [s for s in _statements(attention.reconcile) if "janitor_demand_results" in s]
+    fail_twice(setup)
+    assert [s for s in _statements(attention.reconcile) if "janitor_demand_results" in s]
+    run(setup, outcome="insufficient_context")         # a skip: the alert stays open
+    assert [s for s in _statements(attention.reconcile) if "janitor_demand_results" in s]
