@@ -287,18 +287,50 @@ def effective_visibility(agent_id: str) -> str:
     return chat_visibility(agent_id) or global_visibility()
 
 
+# Every live agent with what decides whether its chat hides coordination, and the Host's
+# setting beside it: one statement. The preview projection reads its roster with it, so a
+# dashboard build knows which chats hide at no extra statement.
+HIDING_ROWS_SQL = f"""SELECT a.agent_id, a.backend, a.coordination_visibility,
+       (SELECT value FROM settings WHERE key = '{GLOBAL_KEY}') AS host
+  FROM agents a WHERE a.deleted_at IS NULL"""
+
+
+def hiding_from_rows(rows) -> set[str]:
+    """The agents of HIDING_ROWS_SQL's rows whose chat leaves coordination out under 'auto'
+    (effective visibility 'hide' and able to leave a note), as /log decides it."""
+    out: set[str] = set()
+    for row in rows:
+        host = normalize_visibility(row["host"]) or DEFAULT_VISIBILITY
+        if (normalize_visibility(row["coordination_visibility"]) or host) == HIDE \
+                and backend_leaves_notes(row["backend"]):
+            out.add(row["agent_id"])
+    return out
+
+
+_HIDING_CACHE = None
+
+
 def hiding_agents(*, database=None) -> set[str]:
-    """The agents whose chat leaves coordination out under 'auto' (their effective visibility is
-    'hide' and they can leave a note, as /log decides it), read for the whole roster at once: the
-    snapshot's previews and the working state follow the same rule as GET /log."""
+    """The agents whose chat leaves coordination out under 'auto', for the whole roster: the
+    snapshot's previews and working state, the state stream and the push follow the same rule
+    as GET /log. Kept until the database's change stamp moves (a setting change is a write), so
+    a quiet Host answers from memory; read again inside a transaction."""
+    global _HIDING_CACHE
+    from . import db
+    from .revisioned_cache import RevisionedCache
     if database is None:
-        from .db import conn
-        database = conn()
-    host = global_visibility()
-    return {row["agent_id"] for row in database.execute(
-                "SELECT agent_id, backend, coordination_visibility FROM agents WHERE deleted_at IS NULL")
-            if (normalize_visibility(row["coordination_visibility"]) or host) == HIDE
-            and backend_leaves_notes(row["backend"])}
+        database = db.conn()
+    if _HIDING_CACHE is None:
+        _HIDING_CACHE = RevisionedCache("coordination.hiding", max_entries=1)
+    stamp = None if database.in_transaction else db.change_stamp()
+    if stamp is not None and stamp[0] >= 0:
+        hit, cached = _HIDING_CACHE.get("all", stamp)
+        if hit:
+            return set(cached)
+    hiding = hiding_from_rows(database.execute(HIDING_ROWS_SQL).fetchall())
+    if stamp is not None and stamp[0] >= 0:
+        _HIDING_CACHE.put("all", stamp, frozenset(hiding))
+    return hiding
 
 
 def working_with(agent_id: str, trace_id: str | None) -> dict[str, Any]:
