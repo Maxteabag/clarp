@@ -116,6 +116,9 @@ pub struct CreateAgentRequest {
     /// never read as a file path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_path: Option<Value>,
+    /// Ordered server names. Omission keeps the agent's selection; an empty list clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_servers: Option<Vec<String>>,
 }
 
 pub(crate) fn present_value<'de, D: serde::Deserializer<'de>>(

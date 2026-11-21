@@ -552,6 +552,7 @@ pub struct Setup {
     pub runtime: tokio::runtime::Handle,
     pub opening_gate: crate::calls::opening_launch::Gate,
     pub record: AgentRecord,
+    pub(crate) mcp_strict: bool,
     pub profile: Profile,
     pub backend: Arc<dyn Backend>,
     pub engine: Arc<dyn LogEngine>,
@@ -3693,6 +3694,8 @@ impl Worker {
                 let versions = self.setup.versions.clone();
                 let runtime = self.setup.runtime.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
+                let claude_mcp = (self.setup.record.backend == "claude")
+                    .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
@@ -3700,6 +3703,9 @@ impl Worker {
                         if let Some(pool) = pool {
                             pool.guard_turn(&mut order);
                         }
+                        let _mcp = claude_mcp.and_then(|(strict, servers)| {
+                            crate::mcp::configure(&mut order, strict, servers.as_deref())
+                        });
                         if let Some(opening) = order.opening.as_deref() {
                             let (id, trace) = (opening.id.as_str(), opening.trace.as_str());
                             use crate::launcher::Launched;

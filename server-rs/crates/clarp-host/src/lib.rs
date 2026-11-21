@@ -66,6 +66,7 @@ pub mod line;
 pub mod listening;
 pub mod logins;
 pub mod managed_skills;
+mod mcp;
 pub mod media;
 pub mod media_created;
 pub mod media_manage;
