@@ -118,6 +118,7 @@ from lib.transcript_streamer import TranscriptStreamer  # noqa: E402
 from lib.tts_worker import TTSWorker  # noqa: E402
 from lib.workers import BOOT, SERVING, Worker, WorkerSet, started  # noqa: E402
 from lib.cache_warmup import CacheWarmupWorker  # noqa: E402
+from lib.voice_names import VoiceNamesWorker, worker_enabled as voice_names_worker_enabled  # noqa: E402
 
 
 from lib.config import load as load_config  # noqa: E402
@@ -3350,6 +3351,9 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # catalogue, artifacts) once the listeners are up, so the first client
         # after a restart does not pay for a cold page cache on the request path.
         Worker("cache-warmup", lambda: started(CacheWarmupWorker()), stage=SERVING),
+        # Voice names for the profile's voice_label, fetched off every read path.
+        Worker("voice-names", lambda: started(VoiceNamesWorker()), stage=SERVING,
+               enabled=voice_names_worker_enabled),
         Worker("bookkeeping-listeners", start_bookkeeping_listeners,
                stop=lambda thread: None, stage=SERVING),
         Worker("decision-delivery", lambda: started(
