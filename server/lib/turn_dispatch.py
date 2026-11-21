@@ -511,7 +511,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 # now, written with the item shown and its receipt started in
                 # one transaction (the words the backend was given).
                 self._start_queued_row(spec, steered=True, start_item=True)
-                self._broadcast_queue_state(spec, started=True)
+                self._broadcast_steer_started(spec)
         return accepted
 
     def _steer_read(self, spec: _TurnSpec, active_trace: str, joined: bool) -> None:
@@ -527,7 +527,16 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         self._steered_into(spec, active_trace)
         self._start_queued_row(spec, steered=True, start_item=True)
         steer_records.clear(spec.trace_id)
-        self._broadcast_queue_state(spec, started=True)
+        self._broadcast_steer_started(spec)
+
+    def _broadcast_steer_started(self, spec: _TurnSpec) -> None:
+        """The steered item was read: ``queue-updated`` with ``queue_started`` and its
+        ``client_msg_id``, as the handover says it for an item whose turn starts. After
+        ``_start_queued_row`` committed and sent the row's own events, and only when the
+        item's receipt did start (also after the retry of a failed start): an item whose
+        start failed twice is settled by recovery, and was not started here."""
+        if turn_queue.status(spec.queue_id) == "started":
+            self._broadcast_queue_state(spec, started=True)
 
     def _steer_unread(self, spec: _TurnSpec) -> None:
         """The process ended before the CLI read a follow-up written into it: it was never
