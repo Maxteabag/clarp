@@ -56,7 +56,7 @@ pub(crate) fn error(id: &str, failure: Failure) -> Denied {
 }
 
 fn allow(headers: &HeaderMap) -> Result<(), Denied> {
-    if !crate::media::header_text(headers, "x-clarp-turn").is_empty() {
+    if crate::coordination::from_an_agent(headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not").into());
     }
     Ok(())

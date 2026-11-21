@@ -685,6 +685,249 @@ fn what_was_written_after_a_time_is_read_from_the_revision_the_conversation_had_
     assert_eq!(since(&actor, asked_at), vec!["r-5-1", "u-6", "r-6-1"]);
 }
 
+#[test]
+fn a_takeover_reads_every_record_at_the_fence_before_it_consumes_the_hold() {
+    use std::io::Write;
+
+    let block = |kind| {
+        Line::Out(
+            json!({
+                "type": "stream_event",
+                "event": {"type": "content_block_start", "content_block": {"type": kind}}
+            })
+            .to_string(),
+        )
+    };
+    for (record, quiet) in [
+        (block("thinking"), true),
+        (block("text"), false),
+        (block("tool_use"), false),
+        (Line::Out("not JSON".to_string()), false),
+        (Line::Err("unknown diagnostic".to_string()), false),
+        (
+            Line::Hook {
+                name: "tool".to_string(),
+                data: json!({}),
+            },
+            false,
+        ),
+        (
+            Line::Out(r#"{"type":"result","subtype":"success"}"#.to_string()),
+            false,
+        ),
+    ] {
+        let mut world = World::new("takeover-fence");
+        world.backend = Arc::new(Claude::new());
+        let mut actor = world.open();
+        world.send(&mut actor, "u-first", "first text", Admission::Queue);
+        world.send(&mut actor, "u-second", "second text", Admission::Queue);
+        let offer = actor.takeover_offer(TurnId(2)).unwrap().unwrap();
+        let spool = world.profile.spool_path(TurnId(1));
+        let before = std::fs::metadata(&spool).unwrap().len();
+        world.write(1, record.clone());
+        let after = std::fs::metadata(&spool).unwrap().len();
+
+        // The actor has not been told of the appended record. It must judge the actual
+        // fence, which can be ahead of the last notification it received.
+        assert!(actor.takeover_quiet(&offer, before).unwrap());
+        assert_eq!(
+            actor.takeover_quiet(&offer, after).unwrap(),
+            quiet,
+            "{record:?}"
+        );
+        assert!(!actor.takeover_quiet(&offer, after - 1).unwrap());
+        assert!(!actor.takeover_quiet(&offer, after + 1).unwrap());
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&spool)
+            .unwrap()
+            .write_all(b"{\"t\":42,\"s\":\"out")
+            .unwrap();
+        let with_half_line = std::fs::metadata(&spool).unwrap().len();
+        assert!(!actor.takeover_quiet(&offer, with_half_line).unwrap());
+
+        actor.stop("user", world.tick()).unwrap();
+        assert!(!actor.takeover_quiet(&offer, after).unwrap());
+        assert!(actor.takeover_offer(TurnId(2)).unwrap().is_none());
+    }
+}
+
+#[test]
+fn a_confirmed_takeover_closes_the_first_row_and_leaves_the_third_message_waiting() {
+    let mut world = World::new("takeover-confirmed");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-first", "first text", Admission::Queue);
+    let mut follow_up = message("u-second", "second text");
+    follow_up.trace_id = Some("trace-second".to_string());
+    actor
+        .send(&follow_up, Admission::Queue, world.tick())
+        .unwrap();
+    world.send(&mut actor, "u-third", "third text", Admission::Queue);
+    let offer = actor
+        .request_takeover_hold(TurnId(2), world.tick())
+        .unwrap()
+        .unwrap();
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let before_freeze = log
+        .read_after(0, clarp_ports::log::Kinds::only(kind::AGENT_EVENT), 30)
+        .unwrap();
+    assert!(before_freeze.iter().any(|item| {
+        matches!(
+            serde_json::from_slice::<clarp_kernel::agent::AgentEvent>(&item.body),
+            Ok(clarp_kernel::agent::AgentEvent::TakeoverOffered {
+                from: TurnId(1),
+                into: TurnId(2),
+                attempt: 1,
+            })
+        )
+    }));
+    let fence = std::fs::metadata(world.profile.spool_path(TurnId(1)))
+        .unwrap()
+        .len();
+    let input = clarp_kernel::takeover::Input::ClaudeFresh {
+        first: offer.first.clone(),
+    };
+    assert!(
+        !actor
+            .select_takeover(
+                &offer,
+                fence - 1,
+                "new-provider-session".to_string(),
+                input.clone(),
+                world.tick(),
+            )
+            .unwrap()
+    );
+    assert!(actor.selected_takeover().is_none());
+    assert!(
+        actor
+            .select_takeover(
+                &offer,
+                fence,
+                "new-provider-session".to_string(),
+                input,
+                world.tick(),
+            )
+            .unwrap()
+    );
+    assert_eq!(actor.selected_takeover().unwrap().fence, fence);
+
+    world.exits(1, None, Some(9));
+    let out = actor.finish_takeover(TurnId(1), world.tick()).unwrap();
+    let order = out
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Launch(order) => Some(order),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(order.turn, TurnId(2));
+    assert!(
+        order
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--session-id", "new-provider-session"])
+    );
+    assert!(!order.args.iter().any(|arg| arg == "--resume"));
+    let stdin = std::fs::read_to_string(&order.stdin_file).unwrap();
+    assert_eq!(stdin.lines().count(), 1);
+    let prompt: serde_json::Value = serde_json::from_str(&stdin).unwrap();
+    assert_eq!(
+        prompt["message"]["content"],
+        json!([{"type":"text","text":"first text"}, {"type":"text","text":"second text"}])
+    );
+    let chat = actor.tail(10).unwrap();
+    let ids: Vec<_> = chat.entries.iter().map(|row| row.entry.id()).collect();
+    assert_eq!(ids, ["u-first", "u-second"]);
+    let first = chat
+        .entries
+        .iter()
+        .find(|row| row.entry.id() == "u-first")
+        .unwrap();
+    let end = first.turn.as_ref().unwrap();
+    assert_eq!(end.status, "replaced");
+    assert_eq!(end.replaced_by.as_deref(), Some("trace-second"));
+    assert_eq!(actor.queue().unwrap()[0].message_id, "u-third");
+    assert!(actor.takeover_offer(TurnId(3)).unwrap().is_none());
+}
+
+#[test]
+fn restart_resolves_a_takeover_only_with_its_marker_and_exit() {
+    for consumed in [false, true] {
+        let mut world = World::new("takeover-restart");
+        world.backend = Arc::new(Claude::new());
+        let mut actor = world.open();
+        world.send(&mut actor, "u-first", "first", Admission::Queue);
+        world.send(&mut actor, "u-second", "second", Admission::Queue);
+        let offer = actor.takeover_offer(TurnId(2)).unwrap().unwrap();
+        let fence = std::fs::metadata(world.profile.spool_path(TurnId(1)))
+            .unwrap()
+            .len();
+        assert!(
+            actor
+                .select_takeover(
+                    &offer,
+                    fence,
+                    "replacement-session".to_string(),
+                    clarp_kernel::takeover::Input::ClaudeFresh {
+                        first: offer.first.clone(),
+                    },
+                    world.tick(),
+                )
+                .unwrap()
+        );
+        drop(actor);
+        if consumed {
+            world.write(
+                1,
+                Line::Shim(ShimEvent::Takeover {
+                    fence,
+                    replaced_by: 2,
+                }),
+            );
+            let actor = world.open();
+            assert!(actor.selected_takeover().is_some());
+            assert_eq!(world.took, [1], "the marker alone cannot resolve a restart");
+        }
+        world.exits(1, None, Some(9));
+
+        let actor = world.open();
+        assert!(actor.selected_takeover().is_none());
+        assert_eq!(world.took, [1, 2]);
+        let input: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(world.profile.stdin_path(TurnId(2))).unwrap())
+                .unwrap();
+        let parts: Vec<_> = input["message"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["text"].as_str().unwrap())
+            .collect();
+        if consumed {
+            assert_eq!(parts, ["first", "second"]);
+            let page = actor.tail(10).unwrap();
+            let first = page
+                .entries
+                .iter()
+                .find(|row| row.entry.id() == "u-first")
+                .unwrap();
+            assert_eq!(first.turn.as_ref().unwrap().status, "replaced");
+        } else {
+            assert_eq!(parts, ["second"]);
+            assert!(!actor.tail(10).unwrap().entries.iter().any(|row| {
+                row.turn
+                    .as_ref()
+                    .is_some_and(|end| end.status == "replaced")
+            }));
+        }
+    }
+}
+
 // ---- restarts -------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug)]
@@ -5161,6 +5404,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             turn,
             closes: format!("r-p{turn}"),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(at),
             ended_at_ms: at,
             tool_count: 0,
