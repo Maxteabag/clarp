@@ -26,6 +26,10 @@ say("system", subtype="init", session_id=session)
 if parts == ["first"]:
     say("stream_event", event={"type": "content_block_start", "index": 0,
                               "content_block": {"type": "thinking", "thinking": ""}})
+    say("stream_event", event={"type": "content_block_delta", "index": 0,
+                              "delta": {"type": "thinking_delta", "thinking": "hmm"}})
+    say("stream_event", event={"type": "content_block_delta", "index": 0,
+                              "delta": {"type": "signature_delta", "signature": "s"}})
 with (root / "took.jsonl").open("a") as file:
     file.write(json.dumps(dict(pid=pid, parts=parts, session=session, argv=sys.argv[1:],
                                uuid=line["uuid"])) + "\n")
