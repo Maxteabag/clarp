@@ -179,7 +179,9 @@ async fn a_portrait_pair_is_atomic_on_refusal_and_recovered_without_another_requ
     assert_eq!(fleet.kept_all(PENDING).await.unwrap().len(), 1);
     assert_eq!(fleet.kept_all(BYTES).await.unwrap().len(), 2);
     let local: Arc<dyn Blobs> = blobs.clone();
-    let gallery = crate::gallery::Store::open(roster.open(&dir.join("gallery")).unwrap(), local.clone()).unwrap();
+    let gallery =
+        crate::gallery::Store::open(roster.open(&dir.join("gallery")).unwrap(), local.clone())
+            .unwrap();
     let gallery = crate::gallery::Writer::start(gallery).unwrap();
     let record = fleet
         .directory()
