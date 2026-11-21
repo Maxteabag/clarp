@@ -574,7 +574,7 @@ def test_R1_an_explicit_alias_header_in_a_call_is_the_chat_call(env, header, ref
     assert stt.calls == chat.calls == [("transcribe_model_bytes", header, None)]
     assert out.status == plain.status and out.payload.get("error") == plain.payload.get("error")
     if refuse_aliases:
-        assert out.status == 400 and out.payload["error"] == f"transcription model not installed: {header}"
+        assert out.status == 400 and out.payload["error"] == "transcription model not installed"
         return
     record = out.payload["stt"]
     assert record["engines"]["source"] == "device"
