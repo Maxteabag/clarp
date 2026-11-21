@@ -1,5 +1,7 @@
 //! Python's R152 choices and wire shapes, with its duplicate attempt held as a defect.
 
+#![allow(clippy::unwrap_used)]
+
 use clarp_kernel::heard::{self, language_set as set};
 use clarp_kernel::languages;
 use serde_json::{Value, json};
