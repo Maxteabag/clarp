@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes down which requests the Python Host refuses a device that pairs with limited access.
 
-A device a user paired with limited access (a watch) may read and send, and nothing more. The rule is the Python
+A device a user paired with limited access (a watch) may read, send, and ask to revoke its own pairing. The rule is the Python
 Host's `Handler._device_forbidden` (server/server.py), with `do_PATCH`'s own narrowing (a PATCH is looked at only
 under /schedules/), run here as it is for every prefix of its lists, every route it lets through, the ones next to
 them, and every method a request may have. A refusal is 403 {"error": "full device access required"}.
@@ -42,6 +42,7 @@ def paths(handler) -> list:
                 '/controller-actions/a/b/invoke', '/controller-actions/audit', '/controller-actionsx',
                 '/schedules', '/schedules/', '/schedules/s1', '/agent-schedules/s1', '/log', '/agents/snapshot',
                 '/agents', '/agents/echo', '/stop', '/send-delayed', '/pairing/issue', '/pairing/exchange',
+                '/paired-devices/revoke', '/paired-devices/revoke/', '/paired-devices/revokex',
                 '/devices', '/devices/push-tokens', '/devices/live-activity', '/artifacts', '/artifacts/a/html',
                 '/artifacts/a/submit', '/decisions/d/resolve', '/attention/inbox', '/server-info', '/status',
                 '/', '/x', '/application-activity', '/desktop-presence', '/clips/ack/x', '/hotseat/status',

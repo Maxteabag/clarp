@@ -71,7 +71,16 @@ pub struct Message {
     /// and an app is told of it under none ([`Message::told_id`]).
     #[serde(default, skip_serializing_if = "is_false")]
     pub unminted: bool,
+    /// When it was sent, for a message that had to wait for its turn: its row is written when
+    /// that turn starts and stands there, and this keeps the moment it was sent ([`SENT_AT`]).
+    /// A message whose turn started at once has none: its row's time is when it was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at_ms: Option<i64>,
 }
+
+/// The key the log keeps a waiting message's send time under in its row ([`Message::sent_at_ms`]).
+/// It is the log's, permanent once written, and no client reads it by this name.
+pub const SENT_AT: &str = "sent_at_ms";
 
 impl Message {
     /// Where a message is filed for the id its app gave it, and whether that id came with
@@ -485,6 +494,26 @@ impl Entry {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// The log keeps a waiting message's send time under its own key, and a message whose turn
+    /// started at once is written without one, as before issue 491.
+    #[test]
+    fn a_message_keeps_its_send_time_under_the_logs_key_only_when_it_waited() {
+        let at_once = serde_json::to_value(Message::default()).unwrap();
+        assert!(at_once.get(SENT_AT).is_none(), "{at_once}");
+        let waited = Message {
+            sent_at_ms: Some(1_700),
+            ..Message::default()
+        };
+        let row = serde_json::to_value(&waited).unwrap();
+        assert_eq!(row[SENT_AT], 1_700, "{row}");
+        assert_eq!(
+            SENT_AT, "sent_at_ms",
+            "the log's key is permanent once written"
+        );
+        let read: Message = serde_json::from_value(row).unwrap();
+        assert_eq!(read, waited);
+    }
 
     #[test]
     fn a_message_is_filed_under_its_apps_id_and_gives_that_id_back_as_it_was() {

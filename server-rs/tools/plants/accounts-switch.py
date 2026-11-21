@@ -76,6 +76,35 @@ rules(K,"rule",[
     ('"5-hour"','"hourly"',"mislabel the Claude window"),
     ('"weekly"','"daily"',"mislabel the Codex window"),
 ])
+rules(K, "rule", [
+    ('weekly_used: None,', 'weekly_used: Some(None),', 'add the Codex field to Claude accounts'),
+    ('seat.weekly_used = Some(None);', 'seat.weekly_used = None;', 'omit the failed Codex reading instead of giving null'),
+    ('seat.weekly_used = Some(codex_weekly_used(usage));',
+     'seat.weekly_used = Some(usage["worst_used"].as_number().cloned());',
+     'substitute the switchers worst window for the account week'),
+    ('kind == "7d"', 'kind == "5h"', 'read the five-hour window'),
+    ('kind == "7d"', 'kind == "7d" || kind.starts_with("model:")', 'take model windows as account-wide'),
+    ('let used = window["used"].as_number()?;',
+     'let Some(used) = window["used"].as_number() else { continue; };',
+     'ignore an unreadable duplicate account window'),
+    ('used.as_f64() > best.as_f64()', 'used.as_f64() < best.as_f64()', 'take the smallest duplicate number'),
+    ('used.as_f64() > best.as_f64()', 'used.as_f64() >= best.as_f64()', 'replace the first number on a tie'),
+    ('const WEEKLY_SPENT: f64 = 0.99;', 'const WEEKLY_SPENT: f64 = 0.98;', 'lower the weekly threshold'),
+    ('used >= WEEKLY_SPENT', 'used > WEEKLY_SPENT', 'refuse an account exactly at the weekly threshold'),
+    ('&& !accounts.is_empty()', '', 'take an empty roster as eligibility evidence'),
+    ('accounts.iter().all(|seat|', 'accounts.iter().any(|seat|', 'accept when only one saved account is spent'),
+    ('.is_some_and(|used| used >= WEEKLY_SPENT)', '.is_none_or(|used| used >= WEEKLY_SPENT)',
+     'count missing or failed weekly evidence as spent'),
+    ('spent.is_some_and(|spent| spent < cap)', 'spent.is_none_or(|spent| spent < cap)',
+     'permit a reset with an unreadable redemption count'),
+    ('spent.is_some_and(|spent| spent < cap)', 'spent.is_some_and(|spent| spent <= cap)',
+     'permit a reset when the daily cap has already been reached'),
+    ('Option::deserialize(deserializer).map(Some)', 'Option::deserialize(deserializer)',
+     'lose explicit null when reading a saved Codex account'),
+])
+rules("clarp-kernel/src/seats.rs", "rule", [
+    ('.split(crate::python::blank)', '.split(char::is_whitespace)', 'ignore a Python whitespace separator'),
+])
 rules(M,"desk",[
     ('&["codex", "--no-quota", "--json"]','&["codex", "--json"]',"probe quota when reading only the active login"),
     ('&["switch", target, "--yes", "--json"]','&["switch", target, "--json"]',"omit the Claude confirmation flag"),

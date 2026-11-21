@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 109;
+pub const HOST_CONTRACT: u64 = 115;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -102,13 +102,15 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("attention_index", 2),
     ("artifact_summary_v1", 73),
     // Render specs: a small form drawn by the app from a closed catalog, answered once; a
-    // spec only for a client at or above the owner's threshold (`render_spec.rs`).
+    // spec only for an exact client name at its minimum. Contract 111 adds per-client
+    // negotiation and administrator export while retaining the original feature number.
     ("render_spec", 102),
     ("flat_artifact_responses", 1),
     ("artifacts", 1),
     // What an agent publishes: `POST /media`, an agent's gallery, a file fetched whole and
     // in parts.
     ("media", 1),
+    ("media_manage", 113),
     // A report: a page of HTML an agent hands its user, served behind its policy; what it
     // was, version by version; and the origins its page may reach.
     ("html_reports", 19),
@@ -323,10 +325,12 @@ pub const FEATURES: &[(&str, u64)] = &[
     // What a user send's delivery is, on `GET /log` and its feed (`delivery_*`), and the
     // `delivery-updated` hint: in the in-process mode, the Host owning its turns itself.
     ("send_delivery_state", 81),
+    ("waited_send_order", 115),
     // What the user's last compaction of an agent did, on its row (`last_compaction`).
     ("compaction_outcome", 107),
     ("voice_profile", 109),
     ("speech_outcome", 109),
+    ("pairing_identity", 114),
 ];
 
 /// After this long without an event, a stream is sent a heartbeat.
@@ -359,6 +363,7 @@ pub struct App {
     pub desks: Arc<Mutex<Presence>>,
     /// The bytes of the files agents publish.
     pub blobs: Arc<dyn Blobs>,
+    pub gallery: crate::gallery::Writer,
     /// What the apps have reported of themselves: whether one is in front, and touched.
     pub activity: Arc<Mutex<Leases>>,
     /// The engines that listen: what turns a clip of speech into text.
@@ -410,6 +415,7 @@ pub struct App {
 /// What the door keeps count of.
 pub struct Door {
     failures: Mutex<FailureLimiter>,
+    identity_reads: Mutex<FailureLimiter>,
     since: std::time::Instant,
     /// The devices whose right to speak was taken away, told to the streams they have open.
     revoked: tokio::sync::broadcast::Sender<String>,
@@ -419,6 +425,11 @@ impl Default for Door {
     fn default() -> Self {
         Self {
             failures: Mutex::default(),
+            identity_reads: Mutex::new(FailureLimiter::new(
+                trust::IDENTITY_READS_MOST,
+                trust::FAILURES_WINDOW_S,
+                trust::FAILURE_SOURCES_MOST,
+            )),
             since: std::time::Instant::now(),
             revoked: tokio::sync::broadcast::channel(64).0,
         }
@@ -426,21 +437,27 @@ impl Default for Door {
 }
 
 impl Door {
-    /// One more failure of an asker. Answers how many seconds it is told to wait: nothing
-    /// while it is within what anybody may fail.
-    fn failed(&self, source: &str) -> u64 {
-        let now = self.since.elapsed().as_secs_f64();
-        let mut failures = self
-            .failures
-            .lock()
-            .unwrap_or_else(|held| held.into_inner());
-        failures.failure(source, now)
+    /// Invalid authentication and pairing attempts spend the same failure budget.
+    fn refused(&self, source: &str, too_many: &str) -> Option<Response> {
+        self.spend(&self.failures, source, too_many)
     }
 
-    /// The answer to a caller that did not say who it is, or said it wrongly: that, or, to
-    /// one that fails too often, how long to wait.
-    fn refused(&self, source: &str, too_many: &str) -> Option<Response> {
-        let wait = self.failed(source);
+    /// An identity read spends only its own budget.
+    fn identity_refused(&self, source: &str) -> Option<Response> {
+        self.spend(&self.identity_reads, source, "too many identity reads")
+    }
+
+    fn spend(
+        &self,
+        budget: &Mutex<FailureLimiter>,
+        source: &str,
+        too_many: &str,
+    ) -> Option<Response> {
+        let now = self.since.elapsed().as_secs_f64();
+        let wait = budget
+            .lock()
+            .unwrap_or_else(|held| held.into_inner())
+            .failure(source, now);
         (wait > 0).then(|| {
             let mut refused =
                 ApiError::new(StatusCode::TOO_MANY_REQUESTS, too_many).into_response();
@@ -605,6 +622,7 @@ pub fn router(app: App) -> Router {
         .route("/turn-queue/resume", post(resume))
         .route("/turn-queue/{id}", delete(take_back).put(reword))
         .route("/turn-queue/{id}/send", post(send_by_hand))
+        .route("/pairing/identity", get(pairing_identity))
         .route("/pairing/exchange", post(pairing_exchange))
         .route("/pairing/issue", post(pairing_issue))
         .route("/paired-devices", get(paired_devices))
@@ -880,6 +898,16 @@ pub enum Principal {
     Tools,
 }
 
+/// Where the token a request was let in by was found (the Python Host's
+/// `_request_auth_source`): nowhere on a Host that has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presented {
+    Nowhere,
+    Header,
+    Cookie,
+    Address,
+}
+
 /// Who a request comes from, as the chat a client last opened is kept under: a device by
 /// its id, the administrator by that word on a Host that has a token; nobody else (the
 /// Python Host's `_request_principal`).
@@ -936,8 +964,9 @@ pub(crate) async fn last_opened(app: &App, who: &str) -> String {
     }
 }
 
-/// The only route a caller without a token may use: a device that has a code has no token yet.
+/// A device can check the Host's identity and exchange a code before it has a token.
 const EXCHANGE: &str = "/pairing/exchange";
+const PAIRING_IDENTITY: &str = "/pairing/identity";
 /// And the pictures this Host ships, which anybody may fetch: an address of one is put
 /// where no token goes (a notification, a page), as on the Python Host.
 const PICTURES: &str = "/static/";
@@ -1008,11 +1037,11 @@ fn asked(request: &Request) -> (bool, String) {
 
 /// Who is asking, by the token the request carries: in its header, in its cookie, or, from
 /// this machine, in its address.
-fn who(app: &App, request: &Request, local: bool) -> Option<Principal> {
+fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presented)> {
     let expected = &app.config.auth_token;
     if expected.is_empty() {
         // A Host without a token is open to this machine, and to nobody else.
-        return local.then_some(Principal::Administrator);
+        return local.then_some((Principal::Administrator, Presented::Nowhere));
     }
     let known = |token: &str| -> Option<Principal> {
         // The administrator's token opens the Host only from the machine it runs on, and so
@@ -1034,10 +1063,10 @@ fn who(app: &App, request: &Request, local: bool) -> Option<Principal> {
     let headers = request.headers();
     let text = |name| headers.get(name).and_then(|value| value.to_str().ok());
     if let Some(principal) = text(header::AUTHORIZATION).and_then(bearer).and_then(known) {
-        return Some(principal);
+        return Some((principal, Presented::Header));
     }
     if let Some(principal) = text(header::COOKIE).and_then(cookie).and_then(known) {
-        return Some(principal);
+        return Some((principal, Presented::Cookie));
     }
     // A token in an address is written into logs and histories on its way: it is taken
     // only where there is no way.
@@ -1045,13 +1074,15 @@ fn who(app: &App, request: &Request, local: bool) -> Option<Principal> {
         return None;
     }
     let mut pairs = request.uri().query()?.split('&');
-    pairs.find_map(|pair| known(pair.strip_prefix("token=")?.trim()))
+    let principal = pairs.find_map(|pair| known(pair.strip_prefix("token=")?.trim()))?;
+    Some((principal, Presented::Address))
 }
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
-    let open = path == EXCHANGE || (picture && request.method() == Method::GET);
+    let read = request.method() == Method::GET;
+    let open = path == EXCHANGE || (read && (path == PAIRING_IDENTITY || picture));
     let (local, source) = asked(&request);
     let mut device = None;
     let mut response = if open {
@@ -1073,7 +1104,7 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 let why = "Oracle requires authenticated full-device access";
                 ApiError::new(StatusCode::UNAUTHORIZED, why).into_response()
             }
-            Some(principal) if out_of_scope(&principal, request.method(), &path) => {
+            Some((principal, _)) if out_of_scope(&principal, request.method(), &path) => {
                 let why = if matches!(principal, Principal::Tools) {
                     "an agent's tools may ask for tools only"
                 } else {
@@ -1081,12 +1112,13 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 };
                 ApiError::new(StatusCode::FORBIDDEN, why).into_response()
             }
-            Some(principal) => {
+            Some((principal, presented)) => {
                 if let Principal::Device { device_id, .. } = &principal {
                     device = Some(device_id.clone());
                 }
                 request.extensions_mut().insert(Asker { source });
                 request.extensions_mut().insert(principal);
+                request.extensions_mut().insert(presented);
                 next.run(request).await
             }
         }
@@ -2713,11 +2745,13 @@ async fn send_as(
     // (the Python Host's `origins.FOCUS_ORIGINS`).
     let by_a_person =
         origin_is_user || matches!(&origin, Origin::Trigger { name } if name == "oracle");
-    // A message to an agent that is busy waits its turn, as on the Python Host. What differs
-    // is where it waits. A plain message is said: it is in the conversation at once. One sent
-    // with `queue_if_busy` was left for later: it is in the queue until its turn starts, and
-    // when it does not come from a person, a Stop holds it. (The kernel can also take a message
-    // that replaces the running turn; nothing asks for it yet.)
+    // A message to an agent that is busy waits its turn, as on the Python Host, in the queue,
+    // and enters the conversation when its turn starts, whoever sent it (issue 491). What
+    // differs is what is told of it. A plain message was said: it keeps its delivery receipt
+    // while it waits. One sent with `queue_if_busy` was left for later: it goes through the
+    // queue even when nothing is in its way, and when it does not come from a person, a Stop
+    // holds it. (The kernel can also take a message that replaces the running turn; nothing
+    // asks for it yet.)
     // A message from another agent of this Host never takes a running turn's place either:
     // it waits behind it like one left for later, and a Stop that came before does not hold
     // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).
@@ -2747,6 +2781,7 @@ async fn send_as(
     };
     let message = Message {
         managed_model: None,
+        sent_at_ms: None,
         id,
         marked,
         unminted: own,
@@ -3226,18 +3261,7 @@ async fn queue(
         .anyone(&query.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
     let (waiting, state) = member.agent.queue().await?;
-    let items: Vec<Value> = waiting
-        .iter()
-        .map(|message| {
-            json!({
-                // A waiting message is named as the client named it.
-                "id": message.client_id,
-                "text": message.text,
-                "enqueued_at": message.accepted_at_ms,
-                "synthesize_audio": message.speak,
-            })
-        })
-        .collect();
+    let items: Vec<Value> = waiting.iter().map(wire::queue_item).collect();
     Ok(Json(json!({
         "items": items,
         "paused": state.paused,
@@ -3312,8 +3336,9 @@ fn not_waiting() -> ApiError {
     ApiError::new(StatusCode::NOT_FOUND, "queued message not found")
 }
 
-/// `DELETE /turn-queue/<id>`: its user takes a waiting message back. It never runs, and it
-/// was never in the conversation. A hold that held nothing else is over.
+/// `DELETE /turn-queue/<id>`: its user takes a waiting message back, whether it was said or
+/// left for later. It never runs, and it was never in the conversation: no row of it is left.
+/// A hold that held nothing else is over.
 async fn take_back(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -3330,8 +3355,10 @@ async fn take_back(
 }
 
 /// `PUT /turn-queue/<id>` with `{text}`: its user changes the words of a waiting message. Its
-/// turn answers the new words. A message that waits its turn in the conversation was said,
-/// and what was said stands: on this Host that is every message that was not left for later.
+/// turn answers the new words, and its row, written when that turn starts, holds them: a
+/// rewording either comes before the start or finds nothing waiting. Only a message that a
+/// build before issue 491 put into the conversation while it waited is refused: what is in the
+/// conversation was said, and stands.
 async fn reword(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -3386,6 +3413,19 @@ async fn send_by_hand(
 }
 
 // ---- devices ---------------------------------------------------------------------------------
+
+/// The public bootstrap response holds only the information an app compares before pairing.
+async fn pairing_identity(State(app): State<App>, Extension(asker): Extension<Asker>) -> Response {
+    if let Some(wait) = app.door.identity_refused(&asker.source) {
+        return wait;
+    }
+    Json(json!({
+        "server_id": app.server_id,
+        "name": app.config.name,
+        "contract": { "host": HOST_CONTRACT },
+    }))
+    .into_response()
+}
 
 #[derive(Debug, Deserialize)]
 struct ExchangeRequest {
@@ -3496,12 +3536,25 @@ struct RevokeRequest {
 
 async fn revoke_device(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Json(request): Json<RevokeRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let device_id = request.device_id.trim().to_string();
-    if device_id.is_empty() {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "device_id required"));
-    }
+    use clarp_kernel::devices::{self, RevokeRefusal};
+    let limited_id = match &principal {
+        Principal::Device {
+            device_id,
+            scope: Scope::Limited,
+        } => Some(device_id.as_str()),
+        _ => None,
+    };
+    let device_id = devices::revoke_target(&request.device_id, limited_id)
+        .map_err(|why| match why {
+            RevokeRefusal::Missing => ApiError::new(StatusCode::BAD_REQUEST, "device_id required"),
+            RevokeRefusal::OtherDevice => {
+                ApiError::new(StatusCode::FORBIDDEN, devices::LIMITED_REFUSAL)
+            }
+        })?
+        .to_owned();
     if app.fleet.revoke(device_id.clone()).await? {
         // What the device still listens to ends now, not when it next asks.
         let _ = app.door.revoked.send(device_id.clone());
@@ -3792,7 +3845,7 @@ mod tests {
             (Method::POST, "/agents", true),
             (Method::DELETE, "/agents/echo", true),
             (Method::GET, "/paired-devices", true),
-            (Method::POST, "/paired-devices/revoke", true),
+            (Method::POST, "/paired-devices/revoke", false),
             (Method::POST, "/pairing/issue", true),
             (Method::GET, "/dirs", true),
             (Method::GET, "/past-sessions", true),

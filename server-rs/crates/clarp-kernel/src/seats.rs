@@ -733,9 +733,12 @@ fn branch(decision: &Value, mode: &str, switched: bool) -> Option<(&'static str,
 
 /// The kind and the label of a window of Codex from the tool's name for it: `<limit> [tier]
 /// <span>`, where the account's own limit carries the provider's name (`_codex_kind`).
-fn codex_kind(provider: &str, label: &str) -> Option<(String, String)> {
+pub(crate) fn codex_kind(provider: &str, label: &str) -> Option<(String, String)> {
     let lowered = label.to_lowercase();
-    let words: Vec<&str> = lowered.split_whitespace().collect();
+    let words: Vec<&str> = lowered
+        .split(crate::python::blank)
+        .filter(|word| !word.is_empty())
+        .collect();
     let (first, last) = (*words.first()?, *words.last()?);
     let span = match last {
         "5-hour" => Some("5h"),

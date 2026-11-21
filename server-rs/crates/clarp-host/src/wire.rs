@@ -6,7 +6,7 @@
 //! nothing to say about is sent as the Python Host sends it when it has nothing to say.
 
 use clarp_actor::conversation::{Page, Versioned};
-use clarp_actor::{LiveStatus, LiveTool, Status};
+use clarp_actor::{LiveStatus, LiveTool, Status, Waiting};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::control;
 use clarp_kernel::conversation::{Entry, Notice, ToolCall, ToolStatus, TurnEnd};
@@ -611,25 +611,61 @@ pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
     })
 }
 
-/// The queue changed. `message_id` names the message the change is about, when it is about
-/// one: a message that joined the queue, or one that left it to run (`started`).
-pub fn queue_updated(
-    record: &AgentRecord,
-    status: &Status,
-    client_id: Option<&str>,
-    started: bool,
-) -> Value {
+/// One item from `GET /turn-queue`, including the original fields for older clients.
+pub fn queue_item(message: &Waiting) -> Value {
+    let kind = if message.admission.left_for_later() {
+        "later"
+    } else {
+        "waiting"
+    };
+    let mut item = Map::from_iter([
+        ("client_msg_id".into(), json!(message.told_id)),
+        ("text".into(), json!(message.text)),
+        ("sent_at".into(), json!(iso(message.accepted_at_ms))),
+        ("kind".into(), json!(kind)),
+    ]);
+    item.insert("id".into(), json!(message.client_id));
+    item.insert("enqueued_at".into(), json!(message.accepted_at_ms));
+    item.insert("synthesize_audio".into(), json!(message.speak));
+    Value::Object(item)
+}
+
+#[derive(Clone, Copy)]
+pub enum QueueUpdate<'a> {
+    Mailbox,
+    Joined(&'a str),
+    Started(&'a str),
+    Edited { client_id: &'a str, text: &'a str },
+    Deleted(&'a str),
+}
+
+/// The queue changed, with the item that changed when there is one.
+pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<'_>) -> Value {
     let mut event = json!({
         "type": "queue-updated",
         "agent_id": record.agent_id,
         "session": record.session,
-        "queue_depth": status.waiting.len(),
+        "queue_depth": status.queue_depth,
         "queue_paused": status.paused,
-        "queue_started": started,
+        "queue_started": matches!(update, QueueUpdate::Started(_)),
         "queue_revision": status.queue_revision,
     });
-    if let Some(client_id) = client_id {
-        event["client_msg_id"] = json!(client_id);
+    match update {
+        QueueUpdate::Joined(id) | QueueUpdate::Started(id) => event["client_msg_id"] = json!(id),
+        QueueUpdate::Edited { client_id, text } => {
+            if !client_id.is_empty() {
+                event["client_msg_id"] = json!(client_id);
+            }
+            event["queue_change"] = json!("edited");
+            event["text"] = json!(text);
+        }
+        QueueUpdate::Deleted(id) => {
+            if !id.is_empty() {
+                event["client_msg_id"] = json!(id);
+            }
+            event["queue_change"] = json!("deleted");
+        }
+        QueueUpdate::Mailbox => {}
     }
     event
 }
@@ -1331,6 +1367,9 @@ pub fn row(version: &Versioned) -> Value {
     match &version.entry {
         Entry::Message(message) => {
             row["role"] = json!("user");
+            if let Some(sent_at_ms) = message.sent_at_ms {
+                row["sent_at"] = json!(iso(sent_at_ms));
+            }
             row["text"] = match automated_prompt(kind) {
                 Some(shown) => json!(shown),
                 None => json!(markup::strip_hidden_blocks(&message.text)),
@@ -1790,7 +1829,7 @@ pub fn summary(
         // What the user's last compaction did, from numbers: null until the first
         // (compaction_outcome).
         "last_compaction": status.last_compaction,
-        "queued_turn_count": status.waiting.len(),
+        "queued_turn_count": status.queue_depth,
         "queued_turn_revision": status.queue_revision,
         "queue_paused": status.paused,
         "backend_quota": null,
@@ -1896,6 +1935,7 @@ mod tests {
                 account_waits: 0,
             }),
             waiting: vec![TurnId(3)],
+            queue_depth: 1,
             paused: true,
             queue_revision: 7,
             stop_generation: 0,
@@ -2711,7 +2751,7 @@ mod tests {
             )
         );
 
-        let held = queue_updated(&record(), &thinking, None, false);
+        let held = queue_updated(&record(), &thinking, QueueUpdate::Mailbox);
         assert_eq!(
             (
                 &held["queue_depth"],
@@ -2722,7 +2762,7 @@ mod tests {
             (&json!(1), &json!(true), &json!(7), &json!(false))
         );
         assert!(held.get("client_msg_id").is_none());
-        let left = queue_updated(&record(), &thinking, Some("m2"), true);
+        let left = queue_updated(&record(), &thinking, QueueUpdate::Started("m2"));
         assert_eq!(
             (&left["client_msg_id"], &left["queue_started"]),
             (&json!("m2"), &json!(true))

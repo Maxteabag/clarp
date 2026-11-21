@@ -57,8 +57,12 @@ rules(KERNEL, 'vectors', [
     ('The speaker hands over a different id than the profile', 'Some((tried.provider.clone(), tried.voice_id.clone()?))', 'Some((tried.provider.clone(), "other-voice".into()))'),
     ('The speaker loses the primary silent reason', 'reason: primary.silent_reason.unwrap_or(NO_VOICE)', 'reason: NO_VOICE'),
     ('A personal engine falls behind the Host engine', 'heard::plan("", &own_engines, &view.cloud_engine, "", false)', 'heard::plan("", &[], &view.cloud_engine, "", false)'),
-    ('The Host own model is dropped when no model stands in', 'view.own_engine.clone()', 'String::new()'),
-    ('The later hearing engines are omitted', '.chain(plan.fallbacks)', '.chain(std::iter::empty())'),
+    ('The Host own model is dropped when no model stands in', 'view.own_engine.as_str()', '""'),
+])
+rules('clarp-kernel/src/heard.rs', 'vectors', [
+    ('The later hearing engines are omitted', '.chain(self.fallbacks.iter().map(String::as_str))', '.chain(std::iter::empty())'),
+])
+rules(KERNEL, 'vectors', [
     ('A personal engine can be overridden by the device', 'let device_may_override = engine_origin == DEFAULT;', 'let device_may_override = true;'),
     ('The device never learns the configured set', 'device_may_override.then(|| codes(set))', 'Some(Vec::<String>::new())'),
     ('Local English models autodetect the language', 'if first.ends_with(".en")', 'if false'),

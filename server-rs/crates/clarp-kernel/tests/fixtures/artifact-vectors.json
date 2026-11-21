@@ -12913,6 +12913,9 @@
       "url": "/media/asset_000000000000000000000001",
       "uri": "clarp-media://asset/asset_000000000000000000000001",
       "markdown": "",
+      "favorite": false,
+      "favorite_at": null,
+      "used_as": [],
       "sha256": "8f077786361bd70624303c7e6310a110fb40d108977ec86aab69399a6aae1522"
      },
      "ids": 0
@@ -12942,6 +12945,9 @@
       "url": "/media/asset_000000000000000000000002",
       "uri": "clarp-media://asset/asset_000000000000000000000002",
       "markdown": "",
+      "favorite": false,
+      "favorite_at": null,
+      "used_as": [],
       "sha256": "3bee83cd93579b8504f6102a3ea57af43d230bdfefd60acc239c198aebb2136d"
      },
      "ids": 0
@@ -12971,6 +12977,9 @@
       "url": "/media/asset_000000000000000000000003",
       "uri": "clarp-media://asset/asset_000000000000000000000003",
       "markdown": "",
+      "favorite": false,
+      "favorite_at": null,
+      "used_as": [],
       "sha256": "f5117edb193052414d3b7496857953fd5c40d289c84ce675aa0bd361d40ffd76"
      },
      "ids": 0
@@ -13000,6 +13009,9 @@
       "url": "/media/asset_000000000000000000000004",
       "uri": "clarp-media://asset/asset_000000000000000000000004",
       "markdown": "![chart.png](clarp-media://asset/asset_000000000000000000000004)",
+      "favorite": false,
+      "favorite_at": null,
+      "used_as": [],
       "sha256": "5c8494fe23013d51b181e66d5cc668451c7ece86b085ebb9f0fd7a51840a876a"
      },
      "ids": 0
@@ -13029,6 +13041,9 @@
       "url": "/media/asset_000000000000000000000005",
       "uri": "clarp-media://asset/asset_000000000000000000000005",
       "markdown": "",
+      "favorite": false,
+      "favorite_at": null,
+      "used_as": [],
       "sha256": "f5117edb193052414d3b7496857953fd5c40d289c84ce675aa0bd361d40ffd76"
      },
      "ids": 0

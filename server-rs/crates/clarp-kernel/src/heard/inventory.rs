@@ -128,6 +128,10 @@ impl CatalogModel {
         format!("{}:{}", self.provider, self.model)
     }
 
+    pub fn languages(&self) -> &[&'static str] {
+        std::slice::from_ref(&self.language)
+    }
+
     pub fn installed_record(&self) -> Value {
         let mut row = json!({"id":self.id(), "provider":self.provider,"model":self.model,"name":self.name,
                "weight":self.weight,"download_bytes":self.bytes,"languages":[self.language],

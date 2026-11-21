@@ -1,0 +1,752 @@
+{
+  "fallbacks": [
+    {
+      "attempted": [],
+      "calls": [
+        "google:chirp_3"
+      ],
+      "case": "selected Chirp",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "from": "deepgram:nova-3",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "reason": "language_set",
+        "to": "google:chirp_3"
+      },
+      "selected": "google:chirp_3"
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "elevenlabs:scribe_v2"
+      ],
+      "case": "selected Scribe",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "from": "deepgram:nova-3",
+        "languages": "detected",
+        "reason": "language_set",
+        "to": "elevenlabs:scribe_v2"
+      },
+      "selected": "elevenlabs:scribe_v2"
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "selected not known",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "from": "deepgram:nova-3",
+        "languages": "detected",
+        "reason": "language_set",
+        "to": "server-default"
+      },
+      "selected": "google:unknown"
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "selected unkeyed",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": false,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "from": "deepgram:nova-3",
+        "languages": "detected",
+        "reason": "language_set",
+        "to": "server-default"
+      },
+      "selected": "google:chirp_3"
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "selected incompatible",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "from": "deepgram:nova-3",
+        "languages": "detected",
+        "reason": "language_set",
+        "to": "server-default"
+      },
+      "selected": "deepgram:nova-3"
+    },
+    {
+      "attempted": [
+        "elevenlabs:scribe_v2"
+      ],
+      "calls": [
+        "server-default"
+      ],
+      "case": "selected already failed",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "from": "deepgram:nova-3",
+        "languages": "detected",
+        "reason": "language_set",
+        "to": "server-default"
+      },
+      "selected": "elevenlabs:scribe_v2"
+    },
+    {
+      "attempted": [
+        "elevenlabs:scribe_v2",
+        "local"
+      ],
+      "calls": [],
+      "case": "selected and own already failed",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (elevenlabs:scribe_v2 already failed for this recording; the Host's own engine already failed for this recording)",
+        "reasons": [
+          "elevenlabs:scribe_v2 already failed for this recording",
+          "the Host's own engine already failed for this recording"
+        ]
+      },
+      "selected": "elevenlabs:scribe_v2"
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "selected is rejecting provider",
+      "declared": null,
+      "enabled": true,
+      "from": "google:chirp_3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "from": "google:chirp_3",
+        "languages": "detected",
+        "reason": "language_set",
+        "to": "server-default"
+      },
+      "selected": "google:chirp_3"
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "google:chirp_3"
+      ],
+      "case": "selected failed terminally",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": true,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "status": 500
+      },
+      "selected": "google:chirp_3"
+    },
+    {
+      "attempted": [
+        ""
+      ],
+      "calls": [],
+      "case": "own alias blank already failed",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (the Host's own engine already failed for this recording)",
+        "reasons": [
+          "the Host's own engine already failed for this recording"
+        ]
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [
+        "server-default"
+      ],
+      "calls": [],
+      "case": "own alias named already failed",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (the Host's own engine already failed for this recording)",
+        "reasons": [
+          "the Host's own engine already failed for this recording"
+        ]
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [
+        "faster-whisper:small"
+      ],
+      "calls": [],
+      "case": "own id already failed",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (the Host's own engine already failed for this recording)",
+        "reasons": [
+          "the Host's own engine already failed for this recording"
+        ]
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [],
+      "calls": [],
+      "case": "own model too narrow",
+      "declared": [
+        "en"
+      ],
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small.en",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (the Host's own model faster-whisper:small.en hears only en)",
+        "reasons": [
+          "the Host's own model faster-whisper:small.en hears only en"
+        ]
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "own model multilingual by declaration",
+      "declared": [
+        "multilingual"
+      ],
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small.en",
+      "own_error": "",
+      "result": {
+        "from": "deepgram:nova-3",
+        "languages": "detected",
+        "reason": "language_set",
+        "to": "server-default"
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [],
+      "calls": [],
+      "case": "own engine off",
+      "declared": null,
+      "enabled": false,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (the Host's own engine is off)",
+        "reasons": [
+          "the Host's own engine is off"
+        ]
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [],
+      "calls": [],
+      "case": "own engine unavailable",
+      "declared": "unavailable",
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": true,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (the Host's own engine is unavailable)",
+        "reasons": [
+          "the Host's own engine is unavailable"
+        ]
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "own engine failed",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": true,
+      "model": "small",
+      "own_error": "failed",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (the Host's own engine could not hear it)",
+        "reasons": [
+          "the Host's own engine could not hear it"
+        ]
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "own engine busy",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "busy",
+      "result": {
+        "status": 429
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [],
+      "calls": [
+        "server-default"
+      ],
+      "case": "own engine loading",
+      "declared": null,
+      "enabled": true,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "loading",
+      "result": {
+        "status": 503
+      },
+      "selected": ""
+    },
+    {
+      "attempted": [
+        "elevenlabs:scribe_v2"
+      ],
+      "calls": [],
+      "case": "ordered reasons",
+      "declared": null,
+      "enabled": false,
+      "from": "deepgram:nova-3",
+      "hosted_error": false,
+      "keyed": true,
+      "language": "no,en",
+      "logged_internal_detail": false,
+      "model": "small",
+      "own_error": "",
+      "result": {
+        "engine": "deepgram:nova-3",
+        "engines": [
+          "elevenlabs:scribe_v2",
+          "google:chirp_3"
+        ],
+        "error": "language_set_unsupported",
+        "languages": [
+          "no",
+          "en"
+        ],
+        "message": "deepgram:nova-3 cannot hear this agent's languages (no, en); choose an engine that can: elevenlabs:scribe_v2, google:chirp_3 (elevenlabs:scribe_v2 already failed for this recording; the Host's own engine is off)",
+        "reasons": [
+          "elevenlabs:scribe_v2 already failed for this recording",
+          "the Host's own engine is off"
+        ]
+      },
+      "selected": "elevenlabs:scribe_v2"
+    }
+  ],
+  "own": [
+    {
+      "declared": [
+        "multilingual"
+      ],
+      "enabled": false,
+      "languages": [
+        "no",
+        "en"
+      ],
+      "model": "small",
+      "refusal": "the Host's own engine is off"
+    },
+    {
+      "declared": "unavailable",
+      "enabled": true,
+      "languages": [
+        "no",
+        "en"
+      ],
+      "model": "small",
+      "refusal": "the Host's own engine is unavailable"
+    },
+    {
+      "declared": null,
+      "enabled": true,
+      "languages": [
+        "no",
+        "en"
+      ],
+      "model": "small.en",
+      "refusal": "the Host's own model faster-whisper:small.en hears only en"
+    },
+    {
+      "declared": null,
+      "enabled": true,
+      "languages": [
+        "en-GB"
+      ],
+      "model": "small.en",
+      "refusal": ""
+    },
+    {
+      "declared": [],
+      "enabled": true,
+      "languages": [
+        "nb",
+        "en"
+      ],
+      "model": "custom",
+      "refusal": ""
+    },
+    {
+      "declared": [
+        "  NN-no ",
+        "EN_us"
+      ],
+      "enabled": true,
+      "languages": [
+        "no",
+        "en-GB"
+      ],
+      "model": "custom",
+      "refusal": ""
+    },
+    {
+      "declared": [
+        "nb",
+        "pt"
+      ],
+      "enabled": true,
+      "languages": [
+        "nn",
+        "pt_BR"
+      ],
+      "model": "custom",
+      "refusal": ""
+    },
+    {
+      "declared": [
+        "nb",
+        "pt"
+      ],
+      "enabled": true,
+      "languages": [
+        "en",
+        "no"
+      ],
+      "model": "custom",
+      "refusal": "the Host's own model faster-whisper:custom hears only nb, pt"
+    },
+    {
+      "declared": [
+        "MULTILINGUAL"
+      ],
+      "enabled": true,
+      "languages": [
+        "no",
+        "en"
+      ],
+      "model": "custom.en",
+      "refusal": ""
+    },
+    {
+      "declared": [
+        "  ",
+        " EN "
+      ],
+      "enabled": true,
+      "languages": [
+        "no",
+        "en"
+      ],
+      "model": "custom.en",
+      "refusal": "the Host's own model faster-whisper:custom.en hears only en"
+    }
+  ],
+  "reference_repeats_provider": {
+    "language": "no,en",
+    "order": [
+      "elevenlabs:scribe_v2",
+      "elevenlabs:scribe_v2",
+      "deepgram:nova-3"
+    ],
+    "sent": [
+      "elevenlabs:scribe_v2",
+      "elevenlabs:scribe_v2"
+    ]
+  },
+  "selections": [
+    {
+      "keyed": false,
+      "model": "google:chirp_3",
+      "selected": ""
+    },
+    {
+      "keyed": true,
+      "model": "google:chirp_3",
+      "selected": "google:chirp_3"
+    },
+    {
+      "keyed": false,
+      "model": "elevenlabs:scribe_v2",
+      "selected": ""
+    },
+    {
+      "keyed": true,
+      "model": "elevenlabs:scribe_v2",
+      "selected": "elevenlabs:scribe_v2"
+    },
+    {
+      "keyed": false,
+      "model": "deepgram:nova-3",
+      "selected": ""
+    },
+    {
+      "keyed": true,
+      "model": "deepgram:nova-3",
+      "selected": ""
+    },
+    {
+      "keyed": false,
+      "model": "cartesia:ink-2",
+      "selected": ""
+    },
+    {
+      "keyed": true,
+      "model": "cartesia:ink-2",
+      "selected": ""
+    },
+    {
+      "keyed": false,
+      "model": "google:unknown",
+      "selected": ""
+    },
+    {
+      "keyed": true,
+      "model": "google:unknown",
+      "selected": ""
+    },
+    {
+      "keyed": false,
+      "model": "local",
+      "selected": ""
+    },
+    {
+      "keyed": true,
+      "model": "local",
+      "selected": ""
+    },
+    {
+      "keyed": false,
+      "model": "",
+      "selected": ""
+    },
+    {
+      "keyed": true,
+      "model": "",
+      "selected": ""
+    }
+  ]
+}

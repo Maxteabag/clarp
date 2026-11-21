@@ -23628,6 +23628,8 @@
     "caption": "A chart",
     "created_at": 1700000000000,
     "created_by": "agent",
+    "favorite": false,
+    "favorite_at": null,
     "file_name": "chart.png",
     "height": 480,
     "markdown": "![A chart](clarp-media://asset/asset_made_up_0123456789ab)",
@@ -23637,6 +23639,7 @@
     "source_name": "chart.png",
     "uri": "clarp-media://asset/asset_made_up_0123456789ab",
     "url": "/media/asset_made_up_0123456789ab",
+    "used_as": [],
     "width": 640
    },
    "row": {
@@ -23661,6 +23664,8 @@
     "caption": "",
     "created_at": 1700000000000,
     "created_by": "agent",
+    "favorite": false,
+    "favorite_at": null,
     "file_name": "chart.png",
     "height": 480,
     "markdown": "![chart.png](clarp-media://asset/asset_made_up_0123456789ab)",
@@ -23670,6 +23675,7 @@
     "source_name": "chart.png",
     "uri": "clarp-media://asset/asset_made_up_0123456789ab",
     "url": "/media/asset_made_up_0123456789ab",
+    "used_as": [],
     "width": 640
    },
    "row": {
@@ -23694,6 +23700,8 @@
     "caption": "",
     "created_at": 1700000000000,
     "created_by": "agent",
+    "favorite": false,
+    "favorite_at": null,
     "file_name": "",
     "height": 480,
     "markdown": "![file](clarp-media://asset/asset_made_up_0123456789ab)",
@@ -23703,6 +23711,7 @@
     "source_name": "",
     "uri": "clarp-media://asset/asset_made_up_0123456789ab",
     "url": "/media/asset_made_up_0123456789ab",
+    "used_as": [],
     "width": 640
    },
    "row": {
@@ -23727,6 +23736,8 @@
     "caption": "A clip",
     "created_at": 1700000000000,
     "created_by": "agent",
+    "favorite": false,
+    "favorite_at": null,
     "file_name": "clip.mp4",
     "height": null,
     "markdown": "",
@@ -23736,6 +23747,7 @@
     "source_name": "clip.mp4",
     "uri": "clarp-media://asset/asset_made_up_0123456789ab",
     "url": "/media/asset_made_up_0123456789ab",
+    "used_as": [],
     "width": null
    },
    "row": {
@@ -23760,6 +23772,8 @@
     "caption": "",
     "created_at": 1700000000000,
     "created_by": "agent",
+    "favorite": false,
+    "favorite_at": null,
     "file_name": "report.pdf",
     "height": null,
     "markdown": "",
@@ -23769,6 +23783,7 @@
     "source_name": "report.pdf",
     "uri": "clarp-media://asset/asset_made_up_0123456789ab",
     "url": "/media/asset_made_up_0123456789ab",
+    "used_as": [],
     "width": null
    },
    "row": {
@@ -23793,6 +23808,8 @@
     "caption": "With [brackets]\nand a line",
     "created_at": 1700000000000,
     "created_by": "agent",
+    "favorite": false,
+    "favorite_at": null,
     "file_name": "x.webp",
     "height": 480,
     "markdown": "![With \\[brackets\\] and a line](clarp-media://asset/asset_made_up_0123456789ab)",
@@ -23802,6 +23819,7 @@
     "source_name": "x.webp",
     "uri": "clarp-media://asset/asset_made_up_0123456789ab",
     "url": "/media/asset_made_up_0123456789ab",
+    "used_as": [],
     "width": 640
    },
    "row": {
@@ -23826,6 +23844,8 @@
     "caption": "",
     "created_at": 1700000000000,
     "created_by": "agent",
+    "favorite": false,
+    "favorite_at": null,
     "file_name": "notes.md",
     "height": null,
     "markdown": "",
@@ -23835,6 +23855,7 @@
     "source_name": "notes.md",
     "uri": "clarp-media://asset/asset_made_up_0123456789ab",
     "url": "/media/asset_made_up_0123456789ab",
+    "used_as": [],
     "width": null
    },
    "row": {
