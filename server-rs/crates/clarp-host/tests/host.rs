@@ -603,7 +603,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 126);
+    assert_eq!(info["contract"]["host"], 127);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
@@ -712,6 +712,18 @@ fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
     let place = Place::new("stop");
     let host = place.start();
     let session = host.new_agent("Stopper");
+    let events = host.listen();
+    let queue_event = |paused: bool, from_revision: u64| {
+        events.lock().unwrap().iter().any(|event| {
+            event["type"] == "queue-updated"
+                && event["session"] == session
+                && event["queue_depth"] == 1
+                && event["queue_paused"] == paused
+                && event["queue_revision"]
+                    .as_u64()
+                    .is_some_and(|revision| revision >= from_revision)
+        })
+    };
     host.send(&session, "sleep 60", "m1");
     wait_for("the turn to run", || host.state(&session) == "thinking");
     let queued = host.post(
@@ -762,6 +774,11 @@ fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
         "what was left for later is in the queue, not yet in the conversation"
     );
 
+    let held_revision = held["revision"].as_u64().unwrap();
+    wait_for("the held queue to be broadcast", || {
+        queue_event(true, held_revision)
+    });
+
     // A fresh send goes first. Once it starts, the older messages can run after it.
     let now = host.post(
         "/send",
@@ -774,6 +791,10 @@ fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
         (&now["queued"], &now["queue_depth"], &now["queue_revision"]),
         (&json!(false), &json!(0), &json!(0))
     );
+    wait_for(
+        "the release to be broadcast with the older item still queued",
+        || queue_event(false, held_revision + 1),
+    );
     wait_for("the held message to be answered", || {
         host.conversation(&session)
             .contains(&said("assistant", "later"))
@@ -783,7 +804,7 @@ fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
         (&queue["paused"], &queue["items"]),
         (&json!(false), &json!([]))
     );
-    assert!(queue["revision"].as_u64().unwrap() > held["revision"].as_u64().unwrap());
+    assert!(queue["revision"].as_u64().unwrap() > held_revision);
     // Both messages reached the agent, and the new turn finished before the held one began.
     let conversation = host.conversation(&session);
     let place =
@@ -9192,7 +9213,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 126);
+    assert_eq!(info["contract"]["host"], 127);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
