@@ -12,6 +12,7 @@ use tokio::sync::{mpsc, oneshot};
 const IMAGES: &str = "media";
 const PUBLICATIONS: &str = "media-publication";
 const REMOVALS: &str = "remove-media-blob";
+const HINTS: &str = "media-hints";
 const WAIT: Duration = Duration::from_secs(3);
 const QUEUE: usize = 32;
 
@@ -48,6 +49,30 @@ impl From<StoreError> for Failure {
     fn from(why: StoreError) -> Self {
         Self::Store(why.to_string())
     }
+}
+
+pub(crate) struct Hint {
+    pub asset_id: String,
+    pub session: String,
+    pub agent_id: String,
+    pub change: &'static str,
+    pub at: i64,
+}
+
+impl Hint {
+    fn of(row: &Image, change: &'static str, at: i64) -> Self {
+        Self {
+            asset_id: row.asset.asset_id.clone(),
+            session: row.asset.session.clone(),
+            agent_id: row.agent_id.clone(),
+            change,
+            at,
+        }
+    }
+}
+
+fn hint_key(id: &str, change: &str) -> String {
+    format!("{change}/{id}")
 }
 
 pub struct Store {
@@ -110,6 +135,44 @@ impl Store {
             self.index.apply(image);
         }
         Ok(())
+    }
+
+    pub(crate) fn remember_hint(&mut self, id: &str, change: &str) -> Result<(), Failure> {
+        self.db.put(HINTS, &hint_key(id, change), b"")?;
+        Ok(())
+    }
+
+    /// Claim terminal hints on the same writer that publishes and deletes these IDs.
+    /// They are advisory: a crash after the durable claim can lose an event but cannot
+    /// replay it or undo a publication.
+    pub(crate) fn portrait_hints(
+        &mut self,
+        window: &clarp_kernel::portrait_generation::MediaWindow,
+    ) -> Result<Vec<Hint>, Failure> {
+        let (kept, discarded) = self.index.published_by(
+            &window.session,
+            clarp_kernel::portrait_generation::CREATED_BY_PREFIX,
+            window.since,
+            window.until,
+        );
+        let candidates = kept.into_iter().map(|image| Hint::of(image, "created", image.asset.created_at))
+            .chain(discarded.into_iter().filter_map(|image| {
+                image.deletion.as_ref().map(|deleted| Hint::of(image, "deleted", deleted.at))
+            }));
+        let mut writes = Vec::new();
+        let mut hints = Vec::new();
+        for hint in candidates {
+            let key = hint_key(&hint.asset_id, hint.change);
+            if self.db.get(HINTS, &key)?.is_none() {
+                writes.push((HINTS.to_owned(), key, Some(Vec::new())));
+                hints.push(hint);
+            }
+        }
+        if !writes.is_empty() {
+            self.db.put_together(&writes)?;
+        }
+        hints.sort_unstable_by(|a,b| (a.at, &a.asset_id).cmp(&(b.at,&b.asset_id)));
+        Ok(hints)
     }
 
     /// Takes bytes and records an ID on the same writer that can unlink the bytes.

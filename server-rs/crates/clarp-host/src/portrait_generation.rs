@@ -168,7 +168,7 @@ pub(crate) fn asset(
         width,
         height,
         caption: format!("Generated portrait alternative {index}"),
-        created_by: "portrait_generation:openai".into(),
+        created_by: format!("{}openai", rules::CREATED_BY_PREFIX),
         created_at: now,
         named_only: false,
     })
@@ -247,6 +247,7 @@ async fn run(app: App, agent: String, generation: u64) {
                 asset(&member, &first, 1, now)?,
                 asset(&member, &second, 2, now)?,
             ],
+            media_window: None,
         };
         Ok::<_, String>(Some((publication, [first, second])))
     };
@@ -280,7 +281,7 @@ async fn run(app: App, agent: String, generation: u64) {
                     drop(_gallery);
                     let mut delay = 1;
                     loop {
-                        match deliver(&app.fleet, &app.blobs, &app.gallery, &publication).await {
+                        match deliver(&app.fleet, &app.blobs, &app.gallery, &publication, Some(&announcer(&app))).await {
                             Ok(Delivery::Published) => break,
                             Ok(Delivery::MissingBytes) => {
                                 app.fleet.unread(PENDING, &publication.assets[0].asset_id)
@@ -328,6 +329,7 @@ pub(crate) async fn deliver(
     store: &Arc<dyn clarp_ports::blobs::Blobs>,
     gallery: &crate::gallery::Writer,
     publication: &Publication,
+    announcer: Option<&crate::media_created::Announcer>,
 ) -> Result<Delivery, Unavailable> {
     let member = fleet.directory().named(&publication.agent_id).cloned();
     if let Some(member) = member {
@@ -375,6 +377,26 @@ pub(crate) async fn deliver(
                 .map_err(|why| Unavailable(why.words().to_owned()))?;
         }
     }
+    if let Some(announcer) = announcer {
+        let window = if let Some(window) = &publication.media_window {
+            Ok(Some(window.clone()))
+        } else {
+            // Live delivery has the candidate and the fleet kept the exact terminal
+            // window in its durable copy. Recovery already has that copy.
+            match fleet.kept(PENDING, publication.assets[0].asset_id.clone()).await {
+                Ok(Some(raw)) => serde_json::from_slice::<Publication>(&raw)
+                    .map(|pending| pending.media_window)
+                    .map_err(|why| why.to_string()),
+                Ok(None) => Ok(None),
+                Err(why) => Err(why.0),
+            }
+        };
+        match window {
+            Ok(Some(window)) => announcer.tell(window).await,
+            Ok(None) => {}
+            Err(why) => announcer.failed(&why),
+        }
+    }
     let [first, second] = &publication.assets;
     fleet
         .change_together(
@@ -389,6 +411,15 @@ pub(crate) async fn deliver(
     Ok(Delivery::Published)
 }
 
+fn announcer(app: &App) -> crate::media_created::Announcer {
+    crate::media_created::Announcer {
+        writer: app.gallery.clone(),
+        hub: app.hub.clone(),
+        clock: app.clock.clone(),
+        log: crate::unkept::Log::stderr(app.clock.clone()),
+    }
+}
+
 pub async fn recover(app: &App) -> Result<(), Unavailable> {
     for (key, raw) in app.fleet.kept_all(PENDING).await? {
         let Ok(publication) = serde_json::from_slice::<Publication>(&raw) else {
@@ -398,7 +429,7 @@ pub async fn recover(app: &App) -> Result<(), Unavailable> {
         // Cleanup uses the first asset's id. A malformed receipt must never clear a neighbour.
         if publication.assets[0].asset_id != key
             || matches!(
-                deliver(&app.fleet, &app.blobs, &app.gallery, &publication).await?,
+                deliver(&app.fleet, &app.blobs, &app.gallery, &publication, Some(&announcer(&app))).await?,
                 Delivery::MissingBytes
             )
         {
