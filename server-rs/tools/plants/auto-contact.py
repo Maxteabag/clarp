@@ -88,8 +88,8 @@ PLANTS = [
     (H, 'host', 'the apps are not told of a contact assigned', '    app.hub.publish(told, app.clock.now_ms());\n', ''),
     (F, 'host', 'a minted contact speaks as nobody', '            personality: clarp_kernel::contacts::personality(&name, tier).to_string(),\n', ''),
     (F, 'host', 'a minted contact keeps the session asked for',
-     '            request.name = self.contact_of_launch(&backend, &contact, catalogue)?;\n            request.session = None;\n',
-     '            request.name = self.contact_of_launch(&backend, &contact, catalogue)?;\n'),
+     '                    request.name = self.contact_of_launch(&backend, mint, catalogue)?;\n                    request.session = None;\n',
+     '                    request.name = self.contact_of_launch(&backend, mint, catalogue)?;\n'),
     # ---- the single writer: a contact is chosen in the turn that registers or gives it
     (F, 'host', 'a launch reads the pool without the agents registered before it',
      'clarp_kernel::contacts::pool(&contacts, &wearers, backend, "")', 'clarp_kernel::contacts::pool(&contacts, &[], backend, "")'),

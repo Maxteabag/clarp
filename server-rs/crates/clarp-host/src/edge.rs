@@ -1829,6 +1829,10 @@ pub(crate) async fn make_agent(
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST);
         return Err(refused(status, word, word));
     }
+    let anonymous = asked.get("anonymous") == Some(&Value::Bool(true));
+    if anonymous && replaces.is_some() {
+        return Err(bad("anonymous launch must be fresh"));
+    }
     let record = match replaces {
         Some(replaces) => started_again(app, replaces, request)
             .await?
@@ -1894,12 +1898,13 @@ pub(crate) async fn make_agent(
             // fleet chooses it in the turn that registers the agent, so that launches at once
             // never take the same one; what is refused is refused here.
             let contact = match contacts::launch(asked, None, false) {
+                Launch::AsNamed if anonymous => Some(crate::fleet::ContactAsked::Anonymous),
                 Launch::AsNamed => None,
                 Launch::Refused(status, word) => {
                     let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST);
                     return Err(refused(status, word, word));
                 }
-                Launch::Pooled(_) | Launch::Minted => Some(crate::fleet::ContactAsked {
+                Launch::Pooled(_) | Launch::Minted => Some(crate::fleet::ContactAsked::Pool {
                     mint: asked.get("mint_contact") == Some(&Value::Bool(true)),
                 }),
             };

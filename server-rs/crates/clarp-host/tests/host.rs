@@ -23625,6 +23625,46 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
 }
 
 #[test]
+fn agent_creation_details_anonymous_launch_chooses_its_own_identity() {
+    let place = Place::new("anonymous-agent-creation");
+    let host = place.start();
+    let request = json!({
+        "anonymous": true, "backend": "codex", "name": "Ignored", "session": "ignored",
+        "voice_id": "ignored", "avatar_symbol": "ignored", "personality": "ignored",
+    });
+    let first = host.post("/agents", request.clone());
+    let second = host.post("/agents", request);
+    for made in [&first, &second] {
+        let name = made["name"].as_str().unwrap();
+        let suffix = name.strip_prefix("Codex-").unwrap();
+        assert_eq!(suffix.len(), 4);
+        assert!(suffix.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(made["agent"]["persona"], made["name"]);
+        assert_eq!(made["agent"]["backend"], "codex");
+        assert_eq!(made["agent"]["avatar_symbol"], "");
+        assert_ne!(made["agent"]["voice_id"], "ignored");
+        assert_ne!(made["session"], "ignored");
+    }
+    assert_ne!(first["name"], second["name"]);
+    assert_ne!(first["session"], second["session"]);
+
+    for (key, value, expected) in [
+        ("replace_sid", first["session"].clone(), "anonymous launch must be fresh"),
+        ("mint_contact", json!(true), "conflicting launch options"),
+        ("auto_contact", json!(true), "conflicting launch options"),
+    ] {
+        assert_eq!(
+            host.ask(
+                "POST",
+                "/agents",
+                Some(&json!({"anonymous":true, key:value}))
+            ),
+            (400, json!({"error":expected,"message":expected}))
+        );
+    }
+}
+
+#[test]
 fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     let place = Place::new("not-yet");
     // The Host's user has a home of their own, in which no tool kept anything.
