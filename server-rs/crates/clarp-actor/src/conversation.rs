@@ -520,6 +520,61 @@ fn rows(
     Ok(found)
 }
 
+/// The chat-list preview of a hiding chat and its preview without unfinished drafts.
+pub(crate) fn visible_previews(
+    log: &dyn AgentLog,
+    drafts: &[Draft],
+    candidate: impl Fn(&Entry) -> bool,
+    limit: usize,
+) -> Result<(Option<Versioned>, Option<Versioned>), ActorError> {
+    let mut reader = Reader::new(log);
+    let mut head = None;
+    let mut head_left = limit;
+    for draft in drafts.iter().rev() {
+        let row = draft.versioned();
+        if head_left > 0 && candidate(&row.entry) {
+            head_left -= 1;
+            if reader.mark(draft.turn)?.0.is_none() {
+                head = Some(row);
+                break;
+            }
+        }
+    }
+
+    let mut cursor = Seq::MAX;
+    let mut completed_left = limit;
+    while completed_left > 0 {
+        let items = log.read_before(cursor, kind::ROWS, CHUNK)?;
+        let end = items.len() < CHUNK;
+        for item in items.into_iter().rev() {
+            cursor = item.seq;
+            let Some(entry) = Entry::from_item(&item).map_err(|why| corrupt(&item, why))? else {
+                continue;
+            };
+            if !candidate(&entry) {
+                continue;
+            }
+            let hidden = reader.hidden(&item, &entry)?.is_some();
+            if !hidden {
+                let completed = reader.row(&item, entry)?;
+                if head.is_none() && head_left > 0 {
+                    head = Some(completed.clone());
+                }
+                return Ok((head, Some(completed)));
+            }
+            head_left = head_left.saturating_sub(1);
+            completed_left -= 1;
+            if completed_left == 0 {
+                break;
+            }
+        }
+        if end {
+            break;
+        }
+    }
+    Ok((head, None))
+}
+
 /// The row with this id as it is now, with its turn's end if it closed one.
 pub(crate) fn one(log: &dyn AgentLog, id: &str) -> Result<Option<Versioned>, ActorError> {
     Reader::new(log).stored(id, Which::All)

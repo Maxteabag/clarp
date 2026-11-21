@@ -107,17 +107,23 @@ pub fn reminder(session: &str, sender: Option<&str>) -> String {
 
 /// The words shown while an agent works on a coordination turn its chat hides.
 pub fn working_headline(name: Option<&str>) -> String {
-    let partner = name.filter(|name| !name.is_empty()).unwrap_or("another agent");
+    let partner = name
+        .filter(|name| !name.is_empty())
+        .unwrap_or("another agent");
     format!("Working with {partner}")
 }
 
 pub fn veil_activity(activity: &mut serde_json::Value, headline: &str) {
     use serde_json::{Value, json};
 
-    if let Some(row) = activity.as_object_mut() {
+    if !headline.is_empty()
+        && let Some(row) = activity.as_object_mut()
+    {
         row.insert("tool".into(), json!(""));
-        row.insert("action".into(), json!("working"));
-        row.insert("summary".into(), json!(headline));
+        if row.get("phase").and_then(Value::as_str) != Some("account_recovery") {
+            row.insert("action".into(), json!("working"));
+            row.insert("summary".into(), json!(headline));
+        }
         row.insert("file_path".into(), json!(""));
         row.insert("call_id".into(), Value::Null);
     }
@@ -126,8 +132,19 @@ pub fn veil_activity(activity: &mut serde_json::Value, headline: &str) {
 pub fn veil_live(activity: &mut serde_json::Value, headline: &str) {
     use serde_json::{Value, json};
 
-    if let Some(row) = activity.as_object_mut() {
+    if !headline.is_empty()
+        && let Some(row) = activity.as_object_mut()
+    {
         row.insert("headline".into(), json!(headline));
         row.insert("tool".into(), Value::Null);
+    }
+}
+
+pub fn veil_detail(detail: &mut serde_json::Value, headline: &str) {
+    if !headline.is_empty()
+        && let Some(row) = detail.as_object_mut()
+    {
+        row.retain(|key, _| matches!(key.as_str(), "trace_id" | "phase" | "account_recovery"));
+        row.insert("summary".into(), serde_json::json!(headline));
     }
 }

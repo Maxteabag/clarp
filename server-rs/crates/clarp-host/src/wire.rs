@@ -174,13 +174,7 @@ pub fn dispatched(
         "queue_remaining": waiting,
         "audience": coordination::USER,
     });
-    if let WorkingWith::Agents { sender } = with {
-        told["audience"] = json!(coordination::AGENTS);
-        if let Some((agent_id, name)) = sender {
-            told["sender_agent_id"] = json!(agent_id);
-            told["sender_name"] = json!(name);
-        }
-    }
+    with.tell(&mut told);
     told
 }
 
@@ -194,6 +188,38 @@ pub enum WorkingWith {
     /// Another agent, whose message began the turn: its id and name when it is an agent of
     /// this Host, none for an agent of a peer Host.
     Agents { sender: Option<(String, String)> },
+}
+
+impl WorkingWith {
+    pub(crate) fn audience(&self) -> &'static str {
+        match self {
+            Self::User => coordination::USER,
+            Self::Agents { .. } => coordination::AGENTS,
+        }
+    }
+
+    pub(crate) fn sender(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Agents {
+                sender: Some((id, name)),
+            } => Some((id, name)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn headline(&self) -> Option<String> {
+        matches!(self, Self::Agents { .. }).then(|| {
+            clarp_kernel::hidden_coordination::working_headline(self.sender().map(|(_, name)| name))
+        })
+    }
+
+    pub(crate) fn tell(&self, event: &mut Value) {
+        event["audience"] = json!(self.audience());
+        if let Some((id, name)) = self.sender() {
+            event["sender_agent_id"] = json!(id);
+            event["sender_name"] = json!(name);
+        }
+    }
 }
 
 /// What a turn that waits a moment for its next attempt shows.
@@ -1309,8 +1335,12 @@ fn automated_reply(kind: &str, said: &str) -> Option<&'static str> {
 /// Whether a row is what a list of chats shows as the last thing said in one: something
 /// someone said, not a tool call, and nothing automated.
 pub fn previewed(version: &Versioned) -> bool {
-    let by_hand = automation_kind(version.entry.origin_name()).is_empty();
-    match &version.entry {
+    previewed_entry(&version.entry)
+}
+
+pub(crate) fn previewed_entry(entry: &Entry) -> bool {
+    let by_hand = automation_kind(entry.origin_name()).is_empty();
+    match entry {
         Entry::Message(message) => by_hand && !message.text.is_empty(),
         Entry::Reply(reply) => by_hand && !reply.text.is_empty(),
         Entry::Notice(notice) => !notice.text.is_empty(),
@@ -1693,7 +1723,7 @@ pub fn no_conversation(cwd: &str) -> Value {
 
 /// What a row says in a list of chats: one line, as a screen shows it, no longer than 80
 /// characters, and what the user wrote marked as theirs.
-fn preview(version: &Versioned) -> String {
+pub(crate) fn preview(version: &Versioned) -> String {
     let (theirs, text) = match &version.entry {
         Entry::Message(message) => (true, message.text.as_str()),
         Entry::Reply(reply) => (false, reply.text.as_str()),
