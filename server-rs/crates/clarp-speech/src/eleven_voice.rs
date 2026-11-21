@@ -151,3 +151,23 @@ mod tests {
         );
     }
 }
+
+/// One of the account's voices, resolved by ID for the background names file.
+pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<String, String> {
+    let endpoint = if endpoint.is_empty() {
+        "https://api.elevenlabs.io"
+    } else {
+        endpoint
+    };
+    let path = crate::voice_names::segment(id);
+    let url = format!("{}/v1/voices/{path}", endpoint.trim_end_matches('/'));
+    let voice = crate::voice_names::get(&url, &[("xi-api-key", key)], None)?;
+    Ok(voice["name"]
+        .as_str()
+        .unwrap_or("")
+        .split(" - ")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
