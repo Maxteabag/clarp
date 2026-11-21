@@ -44,6 +44,8 @@ ALLOWED = {
     ("artifact_decisions", "lib/db_migrations.py"): _MIGRATION,
     ("decision_deliveries", "lib/db_migrations.py"): _MIGRATION,
     ("message_clock", "lib/db_migrations.py"): _MIGRATION,
+    ("janitor_demand_claims", "lib/db_migrations.py"):
+        _MIGRATION + " (v137 closes the expired claims of ended runs; janitor_store owns the table)",
     ("task_plan_versions", "lib/db_migrations.py"):
         _MIGRATION + " (v136 stamps the plans that exist; the task_plans triggers in db_schema keep it after)",
     ("teams", "lib/db_migrations.py"): _MIGRATION,
