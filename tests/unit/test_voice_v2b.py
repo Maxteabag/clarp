@@ -330,3 +330,32 @@ def test_never_the_owners_own_voice_nor_another_languages_and_norwegian_gets_nor
     settings_store.set_text(stt_language.AGENT_LANGUAGES_KEY, json.dumps({"ola": "no,en"}))
     ola = json.loads(voice_pool.assign(cfg, "Ola", "{}", agents=[], contacts=[]))["cartesia"]
     assert ola in {"no-public", "nb-public"}
+
+
+def test_real_api_rows_are_picked_and_private_owned_or_unknown_never(tmp_path, monkeypatch):
+    """Live bug (21 Nov): rows in Cartesia's real shape (access, visibility, is_owner; no
+    is_public) must be eligible; a private, an owned and an unknown-owner row never are; and a
+    language the catalogue has no eligible voice for is logged before the built-in fallback."""
+    from lib import voice_names
+    names_file = tmp_path / "voice-names.json"
+    monkeypatch.setenv("CLARP_VOICE_NAMES", str(names_file))
+    base = {"access": "public", "visibility": "all", "is_owner": False, "status": "active", "name": "x"}
+    unknown = {k: v for k, v in base.items() if k != "is_owner"}
+    rows = [{"id": "en-public", "language": "en", **base},
+            {"id": "en-private", "language": "en", **base, "access": "private", "visibility": "owner"},
+            {"id": "en-owned", "language": "en", **base, "is_owner": True},
+            {"id": "en-unknown", "language": "en", **unknown}]
+    cfg = config.Config(tts_provider="cartesia", cartesia_api_key="ck", cartesia_voices={})
+    voice_names.refresh(cfg, path=names_file, cartesia_all=lambda key: rows,
+                        cartesia_one=lambda key, v: {}, eleven_one=lambda key, v: {},
+                        voices_in_use=lambda _cfg: {"cartesia": set(), "elevenlabs": set()})
+    logged = []
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a))
+    assert voice_pool.pool(cfg, "cartesia", "en") == ["en-public"]
+    picks = {json.loads(voice_pool.assign(cfg, f"Name{i}", "{}", agents=[], contacts=[]))["cartesia"]
+             for i in range(10)}
+    assert picks == {"en-public"}
+    assert not [a for a in logged if a[0] == "voicePoolNoCatalogueVoice"]
+    voice_pool.pool(cfg, "cartesia", "no")                          # no Norwegian row at all
+    assert [a[1] for a in logged if a[0] == "voicePoolNoCatalogueVoice"] == [
+        "provider=cartesia language=no eligible=0 total=4"]

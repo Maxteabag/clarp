@@ -342,8 +342,8 @@ FEATURE_CONTRACTS["media_manage"] = 113
 FEATURE_CONTRACTS["waited_send_order"] = 115  # issue 491
 FEATURE_CONTRACTS["pairing_identity"] = 114
 FEATURE_CONTRACTS["queue_user_first"] = 118  # PROVISIONAL: the next free number on main at merge
-FEATURE_CONTRACTS["voice_pool"] = 123  # PROVISIONAL: set by the release owner at merge
-FEATURE_CONTRACTS["voice_provider_maps"] = 122  # PROVISIONAL: next free at its merge, set by the release owner
+FEATURE_CONTRACTS["voice_pool"] = 123
+FEATURE_CONTRACTS["voice_provider_maps"] = 122
 
 
 # Features that exist only while live events actually flow: the hub runs in
