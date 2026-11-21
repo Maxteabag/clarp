@@ -11,8 +11,9 @@ the roster keep their voices for their own names); when every voice is taken, th
 (in the walk's order). The walk is stable: the same name on the same pool and the same fleet gets
 the same voice, and two agents do not share a voice while the pool has a free one.
 
-Cartesia's default pool is its catalogue (every language: the voice names file, else the voice
-picker's catalogue), so a new agent never gets a built-in contact's voice; only when no catalogue
+Cartesia's default pool is TODAY's catalogue (every language: the last fetch the voice names
+file records, else the voice picker's), so a new agent never gets a built-in contact's voice nor
+a voice Cartesia has deleted; only when no catalogue
 has been fetched yet is it the built-in list. Every pick and the insert that stores it run under
 one lock (``assigning()``), so two agents or contacts created at once never get the same voice.
 """
@@ -39,9 +40,14 @@ def assigning() -> threading.RLock:
 
 
 def _cartesia_catalogue() -> list[str]:
-    """Every Cartesia voice id the Host knows from a catalogue it fetched; never a fetch."""
+    """The Cartesia voices on offer TODAY: the last catalogue fetch the names file records
+    (else the voice picker's, fetched this run), never a voice the provider has deleted and
+    never one only remembered by name; never a fetch."""
     from . import cartesia_voices, voice_names
-    return sorted({*voice_names.names(CARTESIA), *cartesia_voices.cached_voice_ids()})
+    today = voice_names.catalogue(CARTESIA)
+    ids = today if today is not None else cartesia_voices.cached_voice_ids()
+    gone = voice_names.gone(CARTESIA)
+    return sorted({v for v in ids if v and v not in gone})
 
 
 def reserved(cfg, provider: str) -> set[str]:
