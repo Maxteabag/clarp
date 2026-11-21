@@ -73,11 +73,13 @@ pub fn wait_ms(failures: u32) -> i64 {
     MAX_MS.min(BASE_MS.saturating_mul(doubled))
 }
 
+pub const NEVER_RUN: &str = "A message you sent was never run.";
+
 /// What the sender is told when the turn ends (`REFUSED_LAUNCH_NOTICE`).
 pub fn notice(failures: u32, error: &str) -> String {
     let error = error.trim_end_matches('.');
     format!(
-        "A message you sent was never run.\n\nThe agent could not be started for it {failures} \
+        "{NEVER_RUN}\n\nThe agent could not be started for it {failures} \
          times in a row: {error}. It will not be tried again; send it again once the agent can \
          start."
     )

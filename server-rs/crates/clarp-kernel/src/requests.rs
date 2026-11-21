@@ -59,6 +59,21 @@ pub fn dependency_key(request_id: &str) -> String {
     format!("peer:{request_id}")
 }
 
+/// The reason a failed queued message was never delivered. A Host notice of a
+/// refused launch or a failed held send can prove this even after a launch was attempted.
+pub fn unrun_reason<'a>(status: &str, started: bool, notice: Option<&'a str>) -> Option<&'a str> {
+    if status != "failed" {
+        return None;
+    }
+    if let Some(notice) = notice.filter(|notice| !notice.is_empty()) {
+        let detail = notice
+            .split_once("\n\n")
+            .map_or(notice, |(_, detail)| detail);
+        return Some(detail.trim()).filter(|detail| !detail.is_empty());
+    }
+    (!started).then_some("its queued message ended failed and was never run")
+}
+
 /// What the agent that is asked is told: the request, and how to answer it.
 pub fn request_text(request_id: &str, requester: &Who<'_>, text: &str) -> String {
     let Who { persona, session } = requester;
