@@ -503,7 +503,9 @@ the same rule as `/log` with `coordination=auto`: in a chat whose effective
 (sought among its newest 200; none: an empty preview), never from a hidden coordination row.
 Every agent row carries `working_audience` (`user`, `agents`, or `null` when idle) and
 `working_with` (`{agent_id, name}` of the agent whose message started the running turn, or
-`null`), so a client that connects mid-turn can say "Working with <Name>"; every working
+`null`), so a client that connects mid-turn can say "Working with <Name>". The audience is the
+one `/log` gives the turn's rows: a turn of an agent that cannot leave a note reads `user` (and
+`working_with` is `null`), as its rows do; every working
 `agent-state` carries the turn's `audience`, `sender_agent_id` and `sender_name`, not only the
 first one. While such a chat runs a coordination turn, its row's `activity` and
 `live_activity` and the agents-working push say "Working with <Name>" and carry no tool,
