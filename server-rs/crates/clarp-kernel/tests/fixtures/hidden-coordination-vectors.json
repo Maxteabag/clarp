@@ -1,0 +1,406 @@
+{
+  "choices": [
+    {
+      "global_choice": "show",
+      "own": "default",
+      "mode": "auto",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "global"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "default",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "default",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "show",
+      "mode": "auto",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "chat"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "show",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "show",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "hide",
+      "mode": "auto",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "chat"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "hide",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
+      "global_choice": "show",
+      "own": "hide",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "default",
+      "mode": "auto",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "global"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "default",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "default",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "show",
+      "mode": "auto",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "chat"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "show",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "show",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "hide",
+      "mode": "auto",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "chat"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "hide",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
+      "global_choice": "hide",
+      "own": "hide",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "raw": "",
+      "normalized": "",
+      "global": {
+        "error": "coordination_visibility must be one of: show, hide"
+      },
+      "chat": {
+        "error": "visibility must be one of: show, hide, default"
+      }
+    },
+    {
+      "raw": "sometimes",
+      "normalized": "",
+      "global": {
+        "error": "coordination_visibility must be one of: show, hide"
+      },
+      "chat": {
+        "error": "visibility must be one of: show, hide, default"
+      }
+    },
+    {
+      "raw": "DEFAULT",
+      "normalized": "",
+      "global": {
+        "error": "coordination_visibility must be one of: show, hide"
+      },
+      "chat": ""
+    },
+    {
+      "raw": " Hide ",
+      "normalized": "hide",
+      "global": "hide",
+      "chat": "hide"
+    },
+    {
+      "raw": " show ",
+      "normalized": "show",
+      "global": "show",
+      "chat": "show"
+    },
+    {
+      "raw": null,
+      "normalized": "",
+      "global": {
+        "error": "coordination_visibility must be one of: show, hide"
+      },
+      "chat": {
+        "error": "visibility must be one of: show, hide, default"
+      }
+    }
+  ],
+  "reminder": "Coordination: this turn answers a message from another agent (Boss). The user has chosen not to see such turns in this chat, so nothing you write in it, your final reply included, reaches the user. To tell the user something, run `clarp-admin tell-user --from ivy --text '...'`: it appears in this chat and notifies the user. Decision cards and artifacts are shown as always.",
+  "counts": [
+    {
+      "nearest": "mttm",
+      "tail": true,
+      "answer": {
+        "messages": 2,
+        "exchanges": 4,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": false
+      }
+    },
+    {
+      "nearest": "mttm",
+      "tail": false,
+      "answer": {
+        "messages": 2,
+        "exchanges": 4,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": false
+      }
+    },
+    {
+      "nearest": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "tail": true,
+      "answer": {
+        "messages": 0,
+        "exchanges": 400,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": false
+      }
+    },
+    {
+      "nearest": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttm",
+      "tail": true,
+      "answer": {
+        "messages": 0,
+        "exchanges": 400,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": true
+      }
+    },
+    {
+      "nearest": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmttt",
+      "tail": false,
+      "answer": {
+        "messages": 100,
+        "exchanges": 103,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": false
+      }
+    },
+    {
+      "nearest": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmtttm",
+      "tail": false,
+      "answer": {
+        "messages": 100,
+        "exchanges": 103,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": true
+      }
+    },
+    {
+      "nearest": "",
+      "tail": true,
+      "answer": null
+    }
+  ]
+}
