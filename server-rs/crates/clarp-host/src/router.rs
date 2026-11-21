@@ -101,7 +101,7 @@ fn unfit_entries(stored: &[u8]) -> Vec<String> {
 }
 
 fn unread() -> Unavailable {
-    Unavailable("the router's book could not be read".to_string())
+    Unavailable::new("the router's book could not be read".to_string())
 }
 
 impl Desk {

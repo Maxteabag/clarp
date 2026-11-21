@@ -502,6 +502,7 @@ pub struct LiveStatus {
 /// What an agent is doing, for a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
+    pub moved: Option<clarp_kernel::agent_moves::Mark>,
     pub live: Option<LiveStatus>,
     /// The last turn that held the agent and ended.
     pub last: Option<Settled>,
@@ -1471,6 +1472,12 @@ impl Actor {
         // A compaction whose turn ended and whose outcome an actor before this one did not
         // write: it is said now, from how the turn ended.
         actor.say_owed_compaction()?;
+        if let Some(settled) = actor.settle_moved_wait(now_ms)? {
+            out.actions.extend(settled.actions);
+            out.changed.status |= settled.changed.status;
+            out.changed.queue |= settled.changed.queue;
+            out.changed.conversation |= settled.changed.conversation;
+        }
         Ok((actor, out))
     }
 
@@ -1698,6 +1705,156 @@ impl Actor {
         self.recorder.agent().latest_turn_start()
     }
 
+    pub fn moved(&self) -> Option<&clarp_kernel::agent_moves::Mark> {
+        self.recorder.agent().moved()
+    }
+
+    pub fn require_here(&self) -> Result<(), ActorError> {
+        self.recorder
+            .agent()
+            .require_here()
+            .map_err(|why| JournalError::Refused(why).into())
+    }
+
+    pub fn set_move(
+        &mut self,
+        to: Option<clarp_kernel::agent_moves::Target>,
+        unsent: Option<TurnId>,
+        now_ms: i64,
+    ) -> Result<(clarp_kernel::agent_moves::Receipt, Outputs), ActorError> {
+        let previous = self.moved().cloned();
+        let setting = to.is_some();
+        let mut batch = self.recorder.batch();
+        batch
+            .command(Command::SetMoved { to }, now_ms)
+            .map_err(JournalError::Refused)?;
+        let changed = batch.agent().moved() != previous.as_ref();
+        let held = if changed
+            && setting
+            && let Some(turn) = unsent
+        {
+            match batch.command(Command::HoldUnsentForMove { turn }, now_ms) {
+                Ok(()) => {
+                    batch.cursor(turn, 0, now_ms);
+                    true
+                }
+                Err(Refusal::UnsentNotProven(_)) => {
+                    batch
+                        .command(
+                            Command::TurnEnded {
+                                turn,
+                                outcome: RunOutcome::Interrupted {
+                                    reason: clarp_kernel::agent_moves::MOVED.into(),
+                                },
+                            },
+                            now_ms,
+                        )
+                        .map_err(JournalError::Refused)?;
+                    if let Some(live) = self.live.as_ref()
+                        && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts())
+                    {
+                        batch.item(written(&end, now_ms)?);
+                    }
+                    true
+                }
+                Err(why) => return Err(JournalError::Refused(why).into()),
+            }
+        } else {
+            false
+        };
+        let effects = batch.commit()?.effects;
+        let mut out = Outputs {
+            changed: Changed {
+                queue: changed,
+                status: changed,
+                conversation: held,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        if held {
+            self.held_for_an_account = false;
+            self.forget_live();
+        }
+        self.carry_out(effects, &mut out)?;
+        if let Some(waited) = self.settle_moved_wait(now_ms)? {
+            out.changed.conversation |= waited.changed.conversation;
+            out.changed.status |= waited.changed.status;
+            out.changed.queue |= waited.changed.queue;
+        }
+        let moved = self.moved().cloned();
+        Ok((clarp_kernel::agent_moves::Receipt { changed, moved }, out))
+    }
+
+    pub fn launch_pending(&self, turn: TurnId, attempt: u32) -> bool {
+        matches!(self.recorder.agent().live(),
+            Some(Turn::Starting(state)) if state.id == turn && state.attempt == attempt)
+    }
+
+    pub fn refuse_moved_launch(
+        &mut self,
+        turn: TurnId,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        if matches!(self.recorder.agent().live(), Some(Turn::Starting(state)) if !state.ran_before)
+        {
+            self.hold_unsent_for_move(turn, now_ms)
+        } else {
+            self.ended_outside_the_spool(
+                turn,
+                Command::TurnEnded {
+                    turn,
+                    outcome: RunOutcome::Interrupted {
+                        reason: clarp_kernel::agent_moves::MOVED.into(),
+                    },
+                },
+                now_ms,
+            )
+        }
+    }
+
+    /// Keep the original queue entry when there is proof nothing reached the tool.
+    pub fn hold_unsent_for_move(
+        &mut self,
+        turn: TurnId,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        let mut batch = self.recorder.batch();
+        batch
+            .command(Command::HoldUnsentForMove { turn }, now_ms)
+            .map_err(JournalError::Refused)?;
+        batch.cursor(turn, 0, now_ms);
+        batch.commit()?;
+        self.held_for_an_account = false;
+        self.forget_live();
+        Ok(Outputs {
+            changed: Changed {
+                status: true,
+                queue: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        })
+    }
+
+    /// Resolve a parked attempt without launching it. A retry whose first attempt may have
+    /// reached the native session ends interrupted. A provably unsent turn goes back to the queue.
+    pub fn settle_moved_wait(&mut self, now_ms: i64) -> Result<Option<Outputs>, ActorError> {
+        if self.moved().is_none() {
+            return Ok(None);
+        }
+        let Some(Turn::Parked(waiting)) = self.recorder.agent().live() else {
+            return Ok(None);
+        };
+        let turn = waiting.id;
+        if waiting.ran {
+            self.ended_outside_the_spool(turn, Command::InterruptMovedRetry { turn }, now_ms)
+                .map(Some)
+        } else {
+            self.hold_unsent_for_move(turn, now_ms).map(Some)
+        }
+    }
+
     pub fn status(&self) -> Status {
         let agent = self.recorder.agent();
         let stopping = agent.stopping().is_some();
@@ -1770,6 +1927,7 @@ impl Actor {
             _ => None,
         };
         Status {
+            moved: agent.moved().cloned(),
             live,
             last: agent.last().cloned(),
             waiting: agent.waiting().map(|queued| queued.id).collect(),
@@ -3054,6 +3212,7 @@ impl Actor {
         marks: &Marks,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
+        self.require_here()?;
         // The first message of a trace owns it: a send that names it later is found by key.
         if let Some(trace) = message
             .trace_id
@@ -3747,6 +3906,16 @@ impl Actor {
                 trace_id: facts.trace_id.clone(),
             })
             .map(|marker| (marker, false)),
+            Command::InterruptMovedRetry { .. } => {
+                let notice = ending_notice(
+                    turn,
+                    &name,
+                    "turn-interrupted",
+                    clarp_kernel::agent_moves::MOVED,
+                    facts.trace_id.clone(),
+                );
+                Some((notice, true))
+            }
             Command::TurnEnded {
                 outcome: RunOutcome::Interrupted { reason },
                 ..
@@ -3793,7 +3962,11 @@ impl Actor {
             match effect {
                 Effect::StartTurn { turn, message_seq } => {
                     out.changed.status = true;
-                    self.start(turn, message_seq, 1, out)?;
+                    let attempt = match self.recorder.agent().live() {
+                        Some(Turn::Starting(starting)) if starting.id == turn => starting.attempt,
+                        _ => 1,
+                    };
+                    self.start(turn, message_seq, attempt, out)?;
                 }
                 Effect::RetryTurn {
                     turn,
@@ -4114,14 +4287,27 @@ impl Actor {
                     "streaming shim still owns input but its spool is missing".into(),
                 ));
             }
-            if starting {
+            if self.moved().is_some()
+                && starting
+                && matches!(self.recorder.agent().live(), Some(Turn::Starting(state)) if !state.ran_before)
+            {
+                let held = self.hold_unsent_for_move(turn, now_ms)?;
+                out.changed.status |= held.changed.status;
+                out.changed.queue |= held.changed.queue;
+                return Ok(());
+            }
+            if starting && self.moved().is_none() {
                 // The attempt was decided and no shim ever took it. Nothing ran: start it now.
                 return self.start(turn, message_seq, attempt, out);
             }
             let command = Command::TurnEnded {
                 turn,
                 outcome: RunOutcome::Interrupted {
-                    reason: "the record of the turn's tool is gone".to_string(),
+                    reason: if self.moved().is_some() {
+                        clarp_kernel::agent_moves::MOVED.to_string()
+                    } else {
+                        "the record of the turn's tool is gone".to_string()
+                    },
                 },
             };
             let message = self.message_at(message_seq)?;
@@ -4375,6 +4561,9 @@ impl Actor {
     /// When the turn that waits for its next attempt is to be tried again. `None`: no turn
     /// waits for that.
     pub fn retry_at(&self) -> Option<i64> {
+        if self.moved().is_some() {
+            return None;
+        }
         match self.recorder.agent().live() {
             // A turn whose launch was refused, and whose count a Host that started since has
             // not: the Python Host's queue tries it at once when it starts (R121).
@@ -4558,6 +4747,9 @@ impl Actor {
 
     /// Starts the next attempt of the turn that waits for one.
     fn retry(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        if let Some(out) = self.settle_moved_wait(now_ms)? {
+            return Ok(out);
+        }
         let mut out = Outputs::default();
         let Some(Turn::Parked(parked)) = self.recorder.agent().live() else {
             return Ok(out);

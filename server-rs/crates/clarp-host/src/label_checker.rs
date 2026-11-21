@@ -130,7 +130,7 @@ pub async fn candidates(directory: &Directory, now: i64) -> Result<Vec<Evidence>
     project(roster(directory), now, |id: String| async move {
         let member = directory
             .named(&id)
-            .ok_or_else(|| Unavailable("label check target disappeared".into()))?;
+            .ok_or_else(|| Unavailable::new("label check target disappeared".into()))?;
         let page = member.agent.tail(3, Which::All).await?;
         Ok(page.entries.iter().map(wire::row).collect())
     })
@@ -194,7 +194,7 @@ async fn diagnostic(app: &crate::edge::App, mut row: Value) -> Result<(), Unavai
     let next = match prior {
         None => 0,
         Some(bytes) => serde_json::from_slice::<u64>(&bytes)
-            .map_err(|_| Unavailable("invalid label diagnostic cursor".into()))?,
+            .map_err(|_| Unavailable::new("invalid label diagnostic cursor".into()))?,
     };
     row["sequence"] = json!(next);
     app.fleet
@@ -431,7 +431,8 @@ async fn stored<T: serde::de::DeserializeOwned>(
         .kept(kind, ROLE.into())
         .await?
         .map(|raw| {
-            serde_json::from_slice(&raw).map_err(|_| Unavailable(format!("invalid {kind} record")))
+            serde_json::from_slice(&raw)
+                .map_err(|_| Unavailable::new(format!("invalid {kind} record")))
         })
         .transpose()
 }

@@ -173,11 +173,12 @@ impl Fleet {
         reason: &str,
         removing: Option<&AgentHandle>,
     ) -> Result<(), Unavailable> {
-        let rows = active_for_agent(self.store.as_ref(), &record.agent_id).map_err(Unavailable)?;
+        let rows =
+            active_for_agent(self.store.as_ref(), &record.agent_id).map_err(Unavailable::new)?;
         let mut writes = if rows.is_empty() {
             Vec::new()
         } else {
-            let bytes = serde_json::to_vec(record).map_err(|e| Unavailable(e.to_string()))?;
+            let bytes = serde_json::to_vec(record).map_err(|e| Unavailable::new(e.to_string()))?;
             vec![(AGENTS.into(), record.agent_id.clone(), Some(bytes))]
         };
         for row in &rows {
@@ -185,11 +186,11 @@ impl Fleet {
         }
         let mut keep = || {
             if rows.is_empty() {
-                self.put(record).map_err(Unavailable)
+                self.put(record).map_err(Unavailable::new)
             } else {
                 self.store
                     .put_together(&writes)
-                    .map_err(|e| Unavailable(e.to_string()))
+                    .map_err(|e| Unavailable::new(e.to_string()))
             }
         };
         match removing {
@@ -210,7 +211,7 @@ impl Fleet {
     ) -> Result<(), Unavailable> {
         let principal = self
             .delegation_member(&row.principal_agent_id)
-            .map_err(Unavailable)?;
+            .map_err(Unavailable::new)?;
         let command = Transition::Stop {
             binding: row.binding(),
             reason: reason.to_string(),
@@ -219,15 +220,17 @@ impl Fleet {
             .agent
             .delegation(DelegationCommand::Change(command))?;
         if !reply.accepted {
-            return Err(Unavailable(
+            return Err(Unavailable::new(
                 "the principal has no matching delegation".into(),
             ));
         }
         let Some((Transition::Stop { reason, .. }, at)) = reply.prior else {
-            return Err(Unavailable("the principal did not record a stop".into()));
+            return Err(Unavailable::new(
+                "the principal did not record a stop".into(),
+            ));
         };
         row.stopped(self.store.as_ref(), at, &reason, writes)
-            .map_err(Unavailable)
+            .map_err(Unavailable::new)
     }
 }
 
@@ -268,7 +271,7 @@ fn conflict(why: impl Into<String>) -> ApiError {
     ApiError::new(StatusCode::CONFLICT, why)
 }
 fn unavailable(why: impl ToString) -> ApiError {
-    Unavailable(why.to_string()).into()
+    Unavailable::new(why.to_string()).into()
 }
 fn participant(r: &AgentRecord) -> Participant<'_> {
     Participant {
@@ -336,7 +339,7 @@ impl Fleet {
                     r.message_through,
                 ))?
                 .applied
-                .ok_or_else(|| Unavailable("missing bookkeeping progress".into()))?
+                .ok_or_else(|| Unavailable::new("missing bookkeeping progress".into()))?
         } else if self
             .stored_agent(&r.principal_agent_id)?
             .is_some_and(|p| p.deleted_at_ms.is_some())
@@ -353,15 +356,15 @@ impl Fleet {
                         .join(&r.principal_agent_id),
                     self.works.codecs.clone(),
                 )
-                .map_err(|e| Unavailable(e.to_string()))?;
+                .map_err(|e| Unavailable::new(e.to_string()))?;
             clarp_actor::bookkeeping::read_progress(
                 log.as_ref(),
                 &r.delegation_id,
                 r.message_through,
             )
-            .map_err(|e| Unavailable(e.to_string()))?
+            .map_err(|e| Unavailable::new(e.to_string()))?
         } else {
-            return Err(Unavailable("principal unavailable".into()));
+            return Err(Unavailable::new("principal unavailable".into()));
         };
         progress.show(&mut shown, self.now_ms());
         Ok(shown)

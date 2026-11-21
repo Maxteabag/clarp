@@ -77,7 +77,7 @@ async fn written(
         if before.get(principal) == Some(book) {
             continue;
         }
-        let kept = serde_json::to_vec(book).map_err(|error| Unavailable(error.to_string()))?;
+        let kept = serde_json::to_vec(book).map_err(|error| Unavailable::new(error.to_string()))?;
         app.fleet.keep(KEPT, principal.clone(), Some(kept)).await?;
     }
     Ok(())

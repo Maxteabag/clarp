@@ -374,7 +374,7 @@ impl Desk {
         }
         crate::library::label_document(member, doc)
             .await
-            .map_err(|_| Unavailable("label report could not be saved".into()))?;
+            .map_err(|_| Unavailable::new("label report could not be saved".into()))?;
         Ok(true)
     }
 
@@ -442,7 +442,7 @@ impl Desk {
     ) -> Result<T, Unavailable> {
         let held = self.held(app).await?;
         let Some(book) = held.as_ref() else {
-            return Err(Unavailable(
+            return Err(Unavailable::new(
                 "the janitors' book could not be read".to_string(),
             ));
         };
@@ -460,7 +460,7 @@ impl Desk {
     ) -> Result<Result<Value, Refused>, Unavailable> {
         let mut held = self.held(app).await?;
         let Some(book) = held.as_mut() else {
-            return Err(Unavailable(
+            return Err(Unavailable::new(
                 "the janitors' book could not be read".to_string(),
             ));
         };
@@ -518,7 +518,7 @@ impl Desk {
     ) -> Result<Result<Begun, Refused>, Unavailable> {
         let mut held = self.held(app).await?;
         let Some(book) = held.as_mut() else {
-            return Err(Unavailable(
+            return Err(Unavailable::new(
                 "the janitors' book could not be read".to_string(),
             ));
         };
@@ -553,7 +553,7 @@ impl Desk {
     ) -> Result<T, Unavailable> {
         let mut held = self.held(app).await?;
         let Some(book) = held.as_mut() else {
-            return Err(Unavailable(
+            return Err(Unavailable::new(
                 "the janitors' book could not be read".to_string(),
             ));
         };
@@ -574,7 +574,7 @@ impl Desk {
     ) -> Result<(T, bool), Unavailable> {
         let mut held = self.held(app).await?;
         let Some(book) = held.as_mut() else {
-            return Err(Unavailable(
+            return Err(Unavailable::new(
                 "the janitors' book could not be read".to_string(),
             ));
         };
@@ -672,6 +672,7 @@ async fn deliver(app: &App, hand: &Handed) -> Delivery {
     };
     match member.agent.send(message, Admission::Background).await {
         Ok(_) => Delivery::Taken,
+        Err(why) if why.1.is_some() => Delivery::Broke(why.0),
         Err(_) => Delivery::Broke("Unavailable".to_string()),
     }
 }

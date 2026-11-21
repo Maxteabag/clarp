@@ -41,6 +41,14 @@ pub fn preempted_by(turn: TurnId) -> String {
 /// What can be asked of an agent, by a client or by the shim that runs its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    /// Set or clear the durable fence on new work.
+    SetMoved {
+        to: Option<crate::agent_moves::Target>,
+    },
+    /// The actor knows this live slot never reached the tool.
+    HoldUnsentForMove { turn: TurnId },
+    /// A continuation that may have reached the tool cannot be replayed here.
+    InterruptMovedRetry { turn: TurnId },
     /// A message was written to the log at `message_seq` and wants a turn.
     Accept {
         message_seq: u64,
@@ -139,6 +147,12 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "agent", rename_all = "kebab-case")]
 pub enum AgentEvent {
+    MoveMarked {
+        mark: Option<crate::agent_moves::Mark>,
+    },
+    HeldUnsentForMove {
+        turn: TurnId,
+    },
     Turn {
         turn: TurnId,
         change: TurnEvent,
@@ -273,6 +287,9 @@ pub struct Decision {
 /// Why a command changes nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
+    Moved(crate::agent_moves::Mark),
+    AlreadyMoved(crate::agent_moves::Mark),
+    UnsentNotProven(TurnId),
     /// The turn is not waiting in the mailbox, so it cannot be withdrawn.
     NotWaiting(TurnId),
     /// A signal about a turn that is not the live one: late, or from a shim we no longer follow.
@@ -294,6 +311,11 @@ pub enum Refusal {
 impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Moved(_) => f.write_str(crate::agent_moves::MOVED),
+            Self::AlreadyMoved(_) => f.write_str("already_moved"),
+            Self::UnsentNotProven(turn) => {
+                write!(f, "turn {} may already have reached the tool", turn.0)
+            }
             Self::NotWaiting(turn) => write!(f, "turn {} is not waiting", turn.0),
             Self::NotLive(turn) => write!(f, "turn {} is not the live turn", turn.0),
             Self::NotParked(turn) => write!(f, "turn {} does not wait for an attempt", turn.0),
@@ -324,6 +346,7 @@ pub struct Agent {
     /// Who last repaired the agent, why, and when: while nothing about its state changed since.
     note: Option<Note>,
     paused: bool,
+    moved: Option<crate::agent_moves::Mark>,
     stop_generation: u64,
     settled: u64,
     /// How often what waits, or whether it is held, has changed. A message that was said and
@@ -405,6 +428,7 @@ impl Default for Agent {
             stopping_since_ms: None,
             note: None,
             paused: false,
+            moved: None,
             settled: 0,
             queue_revision: 0,
             stop_generation: 0,
@@ -468,7 +492,44 @@ impl Agent {
     }
 
     pub fn is_paused(&self) -> bool {
-        self.paused
+        self.paused || self.moved.is_some()
+    }
+
+    pub fn moved(&self) -> Option<&crate::agent_moves::Mark> {
+        self.moved.as_ref()
+    }
+
+    pub fn require_here(&self) -> Result<(), Refusal> {
+        match self.moved() {
+            Some(mark) => Err(Refusal::Moved(mark.clone())),
+            None => Ok(()),
+        }
+    }
+
+    fn unsent(&self, turn: TurnId) -> Option<Queued> {
+        match self.live.as_ref()? {
+            Turn::Starting(starting) if starting.id == turn && !starting.ran_before => {
+                Some(Queued {
+                    id: turn,
+                    message_seq: starting.message_seq,
+                    origin: starting.origin.clone(),
+                    accepted_at_ms: starting.accepted_at_ms,
+                    admission: Admission::Queue,
+                    user_word: false,
+                    attempt: starting.attempt.saturating_add(1),
+                })
+            }
+            Turn::Parked(parked) if parked.id == turn && !parked.ran => Some(Queued {
+                id: turn,
+                message_seq: parked.message_seq,
+                origin: parked.origin.clone(),
+                accepted_at_ms: parked.accepted_at_ms,
+                admission: Admission::Queue,
+                user_word: false,
+                attempt: parked.attempts.saturating_add(1),
+            }),
+            _ => None,
+        }
     }
 
     /// Maximum committed turn start, rebuilt by the same event fold on open.
@@ -616,6 +677,9 @@ impl Agent {
 
     /// The waiting turn that runs when the agent is free: the first one no hold holds.
     fn next_to_run(&self) -> Option<&Queued> {
+        if self.moved.is_some() {
+            return None;
+        }
         self.mailbox.iter().find(|queued| {
             !self.joins.contains_key(&queued.id)
                 && (!self.paused
@@ -625,9 +689,11 @@ impl Agent {
     }
 
     fn can_join(&self, turn: TurnId, join: &Join) -> bool {
-        self.live
-            .as_ref()
-            .is_some_and(|live| live.id() == join.into && live.has_process())
+        self.moved.is_none()
+            && self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.id() == join.into && live.has_process())
             && self.stopping.is_none()
             && self.selected_takeover.is_none()
             && self.mailbox.iter().any(|waiting| {
@@ -652,7 +718,9 @@ impl Agent {
     /// whether it is in the conversation at once. One that must wait enters it in the write
     /// that starts its turn (D14).
     pub fn starts_at_once(&self, admission: Admission) -> bool {
-        self.live.is_none() && !(self.paused && admission == Admission::Background)
+        self.moved.is_none()
+            && self.live.is_none()
+            && !(self.paused && admission == Admission::Background)
     }
 
     /// Whether a hold holds this waiting turn.
@@ -674,6 +742,36 @@ impl Agent {
             decision: Decision::default(),
         };
         match command {
+            Command::SetMoved { to } => {
+                match (&work.agent.moved, &to) {
+                    (Some(mark), Some(to)) if &mark.to != to => {
+                        return Err(Refusal::AlreadyMoved(mark.clone()));
+                    }
+                    (Some(_), Some(_)) | (None, None) => return Ok(work.decision),
+                    _ => {}
+                }
+                work.record(AgentEvent::MoveMarked {
+                    mark: to.map(|to| crate::agent_moves::Mark { to, at: now_ms }),
+                });
+            }
+            Command::HoldUnsentForMove { turn } => {
+                if work.agent.moved.is_none() || work.agent.unsent(turn).is_none() {
+                    return Err(Refusal::UnsentNotProven(turn));
+                }
+                work.record(AgentEvent::HeldUnsentForMove { turn });
+            }
+            Command::InterruptMovedRetry { turn } => {
+                work.parked(turn)?;
+                work.record(AgentEvent::Turn {
+                    turn,
+                    change: TurnEvent::Settled {
+                        outcome: Outcome::Interrupted {
+                            reason: crate::agent_moves::MOVED.into(),
+                        },
+                        at_ms: now_ms,
+                    },
+                });
+            }
             Command::Accept {
                 message_seq,
                 origin,
@@ -681,6 +779,7 @@ impl Agent {
                 coordination,
                 user_word,
             } => {
+                work.agent.require_here()?;
                 let turn = TurnId(work.agent.next_turn);
                 let (_, mut accepted) =
                     Queued::accept(turn, message_seq, origin, admission, now_ms);
@@ -705,6 +804,7 @@ impl Agent {
                 }
             }
             Command::Join { turn, join } => {
+                work.agent.require_here()?;
                 if !work.agent.can_join(turn, &join) {
                     return Err(Refusal::NotWaiting(turn));
                 }
@@ -764,6 +864,7 @@ impl Agent {
                 });
             }
             Command::SendNow { turn, by } => {
+                work.agent.require_here()?;
                 if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
                     return Err(Refusal::NotWaiting(turn));
                 }
@@ -799,6 +900,7 @@ impl Agent {
                 });
             }
             Command::Resume { by } => {
+                work.agent.require_here()?;
                 if !work.agent.paused {
                     return Err(Refusal::NotPaused);
                 }
@@ -841,6 +943,7 @@ impl Agent {
                 });
             }
             Command::StartAgain => {
+                work.agent.require_here()?;
                 if work.agent.live.is_some() {
                     return Err(Refusal::AtWork);
                 }
@@ -1008,6 +1111,7 @@ impl Agent {
                 work.record(AgentEvent::Turn { turn, change });
             }
             Command::TurnRetried { turn } => {
+                work.agent.require_here()?;
                 let parked = work.parked(turn)?;
                 let (message_seq, attempt) = (parked.message_seq, parked.attempts + 1);
                 work.record(AgentEvent::Turn {
@@ -1042,6 +1146,28 @@ impl Agent {
     /// Changes the state by one event. The only way the state changes.
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
+            AgentEvent::MoveMarked { mark } => {
+                self.moved.clone_from(mark);
+                self.queue_revision += 1;
+            }
+            AgentEvent::HeldUnsentForMove { turn } => {
+                let held = self.unsent(*turn).ok_or(IllegalTransition {
+                    turn: *turn,
+                    state: "may have reached the tool",
+                    event: "held-unsent-for-move",
+                })?;
+                self.live = None;
+                self.live_from_queue = false;
+                self.live_takeover = None;
+                self.live_resumed_session = false;
+                self.stopping = None;
+                self.stopping_since_ms = None;
+                self.selected_takeover = None;
+                self.joins.clear();
+                self.mailbox.push_front(held);
+                self.waited.insert(*turn);
+                self.queue_revision += 1;
+            }
             AgentEvent::Joined { turn, join } => {
                 let invalid = IllegalTransition {
                     turn: *turn,

@@ -1232,7 +1232,8 @@ impl Mouth {
             .opening_audio(agent, turn)
             .await?
             .map(|raw| {
-                serde_json::from_slice(&raw).map_err(|e| crate::agent::Unavailable(e.to_string()))
+                serde_json::from_slice(&raw)
+                    .map_err(|e| crate::agent::Unavailable::new(e.to_string()))
             })
             .transpose()
     }

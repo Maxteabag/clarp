@@ -64,7 +64,7 @@ pub(super) async fn with_memory<T>(
         let row = match &kept.row {
             Some(row) => {
                 let written = serde_json::to_vec(row);
-                Some(written.map_err(|error| Unavailable(error.to_string()))?)
+                Some(written.map_err(|error| Unavailable::new(error.to_string()))?)
             }
             None => None,
         };

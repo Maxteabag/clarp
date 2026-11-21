@@ -351,8 +351,8 @@ pub(crate) async fn deliver(
             let copy = raw.clone();
             tokio::task::spawn_blocking(move || blobs.put(&picture, &copy))
                 .await
-                .map_err(|_| Unavailable("portrait write interrupted".into()))?
-                .map_err(|why| Unavailable(why.to_string()))?;
+                .map_err(|_| Unavailable::new("portrait write interrupted".into()))?
+                .map_err(|why| Unavailable::new(why.to_string()))?;
             prepared.push((
                 clarp_kernel::gallery::Image::new(asset.clone(), publication.agent_id.clone()),
                 raw,
@@ -360,11 +360,11 @@ pub(crate) async fn deliver(
         }
         let pair = prepared
             .try_into()
-            .map_err(|_| Unavailable("portrait publication is missing an asset".into()))?;
+            .map_err(|_| Unavailable::new("portrait publication is missing an asset".into()))?;
         gallery
             .ask(move |store| store.publish_pair(pair))
             .await
-            .map_err(|why| Unavailable(why.words().to_owned()))?;
+            .map_err(|why| Unavailable::new(why.words().to_owned()))?;
         let view = member.agent.view();
         if !publication
             .assets
@@ -382,7 +382,7 @@ pub(crate) async fn deliver(
             gallery
                 .ask(move |store| store.delivered(&agent_id, &id))
                 .await
-                .map_err(|why| Unavailable(why.words().to_owned()))?;
+                .map_err(|why| Unavailable::new(why.words().to_owned()))?;
         }
     }
     if let Some(announcer) = announcer {
@@ -469,7 +469,7 @@ pub async fn recover(app: &App) -> Result<(), Unavailable> {
                 failed: Some("portrait_worker_interrupted".into()),
             })
             .await?
-            .map_err(|e| Unavailable(e.to_string()))?;
+            .map_err(|e| Unavailable::new(e.to_string()))?;
     }
     Ok(())
 }

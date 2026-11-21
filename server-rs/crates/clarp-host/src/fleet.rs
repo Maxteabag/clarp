@@ -886,10 +886,10 @@ impl FleetHandle {
         let (answer, reply) = oneshot::channel();
         self.tx
             .send(make(answer))
-            .map_err(|_| Unavailable("the fleet is closed".to_string()))?;
+            .map_err(|_| Unavailable::new("the fleet is closed".to_string()))?;
         reply
             .await
-            .map_err(|_| Unavailable("the fleet did not answer".to_string()))?
+            .map_err(|_| Unavailable::new("the fleet did not answer".to_string()))?
     }
 
     /// Adds an agent. The inner error says why the request cannot be met.
@@ -1535,7 +1535,7 @@ impl FleetHandle {
             signal
                 .wait_for(|ended| *ended)
                 .await
-                .map_err(|_| Unavailable("the fleet is closed".into()))?;
+                .map_err(|_| Unavailable::new("the fleet is closed".into()))?;
         }
         Ok(())
     }
@@ -2227,7 +2227,7 @@ impl Fleet {
                     let result = self
                         .store
                         .put_together(&writes)
-                        .map_err(|e| Unavailable(e.to_string()));
+                        .map_err(|e| Unavailable::new(e.to_string()));
                     let _ = answer.send(Ok(result));
                 }
                 Ask::OpeningAudio {
@@ -2236,7 +2236,7 @@ impl Fleet {
                     answer,
                 } => {
                     let result = read_opening_audio(self.store.as_ref(), &agent, turn)
-                        .map_err(|e| Unavailable(e.to_string()));
+                        .map_err(|e| Unavailable::new(e.to_string()));
                     let _ = answer.send(Ok(result));
                 }
                 Ask::Kept { kind, key, answer } => {
@@ -2246,7 +2246,7 @@ impl Fleet {
                     let (left, log) = (&self.works.left_out, &self.works.log);
                     let found =
                         crate::kept::judged(self.store.as_mut(), &shelf(kind), &key, left, log);
-                    let _ = answer.send(Ok(found.map_err(|e| Unavailable(e.to_string()))));
+                    let _ = answer.send(Ok(found.map_err(|e| Unavailable::new(e.to_string()))));
                 }
                 Ask::Listed {
                     kind,
@@ -2260,7 +2260,7 @@ impl Fleet {
                         Some(as_type) => crate::kept::listed_as(store, &table, as_type, left, log),
                         None => crate::kept::listed(store, &table, left, log),
                     };
-                    let _ = answer.send(Ok(listed.map_err(|e| Unavailable(e.to_string()))));
+                    let _ = answer.send(Ok(listed.map_err(|e| Unavailable::new(e.to_string()))));
                 }
             }
         }
@@ -2272,7 +2272,7 @@ impl Fleet {
             Some(value) => self.store.put(&table, key, &value),
             None => self.store.delete(&table, key).map(|_| ()),
         };
-        done.map_err(|error| Unavailable(error.to_string()))
+        done.map_err(|error| Unavailable::new(error.to_string()))
     }
 
     fn kept(&self, kind: &str, key: Option<&str>) -> Result<Left, Unavailable> {
@@ -2284,7 +2284,7 @@ impl Fleet {
             }),
             None => self.store.list(&table),
         };
-        let found = found.map_err(|error| Unavailable(error.to_string()))?;
+        let found = found.map_err(|error| Unavailable::new(error.to_string()))?;
         // What the judge holds is no desk's (`kept.rs`): a row left out, until the owner repairs
         // or deletes it, and a copy set aside, known by the count and not by its name.
         let left = &self.works.left_out;
@@ -2308,7 +2308,7 @@ impl Fleet {
             None => {
                 self.store
                     .put(JOBS, &job_id, agent_id.as_bytes())
-                    .map_err(|error| Unavailable(error.to_string()))?;
+                    .map_err(|error| Unavailable::new(error.to_string()))?;
                 self.jobs.insert(job_id, agent_id);
                 Ok(Ok(()))
             }
@@ -2327,16 +2327,16 @@ impl Fleet {
         // sequence is not begun anew over the events it numbered.
         let (left, log) = (&self.works.left_out, &self.works.log);
         let found = crate::kept::judged(self.store.as_mut(), &cursor, "last", left, log)
-            .map_err(|e| Unavailable(e.to_string()))?;
+            .map_err(|e| Unavailable::new(e.to_string()))?;
         let mut last = match found {
             crate::kept::Found::Absent => 0,
             crate::kept::Found::Read(bytes) => u64::from_be_bytes(
                 bytes
                     .try_into()
-                    .map_err(|_| Unavailable("invalid voice event sequence".into()))?,
+                    .map_err(|_| Unavailable::new("invalid voice event sequence".into()))?,
             ),
             crate::kept::Found::Unfit => {
-                return Err(Unavailable("invalid voice event sequence".into()));
+                return Err(Unavailable::new("invalid voice event sequence".into()));
             }
         };
         let count = rows.len();
@@ -2344,16 +2344,16 @@ impl Fleet {
         for mut row in rows {
             last = last
                 .checked_add(1)
-                .ok_or_else(|| Unavailable("voice event sequence exhausted".into()))?;
+                .ok_or_else(|| Unavailable::new("voice event sequence exhausted".into()))?;
             row["event_id"] = serde_json::json!(last);
             let bytes = serde_json::to_vec(&row)
-                .map_err(|_| Unavailable("cannot encode voice event".into()))?;
+                .map_err(|_| Unavailable::new("cannot encode voice event".into()))?;
             writes.push((table.clone(), format!("{last:020}"), Some(bytes)));
         }
         writes.push((cursor, "last".into(), Some(last.to_be_bytes().to_vec())));
         self.store
             .put_together(&writes)
-            .map_err(|e| Unavailable(e.to_string()))?;
+            .map_err(|e| Unavailable::new(e.to_string()))?;
         Ok(count)
     }
 
@@ -2528,7 +2528,7 @@ impl Fleet {
             Ok(change) => change,
             Err(why) => return Ok(Err(why)),
         };
-        let failed = |error: clarp_ports::kv::StoreError| Unavailable(error.to_string());
+        let failed = |error: clarp_ports::kv::StoreError| Unavailable::new(error.to_string());
         let (table, id, kept, digest) = match &change.kept {
             Kept::Made(made) => (
                 PERSONAS,
@@ -2547,7 +2547,7 @@ impl Fleet {
             let name = picture_name(digest);
             self.works.blobs.put(&name, bytes).map_err(failed)?;
         }
-        let kept = kept.map_err(|error| Unavailable(error.to_string()))?;
+        let kept = kept.map_err(|error| Unavailable::new(error.to_string()))?;
         self.store.put(table, id, &kept).map_err(failed)?;
         let told = book.told(&owner, &change.kept);
         self.book = Arc::new(book);
@@ -2604,12 +2604,13 @@ impl Fleet {
         let Some(made) = book.set_picture(&owner, persona_id, &made_digest) else {
             return Ok(None);
         };
-        let failed = |error: clarp_ports::kv::StoreError| Unavailable(error.to_string());
+        let failed = |error: clarp_ports::kv::StoreError| Unavailable::new(error.to_string());
         self.works
             .blobs
             .put(&picture_name(&made_digest), &bytes)
             .map_err(failed)?;
-        let kept = serde_json::to_vec(&made).map_err(|error| Unavailable(error.to_string()))?;
+        let kept =
+            serde_json::to_vec(&made).map_err(|error| Unavailable::new(error.to_string()))?;
         self.store
             .put(PERSONAS, persona_id, &kept)
             .map_err(failed)?;
@@ -2653,7 +2654,7 @@ impl Fleet {
         };
         self.store
             .delete(PERSONAS, &made.persona_id)
-            .map_err(|error| Unavailable(error.to_string()))?;
+            .map_err(|error| Unavailable::new(error.to_string()))?;
         self.book = Arc::new(book);
         self.publish();
         self.works
@@ -2667,7 +2668,7 @@ impl Fleet {
         let mut writes = Vec::with_capacity(settings.len());
         for (key, text) in &settings {
             if !key.contains('.') {
-                return Err(Unavailable(format!("`{key}` is no setting")));
+                return Err(Unavailable::new(format!("`{key}` is no setting")));
             }
             writes.push((
                 SETTINGS.to_string(),
@@ -2677,7 +2678,7 @@ impl Fleet {
         }
         self.store
             .put_together(&writes)
-            .map_err(|error| Unavailable(error.to_string()))?;
+            .map_err(|error| Unavailable::new(error.to_string()))?;
         self.settings.extend(settings);
         self.publish();
         Ok(())
@@ -2691,7 +2692,7 @@ impl Fleet {
         use clarp_kernel::hidden_coordination::{self as rules, Visibility};
         let key = if let Some((id, _)) = &chat {
             if self.place_of(id).is_none() {
-                return Err(Unavailable("no such agent".to_owned()));
+                return Err(Unavailable::new("no such agent".to_owned()));
             }
             rules::chat_key(id)
         } else {
@@ -2737,10 +2738,11 @@ impl Fleet {
             token: token.to_string(),
             enabled: true,
         };
-        let stored = serde_json::to_vec(&peer).map_err(|error| Unavailable(error.to_string()))?;
+        let stored =
+            serde_json::to_vec(&peer).map_err(|error| Unavailable::new(error.to_string()))?;
         self.store
             .put(PEERS, name, &stored)
-            .map_err(|error| Unavailable(error.to_string()))?;
+            .map_err(|error| Unavailable::new(error.to_string()))?;
         self.peers.insert(name.to_string(), peer);
         self.publish();
         Ok(Ok(()))
@@ -2750,7 +2752,7 @@ impl Fleet {
         let known = self
             .store
             .delete(PEERS, name)
-            .map_err(|error| Unavailable(error.to_string()))?;
+            .map_err(|error| Unavailable::new(error.to_string()))?;
         self.peers.remove(name);
         self.publish();
         Ok(known)
@@ -2759,10 +2761,11 @@ impl Fleet {
     /// Keeps rows of the push register as a change left them, and publishes the register.
     fn keep_push(&mut self, changed: &[PushRow]) -> Result<(), Unavailable> {
         for row in changed {
-            let stored = serde_json::to_vec(row).map_err(|error| Unavailable(error.to_string()))?;
+            let stored =
+                serde_json::to_vec(row).map_err(|error| Unavailable::new(error.to_string()))?;
             self.store
                 .put(PUSH, &row.token, &stored)
-                .map_err(|error| Unavailable(error.to_string()))?;
+                .map_err(|error| Unavailable::new(error.to_string()))?;
         }
         if !changed.is_empty() {
             self.push.apply(changed);
@@ -3550,7 +3553,7 @@ impl Fleet {
         if record.archived_at_ms.is_some() && self.members[at].record.archived_at_ms.is_none() {
             self.stop_for_roster(&record, "agent archived", None)?;
         } else {
-            self.put(&record).map_err(Unavailable)?;
+            self.put(&record).map_err(Unavailable::new)?;
         }
         self.replaced(at, record, took);
         Ok(())
@@ -3856,8 +3859,8 @@ impl Fleet {
     fn stored_agent(&self, id: &str) -> Result<Option<AgentRecord>, Unavailable> {
         self.store
             .get(AGENTS, id)
-            .map_err(|e| Unavailable(e.to_string()))?
-            .map(|b| serde_json::from_slice(&b).map_err(|e| Unavailable(e.to_string())))
+            .map_err(|e| Unavailable::new(e.to_string()))?
+            .map(|b| serde_json::from_slice(&b).map_err(|e| Unavailable::new(e.to_string())))
             .transpose()
     }
     fn past_ledger(
@@ -3873,7 +3876,9 @@ impl Fleet {
             return Ok((vec![], false));
         };
         if !record.ledger_retired {
-            return Err(Unavailable("goal ledger retirement is incomplete".into()));
+            return Err(Unavailable::new(
+                "goal ledger retirement is incomplete".into(),
+            ));
         }
         let log = self
             .works
@@ -3887,9 +3892,9 @@ impl Fleet {
                     .join(record.agent_id),
                 self.works.codecs.clone(),
             )
-            .map_err(|e| Unavailable(e.to_string()))?;
+            .map_err(|e| Unavailable::new(e.to_string()))?;
         clarp_actor::read_goal_events(log.as_ref(), plan, after, limit)
-            .map_err(|e| Unavailable(e.to_string()))
+            .map_err(|e| Unavailable::new(e.to_string()))
     }
 
     fn remove(&mut self, session: &str) -> Result<bool, Unavailable> {
@@ -3913,7 +3918,7 @@ impl Fleet {
         // Its thread is the one writer of what is its own: until it has closed, nothing of
         // that is touched, and the agent stays as it is. Its tombstone is kept.
         if !agent.close(agent::CLOSE_WITHIN) {
-            return Err(Unavailable(format!(
+            return Err(Unavailable::new(format!(
                 "The agent's thread did not answer within {} seconds, so it is not removed yet: ask again to finish removing it.",
                 agent::CLOSE_WITHIN.as_secs()
             )));
@@ -3972,7 +3977,7 @@ impl Fleet {
         if !already {
             self.store
                 .put(SETTINGS, FOCUS, record.agent_id.as_bytes())
-                .map_err(|error| Unavailable(error.to_string()))?;
+                .map_err(|error| Unavailable::new(error.to_string()))?;
             self.focus = Some(record.agent_id.clone());
             self.publish();
         }
@@ -4048,10 +4053,10 @@ impl Fleet {
         let mut revoked = (*device).clone();
         revoked.revoked_at = Some(self.now_ms());
         let stored =
-            serde_json::to_vec(&revoked).map_err(|error| Unavailable(error.to_string()))?;
+            serde_json::to_vec(&revoked).map_err(|error| Unavailable::new(error.to_string()))?;
         self.store
             .put(DEVICES, device_id, &stored)
-            .map_err(|error| Unavailable(error.to_string()))?;
+            .map_err(|error| Unavailable::new(error.to_string()))?;
         self.devices.remove(&device.token_hash);
         self.publish();
         // Its push tokens stop at once: a revoked phone is not shown what agents say. The rows

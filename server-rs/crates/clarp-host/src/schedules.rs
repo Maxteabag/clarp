@@ -72,7 +72,9 @@ impl Desk {
             *held = Some(Schedules::kept(rows));
         }
         let Some(schedules) = held.as_mut() else {
-            return Err(Unavailable("the schedules could not be read".to_string()));
+            return Err(Unavailable::new(
+                "the schedules could not be read".to_string(),
+            ));
         };
         let mut next = schedules.clone();
         let answer = ask(&mut next, app.clock.now_ms());

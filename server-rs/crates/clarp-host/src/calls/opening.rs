@@ -384,12 +384,12 @@ impl Desk {
         let Some(id) = app.fleet.kept("opening_by_token", token.into()).await? else {
             return Ok(None);
         };
-        let id = String::from_utf8(id).map_err(|e| Unavailable(e.to_string()))?;
+        let id = String::from_utf8(id).map_err(|e| Unavailable::new(e.to_string()))?;
         let Some(raw) = app.fleet.kept("opening_history", id).await? else {
             return Ok(None);
         };
         let ring: clarp_kernel::rings::Ring =
-            serde_json::from_slice(&raw).map_err(|e| Unavailable(e.to_string()))?;
+            serde_json::from_slice(&raw).map_err(|e| Unavailable::new(e.to_string()))?;
         Ok(Some(ring.opening))
     }
 
@@ -451,7 +451,7 @@ impl Desk {
         let ring_id = op["ring_id"].as_str().unwrap_or("");
         let member = app
             .member(op["session"].as_str().unwrap_or(""))
-            .ok_or_else(|| Unavailable("opening agent gone".into()))?;
+            .ok_or_else(|| Unavailable::new("opening agent gone".into()))?;
         let row = member.agent.opening_row(id).await?;
         let (authorized,withdraw) = self
             .with_opening(app,ring_id, |rings, calls, with, (out, _)| {
@@ -671,7 +671,11 @@ impl Desk {
                 .collect::<Vec<_>>()
         };
         for op in pending {
-            self.materialize(app, &op).await?;
+            if let Err(why) = self.materialize(app, &op).await
+                && !matches!(why.1, Some(clarp_kernel::agent::Refusal::Moved(_)))
+            {
+                return Err(why);
+            }
         }
         Ok(())
     }
@@ -733,7 +737,7 @@ impl Desk {
             writes.push((
                 super::RINGS,
                 super::RINGS_KEPT.into(),
-                serde_json::to_vec(rings.rings()).map_err(|e| Unavailable(e.to_string()))?,
+                serde_json::to_vec(rings.rings()).map_err(|e| Unavailable::new(e.to_string()))?,
             ));
         }
         app.fleet.change_together(writes, deletes).await?;
@@ -816,7 +820,7 @@ mod tests {
         let asked = AtomicU32::new(0);
         let answered = again(|| async {
             match asked.fetch_add(1, Ordering::SeqCst) {
-                0 | 1 => Err(Unavailable("no answer".into())),
+                0 | 1 => Err(Unavailable::new("no answer".into())),
                 _ => Ok(7),
             }
         })
@@ -826,7 +830,7 @@ mod tests {
         let asked = AtomicU32::new(0);
         let answered = again(|| async {
             asked.fetch_add(1, Ordering::SeqCst);
-            Err::<u32, _>(Unavailable("no answer".into()))
+            Err::<u32, _>(Unavailable::new("no answer".into()))
         })
         .await;
         assert_eq!(answered.unwrap_err().0, "no answer");

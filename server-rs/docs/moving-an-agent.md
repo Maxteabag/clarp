@@ -133,6 +133,21 @@ With a legacy source that was archived by hand, the way back still uses
 `DELETE /agents/<session>` on the Rust Host and unarchive on the Python Host. The Python Host
 can read the Rust turns that the tool kept in its own session.
 
+## Moving away from the Rust Host
+
+The Rust Host can also be the source of a move. An administrator or full device sets the
+move mark with `POST /agent-moved`, giving the source session and
+`"moved_to": {"host": "<destination name>", "id": "<destination server id>"}`.
+The agent stays in the source roster with its `moved` mark. New turns and terminal
+opens are refused with the destination and the time of the mark. A turn already running
+can finish. Waiting turns stay in the queue through a restart. The source also holds a
+continuation when it knows that no attempt reached the tool, and interrupts a retry that
+may have reached the tool.
+
+When the agent comes back, the same route with `"moved_to": null` releases the move hold.
+The source continues in queue order, subject to any separate Stop. Decision and form
+answers received while the agent was away remain recorded and are delivered on return.
+
 ## Evidence
 
 | When | What | Result |
