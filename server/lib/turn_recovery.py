@@ -259,6 +259,12 @@ class RecoveryMixin:
 
     def _recover_queued_locked(self) -> int:
         from . import task_goal_recovery
+        try:
+            # A shown item a backend already took leaves 'queued' on every pass, not
+            # only at a runtime start (it waited there for good until a restart).
+            turn_queue.start_shown_attempted()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("shownAttemptedStartPassFail", exc)
         turn_queue.reconcile_receipts()
         self._rehydrate_once()
         from . import agent_rings

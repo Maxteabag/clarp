@@ -253,16 +253,18 @@ def test_drain_table(tmp_path, name, mode, capsys):
 # started the next: work queued before a Stop ran past it (eu-codex-profile,
 # see test_stop_holds_queue.py). Now nothing queued before the last Stop
 # starts in process either; a send that preempted before the Stop (h1) ran
-# then. Post-Stop arrivals keep the right they had on arrival.
+# then. Post-Stop arrivals keep the right they had on arrival. The user's next
+# fresh message after the Stop (u_post in scenario a) ends its pause: what it
+# held then runs too, in process and after a restart alike.
 BASELINE = {
-    "a": {"started": {"t0", "u_post", "h_post", "p_post", "uq_post"},
-          "waiting": {"a_post", "a_pre", "p_pre", "uq_pre"}},
+    "a": {"started": {"t0", "a_pre", "p_pre", "uq_pre", "u_post", "a_post", "p_post", "uq_post", "h_post"},
+          "waiting": set()},
     "c": {"started": {"t0", "h1"}, "waiting": {"a1", "p1", "u1q"}},
     "c2": {"started": {"t0", "u0", "h1", "u1"}, "waiting": {"a1", "p1", "u1q"}},
 }
 BASELINE_CRASH = {
-    "a": {"started": {"t0", "u_post", "h_post"},
-          "waiting": {"a_post", "a_pre", "p_post", "p_pre", "uq_post", "uq_pre"}},
+    "a": {"started": {"t0", "a_pre", "p_pre", "uq_pre", "u_post", "a_post", "p_post", "uq_post", "h_post"},
+          "waiting": set()},
     "c": {"started": {"t0", "h1"}, "waiting": {"a1", "p1", "u1q"}},
     "c2": {"started": {"t0", "u0", "h1", "u1"}, "waiting": {"a1", "p1", "u1q"}},
 }
@@ -274,8 +276,11 @@ BEFORE_LAST_STOP = {
 }
 # The branch, through the drain's handoff (= a crash mid-drain): post-Stop
 # arrivals keep the right they had on arrival; nothing older runs past a Stop.
+# Whether the scenario's queue is still paused at its end: scenario a sends a fresh
+# user message after the Stop, which ends the pause.
+PAUSED = {"a": False, "c": True, "c2": True}
 HANDOFF = {
-    "a": {"t0", "u_post", "p_post", "uq_post", "h_post"},
+    "a": {"t0", "a_pre", "p_pre", "uq_pre", "u_post", "a_post", "p_post", "uq_post", "h_post"},
     "c": {"t0"},
     "c2": {"t0", "u0"},
 }
@@ -295,7 +300,7 @@ def test_lifting_the_fence_matches_the_handoff_exactly(tmp_path, name):
     assert len(outcome["started"]) == len(set(outcome["started"]))  # each once
     assert _ids(outcome) | HANDOFF[name] == (
         BASELINE[name]["started"] | BASELINE[name]["waiting"])
-    assert outcome["paused"] is True
+    assert outcome["paused"] is PAUSED[name]
 
 
 @pytest.mark.skipif(not HAS_FENCE, reason="no drain before b540547a")
@@ -310,7 +315,7 @@ def test_the_handoff_never_grants_more_than_the_old_code(tmp_path, name):
     # have run: a later Stop fences held peer and automation work as today.
     assert started & BEFORE_LAST_STOP[name] <= BASELINE_CRASH[name]["started"]
     assert started == HANDOFF[name]
-    assert outcome["paused"] is True
+    assert outcome["paused"] is PAUSED[name]
     assert _ids(outcome) | started == BASELINE[name]["started"] | BASELINE[name]["waiting"]
 
 
