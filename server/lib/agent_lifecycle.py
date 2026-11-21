@@ -10,7 +10,6 @@ import os
 import pathlib
 import secrets
 import tempfile
-import threading
 from dataclasses import dataclass, replace
 
 from . import agents as agents_db
@@ -21,6 +20,7 @@ from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, NeedsContact, RosterView, SpecError
 from . import personas as persona_store
+from . import voice_pool
 
 
 class AgentLifecycleError(RuntimeError):
@@ -45,7 +45,9 @@ class AgentLifecycleResult:
 
 
 class AgentLifecycleService:
-    _create_lock = threading.RLock()
+    # The voice pool's lock: an agent's pick and insert and a contact's (personas.create) are
+    # serialised against each other, so two at once never get the same pool voice.
+    _create_lock = voice_pool.assigning()
 
     def __init__(self, ctx):
         self.ctx = ctx

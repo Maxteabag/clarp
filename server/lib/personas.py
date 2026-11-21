@@ -88,7 +88,17 @@ def create(*, name: str, voice_id: str = "", avatar_symbol: str = "",
     # V2b: a contact saved with no voice, or with a phone's auto-<uuid> stand-in, gets
     # its voices from the pool (voice_pool) for the configured provider and fallback.
     from . import voice_pool
+    with voice_pool.assigning():      # the pick and its insert, against every other pick
+        return _create_assigned(name=name, voice_id=voice_id, avatar_symbol=avatar_symbol,
+                                personality=personality, avatar_base64=avatar_base64)
+
+
+def _create_assigned(*, name: str, voice_id: str, avatar_symbol: str, personality: str,
+                     avatar_base64: str) -> dict:
+    from . import voice_pool
     from .voice import canonical
+    if get(name):
+        raise ValueError(f"{name} already exists.")
     voice_id = canonical(voice_pool.assign(config.load(), name, voice_id or "{}"))   # the one stored shape
     persona_id = "persona-" + secrets.token_hex(8)
     avatar_path = ""

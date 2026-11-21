@@ -6,14 +6,21 @@ providers the stored map and the persona lists leave without a voice are filled;
 caller gave is kept. Google and Deepgram need nothing: each has one default voice.
 
 A voice is picked by a walk from sha256(name) through the provider's pool to the first voice no
-active agent and no contact speaks with; when every voice is taken, the least shared one (in the
-walk's order), with one log line. The walk is stable: the same name on the same pool and the same
-fleet gets the same voice, and two agents do not share a voice while the pool has a free one.
+active agent and no contact speaks with, and that no built-in contact owns (the persona lists and
+the roster keep their voices for their own names); when every voice is taken, the least shared one
+(in the walk's order). The walk is stable: the same name on the same pool and the same fleet gets
+the same voice, and two agents do not share a voice while the pool has a free one.
+
+Cartesia's default pool is its catalogue (every language: the voice names file, else the voice
+picker's catalogue), so a new agent never gets a built-in contact's voice; only when no catalogue
+has been fetched yet is it the built-in list. Every pick and the insert that stores it run under
+one lock (``assigning()``), so two agents or contacts created at once never get the same voice.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from collections import Counter
 from typing import Iterable, Mapping
 
@@ -22,6 +29,30 @@ from .voice_profile import elevenlabs_id_usable, provider_voice
 
 POOL_PROVIDERS = (CARTESIA, ELEVENLABS, GEMINI)
 PLACEHOLDER_PREFIX = "auto-"     # a phone's stand-in voice id when the user chose none (J)
+_ASSIGN_LOCK = threading.RLock()
+
+
+def assigning() -> threading.RLock:
+    """The one lock every pool pick and the insert that stores it run under (agents,
+    contacts, contact assignment). Reentrant: a contact minted inside an agent's creation."""
+    return _ASSIGN_LOCK
+
+
+def _cartesia_catalogue() -> list[str]:
+    """Every Cartesia voice id the Host knows from a catalogue it fetched; never a fetch."""
+    from . import cartesia_voices, voice_names
+    return sorted({*voice_names.names(CARTESIA), *cartesia_voices.cached_voice_ids()})
+
+
+def reserved(cfg, provider: str) -> set[str]:
+    """Voices the built-in contacts keep for their own names (the persona lists, the roster)."""
+    if provider == CARTESIA:
+        return {v for v in (getattr(cfg, "cartesia_voices", {}) or {}).values() if v}
+    if provider == GEMINI:
+        return {v for v in (getattr(cfg, "gemini_voices", {}) or {}).values() if v}
+    if provider == ELEVENLABS:
+        return {v for v in (getattr(cfg, "roster", {}) or {}).values() if v}
+    return set()
 
 
 def pool(cfg, provider: str) -> list[str]:
@@ -29,7 +60,8 @@ def pool(cfg, provider: str) -> list[str]:
     if provider == CARTESIA:
         from .config import DEFAULT_CARTESIA_VOICES
         configured = list(getattr(cfg, "cartesia_pool", ()) or ())
-        return list(dict.fromkeys(v for v in (configured or DEFAULT_CARTESIA_VOICES.values()) if v))
+        source = configured or _cartesia_catalogue() or list(DEFAULT_CARTESIA_VOICES.values())
+        return list(dict.fromkeys(v for v in source if v))
     if provider == ELEVENLABS:
         from .voices import VOICE_CATALOG
         return [row["id"] for row in VOICE_CATALOG]
@@ -75,18 +107,22 @@ def users(cfg, provider: str, agents: Iterable[Mapping], contacts: Iterable[Mapp
     return counts
 
 
-def pick(cfg, provider: str, name: str, taken: Counter) -> str | None:
+def pick(cfg, provider: str, name: str, taken: Counter, *, keep: set[str] | frozenset = frozenset(),
+         active: Counter | None = None) -> str | None:
+    """The walk. ``keep``: voices never handed out while another is free (built-in contacts'
+    own); ``active``: users that are active agents and custom contacts, for the log line."""
     voices = pool(cfg, provider)
     if not voices:
         return None
     start = int(hashlib.sha256(name.strip().casefold().encode()).hexdigest(), 16) % len(voices)
-    order = voices[start:] + voices[:start]
+    order = [v for v in voices[start:] + voices[:start] if v not in keep] or voices[start:] + voices[:start]
     for voice in order:
         if not taken.get(voice):
             return voice
     least = min(order, key=lambda voice: taken.get(voice, 0))
-    from .log import log
-    log("voicePoolExhausted", f"provider={provider} pool={len(voices)} shared_by={taken.get(least, 0)}")
+    if active is None or all(active.get(voice) for voice in voices):
+        from .log import log
+        log("voicePoolExhausted", f"provider={provider} pool={len(voices)} shared_by={taken.get(least, 0)}")
     return least
 
 
@@ -111,8 +147,11 @@ def assign(cfg, name: str, stored: str | None, *, agents: Iterable[Mapping] | No
         agents = agents_db.list_agents() if agents is None else agents
         contacts = personas.list_all() if contacts is None else contacts
     agents, contacts = list(agents), list(contacts)
+    custom = [c for c in contacts if not c.get("builtin")]
     for provider in missing:
-        voice = pick(cfg, provider, name, users(cfg, provider, agents, contacts))
+        voice = pick(cfg, provider, name, users(cfg, provider, agents, contacts),
+                     keep=reserved(cfg, provider) | set(users(cfg, provider, [], contacts) - users(cfg, provider, [], custom)),
+                     active=users(cfg, provider, agents, custom))
         if voice:
             mapping[provider] = voice
     return json.dumps(mapping, sort_keys=True, separators=(",", ":"))
