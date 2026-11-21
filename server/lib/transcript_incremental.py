@@ -58,13 +58,37 @@ _VERSION_SOURCES = {
     "agy": ("agy_transcript.py", "codex_transcript.py", "codex_tool_cells.py", "opencode_transcript.py",
             "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py", "transcript_paths.py"),
 }
-_COMMON_SOURCES = ("transcript_incremental.py", "backend/base.py", "message_writes.py",
-                   "message_import_writer.py", "message_carry.py",
-                   "message_import_rows.py", "message_import_common.py",
-                   "message_context.py", "message_text.py", "message_turns.py", "voice_markup.py",
-                   # The store's ack-token decisions (AUT-07).
-                   "origins.py", "heartbeat.py", "dreaming.py", "team_leader.py",
-                   "team_store.py", "oracle_delegations.py")
+# What a checkpoint is valid for. ``parser_version`` hashes the parser's
+# sources: ``_VERSION_SOURCES`` per backend and ``_PARSE_COMMON``, the helpers
+# the parsers import (what a block is, the markup and preambles they strip, the
+# activity rows they build). A change to any of them refuses every checkpoint
+# of that backend, so the next import of each transcript is full once, as it
+# must be. ``tests/unit/test_transcript_parser_version.py`` checks that every
+# module a parser imports is in its list or named exempt, so a new helper
+# cannot slip past.
+#
+# The store's sources (``_STORE_SOURCES``) decide what a full import WRITES for
+# lines already imported, and the store carry a tail resumes from. So does this
+# module: the parser carry (``parser_carry``), how a range is read and parsed
+# (``parse_range``, ``_RangePath``) and where a boundary may stand live here.
+# They are not hashed: most changes to them (a heartbeat rule, a team block, a
+# log line) leave every row of an imported line as it was, and hashing them
+# re-read every transcript on every such install. Instead ``STORE_FORMAT`` is
+# part of the version and is raised by hand when a change alters those rows,
+# the store carry, the parser carry or how a range is read. The golden test
+# holds the digests of both lists and STORE_FORMAT: any change to a listed file
+# fails it until its author records that decision.
+_PARSE_COMMON = ("backend/base.py", "message_text.py", "voice_markup.py", "activity.py", "protocol.py",
+                 "text_util.py", "voice_preamble.py", "clarp_guidance.py", "personalities.py",
+                 "error_classify.py")
+_STORE_SOURCES = ("transcript_incremental.py", "message_writes.py",
+                  "message_import_writer.py", "message_carry.py",
+                  "message_import_rows.py", "message_import_common.py",
+                  "message_context.py", "message_turns.py",
+                  # The store's ack-token decisions (AUT-07).
+                  "origins.py", "heartbeat.py", "dreaming.py", "team_leader.py",
+                  "team_store.py", "oracle_delegations.py")
+STORE_FORMAT = 1
 
 _HEAD_BYTES = 4096
 _WINDOW_BYTES = 64 * 1024
@@ -74,12 +98,21 @@ _SAMPLE_BYTES = 4096
 _CANDIDATES = 6
 
 
+def sources_digest(names) -> str:
+    """One digest of these source files' bytes, by name (the golden test's too)."""
+    root = pathlib.Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for name in names:
+        digest.update(name.encode() + b"\0" + (root / name).read_bytes())
+    return digest.hexdigest()
+
+
 @functools.cache
 def parser_version(backend: str) -> str:
-    root = pathlib.Path(__file__).resolve().parent
+    """The parser's sources and STORE_FORMAT, not the store's sources."""
     digest = hashlib.sha256(backend.encode())
-    for name in (*_VERSION_SOURCES[backend], *_COMMON_SOURCES):
-        digest.update(name.encode() + b"\0" + (root / name).read_bytes())
+    digest.update(f"store_format={STORE_FORMAT}".encode())
+    digest.update(sources_digest((*_VERSION_SOURCES[backend], *_PARSE_COMMON)).encode())
     return digest.hexdigest()[:24]
 
 
