@@ -320,6 +320,7 @@ pub struct Agent {
     live: Option<Turn>,
     /// Who asked the live turn to stop and why, while it has not gone yet.
     stopping: Option<Control>,
+    stopping_since_ms: Option<i64>,
     /// Who last repaired the agent, why, and when: while nothing about its state changed since.
     note: Option<Note>,
     paused: bool,
@@ -401,6 +402,7 @@ impl Default for Agent {
             joins: BTreeMap::new(),
             live: None,
             stopping: None,
+            stopping_since_ms: None,
             note: None,
             paused: false,
             settled: 0,
@@ -596,6 +598,11 @@ impl Agent {
     /// Who asked the live turn to stop, while it has not gone yet.
     pub fn stopping(&self) -> Option<&Control> {
         self.stopping.as_ref()
+    }
+
+    /// The Stop request's journaled time, while the turn's process is still being retired.
+    pub fn stopping_since_ms(&self) -> Option<i64> {
+        self.stopping_since_ms
     }
 
     /// The note a repair left, while nothing about the agent's state changed since.
@@ -1160,7 +1167,7 @@ impl Agent {
                 by,
                 verified,
                 reason,
-                ..
+                at_ms,
             } => {
                 if self.live_id() != Some(*turn) {
                     return Err(IllegalTransition {
@@ -1174,6 +1181,7 @@ impl Agent {
                     verified: *verified,
                     reason: reason.clone(),
                 });
+                self.stopping_since_ms = Some(*at_ms);
                 self.note = None;
             }
             AgentEvent::Repaired {
@@ -1373,6 +1381,7 @@ impl Agent {
                     self.joins.clear();
                     self.settled += 1;
                     self.stopping = None;
+                    self.stopping_since_ms = None;
                     self.live_from_queue = false;
                     self.owe_compaction(&ended);
                     self.live_takeover = None;

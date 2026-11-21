@@ -61,7 +61,7 @@ use clarp_kernel::turn::{
 };
 use clarp_kernel::turn_identity::Standing;
 use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
-use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
+use clarp_spool::{Entry as Line, Record, ShimEvent, SpoolReader};
 pub use goal_ledger::{page as read_goal_events, retire as retire_goal_ledger};
 
 pub mod conversation;
@@ -887,6 +887,12 @@ fn record_item<R: serde::Serialize>(
         ))
     })?;
     Ok(NewItem::new(kind, now_ms, body).keyed(key))
+}
+
+/// The process can write while it is being retired. Keep the shim's lifecycle records
+/// so its exit settles the turn, along with output recorded before the Stop.
+fn after_stop(record: &Record, stopped_at: Option<i64>) -> bool {
+    !matches!(record.entry, Line::Shim(_)) && stopped_at.is_some_and(|at| record.t >= at)
 }
 
 fn io_error(what: &Path, error: std::io::Error) -> ActorError {
@@ -4130,6 +4136,7 @@ impl Actor {
             .shown
             .begin_turn(&session, &conversation, &name, Some(began), audience, began);
         self.shown_turn = Some((turn, name.clone()));
+        let stopped_at = self.recorder.agent().stopping_since_ms();
         while offset < until {
             let read = reader
                 .read_window(offset, until, WINDOW)
@@ -4138,6 +4145,9 @@ impl Actor {
                 break; // the spool is shorter than the log says: go on from what is there
             }
             for record in &read.records {
+                if after_stop(record, stopped_at) {
+                    continue;
+                }
                 let evidence = steering.record(&record.entry);
                 interpreter.on_record(record, &mut signals);
                 for signal in signals.drain(..) {
@@ -4571,6 +4581,9 @@ impl Actor {
             let mut revealed_at = None;
             for (place, record) in read.records.iter().enumerate() {
                 let t = record.t;
+                if after_stop(record, batch.agent().stopping_since_ms()) {
+                    continue;
+                }
                 let evidence = live.steering.record(&record.entry);
                 let doing = told_activity(batch.agent());
                 // What the shim says about the process means the same for every backend. A
