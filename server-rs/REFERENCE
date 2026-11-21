@@ -1,2 +1,2 @@
-8c4e8e934e09116b986b2e878a8ab34caab80e1b
-The merge of the Python Host's PR 557 (it holds every merge through PR 557: 512 contract 120, 543, 541, 550 121, 545, 487 122, 531, 553 123, 554, 536, 555, 537, 538, 556, 539, 548, 540, 557): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+94ecef9970ac951128e703d3021ccce7f990f94b
+The merge of the Python Host's PR 561 (it holds every merge through PR 561: 558 contract 124, 559, 560, 561): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
