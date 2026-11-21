@@ -49,12 +49,17 @@ impl Which {
     }
 
     fn hides(self) -> bool {
-        matches!(self, Self::WithoutCoordination | Self::WithoutAutomatedOrCoordination)
+        matches!(
+            self,
+            Self::WithoutCoordination | Self::WithoutAutomatedOrCoordination
+        )
     }
 
     fn keeps(self, entry: &Entry) -> bool {
-        !matches!(self, Self::WithoutAutomated | Self::WithoutAutomatedOrCoordination)
-            || !left_out_of_chats(entry.origin_name())
+        !matches!(
+            self,
+            Self::WithoutAutomated | Self::WithoutAutomatedOrCoordination
+        ) || !left_out_of_chats(entry.origin_name())
     }
 
     fn keeps_row(self, row: &Versioned) -> bool {
@@ -339,7 +344,10 @@ impl<'a> Reader<'a> {
         let entry = Entry::from_item(item).map_err(|why| corrupt(item, why))?;
         if which.hides() {
             let parent = super::helper_cells::parent(item)?;
-            if let Some(id) = parent.as_deref().or_else(|| entry.as_ref().and_then(Entry::part_of)) {
+            if let Some(id) = parent
+                .as_deref()
+                .or_else(|| entry.as_ref().and_then(Entry::part_of))
+            {
                 if let Some(row) = self.log.find(id)?
                     && let Some(entry) = Entry::from_item(&row).map_err(|why| corrupt(&row, why))?
                 {
@@ -348,7 +356,9 @@ impl<'a> Reader<'a> {
                 return Ok(false);
             }
         }
-        entry.as_ref().map_or(Ok(true), |entry| self.allows(item, entry, which))
+        entry
+            .as_ref()
+            .map_or(Ok(true), |entry| self.allows(item, entry, which))
     }
 
     /// The row this item is, as it is now.
@@ -539,9 +549,12 @@ impl Counting {
         let text = match entry {
             Entry::Message(message) => message.text.as_str(),
             Entry::Reply(reply) => reply.text.as_str(),
-            Entry::Imported(row) if matches!(row.row["role"].as_str(), Some("user" | "assistant"))
-                && row.row["tool_name"].as_str().unwrap_or("").is_empty() =>
-                    row.row["text"].as_str().unwrap_or(""),
+            Entry::Imported(row)
+                if matches!(row.row["role"].as_str(), Some("user" | "assistant"))
+                    && row.row["tool_name"].as_str().unwrap_or("").is_empty() =>
+            {
+                row.row["text"].as_str().unwrap_or("")
+            }
             _ => "",
         };
         let counted = !text.trim().is_empty();
@@ -634,7 +647,9 @@ fn gaps(
             saw_draft = true;
             Seq::MAX
         } else {
-            let Some(item) = log.find(row.entry.id())? else { continue };
+            let Some(item) = log.find(row.entry.id())? else {
+                continue;
+            };
             item.seq
         };
         if let Some(run) = adjacent(&mut reader, span.floor, position, false, which)?.finish() {
@@ -736,7 +751,8 @@ pub(crate) fn older(
             entries.push(shown);
         }
     }
-    let (hidden_before, hidden_after) = gaps(log, &entries, drafts, span, which, before == Seq::MAX)?;
+    let (hidden_before, hidden_after) =
+        gaps(log, &entries, drafts, span, which, before == Seq::MAX)?;
     Ok(Page {
         entries,
         latest_revision: head_revision,
@@ -990,7 +1006,8 @@ mod tests {
         use serde_json::{Value, json};
         let vectors: Value = serde_json::from_str(include_str!(
             "../../clarp-kernel/tests/fixtures/hidden-coordination-vectors.json"
-        )).unwrap();
+        ))
+        .unwrap();
         let cases = vectors["counts"].as_array().unwrap();
         for case in cases {
             let mut counting = Counting::default();

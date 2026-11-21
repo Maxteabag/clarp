@@ -81,7 +81,8 @@ impl Telling {
         });
         let coordination_hidden = {
             use clarp_kernel::hidden_coordination::{self as rules, Visibility};
-            stored(&rules::chat_key(&record.agent_id)).and_then(Visibility::read)
+            stored(&rules::chat_key(&record.agent_id))
+                .and_then(Visibility::read)
                 .or_else(|| stored(rules::GLOBAL_KEY).and_then(Visibility::read))
                 == Some(Visibility::Hide)
         };

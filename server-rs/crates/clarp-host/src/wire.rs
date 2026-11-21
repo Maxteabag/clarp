@@ -2238,6 +2238,7 @@ mod tests {
             has_more: true,
             head_revision: 7 << 20,
             begins_after: 0,
+            ..Page::default()
         }
     }
 

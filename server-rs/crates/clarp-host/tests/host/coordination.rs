@@ -1098,68 +1098,150 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
     let host = start_host_as(&place, &[], admin);
     for (name, session) in [("Ivy", "ivy"), ("Oak", "oak")] {
         assert_eq!(
-            host.post("/agents", json!({"name": name, "session": session, "backend": "claude"}))["session"],
+            host.post(
+                "/agents",
+                json!({"name": name, "session": session, "backend": "claude"})
+            )["session"],
             session
         );
     }
     let (limited, _) = pair(&host, "Gallery", "limited");
     let declared = json!({"coordination_visibility":"hide"});
     let per = json!({"session":"oak","visibility":"show"});
-    for (path, payload) in [("/coordination-settings", &declared), ("/agent-coordination", &per)] {
+    for (path, payload) in [
+        ("/coordination-settings", &declared),
+        ("/agent-coordination", &per),
+    ] {
         assert_eq!(host.ask_as(&limited, "POST", path, Some(payload)).0, 403);
         for header in ["X-Clarp-Turn", "X-Clarp-Peer"] {
             let (status, body) = asked(&host, path, &[(header, "fixture-agent")], payload);
             assert_eq!((status, body), (403, json!({"error":"agents_may_not"})));
         }
     }
-    assert_eq!(host.get("/coordination-settings"), json!({"coordination_visibility":"show"}));
-    assert_eq!(host.ask_as(&limited, "GET", "/coordination-settings", None).0, 200);
-    assert_eq!(host.ask("POST", "/agent-coordination", Some(&json!({"session":"missing","visibility":"show"}))).0, 404);
-    assert_eq!(host.ask("POST", "/coordination-settings", Some(&json!({"coordination_visibility": true}))).0, 400);
-    assert_eq!(host.ask("GET", "/log?session=oak&coordination=wrong", None).0, 400);
+    assert_eq!(
+        host.get("/coordination-settings"),
+        json!({"coordination_visibility":"show"})
+    );
+    assert_eq!(
+        host.ask_as(&limited, "GET", "/coordination-settings", None)
+            .0,
+        200
+    );
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/agent-coordination",
+            Some(&json!({"session":"missing","visibility":"show"}))
+        )
+        .0,
+        404
+    );
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/coordination-settings",
+            Some(&json!({"coordination_visibility": true}))
+        )
+        .0,
+        400
+    );
+    assert_eq!(
+        host.ask("GET", "/log?session=oak&coordination=wrong", None)
+            .0,
+        400
+    );
     let heard = host.listen_at(&format!("/events?token={admin}"));
     host.send("oak", "visible before", "visible-first");
     wait_for("the first visible reply", || host.state("oak") == "done");
     let path = "/log?session=oak";
     let cached = host.get(&format!("{path}&coordination=auto"));
     let cursor = cached["latest_revision"].as_u64().unwrap();
-    assert_eq!(cached["coordination"], json!({"visibility":"show","hidden":false,"source":"global"}));
-    assert_eq!(host.post("/coordination-settings", declared), json!({"coordination_visibility":"hide"}));
-    let reloaded = host.get(&format!("{path}&after_revision={cursor}&coordination=auto&coordination_read=show"));
+    assert_eq!(
+        cached["coordination"],
+        json!({"visibility":"show","hidden":false,"source":"global"})
+    );
+    assert_eq!(
+        host.post("/coordination-settings", declared),
+        json!({"coordination_visibility":"hide"})
+    );
+    let reloaded = host.get(&format!(
+        "{path}&after_revision={cursor}&coordination=auto&coordination_read=show"
+    ));
     assert_eq!(reloaded["replace_required"], true);
     assert_eq!(reloaded["latest_revision"], cursor);
-    assert_eq!(host.post("/agent-coordination", per)["coordination_override"], "show");
+    assert_eq!(
+        host.post("/agent-coordination", per)["coordination_override"],
+        "show"
+    );
     let own = host.get(&format!("{path}&coordination=auto"));
-    assert_eq!(own["coordination"], json!({"visibility":"show","hidden":false,"source":"chat"}));
-    assert!(host.post("/agent-coordination", json!({"session":"oak","visibility":"default"}))["coordination_override"].is_null());
+    assert_eq!(
+        own["coordination"],
+        json!({"visibility":"show","hidden":false,"source":"chat"})
+    );
+    let snapshot = host.get("/agents/snapshot");
+    let oak = snapshot["agents"].as_array().unwrap().iter()
+        .find(|agent| agent["session"] == "oak").unwrap();
+    assert_eq!(oak["coordination_visibility"], "show");
+    assert_eq!(oak["coordination_override"], "show");
+    assert!(
+        host.post(
+            "/agent-coordination",
+            json!({"session":"oak","visibility":"default"})
+        )["coordination_override"]
+            .is_null()
+    );
     let rows = host.get("/agents/snapshot");
-    assert!(rows["agents"].as_array().unwrap().iter().all(|row|
-        row["coordination_visibility"] == "hide" && row["coordination_override"].is_null()));
-    wait_for("the roster setting event", || heard.lock().unwrap().iter().any(|event|
-        event["type"] == "agent-roster" && event["kind"] == "coordination-changed"
-            && event["coordination_visibility"] == "hide"));
+    assert!(
+        rows["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["coordination_visibility"] == "hide"
+                && row["coordination_override"].is_null())
+    );
+    wait_for("the roster setting event", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-roster"
+                && event["kind"] == "coordination-changed"
+                && event["coordination_visibility"] == "hide"
+        })
+    });
 
     std::fs::write(holds.join("oak"), b"").unwrap();
     let before = std::fs::read_to_string(tokens.join("oak")).unwrap_or_default();
-    let sent = host.post("/send", json!({
-        "session":"oak","text":"coordination prompt","client_msg_id":"only-agents",
-        "sender":"ivy","origin":"agent"
-    }));
+    let sent = host.post(
+        "/send",
+        json!({
+            "session":"oak","text":"coordination prompt","client_msg_id":"only-agents",
+            "sender":"ivy","origin":"agent"
+        }),
+    );
     wait_for("the marked turn to begin", || {
         std::fs::read_to_string(tokens.join("oak")).is_ok_and(|t| !t.is_empty() && t != before)
     });
     let prompt = std::fs::read_to_string(tokens.join("oak.prompt")).unwrap();
-    assert!(prompt.contains("Coordination: this turn answers a message from another agent"), "{prompt}");
+    assert!(
+        prompt.contains("Coordination: this turn answers a message from another agent"),
+        "{prompt}"
+    );
     let token = std::fs::read_to_string(tokens.join("oak")).unwrap();
-    let delta = host.get(&format!("{path}&after_revision={cursor}&coordination=hide&coordination_read=hide"));
+    let delta = host.get(&format!(
+        "{path}&after_revision={cursor}&coordination=hide&coordination_read=hide"
+    ));
     assert_eq!(delta["turns"], json!([]));
     assert!(delta["latest_revision"].as_u64().unwrap() > cursor);
     assert_eq!(delta["replace_required"], false);
-    let (status, note) = asked(&host, "/agent-notes", &[("X-Clarp-Turn", &token)],
-                              &json!({"session":"oak","text":"Keep my note","note_id":"n1"}));
+    let (status, note) = asked(
+        &host,
+        "/agent-notes",
+        &[("X-Clarp-Turn", &token)],
+        &json!({"session":"oak","text":"Keep my note","note_id":"n1"}),
+    );
     assert_eq!(status, 200, "{note}");
     std::fs::write(release.join("oak"), b"").unwrap();
-    wait_for("marked turn to end", || answered(&host, "oak", &sent["trace_id"]));
+    wait_for("marked turn to end", || {
+        answered(&host, "oak", &sent["trace_id"])
+    });
     let hidden = host.get(&format!("{path}&coordination=hide&limit=1"));
     assert_eq!(hidden["turns"].as_array().unwrap().len(), 1);
     assert_eq!(hidden["turns"][0]["id"], note["message_id"]);
@@ -1176,7 +1258,13 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
     assert!(older.get("hidden_after").is_none());
 
     let show = host.get(&format!("{path}&coordination=show"));
-    assert!(show["turns"].as_array().unwrap().iter().any(|row| row["audience"] == "agents"));
+    assert!(
+        show["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["audience"] == "agents")
+    );
     let plain = host.get(path);
     assert_eq!(plain["turns"], show["turns"]);
     assert!(plain.get("coordination").is_none());

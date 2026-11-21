@@ -3632,6 +3632,15 @@ with the built-in pool as a fallback. A stable walk reserves built-in contacts' 
 while other voices are free and chooses the least shared voice when the pool is exhausted.
 A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
 
+**Hidden coordination** (the Python Host's PR 512). Fleet writes the global and per-chat
+visibility settings, publishes the directory, then emits the new effective choice with
+the roster hint. It never edits a conversation for this purpose. An explicit log mode reads
+under one choice and echoes its source. A hidden reader applies its mark check before the
+page limit and still carries hidden changes in the revision cursor. Notes remain visible.
+The gap count names the hidden turns between visible rows and the current tail, nearest
+its visible boundary, with the reference's caps of 100 messages or 400 rows. An acceptance
+made when an agent cannot leave notes stays shown after that agent changes capability.
+
 ## 7. Stages and gates
 
 Since 21 Nov 2026 at 12:39, stages, trains and pieces have no test gate of their own. A train lands when
