@@ -491,6 +491,9 @@ impl Recorder {
         rewrite: impl FnOnce(&[u8]) -> Result<Vec<u8>, JournalError>,
         now_ms: i64,
     ) -> Result<Reworded, JournalError> {
+        if self.agent.joins().contains_key(&turn) {
+            return Ok(Reworded::NotWaiting);
+        }
         let waiting = self.agent.waiting().find(|queued| queued.id == turn);
         let Some(message_seq) = waiting.map(|queued| queued.message_seq) else {
             return Ok(Reworded::NotWaiting);
@@ -569,17 +572,6 @@ impl Recorder {
         with: Vec<NewItem>,
         now_ms: i64,
     ) -> Result<Accepted, JournalError> {
-        self.accept_message_with_join(message, with, None, now_ms)
-    }
-
-    /// Reserves a follow-up for the live tool in the same write as its queue item.
-    pub fn accept_message_with_join(
-        &mut self,
-        message: Incoming,
-        with: Vec<NewItem>,
-        join: Option<crate::steering::Join>,
-        now_ms: i64,
-    ) -> Result<Accepted, JournalError> {
         if let Some(key) = &message.key
             && let Some(earlier) = self.log.find(key)?
         {
@@ -620,11 +612,6 @@ impl Recorder {
                 now_ms,
             )
             .map_err(JournalError::Refused)?;
-        if let Some(join) = join {
-            batch
-                .command(Command::Join { turn, join }, now_ms)
-                .map_err(JournalError::Refused)?;
-        }
         let committed = batch.commit()?;
         Ok(Accepted {
             message_seq,
@@ -2091,17 +2078,22 @@ mod tests {
             .unwrap();
         for (key, uuid) in [("u-two", "read"), ("u-three", "unread")] {
             let accepted = recorder
-                .accept_message_with_join(
-                    message(key, Admission::Queue),
-                    Vec::new(),
-                    Some(crate::steering::Join {
-                        into: TurnId(1),
-                        uuid: uuid.to_string(),
-                    }),
-                    3,
-                )
+                .accept_message(message(key, Admission::Queue), 3)
                 .unwrap();
             assert!(!accepted.entered);
+            let turn = accepted.turn.unwrap();
+            recorder.handle(Command::Join {
+                turn,
+                join: crate::steering::Join {
+                        into: TurnId(1),
+                        uuid: uuid.to_string(),
+                },
+            }, 3).unwrap();
+            assert_eq!(recorder.reword(turn, |_| panic!("the reserved text is immutable"), 4).unwrap(), Reworded::NotWaiting);
+            assert!(matches!(
+                recorder.handle(Command::Withdraw { turn, by: "user".into() }, 5),
+                Err(JournalError::Refused(Refusal::NotWaiting(_))),
+            ));
         }
         drop(recorder);
         let mut recorder = open(&engine);

@@ -4,7 +4,7 @@ use clarp_kernel::agent::{Agent, Command};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::journal::Batch;
 use clarp_kernel::steering::{self, Join, Observation, Stage};
-use clarp_kernel::turn::{Origin, RunOutcome, TurnId};
+use clarp_kernel::turn::{COMPACTION, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
 
@@ -278,7 +278,7 @@ impl Actor {
         if !live.steering.enabled
             || !live.steering.stream.can_join()
             || live.opening
-            || !matches!(live.origin, Origin::Agent { .. } | Origin::User)
+            || live.origin.name() == COMPACTION
         {
             return Ok(None);
         }
