@@ -5507,7 +5507,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     // so after the Host was started again.
     assert_eq!(host.ask("DELETE", &format!("/agents/{asker}"), None).0, 200);
     let named = |host: &Host| {
-        let rows = shown(&host, &worker);
+        let rows = shown(host, &worker);
         (
             rows[0]["sender_name"].clone(),
             rows[0]["sender_session"].clone(),
