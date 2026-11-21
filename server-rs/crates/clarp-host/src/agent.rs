@@ -515,6 +515,7 @@ impl View {
 
 /// Everything an agent's thread is given.
 pub struct Setup {
+    pub(crate) versions: Arc<crate::cli_version::Cache>,
     pub(crate) delegation_rejoin: crate::fleet::delegations::Rejoin,
     pub runtime: tokio::runtime::Handle,
     pub opening_gate: crate::calls::opening_launch::Gate,
@@ -2685,8 +2686,10 @@ impl Worker {
                     {
                         let tx = self.tx.clone();
                         let backend = self.setup.record.backend.clone();
+                        let versions = self.setup.versions.clone();
                         self.setup.runtime.spawn(async move {
-                            if !crate::takeover::can_use(&backend, program.into()).await {
+                            if !crate::takeover::can_use(&backend, program.into(), &versions).await
+                            {
                                 return;
                             }
                             let socket = offer.socket.clone();
@@ -3526,11 +3529,13 @@ impl Worker {
                 }
                 let launcher = self.setup.launcher.clone();
                 let opening_gate = self.setup.opening_gate.clone();
+                let versions = self.setup.versions.clone();
+                let runtime = self.setup.runtime.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
-                        launcher::gate_steering(&mut order);
+                        runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         if let Some(pool) = pool {
                             pool.guard_turn(&mut order);
                         }

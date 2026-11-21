@@ -16069,6 +16069,33 @@ printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
 
 /// Writes a program a test runs in place of a real one.
 fn program(path: &std::path::Path, text: &str) {
+    // A fixture with its own version handling exercises CLI capabilities. Ordinary
+    // fixtures must not count a capability probe as a launch or as input.
+    if !text.contains("--version")
+        && let Some((shebang, body)) = text.split_once('\n')
+        && let Some(interpreter) = shebang
+            .strip_prefix("#!")
+            .and_then(|line| line.split_whitespace().last())
+    {
+        let name = interpreter.rsplit('/').next().unwrap_or(interpreter);
+        let guard = match name {
+            "sh" | "bash" | "dash" => {
+                Some("if [ \"$#\" -eq 1 ] && [ \"$1\" = --version ]; then exit 0; fi")
+            }
+            "python" | "python3" => {
+                Some("if __import__('sys').argv[1:] == ['--version']: raise SystemExit(0)")
+            }
+            _ => None,
+        };
+        if let Some(guard) = guard {
+            write_program(path, &format!("{shebang}\n{guard}\n{body}"));
+            return;
+        }
+    }
+    write_program(path, text);
+}
+
+fn write_program(path: &std::path::Path, text: &str) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::write(path, text).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();

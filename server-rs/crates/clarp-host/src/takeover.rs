@@ -82,13 +82,16 @@ pub(super) fn plan(
     }
 }
 
-pub(super) async fn can_use(backend: &str, program: PathBuf) -> bool {
-    use std::time::Duration;
-
+pub(super) async fn can_use(
+    backend: &str,
+    program: PathBuf,
+    versions: &crate::cli_version::Cache,
+) -> bool {
     if !matches!(backend, "claude" | "agy") {
         return false;
     }
-    crate::models::asked(&program, &["--version".to_string()], Duration::from_secs(2))
+    versions
+        .answer(program)
         .await
-        .is_some_and(|(exit, output)| exit == 0 && takeover::supported_version(backend, &output))
+        .is_some_and(|output| takeover::supported_version(backend, &output))
 }
