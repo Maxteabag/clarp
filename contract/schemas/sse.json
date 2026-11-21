@@ -95,6 +95,20 @@
         "agent_id": {"type": "string"}
       }
     },
+    "media-changed": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session", "agent_id", "asset_id", "change", "at"],
+      "properties": {
+        "type": {"const": "media-changed"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "asset_id": {"type": "string"},
+        "change": {"enum": ["created", "deleted", "favorite"]},
+        "favorite": {"type": "boolean"},
+        "at": {"type": "integer"}
+      }
+    },
     "queue-updated": {
       "type": "object",
       "additionalProperties": true,

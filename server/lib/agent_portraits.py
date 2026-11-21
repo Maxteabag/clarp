@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from . import agents as agents_db
 from . import db
+from . import media_store
 
 
 MAX_PORTRAITS = 3
@@ -84,6 +85,8 @@ def add_media_asset(*, session: str, asset_id: str,
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
+        _still_live(con, asset["asset_id"], "media asset not found",
+                    "media asset content unavailable")
         _prune_unavailable_alternates(con, agent["agent_id"])
         existing = con.execute(
             """SELECT portrait_id FROM agent_portraits
@@ -183,6 +186,12 @@ def replace_alternates_with_media_assets(
             ).fetchone()
             if not active:
                 raise PortraitError("portrait generation was cancelled", status=409)
+        for asset in assets:
+            _still_live(con, asset["asset_id"], "generated media asset not found",
+                        "generated media content unavailable")
+        retired = [(row["storage_path"], row["sha256"]) for row in con.execute(
+            "SELECT storage_path, sha256 FROM agent_portraits WHERE agent_id=? "
+            "AND deleted_at IS NULL AND is_primary=0", (agent["agent_id"],))]
         con.execute(
             "UPDATE agent_portraits SET deleted_at=? WHERE agent_id=? "
             "AND deleted_at IS NULL AND is_primary=0",
@@ -203,6 +212,7 @@ def replace_alternates_with_media_assets(
     except Exception:
         con.execute("ROLLBACK")
         raise
+    _release(retired)
     return _collection(agent)
 
 
@@ -283,6 +293,7 @@ def _ensure_current_primary(
             con.execute("COMMIT")
             return agent
         raw, digest, mime = current
+        retired_paths: list[tuple[str, str]] = []
         immutable_path = _write_immutable(
             raw, digest=digest, mime=mime, portrait_dir=portrait_dir)
         row = con.execute(
@@ -298,7 +309,7 @@ def _ensure_current_primary(
             ).fetchone()["n"])
             if count >= MAX_PORTRAITS:
                 retired = con.execute(
-                    """SELECT portrait_id FROM agent_portraits
+                    """SELECT portrait_id, storage_path, sha256 FROM agent_portraits
                          WHERE agent_id=? AND deleted_at IS NULL AND is_primary=0
                          ORDER BY created_at, portrait_id LIMIT 1""",
                     (agent["agent_id"],),
@@ -308,6 +319,7 @@ def _ensure_current_primary(
                         "UPDATE agent_portraits SET deleted_at=? WHERE portrait_id=?",
                         (db.now_ms(), retired["portrait_id"]),
                     )
+                    retired_paths.append((retired["storage_path"], retired["sha256"]))
                 else:
                     raise PortraitError(
                         "portrait primary reconciliation conflict", status=409)
@@ -336,6 +348,7 @@ def _ensure_current_primary(
             (portrait_id,),
         )
         con.execute("COMMIT")
+        _release(retired_paths)
         return agent
     except Exception:
         con.execute("ROLLBACK")
@@ -383,6 +396,29 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": int(row.get("created_at") or 0),
         "available": available,
     }
+
+
+def _still_live(con, asset_id: str, missing: str, unavailable: str) -> None:
+    """Under the write lock, the asset a portrait is about to be made from is still not
+    deleted and its file still there. The check made before the lock is not enough: a delete
+    committing in between releases the file (media_store.release_blob, under the same lock),
+    and the portrait would point at nothing. Once the portrait row is written, a later delete
+    sees it and keeps the file."""
+    row = con.execute(
+        "SELECT storage_path FROM media_assets WHERE asset_id=? AND deleted_at IS NULL",
+        (asset_id,)).fetchone()
+    if not row:
+        raise PortraitError(missing, status=404)
+    if not pathlib.Path(str(row["storage_path"] or "")).is_file():
+        raise PortraitError(unavailable, status=409)
+
+
+def _release(files: list[tuple[str, str]]) -> None:
+    """A retired portrait may have been the last user of a deleted gallery image's file
+    (they share it): let the media store remove that file now. It removes nothing that
+    anything else still uses, and never a file no deleted image names."""
+    for path, sha256 in files:
+        media_store.release_blob(str(path or ""), str(sha256 or ""))
 
 
 def _prune_unavailable_alternates(con, agent_id: str) -> None:
