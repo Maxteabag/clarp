@@ -1346,7 +1346,7 @@ def serve(handler):
             media_dir = getattr(handler.ctx, "media_dir", None) or RuntimePaths.from_home(pathlib.Path.home()).media_dir
             conversation = podcast_live.StablePodcastConversation(upstream, downstream, key,
                 podcast_context, images=query.get("images", ["0"])[0] == "1",
-                history_id=history_id, media_dir=media_dir)
+                history_id=history_id, media_dir=media_dir, stream=getattr(handler.ctx, "stream", None))
             downstream({"type": "podcast.history", "conversation_id": history_id,
                         "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:
