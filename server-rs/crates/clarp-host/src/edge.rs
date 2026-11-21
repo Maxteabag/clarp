@@ -1079,6 +1079,7 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
 }
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
+    // Scope is decided on the raw path before route parameters are decoded.
     let path = request.uri().path().to_string();
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
     let read = request.method() == Method::GET;
@@ -1139,8 +1140,19 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
 
 // ---- who the Host is, and who its agents are ------------------------------------------------
 
-async fn server_info(State(app): State<App>) -> Json<ServerInfo> {
-    Json(identity(&app))
+async fn server_info(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+) -> Json<Value> {
+    let info = json!(identity(&app));
+    let info = match principal {
+        Principal::Device {
+            scope: Scope::Limited,
+            ..
+        } => clarp_kernel::devices::limited_server_info(info),
+        _ => info,
+    };
+    Json(info)
 }
 
 /// `GET /host/start`, this Host's own and the administrator's only: how its start went. How many
