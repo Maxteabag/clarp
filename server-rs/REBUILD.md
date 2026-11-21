@@ -111,6 +111,7 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D23 | A conversation's head revision is the revision of its newest change (its newest item in the log, or a reply being written), not of the log's newest item | A client compares the head with what it holds to know whether to ask. Bookkeeping must not make it ask |
 | D24 | Every turn's end is told to the apps, also when the next turn begins in the same write: first how the one ended, then that the next began. The answer a turn ended on is found by the row that closed it, not by being the newest row | An app that waits for an agent to be done must hear it, and the user is notified of every answer |
 | D26 | A shim never waits for the Host, and asks a tool to stop in the tool's own way through one signal to its direct child, bounded, before it signals the group | A restart must never hold a turn. The reference aborts a served tool before it ends it. OpenCode gives its abort request three seconds |
+| D-hold | A shim can hold its tool once a turn: every process of the tool's group stopped until each stands still, all it printed taken into the spool, and the answer how far the spool goes and whether a line was begun. It lets the tool go on a release or by itself after the smaller of what was asked and two seconds; a tool ended while held is killed where it stands. A served tool is not held, nor one on a system without `/proc`. A process that left the tool's group (its own session or group) is not held: taken as a limit, since a hold is for a turn that has printed nothing, and such a turn has started no command that could have left it | "Has this turn produced nothing" must be one decision: between the Host's last look and the end, the tool must not be able to print or act. A signal cannot do that (a tool can print its whole answer after a SIGTERM). The bound keeps D26: a Host that is gone never keeps a turn standing |
 | D25 | `busy` and `turn_started_at` in the snapshot are what an app counts a running turn from (issue 354). `busy` is true exactly while a turn holds the agent. `turn_started_at` is then the moment that turn was taken up: not when its message was accepted, not when one of its tools started, never an earlier turn's, and the same for as long as the turn runs. At rest it is 0, however the last turn ended (the Python Host kept the start of a turn that did not complete until its fix of 15 Nov 2026, PR 357) | The timer in the apps is the turn's time. Held by the conformance scenarios `turn-timer` and `turn-timer-after-stop` |
 | D15 | A conversation's revision is `seq * 2^20 + n`: the log position, with room in between for the changes of a reply that is shown while it is written and not stored. A restart that rejoins a turn writes once, so later revisions are above earlier ones | Clients sync by revision; the log gives it for free; a growing reply needs revisions of its own |
 | D16 | A turn starts at most once by construction: the shim creates the turn's spool exclusively; "spawned" is durable before the tool is given the message; the shim prints `ready`; a second shim for the turn leaves with exit 125 | Rule 1 must not depend on the server remembering what it started |
@@ -199,6 +200,21 @@ next turn resumed Codex's thread (`CLARP_TEST_CODEX=1`, run the same way as the 
 
 **Pairing is there** (`clarp-host pair --url ...`, `POST /pairing/exchange`, scopes, revoke), the Python Host's
 scheme word for word.
+
+**Pairing identity** (21 Nov 2026, R172). Before spending its code a device can read this Host's id,
+name and contract at `GET /pairing/identity` without a token. The trusted request source has 30 reads a
+minute in its own budget. Pairing failures still count in the authentication budget. A device paired
+with limited access can revoke its own pairing using its token's exact device id after stripping the
+requested text. Revocation invalidates the token and uses the existing stream and call teardown.
+The pairing and device-scope vectors hold these rules to the Python Host.
+
+**Provider message identity** (21 Nov 2026, R108). A modern Codex assistant item keeps its provider id,
+including when its rollout tells the same words in a legacy record. Native-session seed imports name the
+row from that id and its occurrence in the session. A line whose provider gives no id follows its place
+as before. A Claude reply still holds its message's text blocks and tools in one row. Its live message
+item grows from that same draft and names the row the actor writes when it settles. A nested stream has
+no reply row in the parent's log. This Host does not reconcile active replies against a provider
+transcript, so there is no live-import retraction to perform.
 
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
@@ -1524,6 +1540,11 @@ changing it. The status records each provider's most recent action. Exhaustion
 leaves waiting work in the pool. Banked resets belong to a separate decision
 of the owner. The other account modes leave the login where it is.
 
+The Codex reading also carries the account-wide weekly usage (21 Nov 2026, PR 484).
+A failed or missing weekly reading stays unknown. The vectors hold the inclusive 99%
+threshold across the saved accounts and require a readable redemption count below the
+daily cap. Switch decisions still use the existing quota fields.
+
 **Launch directories** (19 Nov 2026). The new-agent dialog combines recent launches,
 zoxide results and explicit directory completions. The Host finds `zoxide` on PATH
 and starts it without a shell. Each invocation has half a second. If it is absent,
@@ -1692,6 +1713,26 @@ Held through the Host
 with a stand-in that does what the recording shows, and tried on the Host installed on elitebook with the
 real tool on Sonnet (17 Nov, 16:37: from 31,381 tokens to 8,878, the row compacting meanwhile, the third
 turn knowing what the first two said; `docs/battle-test.md`).
+
+**What a compaction did** (20 Nov 2026). The Python Host's PR 483 (R148, contract 107, the feature
+`compaction_outcome`): an agent's row says what the user's last compaction of it did, from numbers
+(`last_compaction`: `null` until the first, then the outcome `compacted`, `not_compacted` or `unknown`,
+the sizes before and after, whether the size after is an estimate, why in words, the tool, and when).
+The rule is in the kernel (`clarp_kernel::compaction`): the Python Host's `decide_claude`, `outcome` and
+its reading of Claude Code's record (`compact_boundary`), held to their answers by vectors its own functions
+wrote (`tools/compaction-outcome-vectors.py`), and what a turn's end means for it here: the tool's record
+of the turn (its newest, where there were more) says it compacted, whatever ended the turn; without one, a
+turn that ended well or was stopped did not compact, one taken back before it began did not, one whose tool
+said it failed did not (in the words the chat shows of the failure), and one whose tool ended without a word
+may have, and is `unknown`. The size after is the tool's own number where its record says one, and no
+estimate; the Python Host says none until the next call. The agent's state owes one outcome when the turn
+of the user's compaction ends, and no other turn owes one, so a compaction the tool makes by itself within
+a turn says nothing of it; the actor writes the outcome in the same write as the turn's end (`Compacted`,
+an event of its own, never written again), and the state keeps the newest, through every later turn and
+every restart. A Host that comes back while the tool compacts reads the tool's output again from its
+beginning and says what it did. A compaction asked for while messages wait is refused in the Python Host's
+new words. Held by the kernel's tests, the Host's test of every ending (`tests/host/compaction_outcome.rs`,
+a restart in the middle of one included) and a list of wrong rules (`tools/plants/compaction-outcome.py`).
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
@@ -2521,11 +2562,14 @@ key came twice (refused as `invalid_object`). Both catalog files are in the prog
 not pass its checks refuses render specs alone (503, `catalog_unavailable`). The Host (`render_spec.rs`
 beside `library.rs`) publishes, revises (a whole new payload that names the version it follows) and only
 checks (`?validate_only=1`); a spec is never in a row of a list, a search, the pins, Updates or an event.
-Who sees it is said by each request: a client whose `X-Clarp-Client` says `<platform>/<build>
-contract=<n>` at or above the owner's threshold (`[artifacts] render_spec_min_client` in his file, read at
-every request; unset, as the reference ships, nobody) is shown what was left out (`content_omitted`, with
-`element_count`) and reads the spec, and once it was answered the answers, from the artifact itself; any
-other client sees a plain row and cannot answer (403, `client_contract`). The first answers that are taken
+A client sees the full spec when its exact `X-Clarp-Client` name and contract meet its minimum. The
+default is `ios` from 74. `[artifacts] render_spec_min_contract` overrides it per exact client name, with
+0 disabling that name. The legacy `render_spec_min_client` integer applies to `ios` alone and the table
+wins when both name it. Unknown or malformed headers see a generic row and cannot submit (403,
+`client_contract`). The Rust Host reads the owner's file for each request and writes each distinct
+configuration diagnostic once. `GET /artifacts/<id>/export` (R137) gives the administrator the public
+row, stored payload and accepted submission. On an authenticated Host it takes the token only from the
+Authorization header. Another artifact kind gets a 409 with its kind. The first answers that are taken
 close the spec (`already_answered`); they are told to its agent once, through the same delivery as a
 form's answers, and the same answers under the same id get the same receipt. `GET
 /artifact-catalogs/clarp.form/1` serves the catalog's bytes, and the agent's tool sends a whole request as
@@ -3245,6 +3289,172 @@ to the blob store. A hit still names the speaker of the current request. Factori
 two agents using the same engine voice can share one fill. No operator script or scheduled operation
 asks for audio. The first use after eviction follows the ordinary speech path.
 
+**Coordination between agents** (20 Nov 2026; the Python Host's PR 482, contract 108). A turn that another
+agent's message began is for the agents: every row of it in `GET /log`, its `GET /live` turn and the
+dispatch's `agent-state` say `audience: agents`, and the working state names that agent where this Host has
+it. The Host decides it at the send from what it can check: the origin the send claimed, the sender it named
+as this Host knows it, the turn whose token it presents (`X-Clarp-Turn`, or the token an agent's tool was
+given) and a peer Host's word (`X-Clarp-Peer`). The user's own word (`user`, `oracle`) never is, whatever
+sender it names. A send from an agent's own turn is that agent's: its sender where it names none, never the
+user's word, refused when it names another agent as its sender, and automation when the agent wakes itself.
+The kernel's rules (`clarp-kernel/src/coordination.rs`) are held to the Python Host's own functions by
+`tools/coordination-vectors.py` and `tools/agent-note-vectors.py`.
+
+The mark is written once, in the item that accepts the turn (`TurnEvent::Accepted.coordination`, keyed
+`coordination-<turn>`), so no restart falls between the mark and the turn's rows. A page of the log finds it
+by key once per turn on the page, as it finds the turn's end: its cost does not grow with the conversation.
+Nothing loosens a mark here, because this Host steers no message into a running turn. Only an agent that can
+leave a note is hidden (`coordination::can_leave_note`): the Host can read its key, and its tool's turns carry
+the token. Every tool's turns carry it here, Codex's too.
+
+An agent leaves its user a note with `POST /agent-notes` or with `clarp-admin tell-user`, its own tool on this
+Host, only from its own running turn. The note is a row of its own in the agent's log (kind 105, keyed by its
+row id `note-<agent>-<note id>`), always the user's, in the turn's trace. It tells the user at once whatever
+turn wrote it; a muted agent's or a helper's note pages nobody. The same note asked again is the same note,
+and other words under its id are refused. The actor counts a turn's notes as they are written, and the turn's
+summary carries `note_count`. A caller that names a trace another message of the agent already has is refused
+(409), but the same message sent again is that message: one look by key (`trace-<trace>`) in the agent's own
+log.
+
+**An agent's voice and hearing, shown as the Host does them** (20 Nov 2026; the Python Host's PR 485, contract 109,
+features `voice_profile` and `speech_outcome`). One resolver in the kernel (`clarp_kernel::voice_profile`) gives the
+voice each provider is handed for an agent and where it came from: the agent's own (its entry in the owner's file,
+what it stored, its persona's in the owner's lists) or a provider's one default, which every agent without its own
+shares (Deepgram's model, Google's `nb-NO-Chirp3-HD-Kore`, Gemini's voice for an agent moved to it on purpose). What
+each provider would then say, or why it is silent (`no_voice`, `not_configured`, `provider_off`), is made once, and
+both the speaker and the profile are made from it: the speaker tries those that can say it in the route's order
+(`speaking_order`), and the profile shows the first, or the fallback's when the first is silent and the fallback is
+not. ElevenLabs is handed only an id it can take; a JSON text, a uuid or nothing is silent and told so, where it was
+handed over and refused before. How an agent is heard is the plan of engines a recording for it is tried with and the
+languages the first is handed. A snapshot makes one view of the Host and resolves every agent from it, counting who
+shares a voice in one pass; the owner's file is read when the view is made. The roster's events about one agent get
+the agent's profile as the hub tells them (`profile::Profiles`), and a change of the speech providers or of the
+transcription settings tells open apps to re-read the agents (`voice-profile`). A reply not spoken is told once a turn
+and reason, with its reason, its provider and its turn, in words made from them, never from an engine's text; what
+was told is remembered in memory only, bounded, and pruned at every write. The vectors are
+`tools/voice-profile-vectors.py`, from `voice_profile.py` run as it is.
+
+**Closing an agent never waits without a bound (20 Nov 2026).** The fleet is one worker, and it closed an agent it
+removed by waiting for the agent's thread to answer, without a bound: one thread that did not answer held every request
+of every agent. `AgentHandle::close` now waits `CLOSE_WITHIN`, three seconds, as a delegation's ask does, and says
+whether the thread closed: it answered, or it is gone (its channel closed, at once, as before). `Fleet::remove` stops the
+agent's delegations and keeps its tombstone first, as before, and then closes it. Past the bound nothing more is done:
+the agent's thread is the one writer of its log, and a bound that passed says nothing of what the thread still writes,
+so its goals are not retired, its helpers not abandoned, the focus not let go, the apps not told, and the agent stays in
+the roster as it was. The answer says so in words (503: its thread did not answer within three seconds, it is not
+removed yet, ask again). Each attempt holds the fleet for at most three seconds waiting for the close, after the
+existing bounded delegation stops on the first attempt. A request for another agent queued during the close is served
+when that wait ends. The first attempt sends one close and keeps its reply for later attempts. Until removal finishes,
+the agent refuses messages, new agents or forks addressed to it, and changes to its record. The refusal tells the
+caller to ask for removal again. The same removal request keeps the original deletion time and, once the thread has
+closed, finishes the removal. A Host that stops first leaves the tombstone, and its next start finishes the
+removal: the agent is not run, its goals are retired, the focus is left out, and a helper whose parent is deleted is
+abandoned there, as the removal would have left it. The fleet tests hold an agent's thread in its first log open or
+end it there. They cover closes before and after the bound, a thread that never answers, concurrent requests, refused
+writes, and a restart after a timed-out delete. The Host test starts from a store written by its own crate with a
+deleted parent and its helper. The wrong rules are in `tools/plants/bounded-close.py`.
+
+**The shim holds its tool** (20 Nov 2026, decision D-hold). Two requests on the shim's socket:
+`{"op":"hold","ms":N}` and `{"op":"release"}`. A hold stops every process of the tool's group (SIGSTOP), and
+looks in `/proc` until every thread of every process whose group is the tool's is stopped or a zombie; while one is
+not, the group is told again, so a process forked while the signal went out is stopped too. A task in uninterruptible
+sleep can be a parent waiting for a child that was stopped before exec. During acquisition the shim briefly resumes
+the group and retries within the original deadline. After the group stands still, the shim counts everything
+printed through the last stop, including output during a retry. Both pipes must be empty, neither pump can have
+a chunk in hand, every complete hook report is handled under its connection's turn, and no connection waits to
+be accepted. The spool's one writer then says how long the spool is after every record sent to it before. If the
+writer missed a record or cannot answer in time, the shim refuses the hold. The answer gains `held`: `spool` (that length, the offset after the last whole record), `partial_out` and
+`partial_err` (the bytes of a line each pump holds that is not whole: it had begun to print), `partial_reports` (the
+hooks' reports begun and not whole: a hook stopped halfway through one cannot finish it, so it is said and not waited
+for; to the Host it is something begun, as a half line is) and `left_ms` (what is left of the bound). The bound is the smaller of what was asked and two seconds (`HOLD_MOST_MS`), counted from the
+first SIGSTOP. A thread of the shim lets the tool go at it (SIGCONT), whatever the Host does; a release lets it go
+sooner and says in `let_go` whether it was the one that did. A hold whose bound is spent before the tool stood still,
+or before all it printed was taken, lets the tool go and is refused in words. A turn is held once in its shim's life,
+counting a hold that was refused after it began. Stop, or the shim told to go, while the tool is held kills the group
+at once (SIGKILL, recorded as `stopping` with that signal and then `exited`, as any stopped turn's end) without a
+polite signal and without letting it run. Refused in words, nothing signalled: a tool that has ended, a tool already
+being stopped, a turn held once already, and a served tool (the shim's own OpenCode driver). A tool killed from
+outside while held is let go before the shim reaps it, so no process of its group is left stopped. Every hold leaves one line in the shim's own
+log (its standard error), when it ends: `clarp-shim: hold still_ms=… drain_ms=… held_ms=… end=…`, how long until
+the group stood still, how long taking what it printed took, how long it was held (`-` for what was never reached),
+and how it ended: `let go by request`, `let go at the bound`, `ended while held`, `let go when the tool ended`, or
+`refused: ` and why. Where the system shows no processes in `/proc` a hold is refused in words and nothing is
+signalled. Nothing of a hold is written in the spool: a turn never held is byte for byte as before, and a reader of today reads a held one. Not
+held: a process that left the tool's group (as it is not stopped today either), and the tool when the shim itself is
+killed while it holds it. No caller yet: the actor's side of a turn that produced nothing is a later piece. Held by
+fifteen tests in `crates/clarp-shim/tests/shim.rs` with stand-in tools (printed before the hold, a pipe full at the
+hold, half a line, a child, the bound with nobody to let go, ended while held, input written while held, held twice,
+a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
+hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
+process group. Wrong rules: `tools/plants/shim-hold.py`.
+
+**An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
+profile use the kernel's engine order. With a language set, models of one hosted provider
+share an attempt, as do the aliases of the Host's default local engine. If the ordinary
+chain ends on a hosted engine that cannot take the set, the Host considers its selected
+model if it is known, keyed and takes language sets. A provider already tried is excluded.
+The Host also considers its own model when no hosted replacement qualifies. Its catalogue
+languages determine coverage, with Norwegian aliases and the Whisper model default for an
+undeclared list. The successful response and an idempotent replay carry `engine_fallback`.
+An exhausted plan replies with the fixed `language_set_unsupported` 422 and its reasons.
+An own-engine failure keeps engine detail in the log. Loading and busy keep their statuses.
+Fallback uses the original audio buffer and current retention policy. The vectors run the
+reference's selection, declarations and fallback at the merge of PR 501.
+
+**Gallery management** (21 Nov 2026, the Python Host's PR 494). One bounded writer owns
+favorites, tombstones and gallery blob reclamation by asset id. The media publication in an
+agent's journal stays as written. At startup the gallery imports older publications and
+finishes any journal deliveries it owes. A deletion writes the tombstone and its pending
+blob removal together, then reflects the commit in the gallery and tombstone indexes.
+Every media read, including each range chunk, checks the tombstone before reading bytes.
+A pending unlink checks the live owners again on the same writer used by a publish. An
+interrupted unlink is safe to repeat. Independent portrait and contact files keep their
+existing names and storage. Media writes do not wait for a fleet or agent worker to reply
+from within the media writer, and those workers never wait for it. A request that does not
+receive its writer answer within three seconds receives a refusal. Deletion and favorite
+retries preserve their first timestamps and publish no new event.
+
+Gallery pages seek by creation or favorite time and asset id. Tombstone pages read nothing
+at or before their cursor, and include all rows that share the last millisecond of the
+page. They tell a reconnecting device what it must evict even when it missed the event.
+
+**A test Host sees nothing of the machine (20 Nov 2026).** Every process the Host's and the shim's tests start (the
+Host, the Host's own program as a tool, a script of the tools, the shim) is given an environment built from nothing
+by one rule, `crates/clarp-sealed`, a crate only tests depend on. Its home and its XDG folders, its runtime folder and
+its scratch folder are inside the test's own place; its path is `/usr/bin:/bin`, its language `C.UTF-8` and its time
+zone UTC; every program a person installs that the Host can start is pinned to a path that is not there, taken from
+the product's own table (`clarp_backend::PROGRAMS`, and `launch_directories::PROGRAM` for zoxide), so that a tool
+added later is pinned without a word in the tests. Nothing of the runner's own environment comes through, unless a
+test names it on purpose: only the three ignored tests that run a real Claude Code, Codex or systemd do. A test's own
+world goes over the rule, as before. The rule is not the runner's environment less a list of what harms: the Host
+reads names that only a file tells it at run time (the variables OpenCode's catalogue says a provider's key is in).
+`tests/host/harness.rs` holds it: the rule against a machine full of traps, what a started process really sees, a
+Host started on a machine that has every tool signed in and every key set (no tool found or run, no login, no store of
+OpenCode's, no key of a speaking engine, no provider asked), a tool run without an address beside an installed Host's
+file of settings (refused in words, the installed Host never reached), every tool a Host knows having a pinned
+program, and a scan of what the crates read from the environment, each name decided on in `clarp-sealed` (set,
+absent with its kind, or no variable). A second scan reads every start of `import`, `peer`, `network` and `pair` in the
+Host's tests: each names `--host`, because told none these take `127.0.0.1:7690`, which no variable moves (a known
+weakness, section 7). The unit tests that run themselves again as a child give the child nothing of the runner's
+either.
+
+**Portrait gallery hints** (21 Nov 2026, the Python Host's PR 510). When a portrait job
+ends, its images are found by chat, producer prefix and the inclusive creation window.
+A durable successful delivery carries the exact terminal window, including across a restart.
+Other terminal changes give that window to the gallery after the fleet commit. The gallery
+writer claims each asset and change before broadcasting, in event-time and asset id order.
+The claim is advisory and takes nothing away from the committed images or portraits if it
+fails. Late updates and replays of a delivered job add no duplicate created hint.
+
+**Cartesia output language (R168, 21 Nov 2026).** Each Cartesia clip uses the first
+transcription language matched by name, persona or session, else the Host's selected
+language. The model catalogue constrains that code and maps Norwegian variants to `no`.
+A request whose model requires English records the unsupported primary code once, at the
+Cartesia boundary. The same resolution reaches a configured alternative after another
+provider fails. Cartesia auditions, narration and cached router phrases include the resulting
+language in their cache identity, so a language change can produce its own audio. The
+reference's model, request and session rules are held by `cartesia-language-vectors.py`.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
@@ -3336,6 +3546,12 @@ connection relay under the name the phone is paired with. Each of these is true 
   turn's states are, and what the turn passed through just before its end is not. To mend by
   telling an agent's states from the log itself (`Command::TurnMoved` is in it) and not from what
   one pass of the actor hands on.
+- **`import`, `peer`, `network` and `pair` speak to `127.0.0.1:7690` when told no Host** (found
+  20 Nov 2026, not built). An installation can put the Host elsewhere (`install-host --listen`),
+  and a command that takes the fixed address then speaks to nobody, or to another Host there. The
+  default should come from the installation (its file of settings, as `clarp-host tool` reads
+  it), and where there is none the command should refuse in words. Until then the Host's tests
+  name `--host` at every start of the four, and a scan in `tests/host/harness.rs` holds them to it.
 
 ## 8. Roles
 

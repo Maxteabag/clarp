@@ -17,7 +17,7 @@ RUNS = {
     'registry': ['test', '-p', 'clarp-host', '--lib', 'kept_registry'],
     'host': ['test', '--test', 'host', '--', 'start_tolerance::'],
     'vocabulary': ['test', '-p', 'clarp-host', '--lib', 'vocabulary::store::tests'],
-    'quota': ['test', '--test', 'host', '--', 'the_quota_keeper_recovers_through_the_owners_selector'],
+    'quota': ['test', '--test', 'host', '--', 'start_tolerance::startup_preserves_the_quota_key'],
 }
 E = 'clarp-host/src/edge.rs'
 S = 'clarp-host/src/schedules.rs'
