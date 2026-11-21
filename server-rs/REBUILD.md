@@ -208,6 +208,14 @@ with limited access can revoke its own pairing using its token's exact device id
 requested text. Revocation invalidates the token and uses the existing stream and call teardown.
 The pairing and device-scope vectors hold these rules to the Python Host.
 
+**Provider message identity** (21 Nov 2026, R108). A modern Codex assistant item keeps its provider id,
+including when its rollout tells the same words in a legacy record. Native-session seed imports name the
+row from that id and its occurrence in the session. A line whose provider gives no id follows its place
+as before. A Claude reply still holds its message's text blocks and tools in one row. Its live message
+item grows from that same draft and names the row the actor writes when it settles. A nested stream has
+no reply row in the parent's log. This Host does not reconcile active replies against a provider
+transcript, so there is no live-import retraction to perform.
+
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first (it does, since 15 Nov 17:14). Since the
