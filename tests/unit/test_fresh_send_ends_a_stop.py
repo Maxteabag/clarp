@@ -120,3 +120,29 @@ def test_a_delivered_steer_leaves_queued_on_any_pass(tmp_path, monkeypatch):
         {"state": launch_receipts.ATTEMPTED} if trace == "t-steered" else real(trace)))
     world.service.recover_queued()
     assert turn_queue.status("steered") != "queued"
+
+
+def test_the_repair_never_ends_a_stops_pause(tmp_path):
+    """A Stop with nothing after it stays in force: a recovery pass that starts a
+    shown item a backend took does not end the pause, even when nothing else waits."""
+    world = World(tmp_path)
+    world.send("t0")
+    world.stop()
+    world.settle()
+    assert turn_queue.is_paused(world.agent)
+    _shown_row(world, "taken", turn="ended")
+    world.service.recover_queued()
+    assert turn_queue.status("taken") != "queued"
+    assert turn_queue.is_paused(world.agent)
+
+
+def test_the_held_work_is_released_a_moment_after_the_fresh_send(tmp_path):
+    """The recovery pass that releases the held work is scheduled with a delay, so the
+    fresh message takes the agent's slot first and the held work runs after it."""
+    world = _stopped_with_held_work(tmp_path)
+    scheduled = []
+    world.service.retry_scheduler = lambda delay, fn: scheduled.append(delay)
+    world.send("b")
+    assert scheduled and min(scheduled) > 0
+    world._collect()
+    assert world.started == ["t0", "b"]
