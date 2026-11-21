@@ -1483,11 +1483,11 @@ def _checkpoint_reason(status):
 
 
 def _cache_committed_tail(key, revision, checkpoint, recorded, file_hash, *, reason_token=None,
-                          hasher=None, grown_ok=False):
+                          hasher=None, grown_ok=False, unwritten=""):
     from . import db
     if recorded is None or file_hash is None:
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
-        _tail_log("checkpoint_not_written", retention=True)
+        _tail_log("checkpoint_not_written", retention=True, reason=unwritten or "not_published")
         return
     try:
         current = identity(pathlib.Path(checkpoint.source_file))
@@ -1825,8 +1825,13 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     except OSError:
         source_invalidated = True
     if not _checkpoint_refused(checkpoint_status) and not source_invalidated:
+        # Why no frontier, when there is none: the tail wrote nothing (the
+        # stored pair still holds), or its rows could not be read after commit.
+        unwritten = ("nothing_written" if not published_under
+                     else "snapshot_missing" if not snapshot or snapshot[-1] is None else "")
         _cache_committed_tail(key, revision, next_cp, recorded, current_hash,
-                              reason_token=reason_token, hasher=hasher, grown_ok=keep_when_grown)
+                              reason_token=reason_token, hasher=hasher, grown_ok=keep_when_grown,
+                              unwritten=unwritten)
     else:
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
     # Include replacement during process-frontier publication, not just the
@@ -1922,19 +1927,27 @@ def _parsed_digests(parsed_read, parsed_evidence, before, earlier, path):
     return (parsed_read["at_mark"], current, parsed_read["hash"].copy()), "saved"
 
 
-def _second_read_log(code, backend, size):
+def _second_read_log(code, backend, size, *, read_bytes=None, cpu_ms=None):
     """One line for each full import that reaches its digest: whether the
     second read of the file was saved, or why it was made. A fixed word, a
-    count, the backend and the size's bucket; no session, path or id."""
+    count, the backend and the size's bucket; no session, path or id. With
+    them, what the full import has cost so far: the bytes it read (the parse,
+    and the second read when it was made) and the CPU of its thread in ms,
+    from the parse's start to the digest."""
     from .log import log
-    log("transcriptFullDigest",
-        f"code={code} count=1 backend={backend if backend in SUPPORTED_BACKENDS else 'other'}"
-        f" size={_size_bucket(size)}")
+    detail = (f"code={code} count=1 backend={backend if backend in SUPPORTED_BACKENDS else 'other'}"
+              f" size={_size_bucket(size)}")
+    if read_bytes is not None:
+        detail += f" bytes={int(read_bytes)}"
+    if cpu_ms is not None:
+        detail += f" cpu_ms={int(cpu_ms)}"
+    log("transcriptFullDigest", detail)
 
 
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
                                      turns, before, conf, *, reason_token=None,
-                                     parsed_evidence=None, imported=None, parsed_read=None):
+                                     parsed_evidence=None, imported=None, parsed_read=None,
+                                     cpu_started=None):
     from . import db, message_carry, message_store, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
@@ -1949,6 +1962,9 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     source_invalidated = False
     effects = ""
     hasher = None
+    # Why a full import that found its boundary still wrote no checkpoint: a
+    # fixed word for the journal (the reason the next import is full again).
+    unwritten = ""
     try:
         observed = identity(path) if before is not None else None
         growing_prefix = (parsed_evidence is not None and before is not None
@@ -1985,9 +2001,12 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                     parsed_read, parsed_evidence, before, earlier, path)
                 if digests is None and not bool(conf.get("full_digest_while_parsing")):
                     second_read = "switch_off"
-                _second_read_log(second_read, backend, before.size)
                 previous, current_hash, hasher = digests or _read_digest(
                     path, earlier[0] if earlier else before.size, before.size)
+                _second_read_log(second_read, backend, before.size,
+                                 read_bytes=before.size * (1 if digests else 2),
+                                 cpu_ms=None if cpu_started is None
+                                 else (time.thread_time() - cpu_started) * 1000)
                 if earlier and previous != earlier[1]:
                     _prefix_changed(path, "imported_bytes", imported)
                 # Compare against ACTUAL bytes delivered to the native parser,
@@ -2008,8 +2027,9 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                         captured = {}
 
                         def publish(database, carry):
-                            nonlocal checkpoint, recorded, source_invalidated
+                            nonlocal checkpoint, recorded, source_invalidated, unwritten
                             if not carry:
+                                unwritten = "no_capture"
                                 return
                             try:
                                 current = identity(path)
@@ -2018,6 +2038,8 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                                 raise
                             if current != observed:
                                 source_invalidated = parsed_evidence is not None
+                                unwritten = ("grew_during_store" if _only_grew(observed, current)
+                                             else "moved_during_store")
                                 return
                             now = db.now_ms()
                             # size/mtime describe the observed file; complete_size
@@ -2094,7 +2116,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
             _tail_log(refusal, retention=True)
     elif checkpoint is None:
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
-        _tail_log("checkpoint_not_written", retention=True)
+        _tail_log("checkpoint_not_written", retention=True, reason=unwritten or "not_published")
     else:
         if effects == "closed":
             # Counted apart: before this narrowing it was bootstrap_effect.
@@ -2206,6 +2228,7 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                     earlier = _imported_before(diagnostic.get("imported"), before, agent_id,
                                                backend_session_id, path)
                     parse_path._full_read["mark"] = earlier[0] if earlier else None
+            cpu_started = time.thread_time()
             turns = parse(parse_path)
             parsed_evidence = None
             parsed_read = None
@@ -2226,7 +2249,8 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                                                  reason_token=diagnostic.get("token"),
                                                  parsed_evidence=parsed_evidence,
                                                  imported=diagnostic.get("imported"),
-                                                 parsed_read=parsed_read)
+                                                 parsed_read=parsed_read,
+                                                 cpu_started=cpu_started)
                 retained = _TAIL_STATES.peek(_tail_key(path, agent_id, backend_session_id))
                 admission.retained = (retained is not None
                                       and retained[0] == parser_version(backend)
