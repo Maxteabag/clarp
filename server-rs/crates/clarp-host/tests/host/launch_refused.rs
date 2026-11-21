@@ -13,9 +13,7 @@ use super::*;
 fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
     let place = Place::new("launch-refused");
     let nowhere = place.root.join("no-shim-here");
-    let world = sealed(&place);
-    let world: Vec<(&str, &str)> = world.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let host = place.start_in("secret", &["--shim", nowhere.to_str().unwrap()], &world);
+    let host = place.start_with("secret", &["--shim", nowhere.to_str().unwrap()]);
     let session = host.new_agent("Refused");
     let heard = host.listen_at("/events?token=secret");
     host.send(&session, "go", "r1");
@@ -78,33 +76,4 @@ fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
     let tries = reconnects().len();
     std::thread::sleep(std::time::Duration::from_millis(2_500));
     assert_eq!(reconnects().len(), tries, "nothing is tried after the Stop");
-}
-
-/// What a Host of these tests sees of the machine: a home of its own in its place, and every
-/// tool a person installs pinned to a path where there is none. Its agent's tool is the
-/// scripted stand-in, built into the Host.
-fn sealed(place: &Place) -> Vec<(&'static str, String)> {
-    let home = place.root.join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    let at = |path: PathBuf| path.to_str().unwrap().to_string();
-    let absent = at(place.root.join("no-such-tool"));
-    let mut world = vec![
-        ("HOME", at(home.clone())),
-        ("XDG_CONFIG_HOME", at(home.join(".config"))),
-        ("XDG_DATA_HOME", at(home.join(".local/share"))),
-        ("XDG_CACHE_HOME", at(home.join(".cache"))),
-        ("XDG_STATE_HOME", at(home.join(".local/state"))),
-    ];
-    for tool in [
-        "CLARP_CLAUDE_PROGRAM",
-        "CLARP_CODEX_PROGRAM",
-        "CLARP_AGY_PROGRAM",
-        "CLARP_GROK_PROGRAM",
-        "CLARP_MUSE_PROGRAM",
-        "CLARP_OPENCODE_PROGRAM",
-        "CLARP_ZOXIDE_PROGRAM",
-    ] {
-        world.push((tool, absent.clone()));
-    }
-    world
 }

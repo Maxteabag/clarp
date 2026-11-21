@@ -1407,7 +1407,7 @@ fn a_served_tool_is_not_held() {
     .unwrap();
     let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
     let shim_path = env!("CARGO_BIN_EXE_clarp-shim");
-    let mut shim = Command::new(shim_path)
+    let mut shim = shim_in(&dir)
         .args(["--spool", spool.to_str().unwrap()])
         .args(["--socket", socket.to_str().unwrap()])
         .args(["--stdin-file", message.to_str().unwrap()])

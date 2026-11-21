@@ -61,7 +61,8 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
     for name in ["clarp-host", "clarp-shim"] {
         program(&from.join(name), "#!/bin/sh\n");
     }
-    let sums = Command::new("sha256sum")
+    let sums = place
+        .command("sha256sum")
         .args(["clarp-host", "clarp-shim"])
         .current_dir(&from)
         .output()

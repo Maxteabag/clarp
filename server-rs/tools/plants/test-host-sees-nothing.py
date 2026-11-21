@@ -79,6 +79,9 @@ PLANTS = [
     # What the Host's crates read is decided on.
     (S, 'sealed', 'a variable the Host reads is decided on nowhere', '    ("CODEX_HOME", "home"),\n', ''),
     (S, 'sealed', 'a name nobody reads is listed', '    "AGY_OK",\n', '    "AGY_OK",\n    "NEVER_READ_ANYWHERE",\n'),
+    (H, 'sealed', 'a new integration fixture bypasses the shared process constructor',
+     'let mut second = place.command("sleep").arg("60").spawn().unwrap();',
+     'let mut second = Command::new("sleep").arg("60").spawn().unwrap();'),
     # A command at a fixed address names the Host it speaks to.
     (H, 'sealed', "a test asks a Host's relay status at the fixed address", '        .args(["network", "relay", "status", "--host", &host.address])',
      '        .args(["network", "relay", "status"])'),
