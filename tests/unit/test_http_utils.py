@@ -71,3 +71,13 @@ def test_handler_responder_encodes_json_and_returns_the_handler_result():
                     (200, b"\x89PNG", "image/png")]
     custom = object()
     assert responder_of(SimpleNamespace(responder=lambda: custom)) is custom
+
+
+def test_redacts_a_secret_in_a_malformed_query():
+    assert redact_query_secrets("/models?backend=codex?token=s3cret") == \
+        "/models?backend=codex?token=REDACTED"
+    assert redact_query_secrets("/provider-capabilities&token=s3cret") == \
+        "/provider-capabilities&token=REDACTED"
+    assert redact_query_secrets("/backends&auth=s3cret&x=1") == "/backends&auth=REDACTED&x=1"
+    assert redact_query_secrets("/a?statuscode=5&Code=9") == "/a?statuscode=5&Code=REDACTED"
+    assert redact_query_secrets("/a/token=not-a-query") == "/a/token=not-a-query"
