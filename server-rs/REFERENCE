@@ -1,2 +1,2 @@
-a78391847855752bd24419f1db6c8f569ec1a3f6
-The merge of the Python Host's PR 567 (it holds every merge through PR 567: 564, 565, 566 ported; 567 moves two caches of the Python Host into its revisioned cache and needs no port): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+9ae6fd6fe6a61d68be6a10fbfa69d8549af4c292
+The merge of the Python Host's PR 580 (it holds every merge through PR 580: 568-576 no port, the Python importer and its gates; 577-578 the moved state, its port owed (rs-logins-sol; contract 125 awaited); 579 no port, the Python snapshot's reads; 580 ported, coordination hidden when nothing is stored): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
