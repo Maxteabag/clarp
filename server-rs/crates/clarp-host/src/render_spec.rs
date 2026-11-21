@@ -44,9 +44,7 @@ const CLIENT_HEADER: &str = "x-clarp-client";
 /// old number. What is refused is named, and what only differs from a known name in its case
 /// is said: each line once.
 fn threshold(app: &App) -> Option<BTreeMap<String, i64>> {
-    let text = OwnerFile::new(app.config.speech_keys.clone()).read_text()?;
-    // The reference names entries in the order the owner wrote them.
-    let file = text.parse::<toml_edit::DocumentMut>().ok()?;
+    let file = OwnerFile::new(app.config.speech_keys.clone()).read_document()?;
     let artifacts = file.get("artifacts")?.as_table_like()?;
     Some(minimums(artifacts)).filter(|set| !set.is_empty())
 }
@@ -111,9 +109,7 @@ pub(crate) fn client(headers: &HeaderMap) -> Option<&str> {
 
 /// Whether the client of this request can see a spec and answer it.
 pub(crate) fn capable(app: &App, headers: &HeaderMap) -> bool {
-    let header = headers
-        .get(CLIENT_HEADER)
-        .and_then(|value| value.to_str().ok());
+    let header = client(headers);
     header.is_some() && spec::capable(header, threshold(app).as_ref())
 }
 
