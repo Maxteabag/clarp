@@ -333,7 +333,7 @@ def test_non_snapshot_status_keeps_ttl_and_default_timeout(fleet, monkeypatch, b
     runtime = Runtime(status)
     backends.configure_runtime_client(runtime)
     if build_fails:
-        def fail_roster():
+        def fail_roster(**_kw):
             raise ValueError("synthetic projection failure")
         monkeypatch.setattr(agents, "list_agents", fail_roster)
         with pytest.raises(ValueError, match="synthetic projection failure"):

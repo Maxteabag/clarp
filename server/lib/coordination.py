@@ -42,7 +42,9 @@ HIDE = "hide"
 # A string enum from the start, stored and echoed as a string, so a later
 # value adds no contract break.
 VISIBILITIES = (SHOW, HIDE)
-DEFAULT_VISIBILITY = SHOW
+# The Host's choice when none is stored: coordination is out of the way unless the user asks for
+# it (the owner's instruction on issue 478). A stored choice, global or per chat, is unchanged.
+DEFAULT_VISIBILITY = HIDE
 GLOBAL_KEY = "coordination_visibility"
 
 NOTE_KIND = "note"

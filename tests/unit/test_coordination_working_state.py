@@ -18,7 +18,11 @@ def _no_live_work(monkeypatch):
 
 @pytest.fixture
 def chat(tmp_path):
-    return _Chat(tmp_path)
+    """A chat on a Host whose user chose to see coordination: each test hides it where it means to
+    (the Host's default is 'hide')."""
+    made = _Chat(tmp_path)
+    coordination.set_global("show")
+    return made
 
 
 def _row(chat):
@@ -167,9 +171,9 @@ def test_the_state_stream_of_a_hidden_turn_names_the_partner_not_the_work(chat):
     watcher._poll_once()
     mine = [e for e in stream.events if (e.get("agent_id") if isinstance(e, dict) else None) == chat.id]
     assert mine and "secret-plan" not in repr(mine)
-    activity = next(e for e in mine if e.get("type") == "agent-activity")
+    activity = next(e for e in mine if e.get("type") == "agent-activity" and e.get("kind") == "tool")
     assert activity["summary"] == "Working with Boss" and activity["tool"] == ""
-    state = next(e for e in mine if e.get("type") == "agent-state")
+    state = next(e for e in mine if e.get("type") == "agent-state" and e.get("kind") == "tool")
     assert state["audience"] == "agents" and state["sender_name"] == "Boss"
 
 
