@@ -10,4 +10,3 @@
 # One line a difference: its id from the report, the reference's PR (a number), the branch that owes
 # the port (or its owner, until the branch is made), and what it is: the scenario first, as the
 # report names it.
-76d51071263c  577  rs-logins-sol  who-is-there / http / [0].body.contract.host / changed: 125 -> 124: the Host's contract number, 125 on the Python Host at the reference, 124 here until the ports of 125 to 125 land (written by the train, never by a piece)

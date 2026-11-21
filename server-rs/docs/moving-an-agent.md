@@ -135,7 +135,8 @@ can read the Rust turns that the tool kept in its own session.
 
 ## Moving away from the Rust Host
 
-The Rust Host can also be the source of a move. An administrator or full device sets the
+The Rust Host can also be the source of a move (feature `agent_moved`,
+[Host contract 125](../../docs/compatibility.md)). An administrator or full device sets the
 move mark with `POST /agent-moved`, giving the source session and
 `"moved_to": {"host": "<destination name>", "id": "<destination server id>"}`.
 The agent stays in the source roster with its `moved` mark. New turns and terminal
