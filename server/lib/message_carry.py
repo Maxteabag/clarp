@@ -446,7 +446,8 @@ def loads(text) -> dict | None:
 
 def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: int = 0,
             source_file: str = "", backend_session_id: str = "",
-            session_rows: bool = False, witness: dict | None = None) -> str:
+            session_rows: bool = False, witness: dict | None = None,
+            pending_tail: dict | None = None, accepted_tail: dict | None = None) -> str:
     """'' when the turns before the boundary would be replayed as they stand.
     Otherwise what stands in the way: fixed words, comma separated, for the
     log (no ids, no text).
@@ -454,7 +455,16 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     ``recorded`` is the record the frontier was published with, ``current``
     the rows now; ``carry`` is the checkpoint's store carry (the state at the
     boundary), ``boundary_seq`` the first turn the tail imports. ``witness``,
-    when given, receives under "base" what ``record`` can build on."""
+    when given, receives under "base" what ``record`` can build on.
+
+    After a tail whose publication was refused by a foreign commit, the store
+    holds the previous frontier while the refused tail's rows (transcript rows
+    of this file from the boundary on) stand above its mark. With
+    ``pending_tail`` (a dict) those rows are not refused: their ids and the
+    digest of their unstamped values are put there, for the caller to check
+    against the tail's plan. With ``accepted_tail`` (that dict, once the plan
+    has reproduced every one of them line for line) they pass only while they
+    are still exactly those rows."""
     if recorded is None or current[3] is None:
         return "not_recorded"
     if recorded["scope"] != ("session" if session_rows else "agent"):
@@ -495,7 +505,16 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
         ident = table.at["message_id"]
         if not settled_turns or table.unstamped(
                 sorted(tail + restamped, key=operator.itemgetter(ident))) != recorded["tail"]:
-            found.add("row_transcript")
+            standing = sorted(tail + restamped, key=operator.itemgetter(ident))
+            ids = frozenset(str(row[ident]) for row in standing)
+            digest = table.unstamped(standing)
+            if accepted_tail is not None and accepted_tail.get("ids") == ids \
+                    and accepted_tail.get("digest") == digest:
+                pass        # the tail's plan reproduces each of them as it stands
+            elif pending_tail is not None:
+                pending_tail.update(ids=ids, digest=digest)
+            else:
+                found.add("row_transcript")
     rows_stand = not found
     # The old rows are both parts. No turn before the boundary has a row in
     # the second part, but the traces the record was published with are the

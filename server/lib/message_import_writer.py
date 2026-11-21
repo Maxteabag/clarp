@@ -175,6 +175,8 @@ class _PlanWriter:
         self.began_at = None
         self.deleted: set[str] = set()
         self.updated: set[str] = set()
+        # Message rows it would insert or rewrite (an upsert is an INSERT).
+        self.written: set[str] = set()
         if not database.in_transaction:
             database.execute("BEGIN")
         row = database.execute(
@@ -197,6 +199,8 @@ class _PlanWriter:
             return _PlanCursor([], len(ids))
         if verb == "UPDATE" and text.upper().startswith("UPDATE MESSAGES"):
             self.updated.add(str(parameters[-1]))
+        if verb == "INSERT" and text.upper().startswith("INSERT INTO MESSAGES") and parameters:
+            self.written.add(str(parameters[0]))
         return _PlanCursor([], 1)
 
     def due(self) -> bool:
