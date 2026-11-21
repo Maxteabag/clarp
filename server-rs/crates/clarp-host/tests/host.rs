@@ -21076,20 +21076,17 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
     );
 
     // Another agent is looked at: it has no engines of its own. A clip an app names the
-    // failing engine for is answered with that engine's failure: there is no next one.
+    // failing engine for is answered with the fixed failure: there is no next one.
     look_at(&echo);
     let (status, said) = hear(
         &[("X-Transcription-Model", "elevenlabs:scribe_v2")],
         b"sound",
     );
     assert_eq!(status, 500, "{said}");
-    assert!(
-        said["error"]
-            .as_str()
-            .unwrap()
-            .starts_with("ElevenLabs HTTP 401: "),
-        "{said}"
-    );
+    assert_eq!(said["error"], "transcription failed", "{said}");
+    wait_for("the provider status in the private Host log", || {
+        host.heard.lock().unwrap().contains("ElevenLabs HTTP 401: ")
+    });
     // And one it names the working engine for is heard in the Host's language.
     let (status, said) = hear(&[("X-Transcription-Model", "google:chirp_3")], b"sound");
     assert_eq!(
