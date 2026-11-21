@@ -981,6 +981,67 @@ fn the_bound_lets_the_tool_go_when_the_host_is_gone_and_the_turn_completes_whole
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn the_hold_retries_when_a_vfork_parent_cannot_stop() {
+    let fifo = dir_of("hold-vfork").join("before-exec");
+    let script = r#"import os,sys
+os.mkfifo(sys.argv[1])
+print("spawning",flush=True)
+child=os.posix_spawn("/bin/sleep",["sleep","5"],os.environ,
+    file_actions=[(os.POSIX_SPAWN_OPEN,3,sys.argv[1],os.O_RDONLY,0)])
+print("spawn completed",flush=True)
+os.waitpid(child,0)"#;
+    let mut running = start(
+        "hold-vfork",
+        &format!("exec python3 -c '{script}' '{}'", fifo.display()),
+    );
+    wait_for("the spawn fixture to start", || {
+        outs(&records(&running.spool)).contains(&"spawning")
+    });
+    let parent = i32::try_from(ask(&running.socket, &Request::Ping).pid.unwrap()).unwrap();
+    let children = format!("/proc/{parent}/task/{parent}/children");
+    let mut child = None;
+    wait_for(
+        "the child to wait in open and its parent to wait in vfork",
+        || {
+            child = std::fs::read_to_string(&children)
+                .ok()
+                .and_then(|pids| pids.split_whitespace().next()?.parse::<i32>().ok());
+            state(parent) == Some('D') && child.is_some_and(|pid| state(pid) == Some('S'))
+        },
+    );
+    let child = child.unwrap();
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(child),
+        nix::sys::signal::Signal::SIGSTOP,
+    )
+    .unwrap();
+    wait_for("the child to stop before exec", || {
+        state(child) == Some('T')
+    });
+    // Opening a Linux FIFO read/write gives the child a writer when it can resume.
+    let _writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .unwrap();
+    assert_eq!(state(parent), Some('D'));
+    assert_eq!(state(child), Some('T'));
+
+    let reply = hold(&running.socket, 2_000);
+    assert!(reply.ok, "{reply:?}");
+    assert_eq!(state(parent), Some('T'));
+    assert_eq!(state(child), Some('T'));
+    assert_eq!(release(&running.socket).let_go, Some(true));
+    wait_for("the parent's spawn to finish", || {
+        outs(&records(&running.spool)).contains(&"spawn completed")
+    });
+    assert!(ask(&running.socket, &Request::Stop { grace_ms: 100 }).ok);
+    ends(&mut running.shim);
+    std::fs::remove_dir_all(&running.dir).unwrap();
+}
+
 #[test]
 fn a_tool_ended_while_it_is_held_is_killed_without_running_again() {
     for how in ["stop", "signal"] {
