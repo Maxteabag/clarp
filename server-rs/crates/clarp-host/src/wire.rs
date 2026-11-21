@@ -19,7 +19,7 @@ use clarp_kernel::recovery;
 use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
-use clarp_protocol::events::{AgentStateKind, QueueKind};
+use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
 use serde_json::{Map, Value, json};
 
@@ -611,23 +611,19 @@ pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
     })
 }
 
-fn queue_item_fields(message: &Waiting, client_id: &str) -> Map<String, Value> {
+/// One item from `GET /turn-queue`, including the original fields for older clients.
+pub fn queue_item(message: &Waiting) -> Value {
     let kind = if message.admission.left_for_later() {
-        QueueKind::Later
+        "later"
     } else {
-        QueueKind::Waiting
+        "waiting"
     };
-    Map::from_iter([
-        ("client_msg_id".into(), json!(client_id)),
+    let mut item = Map::from_iter([
+        ("client_msg_id".into(), json!(message.told_id)),
         ("text".into(), json!(message.text)),
         ("sent_at".into(), json!(iso(message.accepted_at_ms))),
         ("kind".into(), json!(kind)),
-    ])
-}
-
-/// One item from `GET /turn-queue`, including the original fields for older clients.
-pub fn queue_item(message: &Waiting) -> Value {
-    let mut item = queue_item_fields(message, &message.client_id);
+    ]);
     item.insert("id".into(), json!(message.client_id));
     item.insert("enqueued_at".into(), json!(message.accepted_at_ms));
     item.insert("synthesize_audio".into(), json!(message.speak));
@@ -637,48 +633,41 @@ pub fn queue_item(message: &Waiting) -> Value {
 #[derive(Clone, Copy)]
 pub enum QueueUpdate<'a> {
     Mailbox,
-    Joined(&'a Waiting),
-    Started {
-        client_id: &'a str,
-        message: Option<&'a Waiting>,
-    },
-    Edited(&'a Waiting),
+    Joined(&'a str),
+    Started(&'a str),
+    Edited { client_id: &'a str, text: &'a str },
     Deleted(&'a str),
 }
 
 /// The queue changed, with the item that changed when there is one.
 pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<'_>) -> Value {
-    let mut event = match update {
-        QueueUpdate::Joined(message) | QueueUpdate::Edited(message) => {
-            queue_item_fields(message, &message.told_id)
-        }
-        QueueUpdate::Started { client_id, message } => match message {
-            Some(message) => queue_item_fields(message, client_id),
-            None => Map::from_iter([("client_msg_id".into(), json!(client_id))]),
-        },
-        QueueUpdate::Deleted(client_id) => {
-            Map::from_iter([("client_msg_id".into(), json!(client_id))])
-        }
-        QueueUpdate::Mailbox => Map::new(),
-    };
-    event.extend([
-        ("type".into(), json!("queue-updated")),
-        ("agent_id".into(), json!(record.agent_id)),
-        ("session".into(), json!(record.session)),
-        ("queue_depth".into(), json!(status.waiting.len())),
-        ("queue_paused".into(), json!(status.paused)),
-        (
-            "queue_started".into(),
-            json!(matches!(update, QueueUpdate::Started { .. })),
-        ),
-        ("queue_revision".into(), json!(status.queue_revision)),
-    ]);
+    let mut event = json!({
+        "type": "queue-updated",
+        "agent_id": record.agent_id,
+        "session": record.session,
+        "queue_depth": status.queue_depth,
+        "queue_paused": status.paused,
+        "queue_started": matches!(update, QueueUpdate::Started(_)),
+        "queue_revision": status.queue_revision,
+    });
     match update {
-        QueueUpdate::Edited(_) => event.insert("queue_change".into(), json!("edited")),
-        QueueUpdate::Deleted(_) => event.insert("queue_change".into(), json!("deleted")),
-        _ => None,
-    };
-    Value::Object(event)
+        QueueUpdate::Joined(id) | QueueUpdate::Started(id) => event["client_msg_id"] = json!(id),
+        QueueUpdate::Edited { client_id, text } => {
+            if !client_id.is_empty() {
+                event["client_msg_id"] = json!(client_id);
+            }
+            event["queue_change"] = json!("edited");
+            event["text"] = json!(text);
+        }
+        QueueUpdate::Deleted(id) => {
+            if !id.is_empty() {
+                event["client_msg_id"] = json!(id);
+            }
+            event["queue_change"] = json!("deleted");
+        }
+        QueueUpdate::Mailbox => {}
+    }
+    event
 }
 
 /// A background job as the apps are given it: what is kept of it, and what is read off it
@@ -1840,7 +1829,7 @@ pub fn summary(
         // What the user's last compaction did, from numbers: null until the first
         // (compaction_outcome).
         "last_compaction": status.last_compaction,
-        "queued_turn_count": status.waiting.len(),
+        "queued_turn_count": status.queue_depth,
         "queued_turn_revision": status.queue_revision,
         "queue_paused": status.paused,
         "backend_quota": null,
@@ -1946,6 +1935,7 @@ mod tests {
                 account_waits: 0,
             }),
             waiting: vec![TurnId(3)],
+            queue_depth: 1,
             paused: true,
             queue_revision: 7,
             stop_generation: 0,
@@ -2772,14 +2762,7 @@ mod tests {
             (&json!(1), &json!(true), &json!(7), &json!(false))
         );
         assert!(held.get("client_msg_id").is_none());
-        let left = queue_updated(
-            &record(),
-            &thinking,
-            QueueUpdate::Started {
-                client_id: "m2",
-                message: None,
-            },
-        );
+        let left = queue_updated(&record(), &thinking, QueueUpdate::Started("m2"));
         assert_eq!(
             (&left["client_msg_id"], &left["queue_started"]),
             (&json!("m2"), &json!(true))

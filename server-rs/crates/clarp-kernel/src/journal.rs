@@ -12,11 +12,13 @@
 
 mod turn_sessions;
 
+use std::collections::HashSet;
+
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, AgentEvent, Command, Effect, Refusal};
-use crate::turn::{Admission, IllegalTransition, Origin, TurnEvent, TurnId};
+use crate::turn::{Admission, IllegalTransition, Origin, Queued, TurnEvent, TurnId};
 
 /// What an item in an agent's log is. The numbers are permanent once a log holds them.
 pub mod kind {
@@ -214,6 +216,8 @@ pub struct Recorder {
     log: Box<dyn AgentLog>,
     turn_sessions: turn_sessions::TurnSessions,
     agent: Agent,
+    /// Legacy waiting turns that already have a conversation row.
+    shown_waiting: HashSet<TurnId>,
     cursor: Option<SpoolCursor>,
     /// The position of the newest item. This recorder is the log's one writer, so it knows.
     last_seq: Seq,
@@ -322,10 +326,25 @@ impl Recorder {
             .read_before(Seq::MAX, kind::CONVERSATION, 1)?
             .last()
             .map_or(0, |item| item.seq);
+        let mut shown_waiting = HashSet::new();
+        for queued in agent.waiting() {
+            if log
+                .read_after(
+                    queued.message_seq.saturating_sub(1),
+                    Kinds::only(kind::MESSAGE),
+                    1,
+                )?
+                .first()
+                .is_some_and(|item| item.seq == queued.message_seq)
+            {
+                shown_waiting.insert(queued.id);
+            }
+        }
         Ok(Self {
             log,
             turn_sessions,
             agent,
+            shown_waiting,
             cursor,
             last_seq,
             conversation_seq,
@@ -404,6 +423,13 @@ impl Recorder {
 
     pub fn agent(&self) -> &Agent {
         &self.agent
+    }
+
+    /// The public queue contains messages whose conversation row does not exist yet.
+    pub fn unshown_waiting(&self) -> impl Iterator<Item = &Queued> {
+        self.agent
+            .waiting()
+            .filter(|queued| !self.shown_waiting.contains(&queued.id))
     }
 
     /// What changed of the user sends' delivery since this was last asked (send_delivery_state).
@@ -740,6 +766,15 @@ impl Batch<'_> {
         }
         self.recorder.last_seq = last_seq;
         self.recorder.agent = self.work;
+        for event in &self.events {
+            if let AgentEvent::Turn {
+                turn,
+                change: TurnEvent::Started { .. } | TurnEvent::Settled { .. },
+            } = event
+            {
+                self.recorder.shown_waiting.remove(turn);
+            }
+        }
         for (turn, session) in self.turn_bindings {
             self.recorder.turn_sessions.set(turn, session.as_deref());
         }
@@ -1682,6 +1717,17 @@ mod tests {
             .accept_message(message("u-1", Admission::Queue), 1)
             .unwrap();
         let message_seq = said_as_before(&mut recorder, "u-2", 2);
+        let mut recorder = open(&engine);
+        assert_eq!(
+            recorder.agent().waiting().count(),
+            1,
+            "its turn still waits"
+        );
+        assert_eq!(
+            recorder.unshown_waiting().count(),
+            0,
+            "its row is already shown"
+        );
         assert_eq!(rows(&recorder), vec!["u-1", "u-2"]);
         assert_eq!(
             recorder
@@ -1706,6 +1752,7 @@ mod tests {
             }]
         );
         assert_eq!(rows(&recorder), vec!["u-1", "u-2"], "not written twice");
+        assert!(!recorder.shown_waiting.contains(&TurnId(2)));
     }
 
     fn trigger_of(name: &str) -> Origin {
