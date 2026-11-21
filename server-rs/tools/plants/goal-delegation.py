@@ -3,6 +3,7 @@
 import runner
 K='clarp-kernel/src/goals/delegation.rs'
 A='clarp-actor/src/delegation.rs'
+B='clarp-actor/src/bookkeeping.rs'
 F='clarp-host/src/fleet/delegations.rs'
 H='clarp-host/src/'
 RUNS={
@@ -90,18 +91,27 @@ for why,old,new in [
     ('a read after restart loses its delegation history','Some(Transition::Start { binding }) => Some(binding)','Some(Transition::Start { binding }) => None'),
 ]:
     put(A,'mailbox',why,old,new)
-for why,old,new in [
-    ('the second role is not retired on deletion','for row in &rows {\n            self.stage_delegation_stop','for row in rows.iter().take(1) {\n            self.stage_delegation_stop'),
-    ('released relationships disappear from history','Ok(rows)\n}\n\npub(super) fn active_for_agent','rows.retain(|r|r.stopped_at.is_none());Ok(rows)\n}\n\npub(super) fn active_for_agent'),
-    ('a created relationship leaks its token digest','"status":if r.stopped_at','"token_hash":r.token_hash,"status":if r.stopped_at'),
-    ('a reply loses who stopped the relationship','"stopped_reason":r.stopped_reason','"stopped_reason":""'),
-    ('stopped row claims active','{"stopped"}else{"active"}','{"active"}else{"active"}'),
-    ('listener is said to be in flight before any dispatch','"in_flight":false','"in_flight":true'),
-    ('unused cursor is reported spent','"goal_event_through":0','"goal_event_through":1'),
-    ('the initial reason is reset','"created_reason":r.created_reason','"created_reason":""'),
-    ('a delegation reports a fabricated lag','"lag_ms":0','"lag_ms":1'),
+for file,why,old,new in [
+    (F,'the second role is not retired on deletion','for row in &rows {\n            self.stage_delegation_stop','for row in rows.iter().take(1) {\n            self.stage_delegation_stop'),
+    (F,'released relationships disappear from history','Ok(rows)\n}\n\npub(super) fn active_for_agent','rows.retain(|r|r.stopped_at.is_none());Ok(rows)\n}\n\npub(super) fn active_for_agent'),
+    (F,'a created relationship leaks its token digest','"status":if r.stopped_at','"token_hash":r.token_hash,"status":if r.stopped_at'),
+    (F,'a reply loses who stopped the relationship','"stopped_reason":r.stopped_reason','"stopped_reason":""'),
+    (F,'stopped row claims active','{"stopped"}else{"active"}','{"active"}else{"active"}'),
+    # Applied::show writes the progress fields on every successful response.
+    (B,'listener is said to be in flight before any dispatch',
+     'row["in_flight"] = json!(\n'
+     '            row["dispatched_message_through"].as_i64().unwrap_or(0) > self.message_through\n'
+     '                || row["dispatched_goal_event_through"].as_i64().unwrap_or(0)\n'
+     '                    > self.goal_event_through\n'
+     '        );',
+     'row["in_flight"] = json!(true);'),
+    (B,'unused cursor is reported spent','row["goal_event_through"] = json!(self.goal_event_through);',
+     'row["goal_event_through"] = json!(self.goal_event_through.max(1));'),
+    (F,'the initial reason is reset','"created_reason":r.created_reason','"created_reason":""'),
+    (B,'a delegation reports a fabricated lag','.map_or(0, |since| now.saturating_sub(since))',
+     '.map_or(1, |since| now.saturating_sub(since))'),
 ]:
-    put(F,'doors',why,old,new)
+    put(file,'doors',why,old,new)
 for why,old,new in [
     ('a baseline returns the following distinct message','select_nth_unstable_by(offset,','select_nth_unstable_by(offset.saturating_sub(1),'),
     ('a baseline counts the oldest revisions first','|a, b| b.cmp(a)','|a, b| a.cmp(b)'),
