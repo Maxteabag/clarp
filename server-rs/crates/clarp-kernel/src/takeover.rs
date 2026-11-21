@@ -58,8 +58,8 @@ pub fn untraced_uuid(agent: &str, turn: u64) -> String {
 
 fn named_uuid(trace: &str) -> String {
     const NAMESPACE: [u8; 16] = [
-        0x5f, 0x0e, 0x7c, 0x52, 0x9a, 0x5b, 0x4d, 0x9e, 0x8f, 0x53, 0x2f, 0x0b, 0x9b, 0x1d,
-        0x49, 0x10,
+        0x5f, 0x0e, 0x7c, 0x52, 0x9a, 0x5b, 0x4d, 0x9e, 0x8f, 0x53, 0x2f, 0x0b, 0x9b, 0x1d, 0x49,
+        0x10,
     ];
     let mut hash = Sha1::new();
     hash.update(NAMESPACE);
@@ -119,9 +119,10 @@ pub fn agy_output(event: &Value) -> bool {
         Some("tool") => true,
         Some("agent_response") => {
             let delta = &update["text_delta"];
-            delta
-                .as_str()
-                .map_or_else(|| python::truthy(delta), |text| !python::strip(text).is_empty())
+            delta.as_str().map_or_else(
+                || python::truthy(delta),
+                |text| !python::strip(text).is_empty(),
+            )
         }
         _ => false,
     }

@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Wrong rules in the provider and journal parts of silent-turn takeover."""
+import runner
+
+KERNEL = "clarp-kernel/src/takeover.rs"
+AGENT = "clarp-kernel/src/agent.rs"
+CLAUDE = "clarp-backend/src/claude.rs"
+AGY = "clarp-backend/src/agy.rs"
+RUNS = {
+    "vectors": ["test", "--test", "takeover_vectors"],
+    "journal": ["test", "-p", "clarp-kernel", "--lib", "a_selected_takeover_survives_reopen"],
+    "claude": ["test", "-p", "clarp-backend", "--lib", "a_turn_is_started_with_the_message_on_standard_input"],
+    "agy": ["test", "-p", "clarp-backend", "--lib", "a_turn_is_started_with_the_message_bound_to_its_flag"],
+}
+
+PLANTS = [
+    (KERNEL, "vectors", "the Claude prompt UUID keeps trace padding",
+     "let trace = python::strip(trace);", "let trace = trace.trim_matches(' ');"),
+    (KERNEL, "vectors", "the Claude prompt UUID is in another namespace",
+     "0x5f, 0x0e, 0x7c, 0x52", "0x5e, 0x0e, 0x7c, 0x52"),
+    (KERNEL, "vectors", "the Claude prompt UUID has the wrong version",
+     "(uuid[6] & 0x0f) | 0x50", "(uuid[6] & 0x0f) | 0x40"),
+    (KERNEL, "vectors", "the Claude prompt UUID has the wrong variant",
+     "(uuid[8] & 0x3f) | 0x80", "(uuid[8] & 0x3f) | 0x40"),
+    (KERNEL, "vectors", "the second Claude block is handed over first",
+     '.iter()\n        .map(|text| json!({"type": "text", "text": text}))',
+     '.iter().rev()\n        .map(|text| json!({"type": "text", "text": text}))'),
+    (KERNEL, "vectors", "empty text block start is ignored",
+     'Some("text" | "text_delta" | "tool_use" | "input_json_delta" | "server_tool_use")',
+     'Some("text_delta" | "tool_use" | "input_json_delta" | "server_tool_use")'),
+    (KERNEL, "vectors", "the first tool input fragment is ignored",
+     'Some("text" | "text_delta" | "tool_use" | "input_json_delta" | "server_tool_use")',
+     'Some("text" | "text_delta" | "tool_use" | "server_tool_use")'),
+    (KERNEL, "vectors", "Claude thinking counts as an answer",
+     'Some("text" | "text_delta" | "tool_use" | "input_json_delta" | "server_tool_use")',
+     'Some("text" | "text_delta" | "tool_use" | "input_json_delta" | "server_tool_use" | "thinking")'),
+    (KERNEL, "vectors", "complete Claude assistant messages are ignored",
+     '.is_some_and(|parts| parts.iter().any(|part| output(&part["type"])))',
+     '.is_some_and(|parts| parts.is_empty())'),
+    (KERNEL, "vectors", "Antigravity tool steps are ignored",
+     'Some("tool") => true,', 'Some("tool") => false,'),
+    (KERNEL, "vectors", "white space is counted as an Antigravity answer",
+     '!python::strip(text).is_empty()', '!text.is_empty()'),
+    (KERNEL, "vectors", "Claude with no resume pair is allowed",
+     '"claude" => [2, 1, 223]', '"claude" => [2, 1, 222]'),
+    (KERNEL, "vectors", "Antigravity before the recorded version is allowed",
+     '"agy" => [1, 5, 13]', '"agy" => [1, 5, 12]'),
+    (KERNEL, "vectors", "the minimum provider version is refused",
+     '[major, minor, patch] >= minimum', '[major, minor, patch] > minimum'),
+    (KERNEL, "vectors", "the Claude resume point ignores an earlier assistant entry",
+     'matches!(kind, Some("user" | "assistant"))', 'matches!(kind, Some("user"))'),
+    (KERNEL, "vectors", "a Claude answer in the transcript is ignored",
+     'facts.answered |= kind == Some("assistant");', 'facts.answered |= false;'),
+    (KERNEL, "vectors", "an Antigravity assistant echo counts as its first input",
+     'turn["role"] == "user"', 'turn["role"] != "system"'),
+    (KERNEL, "vectors", "the first Antigravity text must match the whole stored step",
+     'text.contains(first)', 'text == first'),
+    (KERNEL, "vectors", "a Claude first-turn takeover discards an answer",
+     'if facts.answered {', 'if facts.answered && !first_turn {'),
+    (KERNEL, "vectors", "a resumed Claude turn can take over without readable prior history",
+     'first_turn.then_some(Input::ClaudeFresh { first })', 'Some(Input::ClaudeFresh { first })'),
+    (CLAUDE, "claude", "the resumed request drops a different turn",
+     'drops_turn.clone(),', 'resume_at.clone(),'),
+    (CLAUDE, "claude", "the chosen first-turn session is resumed instead of recreated",
+     'if !fresh', 'if fresh'),
+    (CLAUDE, "claude", "the Host reminder becomes another user block on takeover",
+     'if first.is_none() {\n            texts.extend(reminder.as_deref());',
+     'if first.is_some() {\n            texts.extend(reminder.as_deref());'),
+    (AGY, "agy", "Antigravity takes over with the new words first",
+     'format!("{first}\\n\\n{}", spec.prompt)', 'format!("{}\\n\\n{first}", spec.prompt)'),
+    (AGENT, "journal", "the selected takeover is forgotten on restart",
+     'self.selected_takeover = Some(selected.clone());', 'self.selected_takeover = None;'),
+    (AGENT, "journal", "an abandoned takeover starts the follow-up",
+     'work.record(AgentEvent::TakeoverCleared { from });',
+     'return work.agent.decide(Command::FinishTakeover { from }, now_ms);'),
+    (AGENT, "journal", "the queued replacement has no restart ancestry",
+     'work.start_next_with(now_ms, Some(selected.start));', 'work.start_next_with(now_ms, None);'),
+    (AGENT, "journal", "the third message can take over again",
+     '            && self.live_takeover.is_none()\n', ''),
+]
+
+if __name__ == "__main__":
+    raise SystemExit(runner.main(__file__, RUNS, PLANTS))

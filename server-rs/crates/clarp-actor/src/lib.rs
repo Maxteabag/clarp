@@ -3681,10 +3681,18 @@ impl Actor {
         let before = self.live.take().filter(|live| live.turn == turn);
         let takeover = self.recorder.agent().live_takeover().cloned();
         let (backend_session, new_session) = match &takeover {
-            Some(start) if matches!(start.input, clarp_kernel::takeover::Input::ClaudeFresh { .. }) => {
+            Some(start)
+                if matches!(
+                    start.input,
+                    clarp_kernel::takeover::Input::ClaudeFresh { .. }
+                ) =>
+            {
                 (None, start.session.clone())
             }
-            Some(start) => (Some(start.session.clone()), self.profile.conversation_id.clone()),
+            Some(start) => (
+                Some(start.session.clone()),
+                self.profile.conversation_id.clone(),
+            ),
             None => (
                 self.recorder.agent().backend_session().map(str::to_string),
                 self.profile.conversation_id.clone(),

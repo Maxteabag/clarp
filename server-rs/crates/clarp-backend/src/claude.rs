@@ -1853,7 +1853,10 @@ mod tests {
                 launch.args.iter().any(|arg| arg == "--resume"),
                 expected[1].is_some()
             );
-            assert_eq!(launch.stdin.iter().filter(|byte| **byte == b'\n').count(), 1);
+            assert_eq!(
+                launch.stdin.iter().filter(|byte| **byte == b'\n').count(),
+                1
+            );
             let input: Value = serde_json::from_slice(&launch.stdin).unwrap();
             assert_eq!(
                 input["message"]["content"],
@@ -1862,11 +1865,9 @@ mod tests {
                     {"type": "text", "text": spec.prompt},
                 ])
             );
-            assert!(
-                launch.args.windows(2).any(|pair| {
-                    pair[0] == "--append-system-prompt" && pair[1].contains("<system-reminder>")
-                })
-            );
+            assert!(launch.args.windows(2).any(|pair| {
+                pair[0] == "--append-system-prompt" && pair[1].contains("<system-reminder>")
+            }));
         }
         let resumed = Claude::with_program("/opt/claude").launch(&TurnSpec {
             backend_session: Some("sess-1".to_string()),
