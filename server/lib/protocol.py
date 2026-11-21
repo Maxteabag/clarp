@@ -14,6 +14,10 @@ class SSEType:
     QUEUE_UPDATED = "queue-updated"
     DELIVERY_UPDATED = "delivery-updated"  # F4: a hint to re-read /log delivery state
     ARTIFACT_UPDATED = "artifact-updated"
+    # A chat's gallery changed: an image was published, deleted, or (un)marked as a
+    # favourite (feature media_manage). Clients re-read or patch GET /media and drop
+    # cached bytes of a deleted image.
+    MEDIA_CHANGED = "media-changed"
     ATTENTION_UPDATED = "attention-updated"
     BACKGROUND_JOB_UPDATED = "background-job-updated"
     PROVIDER_LIMIT = "provider-limit"
