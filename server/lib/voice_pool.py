@@ -11,10 +11,11 @@ the roster keep their voices for their own names); when every voice is taken, th
 (in the walk's order). The walk is stable: the same name on the same pool and the same fleet gets
 the same voice, and two agents do not share a voice while the pool has a free one.
 
-Cartesia's default pool is TODAY's catalogue (every language: the last fetch the voice names
-file records, else the voice picker's), so a new agent never gets a built-in contact's voice nor
-a voice Cartesia has deleted; only when no catalogue
-has been fetched yet is it the built-in list. Every pick and the insert that stores it run under
+Cartesia's default pool is TODAY's catalogue (the last fetch the voice names file records):
+public voices that are not the account's own, in the agent's speech language, so a new agent
+never gets a built-in contact's voice, a voice Cartesia has deleted, a voice the owner cloned or
+a voice of another language; only when no catalogue has been fetched yet, or it has no such
+voice, is it the built-in list. Every pick and the insert that stores it run under
 one lock (``assigning()``), so two agents or contacts created at once never get the same voice.
 """
 from __future__ import annotations
@@ -39,15 +40,35 @@ def assigning() -> threading.RLock:
     return _ASSIGN_LOCK
 
 
-def _cartesia_catalogue() -> list[str]:
-    """The Cartesia voices on offer TODAY: the last catalogue fetch the names file records
-    (else the voice picker's, fetched this run), never a voice the provider has deleted and
-    never one only remembered by name; never a fetch."""
-    from . import cartesia_voices, voice_names
-    today = voice_names.catalogue(CARTESIA)
-    ids = today if today is not None else cartesia_voices.cached_voice_ids()
+_SAME_LANGUAGE = {"nb": "no", "nn": "no"}      # Norwegian Bokmål and Nynorsk are spoken as "no"
+
+
+def _language(code: str | None) -> str:
+    base = str(code or "").strip().lower().replace("_", "-").split("-")[0]
+    return _SAME_LANGUAGE.get(base, base)
+
+
+def speech_language(name: str) -> str:
+    """The language a new agent or contact named ``name`` is spoken in: the first code of its
+    language set, else the Host's (tts_registry.agent_speech_language, R168), else "en"."""
+    from .tts_registry import agent_speech_language
+    return _language(agent_speech_language({"persona": name, "name": name})) or "en"
+
+
+def _cartesia_catalogue(language: str = "en") -> list[str]:
+    """The Cartesia voices a new agent may get TODAY: rows of the last catalogue fetch (the
+    voice names file records them as Cartesia sent them) that are public, not the account's
+    own (a voice the owner cloned is never handed to anyone), in ``language``, and not deleted;
+    never a voice only remembered by name; never a fetch."""
+    from . import voice_names
+    rows = voice_names.catalogue(CARTESIA)
+    if not rows:
+        return []
     gone = voice_names.gone(CARTESIA)
-    return sorted({v for v in ids if v and v not in gone})
+    want = _language(language)
+    return sorted(v for v, row in rows.items()
+                  if row.get("public") and not row.get("owner") and v not in gone
+                  and _language(row.get("language")) == want)
 
 
 def reserved(cfg, provider: str) -> set[str]:
@@ -61,12 +82,13 @@ def reserved(cfg, provider: str) -> set[str]:
     return set()
 
 
-def pool(cfg, provider: str) -> list[str]:
-    """The voices a new agent may be given for ``provider``, in a fixed order."""
+def pool(cfg, provider: str, language: str = "en") -> list[str]:
+    """The voices a new agent may be given for ``provider``, in a fixed order; Cartesia's in
+    the agent's ``language``."""
     if provider == CARTESIA:
         from .config import DEFAULT_CARTESIA_VOICES
         configured = list(getattr(cfg, "cartesia_pool", ()) or ())
-        source = configured or _cartesia_catalogue() or list(DEFAULT_CARTESIA_VOICES.values())
+        source = configured or _cartesia_catalogue(language) or list(DEFAULT_CARTESIA_VOICES.values())
         return list(dict.fromkeys(v for v in source if v))
     if provider == ELEVENLABS:
         from .voices import VOICE_CATALOG
@@ -114,10 +136,10 @@ def users(cfg, provider: str, agents: Iterable[Mapping], contacts: Iterable[Mapp
 
 
 def pick(cfg, provider: str, name: str, taken: Counter, *, keep: set[str] | frozenset = frozenset(),
-         active: Counter | None = None) -> str | None:
+         active: Counter | None = None, language: str = "en") -> str | None:
     """The walk. ``keep``: voices never handed out while another is free (built-in contacts'
     own); ``active``: users that are active agents and custom contacts, for the log line."""
-    voices = pool(cfg, provider)
+    voices = pool(cfg, provider, language)
     if not voices:
         return None
     start = int(hashlib.sha256(name.strip().casefold().encode()).hexdigest(), 16) % len(voices)
@@ -154,10 +176,11 @@ def assign(cfg, name: str, stored: str | None, *, agents: Iterable[Mapping] | No
         contacts = personas.list_all() if contacts is None else contacts
     agents, contacts = list(agents), list(contacts)
     custom = [c for c in contacts if not c.get("builtin")]
+    language = speech_language(name)
     for provider in missing:
         voice = pick(cfg, provider, name, users(cfg, provider, agents, contacts),
                      keep=reserved(cfg, provider) | set(users(cfg, provider, [], contacts) - users(cfg, provider, [], custom)),
-                     active=users(cfg, provider, agents, custom))
+                     active=users(cfg, provider, agents, custom), language=language)
         if voice:
             mapping[provider] = voice
     return json.dumps(mapping, sort_keys=True, separators=(",", ":"))
