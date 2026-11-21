@@ -172,3 +172,23 @@ def test_a_send_said_before_committed_in_the_yield_still_forces_a_full_import(tm
         world.grow(_turn(backend, ordinal + 1))
         code, changed = world.imported()
         assert code == "full_carry_inputs_changed" and "send_said_before" in changed, (code, changed)
+
+
+@SWITCH
+@BACKENDS
+def test_a_parked_positional_row_during_a_restore_goes_full_not_failed(tmp_path, backend, switch):
+    """A parked positional row (one left by a pass that never ended) stands while
+    the next import restores after a refused tail. The guard lets it through (a
+    live row with no trace, under the live-rows rule), so the tail's plan runs,
+    and its pass refuses it (``parked_positional_rows``): the import is full, as
+    on main, and never fails."""
+    settings = {**_settings(switch), "carry_live_rows": True}
+    with World(tmp_path, backend, _history(backend), settings=settings) as world:
+        ordinal = world.started(6)
+        _refused_by(world, backend, ordinal, "settings_on_yield")
+        world.message("live-parked", source_file="live:parked", role="assistant", text="a parked copy",
+                      at=9000)
+        world.write("UPDATE messages SET seq=? WHERE message_id='live-parked'", (2 * 10 ** 12 + 1,))
+        world.grow(_turn(backend, ordinal + 1))
+        code, changed = world.imported()        # a raised refusal here would be the failed import
+        assert code.startswith("full"), (code, changed)

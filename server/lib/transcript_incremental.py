@@ -1831,9 +1831,17 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             source_file=str(path), backend_session_id=backend_session_id, session_rows=session_rows,
             pending_tail=pending)
         if not what and pending:
-            plan = message_writes.plan_transcript_tail(
-                agent_id=agent_id, backend_session_id=backend_session_id, source_file=str(path),
-                turns=turns, start_seq=cp.boundary_seq, carry=cp.store_carry)
+            try:
+                plan = message_writes.plan_transcript_tail(
+                    agent_id=agent_id, backend_session_id=backend_session_id, source_file=str(path),
+                    turns=turns, start_seq=cp.boundary_seq, carry=cp.store_carry)
+            except message_writes._TailInvalidated as changed:
+                # The plan runs the tail's pass, which refuses what a tail cannot
+                # write (a parked positional row, an identity shift): full, as the
+                # tail itself would refuse it below, never a failed import.
+                from .log import log
+                log("transcriptCarryInputsChanged", f"what={getattr(changed, 'what', 'unknown')}")
+                return refuse("carry_inputs_changed")
             planned = {str(entry.get("id")) for entry in plan["out"]}
             touched = set(plan["written"]) | set(plan["updated"]) | set(plan["deleted"])
             if not pending["ids"] <= planned or pending["ids"] & touched:
