@@ -642,7 +642,11 @@ fn reply(outcome: Outcome, trace_id: &str) -> Routed {
         ok: outcome.ok,
         session: outcome.session,
         dispatch: outcome.dispatch,
-        trace_id: trace_id.to_string(),
+        trace_id: if outcome.trace_id.is_empty() {
+            trace_id.to_string()
+        } else {
+            outcome.trace_id
+        },
         error: Some(outcome.error).filter(|error| !error.is_empty()),
         orchestrator: Some(decided),
         ..SendResponse::default()

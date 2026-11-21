@@ -10,6 +10,12 @@ key; a failed fetch keeps what the file had; a voice found nowhere stays without
 (CLARP_VOICE_NAMES_WORKER=0). A refresh that finds what the file already holds does not
 rewrite it (it only marks the check), and the start-up refresh is skipped while the file is
 younger than REFRESH_SECONDS, so a restart with nothing changed moves no profile version.
+
+Beside the names, the file keeps "_catalogue" (the LAST successful catalogue fetch, replaced
+each time: what the provider offers today, each voice with its language and whether it is public
+and whether it is the account's own, as the row said) and "_gone" (voices in use that the provider
+answered 404 for at the last lookup: deleted voices, logged once each as voiceGone). The voice
+pool hands out only today's catalogue; the profile reads a gone voice as voice_unavailable.
 """
 from __future__ import annotations
 
@@ -66,6 +72,20 @@ def names(provider: str, path: pathlib.Path | None = None) -> dict[str, str]:
     return dict(loaded[0].get(provider) or {}) if loaded else {}
 
 
+def catalogue(provider: str, path: pathlib.Path | None = None) -> dict[str, dict] | None:
+    """The provider's catalogue as last fetched (today's): voice id -> {"language", "public",
+    "owner"} as each row said, or None when it never was; never a fetch."""
+    loaded = _loaded(path or names_path())
+    rows = (loaded[0].get("_catalogue") or {}).get(provider) if loaded else None
+    return {k: dict(v) for k, v in rows.items()} if rows is not None else None
+
+
+def gone(provider: str, path: pathlib.Path | None = None) -> frozenset[str]:
+    """Voices in use the provider answered 404 for at the last lookup (deleted)."""
+    loaded = _loaded(path or names_path())
+    return frozenset((loaded[0].get("_gone") or {}).get(provider) or ()) if loaded else frozenset()
+
+
 def signature(path: pathlib.Path | None = None) -> str | None:
     """A digest of the file's content, or None: what voice_profile's version follows (the
     same names rewritten leave it unchanged)."""
@@ -89,7 +109,10 @@ def _read(path: pathlib.Path) -> dict[str, dict[str, str]]:
         return {}
 
 
-def _read_bytes(data: bytes, path: pathlib.Path) -> dict[str, dict[str, str]]:
+_META = ("_catalogue", "_gone")       # provider -> sorted voice ids
+
+
+def _read_bytes(data: bytes, path: pathlib.Path) -> dict[str, Any]:
     try:
         raw = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as exc:
@@ -98,8 +121,22 @@ def _read_bytes(data: bytes, path: pathlib.Path) -> dict[str, dict[str, str]]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    return {str(p): {str(k): str(v) for k, v in m.items() if k and isinstance(v, str) and v.strip()}
-            for p, m in raw.items() if isinstance(m, dict)}
+    out: dict[str, Any] = {
+        str(p): {str(k): str(v) for k, v in m.items() if k and isinstance(v, str) and v.strip()}
+        for p, m in raw.items() if isinstance(m, dict) and not str(p).startswith("_")}
+    held = raw.get("_gone")
+    if isinstance(held, dict):
+        out["_gone"] = {str(p): sorted({str(v) for v in ids if v})
+                        for p, ids in held.items() if isinstance(ids, list)}
+    held = raw.get("_catalogue")
+    if isinstance(held, dict):
+        # provider -> voice id -> {"language", "public", "owner"} as the catalogue row said
+        out["_catalogue"] = {str(p): {str(k): {"language": str((m or {}).get("language") or ""),
+                                               "public": bool((m or {}).get("public")),
+                                               "owner": bool((m or {}).get("owner"))}
+                                      for k, m in rows.items() if k and isinstance(m, dict)}
+                             for p, rows in held.items() if isinstance(rows, dict)}
+    return out
 
 
 def in_use(cfg) -> dict[str, set[str]]:
@@ -113,21 +150,50 @@ def in_use(cfg) -> dict[str, set[str]]:
         for provider in found:
             if stored.get(provider):
                 found[provider].add(stored[provider])
+    # A per-agent override ([tts.agents.<name>] cartesia_voice / elevenlabs_voice) is spoken too.
+    for override in (getattr(cfg, "tts_agent_overrides", {}) or {}).values():
+        for provider in found:
+            voice = str((override or {}).get(f"{provider}_voice") or "").strip()
+            if voice:
+                found[provider].add(voice)
     return found
 
 
-def _lookup(key: str, ids: set[str], fetch_one: Callable[[str, str], dict], provider: str) -> dict[str, str]:
+def holders(cfg, provider: str, voice_id: str) -> list[str]:
+    """The names that speak with ``voice_id`` for ``provider`` (agents, contacts, persona
+    lists, overrides): for the voiceGone line."""
+    from . import agents as agents_db, personas
+    names_ = [str(r.get("persona") or r.get("name") or "") for r in
+              [*agents_db.list_agents(), *personas.list_all()]
+              if voice_map(str(r.get("voice_id") or "")).get(provider) == voice_id]
+    if provider == CARTESIA:
+        names_ += [n for n, v in (getattr(cfg, "cartesia_voices", {}) or {}).items() if v == voice_id]
+    names_ += [n for n, o in (getattr(cfg, "tts_agent_overrides", {}) or {}).items()
+               if str((o or {}).get(f"{provider}_voice") or "").strip() == voice_id]
+    return sorted(dict.fromkeys(n for n in names_ if n))
+
+
+def _not_found(exc: Exception) -> bool:
+    return getattr(exc, "code", None) == 404 or getattr(exc, "status", None) == 404
+
+
+def _lookup(key: str, ids: set[str], fetch_one: Callable[[str, str], dict],
+            provider: str) -> tuple[dict[str, str], set[str]]:
+    """(names found, ids the provider answered 404 for)."""
     from .log import log_exception
-    out = {}
+    out, missing = {}, set()
     for voice_id in sorted(ids)[:MAX_LOOKUPS]:
         try:
             row = fetch_one(key, voice_id) or {}
         except Exception as exc:  # noqa: BLE001 - an unknown or removed voice stays nameless
-            log_exception("voiceNamesLookupFail", exc, detail=f"{provider} {voice_id}")
+            if _not_found(exc):
+                missing.add(voice_id)
+            else:
+                log_exception("voiceNamesLookupFail", exc, detail=f"{provider} {voice_id}")
             continue
         if str(row.get("name") or "").strip():
             out[voice_id] = str(row["name"]).strip()
-    return out
+    return out, missing
 
 
 def refresh(cfg=None, *, path: pathlib.Path | None = None,
@@ -150,32 +216,50 @@ def refresh(cfg=None, *, path: pathlib.Path | None = None,
 def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use) -> list[str]:
     from . import cartesia_voices, config as config_module, elevenlabs_voices
     from .log import log, log_exception
+    from .voice_profile import elevenlabs_id_usable
     cfg = cfg or config_module.load()
     cartesia_key, eleven_key = cfg.cartesia_key(), cfg.eleven_key()
     if not cartesia_key and not eleven_key:
         return []
     used = (voices_in_use or in_use)(cfg)
     fresh: dict[str, dict[str, str]] = {}
+    gone_now: dict[str, set[str]] = {}
+    today: dict[str, dict[str, dict]] = {}
     if cartesia_key:
         try:
             rows = (cartesia_all or cartesia_voices.all_voices)(cartesia_key)
         except Exception as exc:  # noqa: BLE001 - the file keeps Cartesia's old names
             log_exception("voiceNamesFetchFail", exc, detail=CARTESIA)
         else:
+            today[CARTESIA] = {str(r.get("id")): {"language": str(r.get("language") or ""),
+                                                   "public": bool(r.get("is_public")),
+                                                   "owner": bool(r.get("is_owner"))}
+                               for r in rows if r.get("id")}
             found = {str(r.get("id")): str(r.get("name")).strip()
                      for r in rows if r.get("id") and str(r.get("name") or "").strip()}
-            found.update(_lookup(cartesia_key, used.get(CARTESIA, set()) - set(found),
-                                 cartesia_one or cartesia_voices.fetch_one, CARTESIA))
-            fresh[CARTESIA] = found
-    if eleven_key and used.get(ELEVENLABS):
-        fresh[ELEVENLABS] = _lookup(eleven_key, used[ELEVENLABS],
-                                    eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS)
+            named, gone_now[CARTESIA] = _lookup(cartesia_key, used.get(CARTESIA, set()) - set(today[CARTESIA]),
+                                                cartesia_one or cartesia_voices.fetch_one, CARTESIA)
+            fresh[CARTESIA] = {**found, **named}
+    # ElevenLabs is asked only for ids it can hold: a bare Cartesia uuid stored before the
+    # one stored shape reads as an ElevenLabs id, and ElevenLabs answers it 400.
+    eleven_ids = {v for v in used.get(ELEVENLABS, set()) if elevenlabs_id_usable(v)}
+    if eleven_key and eleven_ids:
+        fresh[ELEVENLABS], gone_now[ELEVENLABS] = _lookup(
+            eleven_key, eleven_ids, eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS)
     if not fresh:
         return []
     current = _read(path) if path.exists() else {}
     before = json.dumps(current, sort_keys=True, separators=(",", ":"))
     for provider, found in fresh.items():
-        current[provider] = {**current.get(provider, {}), **found}
+        current[provider] = {k: v for k, v in {**current.get(provider, {}), **found}.items()
+                             if k not in gone_now.get(provider, ())}
+    for provider, ids in today.items():
+        current.setdefault("_catalogue", {})[provider] = ids
+    for provider, ids in gone_now.items():
+        current.setdefault("_gone", {})[provider] = sorted(ids)
+        for voice_id in sorted(ids - set(((json.loads(before) if before else {}).get("_gone") or {})
+                                          .get(provider) or ())):
+            log("voiceGone", f"provider={provider} id={voice_id} agents={','.join(holders(cfg, provider, voice_id))}")
     body = json.dumps(current, sort_keys=True, separators=(",", ":"))
     if path.exists() and body == before:
         os.utime(path)                 # checked today; same names: the version stays

@@ -87,6 +87,8 @@ mod source_trace;
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
+#[path = "host/steer_c.rs"]
+mod steer_c;
 #[path = "host/takeover_b.rs"]
 mod takeover_b;
 #[path = "host/transcription_errors.rs"]
@@ -13952,8 +13954,15 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
             &decided["action"],
             &decided["decision_id"]
         ),
-        (200, &json!("anna"), &json!("route"), &Value::Null),
+        (200, &json!("anna"), &json!("route"), &json!(1)),
         "{again}"
+    );
+    assert_eq!(again["orchestrator"], sent["orchestrator"]);
+    assert_eq!(again["trace_id"], sent["trace_id"]);
+    assert!(
+        sent["trace_id"]
+            .as_str()
+            .is_some_and(|trace| !trace.is_empty())
     );
     assert_eq!((questions().len(), told_by_people(&anna)), (2, 1));
     // The same id for other words is other work, and refused.
@@ -13999,6 +14008,12 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         })
     });
     assert_eq!(told_by_people(&anna), 1);
+    let asked_before_replay = questions().len();
+    let (status, still_unsure) = dictate("maybe ship it", "r-2");
+    assert_eq!(status, 200, "{still_unsure}");
+    assert_eq!(still_unsure["orchestrator"], unsure["orchestrator"]);
+    assert_eq!(still_unsure["trace_id"], unsure["trace_id"]);
+    assert_eq!(questions().len(), asked_before_replay);
     let (status, yes) = dictate("yes", "r-3");
     assert_eq!(
         (status, &yes["session"], &yes["orchestrator"]["action"]),
@@ -14143,6 +14158,8 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         (200, &json!(mike), &json!("clarify")),
         "{sent}"
     );
+    assert_eq!(sent["orchestrator"], unsure["orchestrator"]);
+    assert_eq!(sent["trace_id"], unsure["trace_id"]);
     assert_eq!(questions().len(), before);
     let screen = host.get("/orchestrator/settings");
     assert_eq!(

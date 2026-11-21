@@ -687,6 +687,10 @@ impl ClaudeInterpreter {
         let Ok(event) = serde_json::from_str::<Value>(line) else {
             return;
         };
+        // Read receipts place user rows in the actor; they carry no tool output.
+        if event["type"] == "user" && event["isReplay"] == true {
+            return;
+        }
         // What a sub-agent says belongs to its own stream. It has no row in the parent's
         // conversation, and its raw block indexes must not replace the parent's.
         let parent = text_of(&event["parent_tool_use_id"]);

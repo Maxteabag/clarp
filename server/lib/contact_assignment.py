@@ -67,8 +67,12 @@ def assign_contact(session, mode="auto", name=""):
         try:
             if contact is None:
                 contact = personas.create(name=name, voice_id="")
+            # V2b: the contact's voices, plus a pool voice for any configured provider
+            # (or fallback) it has none for, so the agent is heard after the assignment.
+            from . import config as app_config, voice_pool
+            voice = voice_pool.assign(app_config.load(), contact["name"], contact.get("voice_id") or "{}")
             agents.update_agent(agent["agent_id"], persona=contact["name"],
-                voice_id=contact.get("voice_id") or "{}", personality=contact.get("personality") or "",
+                voice_id=voice, personality=contact.get("personality") or "",
                 avatar_symbol=contact.get("avatar_symbol") or "", avatar_path=contact.get("avatar_path") or "")
             connection.commit()
         except Exception:

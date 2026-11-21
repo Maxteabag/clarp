@@ -11,6 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use clarp_actor::ShimOrder;
+use clarp_kernel::steering::REPLAY_USER_MESSAGES;
 use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request};
 
 use crate::ids;
@@ -123,6 +124,9 @@ impl Launcher {
         if order.prompt_as_file {
             command.arg("--prompt-as-file");
         }
+        if order.args.iter().any(|arg| arg == REPLAY_USER_MESSAGES) {
+            command.args(["--stdin-until", "result"]);
+        }
         if let Some(session) = &order.named_session {
             command.arg("--named-session").arg(session);
         }
@@ -203,6 +207,29 @@ impl Launcher {
     }
 }
 
+pub(crate) fn gate_steering(order: &mut ShimOrder) {
+    if !order.args.iter().any(|arg| arg == REPLAY_USER_MESSAGES) {
+        return;
+    }
+    // This is the launch thread. Dispatch consults what the shim recorded; it does not probe.
+    let version = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()
+        .and_then(|runtime| {
+            runtime.block_on(crate::models::asked(
+                Path::new(&order.program),
+                &["--version".into()],
+                Duration::from_millis(2_500),
+            ))
+        });
+    if !version.is_some_and(|(code, version)| {
+        code == 0 && clarp_kernel::steering::supported_version(&version)
+    }) {
+        order.args.retain(|arg| arg != REPLAY_USER_MESSAGES);
+    }
+}
+
 /// Follows the shim at this socket until it is gone: says when its spool may have grown, and
 /// at the end that nothing answers any more. Blocks for as long as the shim lives.
 pub fn follow(socket: &Path, tell: &dyn Fn(Told)) {
@@ -255,6 +282,22 @@ pub fn stop(socket: &Path, grace_ms: u64) {
         let mut reply = String::new();
         let _ = BufReader::new(shim).read_line(&mut reply);
     }
+}
+
+/// Try once. After an ambiguous socket outcome the actor still waits for stdout evidence.
+pub async fn steer(socket: &Path, input: String) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let Ok(line) = serde_json::to_string(&Request::Stdin { data: input }) else {
+        return;
+    };
+    let attempt = async {
+        let mut shim = tokio::net::UnixStream::connect(socket).await?;
+        shim.write_all(format!("{line}\n").as_bytes()).await?;
+        let mut reply = String::new();
+        tokio::io::BufReader::new(shim).read_line(&mut reply).await
+    };
+    let _ = tokio::time::timeout(STOP_TIMEOUT, attempt).await;
 }
 
 #[cfg(test)]

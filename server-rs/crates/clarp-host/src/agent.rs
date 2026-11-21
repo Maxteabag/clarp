@@ -8,14 +8,15 @@
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
-    Action, Actor, ActorError, ByHand, Changed, ImportedRow, Kept, Outputs, Profile, QueueState,
-    Sent, ShimOrder, Status, TurnFate, Waiting,
+    Action, Actor, ActorError, ByHand, Changed, ImportedRow, JoinedRead, Kept, Outputs, Profile,
+    QueueState, Sent, ShimOrder, Status, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
@@ -1275,6 +1276,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         told: None,
         passed: Vec::new(),
         held: None,
+        followups: None,
         pooled: None,
         terminals: 0,
         behind_terminal: None,
@@ -1337,6 +1339,8 @@ struct Worker {
     /// The launch of an attempt that waits for an account: carried out when the pool of the
     /// tool's accounts takes the turn up.
     held: Option<ShimOrder>,
+    /// Socket requests from this agent are written in the order it accepted them.
+    followups: Option<mpsc::Sender<(PathBuf, String)>>,
     /// The turn the pool was last told of.
     pooled: Option<TurnId>,
     /// How many terminals are open on the agent's own tool.
@@ -2563,6 +2567,21 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
+        if self.setup.record.backend == "claude"
+            && let Ask::Send {
+                message,
+                admission: Admission::Queue,
+                reservation: None,
+                ..
+            } = &ask
+            && message.origin.is_user()
+            && let Some(actor) = self.actor.as_mut()
+        {
+            // Read a tool call which reached the spool before this send, even if its wakeup
+            // is still behind the send in the mailbox.
+            let read = actor.spool_changed(now)?;
+            self.after(read);
+        }
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
@@ -2586,20 +2605,38 @@ impl Worker {
                 marks,
                 answer,
             } => {
-                let sent = actor
+                let can_offer_steering = reservation.is_none()
+                    && admission == Admission::Queue
+                    && message.origin.is_user()
+                    && marks.coordination.is_none()
+                    && self.setup.record.backend == "claude";
+                let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
                     .map(|sent| match sent {
                         Ok((sent, out)) => (Ok(sent), out),
                         Err(taken) => (Err(taken), Outputs::default()),
                     });
-                if let Ok((Ok(sent), _)) = &sent
+                if let Ok((Ok(sent), out)) = &mut sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
                 {
                     if let Some(c) = &self.setup.hub.capture {
                         c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
                     }
-                    if sent.queued
+                    let steer = if sent.queued
+                        && can_offer_steering
+                        && let Some(uuid) = message
+                            .trace_id
+                            .as_deref()
+                            .and_then(clarp_kernel::takeover::prompt_uuid)
+                    {
+                        actor.steer_active(turn, uuid, &message.text, now)?
+                    } else {
+                        None
+                    };
+                    if let Some(action) = steer {
+                        out.actions.push(action);
+                    } else if sent.queued
                         && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
                         && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
                         && let Some(program) = clarp_backend::program(&self.setup.record.backend)
@@ -3275,7 +3312,7 @@ impl Worker {
             self.setup.speaks.wake(&self.setup.record.agent_id);
         }
         self.tell_deliveries();
-        self.show(out.changed);
+        self.show(out.changed, &out.joined_reads);
     }
 
     /// A user send's delivery moved (fenced by the user's Stop, or handed over): the apps are
@@ -3426,9 +3463,7 @@ impl Worker {
                         }
                     }
                 }
-                if let Some(pool) = self.setup.pool() {
-                    pool.guard_turn(&mut order);
-                }
+                let pool = self.setup.pool().cloned();
                 // Whose turn this is: a Clarp tool of the turn that presents its token is known
                 // to be this agent's. Nothing is written for it.
                 let agent_id = &self.setup.record.agent_id;
@@ -3442,6 +3477,10 @@ impl Worker {
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
+                        launcher::gate_steering(&mut order);
+                        if let Some(pool) = pool {
+                            pool.guard_turn(&mut order);
+                        }
                         if let Some(opening) = order.opening.as_deref() {
                             let (id, trace) = (opening.id.as_str(), opening.trace.as_str());
                             use crate::launcher::Launched;
@@ -3509,9 +3548,40 @@ impl Worker {
             } => std::thread::Builder::new()
                 .name("stop".to_string())
                 .spawn(move || launcher::stop(&socket, grace_ms)),
+            Action::Steer { socket, input } => {
+                self.write_followup(socket, input);
+                return;
+            }
         };
         if let Err(error) = spawned {
             eprintln!("clarp-host: a turn's thread could not be started: {error}");
+        }
+    }
+
+    fn write_followup(&mut self, socket: PathBuf, input: String) {
+        if self.followups.is_none() {
+            let (send, receive) = mpsc::channel::<(PathBuf, String)>();
+            if let Err(error) = std::thread::Builder::new()
+                .name("follow-up-input".to_string())
+                .spawn(move || {
+                    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    else {
+                        return;
+                    };
+                    for (socket, input) in receive {
+                        runtime.block_on(launcher::steer(&socket, input));
+                    }
+                })
+            {
+                eprintln!("clarp-host: follow-up input thread could not be started: {error}");
+                return;
+            }
+            self.followups = Some(send);
+        }
+        if let Some(send) = &self.followups {
+            let _ = send.send((socket, input));
         }
     }
 
@@ -3719,7 +3789,7 @@ impl Worker {
     }
 
     /// Publishes the agent's view and tells the clients what changed since they were last told.
-    fn show(&mut self, changed: Changed) {
+    fn show(&mut self, changed: Changed, joined_reads: &[JoinedRead]) {
         let by_hand = std::mem::take(&mut self.let_go_by_hand);
         let queue_edit = self.queue_edit.take();
         let passed = std::mem::take(&mut self.passed);
@@ -3852,6 +3922,17 @@ impl Worker {
                 now,
             );
         }
+        for read in joined_reads {
+            let mut event = wire::queue_updated(
+                &record,
+                &status,
+                wire::QueueUpdate::Started(&read.client_id),
+            );
+            event["queue_depth"] = json!(read.queue.waiting);
+            event["queue_paused"] = json!(read.queue.paused);
+            event["queue_revision"] = json!(read.queue.revision);
+            hub.publish(event, now);
+        }
         // A turn began: the word a send is answered with, for every client that did not send it.
         if let Some(live) = &status.live
             && was_live.map(|was| was.turn) != Some(live.turn)
@@ -3908,6 +3989,7 @@ impl Worker {
         let told_with_its_turn = !status.paused && !by_hand && began_from_the_queue;
         let taken_back = was_waiting.iter().any(|turn| {
             !status.waiting.contains(turn)
+                && !joined_reads.iter().any(|read| read.turn == *turn)
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });

@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from . import agents as agents_db, backends, db, roster
 from .config import load as load_config
 
 
-def seed_defaults(backend: str, *, cwd: Path | None = None) -> int:
+def seed_defaults(backend: str, *, cwd: Path | None = None,
+                  voice_for: Callable[[str, str], str] | None = None) -> int:
+    """``voice_for(name, roster_voice)`` gives each seeded agent its stored voice (the
+    installer passes voice_pool.assign, so every agent of a new install is heard)."""
     database = db.conn()
     selected_backend = backends.normalize(backend)
     configured_roster = load_config().roster
@@ -41,8 +45,8 @@ def seed_defaults(backend: str, *, cwd: Path | None = None) -> int:
                 suffix += 1
             used_sessions.add(session)
             agent_id = agents_db.create_agent(
-                persona=name, voice_id=voice_id, cwd=str(root), session=session,
-                backend=selected_backend,
+                persona=name, voice_id=voice_for(name, voice_id) if voice_for else voice_id,
+                cwd=str(root), session=session, backend=selected_backend,
             )
             first_agent_id = first_agent_id or agent_id
             created += 1

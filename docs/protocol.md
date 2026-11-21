@@ -1071,14 +1071,17 @@ client shows it and derives nothing from `voice_id`.
 - **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
   documented values are `own` and `default` (a later Host adds `parent`), and for
   `silent_reason`: `no_voice` (no voice for the provider), `voice_unavailable` (the agent has a
-  voice of its own the provider refuses, such as a Google voice off its list; with feature
-  `voice_provider_maps`), `provider_off` (the Host speaks with no provider) and `not_configured` (the provider
-  has no credential or is refused).
+  voice of its own the provider refuses, such as a Google voice off its list, or a Cartesia or
+  ElevenLabs voice the provider has deleted (it answered 404 when the Host looked it up; the
+  Host logs `voiceGone` once); with feature
+  `voice_provider_maps`), `provider_off` (the Host speaks with no provider), `not_configured` (the provider
+  has no credential or is refused) and, with feature `voice_pool`, `voiceless_role` (a role
+  that is never heard: a Janitor).
   A client shows plain wording for a value it does not know; it never fails on one.
 
 The snapshot head carries `voice_defaults` (the same `speech` and `hearing` shapes for an
 agent not yet created: `speech.voice_id` is null and `speech.assignment` says how its voice
-will be chosen, `contact` today) and `voice_profile_version`, which changes whenever a
+will be chosen: `pool` with feature `voice_pool`) and `voice_profile_version`, which changes whenever a
 Host-wide input of any agent's profile changes.
 
 Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in the
@@ -1103,6 +1106,19 @@ stored values to the map shape and writes only rows that sound the same under ev
   the incoming map is removed. Without `base_voice_id` nothing is removed by its absence; an
   empty value for a provider removes it. Only the incoming value is read by its form: an edit
   never moves a stored value to another provider.
+
+### A working voice for every new agent and contact (feature `voice_pool`)
+
+A new agent (`POST /agents`, an adopted session, an anonymous launch, an assigned or minted
+contact, the first-install roster) and a new contact (`POST /personas`) end with a voice that
+is heard under the Host's configured provider and under its configured fallback. The Host keeps
+every voice the request gave and adds, for each of those providers it has none for, a free
+voice from its pool (`[cartesia] pool`, by default the distinct built-in Cartesia voices; the
+ElevenLabs and Gemini catalogues). A free voice is one no active agent or contact speaks with;
+when there is none, the least shared. With this feature an app may create an agent or contact
+with no voice at all and trust the Host; a phone's `auto-<uuid>` stand-in voice is replaced.
+Existing agents are not changed. A helper or fork, and a Janitor, get no voice from the pool.
+Renaming an agent keeps the voice it spoke with.
 
 ### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
 
