@@ -66,9 +66,16 @@ def _cartesia_catalogue(language: str = "en") -> list[str]:
         return []
     gone = voice_names.gone(CARTESIA)
     want = _language(language)
-    return sorted(v for v, row in rows.items()
-                  if row.get("public") and not row.get("owner") and v not in gone
-                  and _language(row.get("language")) == want)
+    eligible = sorted(v for v, row in rows.items()
+                      if row.get("public") is True and row.get("owner") is False and v not in gone
+                      and _language(row.get("language")) == want)
+    if not eligible:
+        # The fallback to the built-in list is silent otherwise (it hid a whole catalogue
+        # read as not public on 21 Nov 2026).
+        from .log import log
+        log("voicePoolNoCatalogueVoice",
+            f"provider={CARTESIA} language={want} eligible=0 total={len(rows)}")
+    return eligible
 
 
 def reserved(cfg, provider: str) -> set[str]:

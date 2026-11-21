@@ -39,6 +39,9 @@ def names_path() -> pathlib.Path:
 
 REFRESH_SECONDS = 24 * 3600
 FIRST_AFTER_SECONDS = 60.0
+# 2: catalogue rows read public from access/visibility (21 Nov 2026: Cartesia sends no
+# is_public, so every row of a format-1 file reads not public).
+FORMAT = 2
 MAX_LOOKUPS = 100          # voices looked up one by one, at most, per provider and refresh
 
 _FILE = RevisionedCache("voice-names-file", max_entries=4)
@@ -94,10 +97,15 @@ def signature(path: pathlib.Path | None = None) -> str | None:
 
 
 def start_due(path: pathlib.Path | None = None, now: float | None = None) -> bool:
-    """Whether the start-up refresh is due: no file, or one older than REFRESH_SECONDS."""
+    """Whether the start-up refresh is due: no file, one written by an older format of this
+    code (FORMAT), or one older than REFRESH_SECONDS."""
+    path = path or names_path()
     try:
-        age = (time.time() if now is None else now) - (path or names_path()).stat().st_mtime
+        age = (time.time() if now is None else now) - path.stat().st_mtime
     except OSError:
+        return True
+    loaded = _loaded(path)
+    if loaded and loaded[0].get("_format", 1) < FORMAT:
         return True
     return age >= REFRESH_SECONDS
 
@@ -124,6 +132,7 @@ def _read_bytes(data: bytes, path: pathlib.Path) -> dict[str, Any]:
     out: dict[str, Any] = {
         str(p): {str(k): str(v) for k, v in m.items() if k and isinstance(v, str) and v.strip()}
         for p, m in raw.items() if isinstance(m, dict) and not str(p).startswith("_")}
+    out["_format"] = raw.get("_format") if isinstance(raw.get("_format"), int) else 1
     held = raw.get("_gone")
     if isinstance(held, dict):
         out["_gone"] = {str(p): sorted({str(v) for v in ids if v})
@@ -132,8 +141,8 @@ def _read_bytes(data: bytes, path: pathlib.Path) -> dict[str, Any]:
     if isinstance(held, dict):
         # provider -> voice id -> {"language", "public", "owner"} as the catalogue row said
         out["_catalogue"] = {str(p): {str(k): {"language": str((m or {}).get("language") or ""),
-                                               "public": bool((m or {}).get("public")),
-                                               "owner": bool((m or {}).get("owner"))}
+                                               "public": (m or {}).get("public") is True,
+                                               "owner": (m or {}).get("owner") is not False}
                                       for k, m in rows.items() if k and isinstance(m, dict)}
                              for p, rows in held.items() if isinstance(rows, dict)}
     return out
@@ -171,6 +180,20 @@ def holders(cfg, provider: str, voice_id: str) -> list[str]:
     names_ += [n for n, o in (getattr(cfg, "tts_agent_overrides", {}) or {}).items()
                if str((o or {}).get(f"{provider}_voice") or "").strip() == voice_id]
     return sorted(dict.fromkeys(n for n in names_ if n))
+
+
+def _public(row: dict) -> bool:
+    """Whether a catalogue row is a public voice. Cartesia (Cartesia-Version 2026-08-14) sends
+    access ("public") and visibility ("all"), not is_public; is_public is read if it is there."""
+    return (str(row.get("access") or "").strip().lower() == "public"
+            or str(row.get("visibility") or "").strip().lower() in ("all", "public")
+            or row.get("is_public") is True)
+
+
+def _owned(row: dict) -> bool:
+    """Whether a catalogue row is the account's own voice. Fails closed: only is_owner False
+    exactly is not owned; a row whose ownership cannot be read counts as owned (never handed out)."""
+    return row.get("is_owner") is not False
 
 
 def _not_found(exc: Exception) -> bool:
@@ -232,8 +255,7 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
             log_exception("voiceNamesFetchFail", exc, detail=CARTESIA)
         else:
             today[CARTESIA] = {str(r.get("id")): {"language": str(r.get("language") or ""),
-                                                   "public": bool(r.get("is_public")),
-                                                   "owner": bool(r.get("is_owner"))}
+                                                   "public": _public(r), "owner": _owned(r)}
                                for r in rows if r.get("id")}
             found = {str(r.get("id")): str(r.get("name")).strip()
                      for r in rows if r.get("id") and str(r.get("name") or "").strip()}
@@ -255,6 +277,8 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
                              if k not in gone_now.get(provider, ())}
     for provider, ids in today.items():
         current.setdefault("_catalogue", {})[provider] = ids
+    if today:
+        current["_format"] = FORMAT
     for provider, ids in gone_now.items():
         current.setdefault("_gone", {})[provider] = sorted(ids)
         for voice_id in sorted(ids - set(((json.loads(before) if before else {}).get("_gone") or {})
