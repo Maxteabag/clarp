@@ -1296,6 +1296,7 @@ mod tests {
         let selected = Selection {
             into: TurnId(2),
             attempt: 1,
+            fence: 128,
             trace: Some("trace-second".to_string()),
             start: Start {
                 from: TurnId(1),
