@@ -5,7 +5,7 @@
    "turns": [
     {"role": "user", "text": "Fix the build.", "tools": [], "timestamp": "2027-01-15T08:00:00.000Z"},
     {"role": "assistant", "text": "Looking.\n  Done: one test was pinned.", "tools": [], "timestamp": "2027-01-15T08:00:05.000Z"},
-    {"role": "user", "text": "And the version?\nBump it.", "tools": [], "timestamp": "2027-01-15T08:01:00.000Z"},
+    {"role": "user", "text": "And the version?\nBump it.", "tools": [], "timestamp": "2027-01-15T08:01:00.000Z", "parts": ["And the version?", "Bump it."]},
     {"role": "assistant", "text": "Bumped to 2.4.1.", "tools": [], "timestamp": ""}
    ]},
   {"name": "noise", "what": "what the tool wrote into the conversation by itself is no turn of anybody", "model": "claude-test", "phases": [null, null, "final", "final"],

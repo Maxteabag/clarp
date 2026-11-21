@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 115;
+pub const HOST_CONTRACT: u64 = 118;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -326,6 +326,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `delivery-updated` hint: in the in-process mode, the Host owning its turns itself.
     ("send_delivery_state", 81),
     ("waited_send_order", 115),
+    // GET /turn-queue reads the same priority order the mailbox dispatches.
+    ("queue_user_first", 118),
     // What the user's last compaction of an agent did, on its row (`last_compaction`).
     ("compaction_outcome", 107),
     ("voice_profile", 109),
@@ -1079,6 +1081,7 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
 }
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
+    // Scope is decided on the raw path before route parameters are decoded.
     let path = request.uri().path().to_string();
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
     let read = request.method() == Method::GET;
@@ -1139,8 +1142,19 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
 
 // ---- who the Host is, and who its agents are ------------------------------------------------
 
-async fn server_info(State(app): State<App>) -> Json<ServerInfo> {
-    Json(identity(&app))
+async fn server_info(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+) -> Json<Value> {
+    let info = json!(identity(&app));
+    let info = match principal {
+        Principal::Device {
+            scope: Scope::Limited,
+            ..
+        } => clarp_kernel::devices::limited_server_info(info),
+        _ => info,
+    };
+    Json(info)
 }
 
 /// `GET /host/start`, this Host's own and the administrator's only: how its start went. How many
@@ -2813,6 +2827,7 @@ async fn send_as(
         // agent has the message, so that no answer is faster than this.
         app.mouth.sent(&member.record.session).await;
     }
+    let user_word = crate::coordination::front_desk_word(app, made).await;
     let guard = if binding.is_some() {
         Some(app.mouth.binding_admission.write().await)
     } else {
@@ -2823,6 +2838,7 @@ async fn send_as(
     let marks = clarp_actor::Marks {
         coordination,
         trace_named: made.trace_named,
+        user_word,
     };
     let sent = member
         .agent
@@ -3261,7 +3277,11 @@ async fn queue(
         .anyone(&query.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
     let (waiting, state) = member.agent.queue().await?;
-    let items: Vec<Value> = waiting.iter().map(wire::queue_item).collect();
+    let directory = app.fleet.directory();
+    let items: Vec<Value> = waiting
+        .iter()
+        .map(|item| wire::queue_item(item, &directory))
+        .collect();
     Ok(Json(json!({
         "items": items,
         "paused": state.paused,

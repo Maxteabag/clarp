@@ -484,35 +484,7 @@ impl PushBook {
 /// What a device a user paired with limited access is refused with: the Python Host's words.
 pub const LIMITED_REFUSAL: &str = "full device access required";
 
-/// What a device with limited access is kept from altogether, also from reading: the Host's
-/// logins and software, its owner's settings, what is on its disk, calls. The Python Host's
-/// list (`_DEVICE_FULL_ONLY_PREFIXES`), whether or not this Host has the route yet: a route
-/// that is built later is closed from its first day.
-pub const FULL_ONLY: [&str; 20] = [
-    "/backend-auth",
-    "/harness-providers",
-    "/server-update",
-    "/managed-skills",
-    "/hotseat/desk",
-    "/hotseat/switch",
-    "/hotseat/resume",
-    "/orchestrator/",
-    "/herald/",
-    "/personalities/",
-    "/automation-settings",
-    "/avatar-settings",
-    "/paired-devices",
-    "/tts/providers",
-    "/network/",
-    "/server-terminal",
-    "/oracle/",
-    "/agent-file",
-    "/janitor-runs/",
-    "/calls",
-];
-
-/// What a device with limited access may send (`_LIMITED_DEVICE_POST_EXACT`). Whatever it
-/// may read, it may read.
+/// What a device with limited access may send (`_LIMITED_DEVICE_POST_EXACT`).
 pub const LIMITED_POSTS: [&str; 11] = [
     "/send",
     "/transcribe",
@@ -525,6 +497,53 @@ pub const LIMITED_POSTS: [&str; 11] = [
     "/calendar/response",
     "/remote-action",
     "/voice-events",
+];
+
+/// The reference's explicit gallery and conversation read policy, including route families.
+const LIMITED_GETS: &[&str] = &[
+    "/server-info",
+    "/events",
+    "/live",
+    "/status",
+    "/agents/snapshot",
+    "/log",
+    "/message-tool-details",
+    "/turn-queue",
+    "/location",
+    "/attention",
+    "/attention/inbox",
+    "/artifacts",
+    "/pinned-artifacts",
+    "/task-plan",
+    "/task-plans",
+    "/task-plan/document",
+    "/goal-ledger",
+    "/clips/message",
+    "/clips/recoverable",
+    "/media",
+    "/voice-events",
+    "/voice-events/utterances",
+    "/voices",
+    "/voice-catalog",
+    "/voice-preview",
+    "/voice-humanness",
+    "/transcription-guidance",
+    "/transcription-capabilities",
+    "/transcription-providers",
+    "/transcription-audio",
+    "/controller-actions",
+    "/controller-narration",
+];
+
+const LIMITED_GET_PREFIXES: &[&str] = &[
+    "/artifacts/",
+    "/artifact-catalogs/",
+    "/clips/",
+    "/media/",
+    "/audio/",
+    "/avatars/",
+    "/stt/stream",
+    "/controller-actions/",
 ];
 
 /// Where the actions a controller offers are, and how one of them is invoked.
@@ -561,35 +580,62 @@ pub fn invoked(path: &str) -> Option<String> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
-/// Whether a device with limited access is refused a request (the Python Host's
-/// `Handler._device_forbidden`, as its handlers of each method ask it): what is closed to it
-/// altogether, what is on the disk or in a terminal, and every change but what it may send
-/// and the actions it may invoke. A PATCH is looked at only under `/schedules/`.
+/// Whether a device with limited access is refused before routing.
 pub fn limited_refused(method: &str, path: &str) -> bool {
-    if method == "PATCH" && !path.starts_with("/schedules/") {
-        return false;
-    }
     if method == "POST" && path == "/paired-devices/revoke" {
         return false;
     }
-    let closed = |prefix: &&str| path == prefix.trim_end_matches('/') || path.starts_with(*prefix);
-    if FULL_ONLY.iter().any(closed) {
-        return true;
-    }
-    if matches!(
-        path,
-        "/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"
-    ) || (path.starts_with("/terminal/") && method == "GET")
-    {
-        return true;
-    }
     if method == "GET" {
-        return false;
+        if path.starts_with("/artifacts/") && path.trim_end_matches('/').ends_with("/export") {
+            return true;
+        }
+        return !LIMITED_GETS.contains(&path)
+            && !LIMITED_GET_PREFIXES
+                .iter()
+                .any(|prefix| path.starts_with(*prefix));
     }
     if path == CONTROLLER_ACTIONS || path.starts_with("/controller-actions/") {
         return !(method == "POST" && invoked(path).is_some());
     }
     method != "POST" || !LIMITED_POSTS.contains(&path)
+}
+
+/// The fixed identity, compatibility and connection fields a limited device may receive.
+pub fn limited_server_info(mut info: Value) -> Value {
+    const KEYS: &[&str] = &[
+        "server_id",
+        "name",
+        "deployment_mode",
+        "version",
+        "image_version",
+        "clarp_version",
+        "min_app_version",
+        "capabilities",
+        "contract",
+        "client",
+        "local_connection",
+    ];
+    const CONNECTION_KEYS: &[&str] = &[
+        "enabled",
+        "port",
+        "certificate_sha256",
+        "service_type",
+        "urls",
+    ];
+    if let Some(fields) = info.as_object_mut() {
+        fields.retain(|key, _| KEYS.contains(&key.as_str()));
+        if let Some(connection) = fields
+            .get_mut("local_connection")
+            .and_then(Value::as_object_mut)
+        {
+            let failed = connection.get("error").is_some_and(crate::python::truthy);
+            connection.retain(|key, _| CONNECTION_KEYS.contains(&key.as_str()));
+            if failed {
+                connection.insert("error".into(), json!("failed"));
+            }
+        }
+    }
+    info
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -334,7 +334,15 @@ STORIES = [
     ('a message sent again is answered what it was answered first', [
         message('a message that is held', 'ship the slides', to('anna', 0.6), id='p-1',
                 janitor={'enabled': True, 'options': {'fallback_only': False}}),
-        message('the same message again: the question, and the session spoken to', 'ship the slides', to('mike'), id='p-1'),
+        message('the same held message again with another trace', 'ship the slides', to('mike'), id='p-1',
+                trace='trace-p-1-replay'),
+        message('the same held message, with a missing decision row', 'ship the slides', to('mike'), id='p-1',
+                trace='trace-p-1-missing-row', receipt={'decision_id': 999999}),
+        message('the same held message, with a boolean decision id', 'ship the slides', to('mike'), id='p-1',
+                trace='trace-p-1-bad-id', receipt={'decision_id': True}),
+        message('the same held message, with only a legacy receipt id', 'ship the slides', to('mike'), id='p-1',
+                trace='trace-p-1-legacy', receipt={'decision_id': 1, 'decision_target': '<drop>',
+                                                   'decision_action': '<drop>'}),
         message('a command for an agent that is none of the call', 'switch to Zoe',
                 {'kind': 'agent_control', 'control_action': 'switch', 'target_session': 'zoe', 'confidence': 0.95},
                 id='p-2', only=['mike', 'anna']),
@@ -342,7 +350,8 @@ STORIES = [
         message('make a new agent', 'make an agent called Paula',
                 {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.95,
                  'control_payload': {'name': 'Paula'}}, id='p-3'),
-        message('the same command again: the agent it made', 'make an agent called Paula', to('mike'), id='p-3'),
+        message('the same command again: the agent it made, its action and first trace', 'make an agent called Paula',
+                to('mike'), id='p-3', trace='trace-p-3-replay'),
         message('said to a session longer than a receipt keeps', 'ship it', to('anna', 0.6), id='p-4', session='s' * 501),
         message('the same message again: the session it was said to', 'ship it', to('mike'), id='p-4', session='s' * 501),
         message('said to a session as long as a receipt keeps', 'ship it', to('anna', 0.6), id='p-5', session='s' * 500),
@@ -562,6 +571,7 @@ def run(root) -> dict:
 
             message_id = one.get('id', f'auto-{len(told)}-{len(rows)}')
             requested = one.get('session', 'mike')
+            trace = one.get('trace', f'trace-{message_id}')
             if 'receipt' in one:
                 # The receipt of its run is made another before it is sent again, as the Python Host's own
                 # tests make it: what it keeps of the first answer read in every form it may come in.
@@ -581,11 +591,11 @@ def run(root) -> dict:
             admission = prompt_admissions.PromptAdmission(
                 admission_id=f'adm-{message_id}', admission_version=1, authenticated_at_admission=True,
                 cooperative_principal='administrator', principal_id='', origin='user', sender_agent_id='',
-                channel='http', observed_at=at, client_admission_id=message_id, trace_id=f'trace-{message_id}',
+                channel='http', observed_at=at, client_admission_id=message_id, trace_id=trace,
                 original_text=one['text'])
             try:
                 outcome = service.handle_send(
-                    text=one['text'], requested_session=requested, trace_id=f'trace-{message_id}',
+                    text=one['text'], requested_session=requested, trace_id=trace,
                     prompt_admission=admission, hands_free=one.get('hands_free', True), synthesize_audio=True,
                     unheard_audio_sessions=(), dispatch=dispatch, fallback_request=bool(one.get('fallback')),
                     only_sessions=tuple(one['only']) if one.get('only') else None)
@@ -593,7 +603,7 @@ def run(root) -> dict:
             except Exception as broke:  # noqa: BLE001 - told by its kind: the Python Host breaks here
                 answered = {'broke': type(broke).__name__, 'said': str(broke)[:200]}
             decisions = [dict(row) for row in db.conn().execute(
-                'SELECT * FROM orchestrator_decisions WHERE trace_id = ? ORDER BY decision_id', (f'trace-{message_id}',))]
+                'SELECT * FROM orchestrator_decisions WHERE trace_id = ? ORDER BY decision_id', (trace,))]
             held_now = [dict(row) for row in db.conn().execute(
                 'SELECT * FROM orchestrator_pending_utterances ORDER BY created_at, pending_id')]
             run_of = janitor_builtins.get_request_run(
@@ -601,6 +611,7 @@ def run(root) -> dict:
             decide_shown = [str(d) if isinstance(d, Exception) else d for d in (decide if isinstance(decide, list) else [decide])]
             row = {
                 'what': one['what'], 'now': at, 'text': one['text'], 'id': message_id, 'session': requested,
+                **({'trace': trace} if 'trace' in one else {}),
                 'hands_free': one.get('hands_free', True), 'fallback': bool(one.get('fallback')), 'only': one.get('only'),
                 'decide': decide_shown, 'fails': [isinstance(d, Exception) for d in (decide if isinstance(decide, list) else [decide])],
                 'dispatch_fails_with': fails_with, 'pause_at_model': bool(one.get('pause_at_model')),
@@ -612,7 +623,7 @@ def run(root) -> dict:
                 'focus': agents.get_focus(),
                 'routing_messages': [dict(r) for r in db.conn().execute(
                     'SELECT session, role, text, trace_id, source, created_at FROM agent_routing_messages '
-                    'WHERE trace_id = ? ORDER BY rowid', (f'trace-{message_id}',))],
+                    'WHERE trace_id = ? ORDER BY rowid', (trace,))],
             }
             rows.append(named(row))
         story = {'name': name, 'messages': rows}

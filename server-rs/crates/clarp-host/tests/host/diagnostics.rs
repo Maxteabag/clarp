@@ -9,8 +9,8 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
     let key = "/diagnostics/settings";
     let payload = json!({"event":"micFail","trace_id":"fixture-trace","clip_id":7,"duration_ms":1.5,"clip_url":"fixture-secret-url","persona":"fixture-private-persona","detail":{"prompt":"SYNTHETIC PRIVATE","msg":"getUserMedia rejected: NotAllowedError"}});
     let asked = json!({"enabled":true,"categories":[" CLIENT ","requests","agents","client"]});
-    let read = |host: &Host| host.ask_as(&limited, "GET", key, None);
-    assert_eq!(read(&h).1["settings"]["enabled"], false);
+    assert_eq!(h.ask_as(&limited, "GET", key, None).0, 403);
+    assert_eq!(h.get(key)["settings"]["enabled"], false);
     let who = h.new_agent("Diagnostics");
     for n in 0..5 {
         h.send(&who, "synthetic", &format!("diagnostic-{n}"));
@@ -24,11 +24,14 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
     use clarp_ports::diagnostics::DiagnosticUsage;
     let store = clarp_store_files::diagnostics::HourFiles::new(dir, clarp_host::diagnostics::CAP);
     assert_eq!(store.usage().unwrap(), (0, 0));
-    let health = h.ask_as(&limited, "GET", "/diagnostics/health", None);
-    assert_eq!(health.0, 200);
-    assert_eq!(health.1["ready"], health.1["checks"]["stt_ready"]);
-    assert_eq!(health.1["checks"]["ffmpeg_ready"], true);
-    assert!(health.1["tts_queue"]["in_flight"].is_number());
+    assert_eq!(
+        h.ask_as(&limited, "GET", "/diagnostics/health", None).0,
+        403
+    );
+    let health = h.get("/diagnostics/health");
+    assert_eq!(health["ready"], health["checks"]["stt_ready"]);
+    assert_eq!(health["checks"]["ffmpeg_ready"], true);
+    assert!(health["tts_queue"]["in_flight"].is_number());
     assert_eq!(h.ask_as(&limited, "POST", key, Some(&asked)).0, 403);
     assert_eq!(
         h.ask("POST", key, Some(&json!({"categories":["INVALID"]})))
@@ -96,7 +99,7 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
     });
     h.kill();
     let h = place.start_with_token(token);
-    assert_eq!(read(&h).1["settings"]["enabled"], true);
+    assert_eq!(h.get(key)["settings"]["enabled"], true);
     h.post(key, json!({"enabled":false,"categories":["client"]}));
     assert_eq!(h.post("/clog", payload)["captured"], false);
 }

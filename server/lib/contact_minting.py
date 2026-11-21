@@ -13,49 +13,11 @@ from .voice import CARTESIA, resolve_voice
 _INITIALS = "BCDEFGHJKLMNPQRSTVWXYZ"
 
 
-def candidate_cartesia_voice_ids() -> list[str]:
-    """Return all locally known Cartesia voice UUIDs without network I/O."""
-    cfg = config.load()
-    ordered: list[str] = []
-    seen: set[str] = set()
-    for raw in (
-        *cartesia_voices.cached_voice_ids(),
-        *cfg.cartesia_voices.values(),
-        *config.DEFAULT_CARTESIA_VOICES.values(),
-    ):
-        voice_id = str(raw or "").strip()
-        if voice_id and voice_id not in seen:
-            seen.add(voice_id)
-            ordered.append(voice_id)
-    return ordered
-
-
-def pick_available_voice(*, occupied_voices: Collection[str] | None = None) -> str:
-    """Choose a Cartesia voice JSON string preferring unoccupied voices (<0.1ms, no network)."""
-    candidates = candidate_cartesia_voice_ids()
-    if not candidates:
-        return "{}"
-    active_voices = {
-        v for a in agents_db.list_agents()
-        if (v := resolve_voice(a.get("voice_id") or "", CARTESIA))
-    }
-    if occupied_voices is None:
-        persona_voices = {
-            v for p in personas.list_all()
-            if (v := resolve_voice(p.get("voice_id") or "", CARTESIA))
-        }
-        all_taken = active_voices | persona_voices
-    else:
-        all_taken = {str(v).strip() for v in occupied_voices if str(v).strip()}
-
-    for candidate in candidates:
-        if candidate not in all_taken:
-            return json.dumps({CARTESIA: candidate}, separators=(",", ":"))
-    for candidate in candidates:
-        if candidate not in active_voices:
-            return json.dumps({CARTESIA: candidate}, separators=(",", ":"))
-    fallback = candidates[len(all_taken) % len(candidates)]
-    return json.dumps({CARTESIA: fallback}, separators=(",", ":"))
+def pick_available_voice(name: str = "") -> str:
+    """Voices for a new contact named ``name``: the pool's choice for the configured
+    provider and fallback (voice_pool), in the one stored shape. No network I/O."""
+    from . import voice_pool
+    return voice_pool.assign(config.load(), name, "{}")
 
 
 def pick_given_name(
@@ -108,7 +70,7 @@ def mint_contact(
 ) -> dict:
     """Create a durable named Contact immediately and kick off background avatar generation."""
     name, tier = pick_given_name(backend, occupied_names=occupied_names)
-    voice_id = pick_available_voice()
+    voice_id = pick_available_voice(name)
     personality = default_personality(name, tier)
     row = personas.create(
         name=name,

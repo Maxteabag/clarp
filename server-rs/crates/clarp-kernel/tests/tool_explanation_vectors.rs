@@ -1,7 +1,7 @@
 //! What is said of a tool's use without asking a model is what the Python Host says of it.
 //!
 //! `tests/fixtures/tool-explanation-vectors.json` (written by
-//! `tools/tool-explanation-vectors.py` out of that Host's own functions) holds 787 uses of
+//! `tools/tool-explanation-vectors.py` out of that Host's own functions) holds 795 uses of
 //! tools. Of each: how it is read (the bounded fields), how it is told (the template that
 //! fits with what the use names for it, or why none fits, for each of the seventeen reasons
 //! there are), the sentence at each of the five levels of detail, and the parts the call
@@ -39,8 +39,8 @@ fn a_use_is_read_as_the_python_host_reads_it() {
         let hidden = |value: &Value| value.as_str().is_some_and(|said| said.contains('\u{2026}'));
         withheld += usize::from(hidden(&row["read"]["command"]) || hidden(&row["read"]["summary"]));
     }
-    // Counted over the fixture by a script: 787 uses, in 36 of which a heredoc's body is withheld.
-    assert_eq!((read_of, withheld), (787, 36));
+    // Counted over the fixture by a script: 795 uses, in 36 of which a heredoc's body is withheld.
+    assert_eq!((read_of, withheld), (795, 36));
 }
 
 #[test]
@@ -65,8 +65,8 @@ fn a_use_is_told_and_spoken_of_as_the_python_host_does() {
             none += 1;
         }
     }
-    // Counted by the generator: a template fits 266 uses and none fits 521; 1062 sentences.
-    assert_eq!((fit, none, sentences), (266, 521, 1062));
+    // Counted by the generator: a template fits 266 uses and none fits 529; 1062 sentences.
+    assert_eq!((fit, none, sentences), (266, 529, 1062));
 }
 
 #[test]
@@ -113,11 +113,11 @@ fn a_call_has_the_parts_and_the_shapes_the_python_host_gives_it() {
             renamed += usize::from(!part.legacy.is_empty());
         }
     }
-    // Counted by the generator: 830 parts, 128 of them exact, 354 with slots, 34 with a
+    // Counted by the generator: 825 parts, 128 of them exact, 354 with slots, 34 with a
     // directory, 86 with an earlier name; its splitter fails on 2 uses.
     assert_eq!(
         (parts, exact, slotted, placed, renamed, failed),
-        (830, 128, 354, 34, 86, 2)
+        (825, 128, 354, 34, 86, 2)
     );
 }
 
@@ -202,5 +202,5 @@ fn the_smaller_answers_of_the_second_layer_are_the_python_hosts() {
     counted.push(scripts.len());
 
     // Counted by the generator, in its order.
-    assert_eq!(counted, [71, 39, 15, 165, 20, 19, 25, 12]);
+    assert_eq!(counted, [71, 39, 15, 165, 27, 19, 25, 12]);
 }
