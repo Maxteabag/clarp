@@ -1395,7 +1395,7 @@ fn seen_end(last: &Settled) -> Option<TurnSeen> {
         Outcome::Failed { reason, .. } => ("failed", reason.clone()),
         Outcome::Interrupted { reason } => ("interrupted", reason.clone()),
         Outcome::Stopped { by, .. } => ("interrupted", format!("Stopped by {by}")),
-        Outcome::Withdrawn { .. } => return None,
+        Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => return None,
     };
     Some(TurnSeen {
         outcome: outcome.to_string(),

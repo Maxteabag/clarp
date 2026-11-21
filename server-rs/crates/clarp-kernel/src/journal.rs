@@ -266,6 +266,8 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         | AgentEvent::SentNow { turn, .. }
         | AgentEvent::Reworded { turn, .. }
         | AgentEvent::Compacted { turn, .. } => Some(turn.0),
+        AgentEvent::TakeoverSelected { selected } => Some(selected.start.from.0),
+        AgentEvent::TakeoverCleared { from } => Some(from.0),
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }
@@ -1116,7 +1118,7 @@ mod tests {
             .unwrap();
         let impossible = AgentEvent::Turn {
             turn: TurnId(1),
-            change: crate::turn::TurnEvent::Started { at_ms: 1 },
+            change: crate::turn::TurnEvent::Started { at_ms: 1, takeover: None },
         };
         log.append(&[event_item(&impossible, 1).unwrap()]).unwrap();
         log.append(&[NewItem::new(kind::AGENT_EVENT, 2, b"not json".to_vec())])
@@ -1274,6 +1276,84 @@ mod tests {
             admission,
             coordination: None,
         }
+    }
+
+    #[test]
+    fn a_selected_takeover_survives_reopen_and_enters_the_next_message_once() {
+        use crate::takeover::{Input, Selection, Start};
+        use crate::turn::Outcome;
+
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        for (at, id) in [(1, "u-first"), (2, "u-second"), (3, "u-third")] {
+            recorder
+                .accept_message(message(id, Admission::Queue), at)
+                .unwrap();
+        }
+        let selected = Selection {
+            into: TurnId(2),
+            attempt: 1,
+            trace: Some("trace-second".to_string()),
+            start: Start {
+                from: TurnId(1),
+                session: "session-new".to_string(),
+                input: Input::ClaudeFresh {
+                    first: "first text".to_string(),
+                },
+            },
+        };
+        let rows = |recorder: &Recorder| {
+            recorder
+                .log()
+                .read_after(0, kind::ROWS, 10)
+                .unwrap()
+                .into_iter()
+                .filter_map(|item| item.key)
+                .collect::<Vec<_>>()
+        };
+        let select = Command::SelectTakeover {
+            selected: selected.clone(),
+        };
+        assert!(recorder.handle(select.clone(), 4).unwrap().is_empty());
+        drop(recorder);
+
+        let mut recorder = open(&engine);
+        assert_eq!(recorder.agent().selected_takeover(), Some(&selected));
+        assert_eq!(rows(&recorder), ["u-first"]);
+        assert!(recorder
+            .handle(Command::ClearTakeover { from: TurnId(1) }, 5)
+            .unwrap()
+            .is_empty());
+        assert_eq!(recorder.agent().selected_takeover(), None);
+        assert_eq!(rows(&recorder), ["u-first"]);
+        recorder.handle(select, 6).unwrap();
+
+        let mut batch = recorder.batch();
+        batch.command(Command::FinishTakeover { from: TurnId(1) }, 7).unwrap();
+        assert_eq!(batch.agent().live_takeover(), Some(&selected.start));
+        let committed = batch.commit().unwrap();
+        assert!(matches!(committed.effects.as_slice(), [Effect::StartTurn { turn: TurnId(2), .. }]));
+        assert_eq!(rows(&recorder), ["u-first", "u-second"]);
+        let end = recorder.agent().last().unwrap();
+        assert_eq!(
+            end.outcome,
+            Outcome::Replaced {
+                by: TurnId(2),
+                trace: Some("trace-second".to_string()),
+            },
+        );
+        let end = crate::conversation::TurnEnd::of(end, "u-first").unwrap();
+        assert_eq!(end.status, "replaced");
+        assert_eq!(end.replaced_by.as_deref(), Some("trace-second"));
+        drop(recorder);
+
+        let recorder = open(&engine);
+        assert_eq!(recorder.agent().selected_takeover(), None);
+        assert_eq!(recorder.agent().live_takeover(), Some(&selected.start));
+        assert!(!recorder.agent().can_take_over(TurnId(2), TurnId(3), 1));
+        assert_eq!(recorder.agent().user_stop_generation(), 0);
+        assert!(!recorder.agent().is_paused());
+        assert_eq!(rows(&recorder), ["u-first", "u-second"]);
     }
 
     #[test]
