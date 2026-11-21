@@ -37,6 +37,7 @@ pub(super) fn test_works(dir: &Path, engine: Arc<dyn LogEngine>, log: crate::unk
     )
     .unwrap();
     Works {
+        teams: None,
         runtime: tokio::runtime::Handle::current(),
         opening_gate: crate::calls::opening_launch::channel().0,
         config: Arc::new(config),

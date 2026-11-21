@@ -1,0 +1,116 @@
+{
+  "blocks": [
+    {
+      "text": "To the user <speak>hello</speak>",
+      "blocks": []
+    },
+    {
+      "text": "Public <TEAM topic='work'> ready\n <speak>now</speak> <b>ship</b> </TEAM>",
+      "blocks": [
+        "ready now ship"
+      ]
+    },
+    {
+      "text": "<team>  <vox>um</vox>  </team>",
+      "blocks": []
+    },
+    {
+      "text": "<team><environment_context>hidden</environment_context>done</team>",
+      "blocks": [
+        "done"
+      ]
+    },
+    {
+      "text": "<team>unclosed",
+      "blocks": []
+    }
+  ],
+  "raw": "<team>Forward progress</team><team>update 1</team><team>update 2</team><team>update 3</team><team>update 4</team><team>update 5</team><team>update 6</team><team>update 7</team>",
+  "inserted": 8,
+  "again": 0,
+  "digest": "Team updates since your last turn:\n(+3 earlier updates skipped — showing the 5 most recent)\n- [Ops] Worker: update 3\n- [Ops] Worker: update 4\n- [Ops] Worker: update 5\n- [Ops] Worker: update 6\n- [Ops] Worker: update 7\n\nThis is background awareness. Keep broadcasting your OWN progress with <team> as you work — that's expected. Just don't get pulled into back-and-forth replies to teammates unless the user asks or it directly affects your current task.",
+  "inbox": [
+    "tm-0a6f0628bbcc6b834cd5",
+    "tm-7304a66ed494ab837763",
+    "tm-84efccbf060985b3ab02",
+    "tm-a02e8633a0042c219dac",
+    "tm-adc18d734efb24f9596b",
+    "tm-ae7ac77a885f6cdcb521",
+    "tm-e610d63e9a8837b897cf",
+    "tm-e986644fd8440ee57457"
+  ],
+  "prompt": "--- Clarp team context ---\nYou lead this team; decide/delegate/track. Reply LEADER_NOOP if nothing needs action.\nTeam 'Ops' live member states:\n- Worker (worker): interrupted\n\nTeam updates since your last turn:\n(+3 earlier updates skipped — showing the 5 most recent)\n- [Ops] Worker: update 3\n- [Ops] Worker: update 4\n- [Ops] Worker: update 5\n- [Ops] Worker: update 6\n- [Ops] Worker: update 7\n\nThis is background awareness. Keep broadcasting your OWN progress with <team> as you work — that's expected. Just don't get pulled into back-and-forth replies to teammates unless the user asks or it directly affects your current task.\n--- End Clarp team context ---\n\nUser asks",
+  "protocols": [
+    {
+      "agent": "a-leader",
+      "origin": "heartbeat",
+      "text": "You lead this team; decide/delegate/track. Reply HEARTBEAT_OK if nothing needs action.\nTeam 'Ops' live member states:\n- Worker (worker): interrupted"
+    },
+    {
+      "agent": "a-leader",
+      "origin": "leader_tick",
+      "text": "You lead this team; decide/delegate/track. Reply LEADER_NOOP if nothing needs action.\nTeam 'Ops' live member states:\n- Worker (worker): interrupted"
+    },
+    {
+      "agent": "a-worker",
+      "origin": "user",
+      "text": "Team feed: you are on Ops. Share useful coordination as <team>short first-person update</team>; it is not spoken. Broadcast starts, finishes, blockers, handoffs, and decisions that affect others. Keep it short; skip routine noise. Recent team updates are injected below when present.\n\n- Report TERMINAL results directly to leader Leader via self-prompt --from worker --to leader (done+proof, blocked+need, or failed). Use <team> for progress, handoffs, file touches, and awareness; if a finish affects teammates, do both. Rule: leader needs to act -> direct; awareness -> <team>."
+    },
+    {
+      "agent": "a-other",
+      "origin": "user",
+      "text": ""
+    }
+  ],
+  "ticks": [
+    {
+      "team_id": "team-ops",
+      "team_name": "Ops",
+      "leader_agent_id": "a-leader",
+      "leader_session": "leader",
+      "reason": "1 stalled, new team activity"
+    }
+  ],
+  "disabled_ticks": [],
+  "nudge_allowed": [
+    true,
+    false,
+    false
+  ],
+  "before": 1795000000000,
+  "after": 1795000000020,
+  "after_digest": [
+    "",
+    []
+  ],
+  "noop": [
+    {
+      "text": "LEADER_NOOP",
+      "result": [
+        true,
+        ""
+      ]
+    },
+    {
+      "text": "No action. LEADER_NOOP",
+      "result": [
+        true,
+        ""
+      ]
+    },
+    {
+      "text": "word LEADER_NOOP word",
+      "result": [
+        false,
+        "word LEADER_NOOP word"
+      ]
+    },
+    {
+      "text": "LEADER_NOOP xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "result": [
+        false,
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+    }
+  ]
+}

@@ -170,7 +170,13 @@ async fn serve(config: Config) -> Result<(), String> {
     let gallery = clarp_host::gallery::Store::open(gallery_db, blobs.clone())
         .map_err(|error| error.words().to_owned())?;
     let gallery = clarp_host::gallery::Writer::start(gallery).map_err(|error| error.to_string())?;
+    let team_disk = tables
+        .open(&config.data_dir.join("teams.db"))
+        .map_err(|error| error.to_string())?;
+    let teams =
+        Arc::new(clarp_host::teams::Desk::open(team_disk).map_err(|error| error.to_string())?);
     let works = Works {
+        teams: Some(teams.clone()),
         runtime: tokio::runtime::Handle::current(),
         opening_gate,
         config: config.clone(),
@@ -262,11 +268,6 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let ears = Arc::new(clarp_host::heard::Ears::new(&config, &fleet).await?);
-    let team_disk = tables
-        .open(&config.data_dir.join("teams.db"))
-        .map_err(|error| error.to_string())?;
-    let teams =
-        Arc::new(clarp_host::teams::Desk::open(team_disk).map_err(|error| error.to_string())?);
     let app = App {
         teams,
         capture,
@@ -419,6 +420,7 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::oracle::run(&app);
     // And an idle agent that asked for it is given a heartbeat when one is due.
     clarp_host::heartbeat::run(&app);
+    clarp_host::teams::runtime::run(&app);
     clarp_host::goal_listener::run(&app);
     // And a janitor's scheduled task is run when its schedule says.
     clarp_host::janitors::run(&app);
