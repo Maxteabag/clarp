@@ -140,7 +140,7 @@ async fn assign(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
             };
             match app
                 .fleet
-                .persona_mint(said, app.mouth.cartesia_known())
+                .persona_mint(said, app.mouth.cached_voice_names().0)
                 .await?
             {
                 Ok(persona) => persona["name"].as_str().unwrap_or("").to_string(),
@@ -155,9 +155,9 @@ async fn assign(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
     // `auto` where it minted one; a contact with a picture of its own is left by the asking.
     let asks_picture = mode == "create" || mode == "auto";
     let change = if mode == "auto" {
-        Amend::ContactAuto(app.mouth.cartesia_known())
+        Amend::ContactAuto(app.mouth.cached_voice_names().0)
     } else {
-        Amend::Contact(name)
+        Amend::Contact(name, app.mouth.cached_voice_names().0)
     };
     let record = match app.fleet.amend(session.clone(), change).await? {
         Ok(record) => record,
