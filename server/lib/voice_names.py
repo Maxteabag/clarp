@@ -268,17 +268,25 @@ def _refresh(cfg, *, path, cartesia_all, cartesia_one, eleven_one, voices_in_use
     if eleven_key and eleven_ids:
         fresh[ELEVENLABS], gone_now[ELEVENLABS] = _lookup(
             eleven_key, eleven_ids, eleven_one or elevenlabs_voices.fetch_one, ELEVENLABS)
-    if not fresh:
-        return []
     current = _read(path) if path.exists() else {}
+    old_format = path.exists() and current.get("_format", 1) < FORMAT
+    if not fresh and not old_format:
+        return []
     before = json.dumps(current, sort_keys=True, separators=(",", ":"))
     for provider, found in fresh.items():
         current[provider] = {k: v for k, v in {**current.get(provider, {}), **found}.items()
                              if k not in gone_now.get(provider, ())}
+    if old_format:
+        # Catalogue rows of an older format read wrongly (format 1: every row not public);
+        # one not fetched again now is dropped rather than kept for another day.
+        for provider in list((current.get("_catalogue") or {})):
+            if provider not in today:
+                current["_catalogue"].pop(provider)
     for provider, ids in today.items():
         current.setdefault("_catalogue", {})[provider] = ids
-    if today:
-        current["_format"] = FORMAT
+    # Every refresh writes the current format, whatever it could fetch (no Cartesia key, a
+    # failed fetch): otherwise an old-format file would make every start refresh again.
+    current["_format"] = FORMAT
     for provider, ids in gone_now.items():
         current.setdefault("_gone", {})[provider] = sorted(ids)
         for voice_id in sorted(ids - set(((json.loads(before) if before else {}).get("_gone") or {})
