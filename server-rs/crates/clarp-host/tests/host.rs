@@ -23772,9 +23772,14 @@ fn agent_creation_followup_relaunch_uses_persona_presentation_and_refuses_custom
 {
     let place = Place::new("creation-presentation");
     let host = place.start();
-    host.post("/personas", json!({
-        "name":"Presentation fixture", "avatar_symbol":"persona-symbol", "generate_avatar":false,
-    }));
+    let (status, persona) = host.ask(
+        "POST",
+        "/personas",
+        Some(&json!({
+            "name":"Presentation fixture", "avatar_symbol":"persona-symbol", "generate_avatar":false,
+        })),
+    );
+    assert_eq!(status, 201, "{persona}");
     let voice = r#"{"cartesia":"fixture-cartesia"}"#;
     let made = host.post(
         "/agents",
