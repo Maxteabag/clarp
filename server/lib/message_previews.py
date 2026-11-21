@@ -626,10 +626,15 @@ def _revision_maps(agents_sql: str, params: tuple = ()) -> tuple[dict[str, dict[
     return revisions, heads
 
 
-def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]], list[str]]:
+def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]], list[str],
+                                    frozenset[str]]:
+    """The heads, the live roster and which of it hides coordination (lib.coordination): the
+    roster statement reads the columns that decide it, so knowing costs no statement of its
+    own, and it is cached with the rest of the map until the database changes."""
     revisions, heads = _revision_maps(_LIVE_AGENTS)
-    live = [row['agent_id'] for row in conn().execute(_LIVE_AGENTS)]
-    return revisions, heads, live
+    rows = conn().execute(coordination.HIDING_ROWS_SQL).fetchall()
+    live = [row['agent_id'] for row in rows]
+    return revisions, heads, live, frozenset(coordination.hiding_from_rows(rows))
 
 
 def _preview_key(agent_id: str, revisions: dict, heads: dict) -> tuple:
@@ -749,12 +754,11 @@ def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[s
                           _cache_read(_REVISION_CACHE, "all", stamp, failed))
     if not map_hit:
         projection = _dashboard_revisions()
-    revisions, heads, live = projection
+    revisions, heads, live, hiding = projection
     result: dict[str, dict[str, Any]] = {}
     pending = []
     # A setting change writes nothing to a conversation, so whether the chat hides coordination
-    # is part of what a cached preview is valid for.
-    hiding = coordination.hiding_agents(database=database)
+    # is part of what a cached preview is valid for (``hiding`` came with the roster).
     for agent_id in live:
         if agent_ids is not None and agent_id not in agent_ids:
             continue
