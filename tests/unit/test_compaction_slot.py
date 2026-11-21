@@ -418,3 +418,24 @@ def test_stop_while_the_codex_compactions_handle_stays_live(tmp_path, monkeypatc
     assert _wait_for(lambda: (world._collect() or True) and world.started == ["u1"])
     world.settle()
     assert world.started == ["u1"]
+
+
+def test_a_workspace_check_that_raises_claims_nothing(tmp_path, monkeypatch):
+    """R174: the workspace check ran after the slot was claimed and outside the
+    rollback; a raise there left the agent compacting and its sends held."""
+    from lib import launch_paths
+    world = World(tmp_path)
+    compaction._active.clear()
+    monkeypatch.setattr(compaction.shutil, "which", lambda x: "/usr/bin/" + x)
+    monkeypatch.setattr(compaction.agents_db, "live_backend_session", lambda _a: "bs-x")
+    monkeypatch.setattr(compaction.backends, "active_handles", lambda _b, _a: [])
+
+    def unreadable(_cwd):
+        raise PermissionError("workspace unreadable")
+    monkeypatch.setattr(launch_paths, "existing_workspace_path", unreadable)
+    with pytest.raises(PermissionError):
+        compaction.compact_session("mike", dispatch=world.service)
+    assert "mike" not in compaction._active
+    world.send("u1")
+    world.settle()
+    assert world.started == ["u1"]          # not held behind a compaction
