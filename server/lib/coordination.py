@@ -331,6 +331,9 @@ def veil_activity(activity: dict[str, Any], veil: str) -> dict[str, Any]:
     agent works with (``veil``), no tool, action, summary or path of that turn."""
     if not veil:
         return activity
+    if activity.get("phase") == "account_recovery":
+        # Waiting for an account says so: the words are about the account, not the turn's work.
+        return {**activity, "tool": "", "file_path": "", "call_id": None}
     return {**activity, "tool": "", "action": "working", "summary": veil, "file_path": "",
             "call_id": None}
 
@@ -347,7 +350,8 @@ def veil_detail(detail: Any, veil: str) -> Any:
     turn did (a tool, its input, a message)."""
     if not veil or not isinstance(detail, dict):
         return detail
-    return {**{k: detail[k] for k in ("trace_id", "phase") if k in detail}, "summary": veil}
+    kept = {k: detail[k] for k in ("trace_id", "phase", "account_recovery") if k in detail}
+    return {**kept, "summary": veil}
 
 
 ROSTER_KIND = "coordination-changed"

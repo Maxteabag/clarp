@@ -181,3 +181,33 @@ def test_the_state_stream_of_a_shown_turn_is_unchanged(chat):
                                           "input": {"command": "cat secret-plan.md"}})
     watcher._poll_once()
     assert "secret-plan" in repr([e for e in stream.events if isinstance(e, dict) and e.get("agent_id") == chat.id])
+
+
+def test_a_hidden_turn_waiting_for_an_account_still_says_so():
+    """review2 on 560: the veil keeps account_recovery, so such a turn reads as waiting."""
+    detail = {"trace_id": "c1", "account_recovery": "waiting", "tool": "Bash", "input": {"command": "x"}}
+    kept = coordination.veil_detail(detail, "Working with Boss")
+    assert kept == {"trace_id": "c1", "account_recovery": "waiting", "summary": "Working with Boss"}
+    activity = {"phase": "account_recovery", "action": "waiting for account",
+                "summary": "Waiting for an account with available usage", "tool": "Bash", "file_path": "/x"}
+    veiled = coordination.veil_activity(activity, "Working with Boss")
+    assert veiled["action"] == "waiting for account" and veiled["tool"] == "" and veiled["file_path"] == ""
+
+
+def test_a_parents_row_describes_a_helpers_hidden_turn_by_who_it_works_with(chat):
+    """Arnold on 561: a parent's status line built from its helper's activity follows the
+    helper's hide rule: 'Working with <Name>' for its coordination turn, not the work."""
+    db.conn().execute("UPDATE agents SET parent_agent_id = ?, role = 'helper', helper_state = 'running'"
+                      " WHERE agent_id = ?", (chat.boss, chat.id))
+    chat.coordination_turn("c1")
+    agents.record_state(chat.id, "tool", {"trace_id": "c1", "tool": "Bash",
+                                          "input": {"command": "cat secret-plan.md"}})
+
+    def parent_status():
+        rows = snapshot.build_agent_snapshot(None)["agents"]
+        return next(r for r in rows if r["agent_id"] == chat.boss)["status_text"] or ""
+
+    assert "secret-plan" in parent_status()
+    coordination.set_chat(chat.id, "hide")
+    shown = parent_status()
+    assert "Working with Boss" in shown and "secret-plan" not in shown
