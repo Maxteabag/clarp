@@ -1602,6 +1602,7 @@ impl FleetHandle {
 }
 
 struct Fleet {
+    versions: Arc<crate::cli_version::Cache>,
     launch_usage: Arc<Ledger>,
     cwd_owners: Arc<Owners>,
     delegation_desk: delegations::Desk,
@@ -1638,7 +1639,12 @@ pub(crate) fn non_empty(text: &str) -> Option<String> {
     Some(text.trim().to_string()).filter(|text| !text.is_empty())
 }
 
-fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Result<Setup, String> {
+fn setup(
+    works: &Works,
+    desk: &delegations::Desk,
+    versions: &Arc<crate::cli_version::Cache>,
+    record: &AgentRecord,
+) -> Result<Setup, String> {
     let backend = clarp_backend::by_id(&record.backend)
         .ok_or_else(|| format!("this Host has no backend named `{}`", record.backend))?;
     let profile = Profile {
@@ -1680,6 +1686,7 @@ fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Resul
         ),
     };
     Ok(Setup {
+        versions: versions.clone(),
         delegation_rejoin: desk.for_worker(),
         runtime: works.runtime.clone(),
         opening_gate: works.opening_gate.clone(),
@@ -1756,6 +1763,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     let (tx, rx) = mpsc::channel();
     let tx = Arc::new(tx);
     let delegation_desk = delegations::Desk::open(&works, store.as_mut(), &tx)?;
+    let versions = Arc::new(crate::cli_version::Cache::default());
     let mut members = Vec::new();
     let mut gone = BTreeMap::new();
     // Every record of every kind is read alone: one that cannot be read is left out, counted
@@ -1815,7 +1823,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 .put(AGENTS, &agent_id, &value)
                 .map_err(|e| e.to_string())?;
         }
-        match setup(&works, &delegation_desk, &record) {
+        match setup(&works, &delegation_desk, &versions, &record) {
             Ok(setup) => members.push(Arc::new(Member {
                 record,
                 agent: agent::spawn(setup),
@@ -1911,6 +1919,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         log.clone(),
     ));
     let fleet = Fleet {
+        versions,
         launch_usage,
         cwd_owners,
         delegation_desk,
@@ -3271,7 +3280,7 @@ impl Fleet {
             ..AgentRecord::default()
         };
         // Refused before anything is written: an agent whose backend this Host lacks.
-        let setup = setup(&self.works, &self.delegation_desk, &record)?;
+        let setup = setup(&self.works, &self.delegation_desk, &self.versions, &record)?;
         // Its picture is kept before the agent that names it.
         if let Some((bytes, digest)) = &given {
             let kept = self.works.blobs.put(&picture_name(digest), bytes);
@@ -3330,7 +3339,7 @@ impl Fleet {
             voice_id: if by_request { "" } else { "{}" }.to_string(),
             ..AgentRecord::default()
         };
-        let setup = setup(&self.works, &self.delegation_desk, &record)?;
+        let setup = setup(&self.works, &self.delegation_desk, &self.versions, &record)?;
         if by_request {
             self.put_launch(&record)?;
         } else {
@@ -3786,7 +3795,7 @@ impl Fleet {
             record.conversation_id = ids::uuid();
         }
         record.deleted_at_ms = None;
-        let setup = setup(&self.works, &self.delegation_desk, &record)?;
+        let setup = setup(&self.works, &self.delegation_desk, &self.versions, &record)?;
         self.put(&record)?;
         self.gone.remove(&record.agent_id);
         let member = Arc::new(Member {

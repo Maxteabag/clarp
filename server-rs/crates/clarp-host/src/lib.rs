@@ -24,6 +24,7 @@ pub mod calendar;
 pub mod calls;
 pub(crate) mod child;
 pub mod chip;
+mod cli_version;
 pub mod compact;
 pub mod config;
 pub mod connector;
