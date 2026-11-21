@@ -1756,6 +1756,17 @@ async fn started_again(
     done
 }
 
+fn creation_backend(backend: &str) -> String {
+    let backend = clarp_kernel::python::strip(backend).to_ascii_lowercase();
+    match backend.as_str() {
+        "antigravity" => "agy".to_string(),
+        "open-code" | "opencode-ai" => "opencode".to_string(),
+        "deep-seek" => "deepseek".to_string(),
+        "muse-code" | "musecode" => "muse".to_string(),
+        _ => backend,
+    }
+}
+
 /// Makes an agent from what a request said: `POST /agents`, and `clarp-admin agent create`.
 /// Answers what the Python Host answers: the new agent's session, its name and its row, or
 /// why it was not made. With `replace_sid` the agent of that session is started again in
@@ -1770,7 +1781,8 @@ pub(crate) async fn make_agent(
     let bad = |why: &str| refused(StatusCode::BAD_REQUEST, why, why);
     // A field that is a text, or says nothing.
     let text = |key: &str, what: &str| match asked.get(key) {
-        None | Some(Value::Null) => Ok(None),
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(String::new())),
         Some(Value::String(said)) => Ok(Some(said.clone())),
         Some(_) => Err(bad(&format!("{what} must be a string or null"))),
     };
@@ -1804,7 +1816,7 @@ pub(crate) async fn make_agent(
     }
     let mut request = CreateAgentRequest {
         name: plain("name").unwrap_or_default(),
-        backend: plain("backend"),
+        backend: plain("backend").map(|backend| creation_backend(&backend)),
         cwd: plain("cwd"),
         model: text("model", "model")?,
         effort: text("effort", "effort")?,
@@ -1833,6 +1845,24 @@ pub(crate) async fn make_agent(
     if anonymous && replaces.is_some() {
         return Err(bad("anonymous launch must be fresh"));
     }
+    let replacing = replaces
+        .as_deref()
+        .and_then(|session| app.fleet.directory().by_session(session).map(|member| member.record.clone()));
+    let backend = request.backend.as_deref().filter(|backend| !backend.is_empty())
+        .or_else(|| replacing.as_ref().map(|record| record.backend.as_str()))
+        .unwrap_or("claude");
+    let model = request.model.as_deref().map(clarp_kernel::python::strip).unwrap_or("");
+    if !model.is_empty()
+        && let Some(detail) = app.models.policy_model_error(backend, model)
+    {
+        let code = "invalid model for backend";
+        let message = detail.strip_prefix("Invalid provider model identifier: ").unwrap_or(code);
+        return Err(refused(StatusCode::BAD_REQUEST, code, message));
+    }
+    let default_model = crate::owner::text_at(&app.mouth.owners(), &["agents", &format!("{backend}_model")]);
+    if replaces.is_some() && request.model.is_some() && model.is_empty() {
+        request.model = Some(default_model.clone().unwrap_or_default());
+    }
     let record = match replaces {
         Some(replaces) => started_again(app, replaces, request)
             .await?
@@ -1856,7 +1886,12 @@ pub(crate) async fn make_agent(
             let cwd = crate::config::working_dir(said_cwd, &home, &app.config.default_cwd);
             let begins = crate::past::begins(app, asked, &cwd).await?;
             let taken = match begins {
-                crate::past::Begins::Afresh => None,
+                crate::past::Begins::Afresh => {
+                    if request.model.as_deref().is_none_or(|model| model.trim().is_empty()) {
+                        request.model = default_model;
+                    }
+                    None
+                }
                 // An agent has that session, and the request said to open what is there.
                 crate::past::Begins::Open(owner) => {
                     let directory = app.fleet.directory();
@@ -1867,7 +1902,7 @@ pub(crate) async fn make_agent(
                             "No such agent",
                         ));
                     };
-                    return Ok(made_as(app, &member.record));
+                    return Ok(made_as(app, &member.record).await);
                 }
                 crate::past::Begins::With {
                     helpers,
@@ -1948,15 +1983,14 @@ pub(crate) async fn make_agent(
     // picture nor a symbol of its own (`agent_lifecycle.create`); nothing waits for it.
     let given = |key: &str| plain(key).is_some_and(|said| !said.trim().is_empty());
     if !record.is_janitor && !given("avatar_base64") && !given("avatar_symbol") {
-        let (app, name, backend) = (app.clone(), record.persona.clone(), record.backend.clone());
-        tokio::spawn(async move { crate::pictures::ask(&app, &name, "", &backend).await });
+        crate::pictures::ask(app, &record.persona, "", &record.backend).await;
     }
-    Ok(made_as(app, &record))
+    Ok(made_as(app, &record).await)
 }
 
 /// What whoever makes an agent is answered: its session, its name and its row, in the
 /// fields the Python Host answers with.
-fn made_as(app: &App, record: &AgentRecord) -> Value {
+async fn made_as(app: &App, record: &AgentRecord) -> Value {
     let directory = app.fleet.directory();
     let row = directory
         .named(&record.agent_id)
@@ -1986,6 +2020,21 @@ fn made_as(app: &App, record: &AgentRecord) -> Value {
         })
         .collect();
     let mut agent = agent;
+    agent.insert("alive".into(), json!(true));
+    agent.insert("last_activity".into(), json!(record.created_at_ms));
+    if record.avatar.is_none() && record.avatar_symbol.is_empty() && !record.is_janitor
+        && app.config.contact_pictures
+    {
+        let [named, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
+        let owner = clarp_kernel::personas::Owner { roster: &named, cartesia: &cartesia, gemini: &gemini };
+        if let Some(persona) = directory.personas.named(&owner, &record.persona)
+            && let Some(id) = persona["id"].as_str()
+            && let Ok(Some(kept)) = app.fleet.computer_job(crate::pictures::job_id(id)).await
+            && kept.job.status.is_active()
+        {
+            agent.insert("avatar_generation_status".into(), json!(kept.job.status.as_str()));
+        }
+    }
     // How it sounds and is heard, as the snapshot will show it (feature voice_profile).
     if let Some(profile) =
         crate::profile::of_session(&app.mouth, &app.ears, &directory, &record.session)
