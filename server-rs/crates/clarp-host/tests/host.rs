@@ -23665,6 +23665,54 @@ fn agent_creation_details_anonymous_launch_chooses_its_own_identity() {
 }
 
 #[test]
+fn agent_creation_details_relaunch_updates_picture_and_lineage() {
+    let place = Place::new("relaunch-agent-creation");
+    let host = place.start();
+    let parent = host.post("/agents", json!({"name":"Parent","backend":"scripted"}));
+    let original = host.post("/agents", json!({"name":"Relaunched","backend":"scripted"}));
+    let session = original["session"].as_str().unwrap();
+    let image = b"synthetic avatar bytes";
+    let request = json!({
+        "name": "Relaunched", "replace_sid": session,
+        "avatar_base64": clarp_kernel::python::b64encode(image),
+        "parent": parent["session"], "role": "helper",
+    });
+    let made = host.post("/agents", request);
+    let row = &made["agent"];
+    assert_eq!(row["agent_id"], original["agent"]["agent_id"]);
+    assert_eq!(row["session"], session);
+    assert_eq!(row["parent_agent_id"], parent["agent"]["agent_id"]);
+    assert_eq!(row["role"], "helper");
+    assert_eq!(row["helper_state"], "running");
+    let url = row["avatar_url"].as_str().unwrap();
+    assert_eq!(fetch(&host, &host.token, "GET", url, &[], b"").body, image);
+
+    let again = host.post("/agents", json!({"name":"Relaunched","replace_sid":session}));
+    for key in ["parent_agent_id", "role", "helper_state", "avatar_url"] {
+        assert_eq!(again["agent"][key], row[key], "{key}");
+    }
+    let refused = |replace: &Value, name: &str, parent: &str, why: &str| {
+        let (status, body) = host.ask(
+            "POST",
+            "/agents",
+            Some(&json!({"name": name, "replace_sid":replace, "parent":parent})),
+        );
+        assert_eq!(status, 409);
+        assert_eq!(body["error"], why);
+    };
+    refused(&made["session"], "Relaunched", session, "self_parent");
+    refused(&parent["session"], "Parent", session, "parent_cycle");
+    let (status, invalid) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({"name":"Relaunched","replace_sid":session,"avatar_base64":"%%%"})),
+    );
+    assert_eq!(status, 400);
+    assert_eq!(invalid["error"], "invalid avatar");
+    assert_eq!(fetch(&host, &host.token, "GET", url, &[], b"").body, image);
+}
+
+#[test]
 fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     let place = Place::new("not-yet");
     // The Host's user has a home of their own, in which no tool kept anything.

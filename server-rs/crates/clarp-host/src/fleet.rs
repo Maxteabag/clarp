@@ -435,6 +435,16 @@ pub fn shelf(kind: &str) -> String {
 }
 
 /// The name a persona's or an agent's own picture is kept under, by its digest. The Python
+fn creation_picture(base64: &str) -> Result<Option<(Vec<u8>, String)>, NotMade> {
+    personas::picture(base64).map_err(|why| {
+        let why = match why {
+            personas::AVATAR_TOO_LARGE => "avatar is too large",
+            other => other,
+        };
+        Told::new(400, "invalid avatar", why).into()
+    })
+}
+
 /// Host keeps each as a JPEG file, whatever is in it, and hands it out as one.
 pub fn picture_name(digest: &str) -> String {
     format!("{digest}.jpg")
@@ -3080,6 +3090,26 @@ impl Fleet {
                 asked
             }
         };
+        let parent = said(&request.parent);
+        let role = said(&request.role);
+        let change_lineage = !parent.is_empty() || !role.is_empty();
+        let role = if role.is_empty() { before.role() } else { &role };
+        let Some(role) = helpers::parse_role(role) else {
+            return Err(Told::new(400, "invalid_role", "role must be 'agent' or 'helper'").into());
+        };
+        let parent_agent_id = if parent.is_empty() {
+            before.parent_agent_id.clone()
+        } else {
+            let Some(parent_at) = self.place_of(&parent) else {
+                let why = format!("No live agent matches parent '{parent}'.");
+                return Err(Told::new(404, "parent_not_found", why).into());
+            };
+            Some(self.members[parent_at].record.agent_id.clone())
+        };
+        if change_lineage {
+            self.check_relaunch_lineage(&before.agent_id, parent_agent_id.as_deref(), role)?;
+        }
+        let given = creation_picture(&said(&request.avatar_base64))?;
         let record = AgentRecord {
             persona,
             backend,
@@ -3087,6 +3117,15 @@ impl Fleet {
             model,
             effort,
             voice_id: or_kept(said(&request.voice_id), &before.voice_id),
+            parent_agent_id,
+            role: if role == "agent" { String::new() } else { role.to_string() },
+            helper_state: if change_lineage {
+                helpers::initial_state(role).map(str::to_string)
+            } else {
+                before.helper_state.clone()
+            },
+            helper_completed_at_ms: if change_lineage { None } else { before.helper_completed_at_ms },
+            avatar: given.as_ref().map(|(_, digest)| digest.clone()).or_else(|| before.avatar.clone()),
             personality: match &request.personality {
                 Some(asked) => python::first(strip(asked), PERSONALITY_MOST).to_string(),
                 None => before.personality.clone(),
@@ -3102,6 +3141,9 @@ impl Fleet {
         if dry {
             return Ok(record);
         }
+        if let Some((bytes, digest)) = &given {
+            self.works.blobs.put(&picture_name(digest), bytes).map_err(|error| error.to_string())?;
+        }
         let (took, _taken) = oneshot::channel();
         self.put_launch(&record)?;
         self.replaced(at, record.clone(), took);
@@ -3109,6 +3151,39 @@ impl Fleet {
             .hub
             .publish(wire::roster_started_again(&record), self.now_ms());
         Ok(record)
+    }
+
+    fn check_relaunch_lineage(
+        &self,
+        child: &str,
+        parent: Option<&str>,
+        role: &str,
+    ) -> Result<(), NotMade> {
+        let Some(parent) = parent else {
+            return if role == "helper" {
+                Err(Told::new(400, "helper_requires_parent", "A helper needs a parent session.").into())
+            } else {
+                Ok(())
+            };
+        };
+        let mut seen = HashSet::new();
+        let mut chain = Vec::new();
+        let mut next = Some(parent);
+        while let Some(id) = next.filter(|id| seen.insert(*id)) {
+            if id != parent {
+                chain.push(id);
+            }
+            next = self.place_of_any(id).and_then(|at| self.members[at].record.parent_agent_id.as_deref());
+        }
+        if let Some(code) = helpers::parent_refusal(child, parent, &chain) {
+            let message = if code == "self_parent" {
+                "An agent cannot be its own parent."
+            } else {
+                "That parent is already a descendant of this agent."
+            };
+            return Err(Told::new(409, code, message).into());
+        }
+        Ok(())
     }
 
     fn create(
@@ -3279,16 +3354,7 @@ impl Fleet {
             voice_id
         };
         // Its picture: the one it is given, else the one its persona has of its own.
-        let given = match personas::picture(&asked(&request.avatar_base64)) {
-            Ok(given) => given,
-            Err(why) => {
-                let why = match why {
-                    personas::AVATAR_TOO_LARGE => "avatar is too large",
-                    other => other,
-                };
-                return Err(Told::new(400, "invalid avatar", why).into());
-            }
-        };
+        let given = creation_picture(&asked(&request.avatar_base64))?;
         let avatar = match &given {
             Some((_, digest)) => Some(digest.clone()),
             None => definition
