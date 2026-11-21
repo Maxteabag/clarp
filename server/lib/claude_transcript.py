@@ -424,6 +424,11 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             }
             if cells:
                 turn["display_cells"] = cells
+            if t == "user" and not tools and len([p for p in text_parts if str(p).strip()]) >= 2:
+                # One user line of several text blocks: a turn that took over one that
+                # printed nothing gives both messages so (issue 491, part B); the import
+                # links each block to its own client row (message_writes).
+                turn["parts"] = [str(p) for p in text_parts if str(p).strip()]
             turns.append(turn)
     if subagent_cells:
         transcripts = _subagent_transcripts(path)
