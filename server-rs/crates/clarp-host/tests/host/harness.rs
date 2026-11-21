@@ -653,6 +653,47 @@ fn every_start_of_a_command_at_a_fixed_address_in_the_tests_names_its_host() {
     assert!(found >= 13, "the scan found {found} starts");
 }
 
+/// These integration tests all start their processes through the shared environment rule.
+#[test]
+fn integration_tests_start_processes_with_the_shared_environment() {
+    let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut files = vec![
+        tests.join("host.rs"),
+        tests.join("host"),
+        tests.join("../../clarp-shim/tests/shim.rs"),
+    ];
+    let mut direct = Vec::new();
+    while let Some(file) = files.pop() {
+        if file.is_dir() {
+            files.extend(
+                std::fs::read_dir(&file)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path()),
+            );
+        } else if file.extension().is_some_and(|ext| ext == "rs") {
+            let source = std::fs::read_to_string(&file).unwrap();
+            for window in tokens(&source).windows(4) {
+                if let [
+                    (at, Token::Word(ty)),
+                    (_, Token::Mark(':')),
+                    (_, Token::Mark(':')),
+                    (_, Token::Word(method)),
+                ] = window
+                    && ty == "Command"
+                    && method == "new"
+                {
+                    let line = source.chars().take(*at).filter(|c| *c == '\n').count() + 1;
+                    direct.push(format!("{}:{line}", file.display()));
+                }
+            }
+        }
+    }
+    assert!(
+        direct.is_empty(),
+        "direct process constructors bypass the test environment: {direct:?}"
+    );
+}
+
 /// What the scans read of a Rust source, as the compiler reads it: its words, its marks and its
 /// string literals, past comments, escaped quotes, raw strings and character literals (`'"'`),
 /// which a split on quotes misreads. Each with where it begins (in characters).
