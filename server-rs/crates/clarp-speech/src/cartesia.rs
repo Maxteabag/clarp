@@ -26,10 +26,10 @@ const VOICES_VERSION: &str = "2026-08-14";
 /// most. The key is presented the three ways Cartesia has taken one, each tried when the
 /// one before was refused (the Python Host's `cartesia_voices.py`).
 pub fn voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, String> {
-    catalogue(key, endpoint, true, 8)
+    catalogue(key, endpoint, true, 8).map_err(|why| why.to_string())
 }
 
-pub fn all_voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, String> {
+pub fn all_voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, crate::LookupError> {
     catalogue(key, endpoint, false, 20)
 }
 
@@ -47,7 +47,7 @@ fn catalogue(
     endpoint: &str,
     english: bool,
     pages: usize,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<serde_json::Value>, crate::LookupError> {
     let mut voices = Vec::new();
     let mut after = String::new();
     for _ in 0..pages {
@@ -57,7 +57,7 @@ fn catalogue(
             let cursor = crate::voice_names::segment(&after);
             url.push_str(&format!("&starting_after={cursor}"));
         }
-        let page = voice_json(key, &url).map_err(|why| why.to_string())?;
+        let page = voice_json(key, &url)?;
         voices.extend(page["data"].as_array().cloned().unwrap_or_default());
         after = match &page["next_page"] {
             serde_json::Value::String(next) => next.clone(),
