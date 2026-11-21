@@ -220,6 +220,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // task (`POST /agents/<session>/fork`). Each child starts from the conversation as
     // words (`fork: seed`): a tool's own copy of a conversation is not made here yet.
     ("agent_fork", 41),
+    ("agent_creation_details", 1),
     // `GET /agents/snapshot?include_archived=0` and `GET /agents/archived`.
     ("snapshot_without_archived", 82),
     // `DELETE /devices` and `GET /devices/push-tokens`.
