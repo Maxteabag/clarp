@@ -42547,9 +42547,10 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
         host.heard.lock().unwrap().contains(PRIVATE)
     });
     assert_eq!(
-        change(json!({"call_languages":"","call_engines":"","agent_languages":{"mike":"en,no"}})).0,
+        change(json!({"call_languages":"","call_engines":"","agent_languages":{"mike":"en,no"},"agent_engines":{"mike":"deepgram:nova-3"}})).0,
         200
     );
+    let nova_requests = requests.lock().unwrap().len();
     let (code, refused) = hear(&phone, id, &second, "unhanded-set");
     assert_eq!(code, 500, "{refused}");
     assert_eq!(refused["error"], "transcription failed");
@@ -42558,6 +42559,8 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
         "transcription failed"
     );
     assert_eq!(refused["stt"]["attempts"][0]["language"], Value::Null);
+    assert_eq!(refused["stt"]["attempts"][0]["engine"], "deepgram:nova-3");
+    assert_eq!(requests.lock().unwrap().len(), nova_requests);
     assert_eq!(
         action("/calls/hold", json!({"agent":second,"call_id":id})).0,
         200
