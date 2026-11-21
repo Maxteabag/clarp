@@ -1,6 +1,132 @@
 {
   "choices": [
     {
+      "global_choice": null,
+      "own": "default",
+      "mode": "auto",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "global"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "default",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "default",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": null
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "show",
+      "mode": "auto",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "chat"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "show",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "show",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "show",
+        "coordination_override": "show"
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "hide",
+      "mode": "auto",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "chat"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "hide",
+      "mode": "show",
+      "policy": {
+        "visibility": "show",
+        "hidden": false,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
+      "global_choice": null,
+      "own": "hide",
+      "mode": "hide",
+      "policy": {
+        "visibility": "hide",
+        "hidden": true,
+        "source": "request"
+      },
+      "snapshot": {
+        "coordination_visibility": "hide",
+        "coordination_override": "hide"
+      }
+    },
+    {
       "global_choice": "show",
       "own": "default",
       "mode": "auto",

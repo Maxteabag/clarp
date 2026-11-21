@@ -84,7 +84,8 @@ impl Telling {
             stored(&rules::chat_key(&record.agent_id))
                 .and_then(Visibility::read)
                 .or_else(|| stored(rules::GLOBAL_KEY).and_then(Visibility::read))
-                == Some(Visibility::Hide)
+                .unwrap_or_default()
+                == Visibility::Hide
         };
         Told {
             coordination_hidden,
