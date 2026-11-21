@@ -255,9 +255,12 @@ plans and goals, each as it stood, at its revision, with its steps, its history,
 newest of its documents (most of the owner's agents work toward a goal: 88 plans in the week that was
 counted). Nothing of it is made anew or judged anew here: the kernel takes what was shown
 (`GoalBook::taken_over`, `artifacts/moved.rs`), and what one book shows another shows the same after it. It
-arrives with what it made and what it is committed to or not at all. And it arrives held: what its user says to
-it runs, and what would start by itself waits for a resume, because until it is archived where it came from it
-is on both Hosts and both would wake it. Not moving yet: its portrait and voice.
+arrives with what it made and what it is committed to or not at all. Its mailbox arrives held. After the
+files, a source that advertises `agent_moved` is marked with this Host's pairing identity. The source refuses
+new turns, holds its queue, and lets a running turn finish. Once the source mark and idleness are confirmed,
+the mailbox here resumes. A refusal leaves the mailbox here held and the command says why. An older source
+uses its manual archive and resume steps. `clarp-host import --back` holds the imported mailbox before it
+clears the source mark. The source releases its queue and the work done here stays here.
 
 **Stage 3 has begun, on the agent's side first** (15 Nov 2026). An agent on this Host has its background jobs
 (`clarp-agent-bg`, the apps' view of them and the cancel), its own status label, and its goals: `clarp-goal`

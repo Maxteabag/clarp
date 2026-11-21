@@ -1,7 +1,8 @@
 # Moving an agent to the Rust Host
 
 An agent moves from a Python Host to the Rust Host with one command. It takes the agent as the
-other Host's apps see it, through that Host's ordinary API, and changes nothing there.
+other Host's apps see it, through that Host's ordinary API. A source that advertises
+`agent_moved` also records where the agent moved.
 
 ## What moves
 
@@ -89,8 +90,7 @@ CLARP_HOST_TOKEN=<the Rust Host's token> \
 ```
 
 It says how many files came from there, and how many are on neither. With `--files` the same
-words bring them to an agent that has moved already. The second Host is only read, like the
-first.
+words bring them to an agent that has moved already. The second Host is only read.
 
 An agent moves to a Rust Host once. One that went back and comes again is refused, because its
 history from the first time is still on the Rust Host's disk; taking that up again is not
@@ -98,24 +98,40 @@ built yet.
 
 ## After
 
-1. **Archive the agent on the Python Host.** Until then it is on both, and two Hosts that
-   resume one tool session write into each other's turns. This is the one step that is not a
-   command of the Rust Host: it is done on the Python Host, by whoever owns it.
-2. **Point the app at the Rust Host**: `clarp-host pair --url <the address the phone reaches it at>`
-   prints the link to open on the phone.
-3. Send it a message. Its first turn here resumes the tool's session.
-4. **Resume it here.** An agent arrives held: what its user says to it runs, and what would
-   start by itself (a goal that is due, an answer that waits to be told) waits, because until
-   step 1 is done the agent is on both Hosts and both would wake it. When it is archived on the
-   Python Host, resume it on the Rust Host: the app's Resume, or `POST /turn-queue/resume`
-   with its session. Its goals arrive as they stood, not paused: the hold is on its mailbox.
+The agent arrives with its mailbox held. Once its files have arrived, the command checks the
+source's `/server-info`. With `agent_moved`, it marks the source copy moved with this Host's
+name and server ID from `/pairing/identity`. The source refuses new turns and keeps its queued
+items. An already running turn can finish. The command resumes the mailbox here once the
+source confirms the mark and the agent there is idle. Use an administrator's or full device's
+token on the source to record the mark.
+
+If the source refuses the mark or the command cannot confirm it, the command gives the reason
+and leaves the imported mailbox held. Check the source before resuming here. Archive the
+source copy or confirm that it is marked moved and idle. A source without `agent_moved`
+continues to use the manual handoff: archive it there and resume it here with the app's Resume
+or `POST /turn-queue/resume`. A mailbox hold suspends automatic starts such as a due goal. Keep
+direct messages on the active Host while handing the agent over.
+
+Point the app at the Rust Host with `clarp-host pair --url <the address the phone reaches it at>`.
+Its first turn here resumes the tool's session.
 
 ## Back again
 
-Nothing was taken away from the Python Host, so the way back is to delete the agent on the
-Rust Host (`DELETE /agents/<session>`) and unarchive it on the Python Host. What it said on
-the Rust Host in between stays in the tool's own session, and the Python Host reads it from
-there.
+For an agent marked moved on the source, use the same Host addresses and tokens:
+
+```bash
+CLARP_SOURCE_TOKEN=<the Python Host's token> CLARP_HOST_TOKEN=<the Rust Host's token> \
+  clarp-host import --back --from 127.0.0.1:7682 --session <session name> --host 127.0.0.1:7690
+```
+
+Run this when the agent is idle here. The command verifies that the source mark points to this
+Host, holds the imported agent's mailbox, then clears the source mark. The source goes on from
+where it was and releases its queued items in order. Work since the move stays on the Rust Host.
+Send new messages to the source after the return.
+
+With a legacy source that was archived by hand, the way back still uses
+`DELETE /agents/<session>` on the Rust Host and unarchive on the Python Host. The Python Host
+can read the Rust turns that the tool kept in its own session.
 
 ## Evidence
 
@@ -129,5 +145,4 @@ there.
 
 | 15 Nov 2026 | The service arrangement, on elitebook: the Rust Host as a systemd user unit (`--launcher systemd`), six turns running, `systemctl --user restart` of the unit | Each turn's shim was in a scope of its own; all six scopes outlived the restart and all six turns finished, each answered once. (The first try found a defect: `systemd-run` rewrote `${...}` in a tool's arguments. Fixed, and `a_turn_in_a_systemd_scope_gets_its_tool_unchanged_and_outlives_the_host` holds it) |
 
-Not yet done: a move that is kept. It needs the owner to choose the agent and archive it on the
-Python Host.
+A move that is kept needs the owner to choose the agent.

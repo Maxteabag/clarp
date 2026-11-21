@@ -94,6 +94,11 @@ fn a_move_names_every_render_spec_left_on_the_source_and_takes_its_other_artifac
             json!({"portraits":[]}).to_string(),
         ),
         ("/transcription-providers", "200 OK", "{}".into()),
+        (
+            "/server-info",
+            "200 OK",
+            json!({"capabilities":{"features":[]}}).to_string(),
+        ),
     ]);
     let import = |session: &str, extra: &[&str]| {
         place
