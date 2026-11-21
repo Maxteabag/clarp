@@ -25,7 +25,10 @@ TOOL = {"type": "assistant", "message": {"content": [
 
 def _reader(stream, handle, stall, stalled, lines):
     for line in takeover.read_lines(stream, handle):
-        ev = json.loads(line)
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue                            # the half line handed out at the end
         note_output(handle, ev)
         lines.append(ev)
         if ev.get("subtype") == "init":
