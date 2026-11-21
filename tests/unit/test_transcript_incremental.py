@@ -387,13 +387,7 @@ def test_edits_and_rewrites_of_earlier_records_force_a_full_import(tmp_path, clo
     assert _decide(cp, "claude", transcript) == "inode"
 
 
-@pytest.mark.parametrize("backend,helper", [
-    (backend, helper)
-    for backend in ["claude", "codex", "agy"]
-    for helper in ["message_import_rows.py", "message_import_common.py", "message_text.py"]
-] + [("codex", "codex_tool_cells.py"), ("agy", "codex_tool_cells.py")])
-def test_parser_version_changes_when_an_import_helper_changes(monkeypatch, backend, helper):
-    """A moved import dependency must invalidate checkpoints on each affected backend."""
+def _version_with_changed(monkeypatch, backend, helper):
     original = pathlib.Path.read_bytes
     root = pathlib.Path(inc.__file__).resolve().parent
 
@@ -403,14 +397,35 @@ def test_parser_version_changes_when_an_import_helper_changes(monkeypatch, backe
 
     inc.parser_version.cache_clear()
     try:
-        before = inc.parser_version(backend)
+        before = (inc.parser_version(backend), inc.sources_digest(inc._STORE_SOURCES))
         with monkeypatch.context() as scope:
             scope.setattr(pathlib.Path, "read_bytes", changed_bytes)
             inc.parser_version.cache_clear()
-            after = inc.parser_version(backend)
-        assert after != before
+            after = (inc.parser_version(backend), inc.sources_digest(inc._STORE_SOURCES))
+        return before, after
     finally:
         inc.parser_version.cache_clear()
+
+
+@pytest.mark.parametrize("backend,helper", [
+    (backend, "message_text.py") for backend in ["claude", "codex", "agy"]
+] + [("codex", "codex_tool_cells.py"), ("agy", "codex_tool_cells.py")])
+def test_parser_version_changes_when_a_parse_helper_changes(monkeypatch, backend, helper):
+    """A helper that decides what a byte range parses to invalidates checkpoints on each affected backend."""
+    (version, store), (changed, same_store) = _version_with_changed(monkeypatch, backend, helper)
+    assert changed != version and same_store == store
+
+
+@pytest.mark.parametrize("backend", ["claude", "codex", "agy"])
+@pytest.mark.parametrize("helper", ["message_import_rows.py", "message_import_common.py"])
+def test_an_import_helper_change_is_a_store_decision_not_a_full_read(monkeypatch, backend, helper):
+    """The import helpers decide what a full import writes, not what a range parses to: they are
+    store sources. A change to one moves the store digest the golden pins (its author then decides
+    on STORE_FORMAT, see test_transcript_parser_version), and leaves parser_version alone."""
+    assert helper in inc._STORE_SOURCES
+    assert helper not in inc._PARSE_COMMON and helper not in inc._VERSION_SOURCES[backend]
+    (version, store), (same_version, changed_store) = _version_with_changed(monkeypatch, backend, helper)
+    assert same_version == version and changed_store != store
 
 
 def test_a_checkpoint_from_another_parser_version_is_refused(tmp_path, clock, shadow_on, monkeypatch):
