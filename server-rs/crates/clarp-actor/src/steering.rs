@@ -7,6 +7,7 @@ use clarp_kernel::agent::{Agent, Command};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::journal::Batch;
 use clarp_kernel::steering::{self, InputOwner, Join, Observation, Recovery, Stage};
+use clarp_kernel::takeover;
 use clarp_kernel::turn::{COMPACTION, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
@@ -42,6 +43,12 @@ pub(super) struct Separate {
 }
 
 impl State {
+    pub(super) fn for_prompt(agent: &str, turn: TurnId, trace: Option<&str>) -> Self {
+        let uuid = trace.and_then(takeover::prompt_uuid)
+            .unwrap_or_else(|| takeover::untraced_uuid(agent, turn.0));
+        Self { primary_uuid: Some(uuid), ..Self::default() }
+    }
+
     pub(super) fn record(&mut self, entry: &Line) -> Option<Value> {
         match entry {
             Line::Shim(ShimEvent::InputOpen {
@@ -88,9 +95,6 @@ impl State {
                     Some((turn, follow)) if self.separate.is_none() => {
                         self.separate(*turn, message_at(log, follow.message_seq)?);
                     }
-                    None if self.primary_uuid.is_none() => {
-                        self.primary_uuid = Some(uuid.to_owned())
-                    }
                     _ => {}
                 }
             }
@@ -126,9 +130,6 @@ impl State {
                         follow.join.uuid == uuid && follow.stage == Stage::Pending
                     })
                 else {
-                    if self.primary_uuid.is_none() {
-                        self.primary_uuid = Some(uuid.to_owned());
-                    }
                     return Ok(None);
                 };
                 let message = message_at(batch.log(), follow.message_seq)?;
@@ -375,13 +376,18 @@ impl Actor {
         &mut self,
         turn: TurnId,
         uuid: String,
-        input: String,
+        text: &str,
         now_ms: i64,
-    ) -> Result<Option<Outputs>, ActorError> {
+    ) -> Result<Option<Action>, ActorError> {
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
-        if !live.steering.stream.can_join() || live.opening || live.origin.name() == COMPACTION {
+        if self.backend.id() != "claude"
+            || !live.steering.stream.can_join()
+            || live.opening
+            || live.origin.name() == COMPACTION
+            || text.trim().is_empty()
+        {
             return Ok(None);
         }
         let Some(owner) = live.steering.owner.clone() else {
@@ -390,6 +396,8 @@ impl Actor {
         let Some(session) = self.recorder.agent().backend_session() else {
             return Ok(None);
         };
+        let mut input = takeover::claude_user_line(&uuid, &[text]).to_string();
+        input.push('\n');
         let join = Join {
             into: live.turn,
             uuid,
@@ -404,8 +412,6 @@ impl Actor {
             return Ok(None);
         }
         batch.commit()?;
-        let mut out = Outputs::default();
-        out.actions.push(Action::Steer { socket, input });
-        Ok(Some(out))
+        Ok(Some(Action::Steer { socket, input }))
     }
 }
