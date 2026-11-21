@@ -53,7 +53,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
 from ..backend_catalogue import CLAUDE
-from .base import CatalogueDefault, BackendBrand, CliMissing, Backend, CompactionStrategy, resolve
+from .base import CatalogueDefault, BackendBrand, CliMissing, Backend, CompactionStrategy, Unsupported, resolve
 from .stream_json import launch, start_drain, stop_after_drain_failure
 
 
@@ -488,6 +488,9 @@ class ClaudeBackend(Backend):
         return takeover.takeover_plan(takeover.session_facts(path, drops_turn),
                                       drops_turn, first_text)
 
+    # A follow-up is read later than it is written (the replay echo says when).
+    steer_reads_later = True
+
     def steer_ready(self) -> bool:
         """The installed Claude Code is the recorded one or later (part C's recordings)."""
         from .. import takeover
@@ -502,7 +505,9 @@ class ClaudeBackend(Backend):
         it (``joined``: inside the running turn), ``on_unread()`` when the process ends first.
         False: nothing was written (no turn, no open tool call, stdin closed)."""
         if on_read is None or on_unread is None:
-            return False
+            # Without a way to tell when the CLI read it, a follow-up cannot be
+            # placed: Claude is not steerable that way (the Backend contract).
+            raise Unsupported(f"{self.id} is steered only with read callbacks")
         uid = prompt_uuid(trace_id)
         line = json.dumps({"type": "user", "uuid": uid,
                            "message": {"role": "user",

@@ -443,7 +443,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             read_later = {}
             by_id = getattr(self.backends, "by_id", None)
             if by_id is not None and spec.queue_id and getattr(
-                    by_id(spec.backend), "steer_ready", None) is not None:
+                    by_id(spec.backend), "steer_reads_later", False):
                 read_later = {
                     "trace_id": spec.trace_id,
                     "on_read": lambda joined, s=spec, a=active_trace:
