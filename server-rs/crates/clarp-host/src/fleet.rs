@@ -1899,7 +1899,9 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         gone: Arc::new(gone.clone()),
     }));
     let read = Arc::new(read);
-    works.hub.queue_roster(&read);
+    if let Err(why) = works.hub.queue_roster(&read) {
+        works.log.unkept("queue roster", why);
+    }
     let log = works.log.clone();
     let delegation_view = delegation_desk.for_worker();
     let left_out = works.left_out.clone();
