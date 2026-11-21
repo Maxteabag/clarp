@@ -2,17 +2,6 @@
 # One per line: the difference's id from the report, then why. The register with the reasoning
 # is server-rs/docs/differences.md; an id is added here only once it is written there.
 
-# A plain send that has to wait is announced with `queue-updated` (the Python Host announces
-# nothing: reference defect R5). One event more, which the differ shows as these four.
-66b251f369fb  send-while-busy: queue-updated for the message that joined (queue_depth)
-a6a1fa158ccb  send-while-busy: the same event (queue_revision)
-f588400bad1e  send-while-busy: the same event (queue_started)
-d64ffe6fffea  send-while-busy: the event the Python Host does send, now second
-b2edb783c3b0  delivery-of-a-held-send: queue-updated for the plain send that joined behind the busy turn (queue_depth)
-6eef7602ee03  delivery-of-a-held-send: the same event (queue_revision)
-c7c993cc4961  delivery-of-a-held-send: the same event (queue_started)
-9bc6307fe0b6  delivery-of-a-held-send: the event the Python Host does send, now second
-
 # The reply that closes a completed turn is `final` (the Python Host says null when the turn
 # before had settled: reference defect R6).
 dfcb5143ebc3  two-turns: the second reply

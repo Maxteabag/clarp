@@ -61,6 +61,9 @@ sys.path.insert(0, str(REPO / 'tests' / 'replay'))
 import capture as replay  # noqa: E402  (tests/replay)
 import diff  # noqa: E402
 import normalize  # noqa: E402
+
+# A waited message's send time is a clock reading, just like its row timestamp.
+normalize.CLOCK_KEYS = normalize.CLOCK_KEYS | {"sent_at"}
 import planted as harness_planted  # noqa: E402
 import run as harness_run  # noqa: E402
 

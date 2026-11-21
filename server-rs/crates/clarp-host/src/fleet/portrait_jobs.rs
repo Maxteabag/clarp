@@ -165,16 +165,10 @@ impl Fleet {
         if change.record.is_none() {
             return Ok(false);
         }
-        // Only a durably accepted pair writes content-addressed blobs. Make both readable
-        // before publishing the new directory: readers racing the write see the old gallery.
-        // The durable publication carries the original bytes if a disk write is interrupted.
+        // The picture store has its own names. Gallery bytes are written by its writer,
+        // outside the fleet worker, from the durable publication above.
         for (asset, raw) in publication.assets.iter().zip(bytes) {
-            if let Err(error) = self
-                .works
-                .blobs
-                .put(&asset.blob(), &raw)
-                .and_then(|()| self.works.blobs.put(&picture_name(&asset.sha256), &raw))
-            {
+            if let Err(error) = self.works.blobs.put(&picture_name(&asset.sha256), &raw) {
                 self.works.log.line(&format!(
                     "clarp-host: committed portrait awaits local publication: {error}"
                 ));

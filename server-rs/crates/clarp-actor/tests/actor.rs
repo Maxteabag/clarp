@@ -328,7 +328,7 @@ fn a_message_sent_twice_is_one_turn() {
 }
 
 #[test]
-fn what_is_said_is_in_the_conversation_at_once_and_what_is_left_for_later_when_its_turn_starts() {
+fn what_waits_enters_the_conversation_when_its_turn_starts_whether_said_or_left_for_later() {
     let mut world = World::new("later");
     let mut actor = world.open();
     let ids = |actor: &Actor| {
@@ -341,31 +341,51 @@ fn what_is_said_is_in_the_conversation_at_once_and_what_is_left_for_later_when_i
             .collect::<Vec<_>>()
     };
     world.send(&mut actor, "u-1", "go", Admission::Queue);
-    // Said while the agent is busy: there at once. Left for later: in the queue.
-    let said = world.send(&mut actor, "u-2", "and this", Admission::Queue);
-    assert!(said.changed.conversation && said.changed.queue);
+    // Said while the agent is busy, or left for later: in the queue, not in the conversation
+    // (issue 491: a row above an answer that had not read it told the user it was ignored).
     let head = actor.head_revision();
+    let said = world.send(&mut actor, "u-2", "and this", Admission::Queue);
+    assert!(!said.changed.conversation && said.changed.queue);
     let left = world.send(&mut actor, "u-3", "when you are done", Admission::Later);
     assert!(!left.changed.conversation && left.changed.queue);
-    assert_eq!(ids(&actor), vec!["u-1", "u-2"]);
+    assert_eq!(ids(&actor), vec!["u-1"]);
     assert_eq!(
         actor.head_revision(),
         head,
         "what is not in the conversation does not change it"
     );
-    let waiting: Vec<String> = actor
+    let waiting: Vec<(String, String)> = actor
         .queue()
         .unwrap()
         .into_iter()
-        .map(|waiting| waiting.message_id)
+        .map(|waiting| (waiting.message_id, waiting.text))
         .collect();
-    assert_eq!(waiting, vec!["u-2", "u-3"], "both wait their turn");
+    assert_eq!(
+        waiting,
+        vec![
+            ("u-2".to_string(), "and this".to_string()),
+            ("u-3".to_string(), "when you are done".to_string())
+        ],
+        "both wait their turn"
+    );
 
     world.says(1, "One.");
     world.exits(1, Some(0), None);
+    let before = actor.head_revision();
     world.hint(&mut actor);
     assert_eq!(world.took, vec![1, 2]);
-    assert_eq!(ids(&actor), vec!["u-1", "u-2", "r-1-1"]);
+    assert_eq!(
+        ids(&actor),
+        vec!["u-1", "r-1-1", "u-2"],
+        "its turn started: now it is in the conversation, after the answer before it"
+    );
+    let page = actor.after(before, 10).unwrap();
+    let newer: Vec<&str> = page.entries.iter().map(|v| v.entry.id()).collect();
+    assert_eq!(
+        newer,
+        vec!["u-2", "r-1-1"],
+        "the answer is told its end after the row that starts the next turn"
+    );
     world.says(2, "Two.");
     world.exits(2, Some(0), None);
     let before = actor.head_revision();
@@ -373,8 +393,8 @@ fn what_is_said_is_in_the_conversation_at_once_and_what_is_left_for_later_when_i
     assert_eq!(world.took, vec![1, 2, 3]);
     assert_eq!(
         ids(&actor),
-        vec!["u-1", "u-2", "r-1-1", "r-2-1", "u-3"],
-        "its turn started: now it is in the conversation, after the answer before it"
+        vec!["u-1", "r-1-1", "u-2", "r-2-1", "u-3"],
+        "each message stands above the answer that read it"
     );
     // A client that asks what is newer is given the message and the answer that closed the
     // turn before it, and holds the newest revision afterwards.
@@ -1428,10 +1448,11 @@ fn a_day_without_a_restart_is_what_it_should_be() {
         day.conversation,
         vec![
             pair("u-1", "user: go"),
-            pair("u-2", "user: and again"),
             pair("r-1-1", "agent: Let me look."),
             pair("t1", "Bash Ok Some(\"a.txt\")"),
             pair("r-1-2", "agent: One file.\nDone."),
+            // Said while the first turn ran: it enters when its own turn starts (issue 491).
+            pair("u-2", "user: and again"),
             pair("r-2-1", "agent: Second answer."),
         ]
     );

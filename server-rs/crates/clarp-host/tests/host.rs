@@ -33,6 +33,8 @@ mod coordination;
 mod delivery;
 #[path = "host/diagnostics.rs"]
 mod diagnostics;
+#[path = "host/enter_at_start.rs"]
+mod enter_at_start;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
 #[path = "host/harness.rs"]
@@ -45,6 +47,8 @@ mod import_render_specs;
 mod installer;
 #[path = "host/janitor_attention.rs"]
 mod janitor_attention;
+#[path = "host/language_set.rs"]
+mod language_set;
 #[path = "host/launch_directories.rs"]
 mod launch_directories;
 #[path = "host/launch_refused.rs"]
@@ -53,14 +57,20 @@ mod launch_refused;
 mod live_model;
 #[path = "host/managed_skills.rs"]
 mod managed_skills;
+#[path = "host/media_manage.rs"]
+mod media_manage;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
+#[path = "host/pairing_identity.rs"]
+mod pairing_identity;
 #[path = "host/pictures.rs"]
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
 #[path = "host/remote_action.rs"]
 mod remote_action;
+#[path = "host/render_spec_export.rs"]
+mod render_spec_export;
 #[path = "host/router_phrases.rs"]
 mod router_phrases;
 #[path = "host/source_trace.rs"]
@@ -502,7 +512,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 109);
+    assert_eq!(info["contract"]["host"], 115);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["speech_outcome"], 109);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
@@ -8533,11 +8543,12 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
             .contains(&canary.to_lowercase())
     );
 
-    // Without a threshold, as the reference ships, nobody sees a spec or can answer one.
+    // A client the default does not name (only iOS from 74 is), here the desktop at any
+    // contract, sees no spec and cannot answer one.
     let (status, made) = ask(
         "POST",
         "/artifacts",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         Some(&envelope("plain")),
     );
     assert_eq!(status, 201, "{made}");
@@ -8557,19 +8568,24 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         (&row["type"], &row["title"], &row["status"]),
         (&json!("render_spec"), &json!("Decide"), &json!("ready"))
     );
-    let (_, read) = ask("GET", "/artifacts/plain", Some("ios/12 contract=999"), None);
+    let (_, read) = ask(
+        "GET",
+        "/artifacts/plain",
+        Some("desktop/12 contract=999"),
+        None,
+    );
     assert_eq!(read["artifact"], row);
     let (status, said) = ask(
         "POST",
         "/artifacts/plain/submit",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         Some(&json!({})),
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
     let (status, said) = raw(
         "POST",
         "/artifacts/plain/submit",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         b"",
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
@@ -8582,10 +8598,118 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     keys.sort();
     assert_eq!(keys, ["agent_id", "artifact_id", "session", "type"]);
 
-    // The owner sets a threshold; it is read at every request. Only a whole number counts.
-    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"74\"\n").unwrap();
-    let (_, read) = ask("GET", "/artifacts/plain", capable, None);
-    assert!(read["artifact"].get("spec").is_none());
+    // The owner lays his minimums over the default; they are read at every request. The old
+    // single number is iOS's: 0 switches iOS off; one that is no whole number counts for
+    // nothing, and the default stands.
+    let spec_of = |client: &str| {
+        let (_, read) = ask("GET", "/artifacts/plain", Some(client), None);
+        read["artifact"].get("spec").is_some()
+    };
+    assert!(spec_of("ios/12 contract=74"), "iOS from 74, by default");
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 0\n").unwrap();
+    assert!(!spec_of("ios/12 contract=74"), "iOS switched off");
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"80\"\n").unwrap();
+    assert!(
+        spec_of("ios/12 contract=74"),
+        "a text is no number: the default stands"
+    );
+    // A table names each client by its name as sent; a name it does not hold keeps the default.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { android = 30, ios = 75 }\n",
+    )
+    .unwrap();
+    assert!(spec_of("android/5 contract=30"));
+    assert!(!spec_of("android/5 contract=29"));
+    assert!(
+        !spec_of("Android/5 contract=30"),
+        "the name as sent, exactly"
+    );
+    assert!(!spec_of("ios/12 contract=74"));
+    assert!(!spec_of("desktop/1 contract=999"));
+    // A key is a client's name in the header's own form, counted exactly as written (one rule
+    // for both of the Python Host's tables, its owner's of 20 Nov): 'IOS' and 'Ios' are taken
+    // for clients that send them so, not for iOS, and that is said once; a key of no such form,
+    // or a value that is no whole number of at least 0, is refused in a line that names it.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Android = 2, Ios = 1, \"a b\" = 1, \"1os\" = 1, \
+         android = -1, web = 2.5 }\n",
+    )
+    .unwrap();
+    assert!(spec_of("IOS/12 contract=1"), "taken, exactly as written");
+    assert!(spec_of("Ios/12 contract=1"));
+    assert!(spec_of("Android/12 contract=2"));
+    assert!(!spec_of("Android/12 contract=1"));
+    assert!(!spec_of("ios/12 contract=73"), "iOS keeps its own minimum");
+    assert!(spec_of("ios/12 contract=74"));
+    assert!(!spec_of("iOs/12 contract=74"), "only the name as written");
+    assert!(
+        !spec_of("android/5 contract=99"),
+        "a value below 0 is refused"
+    );
+    assert!(!spec_of("web/1 contract=99"), "so is a fraction");
+    let said = |line: &str| {
+        host.heard
+            .lock()
+            .unwrap()
+            .lines()
+            .filter(|heard| heard.contains(line))
+            .count()
+    };
+    assert_eq!(
+        said(
+            "config.render_spec_min_contract: refused 'a b', '1os', 'android', 'web': \
+             a key is a client's name as it sends it ([A-Za-z][A-Za-z0-9_-]{0,31}), \
+             a value a whole number of 0 or more"
+        ),
+        1,
+        "the refused keys are named, once: {}",
+        host.heard.lock().unwrap()
+    );
+    let line = "config.render_spec_min_contract: 'IOS' (not 'ios'), 'Android' (not 'android'), \
+                'Ios' (not 'ios'): names are matched exactly as clients send them, so each is \
+                another client and leaves the built-in one as it is";
+    assert_eq!(said(line), 1, "{line}: {}", host.heard.lock().unwrap());
+    assert_eq!(
+        said(
+            "config.render_spec_min_client: applies to iOS only; name other clients in [artifacts] render_spec_min_contract"
+        ),
+        1
+    );
+    assert_eq!(
+        said("config.render_spec_min_client: ignored: not a whole number"),
+        1
+    );
+    // A TOML boolean is not a minimum on either Host.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { ios = true }\n",
+    )
+    .unwrap();
+    assert!(!spec_of("ios/12 contract=73"), "the default stands");
+    // Where the table names iOS, it wins over the old number.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_client = 0\nrender_spec_min_contract = { ios = 80 }\n",
+    )
+    .unwrap();
+    assert!(
+        spec_of("ios/12 contract=80"),
+        "the table's 80, not the old 0"
+    );
+    assert!(!spec_of("ios/12 contract=79"));
+    assert_eq!(
+        said("config.render_spec_min_client: ignored: render_spec_min_contract names ios"),
+        1
+    );
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_contract = 3\n").unwrap();
+    assert!(spec_of("ios/12 contract=74"));
+    assert!(spec_of("ios/12 contract=74"));
+    assert_eq!(
+        said("config.render_spec_min_contract: ignored: expected a table of client = number"),
+        1
+    );
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 74\n").unwrap();
     let (status, made) = ask(
         "POST",
@@ -8920,7 +9044,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 109);
+    assert_eq!(info["contract"]["host"], 115);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -17745,6 +17869,44 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
     );
     assert_eq!(in_the_address.status, 403, "{}", in_the_address.text());
     assert!(in_the_address.text().contains("not the URL"));
+    // It is read by where the token that let the request in was found, not by which headers
+    // came with it: a cookie or a header that holds no token beside the token in the address
+    // opens nothing; the token in the Authorization header beside a cookie of no token does.
+    let page = format!("/artifacts/findings/html?token={token}");
+    let cookie = format!("claude_pwa_token={token}");
+    let not_a_token = [("Cookie", "claude_pwa_token=not-a-token")];
+    for (how, got) in [
+        (
+            "a cookie of no token",
+            fetch(&host, "", "GET", &page, &not_a_token, b""),
+        ),
+        (
+            "a header of no token",
+            fetch(&host, "not-a-token", "GET", &page, &[], b""),
+        ),
+    ] {
+        assert_eq!(got.status, 403, "{how} beside the address: {}", got.text());
+        assert!(got.text().contains("not the URL"), "{how}");
+    }
+    let by_header = fetch(
+        &host,
+        token,
+        "GET",
+        "/artifacts/findings/html",
+        &not_a_token,
+        b"",
+    );
+    assert_eq!(by_header.status, 200, "{}", by_header.text());
+    let by_cookie = [("Cookie", cookie.as_str())];
+    let in_a_cookie = fetch(
+        &host,
+        "",
+        "GET",
+        "/artifacts/findings/html",
+        &by_cookie,
+        b"",
+    );
+    assert_eq!(in_a_cookie.status, 200, "{}", in_a_cookie.text());
     let (phone, _) = pair(&host, "phone", "limited");
     let kept_out = fetch(&host, &phone, "GET", "/artifacts/findings/html", &[], b"");
     assert_eq!(kept_out.status, 403);
@@ -25496,13 +25658,13 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
             said["error"].as_str().unwrap_or_default().to_string(),
         )
     };
-    // The news of the queue that names no message: it was held or let go, or one was taken back.
-    let plain_news = || -> Vec<(u64, bool, u64)> {
+    let queue_news = |id: Option<&str>, change: Option<&str>| -> Vec<(u64, bool, u64)> {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
             event["type"] == "queue-updated"
                 && event["session"] == echo.as_str()
-                && event.get("client_msg_id").is_none()
+                && event["client_msg_id"].as_str() == id
+                && event["queue_change"].as_str() == change
         });
         ours.map(|event| {
             (
@@ -25513,6 +25675,8 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
         })
         .collect()
     };
+    let plain_news = || queue_news(None, None);
+    let deleted = |id| queue_news(Some(id), Some("deleted"));
 
     // A turn runs, and four messages are left for later behind it: one of the phone's, whose
     // ids come with the mark, among them.
@@ -25556,7 +25720,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     assert_eq!(waiting(), ["m2", "m4", "m5"]);
     assert_eq!(queue()["revision"], before + 1);
     wait_for("the news that one was taken back", || {
-        plain_news() == [(3, false, before + 1)]
+        deleted(phones) == [(3, false, before + 1)]
     });
     assert_eq!(
         refused("DELETE", &format!("/turn-queue/{phones}")),
@@ -25594,14 +25758,11 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     // One more is taken back, and the last is sent by hand: nothing waits any more, and the
     // hold is over without a resume. That is told with the turn that began, not by itself.
     let told_before = plain_news().len();
+    let before = queue()["revision"].as_u64().unwrap();
     host.ask("DELETE", "/turn-queue/m2", None);
     wait_for("the news of the second one taken back", || {
-        plain_news().len() == told_before + 1
+        deleted("m2") == [(1, true, before + 1)]
     });
-    assert_eq!(
-        plain_news().last().map(|news| (news.0, news.1)),
-        Some((1, true))
-    );
     let (status, _) = host.ask("POST", "/turn-queue/m5/send", Some(&json!({})));
     assert_eq!(status, 202);
     wait_for("the last message to be answered", || {
@@ -25611,7 +25772,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     });
     let free = queue();
     assert_eq!((&free["paused"], waiting().len()), (&json!(false), 0));
-    assert_eq!(plain_news().len(), told_before + 1, "{:?}", plain_news());
+    assert_eq!(plain_news().len(), told_before, "{:?}", plain_news());
     let began: Vec<Value> = {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
@@ -26076,12 +26237,14 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         host.ask("PUT", &format!("/turn-queue/{id}"), Some(&body))
     };
     let refused = |status: u16, why: &str| (status, json!({ "error": why }));
-    let plain_news = || -> usize {
+    let edit_news = || -> usize {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
             event["type"] == "queue-updated"
                 && event["session"] == echo.as_str()
-                && event.get("client_msg_id").is_none()
+                && event["client_msg_id"] == "m2"
+                && event["queue_change"] == "edited"
+                && event["text"] == "second, in other words"
         });
         ours.count()
     };
@@ -26143,7 +26306,7 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         ]
     );
     assert_eq!(queue(&host)["revision"], before + 1);
-    wait_for("the news that the queue changed", || plain_news() == 1);
+    wait_for("the news that the queue changed", || edit_news() == 1);
     assert_eq!(
         put(phones, json!({ "text": "third, as the phone has it now" })).0,
         200
@@ -26181,21 +26344,15 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         refused(404, "queued message not found")
     );
 
-    // A message that was said while a turn ran waits its turn in the conversation: what
-    // was said stands. One left for later beside it is changed, and that outlives the Host.
+    // A message that was said while a turn ran waits outside the conversation as one left
+    // for later does (issue 491): the words of both are changed, and that outlives the Host.
     host.send(&echo, "sleep 60", "m5");
     wait_for("a turn to run again", || host.state(&echo) == "thinking");
     host.send(&echo, "said, not left", "m6");
     leave("seventh", "m7");
-    assert_eq!(
-        put("m6", json!({ "text": "x" })),
-        refused(409, "message is already in the conversation")
-    );
+    assert_eq!(put("m6", json!({ "text": "said anew" })).0, 200);
     assert_eq!(put("m7", json!({ "text": "the seventh, anew" })).0, 200);
-    let stands = [
-        named("m6", "said, not left"),
-        named("m7", "the seventh, anew"),
-    ];
+    let stands = [named("m6", "said anew"), named("m7", "the seventh, anew")];
     assert_eq!(waiting(&host), stands);
     let revision = queue(&host)["revision"].clone();
     host.kill();

@@ -103,7 +103,7 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D10 | Migration moves agents, not modules: the Rust Host is a new Host in the fleet | No shared-database coupling with the Python server, no big-bang switch |
 | D11 | The binary is `clarp-host`. (`clarpd` is taken: it is the desktop installer in dotfiles.) | Avoids a name collision the report missed |
 | D12 | Rust stable, edition 2024; Tokio; Axum; no message broker, no external database, no orchestrator | Plain, widely used, one binary and one directory of data |
-| D14 | The kernel admits a message in one of four ways. **Queue**: it was said; it is in the conversation at once and the agent comes to it when it is free. **Later**: someone left it for later (`queue_if_busy`); it waits like the first, but in the queue, and enters the conversation when its turn starts. **Background**: left for later by something that is not a person; a hold holds it. **Direct**: it ends the live turn and runs ahead of what waits. A Stop holds everything that waits at that moment; what a person says or leaves afterwards is not held by it, and when the agent is free it runs past what is held. The edge admits no message direct: the Python Host queues a user's plain send to a busy agent (`turn_claim._enqueue_if_busy`), whatever `docs/protocol.md` section 4 says | The conformance runs of 15 Nov and the Python Host's admission policy (`policies/admission.py`): the apps were built against what the Host does. A hold that also held what the user says next would make Stop a trap. Direct stays in the kernel, tested, for the day something asks for it |
+| D14 | The kernel admits a message in one of four ways. **Queue**: it was said. When its turn can start at once it is in the conversation at once. When it must wait, it waits in the queue and enters the conversation in the write that starts its turn, as **Later** does: a row that stood above an answer which had not read it told its sender it was ignored (issue 491). What still sets it apart from Later is not where it waits but what is told of it: it keeps its delivery receipt while it waits, and the queue says it was said, not left. **Later**: someone left it for later (`queue_if_busy`); it waits in the queue and enters the conversation when its turn starts. **Background**: left for later by something that is not a person; a hold holds it. **Direct**: it ends the live turn and runs ahead of what waits. A Stop holds everything that waits at that moment; what a person says or leaves afterwards is not held by it, and when the agent is free it runs past what is held. The edge admits no message direct: the Python Host queues a user's plain send to a busy agent (`turn_claim._enqueue_if_busy`), whatever `docs/protocol.md` section 4 says. Whatever the admission and whoever sent it, a message is in the conversation at once exactly when its turn starts at once | The conformance runs of 15 Nov and the Python Host's admission policy (`policies/admission.py`): the apps were built against what the Host does. A hold that also held what the user says next would make Stop a trap. Direct stays in the kernel, tested, for the day something asks for it. Order by construction: a row is never written before the agent comes to it and never moved afterwards; a queue item and a row are never both there for one message |
 | D19 | The Host names the tool's session before the tool starts (Claude: `--session-id`), with the agent's conversation id | A conversation must be called the same from its first message on: a client drops what it cached when the name changes |
 | D20 | How a turn ended is a conversation item of its own (`TURN_END`), written once, and told on the row that closed the turn; that row then carries the end's revision | The apps read `turn` on the closing row. Storing it once keeps the log append-only and lets a client that asks "what is newer" get the row again |
 | D21 | The edge writes the Python Host's shapes field for field, as JSON values built in `clarp-host/src/wire.rs` from what `conformance/golden` recorded, empty fields included. `clarp-protocol` stays the typed reading side | An app's decoder may count on a field being there. The recorded answers are the specification; the conformance run fails when the two drift |
@@ -200,6 +200,13 @@ next turn resumed Codex's thread (`CLARP_TEST_CODEX=1`, run the same way as the 
 
 **Pairing is there** (`clarp-host pair --url ...`, `POST /pairing/exchange`, scopes, revoke), the Python Host's
 scheme word for word.
+
+**Pairing identity** (21 Nov 2026, R172). Before spending its code a device can read this Host's id,
+name and contract at `GET /pairing/identity` without a token. The trusted request source has 30 reads a
+minute in its own budget. Pairing failures still count in the authentication budget. A device paired
+with limited access can revoke its own pairing using its token's exact device id after stripping the
+requested text. Revocation invalidates the token and uses the existing stream and call teardown.
+The pairing and device-scope vectors hold these rules to the Python Host.
 
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
@@ -1525,6 +1532,11 @@ changing it. The status records each provider's most recent action. Exhaustion
 leaves waiting work in the pool. Banked resets belong to a separate decision
 of the owner. The other account modes leave the login where it is.
 
+The Codex reading also carries the account-wide weekly usage (21 Nov 2026, PR 484).
+A failed or missing weekly reading stays unknown. The vectors hold the inclusive 99%
+threshold across the saved accounts and require a readable redemption count below the
+daily cap. Switch decisions still use the existing quota fields.
+
 **Launch directories** (19 Nov 2026). The new-agent dialog combines recent launches,
 zoxide results and explicit directory completions. The Host finds `zoxide` on PATH
 and starts it without a shell. Each invocation has half a second. If it is absent,
@@ -2542,11 +2554,14 @@ key came twice (refused as `invalid_object`). Both catalog files are in the prog
 not pass its checks refuses render specs alone (503, `catalog_unavailable`). The Host (`render_spec.rs`
 beside `library.rs`) publishes, revises (a whole new payload that names the version it follows) and only
 checks (`?validate_only=1`); a spec is never in a row of a list, a search, the pins, Updates or an event.
-Who sees it is said by each request: a client whose `X-Clarp-Client` says `<platform>/<build>
-contract=<n>` at or above the owner's threshold (`[artifacts] render_spec_min_client` in his file, read at
-every request; unset, as the reference ships, nobody) is shown what was left out (`content_omitted`, with
-`element_count`) and reads the spec, and once it was answered the answers, from the artifact itself; any
-other client sees a plain row and cannot answer (403, `client_contract`). The first answers that are taken
+A client sees the full spec when its exact `X-Clarp-Client` name and contract meet its minimum. The
+default is `ios` from 74. `[artifacts] render_spec_min_contract` overrides it per exact client name, with
+0 disabling that name. The legacy `render_spec_min_client` integer applies to `ios` alone and the table
+wins when both name it. Unknown or malformed headers see a generic row and cannot submit (403,
+`client_contract`). The Rust Host reads the owner's file for each request and writes each distinct
+configuration diagnostic once. `GET /artifacts/<id>/export` (R137) gives the administrator the public
+row, stored payload and accepted submission. On an authenticated Host it takes the token only from the
+Authorization header. Another artifact kind gets a 409 with its kind. The first answers that are taken
 close the spec (`already_answered`); they are told to its agent once, through the same delivery as a
 form's answers, and the same answers under the same id get the same receipt. `GET
 /artifact-catalogs/clarp.form/1` serves the catalog's bytes, and the agent's tool sends a whole request as
@@ -3147,10 +3162,10 @@ order of any 120 commands, sending by hand among them, loses nothing and runs no
 through a kill, and the scenario `the-queue-by-hand`. And the words of a waiting message are changed
 (`PUT /turn-queue/<id>` with `text`): the message is written anew where it waits, outside the conversation,
 its turn points at the words it has now (`Reword`, the journal's `Recorder::reword`), and it keeps its id and
-its place; the apps are told to read the queue again. Only what was left for later has words that can
-change. A message that was said while a turn ran waits its turn in the conversation on this Host, and what
-was said stands (409, in this Host's words). Held by the kernel's test, a Host test through a kill, and the
-scenario `the-queue-reworded`.
+its place; the apps are told to read the queue again. Since issue 491 every message that waits does so outside
+the conversation, and its words can change; only one that a build before it wrote into the conversation while
+it waited is refused, since what was said stands (409, in this Host's words). Held by the kernel's test, a Host
+test through a kill, and the scenario `the-queue-reworded`.
 
 **An id two agents both use** (19 Nov 2026). An app's message id is each agent's own here: every agent's rows
 are written only into its own log, the ids of a tool's answer are made from the message's id in that log, and
@@ -3364,6 +3379,72 @@ hold, half a line, a child, the bound with nobody to let go, ended while held, i
 a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
 hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
+
+**An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
+profile use the kernel's engine order. With a language set, models of one hosted provider
+share an attempt, as do the aliases of the Host's default local engine. If the ordinary
+chain ends on a hosted engine that cannot take the set, the Host considers its selected
+model if it is known, keyed and takes language sets. A provider already tried is excluded.
+The Host also considers its own model when no hosted replacement qualifies. Its catalogue
+languages determine coverage, with Norwegian aliases and the Whisper model default for an
+undeclared list. The successful response and an idempotent replay carry `engine_fallback`.
+An exhausted plan replies with the fixed `language_set_unsupported` 422 and its reasons.
+An own-engine failure keeps engine detail in the log. Loading and busy keep their statuses.
+Fallback uses the original audio buffer and current retention policy. The vectors run the
+reference's selection, declarations and fallback at the merge of PR 501.
+
+**Gallery management** (21 Nov 2026, the Python Host's PR 494). One bounded writer owns
+favorites, tombstones and gallery blob reclamation by asset id. The media publication in an
+agent's journal stays as written. At startup the gallery imports older publications and
+finishes any journal deliveries it owes. A deletion writes the tombstone and its pending
+blob removal together, then reflects the commit in the gallery and tombstone indexes.
+Every media read, including each range chunk, checks the tombstone before reading bytes.
+A pending unlink checks the live owners again on the same writer used by a publish. An
+interrupted unlink is safe to repeat. Independent portrait and contact files keep their
+existing names and storage. Media writes do not wait for a fleet or agent worker to reply
+from within the media writer, and those workers never wait for it. A request that does not
+receive its writer answer within three seconds receives a refusal. Deletion and favorite
+retries preserve their first timestamps and publish no new event.
+
+Gallery pages seek by creation or favorite time and asset id. Tombstone pages read nothing
+at or before their cursor, and include all rows that share the last millisecond of the
+page. They tell a reconnecting device what it must evict even when it missed the event.
+
+**A message enters the conversation when its turn starts** (20 Nov 2026; issue 491, part A). Messages sent one
+after another while an agent worked were answered for the first, and the second seemed ignored, though it was
+sent before the answer: both Hosts wrote a plain send to a busy agent into the conversation when it came, above
+an answer that had not read it. The Python Host's release owner ruled one rule for every origin, the user, a
+trigger or another agent: a row enters the conversation when its turn starts. Here it is one line of the journal
+(`accept_message_with`): a message is in the conversation at once exactly when its turn starts at once
+(`Agent::starts_at_once`); otherwise it is written as a waiting item (`WAITING`, D22), and `Batch::enter` writes
+its row in the write that starts its turn, after the answer before it. The admission is unchanged: a plain send
+stays `Queue`, keeps its delivery receipt while it waits (pending, stopped by the user's Stop, handed over in the
+write that makes its row; read in the delivery feed by its id, since there is no row yet), and holds, Stop and
+pause do what they did. The row stands where its turn starts, and keeps when the message was sent: the waiting
+turn's acceptance time, under `sent_at_ms` in the row's body (`conversation::SENT_AT`), which a rewording does
+not move. A message whose turn starts at once is written as before, without it. No row is moved or re-timed
+afterwards, and one message is a waiting item or a row, never both. So every send that waits can be reworded and
+taken back like one left for later: a rewording that races the start comes either before it, and the row and the
+turn have the new words, or after it, and finds nothing waiting (404); a take-back leaves no row. A message that a
+build before this one wrote into the conversation while it waited stays there: recovery recognizes the row
+from its journal kind and keeps it out of the public queue and its count, while its turn remains runnable.
+Its turn does not write it again, and a start of the agent anew writes it anew as before. A kill between the
+acceptance and the start loses nothing and writes no row; the turn starts after the restart, with its row.
+A waited row adds ISO `sent_at` alongside the `timestamp` of the start. Its timestamp is the journal's record
+of when the row became visible. The queue item uses `client_msg_id`, `text`, ISO `sent_at` and `kind`
+(`waiting` for a plain send, `later` for a deferred send, read from the acceptance event's admission).
+An item event names the client message. An edit adds `queue_change: edited` and the new words, and a
+withdrawal adds `queue_change: deleted`. The PWA keeps an optimistic send marked waiting after the
+`queued: true` reply, and drops its bubble when the deletion event arrives.
+Here the launch of a new turn follows the append that starts it and records its row, even when the CLI has
+yet to report its session. There is no separately claimed or started item for recovery to make visible.
+The start and the row becoming visible each advance the queue revision. The visibility marker is in the
+same append as the row, so replay recovers both advances and older rows do not acquire a new one.
+Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversation_when_its_turn_starts`,
+`a_message_to_a_parked_or_a_stopping_turn_enters_when_its_own_turn_starts`,
+`a_message_an_older_build_put_into_the_conversation_while_it_waited_stays_there`), the actor's, the Host's test
+`a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts` and the wrong rules of
+`tools/plants/enter-at-start.py`.
 
 ## 7. Stages and gates
 
