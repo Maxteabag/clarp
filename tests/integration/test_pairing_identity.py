@@ -100,3 +100,24 @@ def test_a_full_device_revokes_any_device_as_before(token_host):
     status, _body = _post_with_headers(base + "/paired-devices/revoke", {"device_id": limited}, full_headers)
     assert status == 200
     assert _status(lambda: _get(base + "/agents/snapshot", headers=limited_headers)) == 401
+
+
+def test_the_identity_limit_is_thirty_reads_a_minute(token_host):
+    """docs/protocol.md promises 30 reads a minute per source: the 31st within
+    the minute is refused, whatever the limiter's default."""
+    base, srv = token_host
+    assert (srv.identity_reads.limit, srv.identity_reads.window) == (30, 60.0)
+    codes = [_status(lambda: _get(base + "/pairing/identity")) for _ in range(31)]
+    assert codes == [200] * 30 + [429]
+
+
+def test_a_limited_device_naming_its_own_id_in_other_case_is_refused(token_host):
+    """A device id is compared exactly: its own id upper-cased is another id,
+    so a limited device is refused 403 and keeps working."""
+    base, _srv = token_host
+    mine, headers = _pair(base, "limited")
+    assert mine.upper() != mine
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        _post_with_headers(base + "/paired-devices/revoke", {"device_id": mine.upper()}, headers)
+    assert refused.value.code == 403
+    assert _status(lambda: _get(base + "/agents/snapshot", headers=headers)) == 200
