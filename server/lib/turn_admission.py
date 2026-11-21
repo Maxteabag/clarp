@@ -21,6 +21,11 @@ from .turn_command import DispatchResult, _with_delivery, _resolve_llm, _TurnSpe
 from .turn_stop import _existing_cwd
 
 
+# How long after the user's fresh message ends a Stop's pause the recovery pass
+# that releases the held work runs: long enough for that message to take the
+# agent's slot first, so the held work runs after it.
+PAUSE_END_RECOVERY_DELAY_SEC = 1.0
+
 class AdmissionMixin:
     def dispatch(self, *, text: str, requested_session: str,
                  trace_id: str, synthesize_audio: bool = True,
@@ -809,7 +814,9 @@ class AdmissionMixin:
             except Exception as exc:  # noqa: BLE001 - a projection of the durable pause
                 log_exception("queuePauseEndBroadcastFail", exc, detail=spec.session)
         try:
-            self.retry_scheduler(0.0, self.recover_queued)
+            # A second later, not at once: the fresh send takes the agent's slot
+            # first (in milliseconds), so what the Stop held queues behind it.
+            self.retry_scheduler(PAUSE_END_RECOVERY_DELAY_SEC, self.recover_queued)
         except Exception as exc:  # noqa: BLE001 - the next recovery pass runs them
             log_exception("queuePauseEndRecoverFail", exc, detail=spec.session)
 
