@@ -14,7 +14,6 @@ fn controller_actions_follow_the_reference_and_the_two_rulings() {
         serde_json::from_str(include_str!("fixtures/controller-actions-vectors.json")).unwrap();
     let mut state = Registry::default();
     let mut counts = [0; 8];
-    let mut awaiting = 0;
     for row in cases {
         match row["kind"].as_str().unwrap() {
             // Where an action may send, and what is sent (R133): the URL rebuilt from its parsed
@@ -27,18 +26,6 @@ fn controller_actions_follow_the_reference_and_the_two_rulings() {
                     .filter_map(|v| destination::prefix(v.as_str().unwrap()))
                     .collect();
                 let sent = destination::allowed(row["url"].as_str().unwrap(), &entries);
-                if row["awaiting"] == "R139" {
-                    // Refused here before the reference does: the rows say it admits them still,
-                    // and once its PR is merged and they are written again, this fails and the
-                    // mark goes.
-                    assert_eq!(sent, None, "{row}");
-                    assert!(
-                        row["reference"].is_string(),
-                        "R139 is in the reference: {row}"
-                    );
-                    awaiting += 1;
-                    continue;
-                }
                 assert_eq!(json!(sent), row["reference"], "{row}");
                 counts[0] += 1;
             }
@@ -51,16 +38,6 @@ fn controller_actions_follow_the_reference_and_the_two_rulings() {
                                "query": d.query, "url": d.url()})
                     })
                 };
-                if row["awaiting"] == "R139" {
-                    assert_eq!(destination::destination(text), None, "{text:?}");
-                    assert_eq!(destination::prefix(text), None, "{text:?}");
-                    assert!(
-                        row["destination"].is_object(),
-                        "R139 is in the reference: {row}"
-                    );
-                    awaiting += 1;
-                    continue;
-                }
                 assert_eq!(
                     shown(destination::destination(text)),
                     row["destination"],
@@ -152,7 +129,7 @@ fn controller_actions_follow_the_reference_and_the_two_rulings() {
             _ => panic!("unrecognized vector"),
         }
     }
-    assert_eq!((counts, awaiting), ([72, 62, 40, 5, 4, 84, 4, 1], 18));
+    assert_eq!(counts, [108, 62, 40, 5, 4, 125, 4, 1]);
     assert!(rules::receipt_current(0, 599_999));
     assert!(rules::receipt_current(0, 600_000));
     assert!(!rules::receipt_current(0, 600_001));

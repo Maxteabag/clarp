@@ -1,6 +1,7 @@
 //! The router's fixed sentences. Only ordinary speech can supply a clip.
 use std::collections::{HashMap, HashSet};
 
+use clarp_kernel::cartesia_language::Language;
 use clarp_kernel::router::{
     flow::phrase_key,
     phrases::{self, Clip, Key, MAX_CLIP, Voice},
@@ -285,7 +286,7 @@ impl Desk {
         speaker: &AgentRecord,
         text: &str,
         phrase: &'static str,
-        (voice, primary): (Voice, bool),
+        (voice, primary, cartesia): (Voice, bool, Option<Language>),
         owners: &Table,
     ) -> bool {
         let flight = (
@@ -317,7 +318,14 @@ impl Desk {
                     Some(name) => (Playback::Cached(name), None),
                     None => match app
                         .mouth
-                        .make_announcement(&who, text.clone(), &owners, &key.voice, primary)
+                        .make_announcement(
+                            &who,
+                            text.clone(),
+                            &owners,
+                            &key.voice,
+                            primary,
+                            cartesia,
+                        )
                         .await
                     {
                         Ok(Some((name, bytes))) => (Playback::Ordinary(name), bytes),
@@ -430,6 +438,7 @@ mod tests {
                 provider: "cartesia".into(),
                 voice: voice.into(),
                 model: "model".into(),
+                language: None,
             },
         };
         let orphan = name(b"orphan");

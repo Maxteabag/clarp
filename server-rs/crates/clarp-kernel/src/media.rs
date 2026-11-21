@@ -672,6 +672,9 @@ impl Asset {
             "url": format!("/media/{}", self.asset_id),
             "uri": format!("clarp-media://asset/{}", self.asset_id),
             "markdown": markdown,
+            "favorite": false,
+            "favorite_at": null,
+            "used_as": [],
         })
     }
 }
@@ -721,6 +724,10 @@ impl MediaBook {
         images.sort_by_key(|asset| std::cmp::Reverse(asset.created_at));
         images.truncate(limit);
         images
+    }
+
+    pub fn assets(&self) -> impl Iterator<Item = &Asset> {
+        self.assets.iter()
     }
 
     pub fn len(&self) -> usize {

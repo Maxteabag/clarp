@@ -161,7 +161,9 @@ def language_for(session: str | None) -> str:
 
 
 def split_engines(value: str | None) -> list[str]:
-    return [e.strip() for e in (value or "").split(",") if e.strip()]
+    """The engines of a stored value in order, each once: a list saved with a repeat before
+    saving dropped them is read without it (R175)."""
+    return list(dict.fromkeys(e.strip() for e in (value or "").split(",") if e.strip()))
 
 
 def engines_for(session: str | None) -> list[str]:
@@ -232,7 +234,8 @@ def merge_agent_engines(value, *, is_valid) -> str:
                 or not engine.strip(" ,"):
             raise ValueError(f"unknown transcription engine: {engine}")
         else:
-            merged[key] = ",".join(e.strip() for e in engine.split(",") if e.strip())
+            # An engine listed twice is kept once, at its first place (R175).
+            merged[key] = ",".join(dict.fromkeys(e.strip() for e in engine.split(",") if e.strip()))
             for agent_id in _agent_ids_for(key):
                 merged[agent_id] = merged[key]
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))

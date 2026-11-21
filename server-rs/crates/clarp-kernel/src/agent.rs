@@ -21,11 +21,12 @@ use std::collections::{BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
+use crate::compaction::LastCompaction;
 use crate::control::Control;
 
 use crate::turn::{
-    Activity, Admission, IllegalTransition, Origin, Outcome, Parked, Queued, RunOutcome, Settled,
-    StartOutcome, Turn, TurnEvent, TurnId, Wait,
+    Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued,
+    RunOutcome, Settled, StartOutcome, Turn, TurnEvent, TurnId, Wait,
 };
 
 /// Who let a mailbox go that held nothing any more: the last thing that waited left to run.
@@ -44,6 +45,9 @@ pub enum Command {
         message_seq: u64,
         origin: Origin,
         admission: Admission,
+        /// Another agent addresses this one: its id ("" for a peer Host's agent). `None`: the
+        /// user's ([`TurnEvent::Accepted`]).
+        coordination: Option<String>,
     },
     /// Take a waiting message back.
     Withdraw { turn: TurnId, by: String },
@@ -103,6 +107,9 @@ pub enum Command {
     /// instead of continuing the one it has. Only when no turn runs: a turn that runs is
     /// stopped first.
     StartAgain,
+    /// What the user's compaction did, said once its turn has ended (`compaction`): only for
+    /// that turn, and only once.
+    RecordCompaction { turn: TurnId, said: LastCompaction },
 }
 
 /// What happened to an agent. These, in order, are its history.
@@ -185,6 +192,12 @@ pub enum AgentEvent {
     StartedAgain {
         at_ms: i64,
     },
+    /// What the user's compaction did, the turn it ran as having ended: what the agent's row
+    /// says of its last compaction (`last_compaction`) until the next one.
+    Compacted {
+        turn: TurnId,
+        said: LastCompaction,
+    },
 }
 
 /// What the actor must do after the events are in the log.
@@ -227,6 +240,8 @@ pub enum Refusal {
     AtWork,
     /// An agent that has run a turn here is not one that just arrived.
     AlreadyAtWork,
+    /// The turn is not a compaction that ended and whose outcome is still owed.
+    NoCompactionOwed(TurnId),
 }
 
 impl std::fmt::Display for Refusal {
@@ -238,6 +253,9 @@ impl std::fmt::Display for Refusal {
             Self::NotPaused => write!(f, "the agent is not paused"),
             Self::AtWork => write!(f, "a turn of the agent runs"),
             Self::AlreadyAtWork => write!(f, "the agent has already worked on this Host"),
+            Self::NoCompactionOwed(turn) => {
+                write!(f, "turn {} is no compaction whose outcome is owed", turn.0)
+            }
         }
     }
 }
@@ -273,6 +291,10 @@ pub struct Agent {
     unheld: BTreeSet<TurnId>,
     /// The last turn that held the agent and ended.
     last: Option<Settled>,
+    /// The user's compaction whose turn ended and whose outcome is not said yet: how it ended.
+    compaction_owed: Option<Settled>,
+    /// What the user's last compaction did.
+    last_compaction: Option<LastCompaction>,
     /// The tool's own session, as the tool last named it: where the next turn continues.
     backend_session: Option<String>,
     refused_live_binding: bool,
@@ -334,6 +356,8 @@ impl Default for Agent {
             live_from_queue: false,
             unheld: BTreeSet::new(),
             last: None,
+            compaction_owed: None,
+            last_compaction: None,
             backend_session: None,
             refused_live_binding: false,
             label: String::new(),
@@ -404,6 +428,10 @@ impl Agent {
         self.queue_revision
     }
 
+    pub(crate) fn queue_item_shown(&mut self) {
+        self.queue_revision += 1;
+    }
+
     /// Whether the live turn came through the queue: it had to wait, or it was left for later.
     pub fn live_from_queue(&self) -> bool {
         self.live.is_some() && self.live_from_queue
@@ -412,6 +440,17 @@ impl Agent {
     /// The last turn that held the agent and ended. A message that was taken back never did.
     pub fn last(&self) -> Option<&Settled> {
         self.last.as_ref()
+    }
+
+    /// The user's compaction whose turn ended, also one taken back before it began, while what
+    /// it did is not said yet.
+    pub fn compaction_owed(&self) -> Option<&Settled> {
+        self.compaction_owed.as_ref()
+    }
+
+    /// What the user's last compaction did. None until the agent's first.
+    pub fn last_compaction(&self) -> Option<&LastCompaction> {
+        self.last_compaction.as_ref()
     }
 
     /// The tool's own session, where the agent's next turn continues.
@@ -480,7 +519,9 @@ impl Agent {
         })
     }
 
-    /// Whether a message admitted this way now would start at once, without waiting.
+    /// Whether a message admitted this way now would start at once, without waiting: and so
+    /// whether it is in the conversation at once. One that must wait enters it in the write
+    /// that starts its turn (D14).
     pub fn starts_at_once(&self, admission: Admission) -> bool {
         self.live.is_none() && !(self.paused && admission == Admission::Background)
     }
@@ -508,9 +549,17 @@ impl Agent {
                 message_seq,
                 origin,
                 admission,
+                coordination,
             } => {
                 let turn = TurnId(work.agent.next_turn);
-                let (_, accepted) = Queued::accept(turn, message_seq, origin, admission, now_ms);
+                let (_, mut accepted) =
+                    Queued::accept(turn, message_seq, origin, admission, now_ms);
+                if let TurnEvent::Accepted {
+                    coordination: mark, ..
+                } = &mut accepted
+                {
+                    *mark = coordination;
+                }
                 work.record(AgentEvent::Turn {
                     turn,
                     change: accepted,
@@ -625,6 +674,12 @@ impl Agent {
                     return Err(Refusal::AtWork);
                 }
                 work.record(AgentEvent::StartedAgain { at_ms: now_ms });
+            }
+            Command::RecordCompaction { turn, said } => {
+                if work.agent.compaction_owed.as_ref().map(|owed| owed.id) != Some(turn) {
+                    return Err(Refusal::NoCompactionOwed(turn));
+                }
+                work.record(AgentEvent::Compacted { turn, said });
             }
             Command::TurnStarted { turn } => {
                 work.must_have_process(turn)?;
@@ -882,6 +937,17 @@ impl Agent {
                 self.label.clone_from(text);
                 self.label_at = (!text.is_empty()).then_some(*at_ms);
             }
+            AgentEvent::Compacted { turn, said } => {
+                if self.compaction_owed.as_ref().map(|owed| owed.id) != Some(*turn) {
+                    return Err(IllegalTransition {
+                        turn: *turn,
+                        state: "no compaction owed",
+                        event: "compacted",
+                    });
+                }
+                self.compaction_owed = None;
+                self.last_compaction = Some(said.clone());
+            }
             AgentEvent::Turn { turn, change } => self.apply_turn(*turn, change)?,
         }
         Ok(())
@@ -961,7 +1027,7 @@ impl Agent {
                 // anything is in its way: whoever left it there is told that it joined and, in
                 // the same breath, that it left to run. The Python Host counts it so, and an app
                 // that orders queue news by the revision sees the same numbers from both.
-                if self.live.is_some() || held || queued.admission.waits_outside() {
+                if self.live.is_some() || held || queued.admission.left_for_later() {
                     self.waited.insert(turn);
                     self.queue_revision += 1;
                 }
@@ -993,6 +1059,7 @@ impl Agent {
                     self.settled += 1;
                     self.stopping = None;
                     self.live_from_queue = false;
+                    self.owe_compaction(&ended);
                     self.last = Some(ended);
                 }
                 next => self.live = Some(next),
@@ -1025,7 +1092,10 @@ impl Agent {
         }
         self.unheld.remove(&turn);
         match Turn::Queued(queued).apply(change)? {
-            Turn::Settled(_) => self.settled += 1,
+            Turn::Settled(ended) => {
+                self.settled += 1;
+                self.owe_compaction(&ended);
+            }
             next => {
                 if let TurnEvent::Started { at_ms } = change {
                     self.latest_turn_start =
@@ -1038,6 +1108,14 @@ impl Agent {
             }
         }
         Ok(())
+    }
+
+    /// A turn ended: if it was the user's compaction, what it did is owed. Only that turn, and
+    /// never a compaction the tool made by itself within another turn.
+    fn owe_compaction(&mut self, ended: &Settled) {
+        if matches!(&ended.origin, Origin::Trigger { name } if name == COMPACTION) {
+            self.compaction_owed = Some(ended.clone());
+        }
     }
 
     /// Rebuilds an agent from its history, oldest event first.
@@ -1156,7 +1234,7 @@ impl Work {
         self.decision
             .effects
             .push(Effect::StartTurn { turn, message_seq });
-        if self.agent.live_from_queue {
+        if self.agent.live_from_queue() {
             self.let_go_of_nothing(DRAINED, now_ms);
         }
     }
@@ -1228,6 +1306,7 @@ mod tests {
                 message_seq,
                 origin: Origin::User,
                 admission: Admission::Queue,
+                coordination: None,
             })
             .unwrap()
         }
@@ -1240,6 +1319,7 @@ mod tests {
                     name: "schedule".to_string(),
                 },
                 admission: Admission::Background,
+                coordination: None,
             })
             .unwrap()
         }
@@ -1250,6 +1330,7 @@ mod tests {
                 message_seq,
                 origin: Origin::User,
                 admission: Admission::Direct,
+                coordination: None,
             })
             .unwrap()
         }
@@ -1291,6 +1372,101 @@ mod tests {
     }
 
     /// The connection of the live turn's tool drops: the turn waits a moment for its next attempt.
+    /// The user's compaction owes one outcome once its turn has ended, also when it was taken
+    /// back before it began, and the agent keeps the last one. No other turn owes one, and the
+    /// outcome is written once, for that turn only.
+    #[test]
+    fn a_compaction_owes_one_outcome_and_the_agent_keeps_the_last() {
+        use crate::compaction::{self, LastCompaction};
+        let compaction = |message_seq| Command::Accept {
+            message_seq,
+            origin: Origin::Trigger {
+                name: COMPACTION.to_string(),
+            },
+            admission: Admission::Queue,
+            coordination: None,
+        };
+        let said = |turn: u64, before: u64| Command::RecordCompaction {
+            turn: TurnId(turn),
+            said: LastCompaction {
+                decided: compaction::outcome(compaction::COMPACTED, Some(before), None, false, ""),
+                backend: "claude".to_string(),
+                at: 7,
+            },
+        };
+        let mut a = Driven::new();
+        assert_eq!(a.agent.last_compaction(), None);
+        // A turn of the user's owes nothing, and nothing is written for it.
+        a.user(1);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.finish(1);
+        assert_eq!(a.agent.compaction_owed(), None);
+        assert_eq!(
+            a.send(said(1, 5)),
+            Err(Refusal::NoCompactionOwed(TurnId(1)))
+        );
+        // The compaction: nothing owed while it runs, one outcome once it ended.
+        a.send(compaction(2)).unwrap();
+        assert_eq!(
+            a.send(said(2, 5)),
+            Err(Refusal::NoCompactionOwed(TurnId(2)))
+        );
+        a.send(Command::TurnStarted { turn: TurnId(2) }).unwrap();
+        a.finish(2);
+        assert_eq!(
+            a.agent.compaction_owed().map(|owed| owed.id),
+            Some(TurnId(2))
+        );
+        a.send(said(2, 41_250)).unwrap();
+        assert_eq!(a.agent.compaction_owed(), None);
+        assert_eq!(
+            a.send(said(2, 5)),
+            Err(Refusal::NoCompactionOwed(TurnId(2)))
+        );
+        let first = a.agent.last_compaction().cloned();
+        assert_eq!(
+            first.as_ref().and_then(|last| last.decided.before_tokens),
+            Some(41_250)
+        );
+        // Later turns keep it, and so does a restart (`send` replays the history every time).
+        a.user(3);
+        a.send(Command::TurnStarted { turn: TurnId(3) }).unwrap();
+        a.finish(3);
+        assert_eq!(a.agent.last_compaction().cloned(), first);
+        // One taken back before it began owes one too; the newest is kept.
+        a.user(4);
+        a.send(compaction(5)).unwrap();
+        a.send(Command::Withdraw {
+            turn: TurnId(5),
+            by: "user".to_string(),
+        })
+        .unwrap();
+        let owed = a.agent.compaction_owed().cloned().unwrap();
+        assert_eq!(
+            (owed.id, &owed.outcome),
+            (
+                TurnId(5),
+                &Outcome::Withdrawn {
+                    by: "user".to_string()
+                }
+            )
+        );
+        a.send(said(5, 9)).unwrap();
+        assert_eq!(
+            a.agent
+                .last_compaction()
+                .and_then(|last| last.decided.before_tokens),
+            Some(9)
+        );
+        // An outcome nothing owes cannot be in the log.
+        let mut fresh = Agent::new();
+        let stray = AgentEvent::Compacted {
+            turn: TurnId(1),
+            said: first.unwrap(),
+        };
+        assert!(fresh.apply(&stray).is_err());
+    }
+
     fn dropped(turn: u64) -> Command {
         Command::TurnParked {
             turn: TurnId(turn),
@@ -1774,6 +1950,7 @@ mod tests {
             message_seq: 12,
             origin: Origin::User,
             admission: Admission::Later,
+            coordination: None,
         };
         assert_eq!(
             a.send(later).unwrap(),
@@ -2272,6 +2449,7 @@ mod tests {
                             message_seq: 100 + step,
                             origin,
                             admission,
+                            coordination: None,
                         }
                     }
                     3 => Command::Stop {

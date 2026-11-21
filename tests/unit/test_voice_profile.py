@@ -180,6 +180,46 @@ def test_speech_off_on_the_host_wins_over_an_agents_override(monkeypatch, tmp_pa
     assert [e for e in sent if e.get("type") == "tts-error"] == []      # and nothing is told
 
 
+# The three rows the Rust Host's owner wrote from this code at c453ee7c (Arnold, 18:47): they
+# are what the code answers, and they fail if the answer changes.
+
+def _google(monkeypatch):
+    monkeypatch.setattr(google_tts, "collision_code", lambda cfg=None: None)
+    monkeypatch.setattr(google_tts, "credentials",
+                        lambda cfg: google_tts.Credentials("google_stt", "/adc.json", "p", ""))
+
+
+def test_row_deepgram_default():
+    shown = voice_profile.speech(_host(_cfg("deepgram")),
+                                 {"agent_id": "a", "persona": "Zed", "session": "zed", "voice_id": "{}"})
+    assert {k: shown[k] for k in ("provider", "provider_label", "voice_id", "voice_label", "origin",
+                                  "streaming", "silent_reason")} == {
+        "provider": "deepgram", "provider_label": "Deepgram", "voice_id": "flux-haley-en",
+        "voice_label": "Haley", "origin": "default", "streaming": True, "silent_reason": None}
+
+
+def test_row_google_default_shared_and_off_the_allowlist(monkeypatch):
+    _google(monkeypatch)
+    host = _host(_cfg("google"))
+    roster = [
+        {"agent_id": "g1", "persona": "G1", "session": "g1", "voice_id": "{}"},
+        {"agent_id": "g2", "persona": "G2", "session": "g2", "voice_id": ""},
+        {"agent_id": "g3", "persona": "G3", "session": "g3", "voice_id": json.dumps({"google": "nb-NO-Chirp3-HD-Puck"})},
+        {"agent_id": "g4", "persona": "G4", "session": "g4", "voice_id": json.dumps({"google": "xx-XX-Chirp3-HD-Nobody"})},
+        {"agent_id": "g5", "persona": "G5", "session": "g5", "voice_id": "{}", "archived_at": 1},
+    ]
+    projection = voice_profile.Projection(host, roster)
+    speech = {r["agent_id"]: projection.for_row(r)["speech"] for r in roster[:4]}
+    pick = lambda sp, *keys: tuple(sp[k] for k in keys)
+    for agent in ("g1", "g2"):                       # (b): the default, shared by the two; g5 not counted
+        assert pick(speech[agent], "voice_id", "voice_label", "origin", "streaming", "shared_with") == (
+            "nb-NO-Chirp3-HD-Kore", "Kore", "default", False, 1)
+    assert pick(speech["g3"], "origin", "voice_label", "shared_with") == ("own", "Puck", 0)
+    assert pick(speech["g4"], "provider", "provider_label", "voice_id", "voice_label", "origin",
+                "silent_reason", "streaming") == (                 # (c): off the allowlist
+        "google", "Google Chirp 3 HD", None, None, None, "voice_unavailable", False)
+
+
 # ---------------------------------------------------------------- hearing
 
 def _plan_of_the_pipeline(session):
@@ -194,6 +234,7 @@ def _plan_of_the_pipeline(session):
     ("", "elevenlabs:scribe_v2"),
     ("google:chirp_3,elevenlabs:scribe_v2", "local"),
     ("elevenlabs:scribe_v2", "deepgram:nova-3"),
+    ("elevenlabs:scribe_v2,elevenlabs:scribe_v2,deepgram:nova-3", "local"),     # R175
 ])
 def test_hearing_is_the_pipelines_plan(monkeypatch, engines, cloud):
     monkeypatch.setattr(config, "load", lambda path=None: _cfg("cartesia"))
@@ -207,7 +248,9 @@ def test_hearing_is_the_pipelines_plan(monkeypatch, engines, cloud):
     local = f"{cfg.whisper_provider}:{cfg.whisper_model}"
     shown = voice_profile.hearing(voice_profile.HostView.build(cfg),
                                   agents_db.get_by_agent_id(agent_id))
-    assert [e["id"] for e in shown["engines"]] == [model or local, *fallbacks]
+    from lib import stt_router
+    tried, _skipped = stt_router.distinct_engines([model or local, *fallbacks], local)
+    assert [e["id"] for e in shown["engines"]] == tried
     assert shown["engine_origin"] == ("own" if engines else "default")
     assert shown["device_may_override"] is (not engines)
 
@@ -375,3 +418,15 @@ def test_accepts_language_set_is_the_list_the_path_refuses_by(monkeypatch):
         if not row["accepts_language_set"]:
             with pytest.raises(ValueError, match="language-set"):
                 stt_providers.transcribe(row["id"], b"", "audio/wav", "")
+
+
+def test_hearing_lists_each_engine_once():
+    # R175: the engines shown are the plan, each engine once; two models of one provider stay,
+    # since a refusal before contact does not use the provider up.
+    from lib import stt_router
+    assert stt_router.distinct_engines(
+        ["elevenlabs:scribe_v2", "elevenlabs:scribe_v2", "elevenlabs:scribe_v1", "deepgram:nova-3"]) == (
+        ["elevenlabs:scribe_v2", "elevenlabs:scribe_v1", "deepgram:nova-3"], ["elevenlabs:scribe_v2"])
+    assert stt_router.distinct_engines(
+        ["faster-whisper:small", "local", "faster-whisper:medium"], "faster-whisper:small") == (
+        ["faster-whisper:small", "faster-whisper:medium"], ["local"])

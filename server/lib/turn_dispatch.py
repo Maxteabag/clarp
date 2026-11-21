@@ -16,7 +16,8 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
-from . import launch_receipts, recovery_backoff, turn_lifecycle, turn_slots
+from . import launch_receipts, recovery_backoff, steer_records, takeover, turn_lifecycle
+from . import turn_slots
 from . import events
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
@@ -196,6 +197,38 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             return "", False
         return in_flight, (_slot_is_spawning(spec.agent_id)
                            or self._has_live_turn(spec))
+
+    def _waits_on_arrival(self, spec: _TurnSpec, slot: tuple[str, bool]) -> bool:
+        """Whether a send that did not ask to wait will wait for the agent:
+        read before its admission writes anything, so that a send that waits is
+        admitted as a queue item and its conversation row is written only by
+        the write that starts its turn (issue 491). The same reading
+        _claim_or_queue makes, without its effects: a Stop, a compaction or an
+        attached terminal holds every send; a running or starting turn holds a
+        user's send (a steerable backend is offered it first, below) and the
+        release drain's fence holds every send behind a live turn; a free slot
+        whose process still runs holds it too. A send of another origin to a
+        live turn preempts it and keeps its row at admission, as before. A
+        second send being admitted for the agent at the same moment leans
+        towards waiting: if the agent is idle after all, the item starts at
+        once, its row written then. ``slot`` is _slot_snapshot's reading."""
+        if _is_call_opening(spec):
+            return False
+        agent_id = spec.agent_id
+        current = _SLOTS.get(agent_id)
+        if current in (_STOPPING_SENTINEL, _COMPACTING_SENTINEL) or _terminal_live(agent_id):
+            return True
+        in_flight, live = slot
+        if in_flight:
+            if not live:
+                return _SLOTS.fenced          # a stale slot is taken over, unless fenced
+            if (current.startswith(_PROCESS_OWNER_PREFIX) or _slot_is_spawning(agent_id)
+                    or _SLOTS.fenced):
+                return True
+            return spec.origin == "user"
+        if _SLOTS.admitting_count(agent_id) > 1:
+            return True
+        return bool(self._running_processes(spec))
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
                         park_id: str, queue_user: list,
@@ -406,11 +439,43 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 _with_delivery_context(
                     peer_text, unheard_audio=spec.unheard_audio),
                 digest=spec.team_digest, protocol=spec.team_protocol)
+            # A backend whose CLI reads a follow-up later than it is written (Claude,
+            # issue 491 part C) says when through callbacks: the row is due then.
+            read_later = {}
+            by_id = getattr(self.backends, "by_id", None)
+            if by_id is not None and spec.queue_id and getattr(
+                    by_id(spec.backend), "steer_reads_later", False):
+                read_later = {
+                    "trace_id": spec.trace_id,
+                    "on_read": lambda joined, s=spec, a=active_trace:
+                        self._steer_read(s, a, joined),
+                    "on_unread": lambda s=spec: self._steer_unread(s),
+                }
+            if read_later:
+                # Durable before the write: a runtime that dies before the CLI's echo
+                # leaves the next one what to look up (turn_recovery).
+                running = _alive(list(self.backends.active_handles(
+                    spec.backend, spec.agent_id) or ()))
+                # The handle the follow-up is written to (the one with an open stdin).
+                running = ([h for h in running if getattr(h, "steer_state", None) is not None]
+                           or running)
+                proc_pid = int(getattr(running[0], "pid", 0) or 0) if running else 0
+                steer_records.record(
+                    agent_id=spec.agent_id, trace_id=spec.trace_id, queue_id=spec.queue_id,
+                    backend=spec.backend, cwd=str(spec.cwd),
+                    session_id=(agents_db.live_backend_session(spec.agent_id)
+                                or spec.backend_session_id or ""),
+                    pid=proc_pid,
+                    pgid=int(getattr(running[0], "process_group", 0) or 0) if running else 0,
+                    start_ticks=takeover.start_ticks(proc_pid) if proc_pid else None)
             accepted = bool(steer(
                 spec.backend, spec.agent_id, steer_text,
                 client_msg_id=spec.client_msg_id,
                 synthesize_audio=spec.synthesize_audio,
+                **read_later,
             ))
+            if read_later and not accepted:
+                steer_records.clear(spec.trace_id)
         except Exception as e:  # noqa: BLE001
             log_exception("turnSteerFail", e, detail=spec.agent_id)
             # A peer message falls through to wait behind the turn (it is
@@ -431,18 +496,51 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             if spec.origin == "oracle":
                 from . import oracle_delegations
                 oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
-            self._steered_into(spec, active_trace)
-            if spec.queue_id:
-                # Delivered into the running turn: its durable queue
-                # receipt is spent and the visible user row is due now.
-                turn_queue.mark_started(spec.queue_id)
-                self._record_user_message(spec)
-                self._broadcast_queue_state(spec, started=True)
             team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
             eventlog.emit("server", "turnSteered", context=spec.context,
                           detail={"active_trace": _INFLIGHT.get(spec.agent_id)})
             log("turnSteered", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
+            if read_later:
+                # Written, not read yet: the message stays a queue item (it may not
+                # be edited: its receipt says the prompt may have left) until the
+                # CLI's echo writes its row (_steer_read).
+                return "later"
+            self._steered_into(spec, active_trace)
+            if spec.queue_id:
+                # Delivered into the running turn: the visible user row is due
+                # now, written with the item shown and its receipt started in
+                # one transaction (the words the backend was given).
+                self._start_queued_row(spec, steered=True, start_item=True)
+                self._broadcast_queue_state(spec, started=True)
         return accepted
+
+    def _steer_read(self, spec: _TurnSpec, active_trace: str, joined: bool) -> None:
+        """The CLI read a follow-up written into the running turn (its replay echo): the row
+        is due now, with the item shown and started in one transaction. ``joined``: read
+        inside the running turn (one answer covers both). Otherwise the CLI answered it in a
+        turn of its own in the same process (it was read after the turn's result): its row
+        still stands where it was read, and that answer is told within the running turn's
+        process (issue 491, part C)."""
+        if not joined:
+            log("steerReadAfterResult",
+                f"agent={spec.agent_id} trace={spec.trace_id} running={active_trace}")
+        self._steered_into(spec, active_trace)
+        self._start_queued_row(spec, steered=True, start_item=True)
+        steer_records.clear(spec.trace_id)
+        self._broadcast_queue_state(spec, started=True)
+
+    def _steer_unread(self, spec: _TurnSpec) -> None:
+        """The process ended before the CLI read a follow-up written into it: it was never
+        delivered. Its receipt goes back to pending and its queue item runs as its own turn
+        (recovery hands it on; it is never run twice: until here its receipt said it may
+        have left)."""
+        launch_receipts.withdraw_attempt(spec.trace_id)
+        steer_records.clear(spec.trace_id)
+        log("steerUnread", f"agent={spec.agent_id} trace={spec.trace_id}")
+        try:
+            self.retry_scheduler(0.0, self.recover_queued)
+        except Exception as exc:  # noqa: BLE001 - the next recovery pass runs it
+            log_exception("steerUnreadRecoverFail", exc, detail=spec.agent_id)
 
     def _steered_into(self, spec: _TurnSpec, active_trace: str) -> None:
         """A message that is not coordination, steered into a coordination
@@ -607,6 +705,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                         model=spec.model,
                         effort=spec.effort,
                         run_if_owned=run_if_owned,
+                        **({"takeover": spec.takeover} if spec.takeover else {}),
                     )
                     state["handle"] = handle
                     if handle is not None and not self._still_owns(spec):

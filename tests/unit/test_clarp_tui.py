@@ -38,7 +38,14 @@ def test_tui_exposes_setup_pairing_and_provider_choices():
                 "#optional-skills", SelectionList).selected) == {
                     "clarp-calendar", "clarp-location"}
             included_skills = app.query_one("#included-skills", SelectionList).selected
-            assert len(included_skills) == 34
+            # Every core skill and every artifacts skill not switched off by
+            # default, read from the bundle: a count pinned here broke with each
+            # new skill (35 since #474 added clarp-native-forms).
+            manifest = json.loads((ROOT / "skills/manifest.json").read_text())["skills"]
+            assert set(included_skills) == {
+                str(item["id"]) for item in manifest
+                if item.get("pack") == "core" or (
+                    item.get("pack") == "artifacts" and item.get("default_enabled") is not False)}
             assert "clarp-status-fork" in included_skills
             assert "clarp-oracle-contact" in included_skills
             assert "clarp-calls" in included_skills

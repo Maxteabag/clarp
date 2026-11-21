@@ -46,9 +46,42 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import scratch as tool_scratch
 
 
+USAGE = 'usage: server-rs/tools/plants/<list>.py [--check] [--root DIR] [--shard I/N] [numbers...]'
+
+
+def refused(args: list[str]) -> str:
+    """Why these arguments are not this program's, in words; empty when every one is. A program that plants into
+    the source and compiles must not take a word it does not know for leave to run (20 Nov 2026: `--help` was taken
+    for a list's run, and its run began on the build machine)."""
+    at = 0
+    while at < len(args):
+        arg = args[at]
+        if arg in ('--root', '--shard'):
+            if at + 1 >= len(args) or args[at + 1].startswith('-'):
+                return f'{arg} needs a value'
+            value = args[at + 1]
+            if arg == '--shard':
+                first, slash, every = value.partition('/')
+                if not (slash and first.isdigit() and every.isdigit() and int(first) < int(every)):
+                    return f'--shard {value!r} is not I/N with I below N'
+            at += 2
+            continue
+        if arg != '--check' and not (arg.isascii() and arg.isdigit()):
+            return f'unknown argument {arg!r}'
+        at += 1
+    return ''
+
+
 def main(list_file: str, runs: dict, plants: list) -> int:
     args = sys.argv[1:]
     here = pathlib.Path(list_file).resolve()
+    if '--help' in args or '-h' in args:
+        print(USAGE)
+        return 0
+    why = refused(args)
+    if why:
+        print(f'{here.name}: {why}. Nothing was run. {USAGE}')
+        return 2
     name, root = here.stem, here.parents[3]
     if '--root' in args:
         at = args.index('--root')

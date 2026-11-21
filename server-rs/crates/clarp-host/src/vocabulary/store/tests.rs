@@ -117,6 +117,7 @@ impl Place {
             tool_env: Vec::new(),
             pusher: crate::pusher::pusher().0,
             blobs: MemBlobs::new().open(&dir).unwrap(),
+            portrait_hints: None,
             speaks: crate::voice::mouth().0,
             telling: Telling::new(OwnerFile::new(Some(dir.join("absent.toml")))),
             tally: crate::usage::tally().0,

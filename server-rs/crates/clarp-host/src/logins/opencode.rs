@@ -21,7 +21,7 @@ const POPULAR: &[&str] = &[
     "cerebras",
 ];
 
-fn store(home: &Path, variable: &str, default: &str, file: &str) -> Map<String, Value> {
+pub(crate) fn store(home: &Path, variable: &str, default: &str, file: &str) -> Map<String, Value> {
     let base = std::env::var(variable)
         .ok()
         .map(|s| s.trim().to_owned())

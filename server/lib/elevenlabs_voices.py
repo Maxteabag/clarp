@@ -30,6 +30,17 @@ def _describe(voice: dict) -> str:
     return ", ".join(part for part in parts if part)[:120]
 
 
+def fetch_one(key: str, voice_id: str) -> dict:
+    """One voice by id, {"id", "name"} (voice_names: ids in use; never on a read path)."""
+    import urllib.parse
+    request = urllib.request.Request(_URL + "/" + urllib.parse.quote(voice_id, safe=""),
+                                     headers={"xi-api-key": key})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        voice = json.load(response)
+    name = str(voice.get("name") or "").split(" - ")[0].strip()
+    return {"id": voice_id, "name": name} if name else {}
+
+
 def cached_names() -> dict[str, str]:
     """voice id -> name of the voices already fetched; never a fetch (voice_profile)."""
     with _lock:

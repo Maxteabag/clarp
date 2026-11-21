@@ -46,6 +46,7 @@ ALLOWED = {
     ("message_clock", "lib/db_migrations.py"): _MIGRATION,
     ("teams", "lib/db_migrations.py"): _MIGRATION,
     ("task_items", "lib/db_migrations.py"): _MIGRATION,
+    ("queued_turns", "lib/db_migrations.py"): _MIGRATION,
     ("janitor_trigger_definitions", "lib/db_schema.py"): _MIGRATION,
     ("janitor_trigger_definitions", "lib/persistence/schema_parts/audio_bookkeeper.py"):
         _MIGRATION + " (the audio_bookkeeper schema seeds the audio trigger)",

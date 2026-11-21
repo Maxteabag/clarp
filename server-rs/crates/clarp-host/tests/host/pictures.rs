@@ -61,21 +61,33 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
     for name in ["clarp-host", "clarp-shim"] {
         program(&from.join(name), "#!/bin/sh\n");
     }
-    let sums = Command::new("sha256sum")
+    let sums = place
+        .command("sha256sum")
         .args(["clarp-host", "clarp-shim"])
         .current_dir(&from)
         .output()
         .unwrap();
     std::fs::write(from.join("SHA256SUMS"), sums.stdout).unwrap();
     let home = place.root.join("home");
+    // A systemd of the test's own, that knows no unit: the tool asks it of the Python Host's
+    // unit on this machine, and a test Host's machine has none.
+    let bin = place.root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    program(
+        &bin.join("systemctl"),
+        "#!/bin/sh\ncase \"$2\" in show) exit 0 ;; *) exit 3 ;; esac\n",
+    );
+    let path = format!("{}:{}", bin.display(), sealed::PATH);
     let unit = home.join(".config/systemd/user/clarp-host.service");
     let kept = home.join(".config/clarp-host/install.conf");
     let install = |words: &[&str]| -> String {
-        let done = Command::new("bash")
+        let done = place
+            .command("bash")
             .arg(&tool)
             .args(["--from", from.to_str().unwrap(), "--files-only"])
             .args(words)
             .env("HOME", &home)
+            .env("PATH", &path)
             .env("XDG_CONFIG_HOME", home.join(".config"))
             .env("XDG_DATA_HOME", home.join(".local/share"))
             .output()
@@ -108,7 +120,8 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
     );
     assert!(!install(&["--contact-pictures", "off"]).contains("--contact-pictures"));
     assert!(!install(&["--contact-pictures", "default"]).contains("--contact-pictures"));
-    let refused = Command::new("bash")
+    let refused = place
+        .command("bash")
         .arg(&tool)
         .args([
             "--from",
@@ -118,6 +131,7 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
             "maybe",
         ])
         .env("HOME", &home)
+        .env("PATH", &path)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("XDG_DATA_HOME", home.join(".local/share"))
         .output()

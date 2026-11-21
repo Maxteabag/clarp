@@ -1,4 +1,4 @@
--- user_version 130
+-- user_version 132
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -162,8 +162,17 @@ CREATE INDEX idx_judgment_decisions_site ON judgment_decisions(site, created_at 
 -- index idx_media_assets_agent_created on media_assets
 CREATE INDEX idx_media_assets_agent_created ON media_assets(agent_id, created_at DESC) WHERE deleted_at IS NULL;
 
--- index idx_media_assets_session_created on media_assets
-CREATE INDEX idx_media_assets_session_created ON media_assets(session, created_at DESC) WHERE deleted_at IS NULL;
+-- index idx_media_assets_deleted on media_assets
+CREATE INDEX idx_media_assets_deleted ON media_assets(deleted_at, asset_id, session, mime_type) WHERE deleted_at IS NOT NULL;
+
+-- index idx_media_assets_session_deleted on media_assets
+CREATE INDEX idx_media_assets_session_deleted ON media_assets(session, deleted_at, asset_id, mime_type) WHERE deleted_at IS NOT NULL;
+
+-- index idx_media_assets_session_favorite on media_assets
+CREATE INDEX idx_media_assets_session_favorite ON media_assets(session, favorite_at DESC, asset_id DESC, deleted_at) WHERE deleted_at IS NULL AND favorite_at IS NOT NULL;
+
+-- index idx_media_assets_session_page on media_assets
+CREATE INDEX idx_media_assets_session_page ON media_assets(session, created_at DESC, asset_id DESC, mime_type, deleted_at) WHERE deleted_at IS NULL;
 
 -- index idx_media_assets_sha on media_assets
 CREATE INDEX idx_media_assets_sha ON media_assets(sha256);
@@ -1548,7 +1557,9 @@ CREATE TABLE media_assets (
     caption TEXT,
     created_by TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    favorite_at INTEGER,
+    deleted_by TEXT
 );
 
 -- table message_clock on message_clock
@@ -1579,6 +1590,7 @@ CREATE TABLE messages (
     trace_id TEXT,
     phase TEXT,
     turn_json TEXT,
+    sent_at INTEGER,
     UNIQUE(agent_id, backend_session_id, seq)
 );
 
@@ -1976,7 +1988,9 @@ CREATE TABLE queued_turns (
     started_at INTEGER,
     claimed_at INTEGER,
     prompt_admission_id TEXT NOT NULL DEFAULT '',
-    allow_paused INTEGER NOT NULL DEFAULT 0
+    allow_paused INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'later',
+    shown_at INTEGER
 );
 
 -- table runtimes on runtimes

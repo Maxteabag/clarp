@@ -41,6 +41,17 @@ pub struct Config {
     /// program's name or its path. Empty: this Host was told none, reads no seat, and says
     /// that the tool is not installed.
     pub seats_tool: String,
+    /// The tree of skills this Host's release ships (`--skills`, written by the install tool:
+    /// `<share>/releases/<commit>/skills`, with its `manifest.json`). Absent: this Host keeps
+    /// no skills. It keeps them only with `--accounts select`: the tools' skill folders are the
+    /// machine's, and one Host keeps a machine's tools.
+    pub skills: Option<PathBuf>,
+    /// The folder of the releases of the Host that kept this machine's tools before
+    /// (`--skills-other-releases`): a link it left into one of them is Clarp's own, outdated.
+    pub skills_other_releases: Option<PathBuf>,
+    /// That Host's record of the skills it kept chosen (`--skills-chosen-before`, its
+    /// `install.json`): read once, at the first start that keeps the tools, and never written.
+    pub skills_chosen_before: Option<PathBuf>,
     pub ask_usage: bool,
     /// Whether a contact nobody gave a picture is drawn one by the provider of pictures
     /// (`--contact-pictures`, which the install tool writes where its own word of that name is
@@ -155,6 +166,13 @@ pub struct Config {
     pub relay_config: Option<PathBuf>,
     /// A stand-in for the relay, on this machine. Empty: the relay the settings name.
     pub relay_stand_in: String,
+    /// The model of GPT-Live this Host runs, as the owner named it in his file (`[openai]
+    /// live_model`, read once, here): one of `live_call::LIVE_MODELS`, else the default.
+    pub live_model: &'static str,
+    /// From which client contract, by the client's exact name, an agent's live call runs on
+    /// that model: `live_call::AGENT_LIVE_MODEL_MIN_CLIENT`, overridden by name by the owner's
+    /// file (`[openai] live_model_min_client`, a table of name and contract, read once here).
+    pub live_model_min_client: Vec<(String, i64)>,
     /// No agent of this Host is woken by a heartbeat, whatever its own switch says, and a
     /// heartbeat sent from outside is refused (`CLARP_HEARTBEATS_DISABLED`, as on the
     /// Python Host).
@@ -174,7 +192,8 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
-[--accounts none|follow|select] [--seats-tool PROGRAM] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
+[--accounts none|follow|select] [--seats-tool PROGRAM] \
+[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -292,6 +311,70 @@ pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
     }
 }
 
+/// The model of GPT-Live the owner named in his file (`[openai] live_model`), read once: none
+/// named, or no file, is the default; another than the two there are is refused, said in one
+/// line, and the default runs.
+fn live_model_of(file: Option<&toml_edit::DocumentMut>) -> &'static str {
+    let named = file
+        .and_then(|file| file.get("openai"))
+        .and_then(|openai| openai.get("live_model"));
+    let told = named.map(|named| named.as_str().unwrap_or_default());
+    clarp_kernel::live_call::live_model(told).unwrap_or_else(|model| {
+        eprintln!(
+            "config.openai.live_model refused: not one of {}; {model} runs",
+            clarp_kernel::live_call::LIVE_MODELS.join(", ")
+        );
+        model
+    })
+}
+
+/// From which client contract an agent's live call runs on the owner's model, by the client's
+/// exact name: the two the apps named, and what the owner's file says of any name (`[openai]
+/// live_model_min_client`; 0 for a name is never for it), read by the one reader of such tables
+/// ([`clarp_kernel::client::minimums`]), as a render spec's table is. What it refused is named
+/// and that name keeps what it had; a key that differs from a built-in name only in its case is
+/// taken as written and said; a value that is no table is ignored and said. Each line carries the
+/// table's name, once, when the configuration is read.
+fn live_model_min_client_of(file: Option<&toml_edit::DocumentMut>) -> Vec<(String, i64)> {
+    let built_in = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT;
+    let mut minimums: Vec<(String, i64)> = built_in
+        .iter()
+        .map(|(name, minimum)| ((*name).to_string(), *minimum))
+        .collect();
+    let table = match file
+        .and_then(|file| file.get("openai"))
+        .and_then(|openai| openai.get(MIN_CLIENT_KEY))
+        .map(toml_edit::Item::as_table_like)
+    {
+        None => return minimums,
+        Some(Some(table)) => table,
+        Some(_) => {
+            min_client_said("ignored: expected a table of client = number");
+            return minimums;
+        }
+    };
+    let entries = table.iter().map(|(key, value)| (key, value.as_integer()));
+    let read = clarp_kernel::client::minimums(entries, clarp_kernel::client::BUILT_IN_NAMES);
+    for line in read.lines() {
+        min_client_said(&line);
+    }
+    for (name, minimum) in read.taken {
+        match minimums.iter_mut().find(|(known, _)| *known == name) {
+            Some(known) => known.1 = minimum,
+            None => minimums.push((name, minimum)),
+        }
+    }
+    minimums
+}
+
+/// The owner's table of minimums for the model of an agent's live call.
+const MIN_CLIENT_KEY: &str = "live_model_min_client";
+
+/// A line of what the reading of that table says, with the table's name before it.
+fn min_client_said(line: &str) {
+    eprintln!("clarp-host: config.{MIN_CLIENT_KEY}: {line}");
+}
+
 /// A stand-in for a provider or an engine, given in `variable`: none where nothing is given, and
 /// otherwise an address on this machine by one rule for every one of them
 /// (`clarp_kernel::address::on_this_machine`), parsed as a client parses it and kept as it was
@@ -336,6 +419,7 @@ impl Config {
         let mut contact_pictures = false;
         let mut accounts = clarp_kernel::recovery::Accounts::None;
         let mut seats_tool = String::new();
+        let (mut skills, mut skills_other_releases, mut skills_chosen_before) = (None, None, None);
         let mut logins_checked_every_ms = 5_000;
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
@@ -383,6 +467,13 @@ impl Config {
                         .ok_or(format!("--accounts {named}: none, follow or select"))?;
                 }
                 "--seats-tool" => seats_tool = value("a program")?,
+                "--skills" => skills = Some(PathBuf::from(value("a directory")?)),
+                "--skills-other-releases" => {
+                    skills_other_releases = Some(PathBuf::from(value("a directory")?));
+                }
+                "--skills-chosen-before" => {
+                    skills_chosen_before = Some(PathBuf::from(value("a file")?));
+                }
                 "--push-relay" => {
                     push_relay = value("an address")?.trim_end_matches('/').to_string();
                     // What a phone is told goes over TLS, or stays on this machine.
@@ -542,6 +633,8 @@ impl Config {
         // A stand-in for the relay is on this machine too: the key a Host dials with goes
         // over TLS, or stays here.
         let relay_stand_in = here("CLARP_RELAY_DIAL", Local::SOCKET)?;
+        // The owner's file, read once for what this Host keeps of it.
+        let owners = crate::owner::OwnerFile::new(speech_keys.clone()).read_document();
         Ok(Self {
             run_dir,
             listen: listen
@@ -577,6 +670,9 @@ impl Config {
                 ),
             },
             seats_tool,
+            skills,
+            skills_other_releases,
+            skills_chosen_before,
             logins_checked_every_ms,
             jobs_checked_every_ms,
             schedules_checked_every_ms,
@@ -602,6 +698,8 @@ impl Config {
             whisper_model,
             whisper_compute,
             speech_language,
+            live_model: live_model_of(owners.as_ref()),
+            live_model_min_client: live_model_min_client_of(owners.as_ref()),
             speech_keys,
             push_keys,
             static_dir,
