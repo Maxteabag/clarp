@@ -282,13 +282,25 @@ impl OwnerFile {
     /// The file as it is now. `None`: no file was named, it is not there, or what is in it
     /// is no TOML.
     pub fn read(&self) -> Option<Table> {
-        let text = std::fs::read_to_string(self.path.as_ref()?).ok()?;
-        text.parse::<Table>().ok()
+        self.read_text()?.parse::<Table>().ok()
+    }
+
+    /// Read the owner's TOML with the written order of entries preserved for diagnostics.
+    pub(crate) fn read_document(&self) -> Option<toml_edit::DocumentMut> {
+        self.read_text()?.parse().ok()
+    }
+
+    fn read_text(&self) -> Option<String> {
+        std::fs::read_to_string(self.path.as_ref()?).ok()
     }
 
     /// The key of a provider of speech: what the owner's file has for it, else what this
     /// Host's own environment has. Read now, kept nowhere.
     pub fn key(&self, provider: &str) -> Option<String> {
+        Self::key_from(self.read().as_ref(), provider)
+    }
+
+    pub(crate) fn key_from(file: Option<&Table>, provider: &str) -> Option<String> {
         let (path, variable): (&[&str], &str) = match provider {
             "typesafe" => (&["typesafe", "api_key"], "TYPESAFE_API_KEY"),
             "elevenlabs" => (&["elevenlabs", "api_key"], "ELEVEN_API_KEY"),
@@ -301,10 +313,8 @@ impl OwnerFile {
             "vertex" => (&["gemini_tts", "vertex_api_key"], "GOOGLE_VERTEX_API_KEY"),
             _ => return None,
         };
-        let file = self.read();
         if provider == "gemini"
             && let Some(raw) = file
-                .as_ref()
                 .and_then(|f| f.get("gemini_tts"))
                 .and_then(|t| t.get("api_key"))
                 .and_then(Value::as_str)
@@ -312,7 +322,7 @@ impl OwnerFile {
         {
             return Some(raw.trim().to_owned()).filter(|s| !s.is_empty());
         }
-        let written = file.and_then(|file| text_at(&file, path));
+        let written = file.and_then(|file| text_at(file, path));
         let own = || std::env::var(variable).ok();
         written.or_else(|| {
             own()

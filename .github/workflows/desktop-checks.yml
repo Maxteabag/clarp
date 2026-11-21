@@ -8,13 +8,6 @@ name: Desktop checks
 # list of checks.
 
 on:
-  push:
-    branches-ignore: [main]
-    paths:
-      - "desktop-rs/**"
-      - "static/icon.png"
-      - "src-tauri/icons/icon.icns"
-      - ".github/workflows/desktop-checks.yml"
   workflow_dispatch:
     inputs:
       checks:

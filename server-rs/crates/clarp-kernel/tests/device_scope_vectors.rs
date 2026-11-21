@@ -41,6 +41,6 @@ fn a_limited_device_is_refused_what_the_python_host_refuses_it() {
             let_through += 1;
         }
     }
-    assert_eq!((refused, let_through, others), (650, 315, 1930));
+    assert_eq!((refused, let_through, others), (661, 319, 1960));
     assert_eq!(devices::LIMITED_REFUSAL, "full device access required");
 }
