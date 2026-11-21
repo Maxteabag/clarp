@@ -588,3 +588,57 @@ def test_an_interrupted_turn_with_a_row_before_the_boundary_is_not_let_through()
     recorded = carry.record(before, carry=stored, boundary_seq=1, **WHERE)
     now = _inputs(turns=[_settled_turn("t", 1_000, LATEST + 9_000, "interrupted")], rows=rows)
     assert _asked(recorded, now, stored, 1) == ""
+
+
+# ---- rows a coordination turn's restamp moved above the mark ---------------------
+
+def _restamped(rows, traces, start):
+    """What message_writes.restamp_trace leaves: each row of ``traces`` under a
+    new revision of its own, nothing else changed."""
+    out, revision = [], start
+    for row in rows:
+        if row["trace_id"] in traces:
+            revision += 1
+            row = {**row, "revision": revision}
+        out.append(row)
+    return out
+
+
+def _coordinated():
+    turns = [_turn("older", 100), _turn("before", 200), _turn("coord", 300)]
+    rows = [_row("m-1", trace="older", revision=1), _row("m-2", trace="before", seq=1, revision=2),
+            _row("u-coord", source="client:coord", role="user", text="a reviewer's words",
+                 trace="coord", seq=-1, revision=3),
+            _row("m-3", trace="coord", seq=2, revision=4)]
+    return turns, rows
+
+
+def test_a_restamped_row_of_the_newest_turns_is_judged_at_its_recorded_revision():
+    turns, rows = _coordinated()
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    before = _inputs(turns=turns, rows=rows)
+    assert carry.record(before, **WHERE)["restamp"] == {"m-2": 2, "u-coord": 3, "m-3": 4}
+    assert _changed(before, _inputs(turns=turns, rows=_restamped(rows, {"coord"}, 10)), **stored) == ""
+    # Anything but the revision changed with it is still found.
+    reworded = [{**row, "text": "other words"} if row["message_id"] == "u-coord" else row
+                for row in _restamped(rows, {"coord"}, 10)]
+    assert _changed(before, _inputs(turns=turns, rows=reworded), **stored) == "row_send"
+    # A turn older than the newest two keeps no revisions: refused as before.
+    assert _changed(before, _inputs(turns=turns, rows=_restamped(rows, {"older"}, 10)),
+                    **stored) == "row_transcript"
+
+
+def test_no_revisions_are_kept_past_the_limit_or_from_a_record_that_had_none(monkeypatch):
+    turns, rows = _coordinated()
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    before = _inputs(turns=turns, rows=rows)
+    after = _inputs(turns=turns, rows=_restamped(rows, {"coord"}, 10))
+    recorded = carry.record(before, **WHERE)
+    del recorded["restamp"]
+    old = carry.loads(carry.dumps(recorded))
+    assert old["restamp"] == {}
+    assert carry.changed(old, after, rules=frozenset(carry.RULES), carry=stored, boundary_seq=5,
+                         **WHERE) == "row_send,row_transcript"
+    monkeypatch.setattr(carry, "_RESTAMP_ROWS", 2)
+    assert carry.record(before, **WHERE)["restamp"] == {}
+    assert _changed(before, after, **stored) == "row_send,row_transcript"
