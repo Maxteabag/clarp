@@ -1200,6 +1200,9 @@ impl Agent {
             next => {
                 if let TurnEvent::Started { at_ms, takeover } = change {
                     self.live_takeover.clone_from(takeover);
+                    if let Some(start) = takeover {
+                        self.bind_session(Some(&start.session));
+                    }
                     self.latest_turn_start =
                         Some(self.latest_turn_start.map_or(*at_ms, |old| old.max(*at_ms)));
                 }

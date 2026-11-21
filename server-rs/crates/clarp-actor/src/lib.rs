@@ -67,6 +67,7 @@ pub mod conversation;
 pub mod deliveries;
 pub mod helper_cells;
 pub mod provider_jobs;
+pub mod takeover;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
@@ -3678,13 +3679,24 @@ impl Actor {
         self.for_its_model = false;
         // What the attempts before put into the conversation is still the turn's.
         let before = self.live.take().filter(|live| live.turn == turn);
-        let backend_session = self.recorder.agent().backend_session().map(str::to_string);
+        let takeover = self.recorder.agent().live_takeover().cloned();
+        let (backend_session, new_session) = match &takeover {
+            Some(start) if matches!(start.input, clarp_kernel::takeover::Input::ClaudeFresh { .. }) => {
+                (None, start.session.clone())
+            }
+            Some(start) => (Some(start.session.clone()), self.profile.conversation_id.clone()),
+            None => (
+                self.recorder.agent().backend_session().map(str::to_string),
+                self.profile.conversation_id.clone(),
+            ),
+        };
         // A tool that lets go of old conversations no longer has this one: named, it would
         // begin an empty one without a word. The turn begins a new one instead, which opens
         // with the Host's own record of the old.
-        let lost = backend_session
-            .as_deref()
-            .is_some_and(|session| !self.backend.keeps(session));
+        let lost = takeover.is_none()
+            && backend_session
+                .as_deref()
+                .is_some_and(|session| !self.backend.keeps(session));
         let backend_session = backend_session.filter(|_| !lost);
         // A turn that waited for an account is taken up again: the tool, which has the turn
         // in its own session, is told so. One whose tool never got as far as a session is
@@ -3730,7 +3742,7 @@ impl Actor {
             .then(|| {
                 backend_session
                     .clone()
-                    .unwrap_or_else(|| self.profile.conversation_id.clone())
+                    .unwrap_or_else(|| new_session.clone())
             })
             .filter(|id| !id.is_empty());
         let launch = self.backend.launch(&TurnSpec {
@@ -3738,11 +3750,11 @@ impl Actor {
             session: self.profile.session.clone(),
             turn: turn.0,
             trace_id: message.trace_id.clone(),
-            takeover: None,
+            takeover: takeover.map(|start| start.input),
             cwd: self.profile.cwd.clone(),
             prompt,
             // The first turn starts the tool's session under the conversation's own name.
-            new_session: Some(self.profile.conversation_id.clone())
+            new_session: Some(new_session)
                 .filter(|name| backend_session.is_none() && !name.is_empty()),
             backend_session,
             model: message
