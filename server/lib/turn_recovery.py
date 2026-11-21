@@ -7,7 +7,7 @@ import dataclasses
 import sqlite3
 
 from . import agents as agents_db
-from . import db, eventlog
+from . import db, eventlog, launch_receipts
 from . import turn_queue
 from . import recovery_backoff, turn_lifecycle
 from . import events
@@ -49,6 +49,12 @@ class RecoveryMixin:
         if not _SLOTS.first_rehydration():
             return
         try:
+            # Follow-ups written into a running turn whose echo this runtime never
+            # handled: settled by what the session file holds (issue 491, part C).
+            self._settle_steers_left()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("steersLeftPassFail", exc)
+        try:
             # Items whose row stands and whose prompt may have left: never run
             # again, started so none stays 'queued' (issue 491, review C5).
             turn_queue.start_shown_attempted()
@@ -58,6 +64,13 @@ class RecoveryMixin:
             self._show_started_unshown()
         except Exception as exc:  # noqa: BLE001 - recovery must still run
             log_exception("startedUnshownPassFail", exc)
+        try:
+            # A Host that died while a takeover held a turn's group stopped
+            # (issue 491, part B): the group is thawed from its durable record.
+            from . import takeover
+            takeover.thaw_left_frozen()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("takeoverThawFail", exc)
         try:
             # A listen-first claim left by an earlier process: a process
             # boundary is never proof of what it sent, whatever its age.
@@ -89,6 +102,79 @@ class RecoveryMixin:
                 f"adopted={len(result['adopted'])} "
                 f"requeued_parked={result['requeued_parked']}")
         self._settle_unsent_held_sends()
+
+    def _settle_steers_left(self) -> None:
+        """Once per runtime start (issue 491, part C): a follow-up written into a running
+        turn's stdin, whose echo the previous runtime never handled, is still a queue item
+        whose receipt says it may have left: nothing would run it or settle it. It is looked
+        up in the session file by the uuid its stdin line carried:
+        - there (the CLI read it): its row is written in the live session, shown and started
+          in one transaction; it is never run;
+        - not there (never read): its receipt goes back to pending and it runs as its own
+          turn, once, as when the process ends while the runtime lives;
+        - the file cannot be read: the same, with a log line (a duplicate the user can see
+          is better than a message lost for good)."""
+        from . import steer_records
+        from .backend.registry import by_id
+        for entry in steer_records.left():
+            trace_id, queue_id = str(entry["trace_id"]), str(entry.get("queue_id") or "")
+            try:
+                item = db.conn().execute(
+                    "SELECT * FROM queued_turns WHERE queue_id = ?", (queue_id,)).fetchone()
+                receipt = launch_receipts.get(trace_id) or {}
+                if (item is None or item["status"] != "queued" or item["shown_at"] is not None
+                        or receipt.get("state") != launch_receipts.ATTEMPTED):
+                    continue                           # settled before the runtime died
+                # The steered CLI may have outlived the runtime in a long tool call and
+                # would read the line when its tool returns: it is ended first (only while
+                # its pid is still that process), so "not in the file" means never read.
+                from . import takeover
+                if takeover.kill_group_if_same(int(entry.get("pid") or 0),
+                                               int(entry.get("pgid") or 0),
+                                               entry.get("start_ticks")):
+                    log("steerOrphanEnded", f"agent={item['agent_id']} queue={queue_id}")
+                try:
+                    read = by_id(str(entry.get("backend") or "")).steer_was_read(
+                        session_id=str(entry.get("session_id") or ""), home=self.home,
+                        cwd=str(entry.get("cwd") or ""), trace_id=trace_id)
+                except Exception as exc:  # noqa: BLE001 - not known: as unreadable
+                    log_exception("steerLookupFail", exc, detail=trace_id)
+                    read = None
+                if read:
+                    self._show_steer_read(dict(item), str(entry.get("session_id") or ""))
+                    log("steerReadAtStart", f"agent={item['agent_id']} queue={queue_id}")
+                else:
+                    launch_receipts.withdraw_attempt(trace_id)
+                    log("steerUnreadAtStart" if read is False else "steerUnknownAtStart",
+                        f"agent={item['agent_id']} queue={queue_id}")
+            finally:
+                steer_records.clear(trace_id)
+
+    def _show_steer_read(self, item: dict, steered_session: str) -> None:
+        """A follow-up the CLI read: its row in the live session, shown and started in one
+        transaction (the words the backend was given; never run again)."""
+        from . import message_store
+        agent_id, queue_id = str(item["agent_id"]), str(item["queue_id"])
+        session_id = agents_db.live_backend_session(agent_id) or steered_session
+        database = db.conn()
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            message_store.record_user_message(
+                agent_id=agent_id, backend_session_id=session_id,
+                client_msg_id=str(item["client_msg_id"] or item["trace_id"]),
+                text=str(item["text"]), origin=str(item["origin"] or "user"),
+                sender_agent_id=str(item["sender_agent_id"] or "") or None,
+                prompt_admission_id=str(item["prompt_admission_id"] or ""),
+                trace_id=str(item["trace_id"]),
+                sent_at=int(item["enqueued_at"]) if item["enqueued_at"] else None)
+            turn_queue.show(queue_id, con=database)
+            started = turn_queue.start_receipt(queue_id)
+            database.execute("COMMIT")
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+        turn_queue.after_start(queue_id, started)
 
     def _show_started_unshown(self) -> None:
         """Once per runtime start (issue 491): an item started on a session with no

@@ -327,6 +327,16 @@ class TurnSlots:
             self.inflight[agent_id] = trace_id
             self.claimed_at[agent_id] = self._clock()
 
+    def hand_back(self, agent_id: str, trace_id: str, previous: str) -> bool:
+        """Undo a claim that took a running turn's slot (an abandoned takeover, issue
+        491): the slot is ``previous``'s again, as it was, not spawning."""
+        with self.lock:
+            if self.inflight.get(agent_id) != trace_id:
+                return False
+            self.inflight[agent_id] = previous
+            self.claimed_at.pop(agent_id, None)
+            return True
+
     def mark_spawned(self, agent_id: str, trace_id: str) -> bool:
         """The backend accepted the turn: it is no longer spawning."""
         with self.lock:
