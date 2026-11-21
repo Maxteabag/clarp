@@ -1078,6 +1078,15 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
         "{row}"
     );
     assert_eq!(host.get("/live?session=oak")["turn"]["audience"], "user");
+    let snapshot = host.get("/agents/snapshot");
+    let oak = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["session"] == "oak")
+        .unwrap();
+    assert_eq!(oak["working_audience"], "user");
+    assert!(oak["working_with"].is_null());
     let hidden = host.get("/log?session=oak&coordination=hide");
     assert_eq!(hidden["coordination"]["visibility"], "hide");
     for id in ["u-saved", "u-c-1"] {
@@ -1301,4 +1310,137 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
     let plain = host.get(path);
     assert_eq!(plain["turns"], show["turns"]);
     assert!(plain.get("coordination").is_none());
+}
+
+#[test]
+fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview() {
+    let place = Place::new("coordination-working-state");
+    let release = place.root.join("release-working");
+    let tokens = place.root.join("working-token");
+    let script = STAND_IN_STREAMS
+        .replace(
+            "read message\n",
+            &format!(
+                "read message\nprintf '%s' \"$CLARP_PROVIDER_TURN\" > '{}/'\"$CLARP_SESSION\"\n",
+                tokens.display()
+            )
+        )
+        .replace(
+            "sleep \"$pause\"",
+            &format!(
+                "if [ \"$tag\" = two ]; then n=0; while [ ! -e '{}' ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n+1)); done; fi",
+                release.display()
+            ),
+        )
+        .replace("sleep 2; echo found", "cat secret-plan.md")
+        .replace("sleep 2; ", "cat ")
+        .replace("echo found", "secret-plan.md");
+    std::fs::create_dir(&tokens).unwrap();
+    program(&place.root.join("claude"), &script);
+    let admin = "fixture-admin";
+    let host = start_host_as(&place, &[], admin);
+    host.post(
+        "/agents",
+        json!({"name":"Boss","session":"boss","backend":"claude"}),
+    );
+    host.post(
+        "/agents",
+        json!({"name":"Oak","session":"oak","backend":"claude","role":"helper","parent":"boss"}),
+    );
+    let row = |session| {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .cloned()
+            .unwrap()
+    };
+    host.post(
+        "/agent-coordination",
+        json!({"session":"oak","visibility":"hide"}),
+    );
+    host.send("oak", "one visible turn", "first-visible");
+    wait_for("the visible turn to finish", || host.state("oak") == "done");
+    let before = row("oak");
+    assert!(before["working_audience"].is_null());
+    let heard = host.listen_at(&format!("/events?token={admin}"));
+    wait_for("the event stream to subscribe", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
+    });
+    let sent = host.post(
+        "/send",
+        json!({
+            "session":"oak","text":"two while the tool is held","origin":"agent","sender":"boss",
+            "client_msg_id":"private-working",
+        }),
+    );
+    wait_for("the hidden turn to reach its tool", || {
+        host.state("oak") == "tool"
+    });
+    let hidden = row("oak");
+    assert_eq!(hidden["last_message_id"], before["last_message_id"]);
+    assert_eq!(
+        hidden["last_completed_message"],
+        before["last_completed_message"]
+    );
+    assert_eq!(hidden["last_activity"], before["last_activity"]);
+    assert_eq!(hidden["working_audience"], "agents");
+    assert_eq!(
+        hidden["working_with"],
+        json!({"agent_id":ids_of(&host)["boss"],"name":"Boss"})
+    );
+    assert_eq!(hidden["activity"]["summary"], "Working with Boss");
+    assert_eq!(hidden["live_activity"]["headline"], "Working with Boss");
+    assert!(hidden["live_activity"]["tool"].is_null());
+    assert!(
+        row("boss")["status_text"]
+            .as_str()
+            .unwrap()
+            .contains("oak: Working with Boss")
+    );
+    wait_for("the late working event", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-state"
+                && event["session"] == "oak"
+                && event["kind"] == "tool"
+                && event["audience"] == "agents"
+                && event["sender_name"] == "Boss"
+                && event["detail"]["summary"] == "Working with Boss"
+                && event["detail"].get("tool").is_none()
+        })
+    });
+    assert!(heard.lock().unwrap().iter().any(|event| {
+        event["type"] == "agent-activity"
+            && event["session"] == "oak"
+            && event["kind"] == "tool"
+            && event["tool"] == ""
+            && event["summary"] == "Working with Boss"
+    }));
+
+    let token = std::fs::read_to_string(tokens.join("oak")).unwrap();
+    let (status, note) = asked(
+        &host,
+        "/agent-notes",
+        &[("X-Clarp-Turn", &token)],
+        &json!({"session":"oak","text":"An update for you","note_id":"working-note"}),
+    );
+    assert_eq!(status, 200, "{note}");
+    assert_eq!(row("oak")["last_message"], "An update for you");
+    std::fs::write(release, "").unwrap();
+    wait_for("the hidden turn to finish", || {
+        answered(&host, "oak", &sent["trace_id"])
+    });
+    let idle = row("oak");
+    assert!(idle["working_audience"].is_null() && idle["working_with"].is_null());
+    assert_eq!(idle["last_message"], "An update for you");
+    host.post(
+        "/agent-coordination",
+        json!({"session":"oak","visibility":"show"}),
+    );
+    assert_ne!(row("oak")["last_message_id"], idle["last_message_id"]);
 }

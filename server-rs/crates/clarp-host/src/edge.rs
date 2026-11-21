@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 123;
+pub const HOST_CONTRACT: u64 = 124;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -336,6 +336,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("speech_outcome", 109),
     ("pairing_identity", 114),
     ("hidden_coordination", 120),
+    ("coordination_working_state", 124),
 ];
 
 /// After this long without an event, a stream is sent a heartbeat.
@@ -1289,8 +1290,16 @@ impl Families {
                 let state = wire::state_name(&wire::state_kind(&view.status));
                 // What it says it is doing, or what its state says.
                 let said = view.status.label.trim();
+                let mut doing = wire::activity(record, &view.status);
+                let recovering = doing["phase"] == "account_recovery";
                 let text = if said.is_empty() {
-                    let doing = wire::activity(record, &view.status);
+                    if view.can_leave_note
+                        && crate::hidden_coordination::hides(directory, &record.agent_id)
+                        && let Some(headline) =
+                            view.working.as_ref().and_then(wire::WorkingWith::headline)
+                    {
+                        clarp_kernel::hidden_coordination::veil_activity(&mut doing, &headline);
+                    }
                     doing["summary"].as_str().unwrap_or("").trim().to_string()
                 } else {
                     said.to_string()
@@ -1298,7 +1307,7 @@ impl Families {
                 family.working.push(helpers::Working {
                     session: record.session.clone(),
                     text,
-                    bucket: helpers::bucket(&state),
+                    bucket: helpers::bucket(if recovering { "waiting" } else { &state }),
                 });
             }
         }
@@ -1337,18 +1346,55 @@ pub(crate) fn agent_row(
 ) -> Value {
     let view = member.agent.view();
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
+    let (global, choice) =
+        crate::hidden_coordination::visibility(directory, &member.record.agent_id);
+    let visibility = choice.unwrap_or(global);
+    let hides =
+        view.can_leave_note && visibility == clarp_kernel::hidden_coordination::Visibility::Hide;
+    let newest = if hides {
+        view.visible_previews.0.as_ref()
+    } else {
+        view.newest.as_ref()
+    };
     let mut row = wire::summary(
         &member.record,
         &view.status,
         view.backend,
-        view.newest.as_ref(),
+        newest,
         view.ended.as_ref(),
         focused,
     );
-    let (global, choice) =
-        crate::hidden_coordination::visibility(directory, &member.record.agent_id);
-    row["coordination_visibility"] = json!(choice.unwrap_or(global));
+    row["coordination_visibility"] = json!(visibility);
     row["coordination_override"] = json!(choice);
+    let working = view.working.as_ref();
+    let sender = working
+        .and_then(wire::WorkingWith::sender)
+        .and_then(|(id, _)| {
+            directory
+                .named(id)
+                .map(|known| (id, known.record.persona.as_str()))
+        });
+    row["working_audience"] = json!(working.map(wire::WorkingWith::audience));
+    row["working_with"] = json!(sender.map(|(id, name)| json!({"agent_id": id, "name": name})));
+    if hides {
+        row["last_completed_message"] = json!(
+            view.visible_previews
+                .1
+                .as_ref()
+                .map(wire::preview)
+                .unwrap_or_default()
+        );
+        let at = newest.map_or(member.record.created_at_ms, |preview| {
+            preview.ts_ms.max(member.record.created_at_ms)
+        });
+        row["last_activity"] = json!(at / 1_000);
+        if working.is_some_and(|with| with.audience() == clarp_kernel::coordination::AGENTS) {
+            let headline =
+                clarp_kernel::hidden_coordination::working_headline(sender.map(|(_, name)| name));
+            clarp_kernel::hidden_coordination::veil_activity(&mut row["activity"], &headline);
+            clarp_kernel::hidden_coordination::veil_live(&mut row["live_activity"], &headline);
+        }
+    }
     // Whether its tool's account is used up: advice for whoever is about to write to it.
     row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
     // The face it is shown with: the picture it has of its own; else, unless it has a

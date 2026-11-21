@@ -502,6 +502,10 @@
             "owner": false,
             "public": true
           },
+          "missing-owner": {
+            "language": "en",
+            "public": true
+          },
           "nb": {
             "language": "nb-NO",
             "owner": false,
@@ -517,6 +521,11 @@
             "owner": false,
             "public": true
           },
+          "number-owner": {
+            "language": "en",
+            "owner": 0,
+            "public": true
+          },
           "owned": {
             "language": "en",
             "owner": true,
@@ -526,6 +535,11 @@
             "language": "en",
             "owner": false,
             "public": false
+          },
+          "string-public": {
+            "language": "en",
+            "owner": false,
+            "public": "true"
           },
           "unmarked": {
             "language": "",
@@ -548,7 +562,8 @@
         "ids": [
           "en"
         ],
-        "language": "en"
+        "language": "en",
+        "miss": null
       },
       {
         "ids": [
@@ -556,7 +571,8 @@
           "nn",
           "no"
         ],
-        "language": "nb-NO"
+        "language": "nb-NO",
+        "miss": null
       },
       {
         "ids": [
@@ -564,26 +580,51 @@
           "nn",
           "no"
         ],
-        "language": "NN_no"
+        "language": "NN_no",
+        "miss": null
       },
       {
         "ids": [
           "de"
         ],
-        "language": "de"
+        "language": "de",
+        "miss": null
       },
       {
         "ids": [],
-        "language": "zh"
+        "language": " ZH_cn ",
+        "miss": {
+          "language": "zh",
+          "total": 12
+        }
       },
       {
         "ids": [
           "unmarked"
         ],
-        "language": ""
+        "language": "",
+        "miss": null
       }
     ],
-    "ola": "{\"cartesia\":\"nn\"}"
+    "ola": "{\"cartesia\":\"nn\"}",
+    "quiet": [
+      {
+        "file": {},
+        "ids": [],
+        "language": "en",
+        "miss": null
+      },
+      {
+        "file": {
+          "_catalogue": {
+            "cartesia": {}
+          }
+        },
+        "ids": [],
+        "language": "en",
+        "miss": null
+      }
+    ]
   },
   "default_assignment": "pool",
   "janitor": {

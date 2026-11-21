@@ -202,15 +202,25 @@ impl Hub {
 
     /// Sends a `live` event to the connections that asked to be shown agents' turns. The
     /// reading of the clock in it is this moment's: a client sets its own clock by it.
-    pub fn show(&self, mut event: Value, now_ms: i64) {
+    pub fn show(
+        &self,
+        mut event: Value,
+        now_ms: i64,
+        working: Option<(&str, &crate::wire::WorkingWith)>,
+    ) {
         if self.statuses.receiver_count() > 0 {
             let ops = event["ops"].as_array().into_iter().flatten();
             let mut statuses = ops.filter(|op| op["op"] == "status");
             if let Some(status) = statuses.next_back() {
-                let told = json!({
+                let mut told = json!({
                     "type": "live", "agent_id": event["agent_id"], "session": event["session"],
                     "ops": [status],
                 });
+                if let Some((trace, who)) = working
+                    && status["activity"]["turn_id"] == trace
+                {
+                    who.tell(&mut told);
+                }
                 let _ = self.statuses.send(Arc::new(told));
             }
         }
@@ -302,13 +312,14 @@ mod tests {
         assert_eq!(hub.epoch(), "018bcfe56800");
         let event = |ops: Value| json!({"type": "live", "agent_id": "a1", "session": "claire", "lseq": 4, "server_now_ms": 1, "ops": ops});
         // Nobody watches: nothing is made.
-        hub.show(event(json!([{"op": "status"}])), 5);
+        hub.show(event(json!([{"op": "status"}])), 5, None);
         let mut watching = hub.watch();
         hub.show(
             event(json!([{"op": "upsert", "id": "cl:1"}, {"op": "status", "activity": {}}, {"op": "turn"}])),
             7,
+            None,
         );
-        hub.show(event(json!([{"op": "append", "id": "cl:1"}])), 8);
+        hub.show(event(json!([{"op": "append", "id": "cl:1"}])), 8, None);
         let first = watching.try_recv().unwrap();
         let wanted = |names: &[&str]| names.iter().map(|name| (*name).to_string()).collect();
         let whole: Value =

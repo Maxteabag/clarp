@@ -25,6 +25,11 @@ pub(crate) fn visibility(
     (global, chat)
 }
 
+pub(crate) fn hides(directory: &Directory, agent_id: &str) -> bool {
+    let (global, chat) = visibility(directory, agent_id);
+    chat.unwrap_or(global) == Visibility::Hide
+}
+
 fn owner(headers: &HeaderMap) -> Result<(), ApiError> {
     if crate::coordination::from_an_agent(headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));

@@ -3636,6 +3636,20 @@ with the built-in pool as a fallback. A stable walk reserves built-in contacts' 
 while other voices are free and chooses the least shared voice when the pool is exhausted.
 A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
 
+**Cartesia catalogue access (PR 562, 21 Nov 2026).** The names worker recognizes
+public access, public or all visibility, and the legacy boolean public marker. The
+pool requires explicit non-ownership. A successful Cartesia fetch writes cache format
+2. An older cache is due at startup regardless of age. If a nonempty catalogue has
+no eligible voice in the recipient's language, the Host logs
+`voicePoolNoCatalogueVoice` before using the built-in pool.
+
+**Voice names refresh failures (PR 563, 21 Nov 2026).** A keyed catalogue failure
+preserves the cache age even if the Host writes names fetched from another provider.
+A cache that stays due retries after 15 minutes. Successful writes mark format 2,
+including an ElevenLabs-only refresh or a missing or older cache with no provider
+keys. Upgrading an older cache discards any stale catalogue rows the worker did
+not refetch. Voice labels remain available.
+
 **Hidden coordination** (the Python Host's PR 512). Fleet writes the global and per-chat
 visibility settings, publishes the directory, then emits the new effective choice with
 the roster hint. It never edits a conversation for this purpose. An explicit log mode reads
@@ -3647,6 +3661,16 @@ previous visible boundary is outside the count's reach, its search stops at the 
 and reports a capped gap. The settings routes are for full-scope clients, and both
 writes refuse requests bearing a turn or peer header. An acceptance made when an agent
 cannot leave notes stays shown after that agent changes capability.
+
+**Coordination in the chat list and working state** (Python PRs 558–561). The actor keeps
+a visible preview and a completed preview, looking through at most 200 eligible messages
+for each. The snapshot chooses from these when the chat hides coordination. Its working
+audience is cached in the actor view, and its visibility comes from the fleet directory.
+These in-process projections update on a turn or setting change without polling the log
+from a snapshot or waiting out a refresh interval. Working states carry the turn's audience;
+the hidden turn's state, activity, and push give the partner's name. Account recovery and
+the agent's own status text stay visible. The summary of a running helper uses the helper's
+visibility when it has no status text of its own.
 
 ## 7. Stages and gates
 

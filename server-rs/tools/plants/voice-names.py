@@ -50,7 +50,7 @@ rules(WORKER, 'worker', [
     ('The file contents lack a digest', 'let hash = Some(digest(&raw));', 'let hash = None;'),
     ('The file hash changes to a constant after refresh', 'Some(digest(&raw))\n        };', 'Some(String::new())\n        };'),
     ('A successful refresh never publishes the new names', 'self.publish(Stored {\n            stamp: Some((meta.modified()?, meta.len())),\n            snapshot,\n            hash,\n        });', 'let _ = (meta, snapshot, hash);'),
-    ('A failed catalogue discards the other providers too', 'Err(why) => eprintln!("voiceNamesFetchFail {CARTESIA}: {why}"),', 'Err(why) => { eprintln!("{why}"); return Snapshot::default(); }'),
+    ('A failed catalogue discards the other providers too', 'eprintln!("voiceNamesFetchFail {CARTESIA}: {why}");\n                    failed = true;', 'eprintln!("voiceNamesFetchFail {CARTESIA}: {why}"); return (Snapshot::default(), true);'),
     ('Cartesia skips the used IDs the catalogue missed', 'lookup(&missing, &mut listed, CARTESIA, |id| {', 'lookup(&BTreeSet::new(), &mut listed, CARTESIA, |id| {'),
     ('An ElevenLabs provider with used voices is skipped', '&& !eleven_ids.is_empty()', '&& eleven_ids.is_empty()'),
 ])
