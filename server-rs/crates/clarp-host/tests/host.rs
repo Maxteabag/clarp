@@ -61,6 +61,8 @@ mod move_janitors;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/r175_engine_order.rs"]
+mod r175_engine_order;
 #[path = "host/remote_action.rs"]
 mod remote_action;
 #[path = "host/router_phrases.rs"]

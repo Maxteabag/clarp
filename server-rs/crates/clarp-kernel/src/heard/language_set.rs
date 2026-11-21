@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use super::{PROVIDERS, cloud_model};
+use super::{PROVIDERS, cloud_model, engine_order};
 use crate::languages::SET_PROVIDERS;
 use crate::python::strip;
 
@@ -10,8 +10,7 @@ pub const UNSUPPORTED: &str = "language_set_unsupported";
 pub const OWN_UNAVAILABLE: &str = "the Host's own engine is unavailable";
 pub const OWN_FAILED: &str = "the Host's own engine could not hear it";
 
-/// Providers are tried once, even when their catalogue lists several models. The local
-/// default's aliases share one identity; another local model is its own engine.
+/// The identity of an engine that refused or received the recording, for recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Engine<'a> {
     Hosted(&'static str),
@@ -20,13 +19,15 @@ pub enum Engine<'a> {
 }
 
 pub fn identity<'a>(model: &'a str, own_id: Option<&str>) -> Engine<'a> {
-    if let Some((provider, _)) = cloud_model(model) {
-        return Engine::Hosted(provider.id);
+    if let Some(provider) = engine_order::hosted_provider(model) {
+        return Engine::Hosted(provider);
     }
-    if matches!(model, "" | "local" | "server-default") || own_id == Some(model) {
-        return Engine::Own;
+    let name = strip(model);
+    if engine_order::is_own(name, own_id) {
+        Engine::Own
+    } else {
+        Engine::Other(name)
     }
-    Engine::Other(model)
 }
 
 /// The declaration of the Host's own engine. No declaration follows Whisper's .en rule.
