@@ -6,7 +6,11 @@
 //! What is done with what an engine heard (which pieces are kept, what is thrown away as
 //! invented) is not an engine's business: the Host does that the same for all of them.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+
+mod provider;
+pub(crate) use provider::http_agent;
 
 /// A clip of speech as an app recorded it.
 #[derive(Debug, Clone, Copy)]
@@ -69,22 +73,54 @@ pub enum Deaf {
     Failed(String),
 }
 
+/// What happened at an adapter boundary. The language a provider was asked to use and
+/// whether it got any of the recording are independent facts.
+#[derive(Default)]
+pub struct Observation {
+    pub handed: Option<String>,
+    // A multi-piece Google request and an adapter's retries share this count.
+    sends: AtomicUsize,
+}
+
+impl Observation {
+    pub fn sent(&self) -> bool {
+        self.sends.load(Ordering::Relaxed) != 0
+    }
+
+    pub(crate) fn note_handed(&mut self, language: Option<&str>) {
+        self.handed = Some(language.unwrap_or("auto").into());
+    }
+
+    fn sending_audio<T, E>(
+        &self,
+        send: impl FnOnce() -> Result<T, E>,
+        never_left: impl FnOnce(&E) -> bool,
+    ) -> Result<T, E> {
+        self.sends.fetch_add(1, Ordering::Relaxed);
+        let result = send();
+        if result.as_ref().is_err_and(never_left) {
+            // A refusal can take back only this request's count.
+            self.sends.fetch_sub(1, Ordering::Relaxed);
+        }
+        result
+    }
+}
+
 /// An engine that turns speech into text.
 pub trait Listener: Send + Sync {
     /// Turns a clip into text. It may take as long as the clip is long, so it is never
     /// called where nothing may wait.
-    fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf>;
+    fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf> {
+        self.hear_observed(clip, asked, &mut Observation::default())
+    }
 
-    /// A call report records the constraint at the adapter boundary, also when it fails.
+    /// Records the language at the adapter boundary and sending evidence at the request.
     fn hear_observed(
         &self,
         clip: Clip<'_>,
         asked: Asked<'_>,
-        observed: &mut Option<String>,
-    ) -> Result<Heard, Deaf> {
-        *observed = Some(asked.language.unwrap_or("auto").to_string());
-        self.hear(clip, asked)
-    }
+        observed: &mut Observation,
+    ) -> Result<Heard, Deaf>;
 
     /// Whether the engine could hear a clip now.
     fn ready(&self) -> bool {

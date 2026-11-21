@@ -41,16 +41,16 @@ pub struct Contacts {
 }
 
 impl Contacts {
-    /// Remember a provider after its adapter received the attempt. A local failure counts
+    /// Remember a provider after an audio request was sent. A local failure counts
     /// for R152, but it cannot exhaust a hosted provider.
-    pub fn failed(&mut self, engine: &str, handed: bool) -> bool {
+    pub fn failed(&mut self, engine: &str, sent: bool) -> bool {
         let Some(provider) = hosted_provider(engine) else {
             return true;
         };
-        if handed {
+        if sent {
             self.sent.insert(provider);
         }
-        handed
+        sent
     }
 
     pub fn already_sent(&self, engine: &str) -> Option<&'static str> {
@@ -83,8 +83,8 @@ impl<'a> ChatOrder<'a> {
         Some((engine, !self.pending.is_empty()))
     }
 
-    pub fn failed(&mut self, engine: &str, handed: bool) -> Failure<'a> {
-        let reached = self.contacted.failed(engine, handed);
+    pub fn failed(&mut self, engine: &str, sent: bool) -> Failure<'a> {
+        let reached = self.contacted.failed(engine, sent);
         let mut skipped = Vec::new();
         self.pending.retain(|later| {
             if let Some(provider) = self.contacted.already_sent(later) {

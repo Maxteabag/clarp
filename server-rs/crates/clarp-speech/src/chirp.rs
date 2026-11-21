@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::listen::{Asked, Clip, Deaf, Heard, Listener, strip};
+use crate::listen::{Asked, Clip, Deaf, Heard, Listener, Observation, http_agent, strip};
 
 /// Where a token that renews itself buys a short-lived one.
 pub const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -335,20 +335,21 @@ impl Chirp {
         body: &[u8],
         timeout: Duration,
         what: &str,
+        audio: Option<&Observation>,
     ) -> Result<Value, String> {
-        let config = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .timeout_global(Some(timeout))
-            .http_status_as_error(false)
-            .build();
-        let agent: ureq::Agent = config.into();
+        let agent = http_agent(timeout);
         let mut request = agent.post(url);
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
         // How it failed, and nothing of what was sent.
         let failed = |error: &dyn std::fmt::Display| format!("{what} request failed: {error}");
-        let mut response = request.send(body).map_err(|error| failed(&error))?;
+        let send = || request.send(body);
+        let response = match audio {
+            Some(observed) => observed.send_http(send),
+            None => send(),
+        };
+        let mut response = response.map_err(|error| failed(&error))?;
         let status = response.status().as_u16();
         let said = response
             .body_mut()
@@ -412,6 +413,7 @@ impl Chirp {
             form.as_bytes(),
             Duration::from_secs(15),
             "Google token",
+            None,
         )?;
         let Some(token) = bought["access_token"]
             .as_str()
@@ -430,6 +432,7 @@ impl Chirp {
         piece: &[u8],
         account: &Account,
         languages: &[String],
+        observed: &Observation,
     ) -> Result<String, String> {
         let host = match account.location.as_str() {
             "global" => "speech.googleapis.com".to_string(),
@@ -467,7 +470,14 @@ impl Chirp {
                 ("x-goog-user-project", account.project.as_str()),
                 ("Content-Type", "application/json"),
             ];
-            answer = Self::post(&url, &headers, body.as_bytes(), patience, "Google STT");
+            answer = Self::post(
+                &url,
+                &headers,
+                body.as_bytes(),
+                patience,
+                "Google STT",
+                Some(observed),
+            );
             let Err(why) = &answer else { break };
             let refused_token = why.contains("HTTP 401");
             if refused_token {
@@ -494,7 +504,13 @@ impl Chirp {
 }
 
 impl Listener for Chirp {
-    fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf> {
+    fn hear_observed(
+        &self,
+        clip: Clip<'_>,
+        asked: Asked<'_>,
+        observed: &mut Observation,
+    ) -> Result<Heard, Deaf> {
+        observed.note_handed(asked.language);
         let Some(account) = (self.account)() else {
             let none = "Google credentials are not configured";
             return Err(Deaf::Failed(none.to_string()));
@@ -511,12 +527,15 @@ impl Listener for Chirp {
         let languages = languages_asked(asked.language.unwrap_or("en"));
         let files = pieces(&sound, self.piece_seconds);
         let mut texts: Vec<String> = Vec::with_capacity(files.len());
+        let observed: &Observation = observed;
         // A few pieces at a time, and their texts in the order of the clip.
         for together in files.chunks(AT_ONCE) {
             let heard: Vec<Result<String, String>> = std::thread::scope(|scope| {
                 let asked: Vec<_> = together
                     .iter()
-                    .map(|piece| scope.spawn(|| self.recognised(piece, &account, &languages)))
+                    .map(|piece| {
+                        scope.spawn(|| self.recognised(piece, &account, &languages, observed))
+                    })
                     .collect();
                 let cut_off = || Err("Google STT request failed: its thread ended".to_string());
                 asked
@@ -846,6 +865,40 @@ mod tests {
     fn heard(text: &str) -> (&'static str, String) {
         let answer = json!({ "results": [{ "alternatives": [{ "transcript": text }] }] });
         ("200 OK", answer.to_string())
+    }
+
+    #[test]
+    fn only_google_audio_requests_count_as_sent() {
+        let refusal = ("400 Bad Request", "{}".to_string());
+        for (name, script, sent, count) in [
+            ("token-only", vec![refusal.clone()], false, 1),
+            (
+                "sent-piece",
+                vec![token("fixture"), refusal, heard("Next.")],
+                true,
+                3,
+            ),
+        ] {
+            let (address, taken) = stand_in(script);
+            let (chirp, file) = engine(&address, name);
+            let chirp = chirp.in_pieces_of(1);
+            let audio = vec![0; 2 * BYTES_PER_SECOND];
+            let clip = Clip {
+                audio: &audio,
+                content_type: "audio/wav",
+            };
+            let asked = Asked {
+                listen_for: "",
+                language: Some("en"),
+                wait: Duration::ZERO,
+            };
+            let mut observed = Observation::default();
+            assert!(chirp.hear_observed(clip, asked, &mut observed).is_err());
+            assert_eq!(observed.handed.as_deref(), Some("en"));
+            assert_eq!(observed.sent(), sent, "{name}");
+            assert_eq!(taken.lock().unwrap().len(), count, "{name}");
+            std::fs::remove_file(file).unwrap();
+        }
     }
 
     #[test]
