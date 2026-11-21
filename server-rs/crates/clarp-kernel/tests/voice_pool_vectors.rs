@@ -64,7 +64,7 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
         };
         let configured = words(&settings["cartesia_pool"]);
         let known = Snapshot::from_file(&json!({"_catalogue": {"cartesia":
-            words(&case["catalogue"]).into_iter().map(|id| (id, json!({"language":"en","public":true})))
+            words(&case["catalogue"]).into_iter().map(|id| (id, json!({"language":"en","public":true,"owner":false})))
                 .collect::<serde_json::Map<String, Value>>()
         }}));
         let roster = pairs(&settings["roster"]);

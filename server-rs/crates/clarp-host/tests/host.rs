@@ -10291,11 +10291,12 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     assert!(told.contains(&said_of_it), "{told}");
     assert!(!told.contains("did not arrive"), "{told}");
     let heard_here = new_host.get("/transcription-providers");
+    let heard_by_both = |text: &str| json!({(&session):text, (&agent_id):text});
     assert_eq!(
         (&heard_here["agent_languages"], &heard_here["agent_engines"]),
         (
-            &its_own("no,en"),
-            &its_own("elevenlabs:scribe_v2,google:chirp_3")
+            &heard_by_both("no,en"),
+            &heard_by_both("elevenlabs:scribe_v2,google:chirp_3")
         )
     );
 
@@ -21356,7 +21357,12 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
         ("GOOGLE_APPLICATION_CREDENTIALS", ""),
     ];
     let host = place.start_in("", &args, &world);
-    let (koko, echo) = (host.new_agent("Koko"), host.new_agent("Echo"));
+    let created = host.post("/agents", json!({"name":"Koko","backend":"scripted"}));
+    let koko = created["session"].as_str().unwrap().to_owned();
+    let koko_id = created["agent"]["agent_id"].as_str().unwrap();
+    let engine_map = json!({"koko":"elevenlabs:scribe_v2,google:chirp_3", (koko_id):"elevenlabs:scribe_v2,google:chirp_3"});
+    let language_map = json!({"koko":"no,en", (koko_id):"no,en"});
+    let echo = host.new_agent("Echo");
     let hear = |headers: &[(&str, &str)], clip: &[u8]| -> (u16, Value) {
         let answer = fetch(&host, "", "POST", "/transcribe", headers, clip);
         let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
@@ -21400,11 +21406,7 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
             &told["agent_engines"],
             &told["agent_languages"]
         ),
-        (
-            &json!(true),
-            &json!({ "koko": "elevenlabs:scribe_v2,google:chirp_3" }),
-            &json!({ "koko": "no,en" })
-        )
+        (&json!(true), &engine_map, &language_map)
     );
 
     // Its user looks at it and speaks. The first engine fails: the second hears the clip,
@@ -21553,10 +21555,7 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
         set(json!({ "turn_taking": "native", "retain_audio": false, "long_form_model": "" }));
     assert_eq!(status, 200);
     let unchanged = host.get("/transcription-providers");
-    assert_eq!(
-        unchanged["agent_engines"],
-        json!({ "koko": "elevenlabs:scribe_v2,google:chirp_3" })
-    );
+    assert_eq!(unchanged["agent_engines"], engine_map);
 
     // The Host is killed and started again: the settings are as the owner left them.
     host.kill();
@@ -21570,8 +21569,8 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
             &kept["engine"]
         ),
         (
-            &json!({ "koko": "elevenlabs:scribe_v2,google:chirp_3" }),
-            &json!({ "koko": "no,en" }),
+            &engine_map,
+            &language_map,
             &json!("no"),
             &json!("google:chirp_3")
         )
@@ -23412,6 +23411,14 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         }),
     );
     assert_eq!(status, 201, "{made}");
+    let voice_map = made["persona"]["voice_id"].clone();
+    let voices: Value = serde_json::from_str(voice_map.as_str().unwrap()).unwrap();
+    assert_eq!(voices["gemini"], "Kore");
+    assert!(
+        voices["cartesia"]
+            .as_str()
+            .is_some_and(|voice| !voice.is_empty())
+    );
 
     // An agent made as it has the persona's voice, way of speaking and picture.
     let (status, made) = ask("/agents", json!({ "name": "Scout", "backend": "claude" }));
@@ -23421,7 +23428,7 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         made["agent"]["agent_id"].as_str().unwrap().to_string(),
     );
     let face = format!("/avatars/{id}?v=f475387a7e87a1a9");
-    assert_eq!(made["agent"]["voice_id"], voice);
+    assert_eq!(made["agent"]["voice_id"], voice_map);
     assert_eq!(made["agent"]["avatar_url"], json!(face));
     assert_eq!(made["agent"]["avatar_symbol"], "");
     let listed = row(&host, &scout);

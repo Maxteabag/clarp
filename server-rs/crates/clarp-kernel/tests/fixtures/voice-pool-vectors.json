@@ -146,7 +146,7 @@
       ],
       "logs": [],
       "name": "Catalogue",
-      "result": "{\"cartesia\":\"c2\"}",
+      "result": "{\"cartesia\":\"c1\"}",
       "settings": {
         "cartesia_pool": [],
         "cartesia_voices": {

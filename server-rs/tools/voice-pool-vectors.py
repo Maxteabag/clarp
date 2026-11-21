@@ -54,6 +54,7 @@ def reference(root):
     janitor = {**active, 'is_janitor':1}
     custom = {'name':'Custom','voice_id':stored(CART,'c1')}
     assignments = []
+    assignment_names = root / "assignment-voice-names.json"
     for name, raw, extra, known, agents, contacts in (
         ('Free', '{}', {}, [], [], []),
         ('Free', '{}', {}, [], [active], [custom, builtin]),
@@ -80,8 +81,11 @@ def reference(root):
                         **{k:v for k,v in extra.items() if k not in ('tts_provider','tts_fallback','cartesia_pool','cartesia_voices','gemini_voices','roster')})
         settings.update(extra)
         cfg = config.Config(**settings)
+        catalogue = {voice: {'language': 'en', 'public': True, 'owner': False} for voice in known}
+        assignment_names.write_text(json.dumps({'_catalogue': {CART: catalogue}}), encoding='utf-8')
         logs = []
-        with patch.object(voice_pool,'_cartesia_catalogue',lambda _language='en': known), patch.object(log,'log',lambda kind,msg: logs.append([kind,msg])):
+        with patch.object(voice_names, 'names_path', lambda: assignment_names), \
+                patch.object(log, 'log', lambda kind, msg: logs.append([kind, msg])):
             assigned = voice_pool.assign(cfg,name,raw,agents=agents,contacts=contacts)
         assignments.append({'name':name,'stored':raw,'settings':settings,'catalogue':known,
                             'agents':agents,'contacts':contacts,'result':assigned,'logs':logs})
