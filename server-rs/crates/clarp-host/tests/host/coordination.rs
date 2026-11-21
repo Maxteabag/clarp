@@ -1154,7 +1154,7 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
     assert_eq!(
         host.ask_as(&limited, "GET", "/coordination-settings", None)
             .0,
-        200
+        403
     );
     assert_eq!(
         host.ask(
