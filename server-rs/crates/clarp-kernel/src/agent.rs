@@ -17,12 +17,13 @@
 //!    waits its turn, and runs even while the mailbox is held, without lifting the hold. It never
 //!    ends a turn that has not started: two direct messages in a row both run, in order.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
 use crate::compaction::LastCompaction;
 use crate::control::Control;
+use crate::steering::{FollowUp, Join, Stage};
 
 use crate::turn::{
     Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued,
@@ -48,7 +49,15 @@ pub enum Command {
         /// Another agent addresses this one: its id ("" for a peer Host's agent). `None`: the
         /// user's ([`TurnEvent::Accepted`]).
         coordination: Option<String>,
+        /// The Host verified a designated front desk or a card answered by its user.
+        user_word: bool,
     },
+    /// Reserve a queued message for input to the live turn.
+    Join { turn: TurnId, join: Join },
+    /// The live process echoed this follow-up.
+    JoinRead { turn: TurnId },
+    /// An answer settled this follow-up, or the process ended after reading it.
+    JoinSettled { turn: TurnId },
     /// Take a waiting message back.
     Withdraw { turn: TurnId, by: String },
     /// Let one waiting message run now, whatever holds the mailbox: its user sends it by
@@ -83,6 +92,20 @@ pub enum Command {
     TurnMoved { turn: TurnId, activity: Activity },
     /// The shim: the tool process is gone, and this is how it went.
     TurnEnded { turn: TurnId, outcome: RunOutcome },
+    /// Record who is about to ask a shim to hold, before it can send SIGSTOP.
+    OfferTakeover {
+        from: TurnId,
+        into: TurnId,
+        attempt: u32,
+    },
+    /// Reserve the next user's turn before asking the shim whether its hold can be consumed.
+    SelectTakeover {
+        selected: crate::takeover::Selection,
+    },
+    /// The held tool was not killed for takeover. Leave the next message in the queue.
+    ClearTakeover { from: TurnId },
+    /// The shim durably marked the selected attempt and ended its tool.
+    FinishTakeover { from: TurnId },
     /// The tool process is gone on a failure that does not end the turn: it waits for its
     /// next attempt. `kind` and `reason` are the failure, read and in the tool's words.
     TurnParked {
@@ -119,6 +142,28 @@ pub enum AgentEvent {
     Turn {
         turn: TurnId,
         change: TurnEvent,
+    },
+    TakeoverOffered {
+        from: TurnId,
+        into: TurnId,
+        attempt: u32,
+    },
+    TakeoverSelected {
+        selected: crate::takeover::Selection,
+    },
+    TakeoverCleared {
+        from: TurnId,
+    },
+    Joined {
+        turn: TurnId,
+        join: Join,
+    },
+    JoinRead {
+        turn: TurnId,
+        at_ms: i64,
+    },
+    JoinSettled {
+        turn: TurnId,
     },
     /// Someone asked the live turn to stop. It settles when the tool process is gone. Whether
     /// the Host knew who asked, and why, are absent from a log written before they were kept.
@@ -242,6 +287,8 @@ pub enum Refusal {
     AlreadyAtWork,
     /// The turn is not a compaction that ended and whose outcome is still owed.
     NoCompactionOwed(TurnId),
+    /// The live turn or its next waiting user message changed during takeover.
+    TakeoverStale,
 }
 
 impl std::fmt::Display for Refusal {
@@ -256,6 +303,7 @@ impl std::fmt::Display for Refusal {
             Self::NoCompactionOwed(turn) => {
                 write!(f, "turn {} is no compaction whose outcome is owed", turn.0)
             }
+            Self::TakeoverStale => write!(f, "the selected turn can no longer be taken over"),
         }
     }
 }
@@ -267,6 +315,7 @@ pub struct Agent {
     latest_turn_start: Option<i64>,
     next_turn: u64,
     mailbox: VecDeque<Queued>,
+    joins: BTreeMap<TurnId, FollowUp>,
     /// The turn that holds the agent: starting or running, never anything else.
     live: Option<Turn>,
     /// Who asked the live turn to stop and why, while it has not gone yet.
@@ -286,6 +335,10 @@ pub struct Agent {
     waited: BTreeSet<TurnId>,
     /// The live turn came through the queue.
     live_from_queue: bool,
+    live_takeover: Option<crate::takeover::Start>,
+    /// Whether the live turn started with an existing provider session to continue.
+    live_resumed_session: bool,
+    selected_takeover: Option<crate::takeover::Selection>,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
     unheld: BTreeSet<TurnId>,
@@ -345,6 +398,7 @@ impl Default for Agent {
             latest_turn_start: None,
             next_turn: 1,
             mailbox: VecDeque::new(),
+            joins: BTreeMap::new(),
             live: None,
             stopping: None,
             note: None,
@@ -354,6 +408,9 @@ impl Default for Agent {
             stop_generation: 0,
             waited: BTreeSet::new(),
             live_from_queue: false,
+            live_takeover: None,
+            live_resumed_session: false,
+            selected_takeover: None,
             unheld: BTreeSet::new(),
             last: None,
             compaction_owed: None,
@@ -378,6 +435,10 @@ impl Agent {
 
     pub fn live(&self) -> Option<&Turn> {
         self.live.as_ref()
+    }
+
+    pub fn joins(&self) -> &BTreeMap<TurnId, FollowUp> {
+        &self.joins
     }
 
     /// The position in the log of the event applied next.
@@ -435,6 +496,42 @@ impl Agent {
     /// Whether the live turn came through the queue: it had to wait, or it was left for later.
     pub fn live_from_queue(&self) -> bool {
         self.live.is_some() && self.live_from_queue
+    }
+
+    pub fn live_takeover(&self) -> Option<&crate::takeover::Start> {
+        self.live_takeover.as_ref()
+    }
+
+    /// A fresh first turn can be replaced without discarding any prior provider history.
+    pub fn fresh_first_turn(&self) -> bool {
+        self.live_id() == Some(TurnId(1))
+            && self.settled == 0
+            && !self.arrived
+            && !self.live_resumed_session
+    }
+
+    pub fn selected_takeover(&self) -> Option<&crate::takeover::Selection> {
+        self.selected_takeover.as_ref()
+    }
+
+    /// The next turn must be the new user message. Preparation and commitment both use this
+    /// rule so a Stop or a different queue head does not silently lose accepted work.
+    pub fn can_take_over(&self, from: TurnId, into: TurnId, attempt: u32) -> bool {
+        let (live, origin, live_attempt) = match &self.live {
+            Some(Turn::Starting(turn)) => (turn.id, &turn.origin, turn.attempt),
+            Some(Turn::Running(turn)) => (turn.id, &turn.origin, turn.attempt),
+            _ => return false,
+        };
+        live == from
+            && live_attempt == attempt
+            && origin.is_user()
+            && self.stopping.is_none()
+            && self.live_takeover.is_none()
+            && self.joins.is_empty()
+            && !self.paused
+            && self.next_to_run().is_some_and(|next| {
+                next.id == into && next.origin.is_user() && next.admission == Admission::Queue
+            })
     }
 
     /// The last turn that held the agent and ended. A message that was taken back never did.
@@ -513,10 +610,28 @@ impl Agent {
     /// The waiting turn that runs when the agent is free: the first one no hold holds.
     fn next_to_run(&self) -> Option<&Queued> {
         self.mailbox.iter().find(|queued| {
-            !self.paused
-                || queued.admission == Admission::Direct
-                || self.unheld.contains(&queued.id)
+            !self.joins.contains_key(&queued.id)
+                && (!self.paused
+                    || queued.admission == Admission::Direct
+                    || self.unheld.contains(&queued.id))
         })
+    }
+
+    fn can_join(&self, turn: TurnId, join: &Join) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.id() == join.into && live.has_process())
+            && self.stopping.is_none()
+            && self.selected_takeover.is_none()
+            && self.mailbox.iter().any(|waiting| {
+                waiting.id == turn
+                    && waiting.admission == Admission::Queue
+                    && waiting.origin.is_user()
+            })
+            && !self.holds(turn)
+            && !join.uuid.is_empty()
+            && !self.joins.contains_key(&turn)
+            && !self.joins.values().any(|held| held.join.uuid == join.uuid)
     }
 
     /// Whether a message admitted this way now would start at once, without waiting: and so
@@ -550,15 +665,21 @@ impl Agent {
                 origin,
                 admission,
                 coordination,
+                user_word,
             } => {
                 let turn = TurnId(work.agent.next_turn);
                 let (_, mut accepted) =
                     Queued::accept(turn, message_seq, origin, admission, now_ms);
                 if let TurnEvent::Accepted {
-                    coordination: mark, ..
+                    coordination: mark,
+                    user_word: priority,
+                    ..
                 } = &mut accepted
                 {
                     *mark = coordination;
+                    if user_word {
+                        *priority = Some(true);
+                    }
                 }
                 work.record(AgentEvent::Turn {
                     turn,
@@ -569,8 +690,42 @@ impl Agent {
                     work.stop_live(Control::by(preempted_by(turn)), now_ms);
                 }
             }
+            Command::Join { turn, join } => {
+                if !work.agent.can_join(turn, &join) {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::Joined { turn, join });
+            }
+            Command::JoinRead { turn } => {
+                if !work
+                    .agent
+                    .joins
+                    .get(&turn)
+                    .is_some_and(|join| join.stage == Stage::Pending)
+                {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::JoinRead {
+                    turn,
+                    at_ms: now_ms,
+                });
+                work.let_go_of_nothing(DRAINED, now_ms);
+            }
+            Command::JoinSettled { turn } => {
+                if !work
+                    .agent
+                    .joins
+                    .get(&turn)
+                    .is_some_and(|join| join.stage.read_at().is_some())
+                {
+                    return Err(Refusal::NotLive(turn));
+                }
+                work.record(AgentEvent::JoinSettled { turn });
+            }
             Command::Withdraw { turn, by } => {
-                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                if work.agent.joins.contains_key(&turn)
+                    || !work.agent.mailbox.iter().any(|queued| queued.id == turn)
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::Turn {
@@ -583,7 +738,9 @@ impl Agent {
                 work.let_go_of_nothing(&by, now_ms);
             }
             Command::Reword { turn, message_seq } => {
-                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                if work.agent.joins.contains_key(&turn)
+                    || !work.agent.mailbox.iter().any(|queued| queued.id == turn)
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::Reworded {
@@ -751,6 +908,65 @@ impl Agent {
                     },
                 });
             }
+            Command::OfferTakeover {
+                from,
+                into,
+                attempt,
+            } => {
+                if work.agent.selected_takeover.is_some()
+                    || !work.agent.can_take_over(from, into, attempt)
+                {
+                    return Err(Refusal::TakeoverStale);
+                }
+                work.record(AgentEvent::TakeoverOffered {
+                    from,
+                    into,
+                    attempt,
+                });
+            }
+            Command::SelectTakeover { selected } => {
+                if work.agent.selected_takeover.is_some()
+                    || !work.agent.can_take_over(
+                        selected.start.from,
+                        selected.into,
+                        selected.attempt,
+                    )
+                {
+                    return Err(Refusal::TakeoverStale);
+                }
+                work.record(AgentEvent::TakeoverSelected { selected });
+            }
+            Command::ClearTakeover { from } => {
+                if work
+                    .agent
+                    .selected_takeover
+                    .as_ref()
+                    .is_some_and(|selected| selected.start.from == from)
+                {
+                    work.record(AgentEvent::TakeoverCleared { from });
+                }
+            }
+            Command::FinishTakeover { from } => {
+                let Some(selected) = work.agent.selected_takeover.clone().filter(|selected| {
+                    selected.start.from == from
+                        && work
+                            .agent
+                            .can_take_over(from, selected.into, selected.attempt)
+                }) else {
+                    return Err(Refusal::TakeoverStale);
+                };
+                work.record(AgentEvent::Turn {
+                    turn: from,
+                    change: TurnEvent::Settled {
+                        outcome: Outcome::Replaced {
+                            by: selected.into,
+                            trace: selected.trace,
+                        },
+                        at_ms: now_ms,
+                    },
+                });
+                work.start_next_with(now_ms, Some(selected.start));
+            }
             Command::TurnParked {
                 turn,
                 wait,
@@ -812,6 +1028,69 @@ impl Agent {
     /// Changes the state by one event. The only way the state changes.
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
+            AgentEvent::Joined { turn, join } => {
+                let invalid = IllegalTransition {
+                    turn: *turn,
+                    state: "unavailable",
+                    event: "joined",
+                };
+                if !self.can_join(*turn, join) {
+                    return Err(invalid);
+                }
+                let waiting = self
+                    .mailbox
+                    .iter()
+                    .find(|waiting| waiting.id == *turn)
+                    .ok_or(invalid)?;
+                self.joins.insert(
+                    *turn,
+                    FollowUp {
+                        join: join.clone(),
+                        message_seq: waiting.message_seq,
+                        stage: Stage::Pending,
+                    },
+                );
+            }
+            AgentEvent::JoinRead { turn, at_ms } => {
+                let invalid = IllegalTransition {
+                    turn: *turn,
+                    state: "unavailable",
+                    event: "join-read",
+                };
+                let position = self
+                    .mailbox
+                    .iter()
+                    .position(|waiting| waiting.id == *turn)
+                    .ok_or_else(|| invalid.clone())?;
+                let join = self
+                    .joins
+                    .get_mut(turn)
+                    .filter(|join| join.stage == Stage::Pending)
+                    .ok_or(invalid)?;
+                join.stage = Stage::Read(*at_ms);
+                self.mailbox.remove(position);
+                self.unheld.remove(turn);
+                if self.waited.remove(turn) {
+                    self.queue_revision += 1;
+                }
+                self.deliveries
+                    .hand(turn.0, crate::delivery::revision(self.at, 0), *at_ms);
+                self.deliveries.launch(turn.0);
+            }
+            AgentEvent::JoinSettled { turn } => {
+                let join = self
+                    .joins
+                    .get_mut(turn)
+                    .filter(|join| join.stage.read_at().is_some())
+                    .ok_or(IllegalTransition {
+                        turn: *turn,
+                        state: "unread",
+                        event: "join-settled",
+                    })?;
+                join.stage = Stage::Settled;
+                self.deliveries.over(turn.0);
+                self.settled += 1;
+            }
             AgentEvent::Paused {
                 by,
                 verified,
@@ -948,6 +1227,31 @@ impl Agent {
                 self.compaction_owed = None;
                 self.last_compaction = Some(said.clone());
             }
+            AgentEvent::TakeoverOffered { .. } => {
+                // An offer never changes a turn's state. Its shim releases an unconsumed
+                // hold on its own, including when the Host dies between these events.
+            }
+            AgentEvent::TakeoverSelected { selected } => {
+                if self.selected_takeover.is_some()
+                    || !self.can_take_over(selected.start.from, selected.into, selected.attempt)
+                {
+                    return Err(IllegalTransition {
+                        turn: selected.start.from,
+                        state: "takeover unavailable",
+                        event: "takeover-selected",
+                    });
+                }
+                self.selected_takeover = Some(selected.clone());
+            }
+            AgentEvent::TakeoverCleared { from } => {
+                if self
+                    .selected_takeover
+                    .as_ref()
+                    .is_some_and(|selected| selected.start.from == *from)
+                {
+                    self.selected_takeover = None;
+                }
+            }
             AgentEvent::Turn { turn, change } => self.apply_turn(*turn, change)?,
         }
         Ok(())
@@ -1006,7 +1310,12 @@ impl Agent {
     }
 
     fn move_turn(&mut self, turn: TurnId, change: &TurnEvent) -> Result<(), IllegalTransition> {
-        if let TurnEvent::Accepted { turn: accepted, .. } = change {
+        if let TurnEvent::Accepted {
+            turn: accepted,
+            user_word,
+            ..
+        } = change
+        {
             if *accepted != turn || turn.0 != self.next_turn {
                 return Err(IllegalTransition {
                     turn,
@@ -1039,6 +1348,11 @@ impl Agent {
                         .position(|waiting| waiting.admission != Admission::Direct)
                         .unwrap_or(self.mailbox.len());
                     self.mailbox.insert(at, queued);
+                } else if *user_word == Some(true) {
+                    let at = crate::user_word::slot(self.mailbox.iter().map(|waiting| {
+                        waiting.user_word || waiting.admission == Admission::Direct
+                    }));
+                    self.mailbox.insert(at, queued);
                 } else {
                     self.mailbox.push_back(queued);
                 }
@@ -1056,13 +1370,22 @@ impl Agent {
             }
             match live.apply(change)? {
                 Turn::Settled(ended) => {
+                    self.joins.clear();
                     self.settled += 1;
                     self.stopping = None;
                     self.live_from_queue = false;
                     self.owe_compaction(&ended);
+                    self.live_takeover = None;
+                    self.live_resumed_session = false;
+                    self.selected_takeover = None;
                     self.last = Some(ended);
                 }
-                next => self.live = Some(next),
+                next => {
+                    if matches!(next, Turn::Parked(_)) {
+                        self.joins.clear();
+                    }
+                    self.live = Some(next);
+                }
             }
             return Ok(());
         }
@@ -1097,7 +1420,12 @@ impl Agent {
                 self.owe_compaction(&ended);
             }
             next => {
-                if let TurnEvent::Started { at_ms } = change {
+                if let TurnEvent::Started { at_ms, takeover } = change {
+                    self.live_resumed_session = self.backend_session.is_some();
+                    self.live_takeover.clone_from(takeover);
+                    if let Some(start) = takeover {
+                        self.bind_session(Some(&start.session));
+                    }
                     self.latest_turn_start =
                         Some(self.latest_turn_start.map_or(*at_ms, |old| old.max(*at_ms)));
                 }
@@ -1134,7 +1462,7 @@ impl Agent {
 fn change_at(change: &TurnEvent) -> Option<i64> {
     match change {
         TurnEvent::Accepted { at_ms, .. }
-        | TurnEvent::Started { at_ms }
+        | TurnEvent::Started { at_ms, .. }
         | TurnEvent::Moved { at_ms, .. }
         | TurnEvent::Parked { at_ms, .. }
         | TurnEvent::Retried { at_ms }
@@ -1220,6 +1548,10 @@ impl Work {
 
     /// Starts the next waiting turn when the agent is free: the first one no hold holds.
     fn start_next(&mut self, now_ms: i64) {
+        self.start_next_with(now_ms, None);
+    }
+
+    fn start_next_with(&mut self, now_ms: i64, takeover: Option<crate::takeover::Start>) {
         if self.agent.live.is_some() {
             return;
         }
@@ -1229,7 +1561,10 @@ impl Work {
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
             turn,
-            change: TurnEvent::Started { at_ms: now_ms },
+            change: TurnEvent::Started {
+                at_ms: now_ms,
+                takeover,
+            },
         });
         self.decision
             .effects
@@ -1259,6 +1594,28 @@ const _: fn(StartOutcome) = |_| {};
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_first_turn_only_counts_as_fresh_without_a_session_before_it() {
+        let mut fresh = Driven::new();
+        fresh.user(1);
+        fresh
+            .send(Command::TurnBound {
+                turn: TurnId(1),
+                backend_session: "the-new-session".to_string(),
+            })
+            .unwrap();
+        assert!(fresh.agent.fresh_first_turn());
+
+        let mut resumed = Driven::new();
+        resumed
+            .send(Command::TakeUp {
+                backend_session: "a-kept-session".to_string(),
+            })
+            .unwrap();
+        resumed.user(1);
+        assert!(!resumed.agent.fresh_first_turn());
+    }
 
     /// An agent with its whole history, driven the way the actor will drive it.
     struct Driven {
@@ -1307,6 +1664,7 @@ mod tests {
                 origin: Origin::User,
                 admission: Admission::Queue,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1320,6 +1678,7 @@ mod tests {
                 },
                 admission: Admission::Background,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1331,6 +1690,7 @@ mod tests {
                 origin: Origin::User,
                 admission: Admission::Direct,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1385,6 +1745,7 @@ mod tests {
             },
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         };
         let said = |turn: u64, before: u64| Command::RecordCompaction {
             turn: TurnId(turn),
@@ -1951,6 +2312,7 @@ mod tests {
             origin: Origin::User,
             admission: Admission::Later,
             coordination: None,
+            user_word: false,
         };
         assert_eq!(
             a.send(later).unwrap(),
@@ -2203,6 +2565,31 @@ mod tests {
     }
 
     #[test]
+    fn prior_queue_order_is_replayed_and_old_user_words_protect_their_places() {
+        let mut a = Driven::new();
+        a.user(1);
+        a.background(2);
+        a.agent
+            .apply(&AgentEvent::Turn {
+                turn: TurnId(3),
+                change: TurnEvent::Accepted {
+                    turn: TurnId(3),
+                    message_seq: 3,
+                    origin: Origin::User,
+                    admission: Admission::Queue,
+                    at_ms: 3,
+                    coordination: None,
+                    user_word: None,
+                },
+            })
+            .unwrap();
+        a.background(4);
+        a.user(5);
+        let waiting: Vec<_> = a.agent.waiting().map(|queued| queued.id).collect();
+        assert_eq!(waiting, [TurnId(2), TurnId(3), TurnId(5), TurnId(4)]);
+    }
+
+    #[test]
     fn a_direct_message_runs_past_a_stop_and_leaves_the_rest_held() {
         let mut a = Driven::new();
         a.user(10);
@@ -2450,6 +2837,7 @@ mod tests {
                             origin,
                             admission,
                             coordination: None,
+                            user_word: false,
                         }
                     }
                     3 => Command::Stop {

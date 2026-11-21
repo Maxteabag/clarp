@@ -23,6 +23,165 @@ fn ids_of(host: &Host) -> BTreeMap<String, String> {
         .collect()
 }
 
+#[test]
+fn the_users_word_precedes_ordinary_work_across_a_hold_and_restart() {
+    let place = Place::new("user-word-first");
+    let (tokens, release, holds) = stand_in(&place);
+    let owners = place.root.join("owner.toml");
+    std::fs::write(
+        &owners,
+        "[agents]\nfront_desk_sessions = [' desk ', '', 'desk']\n",
+    )
+    .unwrap();
+    let start = || start_host(&place, &["--speech-keys", owners.to_str().unwrap()]);
+    let host = start();
+    let target = host.new_agent("Target");
+    assert_eq!(
+        host.post(
+            "/agents",
+            json!({"name":"Desk","session":"desk","backend":"claude"})
+        )["session"],
+        "desk"
+    );
+    let heard = host.listen();
+    wait_for("the event subscriber", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
+    });
+    std::fs::write(holds.join("desk"), "").unwrap();
+    host.send("desk", "relay later", "desk-owner");
+    let mut token = String::new();
+    wait_for("the desk's verified turn", || {
+        token = std::fs::read_to_string(tokens.join("desk")).unwrap_or_default();
+        !token.is_empty()
+    });
+    host.send(&target, "sleep 60", "running");
+    wait_for("the receiving turn", || host.state(&target) == "thinking");
+
+    let send = |id: &str, claimed: &str, headers: &[(&str, &str)]| {
+        let (status, reply) = asked(
+            &host,
+            "/send",
+            headers,
+            &json!({
+                "session": target, "client_msg_id": id, "text": id, "origin": claimed,
+                "queue_if_busy": true, "user_word": true,
+                "sender": if claimed == "agent" { json!("desk") } else { Value::Null },
+            }),
+        );
+        assert_eq!(status, 200, "{reply}");
+        assert_eq!(reply["queued"], true, "{reply}");
+    };
+    let queue = |host: &Host| host.get(&format!("/turn-queue?session={target}"));
+    let order = |host: &Host| -> Vec<String> {
+        queue(host)["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    send("forged", "agent", &[]);
+    send("scheduled", "schedule", &[]);
+    send("routine", "automation", &[]);
+    assert_eq!(order(&host), ["forged", "scheduled", "routine"]);
+    let before = queue(&host)["revision"].as_u64().unwrap();
+    let plain = host.send(&target, "owner's word", "plain");
+    assert_eq!(plain["queued"], true, "{plain}");
+    assert_eq!(plain["queue_revision"], before + 1);
+    send("relay", "user", &[("X-Clarp-Turn", token.as_str())]);
+
+    let (status, made) = host.ask(
+        "POST",
+        "/decisions",
+        Some(&json!({"session":target,"title":"Approval","question":"Proceed?"})),
+    );
+    assert_eq!(status, 201, "{made}");
+    let id = made["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap();
+    let path = format!("/decisions/{id}/resolve");
+    let (status, resolved) = host.ask(
+        "POST",
+        &path,
+        Some(&json!({"choice":"accepted","expected_revision":1})),
+    );
+    assert_eq!(status, 200, "{resolved}");
+    let card = format!("decision-{id}");
+    wait_for("the user's card answer to reach the queue", || {
+        order(&host).contains(&card)
+    });
+    send("oracle", "oracle", &[]);
+    let want = [
+        "plain",
+        "relay",
+        card.as_str(),
+        "oracle",
+        "forged",
+        "scheduled",
+        "routine",
+    ];
+    assert_eq!(order(&host), want);
+    let revision = queue(&host)["revision"].clone();
+    wait_for("the last enqueue's published revision", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "queue-updated"
+                && event["client_msg_id"] == "oracle"
+                && event["queue_revision"] == revision
+                && event["queue_depth"] == want.len()
+        })
+    });
+    let snapshot = host.get("/agents/snapshot");
+    let row = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == target)
+        .unwrap();
+    assert_eq!(row["queued_turn_count"], want.len());
+    assert_eq!(row["queued_turn_revision"], revision);
+
+    host.post("/stop", json!({"session":target}));
+    wait_for("the stopped receiving turn", || {
+        host.state(&target) == "interrupted"
+    });
+    assert_eq!(queue(&host)["paused"], true);
+    assert_eq!(order(&host), want);
+    host.kill();
+    let host = start();
+    assert_eq!(queue(&host)["paused"], true);
+    assert_eq!(order(&host), want);
+    host.post("/turn-queue/resume", json!({"session":target}));
+    wait_for("the reordered queue to drain", || {
+        order(&host).is_empty() && host.state(&target) == "done"
+    });
+    let rows = host.turns(&target);
+    let users: Vec<&str> = rows
+        .iter()
+        .filter(|row| row["role"] == "user")
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    let expected: Vec<_> = std::iter::once("running")
+        .chain(want)
+        .map(|id| format!("u-{id}"))
+        .collect();
+    assert_eq!(users, expected);
+    let relay = rows.iter().find(|row| row["id"] == "u-relay").unwrap();
+    assert_eq!(relay["origin"], "agent");
+    assert_eq!(relay["sender_session"], "desk");
+    assert_eq!(relay["audience"], "agents");
+    let card_row = rows
+        .iter()
+        .find(|row| row["id"] == format!("u-{card}"))
+        .unwrap();
+    assert_eq!(card_row["origin"], "automation");
+    std::fs::write(release.join("desk"), "").unwrap();
+    wait_for("the desk stand-in to end", || host.state("desk") == "done");
+}
+
 /// A request with these headers besides the JSON body: its status and answer.
 fn asked(host: &Host, path: &str, headers: &[(&str, &str)], body: &Value) -> (u16, Value) {
     let mut all = vec![("Content-Type", "application/json")];

@@ -19,6 +19,7 @@ from lib import identity
 from lib.log import log, log_exception
 from lib.protocol import ClientAction
 from lib.routes.helpers import _runtime_paths
+from lib.request_texts import body_text
 
 
 class OpsRoutes:
@@ -130,7 +131,7 @@ class OpsRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        sid = (data.get("session") or "").strip()
+        sid = body_text(data, "session")
         if not sid:
             return self._json_error(400, "session required")
         agent = identity.lookup(sid)
@@ -186,14 +187,14 @@ class OpsRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        token = (data.get("token") or "").strip()
+        token = body_text(data, "token")
         if not token:
             return self._json_error(400, "token required")
         from lib import agent_rings, apns
         from lib.agent_ring_live import device_ok
         from lib.group_calls import CallError
         from lib.http_utils import principal_of
-        platform = (data.get("platform") or "ios").strip() or "ios"
+        platform = body_text(data, "platform") or "ios"
         modes: list[str] = []   # an Android phone's declaration; any other registration ignores the field
         if platform == "android" and apns.provider_for(platform, str(data.get("provider") or "")) == "fcm":
             try:
@@ -205,13 +206,17 @@ class OpsRoutes:
         who = principal_of(self)
         owner = who.principal if (who.full_scope and who.principal.startswith("device_")
                                   and device_ok(who.principal)) else ""
+        # Read before the try: a value that is not text is the caller's 400, not 'register failed'.
+        session = body_text(data, "session") or None
+        environment = body_text(data, "environment") or None
+        base_url = body_text(data, "base_url")
         try:
             apns.register_token(
                 token,
-                session=(data.get("session") or "").strip() or None,
-                environment=(data.get("environment") or "").strip() or None,
+                session=session,
+                environment=environment,
                 platform=platform,
-                base_url=(data.get("base_url") or "").strip(),
+                base_url=base_url,
                 push_grant=str(data.get("push_grant") or ""),
                 owner=owner,
                 provider=str(data.get("provider") or ""),
@@ -299,7 +304,9 @@ class OpsRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        action = (data.get("action") or "").strip().lower()
+        # An action that is not text is an unknown action, the ordinary answer (R146).
+        raw = data.get("action")
+        action = raw.strip().lower() if isinstance(raw, str) else ""
         if action not in ClientAction.valid():
             return self._json_error(400, "unknown action")
         if action == ClientAction.CONTROLLER_EVENT:
@@ -355,7 +362,7 @@ class OpsRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         events.broadcast(self.ctx.stream, events.location_request(session=session))
@@ -367,7 +374,7 @@ class OpsRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         try:

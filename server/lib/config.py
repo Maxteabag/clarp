@@ -497,6 +497,9 @@ class Config:
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_CARTESIA_VOICES))
+    # [cartesia] pool: the Cartesia voices a new agent or contact may be given
+    # (voice_pool); empty means the distinct built-in voices.
+    cartesia_pool: tuple[str, ...] = ()
     local_tts_voice: str = ""
     # Audio delivery strategy.
     # "chunked-file" (default) = ClipStreamBroker + /clips/<id>/stream
@@ -558,6 +561,11 @@ class Config:
     # their behalf (lib.artifacts.resolve with on_behalf_session). Empty
     # disables on-behalf answers. [agents] decision_on_behalf_sessions.
     decision_on_behalf_sessions: tuple[str, ...] = ()
+    # The owner's front desk: sessions that relay the user's words to other
+    # agents. A send made from such a session's own turn (its verified turn
+    # token) goes first in the receiving agent's queue as the user's word; its
+    # origin stays 'agent' (issue 481). [agents] front_desk_sessions.
+    front_desk_sessions: tuple[str, ...] = ()
     # Stale work labels (lib.stale_work, background_jobs.reconcile_stale).
     # A running job whose heartbeat is older than job_stale_after_minutes
     # and whose worker PID cannot be verified gets a timeline note, and after
@@ -1204,6 +1212,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         # Merge over the built-in defaults (never wholesale-replace): a
         # [cartesia.voices] table in config.toml adds/overrides specific
         # personas, but the built-ins always remain.
+        cartesia_pool = tuple(str(v).strip() for v in (cartesia.get("pool") or [])
+                              if isinstance(cartesia.get("pool"), list) and str(v).strip()),
         cartesia_voices = {**DEFAULT_CARTESIA_VOICES,
                            **(dict(cartesia_voices) if isinstance(cartesia_voices, dict) else {})},
         whisper_model   = str(whisper.get("model", "small.en")),
@@ -1236,6 +1246,10 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             str(v).strip() for v in agents.get("decision_on_behalf_sessions", ())
             if isinstance(v, str) and v.strip()))
             if isinstance(agents.get("decision_on_behalf_sessions", ()), (list, tuple)) else (),
+        front_desk_sessions=tuple(dict.fromkeys(
+            str(v).strip() for v in agents.get("front_desk_sessions", ())
+            if isinstance(v, str) and v.strip()))
+            if isinstance(agents.get("front_desk_sessions", ()), (list, tuple)) else (),
         job_stale_after_minutes=_non_negative_float(
             agents.get("job_stale_after_minutes"), 15.0),
         job_heartbeat_grace_minutes=_non_negative_float(

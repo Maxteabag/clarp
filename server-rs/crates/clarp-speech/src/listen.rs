@@ -65,8 +65,7 @@ pub enum Deaf {
     Loading,
     /// The engine hears one clip at a time and did not come free in time.
     Busy,
-    /// It failed. The words are for whoever asked and for the log, and hold nothing of
-    /// what was said.
+    /// It failed. These words are private to the Host log and may contain provider text.
     Failed(String),
 }
 

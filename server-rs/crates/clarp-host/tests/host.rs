@@ -69,8 +69,12 @@ mod pairing_identity;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/queue_provenance.rs"]
+mod queue_provenance;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
+#[path = "host/r175_engine_order.rs"]
+mod r175_engine_order;
 #[path = "host/remote_action.rs"]
 mod remote_action;
 #[path = "host/render_spec_export.rs"]
@@ -83,10 +87,18 @@ mod source_trace;
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
+#[path = "host/steer_c.rs"]
+mod steer_c;
+#[path = "host/takeover_b.rs"]
+mod takeover_b;
+#[path = "host/transcription_errors.rs"]
+mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
 #[path = "host/voice_events.rs"]
 mod voice_events;
+#[path = "host/voice_names.rs"]
+mod voice_names;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
 
@@ -569,7 +581,8 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 115);
+    assert_eq!(info["contract"]["host"], 118);
+    assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["speech_outcome"], 109);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
@@ -9133,7 +9146,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 115);
+    assert_eq!(info["contract"]["host"], 118);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -9924,6 +9937,15 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
         ("DELETE", "/agents/echo", b""),
         ("PUT", "/agents/echo", b"{}"),
         ("PATCH", "/schedules/s1", b"{}"),
+        ("PATCH", "/agents/echo", b"{}"),
+        ("GET", "/pairing/issue", b""),
+        ("GET", "/terminal", b""),
+        ("GET", "/artifacts/none/export", b""),
+        ("GET", "/artifacts/none/export/?format=json", b""),
+        ("GET", "/a-path-no-route-serves?ignored=1", b""),
+        ("GET", "/server-info/extra", b""),
+        ("GET", "/%73erver-info", b""),
+        ("GET", "/media%2Fx", b""),
     ] {
         assert_eq!(
             ask(&limited, method, path, body),
@@ -9935,19 +9957,52 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
     for path in ["/dirs", "/past-sessions", "/backend-auth"] {
         assert_ne!(ask(&full, "GET", path, b""), refused, "{path}");
     }
+    assert_eq!(ask(&full, "GET", "/a-path-no-route-serves", b"").0, 404);
+    for path in ["/transcription-capabilities", "/transcription-providers"] {
+        assert_eq!(ask(&limited, "GET", path, b"").0, 200, "{path}");
+    }
+    assert_eq!(
+        host.ask_as(
+            &limited,
+            "GET",
+            "/transcription-audio?trace_id=absent",
+            None
+        ),
+        (404, json!({"error":"no retained audio for that trace"}))
+    );
+    let (status, info) = host.ask_as(&limited, "GET", "/server-info", None);
+    assert_eq!(status, 200);
+    let full_info = host.ask_as(&full, "GET", "/server-info", None).1;
+    assert!(full_info.get("default_cwd").is_some());
+    let allowed_keys = [
+        "server_id",
+        "name",
+        "deployment_mode",
+        "version",
+        "image_version",
+        "clarp_version",
+        "min_app_version",
+        "capabilities",
+        "contract",
+        "client",
+        "local_connection",
+    ];
+    assert_eq!(info.as_object().unwrap().len(), allowed_keys.len());
+    for key in allowed_keys {
+        assert!(info.get(key).is_some(), "{key}");
+        assert_eq!(info[key], full_info[key], "{key}");
+    }
     // A head is asked as a read: refused where a read is, let through where a read is.
     assert_eq!(ask(&limited, "HEAD", "/paired-devices", b"").0, 403);
     assert_ne!(ask(&limited, "HEAD", "/log?session=echo", b"").0, 403);
-    // Refused by the route itself, in the same words: a report's page, the push rows.
+    // A report's page can still require more scope inside an allowed family.
     assert_eq!(ask(&limited, "GET", "/artifacts/none/html", b""), refused);
     assert_eq!(ask(&limited, "GET", "/devices/push-tokens", b""), refused);
-    // Let through where the Python Host lets it through: what it reads, what it sends, an
-    // action it invokes, a PATCH outside the schedules, and a read of what it may not do.
+    // Requests on the allowlist reach their route's own handling.
     for (method, path, body) in [
         ("GET", "/log?session=echo", &b""[..]),
         ("GET", "/agents/snapshot", b""),
-        ("GET", "/pairing/issue", b""),
-        ("GET", "/terminal", b""),
+        ("GET", "/media/%78", b""),
         (
             "POST",
             "/send",
@@ -9956,7 +10011,6 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
         ("POST", "/calendar/response", b"{}"),
         ("POST", "/remote-action", b"{}"),
         ("POST", "/controller-actions/a/invoke", b"{}"),
-        ("PATCH", "/agents/echo", b"{}"),
     ] {
         let (status, said) = ask(&limited, method, path, body);
         assert_ne!(
@@ -13942,8 +13996,15 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
             &decided["action"],
             &decided["decision_id"]
         ),
-        (200, &json!("anna"), &json!("route"), &Value::Null),
+        (200, &json!("anna"), &json!("route"), &json!(1)),
         "{again}"
+    );
+    assert_eq!(again["orchestrator"], sent["orchestrator"]);
+    assert_eq!(again["trace_id"], sent["trace_id"]);
+    assert!(
+        sent["trace_id"]
+            .as_str()
+            .is_some_and(|trace| !trace.is_empty())
     );
     assert_eq!((questions().len(), told_by_people(&anna)), (2, 1));
     // The same id for other words is other work, and refused.
@@ -13989,6 +14050,12 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         })
     });
     assert_eq!(told_by_people(&anna), 1);
+    let asked_before_replay = questions().len();
+    let (status, still_unsure) = dictate("maybe ship it", "r-2");
+    assert_eq!(status, 200, "{still_unsure}");
+    assert_eq!(still_unsure["orchestrator"], unsure["orchestrator"]);
+    assert_eq!(still_unsure["trace_id"], unsure["trace_id"]);
+    assert_eq!(questions().len(), asked_before_replay);
     let (status, yes) = dictate("yes", "r-3");
     assert_eq!(
         (status, &yes["session"], &yes["orchestrator"]["action"]),
@@ -14133,6 +14200,8 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         (200, &json!(mike), &json!("clarify")),
         "{sent}"
     );
+    assert_eq!(sent["orchestrator"], unsure["orchestrator"]);
+    assert_eq!(sent["trace_id"], unsure["trace_id"]);
     assert_eq!(questions().len(), before);
     let screen = host.get("/orchestrator/settings");
     assert_eq!(
@@ -19853,7 +19922,7 @@ fn a_person_speaks_and_the_clip_becomes_text() {
     wait_for("the engine to have loaded its model", || {
         let (status, said) = hear(&[], b"a clip");
         assert!(
-            status == 200 || (status == 503 && said["error"] == "whisper model loading"),
+            status == 200 || (status == 503 && said["error"] == "transcription model loading"),
             "{status} {said}"
         );
         status == 200
@@ -19927,11 +19996,11 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         (status, &silent["text"], &silent["ends_terminal"]),
         (200, &json!(""), &json!(false))
     );
-    // An engine that fails says why, and the next clip is heard.
+    // An engine that fails gives the fixed word, and the next clip is heard.
     let (status, failed) = hear(&[], b"22");
     assert_eq!(
         (status, &failed["error"]),
-        (500, &json!("synthetic failure"))
+        (500, &json!("transcription failed"))
     );
     assert_eq!(hear(&[], b"a clip").0, 200);
 
@@ -19948,25 +20017,17 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         (
             "faster-whisper:medium",
             400,
-            "transcription model not installed: faster-whisper:medium",
+            "transcription model not installed",
         ),
         (
             "nothing-of-the-kind",
             400,
-            "transcription model not installed: nothing-of-the-kind",
+            "transcription model not installed",
         ),
-        ("cartesia:ink-2", 500, "cartesia API key is not configured"),
-        ("deepgram:nova-3", 500, "deepgram API key is not configured"),
-        (
-            "elevenlabs:scribe_v9",
-            500,
-            "unknown transcription engine: elevenlabs:scribe_v9",
-        ),
-        (
-            "elevenlabs:scribe_v2",
-            500,
-            "elevenlabs API key is not configured",
-        ),
+        ("cartesia:ink-2", 500, "transcription failed"),
+        ("deepgram:nova-3", 500, "transcription failed"),
+        ("elevenlabs:scribe_v9", 500, "transcription failed"),
+        ("elevenlabs:scribe_v2", 500, "transcription failed"),
     ] {
         let (answered, said) = hear(&[("X-Transcription-Model", model)], b"a clip");
         assert_eq!((answered, &said["error"]), (status, &json!(why)), "{model}");
@@ -20059,6 +20120,13 @@ fn a_person_speaks_and_the_clip_becomes_text() {
 /// A stand-in for ElevenLabs on the loopback: takes requests one after another, keeps what
 /// each sent, and answers every one with the same words.
 fn scribe_stand_in(answer: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+    speech_reply_stand_in("200 OK", answer)
+}
+
+fn speech_reply_stand_in(
+    status: &'static str,
+    answer: &'static str,
+) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = format!(
         "http://{}/v1/speech-to-text",
@@ -20102,7 +20170,7 @@ fn scribe_stand_in(answer: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
                 .unwrap()
                 .push(String::from_utf8_lossy(&seen).to_string());
             let reply = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
                  Connection: close\r\n\r\n{answer}",
                 answer.len()
             );
@@ -21329,20 +21397,17 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
     );
 
     // Another agent is looked at: it has no engines of its own. A clip an app names the
-    // failing engine for is answered with that engine's failure: there is no next one.
+    // failing engine for is answered with the fixed failure: there is no next one.
     look_at(&echo);
     let (status, said) = hear(
         &[("X-Transcription-Model", "elevenlabs:scribe_v2")],
         b"sound",
     );
     assert_eq!(status, 500, "{said}");
-    assert!(
-        said["error"]
-            .as_str()
-            .unwrap()
-            .starts_with("ElevenLabs HTTP 401: "),
-        "{said}"
-    );
+    assert_eq!(said["error"], "transcription failed", "{said}");
+    wait_for("the provider status in the private Host log", || {
+        host.heard.lock().unwrap().contains("ElevenLabs HTTP 401: ")
+    });
     // And one it names the working engine for is heard in the Host's language.
     let (status, said) = hear(&[("X-Transcription-Model", "google:chirp_3")], b"sound");
     assert_eq!(
@@ -31256,7 +31321,7 @@ else:print(json.dumps({"type":"item.completed","item":{"type":"agent_message","t
     let (limited, _) = pair(&h, "Read policy", "limited");
     assert_eq!(
         h.ask_as(&limited, "GET", policy, None),
-        (200, h.get(policy))
+        (403, json!({"error":"full device access required"}))
     );
     assert_eq!(
         h.ask_as(&limited, "POST", policy, Some(&update)),
@@ -32402,10 +32467,10 @@ fn the_desk_of_the_seats_is_read_with_the_owners_tool_when_an_app_asks_and_is_ke
     assert_eq!(again["accounts"], desk["accounts"]);
     assert_eq!(seats_asked(&place).len(), 3);
 
-    // A device of limited scope is not shown the desk; the strict answer it may read.
+    // Both seat reads require full scope.
     let (limited, _) = pair(&host, "Watch", "limited");
     assert_eq!(host.ask_as(&limited, "GET", "/hotseat/desk", None).0, 403);
-    assert_eq!(host.ask_as(&limited, "GET", "/hotseat/status", None).0, 200);
+    assert_eq!(host.ask_as(&limited, "GET", "/hotseat/status", None).0, 403);
 
     // A Host that is killed and started has kept the desk and the strict answer, and still
     // holds a reading off for as long as it would have.
@@ -34220,7 +34285,7 @@ fn stand_in_engine() -> StandInEngine {
                             of_turn += sound.len();
                             if address.contains("eot_timeout_ms=777") {
                                 let unwell = json!({
-                                    "type": "Error", "description": "the engine is unwell",
+                                    "type": "Error", "description": "the engine is unwell: /fixture/private/stream.bin",
                                 });
                                 says(&mut socket, unwell);
                                 continue;
@@ -34507,10 +34572,16 @@ fn a_phone_streams_what_it_hears_and_is_told_what_the_engine_says_of_the_turns()
     for _ in 0..2 {
         assert_eq!(
             told_on(&mut stream),
-            json!({ "type": "error", "message": "the engine is unwell" })
+            json!({ "type": "error", "message": "transcription failed" })
         );
         stream.send(sound_of(10)).unwrap();
     }
+    wait_for("stream provider detail in the private Host log", || {
+        host.heard
+            .lock()
+            .unwrap()
+            .contains("/fixture/private/stream.bin")
+    });
     // The phone goes without a word: the engine's socket is closed.
     assert_eq!(engine.open.load(Ordering::SeqCst), 1);
     drop(stream);
@@ -42510,7 +42581,7 @@ fn transcription_guidance_reaches_the_phone_and_the_speech_engine() {
     );
     assert_eq!(
         host.ask_as(&limited, "GET", ROUTE, None),
-        (200, before.clone())
+        (403, json!({"error":"full device access required"}))
     );
     assert_eq!(
         host.ask_as(&limited, "POST", ROUTE, Some(&json!({}))).0,
@@ -42602,7 +42673,11 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     let (nova, requests) = scribe_stand_in(
         r#"{"results":{"channels":[{"alternatives":[{"transcript":"the pump is ready"}]}]}}"#,
     );
-    let (scribe, failed) = scribe_stand_in(r#"{"error":"no transcript"}"#);
+    const PRIVATE: &str = "/fixture/private/provider-model.bin";
+    let (scribe, failed) = speech_reply_stand_in(
+        "502 Bad Gateway",
+        r#"{"error":"cannot load /fixture/private/provider-model.bin"}"#,
+    );
     let world = [
         ("CLARP_NOVA_ENDPOINT", nova.as_str()),
         ("CLARP_SCRIBE_ENDPOINT", scribe.as_str()),
@@ -42778,6 +42853,11 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     );
     let (_, again) = hear(&phone, id, &second, "clip-2");
     assert_eq!(again["stt"]["attempts"][0]["outcome"], "error");
+    assert_eq!(
+        again["stt"]["attempts"][0]["reason"],
+        "transcription failed"
+    );
+    assert!(!again.to_string().contains(PRIVATE));
     assert_eq!(again["stt"]["attempts"][0]["language"], "da");
     assert_eq!(again["stt"]["attempts"][1]["language"], "da");
     assert!(failed.lock().unwrap()[0].contains("name=\"language_code\"\r\n\r\nda"));
@@ -42793,9 +42873,55 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     assert_eq!(change(json!({"agent_languages":{"mike":"en"}})).0, 200);
     let (code, last) = hear(&phone, id, &second, "failed");
     assert_eq!(code, 500);
+    assert_eq!(last["error"], "transcription failed");
     assert_eq!(last["stt"]["effective_engine"], Value::Null);
     assert_eq!(last["stt"]["attempts"][0]["outcome"], "error");
     assert_eq!(last["stt"]["attempts"][0]["language"], "en");
+    assert_eq!(last["stt"]["attempts"][0]["reason"], "transcription failed");
+    assert!(!last.to_string().contains(PRIVATE));
+    let events = host.get("/voice-events?utterance_id=failed&event=error");
+    let error = &events["events"][0]["detail"];
+    assert_eq!(
+        error,
+        &json!({"message":"transcription failed","stage":"stt"})
+    );
+    assert!(!events.to_string().contains(PRIVATE));
+    assert_eq!(
+        host.ask_as(&limited, "GET", "/diagnostics/health", None).0,
+        403
+    );
+    let health = host.get("/diagnostics/health");
+    assert_eq!(
+        health["subsystems"]["stt"]["last_error"],
+        "transcription failed"
+    );
+    assert!(!health.to_string().contains(PRIVATE));
+    wait_for("provider detail in the private Host log", || {
+        host.heard.lock().unwrap().contains(PRIVATE)
+    });
+    assert_eq!(
+        change(json!({"call_languages":"","call_engines":"","agent_languages":{"mike":"en,no"},"agent_engines":{"mike":"deepgram:nova-3"}})).0,
+        200
+    );
+    let nova_requests = requests.lock().unwrap().len();
+    let (code, refused) = hear(&phone, id, &second, "unhanded-set");
+    assert_eq!(code, 500, "{refused}");
+    assert_eq!(refused["error"], "transcription failed");
+    assert_eq!(
+        refused["stt"]["attempts"][0]["reason"],
+        "transcription failed"
+    );
+    assert_eq!(refused["stt"]["attempts"][0]["language"], Value::Null);
+    assert_eq!(refused["stt"]["attempts"][0]["engine"], "deepgram:nova-3");
+    assert_eq!(requests.lock().unwrap().len(), nova_requests);
+    assert_eq!(
+        change(json!({
+            "call_languages":"no,en","call_engines":"google:chirp_3",
+            "agent_languages":{"mike":"en"},"agent_engines":{"mike":"elevenlabs:scribe_v2"}
+        }))
+        .0,
+        200
+    );
     assert_eq!(
         action("/calls/hold", json!({"agent":second,"call_id":id})).0,
         200
