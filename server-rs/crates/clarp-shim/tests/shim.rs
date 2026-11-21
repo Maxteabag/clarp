@@ -508,6 +508,22 @@ while True:
         wait_for("both signal handlers", || {
             read().contains("ready") && dir.join("stubborn").is_file()
         });
+        let mut follower = exits.then(|| {
+            let mut stream = UnixStream::connect(&socket).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream.write_all(b"{\"op\":\"follow\"}\n").unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut reply = String::new();
+            reader.read_line(&mut reply).unwrap();
+            assert!(serde_json::from_str::<Reply>(&reply).unwrap().ok);
+            // The first hint confirms the writer has taken ownership of the subscription.
+            let mut hint = [0];
+            reader.read_exact(&mut hint).unwrap();
+            assert_eq!(&hint, b"\n");
+            reader
+        });
         let start = Instant::now();
         let stop = Request::Stop { grace_ms: 2000 };
         let requested_ms = request_time_ms();
@@ -532,6 +548,19 @@ while True:
             });
             assert_fast_end(&dir.join("spool/turn.jsonl"), requested_ms);
             assert!(shim.try_wait().unwrap().is_none());
+            let reader = follower.as_mut().unwrap();
+            reader
+                .get_ref()
+                .set_read_timeout(Some(Duration::from_millis(500)))
+                .unwrap();
+            let mut hints = Vec::new();
+            reader
+                .read_to_end(&mut hints)
+                .expect("the spool writer closes its followers at Exited");
+            assert!(
+                shim.try_wait().unwrap().is_none(),
+                "the group grace is still running"
+            );
         } else {
             assert!(
                 (Duration::from_millis(1450)..Duration::from_secs(3)).contains(&start.elapsed())
