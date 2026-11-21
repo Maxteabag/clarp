@@ -439,9 +439,11 @@ def test_every_rule_has_its_switch_and_the_live_rows_rule_is_off_until_switched_
     assert inc.carry_rules({**inc._DEFAULTS, **dict.fromkeys(off, True)}) == frozenset(carry.RULES)
     for rule in on:
         assert inc.carry_rules({**inc._DEFAULTS, rule: False}) == on - {rule}
-    # A module the parser version does not hash would let a change to a rule
-    # keep every checkpoint that was certified under the old one.
-    assert "message_carry.py" in inc._COMMON_SOURCES
+    # A change to a rule must be decided against the checkpoints certified under
+    # the old one: message_carry.py is a store source, so that rests on raising
+    # STORE_FORMAT, which the golden's store message asks for
+    # (tests/unit/test_transcript_parser_version.py).
+    assert "message_carry.py" in inc._STORE_SOURCES
 
 
 # ---- a turn that settled (SETTLED_TURNS) ------------------------------------------
