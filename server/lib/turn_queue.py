@@ -932,8 +932,15 @@ def start_receipt(queue_id: str):
             "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
             (queue_id,),
         ).fetchone()
+        shown = db.conn().execute("SELECT shown_at FROM queued_turns WHERE queue_id = ?",
+                                  (queue_id,)).fetchone()
+        # Payload-free once its row is written; until then the words are the
+        # message's only copy (its row is written at the CLI's init, or by
+        # recovery if the Host dies first: issue 491).
+        values = ({"text": "", "sender_agent_id": ""}
+                  if shown is not None and shown["shown_at"] is not None else {})
         started = _cas("start", "queue_id = ?", (queue_id,),
-                       values={"text": "", "sender_agent_id": ""})  # stamps started_at
+                       values=values or None)  # stamps started_at
         if started and row:
             _bump_revision(str(row["agent_id"]))
             # A fast backend may settle its turn before the dispatcher gets
@@ -981,6 +988,16 @@ def start_shown_attempted() -> list[str]:
     if started:
         log("shownAttemptedStarted", " ".join(started))
     return started
+
+
+def started_unshown() -> list[dict]:
+    """Items started (or claimed) whose conversation row was never written, with their
+    words: a Host that died between a launch on a session with no backend id and the
+    CLI's init. Recovery writes their row (issue 491)."""
+    return [dict(row) for row in db.conn().execute(
+        """SELECT * FROM queued_turns
+            WHERE status IN ('claimed', 'started') AND shown_at IS NULL
+              AND queue_id NOT LIKE 'call-open:%' AND text <> ''""")]
 
 
 def after_start(queue_id: str, row) -> None:
@@ -1201,12 +1218,22 @@ def show(queue_id: str, *, con=None) -> bool:
     return bool(cursor.rowcount)
 
 
+# What a client reads as the agent's queue (issue 491): every accepted message whose
+# conversation row is not written yet. That is a queued item, and also one that is
+# claimed or started but has no row yet (a turn on a session with no backend id at
+# its handoff writes its row at the CLI's init, not at the start): until then it is
+# still the queue's, so a message is never in neither read. A listen-first opening
+# never has a row and is no message of the user's.
+IN_QUEUE_READ = ("(status = 'queued' OR (status IN ('claimed', 'started')"
+                 " AND queue_id NOT LIKE 'call-open:%')) AND shown_at IS NULL")
+
+
 def waiting_items(agent_id: str) -> list[dict]:
-    """What a client reads as the agent's queue (GET /turn-queue): the queued
-    items whose conversation row is not written yet, in order."""
+    """What a client reads as the agent's queue (GET /turn-queue): the items whose
+    conversation row is not written yet (IN_QUEUE_READ), in order."""
     return [dict(row) for row in db.conn().execute(
-        """SELECT * FROM queued_turns
-            WHERE status = 'queued' AND agent_id = ? AND shown_at IS NULL
+        f"""SELECT * FROM queued_turns
+            WHERE agent_id = ? AND {IN_QUEUE_READ}
             ORDER BY queue_seq""", (agent_id,))]
 
 
@@ -1562,10 +1589,9 @@ def pending_count(agent_id: str) -> int:
 def state(agent_id: str) -> dict[str, int | bool]:
     """Return the count and revision from one SQLite read snapshot."""
     row = db.conn().execute(
-        """SELECT
+        f"""SELECT
                (SELECT COUNT(*) FROM queued_turns
-                 WHERE agent_id = ? AND status = 'queued'
-                   AND shown_at IS NULL) AS pending_count,
+                 WHERE agent_id = ? AND {IN_QUEUE_READ}) AS pending_count,
                COALESCE((SELECT revision FROM queue_state_revisions
                           WHERE agent_id = ?), 0) AS revision,
                COALESCE((SELECT paused FROM queue_state_revisions
@@ -1587,7 +1613,7 @@ def states() -> dict[str, dict[str, int | bool]]:
             "paused": bool(row["paused"]),
         }
         for row in db.conn().execute(
-            """SELECT r.agent_id,
+            f"""SELECT r.agent_id,
                       COALESCE(q.pending_count, 0) AS pending_count,
                       r.revision,
                       r.paused
@@ -1595,7 +1621,7 @@ def states() -> dict[str, dict[str, int | bool]]:
                  LEFT JOIN (
                      SELECT agent_id, COUNT(*) AS pending_count
                        FROM queued_turns
-                      WHERE status = 'queued' AND shown_at IS NULL
+                      WHERE {IN_QUEUE_READ}
                       GROUP BY agent_id
                  ) q ON q.agent_id = r.agent_id""")
     }
