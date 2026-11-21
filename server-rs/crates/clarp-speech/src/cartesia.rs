@@ -33,7 +33,7 @@ pub fn all_voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, S
     catalogue(key, endpoint, false, 20)
 }
 
-pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<serde_json::Value, String> {
+pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<serde_json::Value, crate::LookupError> {
     let path = crate::voice_names::segment(id);
     voice_json(key, &format!("{}/{path}", endpoint.trim_end_matches('/')))
 }
@@ -53,7 +53,7 @@ fn catalogue(
             let cursor = crate::voice_names::segment(&after);
             url.push_str(&format!("&starting_after={cursor}"));
         }
-        let page = voice_json(key, &url)?;
+        let page = voice_json(key, &url).map_err(|why| why.to_string())?;
         voices.extend(page["data"].as_array().cloned().unwrap_or_default());
         after = match &page["next_page"] {
             serde_json::Value::String(next) => next.clone(),
@@ -67,7 +67,7 @@ fn catalogue(
     Ok(voices)
 }
 
-fn voice_json(key: &str, url: &str) -> Result<serde_json::Value, String> {
+fn voice_json(key: &str, url: &str) -> Result<serde_json::Value, crate::LookupError> {
     let bearer = format!("Bearer {key}");
     crate::voice_names::get(
         url,
