@@ -20,7 +20,7 @@ import threading
 import time
 
 from .activity import state_activity_event
-from . import events
+from . import coordination, events
 from .log import log, log_exception
 from .protocol import AgentState
 from .timing import SERVER_TIMING
@@ -60,6 +60,20 @@ def _public_detail(kind: str, raw: str | None):
 class StateLogWatcher:
     WORKING_TTL_S = 5.0
 
+    def _veil(self, agent_id: str, working: dict) -> str:
+        """'Working with <Name>' for a coordination turn the agent's chat hides, else ''."""
+        if working.get("audience") != coordination.AGENTS:
+            return ""
+        now = time.monotonic()
+        if now - self._hiding_at >= self.WORKING_TTL_S:
+            try:
+                self._hiding, self._hiding_at = coordination.hiding_agents(), now
+            except Exception as exc:  # noqa: BLE001 - never break the state stream
+                log_exception("stateHidingAgentsFail", exc)
+                # Unknown: veil, the failure mode of hiding is shown words, never leaked ones.
+                return coordination.veiled(working)
+        return coordination.veiled(working) if agent_id in self._hiding else ""
+
     def _working_with(self, agent_id: str, kind: str, detail) -> dict:
         """A working state's audience, as the dispatch's 'thinking' state carries it, on every
         state of the running turn: a client that connects mid-turn learns from the next state
@@ -72,7 +86,6 @@ class StateLogWatcher:
         known = self._working.get(agent_id)
         if known and known[0] == trace and time.monotonic() - known[1] < self.WORKING_TTL_S:
             return dict(known[2])
-        from . import coordination
         try:
             fields = coordination.working_with(agent_id, trace)
         except Exception as exc:  # noqa: BLE001 - never break the state stream
@@ -90,6 +103,10 @@ class StateLogWatcher:
         # agent_id -> (trace_id, read at, its working_with fields): a turn's audience, read again
         # after WORKING_TTL_S so a turn the user steps into reads 'user' soon after.
         self._working: dict[str, tuple[str, float, dict]] = {}
+        # The chats that hide coordination (lib.coordination.hiding_agents), read again after
+        # WORKING_TTL_S: a setting change reaches the stream within seconds.
+        self._hiding: set[str] = set()
+        self._hiding_at = float("-inf")
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # Completed-turn notification policy settles for up to
@@ -210,24 +227,28 @@ class StateLogWatcher:
         rows = cur.fetchall()
         for r in rows:
             detail = _public_detail(r["kind"], r["detail"])
+            working = self._working_with(r["agent_id"], r["kind"], detail)
+            veil = self._veil(r["agent_id"], working)
             events.broadcast(self.stream, events.agent_state(
                 agent_id=r["agent_id"],
                 session=r["session"],
                 persona=r["persona"],
                 kind=r["kind"],
                 ts=int(r["ts"]),
-                detail=detail,
+                detail=coordination.veil_detail(detail, veil),
                 status_text=r["custom_status"] or "",
-                **self._working_with(r["agent_id"], r["kind"], detail),
+                **working,
             ))
-            events.broadcast(self.stream, events.as_event(state_activity_event(
+            # Clients draw a row's activity from this event: a coordination turn its chat
+            # hides shows who the agent works with, never what it does (as the snapshot does).
+            events.broadcast(self.stream, events.as_event(coordination.veil_activity(state_activity_event(
                 agent_id=r["agent_id"],
                 session=r["session"],
                 persona=r["persona"],
                 kind=r["kind"],
                 ts=int(r["ts"]),
                 detail=detail,
-            )))
+            ), veil)))
             self._last_status[str(r["agent_id"])] = str(r["custom_status"] or "")
             if r["kind"] == AgentState.DONE:
                 self._ensure_notify_worker()
@@ -275,13 +296,14 @@ class StateLogWatcher:
             if latest is None:
                 continue
             latest_detail = _public_detail(latest["kind"], latest["detail"])
+            working = self._working_with(agent_id, latest["kind"], latest_detail)
             events.broadcast(self.stream, events.agent_state(
                 agent_id=agent_id,
                 session=a["session"],
                 persona=a["persona"],
                 kind=latest["kind"],
                 ts=int(latest["ts"]),
-                detail=latest_detail,
+                detail=coordination.veil_detail(latest_detail, self._veil(agent_id, working)),
                 status_text=status_text,
-                **self._working_with(agent_id, latest["kind"], latest_detail),
+                **working,
             ))
