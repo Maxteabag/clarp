@@ -119,8 +119,17 @@ pub fn install_model(id: &str) -> Result<&'static CatalogModel, String> {
 }
 
 impl CatalogModel {
+    /// What it is called on a screen.
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
     pub fn id(&self) -> String {
         format!("{}:{}", self.provider, self.model)
+    }
+
+    pub fn languages(&self) -> &[&'static str] {
+        std::slice::from_ref(&self.language)
     }
 
     pub fn installed_record(&self) -> Value {

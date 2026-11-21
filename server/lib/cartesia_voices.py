@@ -18,11 +18,34 @@ _lock = threading.Lock()
 _cache: tuple[float, list[dict]] | None = None
 
 
-def _fetch_page(key: str, *, cursor: str = "") -> dict:
-    query = [("limit", "100"), ("language", "en"), ("expand[]", "preview_file_url")]
+def _fetch_page(key: str, *, cursor: str = "", language: str | None = "en") -> dict:
+    query = [("limit", "100"), ("expand[]", "preview_file_url")]
+    if language:
+        query.insert(1, ("language", language))
     if cursor:
         query.append(("starting_after", cursor))
-    url = _URL + "?" + urllib.parse.urlencode(query)
+    return _get(key, _URL + "?" + urllib.parse.urlencode(query))
+
+
+def fetch_one(key: str, voice_id: str) -> dict:
+    """One voice by id (voice_names: a voice in use that the catalogue pages missed)."""
+    return _get(key, _URL + "/" + urllib.parse.quote(voice_id, safe=""))
+
+
+def all_voices(key: str) -> list[dict]:
+    """The whole catalogue, every language (voice_names; never on a read path)."""
+    rows: list[dict] = []
+    cursor = ""
+    for _ in range(20):
+        page = _fetch_page(key, cursor=cursor, language=None)
+        rows.extend(page.get("data") or [])
+        cursor = str(page.get("next_page") or "")
+        if not page.get("has_more") or not cursor:
+            break
+    return rows
+
+
+def _get(key: str, url: str) -> dict:
     for header, value in (("Authorization", "Bearer " + key),
                           ("Authorization", key), ("X-API-Key", key)):
         request = urllib.request.Request(

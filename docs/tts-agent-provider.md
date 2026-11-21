@@ -153,6 +153,18 @@ with `google_id_unverifiable` even when no package claims `google`, and
 remove it. Only the last path component is checked; a symlinked parent
 directory is followed as usual.
 
+## Language (Cartesia)
+
+A Cartesia request carries one language. For now (R168, an interim step) it is
+the agent's **first** language: the first code of its language set
+(`transcription.agent_languages`), else the Host's default language. An agent
+heard in `no,en` is therefore sent `no` even for an English sentence; choosing
+the language per clip from its text is a later step (V3). The code must be one the
+configured model speaks (sonic-3.6 and sonic-latest: 44 codes; sonic-3 and
+sonic-3.5: 42, Norwegian included; sonic-2 and sonic-turbo: 8 and 9, no
+Norwegian); `nb` and `nn` count as `no`. Anything else is sent as `en`. Other
+providers are not handed a language.
+
 ## Delivery
 
 Raw PCM delivery only exists for Cartesia. A clip from any other provider is

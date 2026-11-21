@@ -13,8 +13,13 @@ use std::{
     time::Duration,
 };
 
+/// The program of a person's own that this module starts: its name, the environment variable
+/// that names it instead, and the name it is found by on the path (as
+/// [`clarp_backend::PROGRAMS`] has the tools').
+pub const PROGRAM: (&str, &str, &str) = ("zoxide", "CLARP_ZOXIDE_PROGRAM", "zoxide");
+
 async fn zoxide(args: &[&str]) -> Option<(bool, String)> {
-    let program = std::env::var_os("CLARP_ZOXIDE_PROGRAM").unwrap_or_else(|| "zoxide".into());
+    let program = std::env::var_os(PROGRAM.1).unwrap_or_else(|| PROGRAM.2.into());
     let mut cmd = crate::child::asynchronous(program);
     cmd.args(args)
         .kill_on_drop(true)

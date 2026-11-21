@@ -1214,3 +1214,102 @@ def test_unrecognised_reply_codec_cannot_authorize_a_display_sentinel(marker):
     if marker is not None:
         event['_clarp_reply_provider'] = marker
     assert _result_assistant_text(event) == 'Legacy fallback'
+
+
+# ---- R108: a keyed message streams one live row per text block ----------------------------
+
+def _order_b_events():
+    """The measured order-B message (tests/fixtures/live_rec/order-b.jsonl): its stream events
+    and the assistant event Claude Code prints at each block's stop."""
+    fixture = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "live_rec" / "order-b.jsonl"
+    events = []
+    for line in fixture.read_text().splitlines():
+        entry = json.loads(line)
+        if "stream" in entry:
+            events.append({"type": "stream_event", "event": entry["stream"]})
+        elif "line" in entry:
+            events.append({"type": "assistant", "message": entry["line"]})
+    return events
+
+
+def _keyed_turn(fake_clarp, tmp_path, monkeypatch, body, sid, *, result=True):
+    from lib.message_import_common import _identity_id
+    writes = []
+    original = agents_db.upsert_live_assistant_message
+
+    def spy(**kwargs):
+        writes.append((kwargs.get("block", 0), kwargs["text"]))
+        return original(**kwargs)
+    monkeypatch.setattr(agents_db, "upsert_live_assistant_message", spy)
+    agent_id = agents_db.create_agent(persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    fake_clarp([{"type": "system", "subtype": "init", "session_id": sid}, *body,
+                *([{"type": "result", "subtype": "success", "result": "ok"}] if result else [])])
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-blocks")
+    handle = CLAUDE.start_turn(text="hi", cwd=tmp_path, backend_session_id=sid, session="rachel",
+                               agent_id=agent_id, trace_id="trace-blocks")
+    handle.wait(timeout=10.0)
+    rows = [(m["id"], m["text"]) for m in agents_db.list_messages(agent_id=agent_id, backend_session_id=sid)]
+    ids = [_identity_id(agent_id, sid, "trace-blocks", "msg_A", k) for k in range(2)]
+    return writes, rows, ids
+
+
+FIRST_BLOCK = "First block of the message."
+SECOND_BLOCK = "Second block, from the search."
+
+
+def test_a_keyed_message_streams_one_live_row_per_text_block(fake_clarp, tmp_path, monkeypatch):
+    """R108 (L2): each text block of a keyed message has its own live row, under the id its line
+    will have in /log (block 0: the keyed live id; block 1: its blk- id), holding only its own
+    words: never the blocks run together, never anything of the server tool or its result."""
+    writes, rows, ids = _keyed_turn(fake_clarp, tmp_path, monkeypatch, _order_b_events(), "sid-blocks")
+    assert writes and {block for block, _ in writes} == {0, 1}
+    assert all(FIRST_BLOCK.startswith(text) for block, text in writes if block == 0)
+    assert all(SECOND_BLOCK.startswith(text) for block, text in writes if block == 1)
+    assert rows == [(ids[0], FIRST_BLOCK), (ids[1], SECOND_BLOCK)]
+    assert ids[0].startswith("live-") and ids[1].startswith("blk-")
+
+
+def test_without_partial_messages_each_assistant_event_is_one_block(fake_clarp, tmp_path, monkeypatch):
+    """Without stream events Claude Code prints one assistant event per block: the same rows,
+    counted the same way (the server tool and its result are no lines and add no words)."""
+    body = [event for event in _order_b_events() if event["type"] == "assistant"]
+    writes, rows, ids = _keyed_turn(fake_clarp, tmp_path, monkeypatch, body, "sid-whole")
+    assert sorted(set(writes)) == [(0, FIRST_BLOCK), (1, SECOND_BLOCK)]
+    assert rows == [(ids[0], FIRST_BLOCK), (ids[1], SECOND_BLOCK)]
+
+
+def test_a_block_the_stream_never_stops_stays_live_until_the_next_turn_retracts_it(
+        fake_clarp, tmp_path, monkeypatch):
+    """The stream dies inside block 1 (no stop, no result): block 0's row is settled at its stop;
+    block 1's row keeps the words it had and stays live, as a single live row did before R108.
+    Claude Code writes a block's line only at its stop, so no import adopts it; the next turn's
+    first live row removes it (its turn did not complete), with replace_revision."""
+    events = _order_b_events()
+    cut = next(n for n, e in enumerate(events) if e["type"] == "stream_event"
+               and e["event"].get("type") == "content_block_delta" and e["event"].get("index") == 3)
+    writes, rows, ids = _keyed_turn(fake_clarp, tmp_path, monkeypatch, events[:cut + 1], "sid-dies", result=False)
+    stored = {r["message_id"]: (r["text"], r["kind"]) for r in agents_db.conn().execute(
+        "SELECT message_id, text, kind FROM messages WHERE role = 'assistant'")}
+    assert stored == {ids[0]: (FIRST_BLOCK, None), ids[1]: ("Second block, ", "live")}
+    agent_id = agents_db.conn().execute("SELECT agent_id FROM messages WHERE message_id = ?",
+                                        (ids[1],)).fetchone()[0]
+    held = agents_db.conn().execute("SELECT replace_revision FROM conversation_heads WHERE agent_id = ?",
+                                    (agent_id,)).fetchone()[0]
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-next")
+    assert agents_db.upsert_live_assistant_message(agent_id=agent_id, backend_session_id="sid-dies",
+                                                   trace_id="trace-next", item_key="msg_B", text="Next.")
+    assert agents_db.conn().execute("SELECT 1 FROM messages WHERE message_id = ?", (ids[1],)).fetchone() is None
+    assert agents_db.conn().execute("SELECT replace_revision FROM conversation_heads WHERE agent_id = ?",
+                                    (agent_id,)).fetchone()[0] > held
+
+
+def test_a_block_left_open_when_the_result_comes_is_settled_with_its_words(fake_clarp, tmp_path, monkeypatch):
+    """The process reaches its result with block 1 never stopped: the result settles every open
+    block (as it settled the message's single row before R108); its row keeps its words."""
+    events = _order_b_events()
+    cut = next(n for n, e in enumerate(events) if e["type"] == "stream_event"
+               and e["event"].get("type") == "content_block_delta" and e["event"].get("index") == 3)
+    writes, rows, ids = _keyed_turn(fake_clarp, tmp_path, monkeypatch, events[:cut + 1], "sid-open")
+    stored = {r["message_id"]: (r["text"], r["kind"]) for r in agents_db.conn().execute(
+        "SELECT message_id, text, kind FROM messages WHERE role = 'assistant'")}
+    assert stored == {ids[0]: (FIRST_BLOCK, None), ids[1]: ("Second block, ", None)}

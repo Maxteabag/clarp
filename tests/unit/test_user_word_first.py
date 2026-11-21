@@ -319,8 +319,8 @@ def test_the_upgrade_marks_waiting_rows_of_the_users_own_origin():
                    queue_id TEXT, agent_id TEXT, origin TEXT, status TEXT)""")
     con.executemany("INSERT INTO queued_turns (queue_id, agent_id, origin, status) VALUES (?, 'a', ?, 'queued')",
                     [("p1", "agent"), ("u1", "user"), ("o1", "oracle"), ("a1", "automation")])
-    db_migrations._migrate_to_v132(con)
-    db_migrations._migrate_to_v132(con)       # a rerun is a no-op
+    db_migrations._migrate_to_v133(con)
+    db_migrations._migrate_to_v133(con)       # a rerun is a no-op
     assert dict(con.execute("SELECT queue_id, user_word FROM queued_turns")) == {
         "p1": 0, "u1": 1, "o1": 1, "a1": 0}
     assert [r[0] for r in con.execute("SELECT queue_id FROM queued_turns ORDER BY queue_seq")] == \

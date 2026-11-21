@@ -17,6 +17,7 @@ from lib import transcript_import_cache as _transcript_import_cache
 _transcript_import_cache.note_host_started(_HOST_PROCESS_STARTED_AT)
 
 from lib import clip_store
+from lib.clock import iso_from_ms
 from lib import viz_normalize
 
 import gzip
@@ -117,6 +118,7 @@ from lib.transcript_streamer import TranscriptStreamer  # noqa: E402
 from lib.tts_worker import TTSWorker  # noqa: E402
 from lib.workers import BOOT, SERVING, Worker, WorkerSet, started  # noqa: E402
 from lib.cache_warmup import CacheWarmupWorker  # noqa: E402
+from lib.voice_names import VoiceNamesWorker, worker_enabled as voice_names_worker_enabled  # noqa: E402
 
 
 from lib.config import load as load_config  # noqa: E402
@@ -187,6 +189,9 @@ class ContextHTTPServer(ThreadingHTTPServer):
         self._device_connections_lock = threading.Lock()
         from lib.request_security import FailureLimiter
         self.auth_failures = FailureLimiter()
+        # GET /pairing/identity answers without a token: its own budget per
+        # source, so reading it never spends the pairing exchange's failures.
+        self.identity_reads = FailureLimiter(limit=30)
         super().__init__(addr, handler_cls)
 
     def register_device_connection(self, connection, principal: str = "") -> bool:
@@ -517,6 +522,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-events": "_handle_voice_events_get",
         "/voice-events/utterances": "_handle_voice_utterances_get",
         "/server-info": "_handle_server_info",
+        "/pairing/identity": "_handle_pairing_identity",
         "/paired-devices": "_handle_paired_devices",
         "/devices/push-tokens": "_handle_push_tokens",
         "/server-update": "_handle_server_update_status",
@@ -1110,7 +1116,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     # is intentionally public so the client can bootstrap and pick up the
     # token from the URL on first visit.
     _PUBLIC_EXACT = {"/", "/sw.js", "/manifest.json",
-                     "/styles.css", "/icon.png", "/pairing/exchange"}
+                     "/styles.css", "/icon.png", "/pairing/exchange", "/pairing/identity"}
     _PUBLIC_PREFIXES = ("/static/", "/notification-avatars/")
 
     def principal(self) -> Principal:
@@ -1213,6 +1219,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     def _device_forbidden(self, path: str, method: str) -> bool:
         if getattr(self, "_request_device_scope", "") != "limited":
             return False
+        if path == "/paired-devices/revoke" and method == "POST":
+            return False    # the handler lets a limited device revoke itself, no other (R172)
         if any(
             path == prefix.rstrip("/") or path.startswith(prefix)
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
@@ -1638,7 +1646,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         was claimed or started belongs to a turn."""
         from lib import turn_queue
         try:
-            if turn_queue.status(queue_id) != "queued" or not turn_queue.remove(queue_id):
+            if (turn_queue.status(queue_id) != "queued"
+                    or not turn_queue.remove(queue_id, withdraw_shown=True)):
                 return
             agent = identity.lookup(session)
             if agent:
@@ -2599,12 +2608,19 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         if not agent:
             return self._json_error(404, "agent not found")
         state = turn_queue.state(agent["agent_id"])
+        # Each waiting message, with what another device needs to draw it at
+        # the end of the chat (feature waited_send_order): the id its row will
+        # carry (u-<client_msg_id>), when it was sent and why it waits.
         items = [{
             "id": row["queue_id"],
             "text": row["text"],
             "enqueued_at": row["enqueued_at"],
             "synthesize_audio": bool(row["synthesize_audio"]),
-        } for row in turn_queue.pending(agent["agent_id"])]
+            "client_msg_id": row["client_msg_id"] or "",
+            "sent_at": iso_from_ms(int(row["enqueued_at"])),
+            "kind": row["kind"] or turn_queue.KIND_LATER,
+            **turn_queue.item_provenance(row),
+        } for row in turn_queue.waiting_items(agent["agent_id"])]
         return self._json_ok({
             "items": items,
             "paused": state["paused"],
@@ -2639,15 +2655,25 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         return self._json_ok({"session": session, "paused": state["paused"],
                               "count": state["count"], "revision": state["revision"]})
 
-    def _broadcast_turn_queue(self, agent_id: str, session: str) -> None:
+    def _broadcast_turn_queue(self, agent_id: str, session: str, *,
+                              client_msg_id: str = "", change: str = "",
+                              text: str | None = None, provenance: dict | None = None) -> None:
+        """queue-updated. For an edit or a deletion of one item it names the
+        item (client_msg_id) and what changed (``queue_change``: edited, with
+        the new ``text``, or deleted), so a device's waiting bubble follows."""
         from lib import turn_queue
         if getattr(self.ctx, "stream", None) is None:
             return
         state = turn_queue.state(agent_id)
-        events.broadcast(self.ctx.stream, events.queue_updated(
+        event = events.queue_updated(
             session=session, agent_id=agent_id,
             queue_depth=state["count"], queue_paused=state["paused"],
-            queue_started=False, queue_revision=state["revision"]))
+            queue_started=False, queue_revision=state["revision"],
+            **({"client_msg_id": client_msg_id} if client_msg_id else {}),
+            **({"queue_change": change} if change else {}),
+            **({"text": text} if text is not None else {}),
+            **(provenance or {}))
+        events.broadcast(self.ctx.stream, event)
 
     def _handle_turn_queue_update(self, queue_id: str):
         from lib import turn_queue
@@ -2665,7 +2691,10 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return self._json_error(400, "text required")
         if not row or not turn_queue.update_text(queue_id, text):
             return self._json_error(404, "queued message not found")
-        self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]))
+        self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
+                                   client_msg_id=str(row["client_msg_id"] or ""),
+                                   change="edited", text=text,
+                                   provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_delete(self, queue_id: str):
@@ -2678,7 +2707,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return
         if not row or not turn_queue.remove(queue_id):
             return self._json_error(404, "queued message not found")
-        self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]))
+        self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
+                                   client_msg_id=str(row["client_msg_id"] or ""),
+                                   change="deleted", provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_send(self, queue_id: str):
@@ -3324,6 +3355,9 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # catalogue, artifacts) once the listeners are up, so the first client
         # after a restart does not pay for a cold page cache on the request path.
         Worker("cache-warmup", lambda: started(CacheWarmupWorker()), stage=SERVING),
+        # Voice names for the profile's voice_label, fetched off every read path.
+        Worker("voice-names", lambda: started(VoiceNamesWorker()), stage=SERVING,
+               enabled=voice_names_worker_enabled),
         Worker("bookkeeping-listeners", start_bookkeeping_listeners,
                stop=lambda thread: None, stage=SERVING),
         Worker("decision-delivery", lambda: started(

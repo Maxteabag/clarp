@@ -121,6 +121,10 @@ def compact_session(session: str, *, dispatch: Any = None) -> dict[str, Any]:
     # processes on one conversation would collide.
     if backends.active_handles(backend, agent_id):
         return _refuse(session, "agent is busy — try again when idle")
+    # Before the slot is claimed: a raise after it left the agent compacting,
+    # its sends held, until a restart (R174).
+    from .launch_paths import existing_workspace_path
+    cwd = str(existing_workspace_path(agent.get("cwd")))
     with _lock:
         if session in _active:
             return {"ok": True, "status": "already_compacting", "backend": backend}
@@ -137,8 +141,6 @@ def compact_session(session: str, *, dispatch: Any = None) -> dict[str, Any]:
         return _refuse(session, refusal)
     with _lock:
         _active.add(session)
-    from .launch_paths import existing_workspace_path
-    cwd = str(existing_workspace_path(agent.get("cwd")))
     try:
         threading.Thread(
             target=_run, args=(session, dict(agent), backend, bsid, cwd, strategy, dispatch),

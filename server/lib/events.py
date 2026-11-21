@@ -88,7 +88,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session", "backend_session_id"),
     SSEType.QUEUE_UPDATED: (
         "agent_id", "session", "queue_depth", "queue_paused", "queue_started",
-        "queue_revision", "client_msg_id",
+        "queue_revision", "client_msg_id", "queue_change", "text", "origin", "sender",
     ),
     SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
@@ -316,7 +316,12 @@ def transcript_updated(*, agent_id: str, session: str | None,
 
 def queue_updated(*, session: str, agent_id: str, queue_depth: int,
                   queue_paused: bool, queue_started: bool,
-                  queue_revision: int, client_msg_id: Any = OMIT) -> Event:
+                  queue_revision: int, client_msg_id: Any = OMIT,
+                  queue_change: Any = OMIT, text: Any = OMIT,
+                  origin: Any = OMIT, sender: Any = OMIT) -> Event:
+    """``queue_change`` (``edited`` with ``text``, or ``deleted``) names what
+    happened to the item ``client_msg_id`` (feature waited_send_order); an event
+    that names an item also says who it is from (``origin``, ``sender``; R182)."""
     return _build(SSEType.QUEUE_UPDATED, [
         ("session", session),
         ("agent_id", agent_id),
@@ -325,6 +330,10 @@ def queue_updated(*, session: str, agent_id: str, queue_depth: int,
         ("queue_paused", queue_paused),
         ("queue_started", queue_started),
         ("queue_revision", queue_revision),
+        ("queue_change", queue_change),
+        ("text", text),
+        ("origin", origin),
+        ("sender", sender),
     ])
 
 

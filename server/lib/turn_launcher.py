@@ -258,9 +258,9 @@ class LauncherMixin:
             # message id is necessarily a no-op. Persist it as soon as init
             # binds the UUID; this is idempotent for backends that pre-bind.
             if agents_db.live_backend_session(agent_id) == backend_session_id:
-                self._record_user_message(
-                    replace(spec, backend_session_id=backend_session_id)
-                )
+                # A queue item's row is written with the item shown (issue 491).
+                self._start_queued_row(
+                    replace(spec, backend_session_id=backend_session_id), steered=True)
             return True
 
         def on_result(event: dict) -> None:

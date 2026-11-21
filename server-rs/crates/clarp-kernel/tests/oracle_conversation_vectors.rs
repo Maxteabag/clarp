@@ -667,6 +667,7 @@ fn the_voice_is_told_what_the_python_host_tells_it_when_a_call_begins() {
             .collect();
         let history = case["history"].as_array().unwrap();
         let told = Beginning {
+            model: voice::model(),
             roster: Some(&case["roster"]).filter(|roster| !roster.is_null()),
             direct: case["delegation_strategy"] == "direct_contact",
             vocabulary: case["voice_context"].get("terms"),
@@ -676,6 +677,8 @@ fn the_voice_is_told_what_the_python_host_tells_it_when_a_call_begins() {
         assert_eq!(voice::beginning(&told), case["config"], "{case}");
     }
     assert_eq!(configs.len(), 14);
+    // A call opens on the model the owner names, and where he names none on the Python Host's own.
+    assert_eq!(voice::model(), clarp_kernel::live_call::LIVE_MODEL_DEFAULT);
     // What the two models are told as it is, is the Python Host's own.
     assert_eq!(*voice::router(), vectors["router"]);
     assert_eq!(json!(voice::narration(true)), vectors["narration_off"]);

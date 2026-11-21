@@ -106,14 +106,13 @@ def model_for_client(header: Any, cfg: Any = None) -> str:
         from . import config
         cfg = config.load()
     configured = live_model(cfg)
-    # The strict form only (that of render_spec_capable): one name, one build, one contract, nothing else.
-    # The name is compared as sent ("iOS" is not "ios"); the contract is read from the same match.
-    # TODO(rebase onto the render_spec switch-on): one strict reader in server_identity for both.
-    match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_-]{0,31})/[A-Za-z0-9._-]{1,80} contract=([0-9]{1,9})", header) \
-        if isinstance(header, str) else None
-    if configured == BASELINE_LIVE_MODEL or match is None:
+    # The one strict reader of X-Clarp-Client (render_spec_capable's too): the name as sent ("iOS" is not
+    # "ios") and the contract of the same match.
+    from .server_identity import strict_client
+    client = strict_client(header)
+    if configured == BASELINE_LIVE_MODEL or client is None:
         return BASELINE_LIVE_MODEL
-    name, contract = match.group(1), int(match.group(2))
+    name, contract = client
     minimum = {**AGENT_LIVE_MODEL_MIN_CLIENT, **(getattr(cfg, "live_model_min_client", None) or {})}.get(name)
     if type(minimum) is not int or minimum < 1 or contract < minimum:
         return BASELINE_LIVE_MODEL

@@ -71,8 +71,9 @@ def test_periodic_receipt_maintenance_keeps_never_launched_transfer(
     after = dict(db.conn().execute(
         "SELECT * FROM queued_turns WHERE queue_id=?", (work_id,)).fetchone())
     assert after == before, "administrative handoff was consumed as backend execution"
+    # The held arrival is its own queue item since issue 491 (a send that waits).
     assert [row["queue_id"] for row in turn_queue.pending_for_dispatch()] == [
-        work_id, "drain-park-t-next"]
+        work_id, "next"]
     assert turn_queue.is_paused(agent) is paused
     assert (not stopped) or paused
     assert "work" not in provider.texts() and "next" not in provider.texts()

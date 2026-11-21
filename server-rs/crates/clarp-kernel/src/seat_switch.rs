@@ -1,7 +1,7 @@
 //! The switcher's reading of quota and choice of another machine-wide account.
 use crate::python::{casefold, truthy};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Number, Value, json};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,6 +10,13 @@ pub struct Seat {
     pub active: bool,
     pub remaining: Option<i64>,
     pub secondary: Option<i64>,
+    /// Absent on Claude reads. A Codex read reports null if its weekly number is unknown.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_weekly"
+    )]
+    pub weekly_used: Option<Option<Number>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked_models: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -18,6 +25,12 @@ pub struct Seat {
     pub degraded: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub overage: bool,
+}
+
+fn present_weekly<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<Number>>, D::Error> {
+    Option::deserialize(deserializer).map(Some)
 }
 
 fn percent(used: &Value) -> Option<i64> {
@@ -47,6 +60,40 @@ fn spec(model: &str) -> Option<(String, String)> {
     Some((lower, model.into()))
 }
 
+fn codex_weekly_used(usage: &Value) -> Option<Number> {
+    let mut weekly: Option<&Number> = None;
+    for window in usage["windows"].as_array().into_iter().flatten() {
+        let kind = window["label"]
+            .as_str()
+            .and_then(|label| crate::seats::codex_kind("codex", label));
+        if !kind.is_some_and(|(kind, _)| kind == "7d") {
+            continue;
+        }
+        // An unreadable account-wide weekly window invalidates the whole reading.
+        let used = window["used"].as_number()?;
+        if weekly.is_none_or(|best| used.as_f64() > best.as_f64()) {
+            weekly = Some(used);
+        }
+    }
+    weekly.cloned()
+}
+
+const WEEKLY_SPENT: f64 = 0.99;
+
+/// Quota evidence for a banked Codex reset. An unreadable redemption count gives no permission.
+/// The Rust Host has no reset broker lane.
+pub fn codex_reset_quota_ready(accounts: &[Seat], cap: usize, spent: Option<usize>) -> bool {
+    spent.is_some_and(|spent| spent < cap)
+        && !accounts.is_empty()
+        && accounts.iter().all(|seat| {
+            seat.weekly_used
+                .as_ref()
+                .and_then(Option::as_ref)
+                .and_then(Number::as_f64)
+                .is_some_and(|used| used >= WEEKLY_SPENT)
+        })
+}
+
 pub fn parse(tool: &str, body: &Value) -> Vec<Seat> {
     let mut seats = Vec::new();
     for row in body["accounts"]
@@ -65,6 +112,7 @@ pub fn parse(tool: &str, body: &Value) -> Vec<Seat> {
             active: truthy(&row["is_active"]),
             remaining: None,
             secondary: None,
+            weekly_used: None,
             blocked_models: vec![],
             scoped_remaining: BTreeMap::new(),
             degraded: false,
@@ -72,6 +120,7 @@ pub fn parse(tool: &str, body: &Value) -> Vec<Seat> {
         };
         if tool == "codex" {
             if !truthy(&usage["error"]) {
+                seat.weekly_used = Some(codex_weekly_used(usage));
                 seat.remaining = if truthy(&usage["blocked"]) {
                     Some(0)
                 } else if usage["usable"] == false {
@@ -79,6 +128,8 @@ pub fn parse(tool: &str, body: &Value) -> Vec<Seat> {
                 } else {
                     percent(&usage["worst_used"])
                 };
+            } else {
+                seat.weekly_used = Some(None);
             }
         } else {
             seat.secondary = percent(&usage["used_7d"]);
