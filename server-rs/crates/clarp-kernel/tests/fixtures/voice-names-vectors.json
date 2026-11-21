@@ -135,6 +135,43 @@
       }
     ]
   },
+  "backoff": [
+    {
+      "failed": true,
+      "retry": true,
+      "wait": 900
+    },
+    {
+      "failed": true,
+      "retry": true,
+      "wait": 3600
+    },
+    {
+      "failed": true,
+      "retry": true,
+      "wait": 14400
+    },
+    {
+      "failed": true,
+      "retry": true,
+      "wait": 86400
+    },
+    {
+      "failed": true,
+      "retry": true,
+      "wait": 86400
+    },
+    {
+      "failed": false,
+      "retry": false,
+      "wait": 86400
+    },
+    {
+      "failed": true,
+      "retry": true,
+      "wait": 900
+    }
+  ],
   "deleted": {
     "current": {
       "_catalogue": {
@@ -862,6 +899,79 @@
         }
       },
       "wait": 86400
+    }
+  ],
+  "refusals": [
+    {
+      "after": {},
+      "changed_due": true,
+      "events": [
+        "provider=cartesia status=401"
+      ],
+      "marks": {
+        "cartesia": {
+          "key": "c0b9a244235c",
+          "status": 401
+        }
+      },
+      "provider": "cartesia",
+      "repeat_count": 1,
+      "same_due": false,
+      "status": 401
+    },
+    {
+      "after": {},
+      "changed_due": true,
+      "events": [
+        "provider=cartesia status=403"
+      ],
+      "marks": {
+        "cartesia": {
+          "key": "c0b9a244235c",
+          "status": 403
+        }
+      },
+      "provider": "cartesia",
+      "repeat_count": 1,
+      "same_due": false,
+      "status": 403
+    },
+    {
+      "after": {},
+      "changed_due": true,
+      "events": [],
+      "marks": {},
+      "provider": "cartesia",
+      "repeat_count": 2,
+      "same_due": true,
+      "status": 503
+    },
+    {
+      "after": {},
+      "changed_due": true,
+      "events": [
+        "provider=elevenlabs status=401"
+      ],
+      "marks": {
+        "elevenlabs": {
+          "key": "c0b9a244235c",
+          "status": 401
+        }
+      },
+      "provider": "elevenlabs",
+      "repeat_count": 1,
+      "same_due": false,
+      "status": 401
+    },
+    {
+      "after": {},
+      "changed_due": false,
+      "events": [],
+      "marks": {},
+      "provider": "elevenlabs",
+      "repeat_count": 4,
+      "same_due": false,
+      "status": 403
     }
   ],
   "startup": [

@@ -3650,6 +3650,12 @@ including an ElevenLabs-only refresh or a missing or older cache with no provide
 keys. Upgrading an older cache discards any stale catalogue rows the worker did
 not refetch. Voice labels remain available.
 
+**Voice names key refusals (PR 564, 21 Nov 2026).** Cartesia catalogue 401 and
+403 responses and ElevenLabs by-ID 401 responses stop lookups for that key. The
+file records the status and a SHA-256 fingerprint. A replacement key makes the
+cache due at startup even when the file is fresh. Transient catalogue failures
+retry the catalogue after 15 minutes, an hour, and four hours, then daily.
+
 **Hidden coordination** (the Python Host's PR 512). Fleet writes the global and per-chat
 visibility settings, publishes the directory, then emits the new effective choice with
 the roster hint. It never edits a conversation for this purpose. An explicit log mode reads

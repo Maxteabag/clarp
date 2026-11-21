@@ -501,3 +501,9 @@ worker PID or system service. Its job ID stays with the delegation across a Host
 the Rust cache's previous modification time intact. The Python Host can advance it
 when that pass also refreshes ElevenLabs names or discards old-format catalogue rows.
 Preserving the age keeps a due current-format cache eligible for the 15-minute retry.
+
+**Voice names catalogue retries (PR 564).** Rust retries only the Cartesia catalogue
+after a transient catalogue failure. Python selects the Cartesia provider for a retry
+and can also look up its missing voices by ID. Rust leaves those lookups to the next
+full refresh. Skipped passes, including a pass for a previously refused key, keep
+the daily schedule.
