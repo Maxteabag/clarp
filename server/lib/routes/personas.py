@@ -150,6 +150,8 @@ class PersonaRoutes:
                 avatar_symbol=str(data.get("avatar_symbol") or ""),
                 personality=str(data.get("personality") or ""),
                 avatar_base64=str(data.get("avatar_base64") or ""),
+                base_voice_id=(str(data["base_voice_id"]) if isinstance(data.get("base_voice_id"), str)
+                               else None),
             )
         except (ValueError, OSError) as exc:
             return self._json_error(409, str(exc))

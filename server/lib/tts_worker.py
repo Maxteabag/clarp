@@ -28,7 +28,7 @@ from .clip_delivery.chunked_file import ChunkedFileDelivery
 from .config import load as load_config
 from .log import log_exception
 from .paths import RuntimePaths
-from .voice_profile import NO_VOICE, provider_voice
+from .voice_profile import no_voice_reason, provider_voice
 from .tts_service import event_context as _event_context, emit_event as _emit
 from . import tts_mode
 from .voice import (
@@ -107,7 +107,8 @@ def synth_one(*,
                           detail={"provider": clip_route.provider})
                     # It used to end here unseen: say so, once for the turn.
                     _publish_tts_error(stream, row, agent, result.error, cfg=voice_config,
-                                       reason=NO_VOICE, provider=clip_route.provider)
+                                       reason=no_voice_reason(voice_config, agent, clip_route),
+                                       provider=clip_route.provider)
                     return True
                 else:
                     _emit("tts_worker", "route",
@@ -210,16 +211,22 @@ def _cartesia_can_stream(cfg, row: dict, agent: dict | None, clip_route) -> bool
 
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
     """False only when the routed provider certainly has no voice and no
-    fallback could speak instead (Cartesia and Gemini; others decide later).
-    The voice comes from the resolver the profile shows (voice_profile)."""
+    fallback could speak instead (Cartesia, Gemini, Google and ElevenLabs; Deepgram
+    always has its one default voice, and an adapter decides later). The voice comes
+    from the resolver the profile shows (voice_profile)."""
     if clip_route.fallback:
         return True
-    if clip_route.provider not in (CARTESIA, GEMINI, GOOGLE):
+    if clip_route.provider not in (CARTESIA, GEMINI, GOOGLE, ELEVENLABS):
         return True
     voice = provider_voice(cfg, row.get("voice_id"), agent, clip_route, clip_route.provider).voice
     if clip_route.provider == GOOGLE:
         from . import google_tts
         return voice in google_tts.VOICES
+    if clip_route.provider == ELEVENLABS:
+        # Ruling N: a value ElevenLabs refuses (nothing, a map's JSON, a uuid) used to be
+        # announced and then fail; it ends here as no_voice, as for the others.
+        from .voice_profile import elevenlabs_id_usable
+        return elevenlabs_id_usable(voice)
     return bool(voice)
 
 
