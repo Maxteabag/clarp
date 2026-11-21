@@ -20701,13 +20701,15 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
     std::fs::write(
         &owners,
         "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"key-in-the-owners-file\"\n\n\
-         [cartesia.voices]\nMaximus = \"voice-of-maximus\"\n",
+         [cartesia.voices]\nMaximus = \"voice-of-maximus\"\n\n\
+         [tts.agents.Stranger]\nprovider = \"gemini\"\n",
     )
     .unwrap();
     let args = ["--speech-keys", owners.to_str().unwrap()];
     // No engine outside is reached, whatever keys the machine that runs this test has.
     let world = [
         ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CLARP_GEMINI_ENDPOINT", voice.address.as_str()),
         ("CARTESIA_API_KEY", ""),
         ("GEMINI_API_KEY", ""),
         ("GOOGLE_VERTEX_API_KEY", ""),
@@ -20726,7 +20728,7 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
     };
     let answered = |session: &str, id: &str| {
         let mine = format!("u-{id}");
-        wait_for("the answer", || {
+        wait_for(&format!("the answer to {id} in {session}"), || {
             let rows = host.turns(session);
             let at = rows.iter().position(|row| row["id"] == mine);
             at.is_some_and(|at| rows[at + 1..].iter().any(|row| row["role"] == "assistant"))
@@ -21026,8 +21028,8 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
         }),
     );
     answered(&session, "m3");
-    // An agent nobody gave a voice is not heard, nothing is announced, and the apps are told
-    // why once for its turn, however many of its clips are not spoken (feature speech_outcome).
+    // Stranger has a voice from the pool, but its provider has no credentials.
+    // Neither clip is announced and the apps are told why once for the turn.
     let stranger = host.new_agent("Stranger");
     host.send(
         &stranger,
@@ -21056,10 +21058,10 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
         ),
         (
             &json!(stranger),
-            &json!("Not spoken: Cartesia Sonic has no voice for Stranger."),
-            &json!("no_voice"),
-            &json!("no_voice"),
-            &json!("cartesia")
+            &json!("Not spoken: Gemini TTS is not set up on this Host."),
+            &json!("not_configured"),
+            &json!("not_configured"),
+            &json!("gemini")
         )
     );
     assert!(
