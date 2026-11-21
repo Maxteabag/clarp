@@ -2610,16 +2610,26 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
-        if self.setup.record.backend == "claude"
-            && let Ask::Send {
-                message,
-                admission: Admission::Queue,
-                reservation: None,
-                ..
-            } = &ask
-            && message.origin.is_user()
-            && let Some(actor) = self.actor.as_mut()
-        {
+        let can_offer_steering = self.setup.record.backend == "claude"
+            && match &ask {
+                Ask::Send {
+                    message,
+                    admission,
+                    reservation: None,
+                    marks,
+                    ..
+                } => {
+                    let direct_user = *admission == Admission::Queue
+                        && message.origin.is_user()
+                        && marks.coordination.is_none();
+                    let desk_relay = *admission == Admission::Later
+                        && marks.user_word
+                        && marks.coordination.is_some();
+                    direct_user || desk_relay
+                }
+                _ => false,
+            };
+        if can_offer_steering && let Some(actor) = self.actor.as_mut() {
             // Read a tool call which reached the spool before this send, even if its wakeup
             // is still behind the send in the mailbox.
             let read = actor.spool_changed(now)?;
@@ -2648,15 +2658,6 @@ impl Worker {
                 marks,
                 answer,
             } => {
-                let direct_user = admission == Admission::Queue
-                    && message.origin.is_user()
-                    && marks.coordination.is_none();
-                let desk_relay = admission == Admission::Later
-                    && marks.user_word
-                    && marks.coordination.is_some();
-                let can_offer_steering = reservation.is_none()
-                    && (direct_user || desk_relay)
-                    && self.setup.record.backend == "claude";
                 let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
                     .map(|sent| match sent {

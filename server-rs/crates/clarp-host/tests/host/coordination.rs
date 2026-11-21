@@ -172,7 +172,7 @@ fn the_users_word_precedes_ordinary_work_across_a_hold_and_restart() {
     let relay = rows.iter().find(|row| row["id"] == "u-relay").unwrap();
     assert_eq!(relay["origin"], "agent");
     assert_eq!(relay["sender_session"], "desk");
-    assert_eq!(relay["audience"], "agents");
+    assert_eq!(relay["audience"], "user");
     let card_row = rows
         .iter()
         .find(|row| row["id"] == format!("u-{card}"))
