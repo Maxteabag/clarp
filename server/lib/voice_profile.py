@@ -120,6 +120,7 @@ class HostView:
     language: str                          # transcription.language (validated)
     agent_engines: dict[str, str]
     agent_languages: dict[str, str]
+    gone: dict[str, frozenset] = field(default_factory=dict)   # provider -> voices it deleted (voice_names)
     _version: str = field(default="", repr=False)
 
     @classmethod
@@ -147,6 +148,7 @@ class HostView:
             agent_engines=stt_language.parse_map(stored.get("transcription.agent_engines")),
             agent_languages=stt_language.parse_agent_languages(
                 stored.get("transcription.agent_languages")),
+            gone=_gone(),
         )
 
     @property
@@ -159,6 +161,11 @@ class HostView:
                 "language": self.language, "agent_engines": self.agent_engines,
                 "agent_languages": self.agent_languages, "names": _names_signature()})
         return self._version
+
+
+def _gone() -> dict[str, frozenset]:
+    from . import voice_names
+    return {p: voice_names.gone(p) for p in (CARTESIA, ELEVENLABS)}
 
 
 def _names_signature():
@@ -273,11 +280,14 @@ def _attempt(host: HostView, agent: Mapping, route: tts_mode.Route, provider: st
     choice = provider_voice(cfg, agent.get("voice_id"), agent, route, provider,
                             adapter_default=(adapter or {}).get("default_voice"))
     silent = None
+    deleted = bool(choice.voice) and choice.voice in host.gone.get(provider, ())
     if provider == CARTESIA:
-        silent = NO_VOICE if not choice.voice else (None if host.keys.get(CARTESIA) else NOT_CONFIGURED)
+        silent = (NO_VOICE if not choice.voice else VOICE_UNAVAILABLE if deleted
+                  else None if host.keys.get(CARTESIA) else NOT_CONFIGURED)
     elif provider == ELEVENLABS:
         silent = (NOT_CONFIGURED if not host.keys.get(ELEVENLABS)
-                  else None if elevenlabs_id_usable(choice.voice) else NO_VOICE)
+                  else NO_VOICE if not elevenlabs_id_usable(choice.voice)
+                  else VOICE_UNAVAILABLE if deleted else None)
     elif provider == GEMINI:
         silent = NO_VOICE if not choice.voice else (None if host.keys.get(GEMINI) else NOT_CONFIGURED)
     elif provider == GOOGLE:
