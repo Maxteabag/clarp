@@ -474,6 +474,9 @@ contract 108 are `user`. An agent that cannot leave a note (its backend gives it
 on a chat whose effective setting is `hide`, the rows of a turn that is `agents` are left out
 before the page limit: a page of N is N rows the user sees, and older pages page past them.
 A note is never left out, and neither are the turns of an agent that cannot leave a note.
+Nor is a relay of the user's words by the owner's front desk (a message from the verified own
+turn of a session in `[agents] front_desk_sessions`): its turn reads `user`, and steered into a
+turn that is `agents` it makes that turn `user` from then on, as the user's own message does.
 Every answer to a request with `coordination` (the newest page, each older page, each delta)
 echoes the policy it was read under: `coordination: {hidden, source, visibility}`, with
 `source` one of `global`, `chat`, `request`. A visible row that follows rows left out carries
@@ -774,8 +777,8 @@ session in `[agents] decision_on_behalf_sessions` answered on the user's
 behalf (not one that expired); and a message sent from the own turn (its
 verified `X-Clarp-Turn`) of a session the owner named in `[agents]
 front_desk_sessions`, the front desk that relays the user's words. Such a
-relay keeps origin `agent` and its sender: it reads, notifies and is marked
-as an agent's message; only its place in line changes. A request that only
+relay keeps origin `agent` and its sender: it reads and notifies as an agent's
+message; it goes first in line, and under hidden coordination it is never left out. A request that only
 names a front desk, without that session's turn token, gets nothing. Among themselves such items keep the order they were sent; every
 other item keeps its order behind them. An item already taken once (its launch
 failed, or the release drain handed it over) is not overtaken. Nothing else
