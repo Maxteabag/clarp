@@ -20,7 +20,7 @@ introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 19 Nov 2026 
 `background_job_cancel_generation`, `durable_task_goals`, `goal_updater`, `goal_keeper_receipts`,
 `goal_keeper_stalled`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`, `render_spec`, `artifact_pins`,
 `decision_lifecycle`, `decision_on_behalf`, `quiet_agents`, `turn_slot_repair`, `text_input_requests`, `push_grants`, `push_unregister`, `desktop_send_quiet_push`,
-`snapshot_without_archived`, `helper_agents`, `agent_fork`, `media`, `html_reports`, `html_report_revisions`,
+`snapshot_without_archived`, `helper_agents`, `agent_fork`, `media`, `media_manage`, `html_reports`, `html_report_revisions`,
 `html_form_network`, `html_form_events`, `html_form_reply_audio`, `attention_index`, `group_calls`, `agent_rings`, `agent_ring_live`,
 `agent_ring_device_optout`, `agent_ring_listen_first`, `agent_call_live`, `call_transcription_policy`, `oracle`, `oracle_contact`, `oracle_direct_contact`, `oracle_gemini_voice`,
 `oracle_context_memory`, `oracle_earcons`, `oracle_handoff`, `heartbeat`, `launch_directories`, `backend_quota`, `harness_model_providers`, `live_activity_push` on a Host that

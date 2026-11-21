@@ -5,6 +5,10 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     let place = Place::new("media-manage");
     let admin = "test-administrator";
     let host = place.start_with_token(admin);
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["media_manage"],
+        113
+    );
     let session = host.new_agent("Gallery owner");
     let (phone, _) = pair(&host, "Gallery reader", "limited");
     let heard = host.listen_at(&format!("/events?token={admin}"));
