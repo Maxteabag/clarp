@@ -45,7 +45,9 @@ def runtime_enforces(ctx) -> bool:
         return True
     try:
         capabilities = runtime.status().get("capabilities") or {}
-    except Exception:  # noqa: BLE001 - unknown is not ready; the caller refuses and says so
+    except Exception as exc:  # noqa: BLE001 - unknown is not ready; the caller refuses and says so
+        from .log import log_exception
+        log_exception("agentMovesRuntimeCheckFail", exc)
         return False
     return isinstance(capabilities, dict) and capabilities.get(RUNTIME_CAPABILITY) is True
 
