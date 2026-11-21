@@ -433,14 +433,12 @@ fn a_stopped_turn_keeps_earlier_output_and_discards_output_from_retirement() {
     world.hint(&mut actor);
 
     let tail = actor.tail(10).unwrap();
-    assert!(
-        tail.entries
-            .iter()
-            .all(|row| !matches!(&row.entry, Entry::Reply(_)))
-    );
-    assert!(tail.entries.iter().any(|row| matches!(
-        &row.entry, Entry::TurnEnd(end) if end.closes == "u-1" && end.status == "interrupted"
-    )));
+    assert_eq!(tail.entries.len(), 1, "the late reply is not a row");
+    let row = &tail.entries[0];
+    assert_eq!(row.entry.id(), "u-1");
+    let end = row.turn.as_ref().unwrap();
+    assert_eq!(end.closes, "u-1");
+    assert_eq!(end.status, "interrupted");
 
     world.send(&mut actor, "u-2", "stop this too", Admission::Queue);
     world.says(2, "Words printed before Stop.");
