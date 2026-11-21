@@ -136,6 +136,9 @@ class _TurnSpec:
     # a steer offered at its admission is a fresh send's, not a queue launch's,
     # so a Stop's fence still refuses it (_record_launch_attempt). In memory only.
     arrived_waiting: bool = False
+    # This turn takes over one that printed nothing (issue 491, part B): the
+    # Claude launch's plan (takeover.takeover_plan). In memory only.
+    takeover: Any = None
 
 
 def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:

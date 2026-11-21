@@ -336,6 +336,21 @@ class Backend:
         """
         return ""
 
+    # How a turn of this backend that printed nothing is taken over by the
+    # user's next message (issue 491, part B): '' = never. Only a backend with
+    # its own recording of freeze, kill and resume sets one.
+    takeover_strategy = ""
+
+    def takeover_ready(self) -> bool:
+        """The installed CLI is one the takeover was recorded on (or later)."""
+        return False
+
+    def takeover_plan(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                      running_trace: str, first_text: str) -> dict | None:
+        """Judged while the running turn is frozen: how the turn that takes over
+        is launched, or None (no takeover; the turn is thawed and runs on)."""
+        return None
+
     def find_transcript(self, session_id: str,
                         home: pathlib.Path | None = None, *,
                         cwd: str = "") -> pathlib.Path | None:

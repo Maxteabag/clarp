@@ -430,6 +430,11 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             }
             if cells:
                 turn["display_cells"] = cells
+            if t == "user" and not tools and len([p for p in text_parts if str(p).strip()]) >= 2:
+                # One user line of several text blocks: a turn that took over one that
+                # printed nothing gives both messages so (issue 491, part B); the import
+                # links each block to its own client row (message_writes).
+                turn["parts"] = [str(p) for p in text_parts if str(p).strip()]
             if t == "assistant" and isinstance(msg.get("id"), str) and msg["id"]:
                 # The provider's message id: the key its live row was streamed under (R107).
                 turn["provider_id"] = msg["id"]

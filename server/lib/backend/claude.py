@@ -44,6 +44,7 @@ from .. import agents as agents_db
 from .. import config as _config
 from .. import events
 from .claude_models import claude_model_pin
+from .. import takeover as turn_takeover_steps
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..stream_pacing import LivePacer
@@ -56,6 +57,41 @@ from ..voice_preamble import persona_identity_instruction
 from ..backend_catalogue import CLAUDE
 from .base import CatalogueDefault, BackendBrand, CliMissing, Backend, CompactionStrategy, resolve
 from .stream_json import launch, start_drain, stop_after_drain_failure
+
+
+# The namespace of the uuids the Host writes on Claude's stdin lines.
+_PROMPT_UUID_NAMESPACE = uuid.UUID("5f0e7c52-9a5b-4d9e-8f53-2f0b9b1d4910")
+
+
+def prompt_uuid(trace_id: str) -> str:
+    """The uuid the Host writes on the stdin line of the turn of ``trace_id``:
+    the same for the same trace, so it can be named again later (a takeover
+    drops that entry, issue 491). A turn without a trace gets a fresh one."""
+    trace = (trace_id or "").strip()
+    if not trace:
+        return str(uuid.uuid4())
+    return str(uuid.uuid5(_PROMPT_UUID_NAMESPACE, trace))
+
+
+def note_output(handle, ev: dict) -> None:
+    """What a takeover judges (issue 491, part B): every line the drain has
+    read, and whether any of them was output: a word or a tool call, in a
+    stream event or a whole assistant message. Thinking alone is nothing."""
+    handle.lines_read = int(getattr(handle, "lines_read", 0)) + 1
+    if getattr(handle, "output_seen", False):
+        return
+    kinds = []
+    if ev.get("type") == "stream_event":
+        inner = ev.get("event") or {}
+        block = inner.get("content_block") or {}
+        delta = inner.get("delta") or {}
+        kinds = [block.get("type"), delta.get("type")]
+    elif ev.get("type") == "assistant":
+        content = (ev.get("message") or {}).get("content") or []
+        kinds = [part.get("type") for part in content if isinstance(part, dict)]
+    if any(kind in {"text", "text_delta", "tool_use", "input_json_delta", "server_tool_use"}
+           for kind in kinds):
+        handle.output_seen = True
 
 
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path | None:
@@ -306,7 +342,7 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
 _SPAWN_KWARGS = frozenset({
     "text", "cwd", "backend_session_id", "is_new_session", "session",
     "agent_id", "on_session_init", "on_result", "on_error", "trace_id",
-    "model", "effort", "stream", "isolated", "hook_session",
+    "model", "effort", "stream", "isolated", "hook_session", "takeover",
 })
 
 
@@ -349,6 +385,21 @@ class ClaudeBackend(Backend):
     )
     fallback_models = CatalogueDefault('fallback_models')
 
+
+    # Resume before message 1 and drop it, both messages in one line (recording cases 5, 7).
+    takeover_strategy = "resume_pair"
+
+    def takeover_ready(self) -> bool:
+        from .. import takeover
+        return takeover.claude_version_ok(self.executable(_config.load()))
+
+    def takeover_plan(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                      running_trace: str, first_text: str) -> dict | None:
+        from .. import takeover
+        drops_turn = prompt_uuid(running_trace)
+        path = self.find_transcript(session_id, home, cwd=cwd)
+        return takeover.takeover_plan(takeover.session_facts(path, drops_turn),
+                                      drops_turn, first_text)
 
     # --- the runner -------------------------------------------------------
 
@@ -460,8 +511,18 @@ class ClaudeBackend(Backend):
         stream=None,
         isolated: bool = False,
         hook_session: str | None = None,
+        takeover: dict | None = None,
     ) -> TurnHandle:
         """Spawn the configured Claude CLI for ONE turn carrying `text` as the prompt.
+
+        ``takeover`` (issue 491, part B): this turn takes over one that was
+        ended before it printed anything. ``{"first": text, "resume_at": U,
+        "drops_turn": M}``: resume the session at entry U, dropping turn M
+        (message 1, never answered), and give BOTH messages as one user line
+        of two text blocks, so one answer covers both. With no ``resume_at``
+        (the session's first turn), message 1 is already the session's last,
+        unanswered entry: a plain resume with message 2 alone (recording case
+        7, first-plain).
 
         The subprocess is started immediately and a daemon thread is started
         that drains its stdout, parsing stream-json events and calling the
@@ -487,6 +548,11 @@ class ClaudeBackend(Backend):
             persona=persona,
             session=session,
         )
+        blocks = [text]
+        if takeover and takeover.get("resume_at"):
+            cmd += ["--resume-session-at", str(takeover["resume_at"]),
+                    "--resume-drops-turn", str(takeover["drops_turn"])]
+            blocks = [str(takeover.get("first") or ""), text]
         cli_bin = cmd[0]
         if shutil.which(cli_bin) is None:
             hint = (
@@ -500,9 +566,15 @@ class ClaudeBackend(Backend):
         # (clarp used to accept the positional form, hence the historical bug:
         # passing the prompt as argv + stdin=DEVNULL made clarp exit rc=0 with no
         # init/result — the "clarp exited without stream-json result" symptom.)
+        # Every line carries a uuid, which Claude Code keeps as that entry's uuid
+        # in its session file. It is derived from the turn's trace, so the Host
+        # can name this prompt again without storing it: a takeover drops it
+        # with --resume-drops-turn (issue 491, part B).
         user_msg = json.dumps({
             "type": "user",
-            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            "uuid": prompt_uuid(trace_id),
+            "message": {"role": "user",
+                        "content": [{"type": "text", "text": block} for block in blocks]},
         })
         env_session = session if hook_session is None else hook_session
         flag = "new" if is_new_session else ("resume" if backend_session_id else "∅")
@@ -536,6 +608,10 @@ class ClaudeBackend(Backend):
                 proc.stdin.close()
         except (BrokenPipeError, OSError) as e:
             log_exception("clarpStdinWriteFail", e, detail=trace_id)
+        # A takeover may judge this turn (issue 491, part B): the drain below
+        # tells it what the CLI has printed, the process group lets it freeze.
+        handle.takeover_capable = not isolated and handle.process_group is not None
+        handle.takeover_of = bool(takeover)
         self.register_handle("" if isolated else agent_id, handle)
         start_drain(
             handle, self._drain_stdout, backend=self.runner,
@@ -613,7 +689,7 @@ class ClaudeBackend(Backend):
         try:
             if proc.stdout is None:
                 return
-            for line in proc.stdout:
+            for line in turn_takeover_steps.read_lines(proc.stdout, handle):
                 line = line.rstrip("\n")
                 if not line:
                     continue
@@ -625,6 +701,8 @@ class ClaudeBackend(Backend):
                     continue
                 typ = ev.get("type")
                 sub = ev.get("subtype")
+                if handle is not None:
+                    note_output(handle, ev)
                 if evidence.suppress_event(ev):
                     continue
                 items.on_event(ev)
