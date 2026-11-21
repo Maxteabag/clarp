@@ -26,6 +26,13 @@ fn pairing_identity_has_its_own_budget_and_limited_devices_may_revoke_only_thems
     let mut identity = vectors["identity"][0].clone();
     identity["server_id"] = info["server_id"].clone();
     identity["contract"]["host"] = info["contract"]["host"].clone();
+    assert_eq!(info["contract"]["features"]["pairing_identity"], 114);
+    assert!(
+        info["capabilities"]["features"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("pairing_identity"))
+    );
     assert!(!identity["server_id"].as_str().unwrap().is_empty());
 
     let body = |answer: &Fetched| serde_json::from_slice::<Value>(&answer.body).unwrap();
