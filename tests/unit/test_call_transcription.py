@@ -929,3 +929,36 @@ def test_L2_openai_whisper_failing_after_its_boundary_and_an_unnoted_engine_is_n
     disabled.available = True                                        # its transcribe raises, unnoted
     out = _transcribe(disabled, scope=_scope(env), tid="tx-disabled")
     assert _attempts(out)[0][1:] == ("error", None)
+
+
+# R175: never the same audio to one provider twice, in a call too.
+def test_a_stored_duplicate_engine_list_sends_a_call_clip_to_its_provider_once(env, monkeypatch):
+    recorded = _cloud(monkeypatch, fail_after=("elevenlabs",))
+    # Stored before saving dropped repeats: written as it was.
+    settings_store.set_text("transcription.agent_engines", json.dumps(
+        {"mike": "elevenlabs:scribe_v2,elevenlabs:scribe_v2,deepgram:nova-3"}))
+    out = _transcribe(_whisper(), scope=_scope(env))
+    assert [provider for provider, _language in recorded] == ["elevenlabs", "deepgram"]
+    assert [(a[0], a[1]) for a in _attempts(out)] == [
+        ("elevenlabs:scribe_v2", "error"), ("deepgram:nova-3", "ok")]
+
+
+def test_a_call_clip_skips_another_model_of_a_provider_it_reached(env, monkeypatch):
+    from lib import cartesia_stt_ws
+    recorded = _cloud(monkeypatch, fail_after=("cartesia",))
+    monkeypatch.setattr(cartesia_stt_ws, "transcribe",           # ink-2's socket path, never reached
+                        lambda **kw: (recorded.append(("cartesia-ws", kw.get("language"))), ("hei", 1.0))[1])
+    _set(agent_engines={"mike": "cartesia:ink-whisper,cartesia:ink-2,deepgram:nova-3"})
+    out = _transcribe(_whisper(), scope=_scope(env))
+    assert [provider for provider, _language in recorded] == ["cartesia", "deepgram"]
+    assert out.payload["stt"]["attempts"][1] == {
+        "engine": "cartesia:ink-2", "outcome": "skipped", "reason": "provider_already_sent"}
+    assert out.payload["stt"]["effective_engine"] == "deepgram:nova-3"
+
+
+def test_call_engines_are_saved_and_read_each_once():
+    _set(call_engines="google:chirp_3,google:chirp_3,elevenlabs:scribe_v2")
+    assert ct.call_engines() == ["google:chirp_3", "elevenlabs:scribe_v2"]
+    settings_store.set_text(ct.CALL_ENGINES_KEY, "google:chirp_3,google:chirp_3")
+    assert ct.call_engines() == ["google:chirp_3"]
+    assert ct.policy_snapshot()["engines"] == ["google:chirp_3"]

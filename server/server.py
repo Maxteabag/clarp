@@ -118,6 +118,7 @@ from lib.transcript_streamer import TranscriptStreamer  # noqa: E402
 from lib.tts_worker import TTSWorker  # noqa: E402
 from lib.workers import BOOT, SERVING, Worker, WorkerSet, started  # noqa: E402
 from lib.cache_warmup import CacheWarmupWorker  # noqa: E402
+from lib.voice_names import VoiceNamesWorker, worker_enabled as voice_names_worker_enabled  # noqa: E402
 
 
 from lib.config import load as load_config  # noqa: E402
@@ -188,6 +189,9 @@ class ContextHTTPServer(ThreadingHTTPServer):
         self._device_connections_lock = threading.Lock()
         from lib.request_security import FailureLimiter
         self.auth_failures = FailureLimiter()
+        # GET /pairing/identity answers without a token: its own budget per
+        # source, so reading it never spends the pairing exchange's failures.
+        self.identity_reads = FailureLimiter(limit=30)
         super().__init__(addr, handler_cls)
 
     def register_device_connection(self, connection, principal: str = "") -> bool:
@@ -518,6 +522,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-events": "_handle_voice_events_get",
         "/voice-events/utterances": "_handle_voice_utterances_get",
         "/server-info": "_handle_server_info",
+        "/pairing/identity": "_handle_pairing_identity",
         "/paired-devices": "_handle_paired_devices",
         "/devices/push-tokens": "_handle_push_tokens",
         "/server-update": "_handle_server_update_status",
@@ -1111,7 +1116,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     # is intentionally public so the client can bootstrap and pick up the
     # token from the URL on first visit.
     _PUBLIC_EXACT = {"/", "/sw.js", "/manifest.json",
-                     "/styles.css", "/icon.png", "/pairing/exchange"}
+                     "/styles.css", "/icon.png", "/pairing/exchange", "/pairing/identity"}
     _PUBLIC_PREFIXES = ("/static/", "/notification-avatars/")
 
     def principal(self) -> Principal:
@@ -1214,6 +1219,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     def _device_forbidden(self, path: str, method: str) -> bool:
         if getattr(self, "_request_device_scope", "") != "limited":
             return False
+        if path == "/paired-devices/revoke" and method == "POST":
+            return False    # the handler lets a limited device revoke itself, no other (R172)
         if any(
             path == prefix.rstrip("/") or path.startswith(prefix)
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
@@ -3344,6 +3351,9 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # catalogue, artifacts) once the listeners are up, so the first client
         # after a restart does not pay for a cold page cache on the request path.
         Worker("cache-warmup", lambda: started(CacheWarmupWorker()), stage=SERVING),
+        # Voice names for the profile's voice_label, fetched off every read path.
+        Worker("voice-names", lambda: started(VoiceNamesWorker()), stage=SERVING,
+               enabled=voice_names_worker_enabled),
         Worker("bookkeeping-listeners", start_bookkeeping_listeners,
                stop=lambda thread: None, stage=SERVING),
         Worker("decision-delivery", lambda: started(

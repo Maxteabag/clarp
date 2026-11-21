@@ -295,7 +295,16 @@ def test_structural_the_server_main_seals_then_bootstraps_before_its_context():
     names = _calls(block.body)
     seal, ensure, context = _ordered(
         names, "seal_inherited_lock_fds", "ensure_instance_generation", "ServerContext.production")
-    assert names[0] == "seal_inherited_lock_fds" and ensure == seal + 1 and ensure < context
+    # The seal must come before anything that can fork+exec a child (which would inherit fds
+    # 8/9). Since #276 the schema guard runs first: it only reads the database's version
+    # (stored_version: a header read or a read-only sqlite3 connection, no subprocess) and
+    # may refuse the start, so nothing before the seal starts a child. Any other call
+    # placed ahead of the seal fails here until it is shown to start none.
+    schema_guard_prelude = {
+        "pathlib.Path(__file__).resolve", "pathlib.Path", "_schema_guard.check_host_start",
+        "_state_db.run_as_service", "_schema_guard.check_foreign_start", "print", "SystemExit"}
+    assert set(names[:seal]) <= schema_guard_prelude, names[:seal]
+    assert ensure == seal + 1 and ensure < context
 
 
 def test_structural_the_entrypoint_bootstraps_after_the_locks_and_before_the_database():

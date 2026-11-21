@@ -186,6 +186,19 @@ pub struct Commentary {
     pub reply: String,
 }
 
+/// What an agent left for its user from one of its turns (`POST /agent-notes`): always shown,
+/// whatever turn wrote it, also one that answers another agent. Written once under its id
+/// (`note-<agent>-<note id>`), never rewritten.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    pub id: String,
+    pub turn: u64,
+    pub text: String,
+    /// The trace of the turn that wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+}
+
 impl Commentary {
     /// What says of the reply with this id that tool work followed it.
     pub fn of(reply: &str, turn: u64) -> Self {
@@ -298,6 +311,15 @@ pub struct TurnEnd {
     /// newest it said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<LimitsSaid>,
+    /// How many notes the turn left for its user (`POST /agent-notes`), counted as they were
+    /// written, never by reading the turn's rows. Absent: none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub note_count: u32,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 impl TurnEnd {
@@ -327,6 +349,7 @@ impl TurnEnd {
             cost_so_far: None,
             total: None,
             limits: None,
+            note_count: 0,
         })
     }
 }
@@ -351,6 +374,7 @@ pub enum Entry {
     Imported(Imported),
     TurnEnd(TurnEnd),
     Commentary(Commentary),
+    Note(Note),
 }
 
 impl Entry {
@@ -364,6 +388,7 @@ impl Entry {
             Self::Imported(_) => kind::IMPORTED,
             Self::TurnEnd(_) => kind::TURN_END,
             Self::Commentary(_) => kind::COMMENTARY,
+            Self::Note(_) => kind::AGENT_NOTE,
         }
     }
 
@@ -375,7 +400,11 @@ impl Entry {
             Self::Tool(call) => call.reply.as_deref(),
             Self::Commentary(commentary) => Some(&commentary.reply),
             Self::TurnEnd(end) => Some(&end.closes),
-            Self::Message(_) | Self::Reply(_) | Self::Notice(_) | Self::Imported(_) => None,
+            Self::Message(_)
+            | Self::Reply(_)
+            | Self::Notice(_)
+            | Self::Imported(_)
+            | Self::Note(_) => None,
         }
     }
 
@@ -389,6 +418,7 @@ impl Entry {
             Self::Imported(imported) => &imported.id,
             Self::TurnEnd(end) => &end.id,
             Self::Commentary(commentary) => &commentary.id,
+            Self::Note(note) => &note.id,
         }
     }
 
@@ -401,6 +431,7 @@ impl Entry {
             Self::Tool(call) => call.origin.name(),
             Self::Imported(imported) => imported.row["origin"].as_str().unwrap_or("user"),
             Self::Notice(_) | Self::TurnEnd(_) | Self::Commentary(_) => "user",
+            Self::Note(_) => crate::coordination::NOTE_ORIGIN,
         }
     }
 
@@ -413,6 +444,7 @@ impl Entry {
             Self::Imported(_) => None,
             Self::TurnEnd(end) => Some(end.turn),
             Self::Commentary(commentary) => Some(commentary.turn),
+            Self::Note(note) => Some(note.turn),
         }
     }
 
@@ -426,6 +458,7 @@ impl Entry {
             Self::Imported(imported) => serde_json::to_vec(imported),
             Self::TurnEnd(end) => serde_json::to_vec(end),
             Self::Commentary(commentary) => serde_json::to_vec(commentary),
+            Self::Note(note) => serde_json::to_vec(note),
         }?;
         let mut item = NewItem::new(self.kind(), ts_ms, body).keyed(self.id());
         item.turn = self.turn();
@@ -442,6 +475,7 @@ impl Entry {
             kind::IMPORTED => Self::Imported(serde_json::from_slice(&item.body)?),
             kind::TURN_END => Self::TurnEnd(serde_json::from_slice(&item.body)?),
             kind::COMMENTARY => Self::Commentary(serde_json::from_slice(&item.body)?),
+            kind::AGENT_NOTE => Self::Note(serde_json::from_slice(&item.body)?),
             _ => return Ok(None),
         }))
     }
@@ -580,6 +614,7 @@ mod tests {
                 cost_so_far: None,
                 total: None,
                 limits: None,
+                note_count: 0,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {
