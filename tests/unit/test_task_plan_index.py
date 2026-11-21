@@ -104,3 +104,28 @@ def test_a_rolled_back_write_leaves_no_summary_behind(owner):
     assert task_plans.plan_index()[plan]['state'] == 'blocked'       # read whole, not kept
     c.execute("ROLLBACK")
     assert task_plans.plan_index()[plan]['state'] != 'blocked'
+
+
+def test_a_claimed_plan_is_read_again_only_when_it_changed(owner, monkeypatch):
+    """The goal tick reads the plans it may claim whole every 15 s; a plan's row is kept by
+    its version, within a byte budget, and read again only once a write moved the version."""
+    plan_id = _goal('claimed')['plan_id']
+    first = task_plans.claim_row(plan_id)
+    seen = _reads()
+    try:
+        again = task_plans.claim_row(plan_id)
+    finally:
+        _stop()
+    assert again == first and not [s for s in seen if 'SELECT * FROM task_plans' in s]
+    _set_continuation(plan_id, state='retry')
+    assert json.loads(task_plans.claim_row(plan_id)['goal_json'])['continuation']['state'] == 'retry'
+    # A goal bigger than the whole budget is read every time, never kept.
+    monkeypatch.setattr(task_plans, "CLAIM_ROWS_MAX_BYTES", 10)
+    _set_continuation(plan_id, state='ready')
+    task_plans.claim_row(plan_id)
+    seen = _reads()
+    try:
+        task_plans.claim_row(plan_id)
+    finally:
+        _stop()
+    assert [s for s in seen if 'SELECT * FROM task_plans' in s]

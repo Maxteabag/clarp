@@ -541,11 +541,8 @@ def _commit(plan, text, stored, goal, *, enrolled=True):
 
 
 def _claim(plan_id, now):
-    plan = (
-        db.conn()
-        .execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,))
-        .fetchone()
-    )
+    # Kept until the plan changes (task_plans.claim_row): read-only here, as the row was.
+    plan = task_plans.claim_row(plan_id)
     if not plan or plan["status"] != "active" or not plan["recovery_enabled"]:
         return None
     text = plan["goal_json"]
