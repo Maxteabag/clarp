@@ -244,8 +244,11 @@ def generate_image(*, api_key, context, question, review=review_image, plan=imag
 class _PodcastDetour:
     """Podcast behaviour shared by both engines; mixed in ahead of a Conversation."""
 
-    def _start_detour(self, context, images, generate, history_id, media_dir, clock):
+    def _start_detour(self, context, images, generate, history_id, media_dir, clock, stream=None):
         self.context = context
+        # The Host's events stream: a saved concept image is announced on it (media-changed
+        # created) once its save has committed. None outside a Host (tests, tools).
+        self.stream = stream
         self.images = images
         self.generate = generate
         self.user_text = ""
@@ -260,6 +263,22 @@ class _PodcastDetour:
     def _refuse(self, event):
         """Whether to answer the event here instead of passing it on."""
         return False
+
+    def _announce_saved(self, saved):
+        """media-changed created for a concept image that is now in its chat's gallery. Never
+        raises: the image is saved and shown either way; a lost event costs one re-read."""
+        if self.stream is None or not saved.get("asset_id"):
+            return
+        try:
+            from . import events, media_store
+            row = media_store.lookup(saved["asset_id"])
+            if row and row["deleted_at"] is None:
+                events.broadcast(self.stream, events.media_changed(
+                    session=row["session"], agent_id=row["agent_id"], asset_id=row["asset_id"],
+                    change="created", at=row["created_at"]))
+        except Exception as exc:  # noqa: BLE001 - the save stands; the event is a hint
+            from .log import log_exception
+            log_exception("podcastMediaChangedFail", exc)
 
     def _session_over(self):
         return self.close_sent
@@ -322,6 +341,8 @@ class _PodcastDetour:
                         from . import podcast_history
                         saved = podcast_history.save_image(self.history_id, encoded=encoded,
                             question=question, question_event_id=question_event_id, media_dir=self.media_dir)
+                        # save_image has committed (or raised and rolled back, and nothing is sent).
+                        self._announce_saved(saved)
                     self.downstream({"type": "podcast.image", "question": question,
                                      "revision": revision, "jpeg_base64": encoded, **saved})
         except Exception:
@@ -337,12 +358,12 @@ class PodcastConversation(_PodcastDetour, Conversation):
     def __init__(self, upstream, downstream, api_key, context, *, images=False,
                  tools, router_backend="api", clock=time.monotonic, generate=generate_image,
                  history_id=None, media_dir=None, wire=None, memory=None, provider_session=None,
-                 delegation_strategy="operator", router_reuse=False):
+                 delegation_strategy="operator", router_reuse=False, stream=None):
         super().__init__(upstream, downstream, tools, api_key, clock,
                          router_backend=router_backend, reference_context=context, wire=wire,
                          memory=memory, provider_session=provider_session,
                          delegation_strategy=delegation_strategy, router_reuse=router_reuse)
-        self._start_detour(context, images, generate, history_id, media_dir, clock)
+        self._start_detour(context, images, generate, history_id, media_dir, clock, stream)
 
     def receive(self, event):
         with self.lock:
@@ -351,11 +372,12 @@ class PodcastConversation(_PodcastDetour, Conversation):
 
 class StablePodcastConversation(_PodcastDetour, oracle_live_stable.Conversation):
     def __init__(self, upstream, downstream, api_key, context, *, images=False,
-                 clock=time.monotonic, generate=generate_image, history_id=None, media_dir=None):
+                 clock=time.monotonic, generate=generate_image, history_id=None, media_dir=None,
+                 stream=None):
         # Satisfies the transport's lifecycle without any agent operations.
         tools = SimpleNamespace(lock=threading.Lock(), delegations={}, results=lambda: [])
         super().__init__(upstream, downstream, tools, api_key, clock)
-        self._start_detour(context, images, generate, history_id, media_dir, clock)
+        self._start_detour(context, images, generate, history_id, media_dir, clock, stream)
 
     def receive(self, event, source=None):
         if source is not None and source is not self.upstream:
