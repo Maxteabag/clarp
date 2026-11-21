@@ -6,7 +6,7 @@ import runner
 RUNS = {
     "shim": ["test", "-p", "clarp-shim", "--test", "shim", "--", "streaming_input_closes_at_the_first_top_level_stdout_result"],
     "ack": ["test", "-p", "clarp-shim", "--test", "shim", "--", "stdin_refuses_a_write_when_the_tool_has_closed_its_read_end"],
-    "stream": ["test", "-p", "clarp-kernel", "--lib", "only_the_live_tool_window_takes_new_input"],
+    "stream": ["test", "-p", "clarp-kernel", "--lib", "an_open_claude_turn_takes_input_until_its_first_top_level_result"],
     "journal": ["test", "-p", "clarp-kernel", "--lib", "a_follow_up_enters_on_its_echo_and_an_unread_one_still_obeys_stop"],
     "reveal": ["test", "-p", "clarp-actor", "--lib", "revealing_a_turn_sends_its_old_rows_through_a_delta"],
     "receipt": ["test", "-p", "clarp-kernel", "--lib", "a_read_follow_up_is_a_user_entry_or_a_queued_command_attachment"],
@@ -24,14 +24,12 @@ H = "clarp-host/src/agent.rs"
 D = "clarp-actor/src/conversation.rs"
 O = "clarp-actor/src/orphan.rs"
 
+# PR 607 removes tool-window tracking. The first top-level result still fences input.
 PLANTS = [
     (S, "shim", "the initial prompt closes streaming stdin", "if args.stdin_until.is_none() {", "if args.stdin_until.is_some() {"),
     (S, "shim", "no result closes stdin", 'event.get("type").and_then(serde_json::Value::as_str) == Some(kind)', 'event.get("type").and_then(serde_json::Value::as_str) != Some(kind)'),
     (S, "ack", "queue admission is success even with a broken pipe", "&& receipt.recv() != Ok(true)", "&& receipt.recv() == Ok(true)"),
-    (K, "stream", "text-only turns also take input", "!self.input_ended && !self.tools.is_empty()", "!self.input_ended"),
-    (K, "stream", "the input fence can be reopened", "!self.input_ended && !self.tools.is_empty()", "!self.tools.is_empty()"),
-    (K, "stream", "the first tool result clears every running tool", "self.tools.remove(id);", "self.tools.remove(id); self.tools.clear();"),
-    (K, "stream", "a tool still runs after its result", "self.tools.remove(id);", "let _ = id;"),
+    (K, "stream", "the input fence can be reopened", "!self.input_ended", "true"),
     (K, "stream", "user replays are ordinary output", 'if event["type"] == "user" && event["isReplay"] == true {', 'if event["type"] == "user" && event["isReplay"] == false {'),
     (K, "stream", "the wrong field identifies a replay", 'nonempty(&event["uuid"])', 'nonempty(&event["session_id"])'),
     (K, "stream", "results lose their prompt UUIDs", 'event["user_message_uuids"]', 'event["uuid"]'),

@@ -2792,8 +2792,8 @@ impl Worker {
                 _ => false,
             };
         if can_offer_steering && let Some(actor) = self.actor.as_mut() {
-            // Read a tool call which reached the spool before this send, even if its wakeup
-            // is still behind the send in the mailbox.
+            // Read any input fence that reached the spool before this send, even if its
+            // wakeup is still behind the send in the mailbox.
             let read = actor.spool_changed(now)?;
             self.after(read);
         }
