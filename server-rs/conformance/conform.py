@@ -576,6 +576,19 @@ PORTRAIT = re.compile(r'portrait_(?:legacy_[0-9a-f]+_[0-9a-f]{24}|[A-Za-z0-9_]{2
 RING_CLIP = re.compile(r'/audio/1[5-9][0-9]{11}(__[A-Za-z0-9._-]+\.mp3)')
 
 
+# A media page's next_before carries the wall clock of its last image, by creation or favourite.
+# Keep whether there is one, its kind and its asset, including an asset already named in a capture.
+# The cursor's own rule is held by gallery-vectors.
+MEDIA_CURSOR = re.compile(r'^([cf])1[5-9][0-9]{11}\.(<asset:[0-9]+>|[\w-]{1,180})\Z')
+
+
+def settle_media_cursor(body):
+    before = body.get('next_before')
+    if isinstance(before, str):
+        body['next_before'] = MEDIA_CURSOR.sub(r'\1<time>.\2', before)
+    return body
+
+
 def settle(value, sessions):
     """Rewrites what differs between two runs of the same Host by nature, where the harness's
     normalizer does not know the field, and leaves out the agents a scenario is not about."""
@@ -617,7 +630,7 @@ def settle(value, sessions):
         out[key] = settle(item, sessions)
     if 'server_id' in out and 'capabilities' in out and out.get('name'):
         out['name'] = '<name>'  # `GET /server-info`: a Host is called what its machine is called
-    return out
+    return settle_media_cursor(out)
 
 
 def told_to_wait(headers):
@@ -1260,7 +1273,8 @@ def load_golden(directory: Path, chosen) -> dict:
                            ('core', directory / 'core' / f"{scenario['id']}.json")):
             if not path.is_file():
                 raise SystemExit(f'nothing is written down for {scenario["id"]} in {path.parent}: record it first')
-            views[view] = json.loads(path.read_text())
+            # Judge can read a capture written before the media cursor's wall clock was settled.
+            views[view] = json.loads(path.read_text(), object_hook=settle_media_cursor)
         golden[scenario['id']] = views
     return golden
 
@@ -1526,7 +1540,20 @@ def selftest() -> list:
     assert asked == [(attempt, ['s', 't']) for attempt in range(1, UNFINISHED_TRIES + 1)], asked
     assert len(lines) == 2 and all('never did' in line for line in lines), lines
     asking = asking_tried(stamped)
-    return ['the rule for a scenario whose every recording carries the mark of a defect (R19, R115): '
+    cursor_cases = [
+        ({'next_before': 'c1795250046310.<asset:4>'}, {'next_before': 'c<time>.<asset:4>'}),
+        ({'next_before': 'f1795250220644.asset_4-'}, {'next_before': 'f<time>.asset_4-'}),
+        ({'next_before': None}, {'next_before': None}),
+        ({'before': 'c1795250046310.<asset:4>'}, {'before': 'c1795250046310.<asset:4>'}),
+        ({'next_before': 'c12345.<asset:4>'}, {'next_before': 'c12345.<asset:4>'}),
+        ({'next_before': 'c1795250046310.'}, {'next_before': 'c1795250046310.'}),
+        ({'next_before': 'c1795250046310.<asset:4>\n'}, {'next_before': 'c1795250046310.<asset:4>\n'}),
+    ]
+    for saved, expected in cursor_cases:
+        assert settle(saved, ()) == expected, saved
+        assert json.loads(json.dumps(saved), object_hook=settle_media_cursor) == expected, saved
+    return [f'the wall clock in a media cursor: tried on {len(cursor_cases)} cases, holds',
+            'the rule for a scenario whose every recording carries the mark of a defect (R19, R115): '
             'tried on 12 cases, holds',
             f'the rule that a difference is not called unexplained before the reference has been asked again: '
             f'tried on {asking} cases, holds',
