@@ -1845,21 +1845,36 @@ pub(crate) async fn make_agent(
     if anonymous && replaces.is_some() {
         return Err(bad("anonymous launch must be fresh"));
     }
-    let replacing = replaces
+    let replacing = replaces.as_deref().and_then(|session| {
+        app.fleet
+            .directory()
+            .by_session(session)
+            .map(|member| member.record.clone())
+    });
+    let backend = request
+        .backend
         .as_deref()
-        .and_then(|session| app.fleet.directory().by_session(session).map(|member| member.record.clone()));
-    let backend = request.backend.as_deref().filter(|backend| !backend.is_empty())
+        .filter(|backend| !backend.is_empty())
         .or_else(|| replacing.as_ref().map(|record| record.backend.as_str()))
         .unwrap_or("claude");
-    let model = request.model.as_deref().map(clarp_kernel::python::strip).unwrap_or("");
+    let model = request
+        .model
+        .as_deref()
+        .map(clarp_kernel::python::strip)
+        .unwrap_or("");
     if !model.is_empty()
         && let Some(detail) = app.models.policy_model_error(backend, model)
     {
         let code = "invalid model for backend";
-        let message = detail.strip_prefix("Invalid provider model identifier: ").unwrap_or(code);
+        let message = detail
+            .strip_prefix("Invalid provider model identifier: ")
+            .unwrap_or(code);
         return Err(refused(StatusCode::BAD_REQUEST, code, message));
     }
-    let default_model = crate::owner::text_at(&app.mouth.owners(), &["agents", &format!("{backend}_model")]);
+    let default_model = crate::owner::text_at(
+        &app.mouth.owners(),
+        &["agents", &format!("{backend}_model")],
+    );
     if replaces.is_some() && request.model.is_some() && model.is_empty() {
         request.model = Some(default_model.clone().unwrap_or_default());
     }
@@ -1887,7 +1902,11 @@ pub(crate) async fn make_agent(
             let begins = crate::past::begins(app, asked, &cwd).await?;
             let taken = match begins {
                 crate::past::Begins::Afresh => {
-                    if request.model.as_deref().is_none_or(|model| model.trim().is_empty()) {
+                    if request
+                        .model
+                        .as_deref()
+                        .is_none_or(|model| model.trim().is_empty())
+                    {
                         request.model = default_model;
                     }
                     None
@@ -2022,17 +2041,26 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
     let mut agent = agent;
     agent.insert("alive".into(), json!(true));
     agent.insert("last_activity".into(), json!(record.created_at_ms));
-    if record.avatar.is_none() && record.avatar_symbol.is_empty() && !record.is_janitor
+    if record.avatar.is_none()
+        && record.avatar_symbol.is_empty()
+        && !record.is_janitor
         && app.config.contact_pictures
     {
         let [named, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
-        let owner = clarp_kernel::personas::Owner { roster: &named, cartesia: &cartesia, gemini: &gemini };
+        let owner = clarp_kernel::personas::Owner {
+            roster: &named,
+            cartesia: &cartesia,
+            gemini: &gemini,
+        };
         if let Some(persona) = directory.personas.named(&owner, &record.persona)
             && let Some(id) = persona["id"].as_str()
             && let Ok(Some(kept)) = app.fleet.computer_job(crate::pictures::job_id(id)).await
             && kept.job.status.is_active()
         {
-            agent.insert("avatar_generation_status".into(), json!(kept.job.status.as_str()));
+            agent.insert(
+                "avatar_generation_status".into(),
+                json!(kept.job.status.as_str()),
+            );
         }
     }
     // How it sounds and is heard, as the snapshot will show it (feature voice_profile).

@@ -23654,12 +23654,23 @@ fn agent_creation_details_returns_the_named_launch_fields() {
         assert_eq!(&row[key], value, "{key}");
     }
     assert!(row["agent_id"].as_str().is_some_and(|id| !id.is_empty()));
-    assert!(row["last_activity"].as_i64().is_some_and(|ms| ms > 1_000_000_000_000));
-    assert!(row["voice_id"].as_str().is_some_and(|voice| voice.contains("fixture-voice")));
+    assert!(
+        row["last_activity"]
+            .as_i64()
+            .is_some_and(|ms| ms > 1_000_000_000_000)
+    );
+    assert!(
+        row["voice_id"]
+            .as_str()
+            .is_some_and(|voice| voice.contains("fixture-voice"))
+    );
     assert!(row["voice_profile"].is_object());
     // An omitted pin stays, an explicitly null pin resets it to the backend default.
     let session = made["session"].as_str().unwrap();
-    let retained = host.post("/agents", json!({"name":"Named fixture","replace_sid":session}));
+    let retained = host.post(
+        "/agents",
+        json!({"name":"Named fixture","replace_sid":session}),
+    );
     assert_eq!(retained["agent"]["model"], "fixture-model");
     assert_eq!(retained["agent"]["effort"], "high");
     let cleared = host.post(
@@ -23695,7 +23706,11 @@ fn agent_creation_details_anonymous_launch_chooses_its_own_identity() {
     assert_ne!(first["session"], second["session"]);
 
     for (key, value, expected) in [
-        ("replace_sid", first["session"].clone(), "anonymous launch must be fresh"),
+        (
+            "replace_sid",
+            first["session"].clone(),
+            "anonymous launch must be fresh",
+        ),
         ("mint_contact", json!(true), "conflicting launch options"),
         ("auto_contact", json!(true), "conflicting launch options"),
     ] {
@@ -23733,7 +23748,10 @@ fn agent_creation_details_relaunch_updates_picture_and_lineage() {
     let url = row["avatar_url"].as_str().unwrap();
     assert_eq!(fetch(&host, &host.token, "GET", url, &[], b"").body, image);
 
-    let again = host.post("/agents", json!({"name":"Relaunched","replace_sid":session}));
+    let again = host.post(
+        "/agents",
+        json!({"name":"Relaunched","replace_sid":session}),
+    );
     for key in ["parent_agent_id", "role", "helper_state", "avatar_url"] {
         assert_eq!(again["agent"][key], row[key], "{key}");
     }

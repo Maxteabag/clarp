@@ -2879,9 +2879,7 @@ impl Fleet {
             let pool = clarp_kernel::contacts::pool(&contacts, &wearers, backend, "");
             pool.first().map(|name| (*name).to_string())
         };
-        if !mint
-            && let Some(name) = pooled
-        {
+        if !mint && let Some(name) = pooled {
             return Ok(name);
         }
         match self.mint_contact(backend, catalogue) {
@@ -3093,7 +3091,11 @@ impl Fleet {
         let parent = said(&request.parent);
         let role = said(&request.role);
         let change_lineage = !parent.is_empty() || !role.is_empty();
-        let role = if role.is_empty() { before.role() } else { &role };
+        let role = if role.is_empty() {
+            before.role()
+        } else {
+            &role
+        };
         let Some(role) = helpers::parse_role(role) else {
             return Err(Told::new(400, "invalid_role", "role must be 'agent' or 'helper'").into());
         };
@@ -3118,14 +3120,25 @@ impl Fleet {
             effort,
             voice_id: or_kept(said(&request.voice_id), &before.voice_id),
             parent_agent_id,
-            role: if role == "agent" { String::new() } else { role.to_string() },
+            role: if role == "agent" {
+                String::new()
+            } else {
+                role.to_string()
+            },
             helper_state: if change_lineage {
                 helpers::initial_state(role).map(str::to_string)
             } else {
                 before.helper_state.clone()
             },
-            helper_completed_at_ms: if change_lineage { None } else { before.helper_completed_at_ms },
-            avatar: given.as_ref().map(|(_, digest)| digest.clone()).or_else(|| before.avatar.clone()),
+            helper_completed_at_ms: if change_lineage {
+                None
+            } else {
+                before.helper_completed_at_ms
+            },
+            avatar: given
+                .as_ref()
+                .map(|(_, digest)| digest.clone())
+                .or_else(|| before.avatar.clone()),
             personality: match &request.personality {
                 Some(asked) => python::first(strip(asked), PERSONALITY_MOST).to_string(),
                 None => before.personality.clone(),
@@ -3142,7 +3155,10 @@ impl Fleet {
             return Ok(record);
         }
         if let Some((bytes, digest)) = &given {
-            self.works.blobs.put(&picture_name(digest), bytes).map_err(|error| error.to_string())?;
+            self.works
+                .blobs
+                .put(&picture_name(digest), bytes)
+                .map_err(|error| error.to_string())?;
         }
         let (took, _taken) = oneshot::channel();
         self.put_launch(&record)?;
@@ -3161,7 +3177,12 @@ impl Fleet {
     ) -> Result<(), NotMade> {
         let Some(parent) = parent else {
             return if role == "helper" {
-                Err(Told::new(400, "helper_requires_parent", "A helper needs a parent session.").into())
+                Err(Told::new(
+                    400,
+                    "helper_requires_parent",
+                    "A helper needs a parent session.",
+                )
+                .into())
             } else {
                 Ok(())
             };
@@ -3173,7 +3194,9 @@ impl Fleet {
             if id != parent {
                 chain.push(id);
             }
-            next = self.place_of_any(id).and_then(|at| self.members[at].record.parent_agent_id.as_deref());
+            next = self
+                .place_of_any(id)
+                .and_then(|at| self.members[at].record.parent_agent_id.as_deref());
         }
         if let Some(code) = helpers::parent_refusal(child, parent, &chain) {
             let message = if code == "self_parent" {
