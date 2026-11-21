@@ -129,6 +129,22 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 D13 still sets the size of a compilation batch. Since 21 Nov 2026 at 12:39, its test command belongs
 to section 2's final pass.
 
+### Native Codex goals (21 Nov 2026)
+
+A goal belongs to the native Codex thread. Its app-server can start a turn without
+a Host request, so the process that issues goal commands must own that thread
+between turns. Only threads using native goals get this persistent lane. Other
+Codex threads keep the per-turn exec launcher. Clearing or completing a goal
+returns the thread to exec after the last live turn and the lane have ended.
+
+The lane runs through the same launcher, with the same login and account rules.
+It feeds the actor the ordinary turn spool and uses the agent's journal for
+admission and recovery. A Stop pauses the native goal before interrupting the
+turn. A Host restart reconnects to the running lane or restores it for an active
+goal. The cost is one long-lived app-server and its supervisor per goal-enabled
+thread, plus retaining the spool and tracking ownership while the lane is idle.
+Host task plans keep their existing records and execution.
+
 ## 5. Code rules (this is where "exactly as you want" is spent)
 
 - **A port has two implementations or it is not a port.** Do not add a trait for something with one
