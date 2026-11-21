@@ -59,6 +59,12 @@ class VoiceRoutes:
         provider = body_text(data, "provider").lower()
         if not session or not voice_id:
             return self._json_error(400, "session and voice_id required")
+        if not provider:
+            # One stored shape (issue 476): a client that names no provider (the PWA,
+            # the desktop) gets the provider the id's form names, merged into the map,
+            # instead of a bare value that replaced every other provider's choice.
+            from lib.voice import ELEVENLABS, infer_provider
+            provider = infer_provider(voice_id) or ELEVENLABS
         if provider == "google":
             # Only the built-in google provider is validated: its voices are a fixed allowlist.
             # A legacy custom "google" adapter refuses it first, before the allowlist.
@@ -75,14 +81,11 @@ class VoiceRoutes:
         for sid, info in agents.items():
             if sid == session:
                 continue
-            occupied = ((resolve_voice((info or {}).get("voice_id"), provider)
-                         if provider else (info or {}).get("voice_id")))
+            occupied = resolve_voice((info or {}).get("voice_id"), provider)
             if occupied == voice_id:
                 return self._json(409, {"error": "voice taken",
                                         "by": (info or {}).get("name") or sid})
-        agents[session]["voice_id"] = (
-            merge_voice(agents[session].get("voice_id"), provider, voice_id)
-            if provider else voice_id)
+        agents[session]["voice_id"] = merge_voice(agents[session].get("voice_id"), provider, voice_id)
         # This agent only: the roster read above may be stale for others (TP-03).
         save_agent(session, agents[session])
         # Open apps show the voice the agent now speaks with (feature voice_profile).
