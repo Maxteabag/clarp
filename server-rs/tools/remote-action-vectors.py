@@ -41,7 +41,6 @@ def record(tmp):
             self.reply = [status, json.loads(body) if mime == 'application/json' else body.decode()]
 
     rows = []
-    malformed = []
     def ask(method, value):
         door = Door()
         sent = []
@@ -51,14 +50,7 @@ def record(tmp):
         door.headers = {'Content-Length': str(len(raw))}
         door.rfile = io.BytesIO(raw)
         handler = Handler._handle_remote_action if method == 'POST' else Handler._handle_remote_action_get
-        try:
-            handler(door)
-        except AttributeError as exc:
-            if method != 'POST' or not json.loads(value)['action'] or 'strip' not in str(exc):
-                raise
-            assert not sent
-            malformed.append(value)
-            return
+        handler(door)
         rows.append([method, value, *door.reply, sent])
 
     with ExitStack() as stack:
@@ -95,7 +87,7 @@ def record(tmp):
             ask('POST', json.dumps({k:v for k,v in base.items() if k != field}))
     limited = Handler.__new__(Handler)
     limited._request_device_scope = 'limited'
-    return dict(now=NOW, draw=DRAW, rows=rows, malformed_actions=malformed,
+    return dict(now=NOW, draw=DRAW, rows=rows,
                 limited={m: limited._device_forbidden('/remote-action', m) for m in ['GET', 'POST']})
 
 

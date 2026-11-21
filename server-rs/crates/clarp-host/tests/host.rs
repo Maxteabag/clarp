@@ -19,6 +19,8 @@ use serde_json::{Value, json};
 mod agent_portraits;
 #[path = "host/backend_auth.rs"]
 mod backend_auth;
+#[path = "host/body_text.rs"]
+mod body_text;
 #[path = "host/bounded_close.rs"]
 mod bounded_close;
 #[path = "host/cartesia_language.rs"]

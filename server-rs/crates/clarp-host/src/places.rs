@@ -39,8 +39,7 @@ type Answered = Result<Json<Value>, ApiError>;
 
 /// The session a request names in its body. None is refused.
 fn session_of(said: &Map<String, Value>) -> Result<String, ApiError> {
-    let named = said.get("session").and_then(Value::as_str).unwrap_or("");
-    match python::strip(named) {
+    match crate::edge::body_text(said, "session")? {
         "" => Err(ApiError::new(StatusCode::BAD_REQUEST, WHOSE)),
         session => Ok(session.to_string()),
     }

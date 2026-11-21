@@ -93,6 +93,42 @@
       []
     ],
     [
+      "POST",
+      "{\"action\": true}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": 1}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": [\"record\"]}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": {\"action\": \"record\"}}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
       "GET",
       "action=controller-event",
       400,
@@ -2258,12 +2294,6 @@
       },
       []
     ]
-  ],
-  "malformed_actions": [
-    "{\"action\": true}",
-    "{\"action\": 1}",
-    "{\"action\": [\"record\"]}",
-    "{\"action\": {\"action\": \"record\"}}"
   ],
   "limited": {
     "GET": true,
