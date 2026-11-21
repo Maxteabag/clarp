@@ -702,8 +702,12 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     if _oracle(oracle) != recorded["oracle"]:
         found.add("oracle_rows")
     if why is not None and refused_kinds:
-        why["how"] = _how(table, recorded, refused_kinds, counted, new, turns,
-                          source_file, backend_session_id, tail_from, put_back)
+        try:
+            why["how"] = _how(table, recorded, refused_kinds, counted, new, turns,
+                              source_file, backend_session_id, tail_from, put_back)
+        except Exception as exc:  # noqa: BLE001 - the log's word never decides a tail
+            from .log import log_exception
+            log_exception("carryHowFail", exc)
     return ",".join(sorted(found))
 
 

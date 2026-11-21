@@ -730,3 +730,20 @@ def test_words_said_before_pass_only_when_sent_after_every_old_turn_for_no_old_t
     assert _changed(before, _inputs(rows=[*old, notice]), **later) == "send_said_before"
     unknown = dict(initial_provenance_used=False)
     assert _changed(before, _inputs(rows=[*old, new]), **unknown) == "send_said_before"
+
+
+def test_the_how_word_failing_changes_no_decision(monkeypatch):
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    old = [_row("m-1", revision=1)]
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("synthetic")
+    monkeypatch.setattr(carry, "_how", broken)
+    logged = []
+    monkeypatch.setattr("lib.log.log_exception", lambda event, exc, **_k: logged.append(event))
+    why = {}
+    recorded = carry.record(_inputs(rows=old), carry=stored, **WHERE)
+    assert carry.changed(recorded, _inputs(rows=[{**old[0], "text": "x2"}]),
+                         rules=frozenset(carry.RULES), carry=stored, boundary_seq=5, why=why,
+                         **WHERE) == "row_transcript"
+    assert why == {} and logged == ["carryHowFail"]
