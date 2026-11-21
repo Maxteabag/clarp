@@ -96,12 +96,16 @@ def mark(database, *, agent_id: str, trace_id: str, sender_agent_id: str | None,
     if not agent_id or not trace or holds_user_word(database, agent_id, trace):
         return
     stamp = int(at if at is not None else now_ms())
+    # A turn in which the agent could not leave a note is recorded but shown for good
+    # ('mixed'): moving the agent to a backend with turn tokens later must not hide a turn
+    # from which nothing could reach the user (the reviewer's F6B).
+    audience = AGENTS if can_leave_note(agent_id) else MIXED
     database.execute(
         """INSERT INTO coordination_traces
                (agent_id, trace_id, sender_agent_id, audience, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(agent_id, trace_id) DO NOTHING""",
-        (agent_id, trace, (sender_agent_id or "").strip(), AGENTS, stamp, stamp))
+        (agent_id, trace, (sender_agent_id or "").strip(), audience, stamp, stamp))
 
 
 def carry(database, *, agent_id: str, from_trace: str | None, to_trace: str | None) -> None:
@@ -122,8 +126,8 @@ def can_leave_note(agent_id: str) -> bool:
     """Whether the agent can leave a note for the user (POST /agent-notes needs its turn
     token): its backend gives every turn one (turn_identity.IDENTITY_BACKENDS). The one place
     this is decided. An agent that cannot is never hidden (F6-b): the failure mode of this
-    feature is shown, never lost. Its turns are still marked, so they hide without a
-    migration on the day its backend gets a turn token."""
+    feature is shown, never lost. Its turns are recorded as 'mixed' (shown for good), so a
+    later move to a backend with turn tokens does not hide a turn that could leave no note."""
     if not agent_id:
         return False
     from . import agents, backends
@@ -143,7 +147,10 @@ def audience_of(agent_id: str, trace_id: str | None, *, database=None) -> str:
     row = database.execute(
         "SELECT audience FROM coordination_traces WHERE agent_id = ? AND trace_id = ?",
         (agent_id, trace)).fetchone()
-    return AGENTS if row is not None and row["audience"] == AGENTS else USER
+    if row is None or row["audience"] != AGENTS:
+        return USER
+    # The read side of the wall, as /log reads it: the user's word makes it the user's.
+    return USER if holds_user_word(database, agent_id, trace) else AGENTS
 
 
 def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | None:
@@ -158,7 +165,7 @@ def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | No
     row = database.execute(
         "SELECT sender_agent_id, audience FROM coordination_traces WHERE agent_id = ? AND trace_id = ?",
         (agent_id, trace)).fetchone()
-    if row is None or row["audience"] != AGENTS:
+    if row is None or row["audience"] != AGENTS or holds_user_word(database, agent_id, trace):
         return None
     return row["sender_agent_id"] or ""
 
@@ -175,6 +182,46 @@ TRACE_AUDIENCE_SQL = """CASE WHEN ct.audience = 'agents' AND NOT EXISTS (
          WHERE u.trace_id = m.trace_id AND u.agent_id = m.agent_id
            AND u.role = 'user' AND COALESCE(u.origin, 'user') IN ('user', 'oracle'))
      THEN 'agents' WHEN ct.audience IS NULL THEN NULL ELSE 'mixed' END"""
+
+
+# A row the user does not see under 'hide' (alias m: messages): a row of a trace that is still
+# coordination, not a note, in a trace that holds no user row with the user's word. Applied
+# in SQL before the page limit, so a page of N is N visible rows. The caller applies it only
+# for an agent that can leave a note (can_leave_note): another agent is never hidden. The
+# user-word lookup names idx_messages_trace, as TRACE_AUDIENCE_SQL does: by agent it would walk
+# the whole conversation once per row it judges.
+HIDDEN_ROW_SQL = """(EXISTS (SELECT 1 FROM coordination_traces hc
+                            WHERE hc.agent_id = m.agent_id AND hc.trace_id = m.trace_id
+                              AND hc.audience = 'agents')
+      AND COALESCE(m.kind, '') != 'note'
+      AND NOT EXISTS (SELECT 1 FROM messages hu INDEXED BY idx_messages_trace
+                       WHERE hu.trace_id = m.trace_id AND hu.agent_id = m.agent_id
+                         AND hu.role = 'user' AND COALESCE(hu.origin, 'user') IN ('user', 'oracle')))"""
+
+# A counted message among the rows HIDDEN_ROW_SQL leaves out (a user or assistant row with words).
+COUNTED_SQL = """(m.role IN ('user', 'assistant') AND COALESCE(m.tool_name, '') = ''
+      AND TRIM(COALESCE(m.text, '')) != '')"""
+
+# A count of what was left out stops at COUNT_CAP messages, or at COUNT_ROW_CAP rows of any kind,
+# nearest the visible row it belongs to, and then says ``capped``: the apps say "100+". A user
+# needs no exact number of a thousand hidden messages, and a page must never wait on counting
+# them (Arnold, 20 Nov). 100 is a page: counting costs at most what reading a page does.
+COUNT_CAP = 100
+COUNT_ROW_CAP = 400
+
+
+MODES = ("auto", "hide", "show")
+
+
+def read_policy(agent_id: str, mode: str) -> dict[str, Any]:
+    """The policy one /log answer is read under, as it echoes it: ``visibility`` (show | hide),
+    ``hidden`` (whether coordination is left out) and ``source`` (request | chat | global)."""
+    if mode in (HIDE, SHOW):
+        visibility, source = mode, "request"
+    else:
+        own = chat_visibility(agent_id)
+        visibility, source = (own, "chat") if own else (global_visibility(), "global")
+    return {"visibility": visibility, "hidden": visibility == HIDE, "source": source}
 
 
 def row_audience(*, kind: str | None, trace_audience: str | None) -> str:
@@ -232,6 +279,49 @@ def chat_visibility(agent_id: str, *, database=None) -> str:
 def effective_visibility(agent_id: str) -> str:
     """The chat's own choice, else the Host's: 'show' or 'hide'."""
     return chat_visibility(agent_id) or global_visibility()
+
+
+ROSTER_KIND = "coordination-changed"
+DEFAULT_CHOICE = "default"   # POST /agent-coordination: follow the Host's setting again
+
+
+def set_global(value: Any) -> str:
+    """Store the Host's setting ('show' | 'hide'); ValueError for anything else."""
+    visibility = normalize_visibility(value)
+    if not visibility:
+        raise ValueError(f"coordination_visibility must be one of: {', '.join(VISIBILITIES)}")
+    settings_store.set_text(GLOBAL_KEY, visibility)
+    return visibility
+
+
+def set_chat(agent_id: str, value: Any) -> str:
+    """Store one chat's own choice ('show' | 'hide', or 'default' to follow the
+    Host); answers what is stored ('' for default). ValueError otherwise."""
+    text = str(value or "").strip().lower()
+    stored = "" if text == DEFAULT_CHOICE else normalize_visibility(text)
+    if not stored and text != DEFAULT_CHOICE:
+        raise ValueError(f"visibility must be one of: {', '.join(VISIBILITIES + (DEFAULT_CHOICE,))}")
+    from . import agents
+    agents.update_agent(agent_id, coordination_visibility=stored)
+    return stored
+
+
+def overrides(*, database=None) -> dict[str, str]:
+    """Every chat's own choice that is set: {agent_id: 'show' | 'hide'}."""
+    if database is None:
+        from .db import conn
+        database = conn()
+    return {row["agent_id"]: normalize_visibility(row["coordination_visibility"])
+            for row in database.execute(
+                "SELECT agent_id, coordination_visibility FROM agents"
+                " WHERE deleted_at IS NULL AND coordination_visibility != ''")
+            if normalize_visibility(row["coordination_visibility"])}
+
+
+def snapshot_fields(agent_id: str, chosen: dict[str, str], host: str) -> dict[str, Any]:
+    """What a snapshot agent row says: the effective visibility and the chat's own choice."""
+    own = chosen.get(agent_id) or ""
+    return {"coordination_visibility": own or host, "coordination_override": own or None}
 
 
 def reminder(agent: dict | None, *, origin: str | None, sender_agent_id: str | None) -> str:

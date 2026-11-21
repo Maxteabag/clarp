@@ -47,7 +47,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   before_message_id: str = "",
                   limit: int = 100,
                   include_automated: bool = True,
-                  extra_backend_session_id: str = "") -> list[dict[str, Any]]:
+                  extra_backend_session_id: str = "",
+                  hide_coordination: bool = False) -> list[dict[str, Any]]:
     params: list[Any] = [agent_id]
     where = "m.agent_id = ?"
     sessions = list(dict.fromkeys(v for v in (backend_session_id, extra_backend_session_id) if v))
@@ -89,6 +90,9 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             )
         )"""
         params.append(team_leader.TICK_PROMPT)
+    if hide_coordination and coordination.can_leave_note(agent_id):
+        # Before LIMIT, as the automated filter: a page of N is N rows the user sees.
+        where += " AND NOT " + coordination.HIDDEN_ROW_SQL
     params.append(max(1, min(limit, 5000)))
     # Display order is by timestamp (tie-break seq). User rows live in a
     # negative seq band and transcript rows in 0..N-1, so ordering by seq would
@@ -186,6 +190,192 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                if row["sent_at"] is not None else {}),
         })
     return out
+
+
+# ---- coordination hidden from the chat: where it was, and how much (issue 478) -------------
+
+_KEY_SQL = "COALESCE(m.timestamp, '')"
+
+
+def _key_cmp(op: str, key: tuple) -> tuple[str, list]:
+    """Rows strictly ``op`` ('<' or '>') the display key (timestamp, seq, message_id).
+
+    The plain ``timestamp {op}= ?`` in front is what lets SQLite read idx_messages_log_order as
+    a range: an OR of the three cases alone cannot use it, and every look-back or count then
+    walked the whole conversation (300 ms a page on 300k rows)."""
+    t, seq, mid = key
+    return (f"""({_KEY_SQL} {op}= ? AND ({_KEY_SQL} {op} ? OR ({_KEY_SQL} = ? AND m.seq {op} ?)
+               OR ({_KEY_SQL} = ? AND m.seq = ? AND m.message_id {op} ?)))""",
+            [t, t, t, seq, t, seq, mid])
+
+
+def _automated_sql() -> tuple[str, list]:
+    return ("""NOT (COALESCE(m.origin, 'user') IN ('watcher', 'heartbeat', 'leader_tick', 'dreaming')
+               OR (m.role = 'user' AND COALESCE(m.origin, 'user') = 'schedule'
+                   AND TRIM(COALESCE(m.text, '')) = ?))""", [team_leader.TICK_PROMPT])
+
+
+def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str, Any]],
+                      include_automated: bool, contiguous: bool,
+                      tail: bool) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
+    """Where hidden coordination stood among the rows a page gives, so a client draws the
+    separator where the exchange happened: {row id: hidden_before} counted from the previous
+    VISIBLE row of the chat (not of the page), and hidden_after for what follows the chat's
+    newest visible row (on a tail page or a delta; None otherwise). Each count is
+    {messages, exchanges, agents: [{agent_id, name}], capped}: it reads at most
+    coordination.COUNT_CAP messages (COUNT_ROW_CAP rows) of the run, nearest the row it belongs
+    to, and says ``capped`` when the run goes on, so no count waits on a long run. Counted from
+    the row, the same run gives the same count on the same row whatever the page size."""
+    database = conn()
+    scope = "m.agent_id = ?" + (
+        " AND m.backend_session_id IN (" + ",".join("?" for _ in sessions) + ")" if sessions else "")
+    scope_params: list[Any] = [agent_id, *sessions]
+    hidden_sql = coordination.HIDDEN_ROW_SQL
+    visible = "NOT " + hidden_sql
+    counted_sql = f"({hidden_sql} AND {coordination.COUNTED_SQL})"
+    visible_params: list[Any] = []
+    if not include_automated:
+        sql, extra = _automated_sql()
+        visible += " AND " + sql
+        visible_params += extra
+
+    def previous_visible(key: tuple | None) -> tuple[tuple | None, bool]:
+        """The previous visible row before ``key`` (None: the chat's end), looking back at most
+        COUNT_ROW_CAP + 1 rows of any kind by the display-order index: (its key, False). When none
+        of those is visible, (the farthest of them, True): the count reads no further than that
+        anyway and says capped. (None, False) when the chat starts within them. Without the bound
+        a stretch with no visible row was walked to the chat's start, judging every row (a delta
+        poll on a mostly-coordination chat: 356 ms of counts at 300k rows; the review's weigh point)."""
+        where, params = scope, list(scope_params)
+        if key is not None:
+            cmp_sql, cmp_params = _key_cmp("<", key)
+            where, params = where + " AND " + cmp_sql, params + cmp_params
+        rows = database.execute(
+            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id, CASE WHEN {visible} THEN 1 ELSE 0 END AS shown
+                  FROM messages m WHERE {where}
+                 ORDER BY {_KEY_SQL} DESC, m.seq DESC, m.message_id DESC LIMIT ?""",
+            [*visible_params, *params, coordination.COUNT_ROW_CAP + 1]).fetchall()
+        for row in rows:
+            if row["shown"]:
+                return (row["t"], int(row["seq"]), row["message_id"]), False
+        if len(rows) > coordination.COUNT_ROW_CAP:
+            far = rows[-1]
+            return (far["t"], int(far["seq"]), far["message_id"]), True
+        return None, False
+
+    def run(low: tuple | None, high: tuple | None, *, from_high: bool) -> dict[str, Any] | None:
+        """The hidden rows strictly between two keys (None: open), read nearest ``high`` (or
+        ``low``) first and at most up to the caps."""
+        where, params = f"{scope} AND {hidden_sql}", list(scope_params)
+        if low is not None:
+            cmp_sql, cmp_params = _key_cmp(">", low)
+            where, params = where + " AND " + cmp_sql, params + cmp_params
+        if high is not None:
+            cmp_sql, cmp_params = _key_cmp("<", high)
+            where, params = where + " AND " + cmp_sql, params + cmp_params
+        direction = "DESC" if from_high else "ASC"
+        found = database.execute(
+            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id, m.trace_id,
+                       CASE WHEN {counted_sql} THEN 1 ELSE 0 END AS counted
+                  FROM messages m WHERE {where}
+                 ORDER BY {_KEY_SQL} {direction}, m.seq {direction}, m.message_id {direction}
+                 LIMIT ?""", [*params, coordination.COUNT_ROW_CAP + 1]).fetchall()
+        if not found:
+            return None
+        # ``capped`` says that another MESSAGE was left out beyond what is counted: a run of
+        # exactly COUNT_CAP messages followed by wordless rows is not "100+".
+        messages, traces, capped, last = 0, [], False, None
+        for r in found[:coordination.COUNT_ROW_CAP]:
+            if r["counted"] and messages == coordination.COUNT_CAP:
+                capped = True
+                break
+            messages += int(r["counted"])
+            if r["trace_id"] not in traces:
+                traces.append(r["trace_id"])
+            last = r
+        else:
+            if len(found) > coordination.COUNT_ROW_CAP:
+                # The row cap stopped the reading: capped if a message is among the rows beyond.
+                beyond_sql, beyond_params = _key_cmp("<" if from_high else ">",
+                                                     (last["t"], int(last["seq"]), last["message_id"]))
+                capped = database.execute(
+                    f"SELECT 1 FROM messages m WHERE {where} AND {counted_sql} AND {beyond_sql} LIMIT 1",
+                    [*params, *beyond_params]).fetchone() is not None
+        senders: list[str] = []
+        for start in range(0, len(traces), 500):
+            chunk = traces[start:start + 500]
+            for r in database.execute(
+                    "SELECT trace_id, sender_agent_id FROM coordination_traces WHERE agent_id = ? AND trace_id IN ("
+                    + ",".join("?" for _ in chunk) + ")", [agent_id, *chunk]):
+                if r["sender_agent_id"] and r["sender_agent_id"] not in senders:
+                    senders.append(r["sender_agent_id"])
+        names = {r["agent_id"]: r["persona"] for r in database.execute(
+            "SELECT agent_id, persona FROM agents WHERE agent_id IN (" + ",".join("?" for _ in senders) + ")",
+            senders)} if senders else {}
+        return {"messages": messages, "exchanges": len(traces),
+                "agents": [{"agent_id": a, "name": names.get(a, "")} for a in senders],
+                "capped": capped}
+
+    ids = [row["id"] for row in rows]
+    keys: dict[str, tuple] = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        for r in database.execute(
+                f"SELECT message_id, COALESCE(timestamp, '') AS t, seq FROM messages WHERE message_id IN ("
+                + ",".join("?" for _ in chunk) + ")", chunk):
+            keys[r["message_id"]] = (r["t"], int(r["seq"]), r["message_id"])
+    ordered = sorted((keys[i] for i in ids if i in keys))
+    busy = _gaps_with_rows(database, scope, scope_params, ordered)
+    before: dict[str, dict[str, Any]] = {}
+    after_tail: dict[str, Any] | None = None
+    for index, key in enumerate(ordered):
+        if index and busy is not None and index not in busy:
+            continue        # no row at all between this row and the one before it: nothing was left out
+        # In a contiguous page the previous row of the page is the previous visible row of the chat.
+        low, cut = (ordered[index - 1], False) if contiguous and index else previous_visible(key)
+        if c := run(low, key, from_high=True):
+            c["capped"] = c["capped"] or cut
+            before[key[2]] = c
+    if tail or not contiguous:
+        newest, cut = (ordered[-1], False) if contiguous and ordered else previous_visible(None)
+        after_tail = run(newest, None, from_high=False)
+        if after_tail is not None:
+            after_tail["capped"] = after_tail["capped"] or cut
+    return before, after_tail
+
+
+# How many rows beyond the page's own one read may look at to tell which gaps hold rows.
+GAP_SCAN_SLACK = 2000
+
+
+def _gaps_with_rows(database, scope: str, scope_params: list[Any], ordered: list[tuple]) -> set[int] | None:
+    """The indexes i of ``ordered`` (the page's rows, in display order) with some other row of the
+    chat between ordered[i-1] and ordered[i]: only those gaps can hold rows that were left out, so
+    an ordinary chat read under 'hide' costs one read of its page's keys, not a count per row.
+    None when there are more than GAP_SCAN_SLACK such rows (every gap is then counted)."""
+    if len(ordered) < 2:
+        return None
+    low_sql, low_params = _key_cmp(">", ordered[0])
+    high_sql, high_params = _key_cmp("<", ordered[-1])
+    limit = len(ordered) + GAP_SCAN_SLACK
+    found = database.execute(
+        f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id FROM messages m
+             WHERE {scope} AND {low_sql} AND {high_sql}
+             ORDER BY {_KEY_SQL}, m.seq, m.message_id LIMIT ?""",
+        [*scope_params, *low_params, *high_params, limit + 1]).fetchall()
+    if len(found) > limit:
+        return None
+    page = {key[2] for key in ordered}
+    busy: set[int] = set()
+    position = 0
+    for r in found:
+        if r["message_id"] in page:
+            continue
+        key = (r["t"], int(r["seq"]), r["message_id"])
+        while position < len(ordered) and ordered[position] < key:
+            position += 1
+        busy.add(position)
+    return busy
 
 
 def _turn_field(raw: Any) -> dict[str, Any]:
