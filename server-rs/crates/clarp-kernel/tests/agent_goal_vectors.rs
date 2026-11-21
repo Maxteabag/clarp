@@ -11,7 +11,11 @@ fn a_codex_goal_projects_the_reference_hosts_status_counters_and_times() {
         serde_json::from_str(include_str!("fixtures/agent-goal-vectors.json")).unwrap();
     let mut previous = None;
     for case in cases {
-        let next = Goal::from_codex(&case["raw"], previous.as_ref(), case["now"].as_i64().unwrap());
+        let next = Goal::from_codex(
+            &case["raw"],
+            previous.as_ref(),
+            case["now"].as_i64().unwrap(),
+        );
         let public = next.as_ref().map_or(Value::Null, Goal::public);
         assert_eq!(public, case["public"], "{}", case["raw"]);
         if next.is_some() {
