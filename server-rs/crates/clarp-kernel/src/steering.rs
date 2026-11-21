@@ -84,7 +84,7 @@ pub fn transcript_read_uuid(entry: &Value) -> Option<(&str, bool)> {
     }
 }
 
-/// Evidence from the owning Claude process. A result is also the shim's stdin fence.
+/// Evidence from the owning Claude process for offering and settling follow-ups.
 #[derive(Default)]
 pub struct Stream {
     input_ended: bool,
@@ -105,8 +105,12 @@ impl Stream {
         if event["type"] == "user" && event["isReplay"] == true {
             return nonempty(&event["uuid"]).map_or(Observation::Other, Observation::Echo);
         }
-        if event["type"] == "result" && nonempty(&event["parent_tool_use_id"]).is_none() {
+        if event["type"] == "result" {
+            // The reference observes results before filtering nested events.
             self.input_ended = true;
+            if nonempty(&event["parent_tool_use_id"]).is_some() {
+                return Observation::Other;
+            }
             let prompts = event["user_message_uuids"]
                 .as_array()
                 .map_or(&[][..], Vec::as_slice);
@@ -156,17 +160,19 @@ mod tests {
     }
 
     #[test]
-    fn an_open_claude_turn_takes_input_until_its_first_top_level_result() {
+    fn a_nested_result_closes_offers_and_only_a_top_level_result_settles() {
         let mut stream = Stream::default();
         let text = json!({"type":"stream_event","event":{"content_block":{"type":"text"}}});
         stream.observe(&text);
         assert!(stream.can_join(), "a text-only turn can take input");
 
-        stream.observe(&json!({"type":"result","parent_tool_use_id":"task"}));
-        assert!(
-            stream.can_join(),
-            "a nested result does not close the input"
-        );
+        let nested = json!({
+            "type": "result", "parent_tool_use_id": "task", "user_message_uuids": ["child"],
+        });
+        assert!(matches!(stream.observe(&nested), Observation::Other));
+        assert!(!stream.can_join(), "a nested result closes further offers");
+        stream.observe(&text);
+        assert!(!stream.can_join(), "later output leaves offers closed");
 
         let echo = json!({"type":"user","isReplay":true,"uuid":"two"});
         assert!(matches!(stream.observe(&echo), Observation::Echo("two")));
@@ -175,6 +181,6 @@ mod tests {
             matches!(stream.observe(&result), Observation::Result { prompts, failed: false } if prompts == [json!("one"), json!("two")])
         );
         stream.observe(&text);
-        assert!(!stream.can_join(), "the first result closed the input");
+        assert!(!stream.can_join(), "offers stay closed after settlement");
     }
 }
