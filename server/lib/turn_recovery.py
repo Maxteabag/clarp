@@ -49,6 +49,12 @@ class RecoveryMixin:
         if not _SLOTS.first_rehydration():
             return
         try:
+            # Items whose row stands and whose prompt may have left: never run
+            # again, started so none stays 'queued' (issue 491, review C5).
+            turn_queue.start_shown_attempted()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("shownAttemptedStartPassFail", exc)
+        try:
             # A listen-first claim left by an earlier process: a process
             # boundary is never proof of what it sent, whatever its age.
             from . import agent_rings
