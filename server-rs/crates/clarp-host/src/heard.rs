@@ -35,7 +35,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use clarp_kernel::heard::{self, OWN_PROVIDER, PROVIDERS};
+use clarp_kernel::heard::{self, OWN_PROVIDER, PROVIDERS, language_set};
 use clarp_kernel::languages;
 use clarp_kernel::said::Who;
 use clarp_speech::chirp::Chirp;
@@ -117,6 +117,32 @@ struct Chosen {
 
 /// Why a clip was not turned into text: the status and the words an app is given.
 type Refused = (StatusCode, String);
+
+enum AttemptError {
+    LanguageSet,
+    Failed(Told),
+}
+
+impl From<Told> for AttemptError {
+    fn from(error: Told) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl AttemptError {
+    fn told(self) -> Told {
+        match self {
+            Self::LanguageSet => refuse(StatusCode::INTERNAL_SERVER_ERROR, languages::SET_NEEDS),
+            Self::Failed(error) => error,
+        }
+    }
+}
+
+/// The upload's ordinary order and the Host choice retained if a language set is refused.
+struct ChatPlan {
+    order: heard::Plan,
+    selected: String,
+}
 
 impl Ears {
     pub(crate) fn ready(&self) -> bool {
@@ -267,9 +293,7 @@ impl Ears {
     /// `spoken_to`.
     pub(crate) fn as_profiled(&self, directory: &Directory) -> (String, String, String) {
         let default_engine = self.default_engine(directory);
-        let stands_in =
-            heard::is_cloud(&default_engine) || self.inventory.path(&default_engine).is_some();
-        let cloud = if stands_in {
+        let cloud = if self.stands_in(&default_engine) {
             default_engine
         } else {
             String::new()
@@ -327,18 +351,19 @@ impl Ears {
         &self,
         requested: &str,
         own: &[String],
-        default_engine: &str,
+        directory: &Directory,
         long_model: &str,
-    ) -> Vec<String> {
-        // The cloud engine chosen for this Host stands in for its own; what an app asks
-        // for by name still comes first.
-        let stands_in = heard::wants_cloud_engine(requested, own, false)
-            && (heard::is_cloud(default_engine) || self.inventory.path(default_engine).is_some());
-        let cloud = if stands_in { default_engine } else { "" };
-        let plan = heard::plan(requested, own, cloud, long_model, false);
-        let mut order = vec![plan.model];
-        order.extend(plan.fallbacks);
-        order
+    ) -> ChatPlan {
+        let selected = self.default_engine(directory);
+        let stands_in =
+            heard::wants_cloud_engine(requested, own, false) && self.stands_in(&selected);
+        let cloud = if stands_in { &selected } else { "" };
+        let order = heard::plan(requested, own, cloud, long_model, false);
+        ChatPlan { order, selected }
+    }
+
+    fn stands_in(&self, model: &str) -> bool {
+        heard::is_cloud(model) || self.inventory.path(model).is_some()
     }
 
     /// The engine a name stands for on this Host. With the engine comes what is said while
@@ -403,6 +428,20 @@ impl Ears {
         observed: &mut Option<String>,
         has_fallback: bool,
     ) -> Result<Heard, Told> {
+        self.try_hearing(model, language, listen_for, clip, observed, has_fallback)
+            .await
+            .map_err(AttemptError::told)
+    }
+
+    async fn try_hearing(
+        self: &Arc<Self>,
+        model: &str,
+        language: &str,
+        listen_for: &str,
+        clip: (&axum::body::Bytes, &str),
+        observed: &mut Option<String>,
+        has_fallback: bool,
+    ) -> Result<Heard, AttemptError> {
         let variant =
             model.starts_with("faster-whisper:") && self.own_id().as_deref() != Some(model);
         let (chosen, selection) = if variant && let Some((default, _)) = &self.own {
@@ -426,8 +465,9 @@ impl Ears {
             )
         };
         let handed = match chosen.provider {
-            Some(provider) => languages::handed(language, provider)
-                .map_err(|why| refuse(StatusCode::INTERNAL_SERVER_ERROR, why))?,
+            Some(provider) => {
+                languages::handed(language, provider).map_err(|_| AttemptError::LanguageSet)?
+            }
             None => {
                 let own = if variant {
                     model.strip_prefix("faster-whisper:")
@@ -478,9 +518,11 @@ impl Ears {
         *observed = captured;
         match result {
             Ok(said) => Ok(said),
-            Err(Deaf::Loading) => Err(refuse(StatusCode::SERVICE_UNAVAILABLE, chosen.loading)),
-            Err(Deaf::Busy) => Err(refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY)),
-            Err(Deaf::Failed(why)) => Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, why)),
+            Err(Deaf::Loading) => {
+                Err(refuse(StatusCode::SERVICE_UNAVAILABLE, chosen.loading).into())
+            }
+            Err(Deaf::Busy) => Err(refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY).into()),
+            Err(Deaf::Failed(why)) => Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, why).into()),
         }
     }
 
@@ -746,6 +788,9 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let failed = |err: Told| {
         let details = match err.0 {
             StatusCode::TOO_MANY_REQUESTS => Some(json!({"message":"whisper busy"})),
+            StatusCode::UNPROCESSABLE_ENTITY if err.1["error"] == language_set::UNSUPPORTED => {
+                Some(json!({"message":language_set::UNSUPPORTED,"stage":"stt"}))
+            }
             StatusCode::INTERNAL_SERVER_ERROR => Some(
                 json!({"message":clarp_kernel::python::first(err.1["error"].as_str().unwrap_or(""),300),"stage":"stt"}),
             ),
@@ -760,7 +805,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         }
         err
     };
-    let (said, report, run_id) = if scope.is_some() {
+    let (said, report, run_id, engine_fallback) = if scope.is_some() {
         let (said, report, id) = call::hear(
             app,
             session,
@@ -771,7 +816,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         )
         .await
         .map_err(failed)?;
-        (said, Some(report), id)
+        (said, Some(report), id, None)
     } else {
         let (own, language) = spoken_to(&directory, recorded_for, &ears.language);
         let long = if own.is_empty() {
@@ -779,29 +824,32 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         } else {
             ""
         };
-        let order = ears.order(&requested, &own, &ears.default_engine(&directory), long);
-        let selected = order.first().map_or(requested.as_str(), String::as_str);
+        let plan = ears.order(&requested, &own, &directory, long);
+        let selected = &plan.order.model;
         let (audit, id) =
             crate::vocabulary::compile(app, session, selected, hands_free, Some(&trace))
                 .await
                 .unwrap_or_default();
-        let said = hear_chat(
+        let (said, fallback) = hear_chat(
             app,
             &ears,
-            &order,
+            &plan,
             &language,
             audit["payload"].as_str().unwrap_or(""),
-            &audio,
-            &content_type,
+            (&audio, &content_type),
         )
         .await
         .map_err(failed)?;
-        (said, None, id)
+        (said, None, id, fallback)
     };
+    let model_used = engine_fallback
+        .as_ref()
+        .and_then(|r| r["to"].as_str())
+        .unwrap_or(&requested);
     let retained_model = report
         .as_ref()
         .and_then(|r| r["effective_engine"].as_str())
-        .unwrap_or(&requested)
+        .unwrap_or(model_used)
         .to_string();
     // What the engine was sure was speech, unless it is something engines invent on silence.
     let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
@@ -818,7 +866,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         json!({"session":session,"trace_id":trace,"utterance_id":uid,
         "client_ts":client_ts,"duration_ms":duration,"text":text,"detail":{"bytes":length,"content_type":content_type,
         "hands_free":hands_free,"ends_terminal":answer["ends_terminal"],"herald_consumed":answer["herald_consumed"],
-        "model":if requested.is_empty(){"server-default"}else{requested.as_str()}}}),
+        "model":if model_used.is_empty(){"server-default"}else{model_used}}}),
     );
     crate::voice_timeline::metrics(
         app,
@@ -869,6 +917,9 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     if let Some(report) = report {
         answer["stt"] = report;
     }
+    if let Some(fallback) = engine_fallback {
+        answer["engine_fallback"] = fallback;
+    }
     if !job.is_empty() {
         let (keeps, kept) = (ears.clone(), answer.clone());
         let done = tokio::task::spawn_blocking(move || keeps.keep(&job, &fingerprint, &kept)).await;
@@ -881,67 +932,155 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     Ok(answer)
 }
 
+/// Use one upload and the ordinary kernel plan. R152 only takes over after the last
+/// planned attempt refuses the language set, including when a prior provider failed.
 async fn hear_chat(
     app: &App,
     ears: &Arc<Ears>,
-    order: &[String],
+    plan: &ChatPlan,
     language: &str,
     listen_for: &str,
-    audio: &axum::body::Bytes,
-    content_type: &str,
-) -> Result<Heard, Told> {
-    let mut said = None;
-    for (place, model) in order.iter().enumerate() {
-        let started = app
-            .capture
-            .settings()
-            .allows("transcript")
-            .then(std::time::Instant::now);
-        let heard = ears
-            .heard_by(
-                model,
-                language,
-                listen_for,
-                (audio, content_type),
-                &mut None,
-                place + 1 < order.len(),
-            )
-            .await;
-        let at = app.clock.now_ms();
-        app.capture
-            .transcription(at, heard.is_ok(), audio.len(), started);
-        match heard {
-            Ok(heard) => {
-                said = Some(heard);
-                break;
-            }
-            Err((status, why)) => {
-                // Why, and nothing of what was said: an engine's words hold none of it.
-                let engine = if model.is_empty() {
-                    "the Host's own"
-                } else {
-                    model
+    clip: (&axum::body::Bytes, &str),
+) -> Result<(Heard, Option<Value>), Told> {
+    let own = ears.own_id();
+    let order = plan.order.chat_order(language, own.as_deref());
+    let mut attempted = Vec::new();
+    for (place, model) in order.iter().copied().enumerate() {
+        let more = place + 1 < order.len();
+        let (result, _) = chat_attempt(app, ears, model, language, listen_for, clip, more).await;
+        match result {
+            Ok(heard) => return Ok((heard, None)),
+            Err(AttemptError::LanguageSet) if !more => {
+                let fallback = SetFallback {
+                    from: model,
+                    selected: &plan.selected,
+                    attempted: &attempted,
+                    own: own.as_deref(),
                 };
-                let words = why["error"].as_str().unwrap_or("");
-                if place + 1 == order.len() {
-                    if status == StatusCode::INTERNAL_SERVER_ERROR {
+                return hear_language_set(app, ears, fallback, language, listen_for, clip).await;
+            }
+            Err(error) => {
+                let failed = matches!(error, AttemptError::Failed(_));
+                let log = error.told();
+                if !more {
+                    if log.0 == StatusCode::INTERNAL_SERVER_ERROR {
                         eprintln!(
-                            "clarp-host: a clip was not turned into text ({engine}): {words}"
+                            "clarp-host: a clip was not turned into text ({model}): {}",
+                            log.1["error"]
                         );
                     }
-                    return Err((status, why));
+                    return Err(log);
+                }
+                if failed {
+                    attempted.push(language_set::identity(model, own.as_deref()));
                 }
                 eprintln!(
-                    "clarp-host: {engine} did not hear a clip, the next engine is asked: {words}"
+                    "clarp-host: {model} did not hear a clip, the next engine is asked: {}",
+                    log.1["error"]
                 );
             }
         }
     }
-    let Some(said) = said else {
-        let nobody = "no engine heard the clip";
-        return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, nobody));
+    Err(refuse(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "no engine heard the clip",
+    ))
+}
+
+async fn chat_attempt(
+    app: &App,
+    ears: &Arc<Ears>,
+    model: &str,
+    language: &str,
+    listen_for: &str,
+    clip: (&axum::body::Bytes, &str),
+    more: bool,
+) -> (Result<Heard, AttemptError>, Option<String>) {
+    let started = app
+        .capture
+        .settings()
+        .allows("transcript")
+        .then(std::time::Instant::now);
+    let mut handed = None;
+    let result = ears
+        .try_hearing(model, language, listen_for, clip, &mut handed, more)
+        .await;
+    app.capture
+        .transcription(app.clock.now_ms(), result.is_ok(), clip.0.len(), started);
+    (result, handed)
+}
+
+struct SetFallback<'a> {
+    from: &'a str,
+    selected: &'a str,
+    attempted: &'a [language_set::Engine<'a>],
+    own: Option<&'a str>,
+}
+
+async fn hear_language_set(
+    app: &App,
+    ears: &Arc<Ears>,
+    plan: SetFallback<'_>,
+    language: &str,
+    listen_for: &str,
+    clip: (&axum::body::Bytes, &str),
+) -> Result<(Heard, Option<Value>), Told> {
+    let codes: Vec<&str> = language.split(',').collect();
+    let selected = language_set::selected(plan.selected, |provider| ears.has(provider));
+    let own = match plan.own {
+        None => language_set::Own::Off,
+        Some(id) if id.ends_with(':') => language_set::Own::Unavailable,
+        Some(id) => language_set::Own::Model {
+            id,
+            languages: heard::inventory::CATALOG
+                .iter()
+                .find(|model| model.id() == id)
+                .map_or(&[], |model| model.languages()),
+        },
     };
-    Ok(said)
+    let refused = |reasons: &[String]| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            language_set::refusal(plan.from, &codes, reasons),
+        )
+    };
+    let rejected = language_set::identity(plan.from, plan.own);
+    match language_set::fallback(rejected, selected, plan.attempted, own, &codes) {
+        language_set::Fallback::Hosted(target) => {
+            let (result, handed) =
+                chat_attempt(app, ears, target, language, listen_for, clip, false).await;
+            let heard = result.map_err(AttemptError::told)?;
+            Ok((
+                heard,
+                Some(language_set::receipt(plan.from, target, handed.as_deref())),
+            ))
+        }
+        language_set::Fallback::Own(mut reasons) => {
+            let target = "server-default";
+            let (result, _) =
+                chat_attempt(app, ears, target, language, listen_for, clip, false).await;
+            match result.map_err(AttemptError::told) {
+                Ok(heard) => Ok((heard, Some(language_set::receipt(plan.from, target, None)))),
+                Err((status, body))
+                    if matches!(
+                        status,
+                        StatusCode::SERVICE_UNAVAILABLE | StatusCode::TOO_MANY_REQUESTS
+                    ) =>
+                {
+                    Err((status, body))
+                }
+                Err((_, body)) => {
+                    eprintln!(
+                        "clarp-host: the own transcription engine failed: {}",
+                        body["error"]
+                    );
+                    reasons.push(language_set::OWN_FAILED.into());
+                    Err(refused(&reasons))
+                }
+            }
+        }
+        language_set::Fallback::Refused(reasons) => Err(refused(&reasons)),
+    }
 }
 
 /// `DELETE /transcription-results/<job>`: the app has sent what was said and will not ask
