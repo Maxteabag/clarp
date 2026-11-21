@@ -2024,6 +2024,22 @@ def _second_read_log(code, backend, size, *, read_bytes=None, cpu_ms=None):
     log("transcriptFullDigest", detail)
 
 
+def _digest_and_log(path, digests, second_read, earlier, before, backend, cpu_started):
+    """The full import's digests (the parse's, or a second read of the file), and its
+    one transcriptFullDigest line. The line is written even when the second read
+    raises (a file gone or unreadable mid-read), then with what this import had read
+    and spent by then: the parse's bytes, as the line was before the read on main."""
+    read_bytes = before.size
+    try:
+        found = digests or _read_digest(path, earlier[0] if earlier else before.size, before.size)
+        read_bytes = before.size * (1 if digests else 2)
+        return found
+    finally:
+        _second_read_log(second_read, backend, before.size, read_bytes=read_bytes,
+                         cpu_ms=None if cpu_started is None
+                         else (time.thread_time() - cpu_started) * 1000)
+
+
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
                                      turns, before, conf, *, reason_token=None,
                                      parsed_evidence=None, imported=None, parsed_read=None,
@@ -2081,12 +2097,8 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                     parsed_read, parsed_evidence, before, earlier, path)
                 if digests is None and not bool(conf.get("full_digest_while_parsing")):
                     second_read = "switch_off"
-                previous, current_hash, hasher = digests or _read_digest(
-                    path, earlier[0] if earlier else before.size, before.size)
-                _second_read_log(second_read, backend, before.size,
-                                 read_bytes=before.size * (1 if digests else 2),
-                                 cpu_ms=None if cpu_started is None
-                                 else (time.thread_time() - cpu_started) * 1000)
+                previous, current_hash, hasher = _digest_and_log(
+                    path, digests, second_read, earlier, before, backend, cpu_started)
                 if earlier and previous != earlier[1]:
                     _prefix_changed(path, "imported_bytes", imported)
                 # Compare against ACTUAL bytes delivered to the native parser,
