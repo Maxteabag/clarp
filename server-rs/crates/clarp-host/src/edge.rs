@@ -1958,7 +1958,7 @@ pub(crate) async fn make_agent(
                     crate::mcp::check(&backend, selection.as_deref())
                 })
                 .await
-                .map_err(|error| unavailable(Unavailable(error.to_string())))?
+                .map_err(|error| unavailable(Unavailable::new(error.to_string())))?
                 .map_err(|why| not_made(why.into()))?;
             }
             let begins = crate::past::begins(app, asked, &cwd).await?;
