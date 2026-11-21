@@ -250,6 +250,12 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let ears = Arc::new(clarp_host::heard::Ears::new(&config, &fleet).await?);
+    let gallery_db = tables
+        .open(&config.data_dir.join("gallery.db"))
+        .map_err(|error| error.to_string())?;
+    let gallery = clarp_host::gallery::Store::open(gallery_db, blobs.clone())
+        .map_err(|error| error.words().to_owned())?;
+    let gallery = clarp_host::gallery::Writer::start(gallery).map_err(|error| error.to_string())?;
     let app = App {
         capture,
         turns,
@@ -264,6 +270,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clock,
         mouth,
         faces,
+        gallery,
         server_id,
         revisions,
         pusher,
@@ -334,9 +341,13 @@ async fn serve(config: Config) -> Result<(), String> {
     {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
+    clarp_host::media_manage::import_history(&app)
+        .await
+        .map_err(|e| e.words().to_owned())?;
     clarp_host::portrait_generation::recover(&app)
         .await
         .map_err(|e| e.0)?;
+    clarp_host::media_manage::recover(&app).await;
     // The janitors a Host has of its own are installed, each once, paused.
     if let Err(why) = clarp_host::janitors::install(&app).await {
         eprintln!("clarp-host: its own janitors were not installed: {}", why.0);

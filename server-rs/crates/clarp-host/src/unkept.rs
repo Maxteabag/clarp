@@ -448,6 +448,10 @@ pub(crate) mod at_the_port {
                 hub: hub.clone(),
                 clock: clock.clone(),
             });
+            let blobs = MemBlobs::new().open(&self.dir).unwrap();
+            let table = self.engine.open(&self.dir.join("gallery.db")).unwrap();
+            let gallery = crate::gallery::Store::open(table, blobs.clone()).unwrap();
+            let gallery = crate::gallery::Writer::start(gallery).unwrap();
             crate::edge::App {
                 capture: crate::diagnostics::Capture::start(
                     Box::new(clarp_store_files::diagnostics::HourFiles::new(
@@ -479,7 +483,8 @@ pub(crate) mod at_the_port {
                 hub,
                 mouth,
                 pusher: crate::pusher::pusher().0,
-                blobs: MemBlobs::new().open(&self.dir).unwrap(),
+                blobs,
+                gallery,
                 form_event_writer: Arc::default(),
                 skill_links: Arc::default(),
                 turns: Arc::default(),
