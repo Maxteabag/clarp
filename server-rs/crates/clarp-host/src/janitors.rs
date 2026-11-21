@@ -605,7 +605,8 @@ fn turn_of(app: &App, run: &Run) -> (Option<i64>, Option<Ended>) {
         return (Some(live.started_at_ms), None);
     }
     let end = view.ended.as_ref();
-    let Some(end) = end.filter(|end| end.trace_id.as_deref() == trace) else {
+    let Some(end) = end.filter(|end| end.trace_id.as_deref() == trace && end.replaced_by.is_none())
+    else {
         return (None, None);
     };
     let last = view.status.last.as_ref();
@@ -619,6 +620,7 @@ fn turn_of(app: &App, run: &Run) -> (Option<i64>, Option<Ended>) {
             failed(reason.clone())
         }
         Some(Outcome::Stopped { by, .. }) => failed(format!("Stopped by {by}")),
+        Some(Outcome::Replaced { .. }) => return (None, None),
         Some(Outcome::Withdrawn { .. }) => {
             failed("Its turn was taken back before it started".to_string())
         }

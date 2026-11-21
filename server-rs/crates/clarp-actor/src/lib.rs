@@ -67,6 +67,7 @@ pub mod conversation;
 pub mod deliveries;
 pub mod helper_cells;
 pub mod provider_jobs;
+pub mod takeover;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
@@ -374,6 +375,7 @@ pub struct Waiting {
     pub text: String,
     pub speak: bool,
     pub accepted_at_ms: i64,
+    pub admission: Admission,
 }
 
 /// A row of the conversation an agent had on another Host, on its way in.
@@ -464,6 +466,8 @@ pub struct Status {
     pub last: Option<Settled>,
     /// The turns that wait, in the order they will run.
     pub waiting: Vec<TurnId>,
+    /// How many of the waiting turns have yet to put a row in the conversation.
+    pub queue_depth: usize,
     pub paused: bool,
     pub queue_revision: u64,
     pub stop_generation: u64,
@@ -1359,6 +1363,10 @@ impl Actor {
         if let Some((turn, message_seq)) = noting {
             actor.turn_notes = (turn.0, actor.notes_since(turn, message_seq)?);
         }
+        if let Some(mut recovered) = actor.recover_takeover(now_ms)? {
+            recovered.changed.speech |= out.changed.speech;
+            return Ok((actor, recovered));
+        }
         let live = match actor.recorder.agent().live() {
             Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt, true)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt, false)),
@@ -1492,6 +1500,7 @@ impl Actor {
         };
         match &settled.outcome {
             Outcome::Completed => ("completed", None),
+            Outcome::Replaced { .. } => ("replaced", None),
             Outcome::Failed { reason, kind } => {
                 let kind = match kind.as_str() {
                     "" => failures::classify_error(reason),
@@ -1713,6 +1722,7 @@ impl Actor {
             live,
             last: agent.last().cloned(),
             waiting: agent.waiting().map(|queued| queued.id).collect(),
+            queue_depth: self.recorder.unshown_waiting().count(),
             paused: agent.is_paused(),
             queue_revision: agent.queue_revision(),
             stop_generation: agent.stop_generation(),
@@ -2026,7 +2036,7 @@ impl Actor {
     pub fn queue_state(&self) -> QueueState {
         let agent = self.recorder.agent();
         QueueState {
-            waiting: agent.waiting().count(),
+            waiting: self.recorder.unshown_waiting().count(),
             paused: agent.is_paused(),
             revision: agent.queue_revision(),
         }
@@ -2034,20 +2044,53 @@ impl Actor {
 
     /// The messages that wait, in the order they will run.
     pub fn queue(&self) -> Result<Vec<Waiting>, ActorError> {
-        let mut waiting = Vec::new();
-        for queued in self.recorder.agent().waiting() {
-            let message = self.message_at(queued.message_seq)?;
-            waiting.push(Waiting {
-                turn: queued.id,
-                client_id: message.client_id().to_string(),
-                told_id: message.told_id().to_string(),
-                message_id: message.id,
-                text: message.text,
-                speak: message.speak,
-                accepted_at_ms: queued.accepted_at_ms,
-            });
-        }
-        Ok(waiting)
+        self.recorder
+            .unshown_waiting()
+            .map(|queued| {
+                self.queue_message(
+                    queued.id,
+                    queued.message_seq,
+                    queued.accepted_at_ms,
+                    queued.admission,
+                )
+            })
+            .collect()
+    }
+
+    /// The item a user can edit or withdraw while it is waiting.
+    pub fn queue_item(&self, turn: TurnId) -> Result<Option<Waiting>, ActorError> {
+        self.recorder
+            .unshown_waiting()
+            .find(|queued| queued.id == turn)
+            .map(|queued| {
+                self.queue_message(
+                    queued.id,
+                    queued.message_seq,
+                    queued.accepted_at_ms,
+                    queued.admission,
+                )
+            })
+            .transpose()
+    }
+
+    fn queue_message(
+        &self,
+        turn: TurnId,
+        message_seq: Seq,
+        accepted_at_ms: i64,
+        admission: Admission,
+    ) -> Result<Waiting, ActorError> {
+        let message = self.message_at(message_seq)?;
+        Ok(Waiting {
+            turn,
+            client_id: message.client_id().to_string(),
+            told_id: message.told_id().to_string(),
+            message_id: message.id,
+            text: message.text,
+            speak: message.speak,
+            accepted_at_ms,
+            admission,
+        })
     }
 
     /// The message a turn that ended answered.
@@ -3640,13 +3683,32 @@ impl Actor {
         self.for_its_model = false;
         // What the attempts before put into the conversation is still the turn's.
         let before = self.live.take().filter(|live| live.turn == turn);
-        let backend_session = self.recorder.agent().backend_session().map(str::to_string);
+        let takeover = self.recorder.agent().live_takeover().cloned();
+        let (backend_session, new_session) = match &takeover {
+            Some(start)
+                if matches!(
+                    start.input,
+                    clarp_kernel::takeover::Input::ClaudeFresh { .. }
+                ) =>
+            {
+                (None, start.session.clone())
+            }
+            Some(start) => (
+                Some(start.session.clone()),
+                self.profile.conversation_id.clone(),
+            ),
+            None => (
+                self.recorder.agent().backend_session().map(str::to_string),
+                self.profile.conversation_id.clone(),
+            ),
+        };
         // A tool that lets go of old conversations no longer has this one: named, it would
         // begin an empty one without a word. The turn begins a new one instead, which opens
         // with the Host's own record of the old.
-        let lost = backend_session
-            .as_deref()
-            .is_some_and(|session| !self.backend.keeps(session));
+        let lost = takeover.is_none()
+            && backend_session
+                .as_deref()
+                .is_some_and(|session| !self.backend.keeps(session));
         let backend_session = backend_session.filter(|_| !lost);
         // A turn that waited for an account is taken up again: the tool, which has the turn
         // in its own session, is told so. One whose tool never got as far as a session is
@@ -3692,17 +3754,19 @@ impl Actor {
             .then(|| {
                 backend_session
                     .clone()
-                    .unwrap_or_else(|| self.profile.conversation_id.clone())
+                    .unwrap_or_else(|| new_session.clone())
             })
             .filter(|id| !id.is_empty());
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
             turn: turn.0,
+            trace_id: message.trace_id.clone(),
+            takeover: takeover.map(|start| start.input),
             cwd: self.profile.cwd.clone(),
             prompt,
             // The first turn starts the tool's session under the conversation's own name.
-            new_session: Some(self.profile.conversation_id.clone())
+            new_session: Some(new_session)
                 .filter(|name| backend_session.is_none() && !name.is_empty()),
             backend_session,
             model: message
@@ -4256,7 +4320,7 @@ impl Actor {
             // The turn is shown from before its first record is read, and its end after its
             // last one was.
             self.show_turn(now_ms);
-            let Some(live) = self.live.as_mut().filter(|live| !live.over) else {
+            let Some(live) = self.live.as_ref().filter(|live| !live.over) else {
                 return Ok(());
             };
             let turn = live.turn;
@@ -4268,6 +4332,20 @@ impl Actor {
                 return Ok(());
             }
             out.damaged_lines += read.damaged.len();
+            // Once the terminal record is in this read, a takeover marker cannot arrive
+            // between the recovery check and ordinary settlement.
+            if read.records.iter().any(|record| record.is_final())
+                && let Some(recovered) = self.recover_takeover(now_ms)?
+            {
+                out.actions.extend(recovered.actions);
+                out.changed.conversation = true;
+                out.changed.status = true;
+                out.changed.queue = true;
+                return Ok(());
+            }
+            let Some(live) = self.live.as_mut() else {
+                return Ok(());
+            };
 
             let model = live
                 .managed_model

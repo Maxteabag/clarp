@@ -51,7 +51,15 @@ The token is either the administrator token from `config.toml` or a paired
 device credential from `POST /pairing/exchange`. A paired device may have
 `limited` scope, which allows conversation reads and the core `POST`s
 (`/send`, `/transcribe`, `/upload`, `/select`, `/focus`, `/clips/ack`, `/clog`,
-`/location`, `/calendar/response`, `/remote-action`). Administrative routes and
+`/location`, `/calendar/response`, `/remote-action`). Its `GET`s are a list too:
+what an app needs to chat, speak and answer decisions (`/server-info`,
+`/events`, `/live`, `/status`, `/agents/snapshot`, `/log`, the turn queue,
+attention, artifacts and their catalogs, task plans and the goal ledger, clips,
+media, audio, avatars, voices, the speech stream, controller actions and their
+narration). Every other `GET`, a path no route serves included, and every
+`PATCH`, `PUT` and `DELETE` are refused with `403 full device access required`;
+so is an artifact's export. `/server-info` answers a limited device a fixed set
+of keys, without `default_cwd`. Administrative routes and
 Oracle require full scope. Host filesystem browsing (`/agent-file`,
 `/agent-files`, `/dirs` and `/past-sessions` with any scope) also requires full
 scope: a caller-selected root can contain configuration credentials, even

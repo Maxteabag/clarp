@@ -180,6 +180,11 @@ def select(configs: list[dict], target: dict | None) -> dict | None:
     return chosen[0] if len(chosen) == 1 else None
 
 
+def run_id_for(role: str, request_id: str) -> str:
+    """The run id a demand request of this role gets (read-only; begin_run is unchanged)."""
+    return _request_run_id(role, request_id)
+
+
 def _request_run_id(role: str, request_id: str) -> str:
     _role(role)
     if not isinstance(request_id, str) or not 1 <= len(request_id) <= 160:
