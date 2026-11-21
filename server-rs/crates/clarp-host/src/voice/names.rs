@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use clarp_kernel::said::{self, CARTESIA, ELEVENLABS};
-use clarp_kernel::voice_names::{self, CatalogueVoice, Snapshot};
+use clarp_kernel::voice_names::{self, CatalogueVoice, Refusal, Snapshot};
 use clarp_speech::LookupError;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -112,27 +112,20 @@ impl Desk {
         Ok(())
     }
 
-    fn start_due(&self) -> bool {
+    fn start_due(&self, sources: &Sources) -> bool {
         let current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
         let age = current
             .stamp
             .map(|(modified, _)| modified.elapsed().unwrap_or_default());
         voice_names::start_due(age, current.snapshot.format)
+            || sources.key_changed(&current.snapshot)
     }
 
-    fn next_wait(&self) -> std::time::Duration {
-        if self.start_due() {
-            voice_names::RETRY_AFTER
-        } else {
-            voice_names::REFRESH_EVERY
-        }
-    }
-
-    fn refresh(&self, sources: &Sources, used: &Used) -> io::Result<()> {
+    /// Return whether the catalogue needs a retry.
+    fn refresh(&self, sources: &Sources, used: &Used, retry: bool) -> io::Result<bool> {
         let Ok(_refresh) = self.refreshing.try_lock() else {
-            return Ok(());
+            return Ok(false);
         };
-        let (fetched, failed) = sources.fetch(used);
         self.read()?;
         let (before, old_hash, modified) = {
             let current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
@@ -142,13 +135,14 @@ impl Desk {
                 current.stamp.map(|(time, _)| time),
             )
         };
+        let (fetched, failed) = sources.fetch(&before, used, retry);
         let mut snapshot = before.clone();
         let Some(newly_gone) = snapshot.refresh(fetched, sources.has_key(), failed) else {
-            return Ok(());
+            return Ok(failed);
         };
         let hash = if old_hash.is_some() && snapshot == before {
             if failed {
-                return Ok(());
+                return Ok(failed);
             }
             File::open(&self.path)?.set_modified(SystemTime::now())?;
             old_hash
@@ -158,11 +152,20 @@ impl Desk {
             Some(digest(&raw))
         };
         let meta = fs::metadata(&self.path)?;
+        let refused: Vec<_> = snapshot
+            .refused
+            .iter()
+            .filter(|(provider, mark)| before.refused.get(*provider) != Some(*mark))
+            .map(|(provider, mark)| (provider.clone(), mark.status))
+            .collect();
         self.publish(Stored {
             stamp: Some((meta.modified()?, meta.len())),
             snapshot,
             hash,
         });
+        for (provider, status) in refused {
+            eprintln!("voiceNamesKeyRefused provider={provider} status={status}");
+        }
         for (provider, id) in newly_gone {
             let holders = used
                 .get(&provider)
@@ -174,7 +177,7 @@ impl Desk {
                 .join(",");
             eprintln!("voiceGone provider={provider} id={id} agents={holders}");
         }
-        Ok(())
+        Ok(failed)
     }
 
     fn replace(&self, raw: &[u8], modified: Option<SystemTime>) -> io::Result<()> {
@@ -208,7 +211,17 @@ impl Sources {
         self.cartesia.is_some() || self.elevenlabs.is_some()
     }
 
-    fn fetch(&self, used: &Used) -> (Snapshot, bool) {
+    fn key_changed(&self, current: &Snapshot) -> bool {
+        [(CARTESIA, &self.cartesia), (ELEVENLABS, &self.elevenlabs)]
+            .into_iter()
+            .any(|(provider, source)| {
+                source.as_ref().is_some_and(|source| {
+                    current.key_changed(provider, &voice_names::key_mark(&source.key))
+                })
+            })
+    }
+
+    fn fetch(&self, current: &Snapshot, used: &Used, retry: bool) -> (Snapshot, bool) {
         let mut fetched = Snapshot::default();
         let mut failed = false;
         let ids = |provider: &str| {
@@ -216,7 +229,9 @@ impl Sources {
                 .into_iter()
                 .flat_map(|voices| voices.keys().cloned())
         };
-        if let Some(source) = &self.cartesia {
+        if let Some(source) = &self.cartesia
+            && !current.key_refused(CARTESIA, &voice_names::key_mark(&source.key))
+        {
             match clarp_speech::cartesia::all_voices(&source.key, &source.endpoint) {
                 Ok(rows) => {
                     let today: BTreeMap<_, _> = rows
@@ -234,14 +249,23 @@ impl Sources {
                             (!name.is_empty()).then(|| (id.to_owned(), name.to_owned()))
                         })
                         .collect();
-                    let missing = ids(CARTESIA).filter(|id| !today.contains_key(id)).collect();
-                    let gone = lookup(&missing, &mut listed, CARTESIA, |id| {
-                        clarp_speech::cartesia::voice_by_id(&source.key, &source.endpoint, id)
-                            .map(|row| row["name"].as_str().unwrap_or("").trim().to_owned())
-                    });
+                    if !retry {
+                        let missing = ids(CARTESIA).filter(|id| !today.contains_key(id)).collect();
+                        let gone = lookup(&missing, &mut listed, CARTESIA, |id| {
+                            clarp_speech::cartesia::voice_by_id(&source.key, &source.endpoint, id)
+                                .map(|row| row["name"].as_str().unwrap_or("").trim().to_owned())
+                        });
+                        if let Ok(gone) = gone {
+                            fetched.gone.insert(CARTESIA.into(), gone);
+                        }
+                    }
                     fetched.names.insert(CARTESIA.into(), listed);
                     fetched.catalogue.insert(CARTESIA.into(), today);
-                    fetched.gone.insert(CARTESIA.into(), gone);
+                }
+                Err(LookupError::Http(status)) if voice_names::refuses_key(CARTESIA, status) => {
+                    fetched
+                        .refused
+                        .insert(CARTESIA.into(), source.refusal(status));
                 }
                 Err(why) => {
                     eprintln!("voiceNamesFetchFail {CARTESIA}: {why}");
@@ -252,17 +276,37 @@ impl Sources {
         let eleven_ids: BTreeSet<_> = ids(ELEVENLABS)
             .filter(|id| clarp_kernel::voice_profile::elevenlabs_id_usable(Some(id)))
             .collect();
-        if let Some(source) = &self.elevenlabs
+        if !retry
+            && let Some(source) = &self.elevenlabs
             && !eleven_ids.is_empty()
+            && !current.key_refused(ELEVENLABS, &voice_names::key_mark(&source.key))
         {
             let mut found = ProviderNames::new();
             let gone = lookup(&eleven_ids, &mut found, ELEVENLABS, |id| {
                 clarp_speech::eleven_voice::voice_by_id(&source.key, &source.endpoint, id)
             });
-            fetched.names.insert(ELEVENLABS.into(), found);
-            fetched.gone.insert(ELEVENLABS.into(), gone);
+            match gone {
+                Ok(gone) => {
+                    fetched.names.insert(ELEVENLABS.into(), found);
+                    fetched.gone.insert(ELEVENLABS.into(), gone);
+                }
+                Err(status) => {
+                    fetched
+                        .refused
+                        .insert(ELEVENLABS.into(), source.refusal(status));
+                }
+            }
         }
         (fetched, failed)
+    }
+}
+
+impl Provider {
+    fn refusal(&self, status: u16) -> Refusal {
+        Refusal {
+            key: voice_names::key_mark(&self.key),
+            status,
+        }
     }
 }
 
@@ -271,7 +315,7 @@ fn lookup(
     found: &mut ProviderNames,
     provider: &str,
     mut fetch_one: impl FnMut(&str) -> Result<String, LookupError>,
-) -> BTreeSet<String> {
+) -> Result<BTreeSet<String>, u16> {
     let mut gone = BTreeSet::new();
     for id in voice_names::lookups(used, found) {
         match fetch_one(id) {
@@ -281,11 +325,16 @@ fn lookup(
             Err(LookupError::Http(404)) => {
                 gone.insert(id.to_owned());
             }
+            Err(LookupError::Http(status))
+                if provider == ELEVENLABS && voice_names::refuses_key(provider, status) =>
+            {
+                return Err(status);
+            }
             Err(why) => eprintln!("voiceNamesLookupFail {provider} {id}: {why}"),
             Ok(_) => {}
         }
     }
-    gone
+    Ok(gone)
 }
 
 impl Mouth {
@@ -304,32 +353,32 @@ impl Mouth {
         tokio::spawn(async move {
             tokio::time::sleep(voice_names::FIRST_AFTER).await;
             let mut first = true;
-            while let Some(host) = mouth.upgrade() {
-                let mouth = host.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    if first {
-                        mouth.voice_names.read()?;
-                        if !mouth.voice_names.start_due() {
-                            return Ok(());
-                        }
+            let mut retry = false;
+            let mut backoff = voice_names::Backoff::default();
+            while let Some(mouth) = mouth.upgrade() {
+                let result =
+                    tokio::task::spawn_blocking(move || mouth.refresh_voice_names(first, retry))
+                        .await;
+                let failed = match result {
+                    Ok(Ok(failed)) => failed,
+                    Ok(Err(why)) => {
+                        eprintln!("voiceNamesWorkerFail {why}");
+                        false
                     }
-                    mouth.refresh_voice_names()
-                })
-                .await;
-                match result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(why)) => eprintln!("voiceNamesWorkerFail {why}"),
-                    Err(why) => eprintln!("voiceNamesWorkerFail {why}"),
-                }
+                    Err(why) => {
+                        eprintln!("voiceNamesWorkerFail {why}");
+                        false
+                    }
+                };
                 first = false;
-                let wait = host.voice_names.next_wait();
-                drop(host);
+                let (wait, retry_catalogue) = backoff.next_pass(failed);
+                retry = retry_catalogue;
                 tokio::time::sleep(wait).await;
             }
         });
     }
 
-    fn refresh_voice_names(&self) -> io::Result<()> {
+    fn refresh_voice_names(&self, first: bool, retry: bool) -> io::Result<bool> {
         let directory = self.directory();
         let owners = self.owners_from(&directory);
         let sources = Sources {
@@ -342,8 +391,14 @@ impl Mouth {
                 endpoint: self.eleven_at.clone(),
             }),
         };
-        if !sources.has_key() {
-            return self.voice_names.refresh(&sources, &Used::new());
+        if first {
+            self.voice_names.read()?;
+            if !self.voice_names.start_due(&sources) {
+                return Ok(false);
+            }
+        }
+        if retry || !sources.has_key() {
+            return self.voice_names.refresh(&sources, &Used::new(), retry);
         }
 
         let mut used = Used::new();
@@ -398,7 +453,7 @@ impl Mouth {
                 collect(raw, holder);
             }
         }
-        self.voice_names.refresh(&sources, &used)
+        self.voice_names.refresh(&sources, &used, false)
     }
 }
 
@@ -462,8 +517,19 @@ mod tests {
                     asked.lock().unwrap().push(path.clone());
                     let failures = failures.load(Ordering::SeqCst);
                     let elevenlabs = path.starts_with("/v1/voices/");
-                    let (status, body) = if failures == 1 || (failures == 2 && !elevenlabs) {
-                        (503, json!({}))
+                    let catalogue = path.starts_with("/voices?");
+                    let error = match failures {
+                        1 => Some(503),
+                        2 if !elevenlabs => Some(503),
+                        4 if catalogue => Some(401),
+                        5 if catalogue => Some(403),
+                        6 if !catalogue && !elevenlabs => Some(403),
+                        7 if elevenlabs => Some(401),
+                        8 if elevenlabs => Some(403),
+                        _ => None,
+                    };
+                    let (status, body) = if let Some(error) = error {
+                        (error, json!({}))
                     } else if path.contains("starting_after=next%2Fpage") {
                         (
                             200,
@@ -519,17 +585,17 @@ mod tests {
         let root = Temp(crate::once::a_place("voice-names-test").unwrap());
         let path = root.0.join("voice-names.json");
         let desk = Desk::new(path.clone());
-        assert!(desk.start_due());
+        assert!(desk.start_due(&Sources::default()));
 
         let initial = br#"{ "cartesia": {"c1":"Old name","retired":"Preserve old voice"}, "elevenlabs": {"old":"Keep this too"} }"#;
         fs::write(&path, initial).unwrap();
         desk.read().unwrap();
-        assert!(desk.start_due());
+        assert!(desk.start_due(&Sources::default()));
         let stale =
             SystemTime::now() - voice_names::REFRESH_EVERY - std::time::Duration::from_secs(5);
         File::open(&path).unwrap().set_modified(stale).unwrap();
         desk.read().unwrap();
-        assert!(desk.start_due());
+        assert!(desk.start_due(&Sources::default()));
         assert_eq!(desk.snapshot().1, Some(digest(initial)));
         let mut used = Used::new();
         for id in ["c1", "c+missing"] {
@@ -552,26 +618,26 @@ mod tests {
         );
         let no_keys_path = root.0.join("no-keys.json");
         let no_keys = Desk::new(no_keys_path.clone());
-        no_keys.refresh(&Sources::default(), &used).unwrap();
+        no_keys.refresh(&Sources::default(), &used, false).unwrap();
         assert_eq!(fs::read(&no_keys_path).unwrap(), br#"{"_format":2}"#);
-        assert!(!no_keys.start_due());
+        assert!(!no_keys.start_due(&Sources::default()));
         fs::write(
             &no_keys_path,
             br#"{"cartesia":{"c1":"Old name"},"_catalogue":{"cartesia":{"c1":{}}}}"#,
         )
         .unwrap();
-        no_keys.refresh(&Sources::default(), &used).unwrap();
+        no_keys.refresh(&Sources::default(), &used, false).unwrap();
         let (upgraded, _) = no_keys.snapshot();
         assert_eq!(upgraded.names[CARTESIA]["c1"], "Old name");
         assert!(upgraded.catalogue.is_empty());
         assert_eq!(upgraded.format, Some(2));
-        assert_eq!(no_keys.next_wait(), voice_names::REFRESH_EVERY);
+        assert!(!no_keys.start_due(&Sources::default()));
         File::open(&no_keys_path)
             .unwrap()
             .set_modified(stale)
             .unwrap();
         let no_keys_modified = fs::metadata(&no_keys_path).unwrap().modified().unwrap();
-        no_keys.refresh(&Sources::default(), &used).unwrap();
+        no_keys.refresh(&Sources::default(), &used, false).unwrap();
         assert_eq!(
             fs::metadata(&no_keys_path).unwrap().modified().unwrap(),
             no_keys_modified
@@ -591,10 +657,10 @@ mod tests {
         };
         {
             let _running = desk.refreshing.lock().unwrap();
-            desk.refresh(&sources, &used).unwrap();
+            desk.refresh(&sources, &used, false).unwrap();
             assert!(server.asked.lock().unwrap().is_empty());
         }
-        desk.refresh(&sources, &used).unwrap();
+        desk.refresh(&sources, &used, false).unwrap();
         let sent = server.asked.lock().unwrap().clone();
         assert_eq!(sent.len(), 103);
         assert!(sent[0].starts_with("/voices?") && !sent[0].contains("language="));
@@ -618,7 +684,7 @@ mod tests {
         assert_eq!(names.names[ELEVENLABS]["old"], "Keep this too");
         assert_eq!(names.names[ELEVENLABS]["e000"], "Eleven Name");
         assert_ne!(signature, Some(digest(initial)));
-        assert!(!desk.start_due());
+        assert!(!desk.start_due(&Sources::default()));
 
         use std::os::unix::fs::MetadataExt as _;
         let after = fs::read(&path).unwrap();
@@ -630,31 +696,31 @@ mod tests {
         assert!(names.catalogue[CARTESIA]["c2"].owner);
         let reopened = Desk::new(path.clone());
         reopened.read().unwrap();
-        assert!(!reopened.start_due());
+        assert!(!reopened.start_due(&Sources::default()));
         assert_eq!(signature, Some(digest(&after)));
         let inode = fs::metadata(&path).unwrap().ino();
         File::open(&path).unwrap().set_modified(stale).unwrap();
-        desk.refresh(&sources, &used).unwrap();
+        desk.refresh(&sources, &used, false).unwrap();
         assert_eq!(desk.snapshot(), (names.clone(), signature.clone()));
         assert_eq!(fs::read(&path).unwrap(), after);
         assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
-        assert!(!desk.start_due());
+        assert!(!desk.start_due(&Sources::default()));
 
         File::open(&path).unwrap().set_modified(stale).unwrap();
         let previous_modified = fs::metadata(&path).unwrap().modified().unwrap();
         server.failures.store(1, Ordering::SeqCst);
-        desk.refresh(&sources, &used).unwrap();
+        assert!(desk.refresh(&sources, &used, false).unwrap());
         assert_eq!(
             fs::metadata(&path).unwrap().modified().unwrap(),
             previous_modified
         );
-        assert_eq!(desk.next_wait(), voice_names::RETRY_AFTER);
+        assert!(desk.start_due(&sources));
         assert_eq!(desk.snapshot(), (names.clone(), signature.clone()));
         assert_eq!(fs::read(&path).unwrap(), after);
         assert_eq!(server.asked.lock().unwrap().len(), 307);
 
         server.failures.store(2, Ordering::SeqCst);
-        desk.refresh(&sources, &used).unwrap();
+        assert!(desk.refresh(&sources, &used, false).unwrap());
         let (after_partial, changed) = desk.snapshot();
         assert_eq!(after_partial.names[CARTESIA], names.names[CARTESIA]);
         assert_eq!(after_partial.names[ELEVENLABS]["e000"], "New Eleven");
@@ -664,18 +730,101 @@ mod tests {
             fs::metadata(&path).unwrap().modified().unwrap(),
             previous_modified
         );
-        assert_eq!(desk.next_wait(), voice_names::RETRY_AFTER);
+        assert!(desk.start_due(&sources));
         assert_eq!(server.asked.lock().unwrap().len(), 408);
 
         server.failures.store(3, Ordering::SeqCst);
-        desk.refresh(&sources, &used).unwrap();
+        desk.refresh(&sources, &used, false).unwrap();
         let (deleted, digest) = desk.snapshot();
         assert_eq!(deleted.gone[CARTESIA], BTreeSet::from(["c+missing".into()]));
         assert!(!deleted.names[CARTESIA].contains_key("c+missing"));
         assert_eq!(deleted.names[CARTESIA]["c2"], "Second");
         assert!(!deleted.catalogue[CARTESIA].contains_key("c2"));
-        assert_eq!(desk.next_wait(), voice_names::REFRESH_EVERY);
-        desk.refresh(&sources, &used).unwrap();
+        assert!(!desk.start_due(&sources));
+        desk.refresh(&sources, &used, false).unwrap();
         assert_eq!(desk.snapshot(), (deleted, digest));
+    }
+
+    #[test]
+    fn voice_names_remember_refused_keys_and_retry_only_the_catalogue() {
+        let server = Catalogue::start();
+        let root = Temp(crate::once::a_place("voice-names-refusal").unwrap());
+        let endpoint = format!("http://{}", server.addr);
+        let mut sources = Sources {
+            cartesia: Some(Provider {
+                key: "fixture-old".into(),
+                endpoint: format!("{endpoint}/voices"),
+            }),
+            elevenlabs: None,
+        };
+        let mut used = Used::new();
+        record(&mut used, CARTESIA, "c+missing".into(), "");
+        for id in ["e001", "e002"] {
+            record(&mut used, ELEVENLABS, id.into(), "");
+        }
+        let asked = || std::mem::take(&mut *server.asked.lock().unwrap());
+        for (mode, status, attempts) in [(4, 401, 3), (5, 403, 1)] {
+            let path = root.0.join(format!("refusal-{status}.json"));
+            let desk = Desk::new(path.clone());
+            server.failures.store(mode, Ordering::SeqCst);
+            assert!(!desk.refresh(&sources, &used, false).unwrap());
+            assert_eq!(asked().len(), attempts);
+            let file = fs::read_to_string(&path).unwrap();
+            assert!(!file.contains("fixture-old"));
+            let saved: Value = serde_json::from_str(&file).unwrap();
+            assert_eq!(saved["_refused"][CARTESIA]["status"], status);
+            assert_eq!(
+                saved["_refused"][CARTESIA]["key"],
+                voice_names::key_mark("fixture-old")
+            );
+
+            let reopened = Desk::new(path);
+            reopened.read().unwrap();
+            assert!(!reopened.start_due(&sources));
+            assert!(!reopened.refresh(&sources, &used, false).unwrap());
+            assert!(asked().is_empty());
+
+            sources.cartesia.as_mut().unwrap().key = "fixture-new".into();
+            assert!(reopened.start_due(&sources));
+            server.failures.store(6, Ordering::SeqCst);
+            assert!(!reopened.refresh(&sources, &used, false).unwrap());
+            let calls = asked();
+            assert_eq!(calls.len(), 3);
+            assert_eq!(calls[2], "/voices/c%2Bmissing");
+            assert!(reopened.snapshot().0.refused.is_empty());
+            assert!(!reopened.start_due(&sources));
+            sources.cartesia.as_mut().unwrap().key = "fixture-old".into();
+        }
+
+        sources.elevenlabs = Some(Provider {
+            key: "fixture-eleven".into(),
+            endpoint,
+        });
+        let desk = Desk::new(root.0.join("retry.json"));
+        server.failures.store(2, Ordering::SeqCst);
+        assert!(desk.refresh(&sources, &used, false).unwrap());
+        let calls = asked();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(&calls[1..], ["/v1/voices/e001", "/v1/voices/e002"]);
+        server.failures.store(0, Ordering::SeqCst);
+        assert!(!desk.refresh(&sources, &used, true).unwrap());
+        let calls = asked();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|path| path.starts_with("/voices?")));
+
+        sources.cartesia = None;
+        server.failures.store(7, Ordering::SeqCst);
+        assert!(!desk.refresh(&sources, &used, false).unwrap());
+        assert_eq!(asked(), ["/v1/voices/e001"]);
+        assert_eq!(desk.snapshot().0.refused[ELEVENLABS].status, 401);
+        assert!(!desk.refresh(&sources, &used, false).unwrap());
+        assert!(asked().is_empty());
+
+        sources.elevenlabs.as_mut().unwrap().key = "fixture-eleven-new".into();
+        assert!(desk.start_due(&sources));
+        server.failures.store(8, Ordering::SeqCst);
+        assert!(!desk.refresh(&sources, &used, false).unwrap());
+        assert_eq!(asked(), ["/v1/voices/e001", "/v1/voices/e002"]);
+        assert!(desk.snapshot().0.refused.is_empty());
     }
 }

@@ -5,6 +5,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+use crate::said::{CARTESIA, ELEVENLABS};
 
 pub type Names = BTreeMap<String, BTreeMap<String, String>>;
 pub type Catalogue = BTreeMap<String, BTreeMap<String, CatalogueVoice>>;
@@ -41,11 +44,18 @@ pub struct Snapshot {
     pub catalogue: Catalogue,
     #[serde(rename = "_gone", skip_serializing_if = "BTreeMap::is_empty")]
     pub gone: Gone,
+    #[serde(rename = "_refused", skip_serializing_if = "BTreeMap::is_empty")]
+    pub refused: BTreeMap<String, Refusal>,
 }
 
 pub const FIRST_AFTER: Duration = Duration::from_secs(60);
 pub const REFRESH_EVERY: Duration = Duration::from_secs(24 * 3600);
 pub const RETRY_AFTER: Duration = Duration::from_secs(15 * 60);
+const BACKOFF: [Duration; 3] = [
+    RETRY_AFTER,
+    Duration::from_secs(60 * 60),
+    Duration::from_secs(4 * 60 * 60),
+];
 pub const MAX_LOOKUPS: usize = 100;
 
 const FORMAT: i64 = 2;
@@ -55,7 +65,53 @@ pub fn start_due(age: Option<Duration>, format: Option<i64>) -> bool {
     age.is_none_or(|age| age >= REFRESH_EVERY) || format.is_some_and(|format| format < FORMAT)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Refusal {
+    pub key: String,
+    pub status: u16,
+}
+
+pub fn key_mark(key: &str) -> String {
+    format!("{:x}", Sha256::digest(key.as_bytes()))[..12].to_owned()
+}
+
+/// A Cartesia status here is from a catalogue read. ElevenLabs only has by-ID reads.
+pub fn refuses_key(provider: &str, status: u16) -> bool {
+    matches!(
+        (provider, status),
+        (CARTESIA, 401 | 403) | (ELEVENLABS, 401)
+    )
+}
+
+#[derive(Default)]
+pub struct Backoff(usize);
+
+impl Backoff {
+    /// Return how long to wait and whether the next pass is a catalogue retry.
+    pub fn next_pass(&mut self, due: bool) -> (Duration, bool) {
+        if !due {
+            self.0 = 0;
+            return (REFRESH_EVERY, false);
+        }
+        let wait = BACKOFF.get(self.0).copied().unwrap_or(REFRESH_EVERY);
+        self.0 = (self.0 + 1).min(BACKOFF.len());
+        (wait, true)
+    }
+}
+
 impl Snapshot {
+    pub fn key_changed(&self, provider: &str, mark: &str) -> bool {
+        self.refused
+            .get(provider)
+            .is_some_and(|old| old.key != mark)
+    }
+
+    pub fn key_refused(&self, provider: &str, mark: &str) -> bool {
+        self.refused
+            .get(provider)
+            .is_some_and(|old| old.key == mark)
+    }
+
     pub fn from_file(raw: &Value) -> Self {
         let mut names = Names::new();
         for (provider, rows) in raw.as_object().into_iter().flatten() {
@@ -104,11 +160,35 @@ impl Snapshot {
                 ))
             })
             .collect();
+        let refused = raw["_refused"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(provider, mark)| {
+                let key = mark["key"].as_str()?;
+                let status = u16::try_from(mark["status"].as_u64()?).ok()?;
+                (key.len() == 12
+                    && key
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                    && refuses_key(provider, status))
+                .then(|| {
+                    (
+                        provider.clone(),
+                        Refusal {
+                            key: key.to_owned(),
+                            status,
+                        },
+                    )
+                })
+            })
+            .collect();
         Self {
             names,
             format: Some(raw["_format"].as_i64().unwrap_or(1)),
             catalogue,
             gone,
+            refused,
         }
     }
 
@@ -128,7 +208,7 @@ impl Snapshot {
             self.format = Some(FORMAT);
             return Some(Vec::new());
         }
-        if fetched.names.is_empty() && !old_format {
+        if fetched.names.is_empty() && fetched.refused.is_empty() && !old_format {
             return None;
         }
         if old_format {
@@ -137,7 +217,16 @@ impl Snapshot {
         if !failed {
             self.format = Some(FORMAT);
         }
+        for provider in fetched.names.keys() {
+            self.refused.remove(provider);
+        }
+        self.refused.extend(fetched.refused);
         merge(&mut self.names, fetched.names);
+        for (provider, rows) in &fetched.catalogue {
+            if let Some(gone) = self.gone.get_mut(provider) {
+                gone.retain(|id| !rows.contains_key(id));
+            }
+        }
         self.catalogue.extend(fetched.catalogue);
         let mut newly_gone = Vec::new();
         for (provider, ids) in fetched.gone {

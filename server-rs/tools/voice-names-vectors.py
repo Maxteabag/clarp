@@ -27,7 +27,7 @@ def reference(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import log, voice_names
+    from lib import config, log, voice_names
 
     now = 1_700_000_000
     startup = []
@@ -150,7 +150,56 @@ def reference(root):
     with patch.object(log, 'log', lambda *a: None):
         voice_names.refresh(cfg, path=list_path, cartesia_all=lambda _: pages,
                             cartesia_one=by_id, voices_in_use=lambda _: {'cartesia': used})
+    refusals = []
+    for provider, status in (('cartesia', 401), ('cartesia', 403), ('cartesia', 503),
+                             ('elevenlabs', 401), ('elevenlabs', 403)):
+        refused_path = root / f'{provider}-{status}.json'
+        calls = []
+        refusal_events = []
+
+        def cfg(mark):
+            return SimpleNamespace(cartesia_key=lambda: mark if provider == 'cartesia' else '',
+                                   eleven_key=lambda: mark if provider == 'elevenlabs' else '')
+
+        def reject(key, *_):
+            calls.append(1)
+            raise type('Http', (Exception,), {'status': status})()
+
+        def refresh(mark, succeeds=False):
+            def found(key, *_):
+                calls.append(1)
+                return {'id': 'voice', 'name': 'Test voice'}
+            voice_names.refresh(
+                cfg(mark), path=refused_path,
+                cartesia_all=(lambda key: [found(key)]) if succeeds else reject,
+                cartesia_one=lambda *_: {},
+                eleven_one=found if succeeds else reject,
+                voices_in_use=lambda _: {'elevenlabs': {'e1', 'e2'}})
+
+        with patch.object(log, 'log', lambda *a: refusal_events.append(a[1]) if a[0] == 'voiceNamesKeyRefused' else None), \
+                patch.object(log, 'log_exception', lambda *a, **kw: None):
+            refresh('fixture-old')
+            saved = json.loads(refused_path.read_text()) if refused_path.exists() else {}
+            refresh('fixture-old')
+            repeat_count = len(calls)
+            with patch.object(config, 'load', return_value=cfg('fixture-old')):
+                same_due = voice_names.start_due(refused_path)
+            with patch.object(config, 'load', return_value=cfg('fixture-new')):
+                changed_due = voice_names.start_due(refused_path)
+            refresh('fixture-new', succeeds=True)
+        new = json.loads(refused_path.read_text())
+        refusals.append({'provider': provider, 'status': status, 'marks': saved.get('_refused', {}),
+                         'same_due': same_due, 'changed_due': changed_due, 'repeat_count': repeat_count,
+                         'events': refusal_events, 'after': new.get('_refused', {})})
+
+    worker = voice_names.VoiceNamesWorker()
+    backoff = []
+    for due in (True, True, True, True, True, False, True):
+        with patch.object(voice_names, 'start_due', lambda: due):
+            backoff.append({'failed': due, 'wait': worker.next_wait(), 'retry': worker._retries > 0})
+
     return {'startup': startup, 'merge': merged, 'access': access,
+            'refusals': refusals, 'backoff': backoff,
             'deleted': {'current': previous, 'fetched': update, 'result': json.loads(deleted_path.read_text()),
                         'logged': gone_lines},
             'lookup': {'used': sorted(used), 'listed': {row['id']: row['name'] for row in pages},
