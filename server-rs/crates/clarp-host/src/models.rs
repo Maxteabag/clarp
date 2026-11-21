@@ -40,20 +40,15 @@ const WITHIN: Duration = Duration::from_millis(2_500);
 const KEPT_FOR: Duration = Duration::from_secs(300);
 
 /// What is declared of a tool and this Host cannot do with it yet. Claude Code: a turn is
-/// not steered while it runs, a tool is given no servers of its own, nobody signs in from
-/// an app (but on the Host that keeps the machine's tools: `told`), and what an account has
+/// not steered while it runs, nobody signs in from an app (but on the Host that keeps
+/// the machine's tools: `told`), and what an account has
 /// used is not read. Codex, beside those: a past session of
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
 /// conversation is not made shorter from an app.
 const NOT_YET: [(&str, &[&str]); 4] = [
     (
         "claude",
-        &[
-            "supports_steer",
-            "supports_mcp",
-            "supports_auth",
-            "supports_usage",
-        ],
+        &["supports_steer", "supports_auth", "supports_usage"],
     ),
     (
         "codex",

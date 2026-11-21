@@ -81,8 +81,8 @@ impl Backend for Claude {
             "--include-partial-messages",
             // Without this the stream is not a stream: the lines come when the turn is over.
             "--verbose",
-            // Only the MCP servers the Host names, and so far it names none: a slow or broken
-            // server in the user's own configuration must not hold up every turn's start.
+            // The Host may name a subset for this agent. A slow or broken server in
+            // the user's own configuration must not hold up every other turn's start.
             "--strict-mcp-config",
         ]
         .iter()
