@@ -189,3 +189,26 @@ def test_state_watcher_broadcasts_status_only_changes_without_state_rows():
     assert stream.events[0]["kind"] == "done"
     assert stream.events[0]["status_text"] == ""
     assert watcher._notify_queue.unfinished_tasks == 0
+
+
+def test_a_poll_reads_nothing_while_nothing_was_committed():
+    """What a poll broadcasts follows new state_log rows and changed agents rows: while the
+    database's change stamp stands it reads neither, and the next commit is seen at once."""
+    from lib import db
+    agent_id = agents_db.create_agent(persona="Quiet", voice_id="V", cwd="/tmp", session="quiet")
+    stream = FakeStream()
+    watcher = StateLogWatcher(stream)
+    watcher.prime()
+    watcher._poll_once()
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        for _ in range(5):
+            watcher._poll_once()
+    finally:
+        db.conn().set_trace_callback(None)
+    assert not [s for s in statements if "FROM state_log" in s or "FROM agents" in s], statements
+    agents_db.record_state(agent_id, "done", {"backend_session_id": "bs"})
+    watcher._poll_once()
+    assert any(e["type"] == SSEType.AGENT_STATE and e.get("agent_id") == agent_id for e in stream.events)
+    watcher.stop()
