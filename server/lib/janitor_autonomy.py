@@ -363,7 +363,7 @@ class AutonomyJanitors:
             prior=janitor_store.continuity_row(agent['agent_id'])
             fingerprint=digest(snap)
             if prior and prior['due_at']>now and prior['snapshot']==fingerprint:continue
-            request_id=digest([agent['agent_id'],fingerprint,prior['run_id'] if prior else '',owner['generation']])
+            request_id=self._heartbeat_request(digest([agent['agent_id'],fingerprint,prior['run_id'] if prior else '',owner['generation']]),owner,now)
             run=janitor_builtins.begin_run('heartbeat-decider',request_id,context={'input_hash':fingerprint,'target_count':1},target_agent_id=agent['agent_id'])
             if not run or not janitor_builtins.claim_run(run['run_id']):continue
             if self._read_meter is not None: self._read_meter.work()
@@ -373,7 +373,7 @@ class AutonomyJanitors:
             except Exception:
                 janitor_builtins.complete_run(run['run_id'],'failed',error='Decision unavailable or invalid; no target was woken',activity='failed',summary='Decision unavailable or invalid')
                 # Backoff is a capacity guard, not a rigid wake decision.
-                janitor_store.save_continuity(agent['agent_id'],fingerprint,run['run_id'],'{}',now+owner['options']['review_interval_seconds']*1000,'failed')
+                self._heartbeat_back_off(agent,fingerprint,run,owner,now)
                 continue
             try:
                 current=agents.get_by_agent_id(agent['agent_id']);fresh=snapshot(current) if current else None
@@ -388,6 +388,8 @@ class AutonomyJanitors:
                 from .log import log_exception
                 log_exception('heartbeatDecisionFail',exc,detail=run['run_id'])
                 self._close_unfinished(run,f'The decision could not be kept ({type(exc).__name__}); no target was woken')
+                # A decision that could not be saved is not a decision: tried again at the review interval (R106).
+                self._heartbeat_back_off(agent,fingerprint,run,owner,now)
                 continue
             if decision['action']=='wake':
                 self.deliver(agent['agent_id'],run)
@@ -396,6 +398,34 @@ class AutonomyJanitors:
         for row in janitor_store.pending_continuity_rows():
             run=janitors.get_run(row['run_id'])
             if run:self.deliver(row['target_id'],run)
+    def _heartbeat_back_off(self,agent,fingerprint,run,owner,now):
+        """No decision this pass: the agent is decided again at the review interval. A 'failed'
+        continuity names this run, so the next due pass asks with a new request id. If even that
+        write fails, _heartbeat_request finds this run closed and asks again (R106)."""
+        try:janitor_store.save_continuity(agent['agent_id'],fingerprint,run['run_id'],'{}',now+owner['options']['review_interval_seconds']*1000,'failed')
+        except Exception as exc:
+            from .log import log_exception
+            log_exception('heartbeatBackoffFail',exc,detail=run['run_id'])
+
+    def _heartbeat_request(self,request_id,owner,now):
+        """The request id for this agent's decision. A run whose decision could not be kept, with
+        no continuity saved to name it (the write failed twice), leaves the same request id finding
+        that closed run for ever. For the heartbeat decider only (other janitors' failed runs keep
+        their answer): once that run has been over for a review interval, the request is asked
+        again as its k-th retry, k the review intervals since it ended: at most once an interval,
+        and the same id within one (R106)."""
+        row=janitor_store.run_row(janitor_builtins.run_id_for('heartbeat-decider',request_id))
+        if row is None:return request_id
+        if row['status'] in ('failed','cancelled'):ended=row['finished_at']
+        elif row['status'] in ('queued','running'):
+            # Left open (closing it failed too): over once its demand expiry has passed.
+            try:ended=int(json.loads(row['configuration_json'] or '{}').get('expires_at') or 0) or None
+            except (TypeError,ValueError):ended=None
+        else:return request_id
+        review=owner['options']['review_interval_seconds']*1000
+        if not ended or review<=0 or now<ended+review:return request_id
+        return digest([request_id,'retry',(now-ended)//review])
+
     def deliver(self,target_id,run):
         row=janitor_store.continuity_row(target_id);agent=agents.get_by_agent_id(target_id)
         if not row or row['status']!='pending':return

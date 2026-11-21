@@ -381,8 +381,14 @@ def goal(backend: str, agent_id: str, action: str, *, objective: str = "",
 
 
 def steer_turn(backend: str, agent_id: str, text: str, *,
-               client_msg_id: str = "", synthesize_audio: bool = False) -> bool:
+               client_msg_id: str = "", synthesize_audio: bool = False,
+               **read_later) -> bool:
+    """``read_later`` (trace_id, on_read, on_unread): a backend whose follow-up is read later
+    than it is written (issue 491, part C) reports the read through these, in this process;
+    over the runtime socket there is no such call and the steer is not offered."""
     if _RUNTIME_CLIENT is not None:
+        if read_later:
+            return False
         return bool(_RUNTIME_CLIENT.steer(
             normalize(backend), agent_id, text,
             client_msg_id=client_msg_id,
@@ -391,7 +397,7 @@ def steer_turn(backend: str, agent_id: str, text: str, *,
     try:
         return by_id(backend).steer(
             agent_id, text, client_msg_id=client_msg_id,
-            synthesize_audio=synthesize_audio)
+            synthesize_audio=synthesize_audio, **read_later)
     except Unsupported:
         return False
 

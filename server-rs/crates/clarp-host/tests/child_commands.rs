@@ -112,6 +112,10 @@ const EXEMPT: &[(&str, &str)] = &[
         "Owns the standard command constructor and common environment.",
     ),
     (
+        "crates/clarp-sealed/src/lib.rs",
+        "Builds the commands tests start, from nothing; only tests depend on it.",
+    ),
+    (
         "crates/clarp-host/src/child.rs",
         "Builds the PTY adapter with the common environment.",
     ),
