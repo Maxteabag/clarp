@@ -996,8 +996,8 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
 }
 
 /// A Host that cannot read its key gives no turn a token: no agent can leave a note, so no
-/// turn is hidden. A turn another agent's message began is still marked, and every row of it,
-/// its live turn and its working state are the user's. A note is refused without a token
+/// turn is hidden. Turns marked before key loss and turns accepted after it remain visible.
+/// Their history, live turn and working state are the user's. A note is refused without a token
 /// (403) and answered that it cannot be said whose turn it is with one (503, which may be
 /// asked again).
 #[test]
@@ -1023,6 +1023,12 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
     });
     assert_eq!(rows_of(&host, "oak")["u-saved"]["audience"], "agents");
     assert_eq!(host.get("/live?session=oak")["turn"]["audience"], "agents");
+    let queued = host.post(
+        "/send",
+        json!({ "session": "oak", "text": "wait your turn", "client_msg_id": "saved-queued",
+                "sender": "ivy", "origin": "agent" }),
+    );
+    assert_eq!(queued["queued"], true, "{queued}");
     drop(host);
     keep_record(
         &place,
@@ -1037,12 +1043,22 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
     });
     assert_eq!(rows_of(&host, "oak")["u-saved"]["audience"], "user");
     assert_eq!(host.get("/live?session=oak")["turn"]["audience"], "user");
+    let heard = host.listen();
+    wait_for("the event stream to subscribe", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
+    });
     std::fs::write(release.join("oak"), "").unwrap();
-    wait_for("the rejoined turn to finish", || {
-        answered(&host, "oak", &saved["trace_id"])
+    let working = dispatched(&heard, "oak", "saved-queued");
+    assert_eq!(working["audience"], "user", "{working}");
+    assert!(working.get("sender_agent_id").is_none(), "{working}");
+    wait_for("the rejoined and previously queued turns to finish", || {
+        answered(&host, "oak", &saved["trace_id"]) && answered(&host, "oak", &queued["trace_id"])
     });
     std::fs::remove_file(tokens.join("oak")).unwrap();
-    let heard = host.listen();
     std::fs::write(holds.join("oak"), "").unwrap();
     let (status, sent) = asked(
         &host,
