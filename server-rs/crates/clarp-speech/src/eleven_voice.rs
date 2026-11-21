@@ -135,23 +135,6 @@ impl Speaker for ElevenVoice {
     }
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    #[test]
-    fn elevenlabs_frames_match_the_reference() {
-        let v: Value = serde_json::from_str(include_str!(
-            "../../clarp-kernel/tests/fixtures/speech-engines-vectors.json"
-        ))
-        .unwrap();
-        assert_eq!(
-            json!(frames("A line.", "unit", 1.1)),
-            v["eleven"][0]["sent"]
-        );
-    }
-}
-
 /// One of the account's voices, resolved by ID for the background names file.
 pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<String, String> {
     let endpoint = if endpoint.is_empty() {
@@ -170,4 +153,21 @@ pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<String, String
         .unwrap_or("")
         .trim()
         .to_string())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    #[test]
+    fn elevenlabs_frames_match_the_reference() {
+        let v: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/speech-engines-vectors.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            json!(frames("A line.", "unit", 1.1)),
+            v["eleven"][0]["sent"]
+        );
+    }
 }
