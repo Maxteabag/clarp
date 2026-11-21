@@ -389,7 +389,10 @@ impl Stage {
         if message["receipt"].is_object() {
             self.edit_receipt(&id, &message["receipt"]);
         }
-        let trace = format!("trace-{id}");
+        let trace = message["trace"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("trace-{id}"));
         let came = came_of(message);
         let only: Option<Vec<String>> = message["only"]
             .as_array()
@@ -614,7 +617,10 @@ fn expected(message: &Value) -> Value {
 /// Holds what happened to a message here against what happened to it there.
 fn compare(stage: &Stage, seen: &Seen, want: &Value, what: &str) {
     let id = want["id"].as_str().unwrap();
-    let trace = format!("trace-{id}");
+    let trace = want["trace"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("trace-{id}"));
     let ours = |part: &str| match part {
         "shown" => json!(seen.shown),
         "given" => seen.given.iter().map(given_row).collect(),
@@ -688,7 +694,7 @@ fn a_messages_way_is_the_python_hosts_message_by_message() {
     }
     // Every message of the stories, and what the stories are there to show: a model asked
     // once and twice, messages given, and words aloud.
-    assert_eq!((messages, asked, given, said), (141, 189, 14, 60));
+    assert_eq!((messages, asked, given, said), (144, 189, 14, 60));
 }
 
 /// Plays the stories up to the one named, and answers its messages by their ids.
