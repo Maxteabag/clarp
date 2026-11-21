@@ -142,7 +142,7 @@ class HostView:
         adapters = _adapters(providers)
         return cls(
             cfg=cfg, keys=keys, google_refusal=google_refusal, adapters=adapters,
-            labels=_labels(),
+            labels=_labels(cfg),
             engine=(stored.get("transcription.engine") or stt_providers.LOCAL_ENGINE),
             language=stt_language.parse_language(stored.get("transcription.language")),
             agent_engines=stt_language.parse_map(stored.get("transcription.agent_engines")),
@@ -158,8 +158,13 @@ class HostView:
                 "keys": self.keys, "google_refusal": self.google_refusal,
                 "adapters": sorted(self.adapters), "engine": self.engine,
                 "language": self.language, "agent_engines": self.agent_engines,
-                "agent_languages": self.agent_languages})
+                "agent_languages": self.agent_languages, "names": _names_signature()})
         return self._version
+
+
+def _names_signature():
+    from . import voice_names
+    return voice_names.signature()
 
 
 def config_inputs(cfg) -> dict:
@@ -168,6 +173,7 @@ def config_inputs(cfg) -> dict:
         "tts_provider": cfg.tts_provider, "tts_fallback": cfg.tts_fallback,
         "tts_agents": cfg.tts_agent_overrides, "cartesia_voices": cfg.cartesia_voices,
         "gemini_voices": cfg.gemini_voices, "gemini_voice": cfg.gemini_voice,
+        "gemini_vertex_voices": getattr(cfg, "gemini_vertex_voices", {}),
         "deepgram_model": cfg.deepgram_model,
         "whisper": [cfg.whisper_provider, cfg.whisper_model, cfg.whisper_enabled],
         "keys": {p: bool(k) for p, k in (
@@ -211,16 +217,27 @@ def _adapters(providers: set[str]) -> dict[str, dict]:
     return found
 
 
-def _labels() -> dict[str, dict[str, str]]:
-    """Names of voices from what is already in memory; never a fetch."""
-    from . import cartesia_voices, elevenlabs_voices, google_tts
-    from .voice_catalog import AURA2_VOICES, FLUX_VOICES
+def _labels(cfg) -> dict[str, dict[str, str]]:
+    """Names of voices from code tables, configuration, the names file (voice_names) and
+    what the pickers fetched; never a fetch, never a query."""
+    from . import cartesia_voices, elevenlabs_voices, google_tts, voice_names
+    from .voice_catalog import AURA2_VOICES, FLUX_VOICES, gemini_voices
     from .voices import VOICE_CATALOG
     eleven = {row["id"]: row["label"].split(" — ", 1)[0] for row in VOICE_CATALOG}
+    eleven.update(voice_names.names(ELEVENLABS))
     eleven.update(elevenlabs_voices.cached_names())
+    # Gemini: in the voice picker's own words (voice_catalog.gemini_voices): a prebuilt voice
+    # by its name, a Voice Design voice as "<Persona> (designed)"; a Vertex id is mapped back
+    # to the same words through [gemini_tts.vertex_voices]; an id in no map has none.
+    gemini = {vid: label for vid, label, _ in gemini_voices(cfg)}
+    api_of = getattr(cfg, "gemini_voices", {}) or {}
+    for persona, vertex_id in (getattr(cfg, "gemini_vertex_voices", {}) or {}).items():
+        if vertex_id and vertex_id not in gemini:
+            gemini[vertex_id] = gemini.get(api_of.get(persona, ""), f"{persona} (designed)")
     return {
-        CARTESIA: cartesia_voices.cached_names(),
+        CARTESIA: {**voice_names.names(CARTESIA), **cartesia_voices.cached_names()},
         ELEVENLABS: eleven,
+        GEMINI: gemini,
         GOOGLE: {v: v.rsplit("-", 1)[1] for v in google_tts.VOICES},
         DEEPGRAM: {vid: name for vid, name, _ in (*FLUX_VOICES, *AURA2_VOICES)},
     }
@@ -246,10 +263,7 @@ def _voice_label(host: HostView, provider: str, voice: str | None) -> str | None
     """A real name or None, never an empty string (apps show their own words for None)."""
     if not voice:
         return None
-    if provider == GEMINI:
-        label = None if voice.startswith("voice_") else voice
-    else:
-        label = host.labels.get(provider, {}).get(voice)
+    label = host.labels.get(provider, {}).get(voice)
     return (label or "").strip() or None
 
 
@@ -348,6 +362,8 @@ def hearing(host: HostView, agent: Mapping) -> dict:
         language_origin = DEFAULT
     elif stt_providers.provider_of(first) == "elevenlabs" and len(codes) > 1:
         codes = []          # Scribe is handed no language for a set: it detects (stt_providers)
+    # The set chosen for this agent (else the Host's), whatever the first engine is handed.
+    configured = [c for c in (own_language or host.language).split(",") if c]
     device_may_override = engine_origin == DEFAULT
     # What a hosted engine chosen on the phone is handed for this agent
     # (stt_providers.transcribe: the agent's own set, else the Host's).
@@ -360,6 +376,7 @@ def hearing(host: HostView, agent: Mapping) -> dict:
         "device_cloud_languages": device_cloud,
         "languages": codes,
         "language_origin": language_origin,
+        "configured_languages": configured,
     }
 
 
@@ -433,7 +450,8 @@ def for_session(session: str) -> Any:
     from .log import log_exception
     try:
         row = agents_db.get_by_session(session)
-        if not row:
+        if not row or row.get("archived_at"):
+            # An archived agent speaks to nobody: no block, as on the snapshot.
             return events.OMIT
         return for_agent(row, agent_rows=agents_db.list_agents())
     except Exception as exc:  # noqa: BLE001 - a profile never fails the route
