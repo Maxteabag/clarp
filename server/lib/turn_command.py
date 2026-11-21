@@ -281,7 +281,13 @@ def _can_steer(registry, backend: str) -> bool:
     if by_id is None:
         return True
     try:
-        return bool(getattr(by_id(backend), "supports_steer", True))
+        found = by_id(backend)
+        if bool(getattr(found, "supports_steer", True)):
+            return True
+        # A backend whose CLI takes a follow-up into a running turn only from a recorded
+        # version on (Claude, issue 491 part C); its advertised capability is unchanged.
+        ready = getattr(found, "steer_ready", None)
+        return bool(ready()) if callable(ready) else False
     except Exception:  # noqa: BLE001 - unknown: the steer path as before
         return True
 

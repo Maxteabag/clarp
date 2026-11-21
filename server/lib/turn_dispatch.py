@@ -438,10 +438,23 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 _with_delivery_context(
                     peer_text, unheard_audio=spec.unheard_audio),
                 digest=spec.team_digest, protocol=spec.team_protocol)
+            # A backend whose CLI reads a follow-up later than it is written (Claude,
+            # issue 491 part C) says when through callbacks: the row is due then.
+            read_later = {}
+            by_id = getattr(self.backends, "by_id", None)
+            if by_id is not None and spec.queue_id and getattr(
+                    by_id(spec.backend), "steer_ready", None) is not None:
+                read_later = {
+                    "trace_id": spec.trace_id,
+                    "on_read": lambda joined, s=spec, a=active_trace:
+                        self._steer_read(s, a, joined),
+                    "on_unread": lambda s=spec: self._steer_unread(s),
+                }
             accepted = bool(steer(
                 spec.backend, spec.agent_id, steer_text,
                 client_msg_id=spec.client_msg_id,
                 synthesize_audio=spec.synthesize_audio,
+                **read_later,
             ))
         except Exception as e:  # noqa: BLE001
             log_exception("turnSteerFail", e, detail=spec.agent_id)
@@ -463,6 +476,15 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             if spec.origin == "oracle":
                 from . import oracle_delegations
                 oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
+            team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
+            eventlog.emit("server", "turnSteered", context=spec.context,
+                          detail={"active_trace": _INFLIGHT.get(spec.agent_id)})
+            log("turnSteered", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
+            if read_later:
+                # Written, not read yet: the message stays a queue item (it may not
+                # be edited: its receipt says the prompt may have left) until the
+                # CLI's echo writes its row (_steer_read).
+                return "later"
             self._steered_into(spec, active_trace)
             if spec.queue_id:
                 # Delivered into the running turn: the visible user row is due
@@ -470,11 +492,33 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 # one transaction (the words the backend was given).
                 self._start_queued_row(spec, steered=True, start_item=True)
                 self._broadcast_queue_state(spec, started=True)
-            team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
-            eventlog.emit("server", "turnSteered", context=spec.context,
-                          detail={"active_trace": _INFLIGHT.get(spec.agent_id)})
-            log("turnSteered", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
         return accepted
+
+    def _steer_read(self, spec: _TurnSpec, active_trace: str, joined: bool) -> None:
+        """The CLI read a follow-up written into the running turn (its replay echo): the row
+        is due now, with the item shown and started in one transaction. ``joined``: read
+        inside the running turn (one answer covers both). Otherwise the CLI answered it in a
+        turn of its own in the same process (it was read after the turn's result): its row
+        still stands where it was read, and that answer is told within the running turn's
+        process (issue 491, part C)."""
+        if not joined:
+            log("steerReadAfterResult",
+                f"agent={spec.agent_id} trace={spec.trace_id} running={active_trace}")
+        self._steered_into(spec, active_trace)
+        self._start_queued_row(spec, steered=True, start_item=True)
+        self._broadcast_queue_state(spec, started=True)
+
+    def _steer_unread(self, spec: _TurnSpec) -> None:
+        """The process ended before the CLI read a follow-up written into it: it was never
+        delivered. Its receipt goes back to pending and its queue item runs as its own turn
+        (recovery hands it on; it is never run twice: until here its receipt said it may
+        have left)."""
+        launch_receipts.withdraw_attempt(spec.trace_id)
+        log("steerUnread", f"agent={spec.agent_id} trace={spec.trace_id}")
+        try:
+            self.retry_scheduler(0.0, self.recover_queued)
+        except Exception as exc:  # noqa: BLE001 - the next recovery pass runs it
+            log_exception("steerUnreadRecoverFail", exc, detail=spec.agent_id)
 
     def _steered_into(self, spec: _TurnSpec, active_trace: str) -> None:
         """A message that is not coordination, steered into a coordination
