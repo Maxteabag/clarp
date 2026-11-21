@@ -53,6 +53,8 @@ mod launch_refused;
 mod live_model;
 #[path = "host/managed_skills.rs"]
 mod managed_skills;
+#[path = "host/media_manage.rs"]
+mod media_manage;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
 #[path = "host/pictures.rs"]
