@@ -674,19 +674,29 @@ def observed_model_ids(provider_id: str) -> frozenset[str] | None:
     catalogue appends from the bundled list are part of it."""
     try:
         with _cache_condition:
-            cached = copy.deepcopy(_cache[1]) if _cache is not None else None
-        provider = (cached or {}).get("providers", {}).get(provider_id, {})
-        source = provider.get("source") if isinstance(provider, dict) else None
-        if not isinstance(source, dict) or source.get("kind") != "cli_probe":
+            kind, ids = _cached_ids(provider_id)
+        if kind != "cli_probe":
             return None
-        ids = frozenset(
-            item["id"] for item in provider.get("models") or []
-            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"])
         return ids or None
     except Exception as exc:  # noqa: BLE001 - no observation is not a refusal
         # The check is off for this id, which nobody would otherwise learn.
         log_exception("observedModelIdsFail", exc, detail=provider_id)
         return None
+
+
+def _cached_ids(provider_id: str) -> tuple[str | None, frozenset[str]]:
+    """(source kind, model ids) of one provider in the cached catalogue, read in place: the
+    caller holds _cache_condition, and nothing here changes the cache. Every launch and
+    janitor pass asks this; a deep copy of the whole catalogue per question was the cost."""
+    cached = _cache[1] if _cache is not None else None
+    provider = (cached or {}).get("providers", {}).get(provider_id, {})
+    if not isinstance(provider, dict):
+        return None, frozenset()
+    source = provider.get("source")
+    kind = source.get("kind") if isinstance(source, dict) else None
+    return kind, frozenset(
+        item["id"] for item in provider.get("models") or []
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"])
 
 
 def is_agy_model_id(value: Any) -> bool:
@@ -706,15 +716,8 @@ def is_dispatchable_agy_model(value: Any) -> bool:
     model_id = value.strip()
     try:
         with _cache_condition:
-            cached = copy.deepcopy(_cache[1]) if _cache is not None else None
-        provider = (cached or {}).get("providers", {}).get("agy", {})
-        models = provider.get("models") if isinstance(provider, dict) else []
-        ids = {
-            item.get("id") for item in models or []
-            if isinstance(item, dict) and isinstance(item.get("id"), str)
-        }
-        source = provider.get("source") if isinstance(provider, dict) else {}
-        if isinstance(source, dict) and source.get("kind") == "cli_probe":
+            kind, ids = _cached_ids("agy")
+        if kind == "cli_probe":
             return model_id in ids
     except Exception:
         pass
