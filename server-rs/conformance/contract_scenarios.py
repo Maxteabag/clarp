@@ -1899,6 +1899,29 @@ SCENARIOS.append({
     ],
 })
 
+SCENARIOS.append({
+    'id': 'agent-creation-details',
+    'what': 'the details of a named launch, their shape in its answer, and explicit pins on relaunch',
+    'sessions': (AGENT, 'creation-fixture'),
+    'steps': [
+        post('/agents', {
+            'name': '  Creation Fixture  ', 'backend': ' CLAUDE ', 'cwd': '{workspace}',
+            'session': 'creation-fixture', 'model': ' fixture-model ', 'effort': ' HIGH ',
+            'avatar_symbol': 'fixture-symbol', 'personality': 'Speak in short sentences.',
+            'voice_id': '{}', 'synthesize_audio': False,
+        }, 'a launch with the details an app sends'),
+        post('/agents', {
+            'name': 'Creation Fixture', 'replace_sid': 'creation-fixture',
+            'model': None, 'effort': None, 'synthesize_audio': False,
+        }, 'an explicit null resets the two pins'),
+        post('/agents', {'name': 'Other Fixture', 'model': 4}, 'a model that is not text'),
+        post('/agents', {'name': 'Other Fixture', 'effort': 4}, 'an effort that is not text'),
+        post('/agents', {'name': 'Other Fixture', 'avatar_base64': '%%%'},
+             'an invalid avatar is refused'),
+    ],
+})
+
+
 PAST = '/past-sessions'
 FORKED, TAKEN = 'forked-one', 'taken-one'
 # An agent that begins with a session its tool kept, in the directory the scenarios' agent works in.

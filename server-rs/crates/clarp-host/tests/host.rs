@@ -23625,6 +23625,52 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
 }
 
 #[test]
+fn agent_creation_details_returns_the_named_launch_fields() {
+    let place = Place::new("named-agent-creation");
+    let host = place.start();
+    let cwd = place.root.join("work");
+    let (status, made) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({
+            "name":"  Named fixture  ", "backend":" Codex ", "cwd":cwd,
+            "model":" fixture-model ", "effort":" HIGH ", "session":"fixture-with_details",
+            "avatar_symbol":"fixture-symbol", "synthesize_audio":false, "voice_id":"fixture-voice",
+        })),
+    );
+    assert_eq!(status, 200, "{made}");
+    assert_eq!(made["ok"], true);
+    assert_eq!(made["session"], "fixture-with_details");
+    assert_eq!(made["name"], "Named fixture");
+    let row = &made["agent"];
+    let expected = json!({
+        "session":"fixture-with_details", "persona":"Named fixture", "backend":"codex",
+        "cwd":cwd, "model":"fixture-model", "effort":"high", "avatar_symbol":"fixture-symbol",
+        "muted":0, "heartbeat_enabled":0, "dreaming_enabled":0, "parent_agent_id":null,
+        "role":"agent", "helper_state":null, "alive":true, "latest_state":"spawned",
+        "avatar_url":"", "avatar_generation_status":null,
+    });
+    for (key, value) in expected.as_object().unwrap() {
+        assert_eq!(&row[key], value, "{key}");
+    }
+    assert!(row["agent_id"].as_str().is_some_and(|id| !id.is_empty()));
+    assert!(row["last_activity"].as_i64().is_some_and(|ms| ms > 1_000_000_000_000));
+    assert!(row["voice_id"].as_str().is_some_and(|voice| voice.contains("fixture-voice")));
+    assert!(row["voice_profile"].is_object());
+    // An omitted pin stays, an explicitly null pin resets it to the backend default.
+    let session = made["session"].as_str().unwrap();
+    let retained = host.post("/agents", json!({"name":"Named fixture","replace_sid":session}));
+    assert_eq!(retained["agent"]["model"], "fixture-model");
+    assert_eq!(retained["agent"]["effort"], "high");
+    let cleared = host.post(
+        "/agents",
+        json!({"name":"Named fixture","replace_sid":session,"model":null,"effort":null}),
+    );
+    assert_eq!(cleared["agent"]["model"], "");
+    assert_eq!(cleared["agent"]["effort"], "");
+}
+
+#[test]
 fn agent_creation_details_anonymous_launch_chooses_its_own_identity() {
     let place = Place::new("anonymous-agent-creation");
     let host = place.start();
