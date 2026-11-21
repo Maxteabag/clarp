@@ -243,3 +243,11 @@ ccbe384d767a  the-apps-own-ids: the row that follows, which has its turn here (s
 # send_delivery_state, which took every key called `delivery` out of both sides, came off.
 c7bf459ceedf  rings: a ring's pushes, off without a relay
 a15f230cf4b5  rings: the same, on the second ring
+
+
+# Claude declined a follow-up without writing input. Python counts the
+# attempted handoff and its rollback. Rust keeps the send pending throughout.
+423a7536792f  send-while-busy: delivery revision after the waiting send runs
+7418a8c7d119  delivery-of-a-held-send: stopped receipt after the user's Stop
+683fc84686b8  delivery-of-a-held-send: handed-over receipt after resume
+17a6dcfd2347  delivery-of-a-held-send: the same handed-over receipt on the user row
