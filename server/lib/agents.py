@@ -878,7 +878,10 @@ def dashboard_runtimes() -> dict[str, dict[str, Any]]:
                    ELSE lr.backend_session_id END AS backend_session_id,
                (SELECT started_at FROM turns t
                  WHERE t.agent_id = a.agent_id AND ended_at IS NULL
-                 ORDER BY started_at DESC LIMIT 1) AS open_turn_started_at
+                 ORDER BY started_at DESC LIMIT 1) AS open_turn_started_at,
+               (SELECT trace_id FROM turns t
+                 WHERE t.agent_id = a.agent_id AND ended_at IS NULL
+                 ORDER BY started_at DESC LIMIT 1) AS open_turn_trace
           FROM agents a LEFT JOIN live_runtime lr ON lr.agent_id = a.agent_id
          WHERE a.deleted_at IS NULL
     """).fetchall()

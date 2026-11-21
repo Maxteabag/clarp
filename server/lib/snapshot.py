@@ -187,6 +187,29 @@ ARCHIVED_LISTING_TTL_S = 300.0
 _LIMIT_TEXT = re.compile(r"[1-9][0-9]{0,2}")
 
 
+def _working_with(agent_id: str, trace_id: str | None) -> dict[str, Any]:
+    """The running turn's audience for a snapshot row; {} when it cannot be read (a row is
+    never lost for it)."""
+    try:
+        return coordination.working_with(agent_id, trace_id)
+    except Exception as exc:  # noqa: BLE001
+        log_exception("snapshotWorkingWithFail", exc, detail=agent_id)
+        return {}
+
+
+def _veiled_activity(activity: dict[str, Any], veil: str) -> dict[str, Any]:
+    if not veil:
+        return activity
+    return {**activity, "tool": "", "action": "working", "summary": veil, "file_path": "",
+            "call_id": None}
+
+
+def _veiled_live(activity: Any, veil: str) -> Any:
+    if not veil or not isinstance(activity, dict):
+        return activity
+    return {**activity, "headline": veil, "tool": None}
+
+
 def _not_archived(agent_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [a for a in agent_rows if not a.get("archived_at")]
 
@@ -445,6 +468,7 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     # Read once for every row (lib.coordination): the Host's choice and the chats' own.
     coordination_host = coordination.global_visibility()
     coordination_chosen = coordination.overrides()
+    coordination_hiding = coordination.hiding_agents()
     for a in selected:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -494,6 +518,14 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             turn_started_at = now_ms()
         message = messages.get(agent_id, {})
         message_head = message.get('head', {'preview': '', 'message_id': ''})
+        busy_now = active or state.get('kind') in AgentState.busy_states()
+        state_detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
+        working = _working_with(agent_id, rt.get('open_turn_trace') or state_detail.get("trace_id")) \
+            if busy_now else {}
+        # A coordination turn this chat hides shows who the agent works with, never what it does
+        # there (the same rule as GET /log coordination=auto).
+        veil = coordination.veiled(working) if (
+            agent_id in coordination_hiding and working.get("audience") == coordination.AGENTS) else ""
         # Agree with /log's contract: no bound backend session means an empty
         # conversation at revision 0. Querying with an empty session id
         # dropped the WHERE clause and returned the MAX over every
@@ -569,7 +601,7 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             "archived_at":    a.get("archived_at"),
             "backend_session_id": bsid,
             "alive":          True,
-            "busy":           active or state.get('kind') in AgentState.busy_states(),
+            "busy":           busy_now,
             "focused":        agent_id == focus,
             # An agent with no user messages yet has no message activity, and
             # a bare 0 sorted it below every idle chat — so an agent spawned by
@@ -617,17 +649,23 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             # Advisory only: a send is never refused, because an account
             # switch may still serve it.
             "backend_quota": _backend_quota(backend, exhausted),
-            "activity":       state_activity_event(
+            "activity":       _veiled_activity(state_activity_event(
                 agent_id=agent_id,
                 session=a["session"],
                 persona=a["persona"],
                 kind=state.get("kind") or "",
                 ts=int(state.get("ts") or 0),
                 detail=state.get("detail") if isinstance(state.get("detail"), dict) else {},
-            ) if state.get("kind") else None,
+            ), veil) if state.get("kind") else None,
             # The live-items status line (docs/live-items.md §1.3), when the
             # hub has seen this agent since it started.
-            "live_activity":  live_activities.get(agent_id),
+            "live_activity":  _veiled_live(live_activities.get(agent_id), veil),
+            # Who the running turn is for (feature coordination_working_state): 'agents' when
+            # another agent's message started it, with that agent when this Host knows it, so
+            # a client that connects mid-turn can say "Working with <Name>". None when idle.
+            "working_audience": working.get("audience"),
+            "working_with": ({"agent_id": working["sender_agent_id"], "name": working.get("sender_name") or ""}
+                             if working.get("sender_agent_id") else None),
         })
         if not a.get("archived_at"):
             # What it sounds like and how it is heard, as the Host resolves it.
