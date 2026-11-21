@@ -16,6 +16,7 @@ from lib.log import log_exception
 from lib.voices import voices_with_availability
 from lib.routes.helpers import _runtime_paths, _raw_query_value
 from lib.cartesia_preview_locks import _cartesia_preview_lock
+from lib.request_texts import body_text
 
 
 class VoiceRoutes:
@@ -30,7 +31,7 @@ class VoiceRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         if "muted" not in data:
@@ -53,9 +54,9 @@ class VoiceRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
-        voice_id = (data.get("voice_id") or "").strip()
-        provider = (data.get("provider") or "").strip().lower()
+        session = body_text(data, "session")
+        voice_id = body_text(data, "voice_id")
+        provider = body_text(data, "provider").lower()
         if not session or not voice_id:
             return self._json_error(400, "session and voice_id required")
         if provider == "google":
@@ -101,7 +102,7 @@ class VoiceRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         if "voice_verbosity" not in data:
@@ -261,9 +262,9 @@ class VoiceRoutes:
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        voice_id = (data.get("voice_id") or "").strip()
-        text = (data.get("text") or "Hi there, this is what I sound like.").strip()
-        session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
+        voice_id = body_text(data, "voice_id")
+        text = body_text(data, "text") or "Hi there, this is what I sound like."
+        session = body_text(data, "session") or self.ctx.default_session
         if not voice_id:
             return self._json_error(400, "voice_id required")
         from lib.google_tts import GoogleIdCollision

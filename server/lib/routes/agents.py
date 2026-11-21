@@ -13,6 +13,7 @@ from lib import events
 from lib import identity
 from lib.log import log
 from lib.routes.helpers import _raw_query_value
+from lib.request_texts import body_text
 
 
 class AgentRoutes:
@@ -234,7 +235,7 @@ class AgentRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         agent = identity.lookup(session)
@@ -246,7 +247,7 @@ class AgentRoutes:
         if "model" in data:
             if data.get("model") is not None and not isinstance(data.get("model"), str):
                 return self._json_error(400, "model must be string or null")
-            model = (data.get("model") or "").strip()
+            model = body_text(data, "model")
             if not backends.is_valid_model(backend, model):
                 return self._json(400, {
          "error": "invalid model for backend", "backend": backend,
@@ -256,7 +257,7 @@ class AgentRoutes:
         if "effort" in data:
             if data.get("effort") is not None and not isinstance(data.get("effort"), str):
                 return self._json_error(400, "effort must be string or null")
-            effort = (data.get("effort") or "").strip().lower()
+            effort = body_text(data, "effort").lower()
             if effort and effort not in valid:
                 return self._json(400, {"error": "invalid effort for backend",
                                         "backend": backend, "valid_efforts": valid})
@@ -291,7 +292,7 @@ class AgentRoutes:
             return
         if data is None:
             return self._json_error(400, "bad json")
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         agent = identity.lookup(session)
@@ -331,7 +332,7 @@ class AgentRoutes:
             return self._json_error(400, "bad json")
         if self._reject_janitor_control(data):
             return
-        session = (data.get("session") or "").strip()
+        session = body_text(data, "session")
         if not session:
             return self._json_error(400, "session required")
         # Collapse internal runs of whitespace: this is a display name, and a
