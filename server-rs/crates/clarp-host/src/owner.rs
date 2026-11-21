@@ -285,7 +285,12 @@ impl OwnerFile {
         self.read_text()?.parse::<Table>().ok()
     }
 
-    pub(crate) fn read_text(&self) -> Option<String> {
+    /// Read the owner's TOML with the written order of entries preserved for diagnostics.
+    pub(crate) fn read_document(&self) -> Option<toml_edit::DocumentMut> {
+        self.read_text()?.parse().ok()
+    }
+
+    fn read_text(&self) -> Option<String> {
         std::fs::read_to_string(self.path.as_ref()?).ok()
     }
 
