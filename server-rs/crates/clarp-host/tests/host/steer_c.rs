@@ -115,7 +115,11 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
     let subscribe = |host: &Host| {
         let heard = host.listen();
         wait_for("the event stream", || {
-            heard.lock().unwrap().iter().any(|event| event["type"] == "agent-roster")
+            heard
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event["type"] == "agent-roster")
         });
         heard
     };
@@ -244,10 +248,18 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
 }
 
 fn reads(heard: &Mutex<Vec<Value>>, session: &str, id: &str) -> Vec<u64> {
-    heard.lock().unwrap().iter().filter(|event| {
-        event["type"] == "queue-updated" && event["session"] == session
-            && event["client_msg_id"] == id && event["queue_started"] == true
-    }).map(|event| event["queue_revision"].as_u64().unwrap()).collect()
+    heard
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|event| {
+            event["type"] == "queue-updated"
+                && event["session"] == session
+                && event["client_msg_id"] == id
+                && event["queue_started"] == true
+        })
+        .map(|event| event["queue_revision"].as_u64().unwrap())
+        .collect()
 }
 
 fn collect_answer(host: &Host, session: &str, answer: &str) {

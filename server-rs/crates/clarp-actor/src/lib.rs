@@ -2119,7 +2119,12 @@ impl Actor {
         admission: Admission,
     ) -> Result<Waiting, ActorError> {
         let message = self.message_at(message_seq)?;
-        Ok(Waiting::from_message(&message, turn, accepted_at_ms, admission))
+        Ok(Waiting::from_message(
+            &message,
+            turn,
+            accepted_at_ms,
+            admission,
+        ))
     }
 
     /// The message a turn that ended answered.
