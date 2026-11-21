@@ -402,6 +402,70 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
     }
 }
 
+#[test]
+fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
+    let place = Place::new("queue-item-status");
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE);
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let session = "steer-status";
+    host.post(
+        "/agents",
+        json!({"name":session, "session":session, "backend":"claude"}),
+    );
+    host.send(session, "case-race", "first");
+    wait_for("the stand-in tool to be active", || {
+        place.root.join("tool-race").exists() && host.state(session) == "tool"
+    });
+
+    let joined = "add-race-0";
+    host.send(session, joined, joined);
+    wait_for("the follow-up on stdin", || {
+        place.root.join(format!("received-{joined}")).exists()
+    });
+    host.post(
+        "/send",
+        json!({
+            "session":session, "text":"Later", "client_msg_id":"later", "queue_if_busy":true,
+        }),
+    );
+
+    let queue = || host.get(&format!("/turn-queue?session={session}"));
+    let read = queue();
+    let status = |id: &str| {
+        read["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .and_then(|row| row["status"].as_str())
+    };
+    assert_eq!(status(joined), Some("started"), "{read}");
+    assert_eq!(status("later"), Some("queued"), "{read}");
+    assert!(
+        !host
+            .turns(session)
+            .iter()
+            .any(|row| row["id"] == "u-add-race-0")
+    );
+    assert_eq!(host.ask("DELETE", "/turn-queue/later", None).0, 200);
+
+    std::fs::write(place.root.join("release-race"), "").unwrap();
+    collect_answer(&host, session, "first-race");
+    std::fs::write(place.root.join("echo-race"), "").unwrap();
+    collect_answer(&host, session, "second-race");
+    assert!(
+        host.turns(session)
+            .iter()
+            .any(|row| row["id"] == "u-add-race-0")
+    );
+    assert_eq!(queue()["items"], json!([]));
+}
+
 fn reads(heard: &Mutex<Vec<Value>>, session: &str, id: &str) -> Vec<u64> {
     heard
         .lock()
