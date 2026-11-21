@@ -44,6 +44,29 @@ ROUTINE_AUTOMATION_ORIGINS = frozenset({"heartbeat", "leader_tick", "dreaming", 
 # (lib.send_request): it is that agent's, whatever origin it claims.
 USER_WORD_ORIGINS = frozenset({"user", "oracle"})
 
+# A card's answer the user gave in the app (``artifact_decisions.resolved_by``
+# 'user'), or that a session the owner designated answered on their behalf
+# ('agent:<session>', written only after the Host checked the designation and
+# the session's turn token): the Host delivers it with origin 'automation', yet
+# it is the user's word. An expired or dismissed card is not an answer.
+ANSWERED_CHOICES = frozenset({"accepted", "rejected", "answered"})
+
+
+def is_user_word(origin: str | None, *, card_answered_by: str = "",
+                 card_choice: str = "") -> bool:
+    """Whether work reaching an agent carries the user's own word, from what
+    the Host resolved itself: the origin it settled at admission (a send from
+    an agent's own turn or a peer Host never keeps the user's origin,
+    lib.send_request), or a card answered by the user or on their behalf.
+    It decides a queued item's place in line (lib.turn_queue, issue 481). A
+    front desk's relay is marked where its turn token is checked
+    (``SendRequest.front_desk``)."""
+    if (origin or "").strip() in USER_WORD_ORIGINS:
+        return True
+    answered_by = card_answered_by or ""
+    return ((answered_by == "user" or answered_by.startswith("agent:"))
+            and card_choice in ANSWERED_CHOICES)
+
 # Origins a client may set on POST /send. ``leader_tick`` and ``janitor``
 # are stamped server-side only, never accepted from a client payload.
 CLIENT_SETTABLE_ORIGINS = frozenset(
