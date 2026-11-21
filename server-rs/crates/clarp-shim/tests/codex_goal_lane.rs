@@ -68,16 +68,53 @@ case "$interrupt" in (*'"method":"turn/interrupt"'*'"turnId":"goal-turn"'*) ;; (
 printf '%s\n' \
     '{"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"goal-turn","status":"interrupted"}}}' \
     '{"id":5,"result":{}}'
+read -r resume_goal
+case "$resume_goal" in (*'"method":"thread/goal/set"'*'"status":"active"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' \
+    '{"id":6,"result":{"goal":{"objective":"finish the proof","status":"active"}}}' \
+    '{"method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"second-turn"}}}' \
+    '{"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"second-turn","status":"completed"}}}' \
+    '{"method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"too-early"}}}' \
+    '{"method":"item/completed","params":{"threadId":"fixture-thread","turnId":"too-early","item":{"type":"agentMessage","id":"rogue","text":"must stay out"}}}'
+read -r defer
+case "$defer" in (*'"method":"thread/goal/set"'*'"status":"paused"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":7,"result":{"goal":{"objective":"finish the proof","status":"paused"}}}'
+read -r reject
+case "$reject" in (*'"method":"turn/interrupt"'*'"turnId":"too-early"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' \
+    '{"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"too-early","status":"interrupted"}}}' \
+    '{"id":8,"result":{}}'
+read -r probe
+case "$probe" in (*'"method":"thread/goal/get"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":9,"result":{"goal":{"objective":"finish the proof","status":"paused"}}}'
+read -r recover
+case "$recover" in (*'"method":"thread/goal/set"'*'"status":"active"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' \
+    '{"method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"third-turn"}}}' \
+    '{"id":10,"result":{"goal":{"objective":"finish the proof","status":"active"}}}' \
+    '{"method":"thread/goal/updated","params":{"threadId":"fixture-thread","goal":{"objective":"finish the proof","status":"complete"}}}' \
+    '{"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"third-turn","status":"completed"}}}'
 read -r clear
 case "$clear" in (*'"method":"thread/goal/clear"'*) ;; (*) exit 1 ;; esac
-printf '%s\n' '{"id":6,"result":{"cleared":true}}'
+printf '%s\n' '{"id":11,"result":{"cleared":true}}'
 read -r end || :
 "#,
     )
     .unwrap();
     fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
     let options = root.join("resume.json");
-    fs::write(&options, r#"{"threadId":"fixture-thread"}"#).unwrap();
+    let login_path = root.join("login.lock");
+    fs::write(&login_path, "").unwrap();
+    fs::write(
+        &options,
+        json!({"threadId":"fixture-thread", "_clarpLoginLock": login_path}).to_string(),
+    )
+    .unwrap();
+    let selector = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(login_path)
+        .unwrap();
     let socket = root.join("lane.sock");
     let child = Command::new(env!("CARGO_BIN_EXE_clarp-shim"))
         .env_clear()
@@ -124,6 +161,10 @@ read -r end || :
     let state = ask(&socket, &Request::Inspect);
     assert_eq!(state["state"]["claim"], json!(claim));
     assert_eq!(state["state"]["native_turn"], "goal-turn");
+    assert!(matches!(
+        selector.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
 
     let stopped = ask(
         &socket,
@@ -142,6 +183,70 @@ read -r end || :
             signal: Some(_),
         })
     ));
+
+    selector.try_lock().unwrap();
+    selector.unlock().unwrap();
+
+    let reserve = |turn| {
+        let claim = Claim {
+            turn,
+            attempt: 1,
+            spool: lane.root.join(format!("{turn}.jsonl")),
+            socket: lane.root.join(format!("{turn}.sock")),
+        };
+        let answer = ask(
+            &socket,
+            &Request::Reserve {
+                claim: claim.clone(),
+            },
+        );
+        assert_eq!(answer["ok"], true, "{answer}");
+        claim
+    };
+    let second = reserve(8);
+    let resume = ask(
+        &socket,
+        &Request::Goal {
+            action: GoalAction::Resume,
+            objective: String::new(),
+        },
+    );
+    assert_eq!(resume["ok"], true, "{resume}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = ask(&socket, &Request::Inspect);
+        if state["state"]["available"] == true && state["state"]["deferred_goal"] == true {
+            assert_eq!(state["state"]["goal"]["status"], "paused");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{state}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !fs::read_to_string(&second.spool)
+            .unwrap()
+            .contains("must stay out")
+    );
+    let third = reserve(9);
+    let recovered = ask(&socket, &Request::Recover);
+    assert_eq!(
+        recovered["state"]["native_turn"], "third-turn",
+        "{recovered}"
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = ask(&socket, &Request::Inspect);
+        if state["state"]["available"] == true && state["state"]["goal"]["status"] == "complete" {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{state}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !fs::read_to_string(&third.spool)
+            .unwrap()
+            .contains("must stay out")
+    );
 
     let clear = ask(
         &socket,

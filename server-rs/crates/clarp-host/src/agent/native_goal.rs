@@ -169,7 +169,8 @@ impl Worker {
         let pending = self.native.pending.is_some();
         let continue_goal = self.native.record.as_ref().is_some_and(|record| {
             (record.lane == Ownership::AccountHold
-                || (record.lane == Ownership::Owned && self.native.idle_lane))
+                || (matches!(record.lane, Ownership::Owned | Ownership::SchedulerHold)
+                    && self.native.idle_lane))
                 && record
                     .goal
                     .as_ref()
@@ -217,7 +218,10 @@ impl Worker {
         };
         let thread = record.thread.clone();
         let stopping = record.lane == Ownership::Stopping;
-        let for_account = record.lane == Ownership::AccountHold;
+        let restore = matches!(
+            record.lane,
+            Ownership::AccountHold | Ownership::SchedulerHold
+        );
         let private = self
             .actor
             .as_ref()
@@ -235,7 +239,7 @@ impl Worker {
                 objective,
                 answer,
             }) => (Submission::Activate { action, objective }, Some(answer)),
-            None if private && for_account => (
+            None if private && restore => (
                 Submission::Activate {
                     action: GoalAction::Resume,
                     objective: String::new(),
@@ -406,7 +410,7 @@ impl Worker {
             return Ok(());
         }
         self.native.observed_lane = Some((state.instance, state.revision));
-        self.native.idle_lane = state.claim.is_none();
+        self.native.idle_lane = state.available;
         let mut next = match state.goal {
             None => None,
             Some(raw) => {
@@ -416,10 +420,16 @@ impl Worker {
                 Some(goal)
             }
         };
-        if record.lane == Ownership::AccountHold
+        if (matches!(
+            record.lane,
+            Ownership::AccountHold | Ownership::SchedulerHold
+        ) || (state.deferred_goal && record.lane != Ownership::Stopping))
             && let Some(goal) = next.as_mut()
-            && goal.status == GoalStatus::Paused
+            && (goal.status == GoalStatus::Paused || state.deferred_goal)
         {
+            if record.lane != Ownership::AccountHold {
+                record.lane = Ownership::SchedulerHold;
+            }
             // The account pool paused the tool on its way to the next login.
             // Its reserved next attempt keeps the user's active objective.
             goal.status = GoalStatus::Active;
@@ -466,6 +476,7 @@ impl Worker {
     pub(super) fn lost_native_watch(&mut self) {
         self.native.watching = false;
         self.native.idle_lane = false;
+        self.reconcile_native();
     }
 
     /// Resolve unknown activation by a provider read. A recorded Stop can
@@ -476,7 +487,13 @@ impl Worker {
         };
         if self.native.reconciling
             || self.native.mutation
-            || !matches!(record.lane, Ownership::Acquiring | Ownership::Stopping)
+            || !(matches!(record.lane, Ownership::Acquiring | Ownership::Stopping)
+                || (matches!(record.lane, Ownership::Owned | Ownership::SchedulerHold)
+                    && record
+                        .goal
+                        .as_ref()
+                        .is_some_and(|goal| goal.status == GoalStatus::Active)
+                    && !self.native.watching))
         {
             return;
         }
@@ -546,6 +563,8 @@ impl Worker {
                         instance: 0,
                         revision: 0,
                         known_goal: false,
+                        deferred_goal: false,
+                        available: false,
                         claim: None,
                         native_turn: None,
                         goal: None,
