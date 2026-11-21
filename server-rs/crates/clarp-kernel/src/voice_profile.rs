@@ -370,7 +370,8 @@ pub fn hearing(view: &HostView, who: Who<'_>) -> Value {
     let own_language = languages::of_agent(&view.agent_languages, who);
     let set = own_language.unwrap_or(&view.language);
     let engines: Vec<&str> = plan
-        .chat_order(set, Some(&view.own_engine))
+        .chat_order(Some(&view.own_engine))
+        .0
         .into_iter()
         .enumerate()
         .map(|(place, engine)| {

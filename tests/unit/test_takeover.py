@@ -425,6 +425,35 @@ def test_a_crash_between_the_record_and_the_stop_thaws_harmlessly(world):
     assert _beating(w, 2) and settings_frozen() == []
 
 
+def test_a_host_that_dies_right_after_the_stop_leaves_the_record(world, monkeypatch):
+    """The record is written BEFORE the SIGSTOP (reviewer 4: the record-after-stop order
+    survived every test). A Host that dies right after the stop thaws nothing and clears
+    nothing; the record it left is what lets the next runtime thaw the group."""
+    w = world
+    _the_turn_before(w)
+    _running(w, 2)
+
+    class HostDied(BaseException):
+        pass
+    real_freeze, real_thaw, real_clear = takeover.freeze, takeover.thaw, takeover.clear_freeze
+
+    def freeze_then_die(handle):
+        real_freeze(handle)
+        raise HostDied()
+    monkeypatch.setattr(takeover, "freeze", freeze_then_die)
+    monkeypatch.setattr(takeover, "thaw", lambda handle: None)        # a dead Host does nothing
+    monkeypatch.setattr(takeover, "clear_freeze", lambda key: None)
+    with pytest.raises(HostDied):
+        _send(w, "m2")
+    cli, _mcp = _pids(w, 2)
+    assert takeover.stopped(cli) and len(settings_frozen()) == 1
+    monkeypatch.setattr(takeover, "thaw", real_thaw)
+    monkeypatch.setattr(takeover, "clear_freeze", real_clear)
+    assert takeover.thaw_left_frozen() == 1                           # the next runtime
+    assert _wait(lambda: not takeover.stopped(cli)) and _beating(w, 2)
+    assert settings_frozen() == []
+
+
 def test_the_turn_that_took_over_is_never_taken_over_again(world):
     w = world
     _the_turn_before(w)

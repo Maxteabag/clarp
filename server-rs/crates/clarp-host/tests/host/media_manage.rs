@@ -17,28 +17,24 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
         b"\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00",
     ]
     .concat();
-    let publish = |host: &Host, mime, bytes: &[u8], name| -> String {
-        let response = fetch(
-            host,
-            admin,
-            "POST",
-            "/media",
-            &[
-                ("X-Session", session.as_str()),
-                ("Content-Type", mime),
-                ("X-File-Name", name),
-            ],
-            bytes,
-        );
+    let peer = [("X-Clarp-Peer", "gallery-peer")];
+    let publish = |host: &Host, mime, bytes: &[u8], name, extra: &[(&str, &str)]| -> String {
+        let mut headers = vec![
+            ("X-Session", session.as_str()),
+            ("Content-Type", mime),
+            ("X-File-Name", name),
+        ];
+        headers.extend_from_slice(extra);
+        let response = fetch(host, admin, "POST", "/media", &headers, bytes);
         assert_eq!(response.status, 200, "{}", response.text());
         let answer: Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(answer["favorite"], false);
         assert!(answer["favorite_at"].is_null());
         answer["asset_id"].as_str().unwrap().to_owned()
     };
-    let first = publish(&host, "image/png", &png, "first.png");
-    let second = publish(&host, "image/png", &png, "second.png");
-    let text = publish(&host, "text/plain", b"note", "note.txt");
+    let first = publish(&host, "image/png", &png, "first.png", &[]);
+    let second = publish(&host, "image/png", &png, "second.png", &peer);
+    let text = publish(&host, "text/plain", b"note", "note.txt", &[]);
     let file = format!("/media/{first}");
     let mark = format!("{file}/favorite");
     let list = format!("/media?session={session}");
@@ -46,19 +42,38 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     assert_eq!(host.ask_as(&phone, "GET", &list, None).0, 200);
     assert_eq!(host.ask_as(&phone, "POST", &mark, Some(&bookmark)).0, 403);
     assert_eq!(host.ask_as(&phone, "DELETE", &file, None).0, 403);
-    let turn = fetch(
-        &host,
-        admin,
-        "DELETE",
-        &file,
-        &[("X-Clarp-Turn", "fixture-turn")],
-        b"",
+    let batch = json!({"asset_ids": [first]}).to_string();
+    let turn = [("X-Clarp-Turn", "fixture-turn")];
+    for headers in [turn, peer] {
+        for (method, path, body) in [
+            ("DELETE", file.as_str(), ""),
+            ("POST", "/media/delete", batch.as_str()),
+            ("POST", mark.as_str(), r#"{"favorite":true}"#),
+        ] {
+            let response = fetch(&host, admin, method, path, &headers, body.as_bytes());
+            assert_eq!(response.status, 403, "{method} {path} {headers:?}");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&response.body).unwrap(),
+                json!({"error": "agents_may_not"}),
+                "{method} {path} {headers:?}"
+            );
+        }
+    }
+    let response = fetch(&host, admin, "GET", &list, &peer, b"");
+    assert_eq!(response.status, 200);
+    let gallery: Value = serde_json::from_slice(&response.body).unwrap();
+    assert_eq!(gallery["total"], 2);
+    assert_eq!(gallery["favorites_total"], 0);
+    assert!(
+        gallery["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["asset_id"] == second)
     );
-    assert_eq!(turn.status, 403);
-    assert_eq!(
-        serde_json::from_slice::<Value>(&turn.body).unwrap()["error"],
-        "agents_may_not"
-    );
+    let response = fetch(&host, admin, "GET", &file, &peer, b"");
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, png);
     assert_eq!(
         host.ask("POST", &mark, Some(&json!({"favorite": "true"})))
             .0,
@@ -73,7 +88,16 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
             "session": session, "action": "add_media_asset", "asset_id": first,
         }),
     );
-    let marked = host.post(&mark, bookmark.clone());
+    let response = fetch(
+        &host,
+        admin,
+        "POST",
+        &mark,
+        &[("X-Clarp-Peer", " \t "), ("X-Clarp-Turn", "")],
+        bookmark.to_string().as_bytes(),
+    );
+    assert_eq!(response.status, 200, "{}", response.text());
+    let marked: Value = serde_json::from_slice(&response.body).unwrap();
     assert_eq!(marked["favorite"], true);
     assert!(marked["favorite_at"].is_number());
     assert_eq!(marked["used_as"][0]["kind"], "portrait");
@@ -199,7 +223,7 @@ fn gallery_changes_are_durable_and_only_real_changes_emit_events() {
     let host = place.start_with_token(admin);
     assert_eq!(host.ask("GET", &file, None), (410, gone));
     assert_eq!(host.ask("DELETE", &file, None), (200, good.clone()));
-    let replacement = publish(&host, "image/png", &png, "replacement.png");
+    let replacement = publish(&host, "image/png", &png, "replacement.png", &[]);
     assert_ne!(replacement, first);
     assert_eq!(
         fetch(
