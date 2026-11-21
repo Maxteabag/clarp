@@ -4,6 +4,26 @@ use crate::kept_portraits::picture_kind;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+/// Every provider that publishes portrait-generation images uses this prefix.
+pub const CREATED_BY_PREFIX: &str = "portrait_generation:";
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct MediaWindow {
+    pub session: String,
+    pub since: i64,
+    pub until: i64,
+}
+
+impl MediaWindow {
+    pub fn of(job: &crate::jobs::Job) -> Self {
+        Self {
+            session: job.metadata["session"].as_str().unwrap_or_default().to_owned(),
+            since: job.started_at_ms,
+            until: job.terminal_at_ms.filter(|at| *at != 0).unwrap_or(job.updated_at_ms),
+        }
+    }
+}
+
 pub const KIND: &str = "portrait-generation";
 pub const MAX_IMAGE: usize = 20 * 1024 * 1024;
 pub const MAX_RESPONSE: usize = 32 * 1024 * 1024;
