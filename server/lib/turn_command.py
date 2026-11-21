@@ -126,6 +126,12 @@ class _TurnSpec:
     # (``queue_id``) in place: a cancel ends that exact row, and lifting
     # the fence queues it again.
     taken_over: bool = False
+    # The user's word (lib.origins.is_user_word): it waits ahead of every
+    # other waiting item of the agent, behind the user's earlier ones (#481).
+    user_word: bool = False
+    # Put back at the head after it was taken (``TurnSlots.requeue_front``):
+    # its turn started, and the user's word never overtakes it.
+    taken: bool = False
     # The agent's state generation read just before this turn set its live trace (call-open end:
     # hook prompt admissions after it refuse the end's visible write). In memory only.
     s_open: int | None = None
@@ -179,7 +185,8 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
             sender_agent_id=spec.sender_agent_id,
             prompt_admission_id=spec.prompt_admission_id,
             allow_paused=(prefix in {"drain-park", "preempt-park"}
-                          and spec.bypass_pause))
+                          and spec.bypass_pause),
+            user_word=spec.user_word)
     except Exception as exc:  # noqa: BLE001 - memory still holds the send
         log_exception(f"{prefix.split('-')[0]}ParkPersistFail",
                       exc, detail=spec.agent_id)
@@ -201,7 +208,8 @@ def _park_at_head(spec: _TurnSpec) -> str:
                 client_msg_id=spec.client_msg_id,
                 synthesize_audio=spec.synthesize_audio, origin=spec.origin,
                 sender_agent_id=spec.sender_agent_id,
-                prompt_admission_id=spec.prompt_admission_id)
+                prompt_admission_id=spec.prompt_admission_id,
+                user_word=spec.user_word)
             if spec.bypass_pause:
                 turn_queue.allow_paused_for(park_id)
             con.execute("COMMIT")
@@ -599,6 +607,10 @@ class DispatchCommand:
     unheard_audio_sessions: tuple[str, ...] = ()
     allow_paused_queue: bool = False
     janitor_run_id: str = ""
+    # The Host knows this is the user's word though its origin is not (a card
+    # the user answered in the app, or a queue row stamped so at admission):
+    # it goes first in the agent's queue (issue 481). Never from a payload.
+    user_word: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.unheard_audio_sessions, tuple):
@@ -613,6 +625,8 @@ class DispatchCommand:
                   for field in dataclasses.fields(self)}
         if not self.janitor_run_id:
             values.pop("janitor_run_id")
+        if not self.user_word:
+            values.pop("user_word")
         return values
 
     def to_wire(self) -> dict[str, Any]:

@@ -7,7 +7,7 @@ import json
 import contextlib
 import sys
 import time
-from typing import Callable
+from typing import Any, Callable
 
 from . import db, prompt_admissions
 from . import lifecycle as lk
@@ -211,22 +211,74 @@ def _cas(events, where: str, params=(), *, values=None, returning: str = "", con
                                     params=params, now=db.now_ms(), values=values,
                                     returning=returning)
 
+def user_word_slot(items, *, is_user: Callable[[Any], bool],
+                   started: Callable[[Any], bool]) -> int:
+    """Where the user's word joins an agent's waiting items (issue 481): just
+    after the last item that is itself the user's word or whose turn already
+    started, so it never overtakes either; every other item stays behind it in
+    its own order. The one rule for both the durable rows (``_place``) and the
+    dispatcher's memory queue (``turn_slots.TurnSlots.enqueue``)."""
+    slot = 0
+    for index, item in enumerate(items):
+        if is_user(item) or started(item):
+            slot = index + 1
+    return slot
+
+
+def _place(con, row_id: str) -> None:
+    """Put the user's word ``row_id`` (just inserted, so the newest) at its
+    slot among the agent's other waiting rows: the rows from the slot on are
+    re-inserted behind it, in their order. The caller owns the transaction."""
+    row = con.execute("SELECT agent_id, user_word FROM queued_turns WHERE queue_id = ?",
+                      (row_id,)).fetchone()
+    if row is None or not row["user_word"]:
+        return
+    waiting = con.execute(
+        """SELECT * FROM queued_turns
+            WHERE agent_id = ? AND status IN ('queued', 'parked') AND queue_id <> ?
+            ORDER BY queue_seq""", (row["agent_id"], row_id)).fetchall()
+    slot = user_word_slot(waiting, is_user=lambda item: bool(item["user_word"]),
+                          started=lambda item: bool(item["taken"]) or _has_turn(item))
+    for behind in waiting[slot:]:
+        _reinsert_at_back(con, behind)
+
+
+def _insert_placed(sql: str, params, *, queue_id: str, user_word: bool) -> bool:
+    """Insert one row; the user's word is placed in the same transaction."""
+    con = db.conn()
+    if not user_word:
+        return con.execute(sql, params).rowcount == 1
+    own = not con.in_transaction
+    if own:
+        con.execute("BEGIN IMMEDIATE")
+    try:
+        inserted = con.execute(sql, params).rowcount == 1
+        if inserted:
+            _place(con, queue_id)
+        if own:
+            con.execute("COMMIT")
+    except BaseException:
+        if own:
+            con.execute("ROLLBACK")
+        raise
+    return inserted
+
+
 def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
             trace_id: str, client_msg_id: str, synthesize_audio: bool,
             origin: str, sender_agent_id: str,
-            prompt_admission_id: str = "") -> bool:
-    cursor = db.conn().execute(
+            prompt_admission_id: str = "", user_word: bool = False) -> bool:
+    inserted = _insert_placed(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, enqueued_at,
-               prompt_admission_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               prompt_admission_id, user_word
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
          int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id),
-    )
-    inserted = cursor.rowcount == 1
+         prompt_admission_id, int(user_word)),
+        queue_id=queue_id, user_word=user_word)
     if inserted:
         _bump_revision(agent_id)
     return inserted
@@ -243,19 +295,19 @@ def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
 def park(*, queue_id: str, agent_id: str, session: str, text: str,
          trace_id: str, client_msg_id: str, synthesize_audio: bool,
          origin: str, sender_agent_id: str,
-         prompt_admission_id: str = "", allow_paused: bool = False) -> bool:
-    cursor = db.conn().execute(
+         prompt_admission_id: str = "", allow_paused: bool = False,
+         user_word: bool = False) -> bool:
+    return _insert_placed(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?)
+               prompt_admission_id, allow_paused, user_word
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
          int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id, int(allow_paused)),
-    )
-    return cursor.rowcount == 1
+         prompt_admission_id, int(allow_paused), int(user_word)),
+        queue_id=queue_id, user_word=user_word)
 
 
 # --- release drain ---------------------------------------------------------------
@@ -310,7 +362,7 @@ def _move_behind(agent_id: str, head: str) -> None:
 def park_at_head(*, queue_id: str, agent_id: str, session: str, text: str,
                  trace_id: str, client_msg_id: str, synthesize_audio: bool,
                  origin: str, sender_agent_id: str,
-                 prompt_admission_id: str = "") -> None:
+                 prompt_admission_id: str = "", user_word: bool = False) -> None:
     """Park work that was already in flight ahead of everything the agent
     has open, keeping their order behind it. The caller holds the write
     transaction (the release drain's hand-over writes this, the turn's end
@@ -319,11 +371,11 @@ def park_at_head(*, queue_id: str, agent_id: str, session: str, text: str,
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0)""",
+               prompt_admission_id, allow_paused, user_word, taken
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0, ?, 1)""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
          int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id))
+         prompt_admission_id, int(user_word)))
     if cursor.rowcount != 1:
         raise RuntimeError(f"could not park {queue_id}")
     _move_behind(agent_id, queue_id)
@@ -352,6 +404,7 @@ def take_over_at_head(queue_id: str, *, agent_id: str, trace_id: str,
                               prompt_admission_id=prompt_admission_id):
         raise RuntimeError(f"queued row {queue_id} is not this work's")
     _cas("park", "queue_id = ?", (queue_id,))
+    db.conn().execute("UPDATE queued_turns SET taken = 1 WHERE queue_id = ?", (queue_id,))
     _move_behind(agent_id, queue_id)
 
 
@@ -1306,6 +1359,14 @@ def remove_for_agent(agent_id: str) -> int:
         con.execute("ROLLBACK")
         raise
     return removed
+
+
+def waiting_ids(agent_id: str) -> list[str]:
+    """The agent's waiting rows (queued or parked) in the order it takes them."""
+    return [str(row[0]) for row in db.conn().execute(
+        """SELECT queue_id FROM queued_turns
+            WHERE agent_id = ? AND status IN ('queued', 'parked')
+            ORDER BY queue_seq""", (agent_id,))]
 
 
 def pending(agent_id: str = "") -> list[dict]:

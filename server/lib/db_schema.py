@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 131  # media_assets.favorite_at, media_assets.deleted_by, the favourites index, the two tombstone indexes (GET /media/deleted) and the gallery page index in place of the created one (issue 489). 130: coordination_traces (a table) and agents.coordination_visibility: coordination between agents (issue 478). 129: provider_turns.trace_id, the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
+_SCHEMA_VERSION = 132  # queued_turns.user_word and .taken and idx_queued_turns_waiting: the user's word goes first in an agent's queue (issue 481). 131: media_assets.favorite_at, media_assets.deleted_by, the favourites index, the two tombstone indexes (GET /media/deleted) and the gallery page index in place of the created one (issue 489). 130: coordination_traces (a table) and agents.coordination_visibility: coordination between agents (issue 478). 129: provider_turns.trace_id, the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -799,10 +799,13 @@ CREATE TABLE queued_turns (
     started_at INTEGER,
     claimed_at INTEGER,
     prompt_admission_id TEXT NOT NULL DEFAULT '',
-    allow_paused INTEGER NOT NULL DEFAULT 0
+    allow_paused INTEGER NOT NULL DEFAULT 0,
+    user_word INTEGER NOT NULL DEFAULT 0,
+    taken INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_queued_turns_agent_time ON queued_turns(agent_id, enqueued_at);
 CREATE INDEX idx_queued_turns_status_seq ON queued_turns(status, queue_seq);
+CREATE INDEX idx_queued_turns_waiting ON queued_turns(agent_id, status, queue_seq);
 
 CREATE TABLE queue_state_revisions (
     agent_id TEXT PRIMARY KEY,

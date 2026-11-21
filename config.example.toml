@@ -167,6 +167,11 @@ claude_account_switch_command = []
 # behalf (for example a front-desk agent). Empty = nobody may. The acting
 # session must also present its verified turn identity when it answers.
 decision_on_behalf_sessions = []  # e.g. ["nori-5aac"]
+# The owner's front desk: sessions that relay the owner's words to other
+# agents. A message sent from such a session's own turn goes first in the
+# receiving agent's queue, as the owner's word would; it still reads as that
+# agent's message. A request that only names the session gets nothing.
+front_desk_sessions = []
 claude_model           = ""
 claude_effort          = "high"   # explicit default; "" keeps the Claude CLI default; low | medium | xhigh | max
 codex_model            = ""
