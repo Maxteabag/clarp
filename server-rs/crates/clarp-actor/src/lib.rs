@@ -2211,27 +2211,26 @@ impl Actor {
 }
 
 fn message_at(log: &dyn AgentLog, message_seq: Seq) -> Result<Message, ActorError> {
-        let stored = log
-            .read_after(message_seq.saturating_sub(1), Kinds::ALL, 1)?
-            .into_iter()
-            .next()
-            .filter(|item| {
-                item.seq == message_seq && matches!(item.kind, kind::MESSAGE | kind::WAITING)
-            })
-            .ok_or_else(|| {
-                ActorError::Corrupt(format!(
-                    "a turn answers the message at {message_seq}, and the log has none there"
-                ))
-            })?;
-        serde_json::from_slice(&stored.body).map_err(|error| {
-            ActorError::Corrupt(format!(
-                "the message at {message_seq} cannot be read: {error}"
-            ))
+    let stored = log
+        .read_after(message_seq.saturating_sub(1), Kinds::ALL, 1)?
+        .into_iter()
+        .next()
+        .filter(|item| {
+            item.seq == message_seq && matches!(item.kind, kind::MESSAGE | kind::WAITING)
         })
+        .ok_or_else(|| {
+            ActorError::Corrupt(format!(
+                "a turn answers the message at {message_seq}, and the log has none there"
+            ))
+        })?;
+    serde_json::from_slice(&stored.body).map_err(|error| {
+        ActorError::Corrupt(format!(
+            "the message at {message_seq} cannot be read: {error}"
+        ))
+    })
 }
 
 impl Actor {
-
     /// The newest `limit` things of the conversation, as a chat opens.
     pub fn tail(&self, limit: usize) -> Result<Page, ActorError> {
         self.tail_of(limit, Which::All)
@@ -4068,7 +4067,13 @@ impl Actor {
                         cost,
                         ..Facts::default()
                     };
-                    steering.replay(&event, self.recorder.agent(), self.recorder.log(), facts, &last_row)?;
+                    steering.replay(
+                        &event,
+                        self.recorder.agent(),
+                        self.recorder.log(),
+                        facts,
+                        &last_row,
+                    )?;
                 }
             }
             offset = read.next_offset;
@@ -4818,7 +4823,10 @@ impl Actor {
                 }
                 if let Some(event) = evidence {
                     let facts = live.facts();
-                    if let Some(sharing) = live.steering.observe(&event, &mut batch, facts, &live.last_row, t, out)? {
+                    if let Some(sharing) =
+                        live.steering
+                            .observe(&event, &mut batch, facts, &live.last_row, t, out)?
+                    {
                         live.speak |= sharing.speak;
                         if sharing.revealed {
                             revealed_at = Some(t);
@@ -4889,7 +4897,9 @@ impl Actor {
             }
             let committed = batch.commit()?;
             if let Some(at) = revealed_at {
-                let events = self.shown.set_turn_audience(clarp_kernel::coordination::USER, at);
+                let events = self
+                    .shown
+                    .set_turn_audience(clarp_kernel::coordination::USER, at);
                 self.shown_events.extend(events);
             }
             if !already_refused && self.recorder.agent().refused_live_binding() {

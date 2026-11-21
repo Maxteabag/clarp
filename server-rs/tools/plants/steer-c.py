@@ -8,6 +8,7 @@ RUNS = {
     "ack": ["test", "-p", "clarp-shim", "--test", "shim", "--", "stdin_refuses_a_write_when_the_tool_has_closed_its_read_end"],
     "stream": ["test", "-p", "clarp-kernel", "--lib", "only_the_live_tool_window_takes_new_input"],
     "journal": ["test", "-p", "clarp-kernel", "--lib", "a_follow_up_enters_on_its_echo_and_an_unread_one_still_obeys_stop"],
+    "reveal": ["test", "-p", "clarp-actor", "--lib", "revealing_a_turn_sends_its_old_rows_through_a_delta"],
     "host": ["test", "-p", "clarp-host", "--test", "host", "--", "a_claude_follow_up_enters_at_the_echo_and_is_answered_once"],
 }
 S = "clarp-shim/src/main.rs"
@@ -42,8 +43,8 @@ PLANTS = [
     (C, "host", "the queue is never told which follow-up was read", "out.joined_reads.push(JoinedRead", "drop(JoinedRead"),
     (H, "host", "several echoes in one batch all get its last queue revision", 'event["queue_revision"] = json!(read.queue.revision);', ''),
     (C, "host", "a read user follow-up leaves the original turn hidden", "let revealed = !self.mixed && conversation::loosen(batch, into, now_ms)?;", "let revealed = false;"),
-    (D, "host", "revealed old rows are missing from the next delta", "if stamped.insert(id.to_owned()) {", "if !stamped.insert(id.to_owned()) {"),
-    (R, "host", "the running turn stays hidden after its audience changes", "self.shown.set_turn_audience(clarp_kernel::coordination::USER, at)", "self.shown.set_turn_audience(clarp_kernel::coordination::AGENTS, at)"),
+    (D, "reveal", "revealed old rows are missing from the next delta", "if stamped.insert(id.to_owned()) {", "if !stamped.insert(id.to_owned()) {"),
+    (R, "host", "the running turn stays hidden after its audience changes", ".set_turn_audience(clarp_kernel::coordination::USER, at)", ".set_turn_audience(clarp_kernel::coordination::AGENTS, at)"),
     (R, "host", "a separate reply keeps the trace of the first prompt", "reply.trace_id.clone_from(&separate.message.trace_id);", ""),
     (L, "host", "opting into replay does not keep stdin open", 'command.args(["--stdin-until", "result"]);', ""),
 ]

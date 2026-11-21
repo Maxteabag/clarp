@@ -774,7 +774,10 @@ impl Batch<'_> {
     }
 
     pub fn queue_depth(&self) -> usize {
-        self.work.waiting().filter(|queued| !self.recorder.shown_waiting.contains(&queued.id)).count()
+        self.work
+            .waiting()
+            .filter(|queued| !self.recorder.shown_waiting.contains(&queued.id))
+            .count()
     }
 
     /// Writes everything in one append, then changes the state.
