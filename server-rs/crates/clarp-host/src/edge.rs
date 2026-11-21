@@ -175,6 +175,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("log_turn_summary", 47),
     // Plans with goals: `/task-plan`, `/task-plans`, `/task-plan/action`.
     ("durable_task_goals", 21),
+    // Native Codex goals, with a persistent app-server lane only while the goal needs it.
+    ("agent_goals", 5),
     // Goals kept current by the Goal keeper: `plan.goal.updater` beside the owner's own
     // checkpoint, `plan.updater`, a criterion set aside, a paused goal's step that keeps
     // its place.
