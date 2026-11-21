@@ -36,7 +36,15 @@ the Python server as the reference for behaviour the clients can observe.
 
 ## 2. How we prove it
 
-Done is evidence, in this order:
+Peter's rule, given through Hazel on 21 Nov 2026 at 12:39:
+
+> Remove all tests from the pipeline. We will do one single test at the very end when Maximus considers the work 100% done. Make this a rule also for future agents. Avoid making tests the bottleneck in developing.
+
+The lead gathers the evidence below once, in one full test pass when he considers the Rust Host complete.
+He fixes what the pass finds before putting the Host in front of Peter or installing it on a machine Peter
+uses.
+
+Done means three kinds of evidence, in this order:
 
 1. **Conformance.** One suite for the core client contract (`contract/` schemas and fixtures, the replay corpus of
    `tests/replay/`). It must pass against today's Python Host first. It counts only once it has been shown to fail:
@@ -67,10 +75,9 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
    reach `service_manager` (Clarp issue 322). Tools print structure, counts and codes, never conversation text.
 3. **The client contract does not change** in stages 1 to 3: `contract/`, `HOST_CONTRACT`, routes, payloads and
    event types are frozen for this program. The Rust Host leaves out of `FEATURES` what it does not have yet.
-4. **Main moves by fast-forward, after the gates:** the repository's gates in `AGENTS.md`, plus a green
-   `Server (Rust)` run, started by hand, on the exact commit. No force-push, no rewriting main, no secrets in commits.
-   **Main moves at milestones, not per commit** (Peter, 15 Nov 2026): work on your branch, push it often, and
-   pay for the gates when a stage or a whole piece is done.
+4. **Main moves by fast-forward.** No force-push, no rewriting main, no secrets in commits. The lead lands
+   trains once they compile and he has read them (Peter, 21 Nov 2026, 12:39). Section 2 holds the tests for
+   the final pass. Work on your own branch and push it often.
 5. **Fail safe.** Unknown, partial or contradictory means stop and report. Never retry a write that may have
    landed; read back first.
 6. **Never `pkill -f` or `pgrep -f`.** Kill only process ids you captured.
@@ -119,6 +126,9 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D18 | The conformance suite is `tests/replay` run across implementations: its scenarios, its fake Claude and its differ, with the Rust Host as the second build, comparing the `http` and `sse` channels. It runs in GitHub Actions, contained, never on a machine with a live Host | The harness exists, is proven to catch planted changes, and already isolates a Python Host safely |
 | D13 | **Write big, compile rarely.** The lead keeps a compiled skeleton: every crate, its public traits and message types, no logic. A builder writes a whole crate against it, then compiles: `tools/build check` until clean, then `tools/build test`. No compile after every function, and no one-shot of the whole server | Peter's concern is dead time and parallel builds; the compiler is still the design feedback, so the batch is a crate, not the application |
 
+D13 still sets the size of a compilation batch. Since 21 Nov 2026 at 12:39, its test command belongs
+to section 2's final pass.
+
 ## 5. Code rules (this is where "exactly as you want" is spent)
 
 - **A port has two implementations or it is not a port.** Do not add a trait for something with one
@@ -136,8 +146,8 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 - **Small files.** A module over about 500 lines or a function over about 60 is a signal to split, not a law.
 - **A comment says why**, and when it records an incident it carries the date, as the Python server's best
   comments do.
-- **Tests are fast and need no server.** Unit and simulation tests run in `cargo test`; anything that needs a
-  running Host is a conformance or soak job.
+- **Tests are written with the code.** Unit and simulation tests need no server. Anything that needs a
+  running Host is a conformance or soak job. Section 2 puts these in the one final test pass.
 
 ## 6. Layout
 
@@ -188,9 +198,9 @@ elitebook with the binaries the XPS had built (running a built binary is not com
 changes and the driver; the workflow `Conformance (Rust Host)` records the Python Host twice, proves that every
 planted change is caught, and compares the Rust Host. Eight differences are left, all registered with their
 reason in `docs/differences.md`; what the runs showed to be wrong in the Python Host is in
-`docs/reference-defects.md` (nine entries, none reported yet). `tools/build conform` is the everyday loop against
-the recorded answers (about 20 seconds). Read `conformance/README.md` before you change anything a client can
-see: the recorded answers are the specification. Still open on this proof: planted changes written by someone
+`docs/reference-defects.md` (nine entries, none reported yet). In that loop, `tools/build conform` compared
+against the recorded answers in about 20 seconds. Read `conformance/README.md` before changing anything a
+client can see. The recorded answers are the specification. Still open on this proof: planted changes written by someone
 other than the author, and a corpus for Codex agents (the Python Host runs Codex through its app server, the
 harness has no fake for it).
 
@@ -3412,13 +3422,18 @@ page. They tell a reconnecting device what it must evict even when it missed the
 
 ## 7. Stages and gates
 
-| Stage | Content | Gate |
+Since 21 Nov 2026 at 12:39, stages, trains and pieces have no test gate of their own. A train lands when
+it compiles and the lead has read it. The installed battle-test Host stays as it is until the final pass
+in section 2 is complete and what it finds is fixed. The table gives the evidence that pass must show for
+each stage. Accounts of earlier landings still record the gates used then.
+
+| Stage | Content | What the final pass must show |
 |---|---|---|
-| 0 Foundation | this brief, the build queue and the CI gate, the ports with two implementations each, then the compiled skeleton of every crate | green run on main |
-| 1 Contract | `clarp-protocol` for the core contract; the conformance suite, proven against the Python Host and proven able to fail; the event model and spool format written down; the behaviour list from the 66 dated notes and the review registers | the suite passes on today's Host and catches every plant |
-| 2 Core | kernel, shim, stores, edge for the core contract (agents, send, queue, stop, log, events, snapshot), Claude and Codex adapters, the importer for one agent | section 2, all three kinds of evidence; then the first agent moves |
-| 3 Daily use | speech in and out, push, artifacts, goals and their wakes, helpers, background jobs | Peter uses it for a week with agents he chooses |
-| 4 Everything | autonomy on the trigger engine, live calls, remaining backends, accounts, install and update | the last agent leaves the Python server |
+| 0 Foundation | this brief, the build queue and the test workflow, the ports with two implementations each, then the compiled skeleton of every crate | the workspace builds and both implementations of each port pass its suite |
+| 1 Contract | `clarp-protocol` for the core contract; the conformance suite, proven against the Python Host and proven able to fail; the event model and spool format written down; the behaviour list from the 66 dated notes and the review registers | the suite passes against the reference and catches every planted difference |
+| 2 Core | kernel, shim, stores, edge for the core contract (agents, send, queue, stop, log, events, snapshot), Claude and Codex adapters, the importer for one agent | all three kinds of evidence in section 2 and an agent can move with its data intact |
+| 3 Daily use | speech in and out, push, artifacts, goals and their wakes, helpers, background jobs | a week of daily use with test agents and no lost or doubled message |
+| 4 Everything | autonomy on the trigger engine, live calls, remaining backends, accounts, install and update | the remaining features work and the Rust Host can take over the Python Host's work |
 
 ### Before the Rust Host takes a phone
 
@@ -3506,7 +3521,7 @@ connection relay under the name the phone is paired with. Each of these is true 
 
 | Role | Session | Owns |
 |---|---|---|
-| Lead | `maximus-6c37` | this brief, the ports, the workspace, decisions; the split of what is left, the briefs, review, integration, the gates, landings and the installed Host |
+| Lead | `maximus-6c37` | this brief, the ports, the workspace, decisions; the split of what is left, the briefs, review, integration, landings, the final pass and the installed Host |
 | Builders | helper agents of the lead, one for each piece | their piece, on a branch and in a worktree of their own, to the lead's brief |
 
 Stage 1 was built by the lead alone (Peter's decision of 15 Nov 2026), and so was most of what followed.
@@ -3515,10 +3530,10 @@ Astra 6.2 agents on high to work in parallel to speed up. He is now just coordin
 into pieces. Each is built by a helper on Codex (`gpt-6.2-astra`, effort high), started through
 `clarp-sub-agents` as a Clarp helper agent of the lead's with a worktree of its own
 (`~/GIT/clarp-worktrees/<piece>`, branch `rebuild/<piece>`). The lead writes the brief, reviews what comes
-back, puts the pieces together, runs the gates, lands and installs. A helper pushes its own branch and nothing
-else, installs nothing, messages nobody but the lead, and asks him when its brief does not say. The helpers'
-guide (what the method is, where to compile, the limits) is `/var/tmp/maximus/helpers/GUIDE.md` on elitebook;
-where it and this document differ, the guide is the newer.
+back, puts the pieces together and lands them. He runs the final pass and owns the installation. A helper
+pushes its own branch and nothing else, installs nothing, messages nobody but the lead, and asks him when its
+brief does not say. The helpers' guide is `/var/tmp/maximus/helpers/GUIDE.md` on elitebook. Where it and
+this document differ, the guide is the newer.
 
 Out of scope by the owner's word of the same day: dreaming ("discard dreaming. It's an old feature"). In
 scope by his word of 17 Nov 2026: every backend the Python Host offers, not only Claude Code, Codex and
@@ -3531,50 +3546,32 @@ come ("We will wait with reviewers", 16 Nov 2026).
 ## 9. How to work
 
 - One worktree per agent under `~/GIT/clarp-worktrees/`, one branch per slice. Commit after every meaningful step.
-- A helper's compiler is `server-rs/tools/build check`, `clippy` and `fmt`, and its tests run in GitHub Actions on
-  its branch: the build machine has one slot and a small disk, and a test build of every helper's checkout does
-  not fit on it (18 Nov 2026: 99 percent full; one checkout's test build had grown to 82 GB). The lead's
-  compiler is `server-rs/tools/build check` (seconds once warm), then `test`, `clippy`, `fmt`; `status` shows
-  who holds the queue. It works from any checkout on elitebook or laptopstudio and runs on the XPS 15. Write the
-  crate first (D13); a queue with one slot is fast only if nobody compiles after every function.
-- The merge gate is the `Server (Rust)` workflow, and it never starts by itself: Peter does not want tests that
-  run automatically (his word of 10 Nov 2026). Whoever lands a commit starts it on that commit:
-  `gh workflow run server-rs.yml -R Maxteabag/clarp --ref <branch>`, then `gh run list --workflow server-rs.yml
-  --branch <branch>` and `gh run view <id> --log-failed`. Start a watcher that wakes your goal instead of waiting
-  in a turn (`clarp-background-jobs`, `run_detached_job.sh --goal ...`).
-- Report to the lead with `clarp-admin prompt --to maximus-6c37 --from <you> --text "..."`: branch, head, done,
-  next, blockers. One message per decision. No acknowledgements.
-- A slice is ready for review when its CI run is green on the exact commit and its tests show the behaviour, the
-  failure cases included.
-- A candidate lands when three things are green on its commit: `Server (Rust)`, the conformance workflow, and
-  the repository's own gates with a release built from a clean checkout of that commit. When main moves under
-  a green candidate (it does several times a day: the Python Host's line lands there too), the candidate is put
-  on top of it and `Server (Rust)` and the repository's gates are run on the new commit, which takes minutes.
-  The conformance workflow, which takes twenty, is run again when main moved by something a scenario can reach:
-  anything under `server/` that a route of the corpus runs through, and anything under `tests/replay/`. It is
-  not run again for a move no scenario can reach (tests, documents, and the modules the corpus has no door to:
-  the janitors' own, the hotseat, dreaming, the scheduler), because the reference it compares with would answer
-  the same. Which it was is written down with the landing. A wrong reading costs nothing that runs: the next
-  candidate's run compares with the newest reference, and says so. Where main moved by nothing either run
-  reads at all, no reading is needed: `tools/gated-trees <the commit the verdict was given for> <the new
-  commit>` compares the trees and files the two runs build and run (`server`, `server-rs`, `tests/replay`,
-  `bin`, the lock of the Python packages, the two workflows) and ends 0 when every one is the same. Then the
-  verdicts stand, and what runs again on the new commit is what reads the rest of the repository: its own
-  gates, and the release that is installed (17 Nov 2026: main moved twice under one green candidate within
-  twenty minutes, both times by a hook of Claude Code and its tests).
+- Write the slice first (D13). Use `server-rs/tools/build check` to compile and `server-rs/tools/build fmt`
+  to run `cargo fmt` through the build queue. `server-rs/tools/build status` shows who holds the queue on
+  the XPS 15. The queue has one slot.
+- A slice is ready for review when it compiles and is pushed. The lead reads it and lands it. When main
+  moves, the lead puts the candidate on top of it and compiles that tree.
+- Write the tests with the code, including the failure cases. Start no workflow for a change, pull request,
+  stage or train. `Server (Rust)`, the planted rules and conformance belong to the final pass in section 2.
+  A quick local run can help understand a failure being fixed. It has no bearing on review or landing.
+- Report the branch, head, what it does and any blockers to the lead with `clarp-admin prompt --to
+  maximus-6c37 --from <you> --text "..."`. One message per decision. No acknowledgements.
+
+Under Peter's earlier rule of 15 Nov 2026, main moved at milestones. `tools/gated-trees` compared the files
+the two runs built and tested when main moved. On 17 Nov 2026, main moved twice under one green candidate
+within twenty minutes, both times by a hook of Claude Code and its tests. On 18 Nov 2026, the build disk was
+99 percent full and one checkout's test build had reached 82 GB.
 
 **The reference** (20 Nov 2026). The Python Host is merged into main several times a day, and it does not
 wait for this Host. A gate taken against main's tip was voided by every such merge in its middle. So this Host
 is held to one named commit of main, the reference: the Python Host as it is at that commit.
 `server-rs/REFERENCE` names it, the full commit on its first line. The fixtures are generated from it, and the
-conformance run compares with it. Where the paragraph above says main, read the reference.
+conformance run in the final pass compares with it.
 
-A candidate is gated on its gate tree: the reference's tree with `server-rs/` replaced by the candidate's.
-`Server (Rust)`, the planted lists, the conformance run and the regeneration of every fixture are taken there.
-The build machine's Rust tests and the repository's own gates are taken on the commit that lands. What lands is
-main of that minute with the piece's commits on top. That is sound while the candidate's `server-rs/` is byte
-for byte the gate tree's. It holds because the piece touches nothing outside `server-rs/` and only the lead's
-trains write under it.
+The gate tree is the reference's tree with `server-rs/` replaced by the candidate's. It gives the generators
+and the final comparison the same Python Host. What lands is main of that minute with the piece's commits
+on top, once it compiles and the lead has read it. The final pass checks the completed Rust tree, including
+its fixtures, and the release built from it.
 
 The debt is what main has outside `server-rs/` beyond the reference: the merges of the Python Host not yet
 ported. A catch-up piece moves the reference forward, and only a catch-up piece does; the lead lands it. It
@@ -3595,8 +3592,9 @@ removes its scratch. `reference run --all` does so for every generator. A genera
 copied back.
 
 `reference check` runs every generator the same way and writes nothing back: it names each fixture that would
-change and leaves the working tree as it was. It ends 0 only when none fails and no fixture would change. It is
-what a piece runs before it reports, and what a catch-up piece reads to see what the new reference moved.
+change and leaves the working tree as it was. It ends 0 only when none fails and no fixture would change. The
+lead uses it in the final pass. A catch-up piece uses `reference run <generator>` at the commit the lead names
+to record what moved.
 
 Every generator the tool runs gets a scratch place of its own, whatever the generator sets itself:
 `CLAUDE_PWA_DB` names a fresh database inside it, and `HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`,
