@@ -210,6 +210,7 @@ dependencies = [
  "nix",
  "proc-macro2",
  "pty-process",
+ "regex",
  "ring",
  "rustls",
  "serde",

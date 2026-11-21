@@ -38,6 +38,18 @@ use crate::edge::{ApiError, App};
 use crate::model_fallbacks::{Failure, execute};
 use crate::once;
 
+/// What this desk keeps, declared once (`kept.rs`; judged when read where it says so).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(LEARNED, crate::kept::Key::Plain, crate::kept::fits::<Row>),
+    // One for every hour it worked, kept for ever, listed at its first use: judged when read.
+    crate::kept::Kind::book(
+        COUNTED,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<([u64; 8], u64)>,
+    )
+    .when_read(),
+];
+
 /// The job of the janitor that explains.
 pub(crate) const JOB: &str = "tool-explainer";
 /// The kinds of thing the desk leaves with the fleet: a row of what was learned, and an
@@ -262,7 +274,7 @@ impl Desk {
             let rows = rows
                 .iter()
                 .filter_map(|(_, kept)| serde_json::from_slice::<Row>(kept).ok());
-            let hours = app.fleet.kept_all(COUNTED).await?;
+            let hours = app.fleet.kept_listed(COUNTED).await?;
             let hours = hours.iter().filter_map(|(hour, kept)| {
                 let (counts, latency_ms) = serde_json::from_slice::<([u64; 8], u64)>(kept).ok()?;
                 Some((hour.parse::<i64>().ok()?, counts, latency_ms))

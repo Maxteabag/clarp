@@ -13,7 +13,7 @@ use std::collections::HashMap;
 pub(crate) mod audio;
 mod compile;
 pub(crate) mod judge;
-mod store;
+pub(crate) mod store;
 pub(crate) mod workspace;
 pub(crate) use compile::{compile, stream_run};
 pub(crate) use store::Desk;

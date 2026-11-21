@@ -242,14 +242,23 @@ fn unreadable_launch_usage_is_skipped_until_that_directory_is_launched_again() {
             .lines()
             .filter(|l| l.contains("launch-path-usage"))
             .collect::<Vec<_>>(),
-        ["clarp-host: unreadable launch-path-usage records skipped: 2"]
+        [
+            "clarp-host: a record of the kind launch-path-usage could not be read and is set aside beside it, 1 of this kind so far: its desk starts without it",
+            "clarp-host: a record of the kind launch-path-usage could not be read and is set aside beside it, 2 of this kind so far: its desk starts without it",
+            "clarp-host: 2 records read at the start could not be read and are left out (launch-path-usage 2)",
+        ]
     );
     for private in [key, "another-private-key", "unreadable-private-value"] {
         assert!(!journal.contains(private));
     }
     drop(host);
+    // Moved aside whole, never lost: the key is free, its copy stands beside it.
+    assert_eq!(open().get(&shelf, key).unwrap(), None);
     assert_eq!(
-        open().get(&shelf, key).unwrap().as_deref(),
+        open()
+            .get(&shelf, &format!("{key}.unreadable"))
+            .unwrap()
+            .as_deref(),
         Some(corrupt.as_slice())
     );
     let host = start();
@@ -269,11 +278,6 @@ fn unreadable_launch_usage_is_skipped_until_that_directory_is_launched_again() {
     drop(host);
     let host = start();
     assert_eq!(host.get("/favorite-paths"), after);
-    assert!(
-        host.heard
-            .lock()
-            .unwrap()
-            .lines()
-            .any(|l| l == "clarp-host: unreadable launch-path-usage records skipped: 1")
-    );
+    // The copies stand, and are counted at every start until somebody removes them.
+    assert_eq!(host.get("/host/start")["left_out"]["launch-path-usage"], 2);
 }

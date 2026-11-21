@@ -56,6 +56,15 @@ use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
 use crate::{apps, ids, joblog, library, media, peers, plans, push, roster, wire};
 
+/// What this desk keeps, declared once (`kept.rs`): the chat each client last opened, read by key alone (one
+/// for every client that ever opened one, and none is listed), judged as the object it reads.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    OPENED,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<serde_json::Map<String, Value>>,
+)
+.when_read()];
+
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
 pub const HOST_CONTRACT: u64 = 106;
@@ -75,11 +84,14 @@ fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
     let actions = app.config.accounts == clarp_kernel::recovery::Accounts::Select && seats;
     let chip = app.chip.pushes();
     let fcm = app.android.configured();
+    let skills = crate::managed_skills::keeps(&app.config);
     FEATURES.iter().filter(move |(feature, _)| {
         (*feature != CHIP || chip)
             && (*feature != SEATS || seats)
             && (*feature != "hotseat_desk_actions" || actions)
+            && (*feature != "backend_auth" || crate::logins::sign_in::keeps(app))
             && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
+            && (*feature != "managed_skills" || skills)
     })
 }
 
@@ -215,6 +227,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // for Codex by what Codex writes of its account and by a turn that failed for a usage
     // limit, for Claude by what Claude Code says as it runs. No provider is asked.
     ("backend_quota", 3),
+    // A tool signed in and out from an app (`/backend-auth/login`, `/login-code`, `/logout`).
+    // Listed only by the Host that keeps the machine's tools (`--accounts select`): every
+    // other refuses the change.
+    ("backend_auth", 1),
     // The desk of the machine's account seats (`GET /hotseat/desk`): every saved account of
     // the agents' tools with its windows, its state and its clocks, read with the owner's
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
@@ -224,6 +240,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `clarp.hotseat-status/1`): served from what was kept, nothing read for it. Listed by
     // every Host, as there: the strict answer of a Host without the owner's tool says so.
     ("accounts_hotseat", 78),
+    // Signing OpenCode and DeepSeek in to their providers of models from an app
+    // (`/harness-providers`); with it an app lists every harness's login
+    // (`/backend-auth?harnesses=all`). A change is made only by a Host that keeps this
+    // machine's tools (`--accounts select`); any other refuses it in words.
+    ("harness_model_providers", 75),
     ("transcription", 1),
     // What an agent says aloud (`/tts/providers`, `/voices`, `/voice-catalog`,
     // `/voice-preview`, the clips): five built-in engines, among them Google's Chirp 3 HD
@@ -272,6 +293,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("herald", 1),
     // How the agents speak: the owner's personalities and the humanness of a spoken reply.
     ("personalities", 1),
+    // The skills kept installed for the tools (`/managed-skills`): listed only by a Host that
+    // keeps them, one started with `--accounts select` and a tree of skills.
+    ("managed_skills", 1),
     ("agent_portraits", 1),
     ("voice_humanness", 46),
     // The router of spoken messages (`/orchestrator/*`).
@@ -309,6 +333,9 @@ pub struct App {
     pub capture: Arc<crate::diagnostics::Capture>,
     pub controller_actions: Arc<crate::controller_actions::Desk>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
+    /// Held by a change to the skills this Host keeps installed, from its reading of the
+    /// tools' folders to its keeping of the chosen list.
+    pub skill_links: Arc<tokio::sync::Mutex<()>>,
     pub config: Arc<Config>,
     /// What makes and reads the token each turn is given, which tells whose turn calls.
     pub turns: Arc<crate::turn_identity::Signer>,
@@ -366,6 +393,8 @@ pub struct App {
     pub pools: Vec<Arc<crate::pool::Service>>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
+    /// The sign-ins of the tools started from an app, where this Host keeps the tools.
+    pub sign_ins: Arc<crate::logins::sign_in::Desk>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
     /// speak was taken away.
     pub door: Arc<Door>,
@@ -551,6 +580,7 @@ impl App {
 pub fn router(app: App) -> Router {
     Router::new()
         .route("/server-info", get(server_info))
+        .route("/host/start", get(host_start))
         .route("/message-tool-details", get(tool_details))
         .route("/agents/snapshot", get(snapshot))
         .route("/agents", post(create_agent))
@@ -600,6 +630,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::portrait_generation::routes())
+        .merge(crate::managed_skills::routes())
         .merge(crate::contacts::routes())
         .merge(crate::places::routes())
         .merge(crate::oracle::routes())
@@ -884,7 +915,7 @@ pub(crate) async fn last_opened(app: &App, who: &str) -> String {
         return String::new();
     }
     let key = clarp_kernel::heard::client_chat_key(who);
-    match app.fleet.kept(OPENED, key).await {
+    match app.fleet.kept_book(OPENED, key).await {
         Ok(kept) => {
             let text = kept.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
             clarp_kernel::heard::client_chat(text.as_deref(), app.clock.now_ms())
@@ -1072,6 +1103,37 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
 
 async fn server_info(State(app): State<App>) -> Json<ServerInfo> {
     Json(identity(&app))
+}
+
+/// `GET /host/start`, this Host's own and the administrator's only: how its start went. How many
+/// agents it has, how many are still being opened and how many could not be (their logs stay
+/// as they were), and how many records of each kind it keeps and could not read
+/// (`kept.rs`). Not the reference's `/server-info` or `/status`, which keep their shape in every
+/// state: this is not zero for a moment at every start.
+async fn host_start(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+) -> Result<Json<Value>, ApiError> {
+    if !matches!(principal, Principal::Administrator) {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "administrator only"));
+    }
+    let directory = app.fleet.directory();
+    let all = directory.members.iter().chain(directory.janitors.iter());
+    let (mut agents, mut opening, mut broken) = (0_u64, 0_u64, 0_u64);
+    for member in all {
+        agents += 1;
+        match member.agent.view().broken.as_deref() {
+            None => {}
+            Some(crate::agent::OPENING) => opening += 1,
+            Some(_) => broken += 1,
+        }
+    }
+    Ok(Json(json!({
+        "agents": agents, "opening": opening, "broken": broken,
+        "left_out": app.fleet.left_out().counts(),
+        "not_run": app.fleet.left_out().not_run_counts(),
+        "judged_when_read": crate::kept::judged_when_read(),
+    })))
 }
 
 /// Who this Host is: what `GET /server-info` answers and what a pairing hands the new device.

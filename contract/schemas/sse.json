@@ -81,7 +81,8 @@
       "properties": {
         "type": {"const": "agent-roster"},
         "kind": {"type": "string"},
-        "session": {"type": "string"}
+        "session": {"type": "string"},
+        "voice_profile": {"type": "object", "description": "feature voice_profile: as on the snapshot agent row"}
       }
     },
     "agent-focus": {
@@ -92,6 +93,20 @@
         "type": {"const": "agent-focus"},
         "session": {"type": "string"},
         "agent_id": {"type": "string"}
+      }
+    },
+    "media-changed": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session", "agent_id", "asset_id", "change", "at"],
+      "properties": {
+        "type": {"const": "media-changed"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "asset_id": {"type": "string"},
+        "change": {"enum": ["created", "deleted", "favorite"]},
+        "favorite": {"type": "boolean"},
+        "at": {"type": "integer"}
       }
     },
     "queue-updated": {
@@ -107,7 +122,7 @@
         "queue_started": {"type": "boolean"},
         "queue_revision": {"type": "integer"},
         "client_msg_id": {"type": "string"},
-        "queue_change": {"enum": ["edited", "deleted"], "description": "Host contract 109 (provisional), feature waited_send_order: what happened to the item client_msg_id; with edited, text is its new words."},
+        "queue_change": {"enum": ["edited", "deleted"], "description": "Host contract 114 (provisional), feature waited_send_order: what happened to the item client_msg_id; with edited, text is its new words."},
         "text": {"type": "string"}
       }
     },
@@ -165,7 +180,10 @@
         "agent_id": {"type": "string"},
         "persona": {"type": "string"},
         "message": {"type": "string"},
-        "error": {"type": "string"}
+        "error": {"type": "string"},
+        "reason": {"type": "string", "description": "feature speech_outcome; open set: no_voice, not_configured, provider_off, provider_failed, host_failed"},
+        "provider": {"type": "string"},
+        "trace_id": {"type": "string", "description": "the turn whose reply was not spoken"}
       }
     },
     "server-version": {

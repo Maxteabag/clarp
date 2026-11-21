@@ -152,10 +152,9 @@ def test_emotion_tags_reach_gemini_but_not_its_cartesia_fallback(tmp_path, monke
 
     monkeypatch.setattr(gemini_tts, "synthesize", failing_gemini)
     monkeypatch.setattr(tts_registry, "cartesia_synthesize", cartesia)
-    monkeypatch.setattr(tts_registry, "_gemini_voice", lambda *a, **k: "Kore")
     tts_worker._synthesize(
         cfg=cfg, row={"text": "Ha, [laughing] it works.", "voice_id": "c-uuid"},
         agent={"persona": "Rachel"}, out_path=tmp_path / "x.mp3", on_chunk=None,
-        trace_id="", clip_route=tts_mode.Route("gemini", None, "cartesia"))
+        trace_id="", clip_route=tts_mode.Route("gemini", "Kore", "cartesia"))
 
     assert sent == [("gemini", "Ha, [laughing] it works."), ("cartesia", "Ha, it works.")]

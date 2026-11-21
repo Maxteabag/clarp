@@ -105,25 +105,27 @@ def test_the_matrix_shows_the_known_paths(monkeypatch):
     assert "_migrate_to_v127" in fresh["calls"]         # a table created if missing: a no-op too
     assert "_migrate_to_v129" in fresh["calls"]         # a guarded column: a no-op after _create_schema
     assert "_migrate_to_v130" in fresh["calls"]         # a table created if missing and a guarded column
-    assert "_migrate_to_v131" in fresh["calls"]         # guarded columns and a data step: a no-op after _create_schema
+    assert "_migrate_to_v131" in fresh["calls"]         # guarded columns and an index created if missing
+    assert "_migrate_to_v132" in fresh["calls"]         # guarded columns and a data step: a no-op after _create_schema
     assert from_119["calls"] == ["_migrate_to_v121", "_migrate_to_v122", "_migrate_to_v123",
                                  "_migrate_to_v124", "_migrate_to_v125", "_migrate_to_v126",
-                                 "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
+                                 "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
     assert from_119["final"] == db_schema._SCHEMA_VERSION
     assert run_from(121, monkeypatch)["calls"] == ["_migrate_to_v122", "_migrate_to_v123",
                                                    "_migrate_to_v124", "_migrate_to_v125", "_migrate_to_v126",
-                                                   "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
+                                                   "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
     assert run_from(122, monkeypatch)["calls"] == ["_migrate_to_v123", "_migrate_to_v124", "_migrate_to_v125",
-                                                   "_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
+                                                   "_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
     assert run_from(123, monkeypatch)["calls"] == ["_migrate_to_v124", "_migrate_to_v125", "_migrate_to_v126",
-                                                   "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
-    assert run_from(124, monkeypatch)["calls"] == ["_migrate_to_v125", "_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
-    assert run_from(125, monkeypatch)["calls"] == ["_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
-    assert run_from(126, monkeypatch)["calls"] == ["_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
-    assert run_from(127, monkeypatch)["calls"] == ["_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
-    assert run_from(128, monkeypatch)["calls"] == ["_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131"]
-    assert run_from(129, monkeypatch)["calls"] == ["_migrate_to_v130", "_migrate_to_v131"]
-    assert run_from(130, monkeypatch)["calls"] == ["_migrate_to_v131"]
+                                                   "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(124, monkeypatch)["calls"] == ["_migrate_to_v125", "_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(125, monkeypatch)["calls"] == ["_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(126, monkeypatch)["calls"] == ["_migrate_to_v127", "_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(127, monkeypatch)["calls"] == ["_migrate_to_v128", "_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(128, monkeypatch)["calls"] == ["_migrate_to_v129", "_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(129, monkeypatch)["calls"] == ["_migrate_to_v130", "_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(130, monkeypatch)["calls"] == ["_migrate_to_v131", "_migrate_to_v132"]
+    assert run_from(131, monkeypatch)["calls"] == ["_migrate_to_v132"]
 
 
 def test_every_supported_start_reaches_the_final_stamp(monkeypatch):
@@ -150,4 +152,6 @@ def test_every_supported_start_reaches_the_final_stamp(monkeypatch):
             assert "_migrate_to_v129" in result["calls"], start
         if start < 130:
             assert "_migrate_to_v130" in result["calls"], start
-        assert "_migrate_to_v131" in result["calls"], start
+        if start < 131:
+            assert "_migrate_to_v131" in result["calls"], start
+        assert "_migrate_to_v132" in result["calls"], start
