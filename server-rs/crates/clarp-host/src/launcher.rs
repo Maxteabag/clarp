@@ -207,25 +207,13 @@ impl Launcher {
     }
 }
 
-pub(crate) fn gate_steering(order: &mut ShimOrder) {
+pub(crate) async fn gate_steering(order: &mut ShimOrder, versions: &crate::cli_version::Cache) {
     if !order.args.iter().any(|arg| arg == REPLAY_USER_MESSAGES) {
         return;
     }
     // This is the launch thread. Dispatch consults what the shim recorded; it does not probe.
-    let version = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .ok()
-        .and_then(|runtime| {
-            runtime.block_on(crate::models::asked(
-                Path::new(&order.program),
-                &["--version".into()],
-                Duration::from_millis(2_500),
-            ))
-        });
-    if !version.is_some_and(|(code, version)| {
-        code == 0 && clarp_kernel::steering::supported_version(&version)
-    }) {
+    let version = versions.answer(PathBuf::from(&order.program)).await;
+    if !version.is_some_and(|version| clarp_kernel::steering::supported_version(&version)) {
         order.args.retain(|arg| arg != REPLAY_USER_MESSAGES);
     }
 }

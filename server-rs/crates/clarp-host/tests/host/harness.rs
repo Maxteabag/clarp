@@ -88,7 +88,7 @@ fn a_machine_that_has_everything(
     let mut runner: Vec<(String, std::ffi::OsString)> = Vec::new();
     for (variable, name) in sealed::programs() {
         let tool = bin.join(name);
-        program(
+        write_program(
             &tool,
             &format!(
                 "#!/bin/sh\n: > '{}'\necho trap-version\n",
