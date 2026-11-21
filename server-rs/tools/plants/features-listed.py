@@ -26,7 +26,7 @@ for file,label,old,new in [
     ('clarp-host/src/edge.rs','kept under another key than it is read','let key = clarp_kernel::heard::client_chat_key(&who);\n    if let Err(why)','let key = clarp_kernel::heard::client_chat_key(&who.to_uppercase());\n    if let Err(why)'),
     ('clarp-host/src/heard.rs','what was opened read before what is named','match heard::transcription_session(&named, "", known) {','match heard::transcription_session("", "", known) {'),
     ('clarp-host/src/heard.rs','the language of the shared focus','spoken_to(&directory, recorded_for, &ears.language)','spoken_to(&directory, directory.focus.as_deref().and_then(|id| directory.named(id)), &ears.language)'),
-    ('clarp-host/src/edge.rs','a select is not kept','            opened_by(&app, &principal, request.session.trim()).await;\n',''),
+    ('clarp-host/src/edge.rs','a select is not kept','            opened_by(&app, &principal, session).await;\n',''),
     ('clarp-host/src/apps.rs','a focus is not kept','        crate::edge::opened_by(&app, &principal, session).await;\n',''),
     ('clarp-host/src/edge.rs','the administrator is nobody','Principal::Administrator if !app.config.auth_token.is_empty() => "administrator".into(),','Principal::Administrator if false => "administrator".into(),'),
 ]:
