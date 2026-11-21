@@ -3529,8 +3529,14 @@ impl Worker {
             if let Err(error) = std::thread::Builder::new()
                 .name("follow-up-input".to_string())
                 .spawn(move || {
+                    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    else {
+                        return;
+                    };
                     for (socket, input) in receive {
-                        launcher::steer(&socket, input);
+                        runtime.block_on(launcher::steer(&socket, input));
                     }
                 })
             {

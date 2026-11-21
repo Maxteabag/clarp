@@ -4,7 +4,9 @@ use super::*;
 
 const CLAUDE: &str = r#"#!/usr/bin/env python3
 import json
+import os
 import pathlib
+import re
 import sys
 import time
 
@@ -67,9 +69,19 @@ if mode == "task":
     start("child", "Bash", tool)
     returned("child", tool)
 (root / ("tool-" + mode)).touch()
+if mode == "large":
+    release("flood-large")
+    for _ in range(96):
+        say("system", subtype="fixture-padding", padding="x" * 1024)
+    start("large-producer-advanced", "LargeProducer")
+    release("read-large")
 more = []
 for index in range(2 if mode == "double" else 1):
     uid, follow = prompt()
+    if mode == "large":
+        identifier, _, content = follow.partition(" ")
+        assert len(content) == 256 * 1024
+        follow = identifier
     more.append((uid, follow))
     (root / ("received-" + follow)).write_text(uid)
 release("release-" + mode)
@@ -81,6 +93,13 @@ if mode == "race":
     answer("second-race", more[0][0])
 elif mode == "unread":
     answer("first-unread", first)
+elif mode == "ledger":
+    project = re.sub(r"[^a-zA-Z0-9]", "-", os.getcwd())
+    transcript = pathlib.Path.home() / ".claude" / "projects" / project / (session + ".jsonl")
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text(json.dumps({"type": "attachment", "attachment": {
+        "type": "queued_command", "source_uuid": more[0][0]}}) + "\n")
+    answer("read-in-the-session-file", first, more[0][0])
 else:
     returned(tool)
     for uid, _ in more:
@@ -139,7 +158,7 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
     };
 
     for mode in [
-        "race", "task", "double", "unread", "stop", "restart", "mixed",
+        "race", "task", "double", "unread", "stop", "restart", "mixed", "large", "ledger",
     ] {
         let session = format!("steer-{mode}");
         let made = host.post(
@@ -189,9 +208,23 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         let mut traces = Vec::new();
         for index in 0..if mode == "double" { 2 } else { 1 } {
             let id = format!("add-{mode}-{index}");
-            let sent = host.send(&session, &id, &id);
+            let text = if mode == "large" {
+                format!("{id} {}", "x".repeat(256 * 1024))
+            } else {
+                id.clone()
+            };
+            let sent = host.send(&session, &text, &id);
             assert_eq!(sent["queued"], true, "{sent}");
             traces.push(sent["trace_id"].clone());
+            if mode == "large" {
+                mark("flood-large");
+                wait_for("stdout made progress while the stdin reader was still held", || {
+                    host.get("/agents/snapshot")["agents"].as_array().unwrap().iter().any(|row| {
+                        row["session"] == session && row["activity"]["tool"] == "LargeProducer"
+                    })
+                });
+                mark("read-large");
+            }
             await_file(&format!("received-{id}"));
             assert_eq!(
                 ids(&host, &session),
@@ -223,7 +256,7 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             assert_eq!(ids(&host, &session), ["u-first"]);
             host.post("/turn-queue/resume", json!({"session":session}));
         } else {
-            if mode == "restart" {
+            if matches!(mode, "restart" | "ledger") {
                 host.kill();
                 host = place.start_in("", &[], &world);
                 heard = subscribe(&host);
@@ -242,6 +275,8 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
                 |text: &str| &rows.iter().find(|row| row["text"] == text).unwrap()["trace_id"];
             assert_eq!(trace_for("first-race"), &first["trace_id"]);
             assert_eq!(trace_for("second-race"), &traces[0]);
+        } else if mode == "ledger" {
+            collect_answer(&host, &session, "read-in-the-session-file");
         } else if matches!(mode, "stop" | "unread") {
             let text = format!("separate-add-{mode}-0");
             collect_answer(&host, &session, &text);

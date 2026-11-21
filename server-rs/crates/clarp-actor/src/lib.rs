@@ -44,6 +44,7 @@ pub mod bookkeeping;
 use clarp_kernel::launch_refused;
 pub mod delegation;
 mod goal_ledger;
+mod orphan;
 use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -197,6 +198,8 @@ pub struct ShimOrder {
     pub named_session: Option<String>,
     pub cwd: PathBuf,
     pub program: String,
+    /// The provider executable when a launcher has wrapped the command.
+    pub version_program: Option<String>,
     pub args: Vec<String>,
     /// Set on top of the environment the tool inherits.
     pub env: Vec<(String, String)>,
@@ -3503,6 +3506,14 @@ impl Actor {
         if !self.recorder.agent().live().is_some_and(Turn::has_process) {
             return Ok(out);
         }
+        if !steering::inactive_owner(self.recorder.agent())? {
+            out.actions.push(Action::Follow {
+                turn,
+                attempt: self.attempt_of_live(turn),
+                socket: self.profile.socket_path_of(turn, self.attempt_of_live(turn)),
+            });
+            return Ok(out);
+        }
         // An attempt that was stopped for its account, and went without a word in its
         // spool: the turn waits for an account all the same, and the pool is told.
         if self.live.as_ref().is_some_and(|live| live.for_account)
@@ -3518,6 +3529,7 @@ impl Actor {
                 reason: STOPPED_FOR_AN_ACCOUNT.to_string(),
             };
             let mut batch = self.recorder.batch();
+            steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, &mut out)?;
             if let Some(live) = self.live.as_mut() {
                 live.steering.finish_read(&mut batch, now_ms)?;
             }
@@ -3565,6 +3577,7 @@ impl Actor {
             })
             .unwrap_or_default();
         let mut batch = self.recorder.batch();
+        steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, &mut out)?;
         if let Some(live) = self.live.as_mut() {
             live.steering.finish_read(&mut batch, now_ms)?;
         }
@@ -3909,6 +3922,7 @@ impl Actor {
             cwd: self.profile.cwd.clone(),
             before_stop: launch.before_stop,
             program: launch.program,
+            version_program: None,
             args: launch.args,
             env: launch
                 .env
@@ -3932,6 +3946,9 @@ impl Actor {
         let spool = self.profile.spool_path_of(turn, attempt);
         let reader = SpoolReader::new(&spool);
         if !reader.exists() {
+            if !steering::inactive_owner(self.recorder.agent())? {
+                return Err(ActorError::Io("streaming shim still owns input but its spool is missing".into()));
+            }
             if starting {
                 // The attempt was decided and no shim ever took it. Nothing ran: start it now.
                 return self.start(turn, message_seq, attempt, out);
@@ -3951,6 +3968,7 @@ impl Actor {
                 ..Facts::default()
             };
             let mut batch = self.recorder.batch();
+            steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, out)?;
             steering::State::default().finish_read(&mut batch, now_ms)?;
             if batch.command(command, now_ms).is_ok()
                 && let Some(end) = closing(&mut batch, turn, &message.id, facts)
@@ -4554,6 +4572,9 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
+                            if steering::recover_reads(&mut batch, &self.profile.cwd, t, out)? {
+                                revealed_at = Some(t);
+                            }
                             live.steering.finish_read(&mut batch, t)?;
                             let (outcome, parent_facts) = match live.steering.parent() {
                                 Some((outcome, facts, closes)) => {
@@ -4851,6 +4872,9 @@ impl Actor {
             {
                 // The process is gone and its backend did not say how the turn went.
                 let reason = "the tool ended and nothing said how";
+                if steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, out)? {
+                    revealed_at = Some(now_ms);
+                }
                 live.steering.finish_read(&mut batch, now_ms)?;
                 let stopping = batch.agent().stopping().is_some();
                 let outcome = RunOutcome::Interrupted {

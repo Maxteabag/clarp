@@ -220,7 +220,7 @@ fn steering_order(order: &ShimOrder) -> std::borrow::Cow<'_, ShimOrder> {
         .ok()
         .and_then(|runtime| {
             runtime.block_on(crate::models::asked(
-                Path::new(&order.program),
+                Path::new(order.version_program.as_deref().unwrap_or(&order.program)),
                 &["--version".into()],
                 Duration::from_millis(2_500),
             ))
@@ -290,19 +290,19 @@ pub fn stop(socket: &Path, grace_ms: u64) {
 }
 
 /// Try once. After an ambiguous socket outcome the actor still waits for stdout evidence.
-pub fn steer(socket: &Path, input: String) {
-    let Ok(mut shim) = UnixStream::connect(socket) else {
-        return;
-    };
-    let _ = shim.set_read_timeout(Some(STOP_TIMEOUT));
-    let _ = shim.set_write_timeout(Some(STOP_TIMEOUT));
+pub async fn steer(socket: &Path, input: String) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
     let Ok(line) = serde_json::to_string(&Request::Stdin { data: input }) else {
         return;
     };
-    if shim.write_all(format!("{line}\n").as_bytes()).is_ok() {
+    let attempt = async {
+        let mut shim = tokio::net::UnixStream::connect(socket).await?;
+        shim.write_all(format!("{line}\n").as_bytes()).await?;
         let mut reply = String::new();
-        let _ = BufReader::new(shim).read_line(&mut reply);
-    }
+        tokio::io::BufReader::new(shim).read_line(&mut reply).await
+    };
+    let _ = tokio::time::timeout(STOP_TIMEOUT, attempt).await;
 }
 
 #[cfg(test)]
@@ -325,6 +325,7 @@ mod tests {
             stdin_file: PathBuf::from("/data/agents/a1/spool/7.stdin"),
             cwd: PathBuf::from("/work"),
             program: "claude".to_string(),
+            version_program: None,
             args: vec!["-p".to_string()],
             env: vec![("CLAUDE_PWA_SESSION".to_string(), "maximus".to_string())],
         }

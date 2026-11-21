@@ -9,6 +9,8 @@ RUNS = {
     "stream": ["test", "-p", "clarp-kernel", "--lib", "only_the_live_tool_window_takes_new_input"],
     "journal": ["test", "-p", "clarp-kernel", "--lib", "a_follow_up_enters_on_its_echo_and_an_unread_one_still_obeys_stop"],
     "reveal": ["test", "-p", "clarp-actor", "--lib", "revealing_a_turn_sends_its_old_rows_through_a_delta"],
+    "receipt": ["test", "-p", "clarp-kernel", "--lib", "a_read_follow_up_is_a_user_entry_or_a_queued_command_attachment"],
+    "orphan": ["test", "-p", "clarp-actor", "--lib", "a_lost_shim_is_fenced_by_identity_before_its_tool_can_be_recovered"],
     "host": ["test", "-p", "clarp-host", "--test", "host", "--", "a_claude_follow_up_enters_at_the_echo_and_is_answered_once"],
 }
 S = "clarp-shim/src/main.rs"
@@ -20,11 +22,12 @@ C = "clarp-actor/src/steering.rs"
 L = "clarp-host/src/launcher.rs"
 H = "clarp-host/src/agent.rs"
 D = "clarp-actor/src/conversation.rs"
+O = "clarp-actor/src/orphan.rs"
 
 PLANTS = [
     (S, "shim", "the initial prompt closes streaming stdin", "if args.stdin_until.is_none() {", "if args.stdin_until.is_some() {"),
     (S, "shim", "no result closes stdin", 'event.get("type").and_then(serde_json::Value::as_str) == Some(kind)', 'event.get("type").and_then(serde_json::Value::as_str) != Some(kind)'),
-    (S, "ack", "queue admission is success even with a broken pipe", " && receipt.recv() == Ok(true)", ""),
+    (S, "ack", "queue admission is success even with a broken pipe", "if let Some(receipt) = after_write && receipt.recv() != Ok(true)", "if let Some(receipt) = after_write && receipt.recv() == Ok(true)"),
     (K, "stream", "text-only turns also take input", "!self.input_ended && !self.tools.is_empty()", "!self.input_ended"),
     (K, "stream", "the input fence can be reopened", "!self.input_ended && !self.tools.is_empty()", "!self.tools.is_empty()"),
     (K, "stream", "the first tool result clears every running tool", "self.tools.remove(id);", "self.tools.remove(id); self.tools.clear();"),
@@ -45,6 +48,10 @@ PLANTS = [
     (C, "host", "a read user follow-up leaves the original turn hidden", "let revealed = !self.mixed && conversation::loosen(batch, into, now_ms)?;", "let revealed = false;"),
     (D, "reveal", "revealed old rows are missing from the next delta", "if stamped.insert(id.to_owned()) {", "if !stamped.insert(id.to_owned()) {"),
     (R, "host", "the running turn stays hidden after its audience changes", ".set_turn_audience(clarp_kernel::coordination::USER, at)", ".set_turn_audience(clarp_kernel::coordination::AGENTS, at)"),
+    (K, "receipt", "a queued-command receipt does not identify the follow-up", 'nonempty(&entry["attachment"]["source_uuid"])', 'nonempty(&entry["uuid"])'),
+    (K, "receipt", "an assistant entry proves a user read", 'Some("user") => nonempty(&entry["uuid"])', 'Some("user" | "assistant") => nonempty(&entry["uuid"])'),
+    (O, "orphan", "the orphan stays alive through the transcript lookup", "                kill_exact(member)?;", "                let _ = member;"),
+    (C, "host", "the transcript is ignored after the stdout receipt was lost", "let Some(proof) = read.get(&uuid)", "let Some(proof) = read.get(\"missing\")"),
     (R, "host", "a separate reply keeps the trace of the first prompt", "reply.trace_id.clone_from(&separate.message.trace_id);", ""),
     (L, "host", "opting into replay does not keep stdin open", 'command.args(["--stdin-until", "result"]);', ""),
 ]
