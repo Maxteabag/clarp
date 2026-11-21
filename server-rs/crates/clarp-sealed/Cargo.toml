@@ -1,0 +1,11 @@
+[package]
+name = "clarp-sealed"
+description = "What a process a test starts is given of the environment: nothing of the machine's"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

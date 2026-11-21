@@ -31,6 +31,8 @@ def default_temp_root(environ, *, var_tmp_exists: bool) -> str | None:
 
 
 _TEMP_ROOT = default_temp_root(os.environ, var_tmp_exists=os.path.isdir("/var/tmp"))
+# The voice names worker fetches provider catalogues; a test Host never starts it.
+os.environ["CLARP_VOICE_NAMES_WORKER"] = "0"
 if _TEMP_ROOT:
     # Read lazily by pytest's tmp_path factory, after initial conftests load.
     os.environ["PYTEST_DEBUG_TEMPROOT"] = _TEMP_ROOT
@@ -196,6 +198,14 @@ def _no_real_agy_cli(_transcript_importer_quiescent, monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "no-agy-home"))
 
 
+@pytest.fixture(autouse=True)
+def _no_usage_refresher(monkeypatch):
+    """An in-process Host (build_server) starts its workers; the usage refresher
+    polls the providers 20 s later, the real Codex app-server among them, inside
+    whichever test is running by then. Tests call its run_once directly."""
+    monkeypatch.setenv("CLARP_USAGE_REFRESH_WORKER", "0")
+
+
 # ---- real provider CLIs, the network and the real HOME are never reached from a test ----
 #
 # A unit test once ran a real Claude Code turn through a handler that built its
@@ -302,6 +312,8 @@ def pytest_configure(config):
         "HOME": str(home),
         "CLARP_TTS_ADAPTERS_DIR": str(root / "tts-adapters.d"),
         "CLARP_STT_ADAPTERS_DIR": str(root / "stt-adapters.d"),
+        # The voice names file (voice_names): never the live Host's ~/.cache/clarp one.
+        "CLARP_VOICE_NAMES": str(root / "voice-names.json"),
         "CLARP_TOOLCHAIN_MODE": "none",
         "CLARP_TEST_BACKEND_CLI_LOG": str(session_log),
     })

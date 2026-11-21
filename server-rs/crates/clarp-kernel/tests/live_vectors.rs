@@ -102,6 +102,7 @@ fn done_to(hub: &mut Hub, step: &Value) -> (Vec<Value>, Value) {
             text("conv"),
             text("turn_id"),
             args["started_at_ms"].as_i64(),
+            args["audience"].as_str().unwrap_or("user"),
             now,
         ),
         "end_turn" => hub.end_turn(

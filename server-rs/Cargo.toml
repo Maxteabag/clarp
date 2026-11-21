@@ -17,6 +17,7 @@ members = [
     "crates/clarp-store-sqlite",
     "crates/clarp-store-files",
     "crates/clarp-speech",
+    "crates/clarp-sealed",
 ]
 
 [workspace.package]
@@ -39,6 +40,7 @@ clarp-shim = { path = "crates/clarp-shim" }
 clarp-store-sqlite = { path = "crates/clarp-store-sqlite" }
 clarp-store-files = { path = "crates/clarp-store-files" }
 clarp-speech = { path = "crates/clarp-speech" }
+clarp-sealed = { path = "crates/clarp-sealed" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "process", "io-util"] }

@@ -1,73 +1,73 @@
 {
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -105,31 +105,31 @@
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -141,7 +141,7 @@
  },
  "agent=none|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -155,73 +155,73 @@
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -229,7 +229,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -237,7 +237,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -245,7 +245,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -253,37 +253,37 @@
   "calls": [
    "bytes"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -295,7 +295,7 @@
  },
  "agent=none|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -303,79 +303,79 @@
   "calls": [
    "bytes"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -383,7 +383,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -391,7 +391,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -399,7 +399,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -407,37 +407,37 @@
   "calls": [
    "bytes"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -449,7 +449,7 @@
  },
  "agent=none|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -457,79 +457,79 @@
   "calls": [
    "bytes"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -567,31 +567,31 @@
  },
  "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -603,7 +603,7 @@
  },
  "agent=none|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -617,73 +617,73 @@
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:small",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -691,7 +691,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -699,7 +699,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -707,7 +707,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -715,37 +715,37 @@
   "calls": [
    "bytes"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:large-v3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -757,7 +757,7 @@
  },
  "agent=none|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -765,7 +765,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -963,7 +963,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -971,7 +971,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -979,7 +979,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -987,7 +987,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -995,7 +995,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1003,7 +1003,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1011,7 +1011,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1019,7 +1019,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1027,7 +1027,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1035,7 +1035,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1043,7 +1043,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1051,7 +1051,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1059,7 +1059,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1067,7 +1067,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1075,7 +1075,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1083,7 +1083,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1091,7 +1091,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1099,7 +1099,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1107,7 +1107,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1115,7 +1115,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1123,7 +1123,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1137,7 +1137,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1145,7 +1145,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -1153,7 +1153,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1161,7 +1161,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1169,7 +1169,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1177,7 +1177,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1185,7 +1185,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1193,7 +1193,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1201,7 +1201,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1209,7 +1209,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1217,7 +1217,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1225,7 +1225,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1233,7 +1233,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1241,7 +1241,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1249,7 +1249,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1257,7 +1257,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1265,7 +1265,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1273,7 +1273,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1281,7 +1281,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1289,7 +1289,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1297,7 +1297,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1305,7 +1305,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1313,7 +1313,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1327,7 +1327,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1335,7 +1335,7 @@
   "calls": [
    "bytes"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -1533,7 +1533,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1541,7 +1541,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1549,7 +1549,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1557,7 +1557,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1565,7 +1565,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1573,7 +1573,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1581,7 +1581,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1589,7 +1589,7 @@
   "calls": [
    "faster-whisper:small"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1597,7 +1597,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1605,7 +1605,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1613,7 +1613,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1621,7 +1621,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1629,7 +1629,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1637,7 +1637,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1645,7 +1645,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1653,7 +1653,7 @@
   "calls": [
    "server-default"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1661,7 +1661,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1669,7 +1669,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1677,7 +1677,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1685,7 +1685,7 @@
   "calls": [
    "faster-whisper:large-v3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1693,7 +1693,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1707,7 +1707,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -1715,727 +1715,727 @@
   "calls": [
    "bytes"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=one|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: deepgram:nova-3",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -2635,7 +2635,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2643,7 +2643,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2651,7 +2651,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2659,7 +2659,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2667,7 +2667,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2675,7 +2675,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2683,7 +2683,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2691,7 +2691,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2699,7 +2699,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2707,7 +2707,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2715,7 +2715,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2723,7 +2723,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2731,7 +2731,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2739,7 +2739,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2747,7 +2747,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2755,7 +2755,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2763,7 +2763,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2771,7 +2771,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2779,7 +2779,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2787,7 +2787,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2795,7 +2795,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2803,7 +2803,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2811,7 +2811,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2819,7 +2819,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "provider down",
+  "error": "transcription failed",
   "status": 500,
   "text": ""
  },
@@ -2827,7 +2827,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2835,7 +2835,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2843,7 +2843,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2851,7 +2851,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2859,7 +2859,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2867,7 +2867,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2875,7 +2875,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2883,7 +2883,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2891,7 +2891,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2899,7 +2899,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2907,7 +2907,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2915,7 +2915,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2923,7 +2923,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2931,7 +2931,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2939,7 +2939,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2947,7 +2947,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2955,7 +2955,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2963,7 +2963,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2971,7 +2971,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2979,7 +2979,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2987,7 +2987,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -2995,7 +2995,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -3003,7 +3003,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -3011,7 +3011,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "loading",
+  "error": "transcription model loading",
   "status": 503,
   "text": ""
  },
@@ -3211,7 +3211,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3219,7 +3219,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3227,7 +3227,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3235,7 +3235,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3243,7 +3243,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3251,7 +3251,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3259,7 +3259,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3267,7 +3267,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3275,7 +3275,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3283,7 +3283,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3291,7 +3291,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3299,7 +3299,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3307,7 +3307,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3315,7 +3315,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3323,7 +3323,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3331,7 +3331,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3339,7 +3339,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3347,7 +3347,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3355,7 +3355,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3363,7 +3363,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3371,7 +3371,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3379,7 +3379,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3387,7 +3387,7 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
@@ -3395,727 +3395,727 @@
   "calls": [
    "deepgram:nova-3"
   ],
-  "error": "unknown model",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=busy|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=error|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=loading|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=no|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=faster-whisper:small|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=server-default|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=faster-whisper:large-v3|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=False|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=deepgram:nova-3": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },
  "agent=two|engine=bytes-only|first_fails=unknown|header=|long=|ready=True|selected=server-default": {
   "calls": [],
-  "error": "transcription model not installed: faster-whisper:medium",
+  "error": "transcription model not installed",
   "status": 400,
   "text": ""
  },

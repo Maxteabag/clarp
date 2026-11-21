@@ -590,8 +590,8 @@ def test_queued_completion_keeps_its_own_notification_provenance(
     users = db.conn().execute(
         "SELECT message_id,trace_id,prompt_admission_id FROM messages "
         "WHERE agent_id=? AND role='user' ORDER BY seq", (agent_id,)).fetchall()
-    assert {r["trace_id"]: r["message_id"] for r in users} == {
-        f"notify-{i}": f"u-notify-{i}" for i in range(1, (reply_count if queued_origin == "user" else 1) + 1)}
+    # Since issue 491 a waiting user send, like a peer's, has no row until its turn starts.
+    assert {r["trace_id"]: r["message_id"] for r in users} == {"notify-1": "u-notify-1"}
     assert all(r["prompt_admission_id"] for r in users)
     # Peer queue visibility is intentionally deferred until its actual launch.
     # Its immutable admission/queue row already exists before DONE1.
@@ -988,7 +988,9 @@ def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, mon
     monkeypatch.setattr(turn_queue, "enqueue", finish_during_enqueue)
     result = service.dispatch(text="second", requested_session="mike", trace_id="tB",
                               client_msg_id="u-second")
-    assert result.queued and backend.interrupted == []
+    # Since issue 491 the item is written in the send's admission, before the busy decision:
+    # the turn that ended meanwhile leaves the agent idle, and the send starts at once.
+    assert backend.interrupted == [] and result.queued is False
     assert [call["trace_id"] for _, call in backend.spawned] == ["tA", "tB"]
     assert _td._INFLIGHT[agent_id] == "tB"
     assert turn_queue.status("u-second") == "started"
@@ -1195,18 +1197,26 @@ def test_a_stop_finishing_after_the_send_parked_leaves_one_durable_row(tmp_path,
     leftover = _LeftoverProcessBackends()
     service.backends = leftover
     snapshot, _dropped, _was_paused = _td.begin_stop(agent_id)
-    real_park = _td._park
+    real_enqueue = _td.turn_queue.enqueue
     finished = []
 
-    def park_then_finish_stop(spec, **kwargs):
-        row = real_park(spec, **kwargs)
-        if kwargs.get("prefix", "stop-park") == "stop-park" and not finished:
+    calls = []
+
+    def enqueue_then_finish_stop(**kwargs):
+        # Since issue 491 the send's one durable row is the queue item its admission
+        # writes (no park row). The Stop finishes after that write is committed (the
+        # dispatcher's second, idempotent enqueue, just before the turn lock), while
+        # the old CLI still runs.
+        row = real_enqueue(**kwargs)
+        if kwargs.get("trace_id") == "tW":
+            calls.append(1)
+        if len(calls) == 2 and not finished:
             _td.complete_stop(service.ctx, agent_id, snapshot, set(),
                               backend_registry=leftover)
             finished.append(True)
         return row
 
-    patch_shared(monkeypatch, _td, "_park", park_then_finish_stop)
+    monkeypatch.setattr(_td.turn_queue, "enqueue", enqueue_then_finish_stop)
     result = service.dispatch(text="waiting", requested_session="mike", trace_id="tW",
                               client_msg_id="m-waiting", synthesize_audio=False)
 
@@ -2819,9 +2829,11 @@ def test_send_parked_behind_stop_survives_a_runtime_restart(tmp_path):
     result = service.dispatch(text="after stop", requested_session="mike",
                               trace_id="parked", client_msg_id="parked")
     assert result.queued and backends.spawned == []
-    [row] = turn_queue.parked(agent_id)
-    assert (row["trace_id"], row["text"]) == ("parked", "after stop")
-    assert turn_queue.pending(agent_id) == []  # invisible to the queue UI
+    # Since issue 491 a send that waits is a queue item (shown in the queue, no
+    # conversation row yet), not a park row behind the Stop.
+    assert turn_queue.parked(agent_id) == []
+    [row] = turn_queue.waiting_items(agent_id)
+    assert (row["trace_id"], row["text"], row["kind"]) == ("parked", "after stop", "waiting")
 
     # Restart: memory is gone, the row is not. The user lifts the Stop pause.
     _td.reset_for_tests()
@@ -2830,8 +2842,8 @@ def test_send_parked_behind_stop_survives_a_runtime_restart(tmp_path):
     assert service.recover_queued() == 1
     [(_, call)] = backends.spawned
     assert call["trace_id"] == "parked"
-    assert turn_queue.parked(agent_id) == []
-    assert turn_queue.status("stop-park-parked") == "started"
+    assert turn_queue.waiting_items(agent_id) == []
+    assert turn_queue.status("parked") == "started"
 
 
 def test_parked_send_is_unparked_when_the_stop_finishes(tmp_path):

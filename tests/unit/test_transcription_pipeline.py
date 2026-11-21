@@ -1,5 +1,6 @@
 """lib.transcription_pipeline.transcribe with a stub ctx: outcome mapping for
 every STT error class, the response contract, and the single-engine read."""
+import json
 import threading
 from types import SimpleNamespace
 
@@ -143,7 +144,7 @@ def test_pinned_model_without_model_support_is_400():
     stt = StubSTT()
     out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova")
     assert out.status == 400
-    assert out.payload == {"error": "transcription model not installed: deepgram:nova"}
+    assert out.payload == {"error": "transcription model not installed"}
     assert stt.calls == []
     assert out.trace_id
 
@@ -177,8 +178,8 @@ def test_long_form_escalation_overrides_pin(monkeypatch):
 
 
 @pytest.mark.parametrize("exc, status, message", [
-    (STTUnknownModelError("model gone"), 400, "model gone"),
-    (STTModelLoadingError("still loading"), 503, "still loading"),
+    (STTUnknownModelError("model gone"), 400, "transcription model not installed"),
+    (STTModelLoadingError("still loading"), 503, "transcription model loading"),
 ])
 def test_model_errors_map_without_voice_rows(exc, status, message):
     rec = Recorder()
@@ -206,11 +207,11 @@ def test_unexpected_failure_is_500_with_stage(monkeypatch):
     rec = Recorder()
     boom = RuntimeError("decoder exploded " + "x" * 400)
     out = _run(_ctx(StubSTT(raise_=boom)), rec)
-    assert out.status == 500 and out.payload == {"error": str(boom)}
+    assert out.status == 500 and out.payload == {"error": "transcription failed"}
     assert marks == ["stt"]
     event, fields = rec.voice[0]
     assert event == "error"
-    assert fields["detail"] == {"message": str(boom)[:300], "stage": "stt"}
+    assert fields["detail"] == {"message": "transcription failed", "stage": "stt"}
 
 
 def test_herald_grant_blanks_text_but_keeps_transcript_row():
@@ -273,16 +274,23 @@ def test_engine_is_read_once_per_request():
 
 
 class PerModelSTT(StubSTT):
-    """Each model raises its own error, or answers with its own name."""
+    """Each model raises its own error, or answers with its own name. A refusal the Host
+    makes itself (a language set the engine cannot take, an unknown model) is raised before
+    the audio leaves; any other error comes after it left, so the handed language is noted
+    first, as stt_providers.transcribe does (R175)."""
 
     def __init__(self, errors):
         super().__init__()
         self.errors = errors
 
     def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        from lib import stt_language
         self.calls.append(("model", model))
-        if self.errors.get(model):
-            raise self.errors[model]
+        error = self.errors.get(model)
+        if error and not isinstance(error, (stt_providers.LanguageSetUnsupported, STTUnknownModelError)):
+            stt_language.note_handed(None)
+        if error:
+            raise error
         return f"from {model}", True, 1.0
 
 
@@ -356,3 +364,502 @@ def test_only_an_engine_with_a_fallback_after_it_bounds_its_selection_wait(monke
     tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
                        ctype="audio/webm", prompt="")
     assert calls.bounds == [("a", 10.0), ("b", None)]
+
+
+# R152: a recording must never fail because of a choice made in another screen, and a recording of
+# the owner's voice is never sent to a provider he did not choose FOR TRANSCRIPTION (the agent's own
+# engines, the Host's selected engine, the device's model), whatever keys the Host holds for speech.
+def test_an_engine_that_cannot_take_the_language_set_falls_back_to_the_hosts_choice(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    rec = Recorder()
+    out = _run(_ctx(stt), rec, requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from elevenlabs:scribe_v2"
+    assert out.payload["engine_fallback"] == {
+        "from": "deepgram:nova-3", "to": "elevenlabs:scribe_v2", "reason": "language_set",
+        "languages": "detected"}
+    assert [c[1] for c in stt.calls] == ["deepgram:nova-3", "elevenlabs:scribe_v2"]
+    assert rec.voice[-1][1]["detail"]["model"] == "elevenlabs:scribe_v2"
+
+
+def _own_model(monkeypatch, model):
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(whisper_model=model))
+
+
+def test_a_multilingual_own_engine_hears_it_when_the_host_chose_no_set_engine(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"cartesia:ink-whisper": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="cartesia:ink-whisper", focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "hello there"       # transcribe_bytes
+    assert out.payload["engine_fallback"]["to"] == "server-default"
+    assert out.payload["engine_fallback"]["languages"] == "detected"
+
+
+def test_an_english_only_own_engine_is_never_used_the_recording_is_refused_with_words(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_model(monkeypatch, "small.en")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422
+    assert out.payload["error"] == "language_set_unsupported"
+    assert (out.payload["engine"], out.payload["languages"]) == ("deepgram:nova-3", ["no", "en"])
+    assert out.payload["engines"] == ["elevenlabs:scribe_v2", "google:chirp_3"]
+    assert "deepgram:nova-3" in out.payload["message"] and "elevenlabs:scribe_v2" in out.payload["message"]
+    assert [c[0] for c in stt.calls if c[0] == "bytes"] == []               # no English nonsense
+
+
+def test_an_answer_without_a_fallback_has_no_new_field():
+    out = _run(_ctx(ModelSTT()), Recorder(), requested_model="deepgram:nova-3")
+    assert out.status == 200 and "engine_fallback" not in out.payload
+
+
+def test_only_the_language_set_refusal_falls_back(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    stt = PerModelSTT({"deepgram:nova-3": ValueError("something else")})
+    assert _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3").status == 500
+    assert [c[1] for c in stt.calls] == ["deepgram:nova-3"]
+
+
+def test_the_set_engine_is_only_the_hosts_selected_one_never_another_keyed_provider(monkeypatch):
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config())
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")     # every key held
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "google:chirp_3")
+    assert stt_providers.language_set_engine() == "google:chirp_3"
+    for selected in ("deepgram:nova-3", "cartesia:ink-whisper", "local", "server-default"):
+        monkeypatch.setattr(stt_providers, "selected_engine", lambda selected=selected: selected)
+        assert stt_providers.language_set_engine() == ""
+
+
+def test_the_refusal_is_the_typed_error(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_language, "current_language", lambda: "no,en")
+    with pytest.raises(stt_providers.LanguageSetUnsupported):
+        stt_providers.transcribe("deepgram:nova-3", b"", "audio/wav", "")
+
+
+class _RealCloudSTT(StubSTT):
+    """Cloud models go through the real stt_providers.transcribe (its language-set check
+    and its adapters, stubbed at the network edge); the own engine is recorded as local."""
+
+    def __init__(self, received):
+        super().__init__()
+        self.received = received
+
+    def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        if stt_providers.provider_of(model) in stt_providers.VALID_IDS:
+            text, ends, dur = stt_providers.transcribe(model, audio, ctype, prompt)
+            return text or f"from {model}", ends, dur
+        self.received.append("local")
+        return f"from {model}", True, 1.0
+
+    def transcribe_bytes(self, audio, ctype, prompt, *, wait=0.0):
+        self.received.append("local")
+        return "local text", True, 1.0
+
+
+@pytest.mark.parametrize("own_model", ["small.en", "small"])
+@pytest.mark.parametrize("selected", ["local", "deepgram:nova-3", "cartesia:ink-whisper",
+                                      "elevenlabs:scribe_v2", "google:chirp_3"])
+@pytest.mark.parametrize("device", ["deepgram:nova-3", "cartesia:ink-whisper", "cartesia:ink-2",
+                                    "elevenlabs:scribe_v2", "google:chirp_3"])
+def test_no_provider_outside_the_owners_choice_ever_receives_audio(monkeypatch, device, selected, own_model):
+    """Every key is held; the agent is heard in no,en and has no engines of its own. Audio may
+    reach only the device's model, the Host's selected engine or the Host's own engine."""
+    import lib.cartesia_stt, lib.cartesia_stt_ws, lib.deepgram_stt, lib.eleven_stt, lib.google_stt
+    from lib import config, stt_language
+    received = []
+    for provider, module in (("deepgram", lib.deepgram_stt), ("elevenlabs", lib.eleven_stt),
+                             ("google", lib.google_stt), ("cartesia", lib.cartesia_stt),
+                             ("cartesia", lib.cartesia_stt_ws)):
+        monkeypatch.setattr(module, "transcribe",
+                            lambda provider=provider, **kw: (received.append(provider), ("heard", 1.0))[1])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(
+        whisper_model=own_model, google_stt_project="p"))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: selected)
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: [])
+    out = _run(_ctx(_RealCloudSTT(received)), Recorder(), requested_model=device, focus="rachel")
+    chosen = {stt_providers.provider_of(device), stt_providers.provider_of(selected), "local"}
+    assert set(received) <= chosen, (received, chosen)
+    assert out.status in (200, 422)
+    if out.status == 422:
+        assert own_model == "small.en" and received == []      # refused, not English nonsense
+
+
+# F1: whether the Host's own engine can hear the recording is read from its model's declared
+# languages (the adapter's model list, the curated catalogue), never from its name.
+def _own_adapter(monkeypatch, languages, *, model="fast"):
+    from lib import config, custom_stt_adapters
+    manifest = SimpleNamespace(id="myasr", default_model=model)
+    monkeypatch.setattr(custom_stt_adapters, "get",
+                        lambda provider: manifest if provider == "myasr" else None)
+    monkeypatch.setattr(custom_stt_adapters, "models", lambda m, force=False: [
+        {"id": f"myasr:{model}", "languages": list(languages)}])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(
+        whisper_provider="myasr", whisper_model=model))
+
+
+def test_an_own_adapter_model_that_declares_only_english_is_never_used(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_adapter(monkeypatch, ["en"])                    # its name has no ".en"
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"] == ["the Host's own model myasr:fast hears only en"]
+    assert [c for c in stt.calls if c[0] == "bytes"] == []
+
+
+def test_an_own_adapter_model_that_declares_the_agents_languages_hears_it(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_adapter(monkeypatch, ["nb-NO", "en"], model="tiny.en")    # the name says nothing
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"]["to"] == "server-default"
+
+
+def test_the_own_engine_is_judged_by_its_declared_languages(monkeypatch):
+    from lib import config, custom_stt_adapters
+    cfg = lambda **kw: config.Config(**kw)
+    refusal = stt_providers.own_engine_refusal
+    # The curated catalogue decides a built-in model.
+    assert refusal(cfg(whisper_model="small"), ["no", "en"]) == ""
+    assert "hears only en" in refusal(cfg(whisper_model="small.en"), ["no", "en"])
+    # A model declaring nothing (registered by hand) is judged as the engine runs it.
+    assert refusal(cfg(whisper_model="distil-large-v3"), ["no", "en"]) == ""
+    assert "hears only en" in refusal(cfg(whisper_model="tiny.en"), ["no", "en"])
+    assert refusal(cfg(whisper_enabled=False, whisper_model="small"), ["no", "en"])
+    # An adapter that cannot answer is not used.
+    _own_adapter(monkeypatch, ["multilingual"])
+    def down(manifest, force=False):
+        raise custom_stt_adapters.AdapterError("adapter gone")
+    monkeypatch.setattr(custom_stt_adapters, "models", down)
+    assert refusal(config.load(), ["no", "en"]) == "the Host's own engine is unavailable"
+
+
+# F2: the fallback never sends the recording again to an engine that already failed for it.
+def test_the_fallback_never_resends_to_an_engine_that_already_failed(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["elevenlabs:scribe_v2", "deepgram:nova-3"])
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_model(monkeypatch, "small.en")
+    stt = PerModelSTT({"elevenlabs:scribe_v2": RuntimeError("elevenlabs 503"),
+                       "deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v2", "deepgram:nova-3"]
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"][0] == "elevenlabs:scribe_v2 already failed for this recording"
+
+
+def test_after_a_failed_set_engine_the_own_engine_still_takes_over(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["elevenlabs:scribe_v2", "deepgram:nova-3"])
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"elevenlabs:scribe_v2": RuntimeError("elevenlabs 503"),
+                       "deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"]["to"] == "server-default"
+    assert [c[0] for c in stt.calls] == ["model", "model", "bytes"]
+
+
+def test_the_own_engine_that_already_failed_is_not_asked_again(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["server-default", "deepgram:nova-3"])
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"server-default": RuntimeError("whisper worker crashed"),
+                       "deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 422
+    assert out.payload["reasons"] == ["the Host's own engine already failed for this recording"]
+    assert [c[0] for c in stt.calls if c[0] == "bytes"] == []
+
+
+def test_the_engine_that_just_refused_the_set_is_not_asked_again(monkeypatch):
+    # Even were it the Host's selection, the engine that refused is never sent the recording again.
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "deepgram:nova-3")
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"]["to"] == "server-default"
+    assert [c[0] for c in stt.calls] == ["model", "bytes"]
+
+
+# F4: an own engine that is off or unavailable is never a 500: the typed refusal with words.
+@pytest.mark.parametrize("own_error", [RuntimeError("server transcription is disabled"),
+                                       RuntimeError("configured transcription model is not "
+                                                    "installed: faster-whisper:small")])
+def test_an_own_engine_that_is_off_or_missing_is_the_typed_refusal(monkeypatch, own_error):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    stt.raise_ = own_error                                     # transcribe_bytes
+    rec = Recorder()
+    out = _run(_ctx(stt), rec, requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"] == ["the Host's own engine could not hear it"]
+    assert str(own_error) not in json.dumps(out.payload)          # the detail stays in the log
+    assert rec.voice[-1][1]["detail"]["message"] == "language_set_unsupported"
+
+
+def test_a_disabled_own_engine_is_never_the_fallback(monkeypatch):
+    from lib import config
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(
+        whisper_model="small", whisper_enabled=False))
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["reasons"] == ["the Host's own engine is off"]
+    assert [c[0] for c in stt.calls if c[0] == "bytes"] == []
+
+
+def test_an_own_engine_still_loading_is_the_loading_answer(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    stt.load_done = threading.Event()                          # not loaded yet
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 503
+    assert [c[0] for c in stt.calls if c[0] == "bytes"] == []
+
+
+def test_a_selected_set_engine_without_its_key_is_never_picked(monkeypatch):
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config())
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "google:chirp_3")
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "")
+    assert stt_providers.language_set_engine() == ""
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    assert stt_providers.language_set_engine() == "google:chirp_3"
+
+
+def test_a_fallback_to_chirp_records_the_set_it_was_handed(monkeypatch):
+    import lib.google_stt
+    from lib import config, stt_language
+    handed = []
+    monkeypatch.setattr(lib.google_stt, "transcribe",
+                        lambda **kw: (handed.append(kw.get("language")), ("heard", 1.0))[1])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(
+        whisper_model="small", google_stt_project="p"))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "google:chirp_3")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    out = _run(_ctx(_RealCloudSTT([])), Recorder(), requested_model="deepgram:nova-3",
+               focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"] == {
+        "from": "deepgram:nova-3", "to": "google:chirp_3", "reason": "language_set",
+        "languages": ["no", "en"]}
+    assert handed and "," in str(handed[0])
+
+
+def test_an_own_adapter_that_cannot_answer_is_refused_with_fixed_words_and_logged(monkeypatch):
+    # The adapter's error names a local path: the answer says fixed words, the log keeps it.
+    from lib import custom_stt_adapters, log as host_log, stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_adapter(monkeypatch, ["multilingual"])
+    path = "/home/someone/.local/share/stt-adapters/myasr/run.sh"
+    def down(manifest, force=False):
+        raise custom_stt_adapters.AdapterError(f"myasr STT adapter files are unavailable: {path}")
+    monkeypatch.setattr(custom_stt_adapters, "models", down)
+    logged = []
+    monkeypatch.setattr(host_log, "log_exception",
+                        lambda event, e, detail="": logged.append((event, str(e), detail)))
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"] == ["the Host's own engine is unavailable"]
+    assert path not in json.dumps(out.payload)
+    assert any(path in error for _event, error, _detail in logged)
+    assert [c for c in stt.calls if c[0] == "bytes"] == []
+
+
+# The 400, 503 and 500 answers say fixed words; the exception text (which can name a local path
+# or carry a provider's reply) goes only to the Host's log, never to the client or the voice timeline.
+_PLANTED = "/home/someone/.cache/clarp/models/secret-model.bin"
+
+
+@pytest.mark.parametrize("error,status,words", [
+    (STTUnknownModelError(f"transcription model not installed: {_PLANTED}"), 400,
+     "transcription model not installed"),
+    (STTModelLoadingError(f"loading {_PLANTED}"), 503, "transcription model loading"),
+    (RuntimeError(f"could not load transcription model: {_PLANTED}"), 500, "transcription failed"),
+])
+def test_an_error_answer_says_fixed_words_and_the_detail_stays_in_the_log(
+        monkeypatch, error, status, words):
+    logged = []
+    monkeypatch.setattr(tp, "log_exception",
+                        lambda event, e, detail="": logged.append((event, str(e), detail)))
+    rec = Recorder()
+    out = _run(_ctx(ModelSTT(raise_=error)), rec, requested_model="faster-whisper:small")
+    assert out.status == status and out.payload["error"] == words
+    assert _PLANTED not in json.dumps(out.payload) and _PLANTED not in json.dumps(rec.voice)
+    assert any(_PLANTED in text for _event, text, _detail in logged)
+
+
+def test_a_failing_fallback_engines_provider_error_is_not_told_to_the_client(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["deepgram:nova-3", "elevenlabs:scribe_v2"])
+    logged = []
+    monkeypatch.setattr(tp, "log_exception",
+                        lambda event, e, detail="": logged.append((event, str(e), detail)))
+    reply = f"HTTP 500 from provider: config at {_PLANTED}"
+    stt = PerModelSTT({"deepgram:nova-3": RuntimeError("deepgram down"),
+                       "elevenlabs:scribe_v2": RuntimeError(reply)})
+    rec = Recorder()
+    out = _run(_ctx(stt), rec, focus="rachel")
+    assert out.status == 500 and out.payload["error"] == "transcription failed"
+    assert _PLANTED not in json.dumps(out.payload) and _PLANTED not in json.dumps(rec.voice)
+    assert any(reply == text for _event, text, _detail in logged)
+
+
+def test_a_call_attempts_reason_is_fixed_words():
+    calls = ModelSTT(raise_=RuntimeError(f"worker crashed reading {_PLANTED}"))
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    with pytest.raises(RuntimeError):
+        tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
+                           ctype="audio/webm", prompt="")
+    reasons = [a.get("reason") for a in call_stt["report"]["attempts"]]
+    assert reasons == ["transcription failed", "transcription failed"]
+
+
+def test_a_call_attempt_that_finds_whisper_busy_says_so():
+    # client_words' busy branch: the attempt's reason is the fixed 'whisper busy', not the text.
+    calls = ModelSTT(raise_=STTBusyError(f"busy with {_PLANTED}"))
+    steps = [{"engine": "a", "model": "a", "language": None, "adapted": False},
+             {"engine": "b", "model": "b", "language": None, "adapted": False}]
+    call_stt = {"language": {"value": None}, "engines": ["a", "b"], "requested_model": ""}
+    with pytest.raises(STTBusyError):
+        tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
+                           ctype="audio/webm", prompt="")
+    assert [a.get("reason") for a in call_stt["report"]["attempts"]] == ["whisper busy", "whisper busy"]
+
+# R175: each provider gets a recording at most once, whatever its models; the Host's own engine
+# is one engine under all its names; another local model is its own.
+def test_a_repeated_agent_engine_sends_the_recording_to_its_provider_once(monkeypatch):
+    # The reference case (reference_repeats_provider): Scribe listed twice and down, Nova
+    # refuses the set before contact. Scribe gets the recording once, not twice.
+    import lib.deepgram_stt, lib.eleven_stt
+    from lib import config, stt_language
+    sent = []
+
+    def scribe(**kw):
+        sent.append("elevenlabs")
+        raise RuntimeError("scribe 503")
+    monkeypatch.setattr(lib.eleven_stt, "transcribe", scribe)
+    monkeypatch.setattr(lib.deepgram_stt, "transcribe",
+                        lambda **kw: (sent.append("deepgram"), ("heard", 1.0))[1])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(whisper_model="small.en"))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: [
+        "elevenlabs:scribe_v2", "elevenlabs:scribe_v2", "deepgram:nova-3"])
+    received = []
+    out = _run(_ctx(_RealCloudSTT(received)), Recorder(), focus="rachel")
+    assert sent == ["elevenlabs"] and received == []
+    assert out.status == 422
+
+
+class _ContactSTT(StubSTT):
+    """Each engine either refuses before its audio leaves (no language noted, as
+    stt_providers.transcribe refuses a set, a missing key or an unknown model), or fails or
+    answers after contact (the handed language noted first, as transcribe does)."""
+
+    def __init__(self, before=(), after=()):
+        super().__init__()
+        self.before, self.after = set(before), set(after)
+
+    def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        from lib import stt_language
+        self.calls.append(("model", model))
+        if model in self.before:
+            raise stt_providers.LanguageSetUnsupported("set")
+        stt_language.note_handed("no,en")
+        if model in self.after:
+            raise RuntimeError(f"{model} 503")
+        return f"from {model}", True, 1.0
+
+
+def test_a_refusal_before_contact_leaves_the_provider_for_its_next_model(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: ["google:chirp_2", "google:chirp_3"])
+    stt = _ContactSTT(before={"google:chirp_2"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from google:chirp_3"
+    assert [c[1] for c in stt.calls] == ["google:chirp_2", "google:chirp_3"]
+
+
+def test_a_failure_after_contact_uses_the_provider_up(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["elevenlabs:scribe_v1", "elevenlabs:scribe_v2"])
+    stt = _ContactSTT(after={"elevenlabs:scribe_v1", "elevenlabs:scribe_v2"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 500
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v1"]
+
+
+def test_after_a_used_up_provider_the_next_one_is_still_tried(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: [
+        "elevenlabs:scribe_v1", "elevenlabs:scribe_v2", "deepgram:nova-3"])
+    stt = _ContactSTT(after={"elevenlabs:scribe_v1"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from deepgram:nova-3"
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v1", "deepgram:nova-3"]
+
+
+@pytest.mark.parametrize("engines, default, tried", [
+    (["elevenlabs:scribe_v2", "elevenlabs:scribe_v2"], None, ["elevenlabs:scribe_v2"]),
+    (["server-default", "local", "faster-whisper:small"], "faster-whisper:small", ["server-default"]),
+    (["faster-whisper:medium", "faster-whisper:large-v3"], None,
+     ["faster-whisper:medium", "faster-whisper:large-v3"]),
+])
+def test_an_engine_listed_twice_is_tried_once(monkeypatch, engines, default, tried):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: list(engines))
+    stt = PerModelSTT({engine: RuntimeError(f"{engine} down") for engine in engines})
+    if default:
+        stt.default_model_id = default
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 500
+    assert [c[1] for c in stt.calls] == tried
+
+
+def test_saving_an_agents_engines_keeps_each_engine_once():
+    from lib import stt_language
+    stored = stt_language.merge_agent_engines(
+        {"ada": "elevenlabs:scribe_v2, elevenlabs:scribe_v2,deepgram:nova-3"}, is_valid=lambda e: True)
+    assert json.loads(stored)["ada"] == "elevenlabs:scribe_v2,deepgram:nova-3"
+
+
+def test_a_stored_duplicate_engine_list_sends_a_recording_to_its_provider_once(monkeypatch):
+    # Stored before saving dropped repeats: read once, and sent once (R175).
+    from lib import settings_store, stt_language
+    settings_store.set_text("transcription.agent_engines", json.dumps(
+        {"rachel": "elevenlabs:scribe_v2,elevenlabs:scribe_v2,deepgram:nova-3"}))
+    assert stt_language.engines_for("rachel") == ["elevenlabs:scribe_v2", "deepgram:nova-3"]
+    stt = _ContactSTT(after={"elevenlabs:scribe_v2"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from deepgram:nova-3"
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v2", "deepgram:nova-3"]
