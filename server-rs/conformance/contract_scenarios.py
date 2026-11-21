@@ -2246,6 +2246,29 @@ SCENARIOS.append({
     ],
 })
 
+SCENARIOS.append({
+    'id': 'team-management',
+    'what': 'the desktop makes a team, adds and removes a member, edits its controls, and deletes it',
+    'steps': [
+        get('/teams'),
+        post('/teams', {'name': '   '}, 'an empty team name is refused'),
+        {**post('/teams', {'name': ' Synthetic   Team ', 'color': '#336699'}),
+         'save': {'team': 'team.team_id'}},
+        {**get(f'/agent-helper-state?session={AGENT}'), 'save': {'member': 'agent_id'}},
+        post('/teams/{team}', {'leader': '{member}'}, 'a nonmember cannot lead'),
+        post('/teams/{team}/members', {'agent_id': '{member}'}),
+        post('/teams/{team}/members', {'agent_id': '{member}'}, 'adding the same member is idempotent'),
+        post('/teams/{team}', {'leader': '{member}', 'communication_enabled': True}),
+        post('/team-nudging', {'team_id': '{team}', 'nudge_enabled': True}),
+        get('/teams/{team}/messages?limit=invalid'),
+        {'op': 'delete', 'path': '/teams/{team}/members/{member}'},
+        get('/teams'),
+        {'op': 'delete', 'path': '/teams/{team}'},
+        get('/teams'),
+    ],
+})
+
+
 SCHEDULES = '/agent-schedules'
 
 

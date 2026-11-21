@@ -1,0 +1,238 @@
+[
+  {
+    "body": {
+      "color": "#123",
+      "name": "  Root \u00a0 Team "
+    },
+    "id": "team-root",
+    "now": 100,
+    "operation": "make",
+    "team": {
+      "archived_at": null,
+      "color": "#123",
+      "communication_enabled": false,
+      "created_at": 100,
+      "leader_agent_id": "",
+      "leader_enabled": false,
+      "name": "Root Team",
+      "nudge_enabled": false,
+      "parent_team_id": null,
+      "team_id": "team-root",
+      "updated_at": 100
+    }
+  },
+  {
+    "body": {
+      "name": "Child",
+      "parent_team_id": "team-root"
+    },
+    "id": "team-child",
+    "now": 101,
+    "operation": "make",
+    "team": {
+      "archived_at": null,
+      "color": "",
+      "communication_enabled": false,
+      "created_at": 101,
+      "leader_agent_id": "",
+      "leader_enabled": false,
+      "name": "Child",
+      "nudge_enabled": false,
+      "parent_team_id": "team-root",
+      "team_id": "team-child",
+      "updated_at": 101
+    }
+  },
+  {
+    "body": {
+      "name": "\t "
+    },
+    "error": "team name is required",
+    "id": "team-empty",
+    "now": 102,
+    "operation": "make"
+  },
+  {
+    "body": {
+      "name": "Other",
+      "parent_team_id": "missing"
+    },
+    "error": "parent team must exist and be active",
+    "id": "team-missing-parent",
+    "now": 103,
+    "operation": "make"
+  },
+  {
+    "body": {
+      "name": "Other",
+      "parent_team_id": false
+    },
+    "error": "parent_team_id must be a string or null",
+    "id": "team-bad-parent",
+    "now": 104,
+    "operation": "make"
+  },
+  {
+    "body": {
+      "parent_team_id": "team-child"
+    },
+    "error": "a team cannot contain itself or an ancestor",
+    "id": "team-root",
+    "now": 105,
+    "operation": "change"
+  },
+  {
+    "body": {
+      "parent_team_id": "team-root"
+    },
+    "error": "a team cannot contain itself or an ancestor",
+    "id": "team-root",
+    "now": 106,
+    "operation": "change"
+  },
+  {
+    "body": {
+      "leader": "not-a-member"
+    },
+    "error": "leader must be a member of the team",
+    "id": "team-child",
+    "now": 107,
+    "operation": "change"
+  },
+  {
+    "body": {
+      "leader_enabled": "yes"
+    },
+    "error": "leader_enabled must be a boolean",
+    "id": "team-root",
+    "now": 108,
+    "operation": "change"
+  },
+  {
+    "body": {
+      "communication_enabled": 1
+    },
+    "error": "communication_enabled must be a boolean",
+    "id": "team-root",
+    "now": 109,
+    "operation": "change"
+  },
+  {
+    "body": {
+      "color": 65,
+      "communication_enabled": true,
+      "name": "  New  Child "
+    },
+    "id": "team-child",
+    "now": 110,
+    "operation": "change",
+    "team": {
+      "archived_at": null,
+      "color": "65",
+      "communication_enabled": true,
+      "created_at": 101,
+      "leader_agent_id": "",
+      "leader_enabled": false,
+      "name": "New Child",
+      "nudge_enabled": false,
+      "parent_team_id": "team-root",
+      "team_id": "team-child",
+      "updated_at": 110
+    }
+  },
+  {
+    "body": {
+      "leader_enabled": false,
+      "parent_team_id": null
+    },
+    "id": "team-child",
+    "now": 111,
+    "operation": "change",
+    "team": {
+      "archived_at": null,
+      "color": "65",
+      "communication_enabled": true,
+      "created_at": 101,
+      "leader_agent_id": "",
+      "leader_enabled": false,
+      "name": "New Child",
+      "nudge_enabled": false,
+      "parent_team_id": null,
+      "team_id": "team-child",
+      "updated_at": 111
+    }
+  },
+  {
+    "body": {
+      "archived": true
+    },
+    "id": "team-root",
+    "now": 112,
+    "operation": "change",
+    "team": {
+      "archived_at": 112,
+      "color": "#123",
+      "communication_enabled": false,
+      "created_at": 100,
+      "leader_agent_id": "",
+      "leader_enabled": false,
+      "name": "Root Team",
+      "nudge_enabled": false,
+      "parent_team_id": null,
+      "team_id": "team-root",
+      "updated_at": 112
+    }
+  },
+  {
+    "body": {
+      "parent_team_id": "team-root"
+    },
+    "error": "parent team must exist and be active",
+    "id": "team-child",
+    "now": 113,
+    "operation": "change"
+  },
+  {
+    "body": {
+      "archived": false,
+      "color": null
+    },
+    "id": "team-root",
+    "now": 114,
+    "operation": "change",
+    "team": {
+      "archived_at": null,
+      "color": "#123",
+      "communication_enabled": false,
+      "created_at": 100,
+      "leader_agent_id": "",
+      "leader_enabled": false,
+      "name": "Root Team",
+      "nudge_enabled": false,
+      "parent_team_id": null,
+      "team_id": "team-root",
+      "updated_at": 114
+    }
+  },
+  {
+    "body": {
+      "parent_team_id": "team-root"
+    },
+    "id": "team-child",
+    "now": 115,
+    "operation": "change",
+    "team": {
+      "archived_at": null,
+      "color": "65",
+      "communication_enabled": true,
+      "created_at": 101,
+      "leader_agent_id": "",
+      "leader_enabled": false,
+      "name": "New Child",
+      "nudge_enabled": false,
+      "parent_team_id": "team-root",
+      "team_id": "team-child",
+      "updated_at": 115
+    }
+  }
+]
