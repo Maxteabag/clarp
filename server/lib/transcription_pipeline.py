@@ -356,7 +356,7 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                      client_ts=client_ts, detail={"message": "whisper busy"})
         return TranscriptionOutcome.error(429, "whisper busy", trace_id)
     except Exception as e:  # noqa: BLE001
-        health.mark_error("stt", e)
+        health.mark_error("stt", client_words(e))
         log_exception("transcribeFail", e,
                       detail=f"model={requested_model} bytes={len(audio_bytes)}")
         # Keep the failed clip too (when retention is on), so the failure can
