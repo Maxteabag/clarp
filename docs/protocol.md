@@ -1036,6 +1036,9 @@ client shows it and derives nothing from `voice_id`.
   `[gemini_tts.voices]`; null for an id in no map), Google's and Deepgram's voice names.
 - An archived agent has no `voice_profile`: not on its snapshot row, and not in the creation
   answer or a roster event about it.
+- The rule both Hosts hold (vectors in `tests/unit/test_voice_v2a.py`): no voice of its own =
+  the provider's default voice where the provider has exactly one, silence (`no_voice`) where
+  it has none; a migrated agent must not fall silent where it spoke before.
 - `speech.shared_with`: how many other active agents speak with the same provider and
   voice (0: its own). Say it when it is not 0.
 - `speech.streaming`: whether audio begins before the whole clip is made.
@@ -1067,8 +1070,10 @@ client shows it and derives nothing from `voice_id`.
   recording ("this model cannot hear this agent's languages").
 - **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
   documented values are `own` and `default` (a later Host adds `parent`), and for
-  `silent_reason`: `no_voice` (no voice for the provider), `provider_off` (the Host speaks
-  with no provider) and `not_configured` (the provider has no credential or is refused).
+  `silent_reason`: `no_voice` (no voice for the provider), `voice_unavailable` (the agent has a
+  voice of its own the provider refuses, such as a Google voice off its list; with feature
+  `voice_provider_maps`), `provider_off` (the Host speaks with no provider) and `not_configured` (the provider
+  has no credential or is refused).
   A client shows plain wording for a value it does not know; it never fails on one.
 
 The snapshot head carries `voice_defaults` (the same `speech` and `hearing` shapes for an
@@ -1082,13 +1087,30 @@ Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in
 every agent (`POST /tts/providers`, `POST /transcription-providers`, a configuration
 edit) sends `agent-roster` with `kind` `voice-profile`: re-read the snapshot.
 
+### A stored voice and its edits (feature `voice_provider_maps`; Host contract: next free at merge)
+
+A stored `voice_id` (agent or contact) is a provider map, compact sorted JSON such as
+`{"cartesia":"<uuid>","gemini":"Kore"}`; `{}` means no voice of its own. A bare value stored
+before this release is still read as an ElevenLabs id; `clarp-admin voice migrate` brings
+stored values to the map shape and writes only rows that sound the same under every provider.
+
+- `POST /agent-voice` `{session, voice_id}` without `provider`: the id goes under the provider
+  its form names (a uuid: Cartesia; a Chirp 3 HD name: Google; 20 letters and digits:
+  ElevenLabs; otherwise ElevenLabs), merged into the agent's map. With `provider`, as before.
+- `POST /personas/update` merges `voice_id` into the stored map per provider. Optional
+  `base_voice_id`: the map the app last read. A provider whose incoming value equals the base
+  keeps the stored value (another app may have changed it since); one in the base but not in
+  the incoming map is removed. Without `base_voice_id` nothing is removed by its absence; an
+  empty value for a provider removes it. Only the incoming value is read by its form: an edit
+  never moves a stored value to another provider.
+
 ### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
 
 When a reply's speech ends without audio, the Host sends `tts-error` with `reason`, `provider`
 and `trace_id`, also when no provider had a voice for the agent (before this feature that case
 sent nothing). It is sent once per turn and reason, however many clips of that reply fail.
 
-- `reason` is an open set: `no_voice`, `not_configured`, `provider_off` (the same words and causes
+- `reason` is an open set: `no_voice`, `voice_unavailable`, `not_configured`, `provider_off` (the same words and causes
   as `voice_profile.speech.silent_reason`), `provider_failed` (the provider did not make the clip)
   and `host_failed`. A client shows plain words for a value it does not know.
 - `message` is a sentence built from the reason and the provider's name ("Not spoken: Cartesia
