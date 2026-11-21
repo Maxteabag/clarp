@@ -674,6 +674,13 @@ Response `200`:
 `dispatch` names the backend that took the turn (`claude`, `codex`, …);
 `queued` is true when the turn waits behind a running one.
 
+A routed send (`hands_free: true`, or `POST /orchestrator/route-delegation`, which
+answers the same way) replayed with the same `client_msg_id` answers what the first
+answered: the same `orchestrator.action`, `session`, `dispatch`, `decision_id` and
+`decision`, and the FIRST request's `trace_id`; the model is not asked again. A send
+first answered before this answers `decision_id` and `decision` null and its own
+`trace_id`, as before. Same fields, so no contract change.
+
 `200` means accepted, not delivered. Delivery is proven when a `/log` response
 contains a turn with id `u-<client_msg_id>`. A client that wants a delivery
 indicator should treat a send as failed if that id has not appeared within
