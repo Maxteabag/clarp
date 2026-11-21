@@ -133,8 +133,11 @@ impl Snapshot {
             .into_iter()
             .flatten()
             .filter_map(|(provider, rows)| {
-                let voices = rows.as_object()?.iter().filter_map(|(id, row)| {
-                    (!id.is_empty() && row.is_object()).then(|| {
+                let voices = rows
+                    .as_object()?
+                    .iter()
+                    .filter(|(id, row)| !id.is_empty() && row.is_object())
+                    .map(|(id, row)| {
                         (
                             id.clone(),
                             CatalogueVoice {
@@ -143,8 +146,7 @@ impl Snapshot {
                                 owner: row["owner"].as_bool() != Some(false),
                             },
                         )
-                    })
-                });
+                    });
                 Some((provider.clone(), voices.collect()))
             })
             .collect();
