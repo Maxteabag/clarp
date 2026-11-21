@@ -2915,11 +2915,29 @@ impl Actor {
         marks: &Marks,
         now_ms: i64,
     ) -> Result<Result<(Sent, Outputs), TraceTaken>, ActorError> {
-        if marks.trace_named
+        let relay = marks.user_word && marks.coordination.is_some();
+        let trace_named = marks.trace_named;
+        let mut with = Vec::new();
+        let mut revealed = None;
+        if (trace_named || relay)
             && let Some(owner) = self.trace_owner(message.trace_id.as_deref())?
             && owner != trace_owner_of(message)
         {
-            return Ok(Err(TraceTaken));
+            // Only a verified relay can add a new message to an earlier coordination
+            // trace. The trace's first message remains its owner.
+            let prior = if relay {
+                self.relay_trace_owner(&owner)?
+            } else {
+                None
+            };
+            if let Some((turn, first)) = prior {
+                if self.recorder.log().find(&message.id)?.is_none() {
+                    with = conversation::loosen_from(self.recorder.log(), turn, first, now_ms)?;
+                    revealed = (!with.is_empty()).then_some(turn);
+                }
+            } else if trace_named {
+                return Ok(Err(TraceTaken));
+            }
         }
         // Show this turn for good if it cannot leave a note at acceptance, even if
         // a later key or backend change allows notes from new turns.
@@ -2932,8 +2950,37 @@ impl Actor {
             trace_named: marks.trace_named,
             user_word: marks.user_word,
         };
-        self.take(message, admission, Vec::new(), reservation, &marks, now_ms)
-            .map(Ok)
+        let (sent, mut out) = self.take(message, admission, with, reservation, &marks, now_ms)?;
+        if !sent.duplicate
+            && let Some(turn) = revealed
+        {
+            out.changed.conversation = true;
+            if self.recorder.agent().live().map(Turn::id) == Some(turn) {
+                self.shown_events.extend(
+                    self.shown
+                        .set_turn_audience(clarp_kernel::coordination::USER, now_ms),
+                );
+            }
+        }
+        Ok(Ok((sent, out)))
+    }
+
+    fn relay_trace_owner(
+        &self,
+        owner: &TraceOwner,
+    ) -> Result<Option<(TurnId, Option<Seq>)>, ActorError> {
+        let log = self.recorder.log();
+        let Some(row) = log.find(&owner.id)? else {
+            return Ok(None);
+        };
+        let Some(turn) = row
+            .turn
+            .filter(|_| matches!(row.kind, kind::MESSAGE | kind::WAITING))
+        else {
+            return Ok(None);
+        };
+        let first = (row.kind == kind::MESSAGE).then_some(row.seq);
+        Ok(conversation::original_mark(log, turn)?.map(|_| (TurnId(turn), first)))
     }
 
     /// The message a trace belongs to, by one look by key.
@@ -3039,9 +3086,6 @@ impl Actor {
         )?;
         let mut out = Outputs::default();
         if accepted.duplicate {
-            if marks.user_word && marks.coordination.is_some() {
-                out.changed.conversation = self.reveal_relay_retry(message, now_ms)?;
-            }
             let sent = Sent {
                 message_seq: accepted.message_seq,
                 turn: None,
@@ -3082,39 +3126,6 @@ impl Actor {
             queue: self.queue_state(),
         };
         Ok((sent, out))
-    }
-
-    fn reveal_relay_retry(&mut self, message: &Message, now_ms: i64) -> Result<bool, ActorError> {
-        let Some(row) = self.recorder.log().find(&message.id)? else {
-            return Ok(false);
-        };
-        let Some(turn) = row
-            .turn
-            .filter(|_| matches!(row.kind, kind::MESSAGE | kind::WAITING))
-        else {
-            return Ok(false);
-        };
-        let earlier = message_at(self.recorder.log(), row.seq)?;
-        if earlier.trace_id != message.trace_id
-            || earlier.text != message.text
-            || trace_owner_of(&earlier) != trace_owner_of(message)
-        {
-            return Ok(false);
-        }
-        let first = (row.kind == kind::MESSAGE).then_some(row.seq);
-        let mut batch = self.recorder.batch();
-        let revealed = conversation::loosen_from(&mut batch, TurnId(turn), first, now_ms)?;
-        if revealed {
-            batch.commit()?;
-            self.unstored_changes = 0;
-            if self.recorder.agent().live().map(Turn::id) == Some(TurnId(turn)) {
-                self.shown_events.extend(
-                    self.shown
-                        .set_turn_audience(clarp_kernel::coordination::USER, now_ms),
-                );
-            }
-        }
-        Ok(revealed)
     }
 
     /// Takes over the conversation an agent had on another Host: its rows as that Host served

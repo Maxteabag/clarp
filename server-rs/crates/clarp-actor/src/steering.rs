@@ -392,6 +392,7 @@ impl Actor {
         };
         if self.backend.id() != "claude"
             || !live.steering.stream.can_join()
+            || live.steering.primary_uuid.as_deref() == Some(uuid.as_str())
             || live.opening
             || live.origin.name() == COMPACTION
             || text.trim().is_empty()
