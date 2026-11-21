@@ -19,6 +19,9 @@
 //! A spool that says "spawned" belongs to a turn that must never be started again. A spool that
 //! does not belongs to a turn whose program was never given anything to do.
 
+mod codex_lane_runtime;
+mod codex_lane_socket;
+mod codex_lane_turns;
 mod opencode;
 
 use std::io::{ErrorKind, Read, Write};
@@ -1402,6 +1405,16 @@ fn main() -> ExitCode {
         argv.next();
         background_hook(argv.next());
         return ExitCode::SUCCESS;
+    }
+    if argv.peek().is_some_and(|word| word == "codex-goal-lane") {
+        argv.next();
+        return match codex_lane_runtime::from_args(argv) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("clarp-shim: Codex goal lane: {error}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if argv.peek().is_some_and(|word| word == "opencode-turn") {
         argv.next();
