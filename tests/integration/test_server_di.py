@@ -4120,7 +4120,7 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
         assert json.loads(client.recv())["type"] == "session.closed"
     finally:
         client.close()
-    assert upstream.sent[0]["session"]["model"] == "gpt-live-1"
+    assert upstream.sent[0]["session"]["model"] == "gpt-live-1.1"  # the configured default
     if podcast:
         assert "server remains authoritative" in json.dumps(upstream.sent[0]["session"])
         assert "separate explainer" in upstream.sent[0]["session"]["instructions"]

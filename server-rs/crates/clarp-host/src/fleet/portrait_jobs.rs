@@ -10,6 +10,18 @@ use serde::{Deserialize, Serialize};
 pub(crate) const PENDING: &str = "portrait-publications";
 pub(crate) const BYTES: &str = "portrait-publication-bytes";
 
+/// What this desk keeps, declared once (`kept.rs`): a publication in flight, listed whole at the
+/// start by `portrait_generation::recover` and judged there as the publication it reads; and its
+/// pictures' bytes, no JSON, read by key alone and judged when read as bytes.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(
+        PENDING,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Publication>,
+    ),
+    crate::kept::Kind::book(BYTES, crate::kept::Key::Plain, crate::kept::any).when_read(),
+];
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Publication {
     pub agent_id: String,
@@ -27,6 +39,7 @@ impl Fleet {
         let Some(at) = self.place_of(agent_id) else {
             return Ok(Admission::Refused("unknown Agent session"));
         };
+        self.members[at].agent.accepting_work()?;
         let member = &self.members[at].record;
         let id = rules::job_id(&member.agent_id);
         if let Some(known) = self
@@ -85,6 +98,7 @@ impl Fleet {
         let Some(at) = self.place_of(&publication.agent_id) else {
             return Err(Unavailable("unknown Agent session".into()));
         };
+        self.members[at].agent.accepting_work()?;
         let mut record = self.members[at].record.clone();
         let digest = record
             .avatar

@@ -104,18 +104,25 @@ def test_the_own_follow_up_is_durable_before_it_is_acknowledged_and_runs_once(po
     assert sum("and also" in str(p.get("input")) for m, p in pool.sent if m == "turn/start") == 1
 
 
-def test_a_failed_park_refuses_the_follow_up(pool, monkeypatch):
+def test_a_follow_up_to_a_starting_turn_is_durable_without_a_park(pool, monkeypatch):
+    """Before issue 491 a follow-up to a turn still starting was acknowledged only once a
+    start-park row was written, and a failed park refused it (503). It is now admitted as a
+    queue item in its own admission transaction, so no park is needed: a park that would fail
+    changes nothing, and the follow-up is durable before it is acknowledged."""
     held, release = _hold(pool, "turn/start", lambda p: "HOLD" in str(p.get("input")))
     _ok, _, _, starter = _timed(lambda: pool.service.dispatch(
         text="HOLD", requested_session="rachel", trace_id="t-r1", synthesize_audio=False), 0.0)
     assert held.wait(15)
     patch_shared(monkeypatch, td, "_park", lambda spec, prefix="park": "")
-    with pytest.raises(td.DispatchError) as error:
-        pool.service.dispatch(text="and also", requested_session="rachel", trace_id="t-r2",
-                              synthesize_audio=False)
-    assert error.value.status == 503
+    result = pool.service.dispatch(text="and also", requested_session="rachel", trace_id="t-r2",
+                                   synthesize_audio=False)
+    assert result.queued
+    assert any(row["trace_id"] == "t-r2" for row in turn_queue.pending(pool.rachel))
     release.set()
     starter.join(15)
+    # The follow-up runs once the held turn has started and ended: let it, inside this test.
+    assert _wait(lambda: sum("and also" in str(p.get("input"))
+                             for m, p in pool.sent if m == "turn/start") == 1, 20)
     assert _wait(lambda: not cas.active_handles(pool.rachel), 15)
 
 
@@ -432,7 +439,9 @@ def test_a_retry_after_failed_queue_promotion_preserves_the_follow_up(pool, monk
                     patch.setattr(turn_queue, name, locked)
             with pytest.raises(sqlite3.OperationalError, match='database is locked'):
                 _host_stop(pool, pool.rachel)
-        assert any(row['trace_id'] == 't-r2' for row in turn_queue.parked(pool.rachel)), \
+        # Since issue 491 the follow-up's durable row is a queue item, not a start-park row.
+        assert any(row['trace_id'] == 't-r2'
+                   for row in turn_queue.pending(pool.rachel) + turn_queue.parked(pool.rachel)), \
             'control: the acknowledged row survived the failed write'
         _host_stop(pool, pool.rachel)  # actual retry; database is healthy again
         rows = turn_queue.pending(pool.rachel) + turn_queue.parked(pool.rachel)

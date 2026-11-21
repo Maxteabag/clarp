@@ -95,7 +95,15 @@ def increment(key: str) -> None:
 
 
 def set_text_if_blank(key: str, value: str, *, updated_at: int | None = None) -> str:
-    """Store `value` unless a non-blank value exists; return what is stored."""
+    """Store `value` unless a non-blank value exists; return what is stored.
+
+    A value that is already set is returned by a read alone: the write below
+    takes SQLite's write lock even when its WHERE leaves the row as it is, so
+    a caller on a hot path (heartbeat accounting, once per settled turn)
+    would otherwise wait behind every other writer for a no-op."""
+    existing = get_text(key)
+    if existing.strip():
+        return existing
     conn().execute(
         """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
            ON CONFLICT(key) DO UPDATE SET

@@ -88,10 +88,11 @@ FIELDS: dict[str, tuple[str, ...]] = {
     SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session", "backend_session_id"),
     SSEType.QUEUE_UPDATED: (
         "agent_id", "session", "queue_depth", "queue_paused", "queue_started",
-        "queue_revision", "client_msg_id",
+        "queue_revision", "client_msg_id", "queue_change", "text",
     ),
     SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
+    SSEType.MEDIA_CHANGED: ("session", "agent_id", "asset_id", "change", "favorite", "at"),
     SSEType.ATTENTION_UPDATED: ("attention_count",),
     SSEType.BACKGROUND_JOB_UPDATED: (
         "change_revision", "observed_at", "job_id", "session", "agent_id",
@@ -315,7 +316,10 @@ def transcript_updated(*, agent_id: str, session: str | None,
 
 def queue_updated(*, session: str, agent_id: str, queue_depth: int,
                   queue_paused: bool, queue_started: bool,
-                  queue_revision: int, client_msg_id: Any = OMIT) -> Event:
+                  queue_revision: int, client_msg_id: Any = OMIT,
+                  queue_change: Any = OMIT, text: Any = OMIT) -> Event:
+    """``queue_change`` (``edited`` with ``text``, or ``deleted``) names what
+    happened to the item ``client_msg_id`` (feature waited_send_order)."""
     return _build(SSEType.QUEUE_UPDATED, [
         ("session", session),
         ("agent_id", agent_id),
@@ -324,6 +328,8 @@ def queue_updated(*, session: str, agent_id: str, queue_depth: int,
         ("queue_paused", queue_paused),
         ("queue_started", queue_started),
         ("queue_revision", queue_revision),
+        ("queue_change", queue_change),
+        ("text", text),
     ])
 
 
@@ -344,6 +350,24 @@ def artifact_updated(*, session: str, agent_id: str,
         ("session", session),
         ("agent_id", agent_id),
         ("artifact_id", artifact_id),
+    ])
+
+
+def media_changed(*, session: str, agent_id: str, asset_id: str, change: str,
+                  at: int, favorite: Any = OMIT) -> Event:
+    """A gallery image was created, deleted or (un)marked; ``favorite`` only with
+    change ``favorite``."""
+    if change not in {"created", "deleted", "favorite"}:
+        raise ValueError(f"media-changed: unknown change {change!r}")
+    if (change == "favorite") != (favorite is not OMIT):
+        raise ValueError("media-changed: favorite goes with change 'favorite' only")
+    return _build(SSEType.MEDIA_CHANGED, [
+        ("session", session),
+        ("agent_id", agent_id),
+        ("asset_id", asset_id),
+        ("change", change),
+        ("favorite", favorite),
+        ("at", at),
     ])
 
 
@@ -510,6 +534,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.QUEUE_UPDATED: queue_updated,
     SSEType.DELIVERY_UPDATED: delivery_updated,
     SSEType.ARTIFACT_UPDATED: artifact_updated,
+    SSEType.MEDIA_CHANGED: media_changed,
     SSEType.ATTENTION_UPDATED: attention_updated,
     SSEType.BACKGROUND_JOB_UPDATED: background_job_updated,
     SSEType.PROVIDER_LIMIT: provider_limit,

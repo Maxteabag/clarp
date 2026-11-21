@@ -23,6 +23,7 @@ from .http_utils import principal_of, require_full_scope
 from . import oracle_contact
 from .log import log, log_exception, log_fault
 from .oracle_calls_stable import AgentTools, session_config as realtime_config
+from .oracle_live_wire import API_VOICE as VOICE, BASELINE_LIVE_MODEL, live_model
 from .oracle_realtime import claim_session, release_session, _send_http_error
 
 _CLOSING = set()
@@ -100,8 +101,6 @@ def release_connection(principal, token):
         _CLOSING_CONDITION.notify_all()
 
 
-MODEL = "gpt-live-1"
-VOICE = "marin"
 ROUTER = "gpt-5.6-luna"
 # How long Oracle's audio must be silent before the Host tells the phone the
 # reply is over. Upstream sends no end-of-response event, so this is a guess,
@@ -222,7 +221,7 @@ def router_tools():
     Omar doing"; without this it can only start work or read old messages.
     """
     from .oracle_realtime import _tool
-    tools = realtime_config(model=MODEL, voice=VOICE)["tools"]
+    tools = realtime_config(model=BASELINE_LIVE_MODEL, voice=VOICE)["tools"]  # only its tool list
     if not any(t["name"] == "get_agent_status" for t in tools):
         tools.append(_tool("get_agent_status", "Read what one Clarp agent is doing right now: state, current step, last thing it said.",
                            {"agent": {"type": "string"}}, ["agent"]))
@@ -258,7 +257,7 @@ def language_fact(codes):
     return "The user speaks " + (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]) + "."
 
 
-def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=(), languages=()):
+def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=(), languages=(), model=None):
     """Session config; the roster and contact ride in the instructions.
 
     The voice model holds no tools, so unless it is told who the agents are it
@@ -274,7 +273,7 @@ def live_config(*, roster=None, delegation_strategy="operator", voice_context=No
     instructions += oracle_voice_context.instructions(voice_context)
     if languages:
         instructions += "\n" + language_fact(languages)
-    result = {"model": MODEL, "instructions": instructions,
+    result = {"model": live_model() if model is None else model, "instructions": instructions,
             "audio": {"format": {"type": "audio/pcm", "rate": 24000},
                       "output": {"voice": VOICE}}, "delegation": {"type": "client"}}
     if history: result["input"] = list(history)
@@ -1314,7 +1313,13 @@ def serve(handler):
         with write_lock:
             handler.wfile.write(ws.text_frame(json.dumps(event)))
             handler.wfile.flush()
+    live = live_model(cfg)  # this session's one read of the configured GPT-Live model
+    podcast_session = None
     try:
+        # A podcast's session is built once from that value: the history records what is sent (ruling B).
+        # Inside the try, so a failure here still releases the device's claim.
+        if podcast_context is not None:
+            podcast_session = podcast_live.session_config(podcast_context, stable=True, model=live)
         if podcast_context is None:
             try:
                 memory = oracle_memory.open_thread(principal, selected_contact, connection_id=token,
@@ -1326,12 +1331,12 @@ def serve(handler):
             # Persist the exact source/configuration before opening paid audio.
             history_id = podcast_history.create(artifact=artifact,
                 position=float(query.get("position", ["0"])[0]), context=podcast_context,
-                source=podcast_source, model=MODEL, voice=VOICE)
+                source=podcast_source, model=live, voice=VOICE, configuration=podcast_session)
         import websocket
         from . import oracle_voice_provider
         upstream, provider = _connect_voice(cfg, key,
             oracle_voice_provider.effective(cfg) if podcast_context is None else "openai")
-        model, voice = (upstream.model, upstream.voice) if provider == "gemini" else (MODEL, VOICE)
+        model, voice = (upstream.model, upstream.voice) if provider == "gemini" else (live, VOICE)
         handler.wfile.write(ws.handshake_response(headers["sec-websocket-key"]))
         handler.wfile.flush()
         handler.connection.settimeout(CLIENT_IDLE_TIMEOUT)
@@ -1341,7 +1346,7 @@ def serve(handler):
             media_dir = getattr(handler.ctx, "media_dir", None) or RuntimePaths.from_home(pathlib.Path.home()).media_dir
             conversation = podcast_live.StablePodcastConversation(upstream, downstream, key,
                 podcast_context, images=query.get("images", ["0"])[0] == "1",
-                history_id=history_id, media_dir=media_dir)
+                history_id=history_id, media_dir=media_dir, stream=getattr(handler.ctx, "stream", None))
             downstream({"type": "podcast.history", "conversation_id": history_id,
                         "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:
@@ -1412,8 +1417,8 @@ def serve(handler):
             downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
                 "primary_contact": selected_contact, "operator_model_called": False})
         conversation.send({"type": "session.start", "session":
-            podcast_live.session_config(podcast_context, stable=True) if podcast_context is not None
-            else live_config(roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy, voice_context=voice_context,
+            podcast_session if podcast_context is not None
+            else live_config(model=live, roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy, voice_context=voice_context,
                 languages=cfg.oracle_languages,
                 history=memory.startup_history(roster=tools.execute("list_agents", {}, "history")) if memory else ())})
         while not conversation.stop.is_set():

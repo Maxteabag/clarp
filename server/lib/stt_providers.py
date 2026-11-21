@@ -88,6 +88,121 @@ VALID_IDS = frozenset(item["id"] for item in CATALOG)
 LANGUAGE_SET_PROVIDERS = frozenset({"google", "elevenlabs"})
 
 
+class LanguageSetUnsupported(ValueError):
+    """The engine cannot be handed the agent's language set ("no,en")."""
+
+
+class LanguageSetRefused(LanguageSetUnsupported):
+    """No engine the owner chose for transcription can hear the agent's language set:
+    the recording is refused with words that say what to change (422)."""
+
+    def __init__(self, *, engine: str, languages: list[str], engines: list[str],
+                 reasons: list[str] = ()):
+        self.engine, self.languages, self.engines = engine, list(languages), list(engines)
+        # Why no engine the owner chose could take over, in words (may be empty).
+        self.reasons = list(reasons)
+        why = f" ({'; '.join(self.reasons)})" if self.reasons else ""
+        super().__init__(
+            f"{engine} cannot hear this agent's languages ({', '.join(languages)}); "
+            f"choose an engine that can: {', '.join(engines)}{why}")
+
+
+def language_set_engines() -> list[str]:
+    """The hosted models that can be handed a language set, in catalogue order."""
+    return [row["id"] for item in CATALOG if item["id"] in LANGUAGE_SET_PROVIDERS for row in item["models"]]
+
+
+def language_set_engine() -> str:
+    """The Host's selected transcription engine when it can take a language set and has
+    a key; "" otherwise (R152). Never another provider: a recording of the owner's voice
+    goes only to an engine chosen for transcription (the agent's own, the Host's selected,
+    the device's), whatever keys the Host holds for other uses."""
+    from .config import load
+    selected = selected_engine()
+    provider = provider_of(selected)
+    if provider in LANGUAGE_SET_PROVIDERS and _model_row(selected) is not None and _key_for(load(), provider):
+        return selected
+    return ""
+
+
+def own_model_id(cfg) -> str:
+    """The Host's own engine as a model id (`provider:model`), as the Host builds it."""
+    provider = getattr(cfg, "whisper_provider", "") or "faster-whisper"
+    model = str(cfg.whisper_model or "")
+    if not model:
+        from .custom_stt_adapters import get as custom_adapter
+        manifest = custom_adapter(provider)
+        model = manifest.default_model if manifest is not None else ""
+    return f"{provider}:{model}"
+
+
+def declared_languages(model_id: str) -> list[str] | None:
+    """The languages a local or adapter model declares, from the one table that
+    describes it: the adapter's own model list for an adapter model, the curated
+    catalogue for a built-in one. None when it declares nothing (a model registered
+    by hand, an adapter that lists no languages). Raises
+    custom_stt_adapters.AdapterError when the adapter cannot answer or does not
+    offer the model."""
+    from . import custom_stt_adapters, transcription_catalog
+    provider = provider_of(model_id)
+    manifest = custom_stt_adapters.get(provider) if provider else None
+    if manifest is not None:
+        row = next((item for item in custom_stt_adapters.models(manifest)
+                    if item["id"] == model_id), None)
+        if row is None:
+            raise custom_stt_adapters.AdapterError(
+                f"configured transcription model is unavailable: {model_id}")
+    else:
+        row = transcription_catalog.model_by_id(model_id)
+    declared = [str(code).strip().lower() for code in ((row or {}).get("languages") or [])
+                if str(code).strip()]
+    return declared or None
+
+
+# Bokmål and Nynorsk are written Norwegian: a model declaring either hears `no`.
+_SAME_LANGUAGE = {"nb": "no", "nn": "no"}
+
+
+def _primary(code: str) -> str:
+    primary = code.strip().lower().replace("_", "-").split("-", 1)[0]
+    return _SAME_LANGUAGE.get(primary, primary)
+
+
+# Fixed words for an own engine that cannot answer or failed; its error text, which
+# can name local paths, goes only to the Host's log.
+OWN_ENGINE_UNAVAILABLE = "the Host's own engine is unavailable"
+OWN_ENGINE_FAILED = "the Host's own engine could not hear it"
+
+
+def own_engine_refusal(cfg, languages: list[str]) -> str:
+    """Why the Host's own engine cannot hear a recording that may be in any of
+    `languages`, or "" when it can (R152). Read from the model's declared
+    languages, never from its name. A model that declares nothing is judged as the
+    engine itself runs it: the Whisper engines pin English for a `.en` model and
+    detect the language otherwise (stt.WhisperSTT.language), so only a `.en` name
+    is English-only there."""
+    if not getattr(cfg, "whisper_enabled", True):
+        return "the Host's own engine is off"
+    model_id = own_model_id(cfg)
+    try:
+        declared = declared_languages(model_id)
+    except Exception as e:  # noqa: BLE001 - an adapter that cannot answer is not used
+        # The adapter's words can name local paths: they stay in the Host's log, the
+        # answer says a fixed sentence.
+        from .log import log_exception
+        log_exception("sttOwnEngineLanguagesFail", e, detail=model_id)
+        return OWN_ENGINE_UNAVAILABLE
+    if declared is None:
+        declared = ["en"] if model_id.endswith(".en") else ["multilingual"]
+    if "multilingual" in declared:
+        return ""
+    heard = {_primary(code) for code in declared}
+    missing = [code for code in languages if _primary(code) not in heard]
+    if not missing:
+        return ""
+    return f"the Host's own model {model_id} hears only {', '.join(declared)}"
+
+
 def provider_of(model_id: str) -> str:
     return model_id.split(":", 1)[0].strip().lower() if ":" in model_id else ""
 
@@ -379,7 +494,8 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
     session = stt_language.current_session() or current_focus_session()
     language = stt_language.current_language() or stt_language.language_for(session)
     if "," in language and provider not in LANGUAGE_SET_PROVIDERS:
-        raise ValueError("agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
+        raise LanguageSetUnsupported(
+            "agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
     # The argument handed to the adapter, as the attempt records it: Scribe
     # drops a set and detects without bound, so it is handed none.
     handed = None if provider == "elevenlabs" and "," in language else language

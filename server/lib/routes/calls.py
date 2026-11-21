@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from lib import identity
+from lib import identity, server_identity
 from lib.log import log_exception
 
 
@@ -111,7 +111,8 @@ class CallRoutes:
             live.require_device(principal)
             if set(data) != {"agent", "request_id", "client_nonce"}:
                 raise rings.CallError(400, live.REQUEST_INVALID)
-            return rings.user_call_live(principal, data["agent"], data["request_id"], data["client_nonce"])
+            return rings.user_call_live(principal, data["agent"], data["request_id"], data["client_nonce"],
+                                        client=self.headers.get(server_identity.CLIENT_HEADER))
         return self._calls_ring_run(work)
 
     def _handle_calls_remove(self):
@@ -132,6 +133,7 @@ class CallRoutes:
         return self._calls_ring_run(lambda rings, principal, data: rings.answer(
             principal, str(data.get("ring_id") or ""), conversation_mode=data.get("conversation_mode"),
             request_id=data.get("request_id"), client_nonce=data.get("client_nonce"),
+            client=self.headers.get(server_identity.CLIENT_HEADER),
             **({"opening_mode": data["opening_mode"]} if "opening_mode" in data else {})))
 
     def _handle_calls_ring_cancel(self):

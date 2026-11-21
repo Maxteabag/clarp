@@ -16,6 +16,13 @@ use std::sync::{
 };
 use std::time::Duration;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    "live_tools",
+    crate::kept::Key::Plain,
+    crate::kept::json,
+)];
+
 pub struct Worker {
     pub app: App,
     pub call: Joined,
@@ -359,7 +366,8 @@ impl Worker {
                         "--text".into(),
                         team::prompt(name, &normalized),
                     ];
-                    let result = crate::admin_tool::prompt(&self.app, &args).await;
+                    let call = crate::tools::ToolCall::default();
+                    let result = crate::admin_tool::prompt(&self.app, &call, &args).await;
                     let verdict = match result.exit {
                         0 => Prompt::Sent,
                         4 => Prompt::Refused(&result.stderr),
