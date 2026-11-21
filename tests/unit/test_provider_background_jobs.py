@@ -778,3 +778,77 @@ def test_the_upgrade_ends_every_long_silent_task_once_and_leaves_recent_ones(cas
     assert c.execute('PRAGMA user_version').fetchone()[0] == db_schema._SCHEMA_VERSION
     assert jobs.get(ident)['terminal_reason'] == 'provider_task_evidence_lost'
     assert jobs.get(recent)['terminal_at'] is None
+
+
+def test_a_round_asks_sqlite_for_its_transcripts_once(tmp_path, monkeypatch):
+    """A visit reads two transcripts and the next one comes at once while the round is
+    unfinished: the transcripts of the round are asked for once, at its start, and again
+    only for the next round. A session added meanwhile is in the next round."""
+    from lib import backends
+    line = json.dumps(record('assistant', message={'content': []})) + '\n'
+    paths = {}
+
+    def add(native):
+        aid = agents.create_agent(persona=native, voice_id='', cwd=str(tmp_path), session=native)
+        db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES(?,?,?,?)',
+                          (aid, native, native, db.now_ms() - 1000))
+        path = tmp_path / f'{native}.jsonl'
+        path.write_text(line)
+        paths[native] = path
+    for i in range(6):
+        add(f'round-{i}')
+    monkeypatch.setattr(backends.by_id('claude'), 'find_transcript', lambda native: paths.get(native))
+    asked = []
+    real = provider.ProviderJobObserver._transcripts
+    monkeypatch.setattr(provider.ProviderJobObserver, '_transcripts',
+                        staticmethod(lambda: (asked.append(1), real())[1]))
+    observer = provider.ProviderJobObserver()
+    observer.poll_once()
+    add('round-late')
+    while observer.continue_soon:
+        observer.poll_once()
+    assert len(asked) == 1
+    assert 'round-late' not in dict(db.conn().execute('SELECT native_id,position FROM provider_job_cursors'))
+    observer.poll_once()
+    while observer.continue_soon:
+        observer.poll_once()
+    assert len(asked) == 2
+    assert 'round-late' in dict(db.conn().execute('SELECT native_id,position FROM provider_job_cursors'))
+
+
+def test_a_visit_does_not_look_for_turns_to_prune(case):
+    """No index holds exited_at, so looking for turns past their retention reads the whole
+    table: the observer does it with its evidence sweep (every EVIDENCE_SWEEP_SEC), not on
+    the visits that follow one another four times a second."""
+    observer = provider.ProviderJobObserver()
+    observer.poll_once()                      # the first visit sweeps, and prunes
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        for _ in range(3):
+            observer.poll_once()
+    finally:
+        db.conn().set_trace_callback(None)
+    assert not [s for s in statements if 'exited_at<' in s], statements
+
+
+def test_a_session_that_went_live_during_the_round_is_not_visited_as_ended(case, monkeypatch):
+    """The round keeps its order, not whether each session is live: that is asked at the
+    visit. A session that had ended when the round began, then started a turn and launched
+    a background task before its visit, is live; its new task must not be closed as
+    'unknown' because the round remembered it ended (reviewer 1 on 598)."""
+    from lib import backends
+    owner, path, ident = case
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at,ended_at)'
+                      ' VALUES(?,?,?,?,?)', (owner['agent_id'], owner['session'], NATIVE,
+                                             db.now_ms() - 7_200_000, db.now_ms() - 3_600_000))
+    monkeypatch.setattr(backends.by_id('claude'), 'find_transcript', lambda native: path)
+    observer = provider.ProviderJobObserver()
+    observer._round = observer._transcripts()                    # the round begins: ended
+    assert [(r['backend_session_id'], r['live']) for r in observer._round] == [(NATIVE, 0)]
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at)'
+                      ' VALUES(?,?,?,?)', (owner['agent_id'], owner['session'], NATIVE, db.now_ms()))
+    append(path, launch(), receipt())                             # a turn launches a task
+    observer.poll_once()
+    job = jobs.get(ident)
+    assert job['status'] == 'running' and job['outcome_state'] != 'unknown', job
