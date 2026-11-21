@@ -565,6 +565,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/remote-action": "_handle_remote_action_get",
         "/location": "_handle_get_location",
         "/media": "_handle_media_list",
+        # Exact, so it is matched before the /media/<asset_id> content route.
+        "/media/deleted": "_handle_media_deleted",
         "/agent-portraits": "_handle_agent_portraits_list",
         "/agent-portrait-generation": "_handle_agent_portrait_generation_status",
         "/teams": "_handle_teams_list",
@@ -635,6 +637,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/managed-skills": "_handle_managed_skills_update",
         "/upload": "_handle_upload",
         "/media": "_handle_media_publish",
+        "/media/delete": "_handle_media_delete_batch",
         "/agent-portraits": "_handle_agent_portraits_update",
         "/agent-portrait-generation": "_handle_agent_portrait_generation_start",
         "/select": "_handle_select",
@@ -1510,6 +1513,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         except ValueError as exc:
             return self._json_error(400, str(exc))
         payload["ok"] = True
+        # Every agent's hearing may have changed: open apps re-read the agents.
+        from lib import events
+        events.broadcast(self.ctx.stream, events.agent_roster("voice-profile"))
         self._json_ok(payload)
 
     # ---- vocabulary: packs, terms, profiles, assignments, preview, runs ----
@@ -3051,9 +3057,14 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     def _handle_media_content(self, asset_id: str):
         if not asset_id or "/" in asset_id or "." in pathlib.PurePath(asset_id).parts:
             return self._send(400, b"bad asset id")
-        row = media_store.get(asset_id)
+        row = media_store.lookup(asset_id)
         if not row:
             return self._send(404, b"not found")
+        if row["deleted_at"] is not None:
+            # Removed for ever: 410, so an app shows "Image removed" and offers no retry;
+            # 404 stays an id this Host never had (feature media_manage).
+            return self._json(410, {"error": "removed", "asset_id": asset_id,
+                                    "deleted_at": row["deleted_at"]})
         path = pathlib.Path(row["storage_path"]).resolve()
         root = (self.ctx.media_dir or _runtime_paths().media_dir).resolve()
         if not path.is_file() or (path != root and root not in path.parents):

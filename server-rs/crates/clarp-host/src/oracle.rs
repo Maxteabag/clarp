@@ -27,9 +27,9 @@ use crate::owner::{self, OwnerFile};
 use crate::personas::object;
 
 mod call;
-mod delegations;
-mod handoffs;
-mod memory;
+pub(crate) mod delegations;
+pub(crate) mod handoffs;
+pub(crate) mod memory;
 mod router;
 mod tools;
 mod upstream;

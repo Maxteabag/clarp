@@ -28,7 +28,7 @@ from .clip_delivery.chunked_file import ChunkedFileDelivery
 from .config import load as load_config
 from .log import log_exception
 from .paths import RuntimePaths
-from .tts_registry import _gemini_voice, _google_voice
+from .voice_profile import NO_VOICE, provider_voice
 from .tts_service import event_context as _event_context, emit_event as _emit
 from . import tts_mode
 from .voice import (
@@ -105,6 +105,9 @@ def synth_one(*,
                     tts_queue.mark_failed(queue_id, result.error)
                     _emit("tts_worker", "noVoice", context=_event_context(row, agent),
                           detail={"provider": clip_route.provider})
+                    # It used to end here unseen: say so, once for the turn.
+                    _publish_tts_error(stream, row, agent, result.error, cfg=voice_config,
+                                       reason=NO_VOICE, provider=clip_route.provider)
                     return True
                 else:
                     _emit("tts_worker", "route",
@@ -202,30 +205,22 @@ def _cartesia_can_stream(cfg, row: dict, agent: dict | None, clip_route) -> bool
     and has a key and a voice for it (as ``_synthesize`` resolves them)."""
     if clip_route.provider != CARTESIA or not cfg.cartesia_key():
         return False
-    voice = clip_route.voice or resolve_voice(row["voice_id"], CARTESIA)
-    return bool(voice or cfg.cartesia_voice_for((agent or {}).get("persona", "")))
+    return bool(provider_voice(cfg, row["voice_id"], agent or {}, clip_route, CARTESIA).voice)
 
 
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
     """False only when the routed provider certainly has no voice and no
-    fallback could speak instead (Cartesia and Gemini; others decide later)."""
+    fallback could speak instead (Cartesia and Gemini; others decide later).
+    The voice comes from the resolver the profile shows (voice_profile)."""
     if clip_route.fallback:
         return True
-    raw_voice = row.get("voice_id")
-    persona = (agent or {}).get("persona", "")
-    route_voice = clip_route.voice
-    cartesia_voice = ((route_voice if clip_route.provider == CARTESIA else None)
-                      or resolve_voice(raw_voice, CARTESIA)
-                      or cfg.cartesia_voice_for(persona))
-    if clip_route.provider == CARTESIA:
-        return bool(cartesia_voice)
-    if clip_route.provider == GEMINI:
-        return bool(_gemini_voice(cfg, raw_voice, persona, agent,
-                                  route_voice, cartesia_voice))
+    if clip_route.provider not in (CARTESIA, GEMINI, GOOGLE):
+        return True
+    voice = provider_voice(cfg, row.get("voice_id"), agent, clip_route, clip_route.provider).voice
     if clip_route.provider == GOOGLE:
         from . import google_tts
-        return _google_voice(raw_voice, route_voice) in google_tts.VOICES
-    return True
+        return voice in google_tts.VOICES
+    return bool(voice)
 
 
 def _synthesize(*, cfg, row: dict, agent: dict,
@@ -372,41 +367,83 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
     )
 
 
-def _publish_tts_error(stream: Any | None, row: dict,
-                       agent: dict | None, error: str | None) -> None:
-    """Broadcast a tts-error SSE so a failed synthesis isn't just silent audio.
-    Maps the raw error to a short human message; keeps the detail for logs."""
+# Google's structured codes keep their own words (they name the operator's step).
+_GOOGLE_WORDS = {
+    "google_quota": "Voice paused: Google Chirp 3 HD quota exceeded.",
+    "google_auth_failed": "Voice unavailable: Google Chirp 3 HD sign-in failed.",
+    "google_credentials_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
+    "google_project_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
+    "voice_unavailable": "Voice unavailable: this Google Chirp 3 HD voice is not available.",
+    "google_id_collision": ("Voice unavailable: an old custom adapter also uses the id "
+                            "google; an operator must resolve it."),
+    "google_id_unverifiable": ("Voice unavailable: an installed custom adapter cannot be "
+                               "identified; an operator must check it."),
+}
+
+
+def _provider_label(provider: str | None) -> str:
+    from .tts_providers import CATALOG
+    row = next((item for item in CATALOG if item["id"] == provider), None)
+    return row["name"] if row else (provider or "")
+
+
+_TURN_TOLD_MS = 6 * 3600 * 1000
+_UNTRACED_TOLD_MS = 10 * 60 * 1000
+
+
+def _publish_tts_error(stream: Any | None, row: dict, agent: dict | None, error: str | None,
+                       *, cfg=None, reason: str | None = None,
+                       provider: str | None = None) -> None:
+    """Tell the apps a reply was not spoken, and why (feature speech_outcome).
+
+    The reason is the profile's own (voice_profile.clip_failure: the same resolver
+    the profile shows) or a Google structured code's; the words come from the reason
+    and the provider's name, never from an error's text, and nothing provider-internal
+    reaches the client. The failed row keeps "<reason>: <error>" for the Host's logs,
+    and a turn is told once per reason, however many of its clips fail."""
+    from . import google_tts, voice_profile
+    code = (error or "").lower().split(":", 1)[0].strip()
+    google_code = code if code in google_tts.ERROR_CODES else None
+    if reason is None:
+        try:
+            reason, provider = voice_profile.clip_failure(
+                cfg or load_config(), agent, google_code=google_code)
+        except Exception as exc:  # noqa: BLE001 - the user still hears why
+            log_exception("ttsFailureReasonFail", exc, detail=(error or "")[:60])
+            reason = voice_profile.PROVIDER_FAILED
+    queue_id, trace_id = row.get("queue_id"), row.get("trace_id") or ""
+    # A turn is told once per reason; clips without a trace, once per agent and reason
+    # in _UNTRACED_TOLD_MS (they cannot be grouped into a turn).
+    enqueued_at = int(row.get("enqueued_at") or 0)
+    since_ms = enqueued_at - (_TURN_TOLD_MS if trace_id else _UNTRACED_TOLD_MS)
+    partly = False
+    try:
+        if queue_id is not None:
+            tts_queue.mark_failed(queue_id, f"{reason}: {error or ''}")
+        if (queue_id is not None and row.get("agent_id")
+                and tts_queue.turn_already_told(
+                    agent_id=row["agent_id"], trace_id=trace_id, queue_id=queue_id,
+                    reason=reason, since_ms=since_ms)):
+            return
+        partly = bool(row.get("agent_id")) and tts_queue.turn_partly_spoken(
+            agent_id=row["agent_id"], trace_id=trace_id, since_ms=since_ms)
+    except Exception as exc:  # noqa: BLE001 - telling twice beats not telling
+        log_exception("ttsFailureOnceFail", exc, detail=str(queue_id))
     if stream is None:
         return
-    low = (error or "").lower()
-    from . import google_tts
-    google_code = low.split(":", 1)[0].strip()
-    if google_code in google_tts.ERROR_CODES:
-        # A Google Chirp failure names Google, never the ElevenLabs fallback text below.
-        message = {
-            "google_quota": "Voice paused: Google Chirp 3 HD quota exceeded.",
-            "google_auth_failed": "Voice unavailable: Google Chirp 3 HD sign-in failed.",
-            "google_credentials_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
-            "google_project_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
-            "voice_unavailable": "Voice unavailable: this Google Chirp 3 HD voice is not available.",
-            "google_id_collision": ("Voice unavailable: an old custom adapter also uses the id "
-                                    "google; an operator must resolve it."),
-            "google_id_unverifiable": ("Voice unavailable: an installed custom adapter cannot be "
-                                       "identified; an operator must check it."),
-        }.get(google_code, "Voice synthesis failed.")
-    elif "quota" in low or "401" in low:
-        message = "Voice paused: ElevenLabs quota exceeded."
-    elif "api_key" in low or "not configured" in low:
-        message = "Voice unavailable: TTS not configured."
-    else:
-        message = "Voice synthesis failed."
+    persona = (agent or {}).get("persona")
+    message = _GOOGLE_WORDS.get(google_code or "") or voice_profile.not_spoken_words(
+        reason, provider_label=_provider_label(provider), name=persona or "", partly=partly)
     try:
         events.broadcast(stream, events.tts_error(
             session=row.get("session"),
             agent_id=row.get("agent_id"),
-            persona=(agent or {}).get("persona"),
+            persona=persona,
             message=message,
-            error=(error or "")[:300],
+            error=reason,
+            reason=reason,
+            provider=provider or events.OMIT,
+            trace_id=trace_id or events.OMIT,
         ))
     except Exception as e:  # noqa: BLE001
         log_exception("ttsErrorBroadcastFail", e, detail=message)

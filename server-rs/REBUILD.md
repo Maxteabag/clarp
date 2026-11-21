@@ -2284,6 +2284,40 @@ work; Keeper asks and publishes as a member, is refused as a janitor while its t
 refused a message, and its own run is held while Mike works: no notification, no push, nothing in `/attention`, the
 inbox or the chip, and its new request and document are refused) and the wrong rules `tools/plants/quiet-agents.py`.
 
+**What may stop the Host from starting** (20 Nov 2026; the lead's rulings of that day). Only its configuration, its
+listener, a store that does not answer and a core thread that does not start stop a start. What it keeps is read through
+one loader (`kept.rs`): each record of a kind alone, and one that cannot be read is LEFT OUT of what the Host does and
+seen by no desk, counted by its kind and said once in the journal by its kind and key, never by what it holds (a row
+stays where it is, never written over or deleted by the Host and hidden from every read until the owner repairs or
+deletes it; a book's record is MOVED aside whole, in one write, never lost: the copy under `<key>.unreadable`, beside a
+copy that stands the next free name, and the key let go, so its desk starts without it; a copy is counted at every start
+while it stands, through a register written with each move, and a delete of its key takes it along, said as one delete;
+a desk that would write over what it cannot see, a counter or a ledger's tail, is told a record was there and refuses) (a secret key, a push token or an opening's token, not even in part: such a record is said by its place in its
+kind's count). The counts are said in one line when the Host starts and shown at the
+Host's own door, `GET /host/start` (the administrator's only: `{agents, opening, broken, left_out, not_run,
+judged_when_read}`, how many agents are still being opened and how many could not be beside what could not be read, the
+agents kept and not run for want of their tool, and the kinds counted only when read); `/server-info` and `/status` keep the
+reference's shape in every state, since the count is not zero for a moment at every start. `install-host` asks it until
+nothing is opening, prints what is broken and left out and ends with code 3 when either is not zero; the Host stays up. The one write
+such a key gets is the owner's own (a token registered again, a peer named again): that is its repair, said, and the
+record is no longer counted (the fleet's store is watched for it). An agent the Host keeps and does not run (left out,
+where its bytes are JSON that name it, or read and not set up for a tool this Host has not) keeps its session and the
+name it goes by: no new agent gets them. A deleted agent whose goals cannot be retired is retired at a later start and
+counted until then. Every kind is declared once beside its desk (`kept_registry.rs`: its table, policy, whether its key
+may be printed, its desk's own type) with WHEN IT IS JUDGED: at the start, before the door opens, where some desk lists it
+at the start anyway, so that a start costs what the live fleet weighs (every kind judged by its desk's own type, plain
+JSON or bytes only where the desk reads it so); or when read, where it grows with a history (a
+vocabulary run, a form's event, a fallback attempt, the Oracle's threads), and then it is read nowhere raw, only through
+`kept_book` (by key) and `kept_listed` (whole), and a record that is not its desk's is judged at that read. One judge
+(`kept::judge`) does both: a row left out, a book's record set aside under `<key>.unreadable`, counted, said once. A desk
+that would write over what it cannot see (a counter, a ledger's tail) is told a record was there and refuses rather than
+begin anew. The start's line claims only what was read at the start. Held by the loader's tests and the fleet's at the
+port (`fleet/tolerance_tests.rs`: stores written by their own crate before a start, a store that does not answer, a kind
+judged when read), the registry's own tests (no kind kept that it lacks, none declared twice, none judged when read read
+raw), the Host's (`start_tolerance.rs`) and the wrong rules `tools/plants/start-tolerance.py`.
+Later, not part of this piece (the lead's note of 20 Nov): a copy that fits again under a later build (a build rolled
+back and forward) could be taken back when its key is free.
+
 **Who stops or repairs an agent, and why** (19 Nov 2026; Host feature `turn_slot_repair`, 61). `POST /stop` takes
 `actor` and `reason`, and so does `POST /repair-slot {session, reason, actor?}`; both are read as the Python Host reads
 them (`actor` cut to 80 signs, `user` where none is said; `reason` cut to 200; what is no text is written as Python
@@ -3364,6 +3398,48 @@ come ("We will wait with reviewers", 16 Nov 2026).
   gates, and the release that is installed (17 Nov 2026: main moved twice under one green candidate within
   twenty minutes, both times by a hook of Claude Code and its tests).
 
+**The reference** (20 Nov 2026). The Python Host is merged into main several times a day, and it does not
+wait for this Host. A gate taken against main's tip was voided by every such merge in its middle. So this Host
+is held to one named commit of main, the reference: the Python Host as it is at that commit.
+`server-rs/REFERENCE` names it, the full commit on its first line. The fixtures are generated from it, and the
+conformance run compares with it. Where the paragraph above says main, read the reference.
+
+A candidate is gated on its gate tree: the reference's tree with `server-rs/` replaced by the candidate's.
+`Server (Rust)`, the planted lists, the conformance run and the regeneration of every fixture are taken there.
+The build machine's Rust tests and the repository's own gates are taken on the commit that lands. What lands is
+main of that minute with the piece's commits on top. That is sound while the candidate's `server-rs/` is byte
+for byte the gate tree's. It holds because the piece touches nothing outside `server-rs/` and only the lead's
+trains write under it.
+
+The debt is what main has outside `server-rs/` beyond the reference: the merges of the Python Host not yet
+ported. A catch-up piece moves the reference forward, and only a catch-up piece does; the lead lands it. It
+first registers what the new reference changes: a new name in `NOT_YET` or `NOT_BUILT` of
+`conformance/conform.py`, a changed value by its id in `conformance/awaited.txt`, a new key a generator leaves
+out. Then it ports, and the port takes those registrations out again.
+
+`server-rs/tools/reference` is the tool for it, git alone and no network. `show` names the reference and the
+debt: the first-parent commits of the fetched `origin/main` beyond it that touch anything outside
+`server-rs/`, and how long ago it was fetched. `commit [REV]` writes the gate commit of REV (HEAD by default)
+and prints its id, without touching a checkout: the reference's tree with REV's `server-rs/`, the reference as
+its one parent. It refuses, in words, a `REFERENCE` that names no commit, a REV whose history lacks the
+reference, and a REV that changes anything outside `server-rs/` against its merge base with main. A helper
+runs a generator with `reference run <generator> [args]`, never by hand: the tool stands up the gate tree of
+the working tree in scratch (uncommitted changes of `server-rs/` included), runs the generator there with the
+Python Host's interpreter, copies back exactly the files under `server-rs/` it changed, names them, and
+removes its scratch. `reference run --all` does so for every generator. A generator that fails has nothing
+copied back.
+
+`reference check` runs every generator the same way and writes nothing back: it names each fixture that would
+change and leaves the working tree as it was. It ends 0 only when none fails and no fixture would change. It is
+what a piece runs before it reports, and what a catch-up piece reads to see what the new reference moved.
+
+Every generator the tool runs gets a scratch place of its own, whatever the generator sets itself:
+`CLAUDE_PWA_DB` names a fresh database inside it, and `HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`,
+`XDG_CACHE_HOME` and `XDG_STATE_HOME` point inside it too; nothing else of the runner's environment passes. A
+generator of ours read the default database of whoever ran it once the Python code under it began to ask its
+store (20 Nov 2026). The interpreter is read before the home is changed. `reference selftest` holds each of
+these by example in a repository it builds in scratch, the refusals included.
+
 **Model portraits and the avatar display preference.** The Host keeps the owner's
 choice from `POST /avatar-settings` and returns it to the settings screen and in
 the agents' snapshot. For bundled model art the Host tries the agent's model,
@@ -3394,3 +3470,101 @@ the two media records together. Once local publication finishes the Host
 removes the receipt and its staging bytes. On restart a committed receipt can
 finish locally and an interrupted generation ends failed. The bounded edit
 fixtures come from the Python Host's own functions in an isolated store.
+
+**The tools' skills kept installed (`managed_skills`, 20 Nov 2026).** A release ships a tree of skills with a
+manifest (the repository's `skills/`, or the tree `--skills-from` names); the install tool copies it to `<share>/releases/<version>/skills`, keeps the
+version installed before and removes older ones, and names it to the Host (`--skills`), with the releases of the
+Python Host on the machine (`--skills-other-releases`) and that Host's record of its chosen skills
+(`--skills-chosen-before`). It never touches a tool's skill folder, and the programs a skill requires are looked up
+on the unit's path, which is the Python Host's. The tools' folders (Claude Code's, Codex's, and Antigravity's where
+it is installed) are the machine's, and one Host keeps a machine's tools (the lead's ruling): this Host keeps them
+only when it is started with `--accounts select` and a tree. The install tool refuses `--accounts select` while the Python Host of the machine runs
+(its unit anything but stopped), with or without a selector of accounts: that Host keeps the tools while it runs,
+and links the skills at every update of its own. Then `GET /managed-skills` reports each skill as the
+Python Host does (`server/lib/managed_skills.py`: how each link stands, the skill's health, its requirements) and
+`POST /managed-skills` switches one on or off as it does: links made or taken away in every folder, a skill of the
+user's own preserved and the change refused, the same refusals in the same words, nothing written on a refusal and
+the links put back when the list cannot be kept. The chosen list is the Host's own, in its store; it is taken once,
+from the Python Host's record where there is one, else from the setup's defaults. At every start the Host enrols the
+core skills a newer release brought and links each chosen skill to its own release where nothing or another
+release's link is; a link into the Python Host's releases is Clarp's too (outdated), so a machine that Host kept is
+taken over without every skill reading as the user's. A Host started with `--accounts follow`, or with no mode,
+answers the list empty, refuses every change with `skills_kept_elsewhere` and one sentence, and writes nothing into
+a tool's folder, at a request or at its start; `managed_skills` is listed only by a Host that keeps the tools. The
+rules are in `clarp_kernel::managed_skills`, held to the reference's own functions run in stand-in homes and release
+trees (`tools/managed-skills-vectors.py`); the Host's part is `clarp-host` `managed_skills.rs`; the wrong rules are
+`tools/plants/managed-skills.py`. Left out: personal skills and the admin tool's `skills` words.
+
+What a Host in `follow` would need to pass a change on to the Host that keeps the tools, rather than refuse it (not
+built): which peer keeps them (a word of its configuration, which the install tool can write from the Python Host it
+finds; `peers.rs` already holds a peer's address and token); a token of full scope there, since the route takes no
+limited device; the change relayed as it was asked and the keeper's status and body relayed as they came, and the
+reading relayed too, since what is linked is the keeper's release and catalogue, not this Host's; and a keeper that
+does not answer told as 502 with the reason, with a change that may have landed never sent again, only read back.
+
+**Signing a tool in and out from an app (`backend_auth`, 20 Nov 2026).** The Host that keeps
+its machine's tools (`--accounts select`) runs the tool's own sign-in (`claude auth login
+--claudeai`, `codex login --device-auth`, `grok login --device-auth`) when an app asks
+(`POST /backend-auth/login`), shows the app what it prints in `GET /backend-auth`'s `tasks`,
+hands a code pasted back to the tool's input (`/login-code`), stops a sign-in after ten
+minutes, and runs the tool's own sign-out (`/logout`). What an app is shown (a terminal's
+signs and anything that looks like a key taken out, the address, the device code, whether a
+code is asked for, why it failed) is `clarp_kernel::sign_in`, held to the Python Host's own
+functions by `tools/backend-auth-vectors.py`. One task owns the sign-ins
+(`logins::sign_in::Desk`); a sign-in lives as long as the Host, as there. Two Hosts may share
+a machine, and its tools keep one login each, so only one Host changes them: a Host beside it
+(`follow`) or with no mode refuses each change, 409 in words, whatever the request says, and
+starts nothing. A sign-in or sign-out takes no lock and waits for no turn, as there: it is the
+owner's own act. A turn that runs while its tool is signed out under it fails on the login,
+and this Host's account rule takes it up (`recovery::after_failed_attempt`): with a pool of the
+tool's accounts the pool decides whether it waits for another; without one the turn ends and
+says the sign-in is gone, and the agent answers again once the tool is signed in (held by
+`a_turn_whose_tool_is_signed_out_under_it_ends_on_the_login_and_holds_nothing`). A sign-in is
+stopped after ten minutes; the Host's tests shorten that with `CLARP_SIGN_IN_MOST_MS`, which is
+no owner's setting. The wrong rules are `tools/plants/backend-auth.py`.
+
+Not built: a Host in `follow` passing a change on to the Host that keeps the tools, instead of
+refusing it. It would need (1) where that Host is: a loopback address in this Host's
+configuration, and proof that it runs on the same machine and home; (2) a credential to it
+with full device scope, kept in a file the owner provisions and never in the repository; (3)
+the three changes forwarded as they came, and that Host's status and body answered as they
+are; (4) `GET /backend-auth`'s `tasks` taken from that Host, since the app follows a sign-in by
+reading this one, while the rows are still read here off the same files; (5) when that Host
+cannot be reached, 502 in words and never a change sent twice (a sign-in may have started:
+its `tasks` are read back instead); (6) a code sent to the Host that holds the sign-in it is
+for. The client contract would not change, and the follower of logins already wakes the turns
+that wait when the login file changes.
+
+**A harness's providers of models, signed in from the app (20 Nov 2026).** OpenCode, and the
+DeepSeek card that runs through it, serve models of many providers, each with a sign-in of its
+own (`harness_model_providers`, listed at 75). `GET /harness-providers` lists OpenCode's catalogue
+(its cache of models.dev) with the type of each credential in OpenCode's store, never a key;
+`GET /harness-providers/models` lists a provider's models; `POST /harness-providers/login` writes
+an API key to OpenCode's store or starts the provider's own device or code sign-in in a private
+`opencode serve` (loopback, a password of its own), which writes the store itself;
+`/login-code` hands it the code; `/logout` takes a credential away. The rules are the Python
+Host's, run from its own module and route handlers (`tools/harness-provider-vectors.py`) and held
+in `clarp_kernel::harness_providers`; the Host reads and writes the files and runs OpenCode
+(`clarp-host` `harness_providers`). A key is written in one move, 0600 in a folder made 0700, and
+is in no answer, no log line and no error. One desk owns the sign-ins that run, and is told by
+threads of its own what OpenCode answered: a sign-in's server is ended before its end is told, and
+the app's picker of models is made to ask again before a completed sign-in is told, so whoever
+sees it complete finds the provider's models. Which sign-ins a phone can complete is asked of
+OpenCode aside, once a day, and kept in the fleet's settings, and only by a Host that keeps the
+tools: any other never starts OpenCode (the lead's review: a Host beside the Python Host would
+run the owner's tool in his home for a sign-in it refuses). The tools' logins and stores are one
+per machine, and one Host keeps a machine's tools (the lead's ruling): with `--accounts select` the
+Host changes them as the reference does; beside a Host that keeps them (`--accounts follow`) and
+with no mode it refuses every change in words, 409, before anything is read, and writes nothing;
+the readings answer in every mode.
+
+Not built: passing a change on to the Host that keeps the tools instead of refusing it. It needs
+the address of that Host and a credential of full-device scope on it (a peer today holds an
+address and a token for `/send` only; such a credential is the owner's to grant); the four
+changes passed on as they came, the key in the body over loopback only and never logged, and the
+other Host's status and body answered as they are; the sign-ins that run, which live in the
+memory of the Host that runs them, read from it too (the `tasks` of `GET /harness-providers`, or
+the whole answer), or an app never sees its code; this Host's picker of models made to ask again
+after a change passed on (or OpenCode's store watched by its digest, as the tools' logins are);
+and the other Host down means refused, and a change whose acceptance is not known is never sent
+again.

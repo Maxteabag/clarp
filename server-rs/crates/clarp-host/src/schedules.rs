@@ -27,6 +27,10 @@ use crate::agent::Unavailable;
 use crate::edge::{self, ApiError, App};
 use crate::ids;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits_book).by_entries(unfit_entries)];
+
 /// The kind of thing the schedules are, among what is left with the fleet, and their name.
 const KIND: &str = "schedule";
 const ALL: &str = "all";
@@ -35,6 +39,16 @@ const ALL: &str = "all";
 #[derive(Default)]
 pub struct Desk {
     schedules: tokio::sync::Mutex<Option<Schedules>>,
+    /// The schedules kept that are not schedules of this Host's, put back with every save.
+    carried: std::sync::Mutex<crate::kept::Carried>,
+}
+
+fn fits_book(stored: &[u8]) -> bool {
+    crate::kept::fits_carried::<Vec<Schedule>, Schedule>(stored, &[])
+}
+
+fn unfit_entries(stored: &[u8]) -> Vec<String> {
+    crate::kept::unfit::<Vec<Schedule>, Schedule>(stored, &[])
 }
 
 impl Desk {
@@ -46,11 +60,15 @@ impl Desk {
     ) -> Result<T, Unavailable> {
         let mut held = self.schedules.lock().await;
         if held.is_none() {
-            let kept = app.fleet.kept(KIND, ALL.to_string()).await?;
-            // What cannot be read is no schedule: nothing is sent on a guess.
-            let rows: Vec<Schedule> = kept
-                .and_then(|kept| serde_json::from_slice(&kept).ok())
-                .unwrap_or_default();
+            // Through the loader: what cannot be read is no schedule, and nothing is sent on a
+            // guess; a schedule that is not one of this Host's is carried through (`kept.rs`).
+            let (rows, carried) = app
+                .fleet
+                .read_book::<Vec<Schedule>, Schedule>(KIND, ALL, &[])
+                .await?;
+            if let Ok(mut kept) = self.carried.lock() {
+                *kept = carried;
+            }
             *held = Some(Schedules::kept(rows));
         }
         let Some(schedules) = held.as_mut() else {
@@ -59,7 +77,8 @@ impl Desk {
         let mut next = schedules.clone();
         let answer = ask(&mut next, app.clock.now_ms());
         if next != *schedules {
-            let kept = serde_json::to_vec(next.rows()).unwrap_or_default();
+            let carried = self.carried.lock().map(|c| c.clone()).unwrap_or_default();
+            let kept = crate::kept::saved(&next.rows(), &carried);
             app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
             *schedules = next;
         }

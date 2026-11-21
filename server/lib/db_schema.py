@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 131  # messages.sent_at, queued_turns.kind and queued_turns.shown_at: a message that waits for a running turn enters the conversation when its turn starts and keeps the time it was sent (issue 491). 130: coordination_traces (a table) and agents.coordination_visibility: coordination between agents (issue 478). 129: provider_turns.trace_id, the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
+_SCHEMA_VERSION = 132  # messages.sent_at, queued_turns.kind and queued_turns.shown_at: a message that waits for a running turn enters the conversation when its turn starts and keeps the time it was sent (issue 491). 131: media_assets.favorite_at, media_assets.deleted_by, the favourites index, the two tombstone indexes (GET /media/deleted) and the gallery page index in place of the created one (issue 489). 130: coordination_traces (a table) and agents.coordination_visibility: coordination between agents (issue 478). 129: provider_turns.trace_id, the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -464,11 +464,21 @@ CREATE TABLE media_assets (
     caption TEXT,
     created_by TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    -- A gallery image's favourite mark (ms it was set, NULL when not a
+    -- favourite) and who deleted it (a device id or 'administrator').
+    favorite_at INTEGER,
+    deleted_by TEXT
 );
-CREATE INDEX idx_media_assets_session_created ON media_assets(session, created_at DESC) WHERE deleted_at IS NULL;
+-- deleted_at is NULL in every entry of the gallery's page and favourites indexes; it is a column of
+-- each so that a count over a chat (total, favorites_total) reads the index alone: without
+-- it the planner reads the table for the condition, and at 50,000 images scans it.
+CREATE INDEX idx_media_assets_session_page ON media_assets(session, created_at DESC, asset_id DESC, mime_type, deleted_at) WHERE deleted_at IS NULL;
 CREATE INDEX idx_media_assets_agent_created ON media_assets(agent_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_media_assets_sha ON media_assets(sha256);
+CREATE INDEX idx_media_assets_session_favorite ON media_assets(session, favorite_at DESC, asset_id DESC, deleted_at) WHERE deleted_at IS NULL AND favorite_at IS NOT NULL;
+CREATE INDEX idx_media_assets_deleted ON media_assets(deleted_at, asset_id, session, mime_type) WHERE deleted_at IS NOT NULL;
+CREATE INDEX idx_media_assets_session_deleted ON media_assets(session, deleted_at, asset_id, mime_type) WHERE deleted_at IS NOT NULL;
 
 CREATE TABLE teams (
     team_id TEXT PRIMARY KEY,

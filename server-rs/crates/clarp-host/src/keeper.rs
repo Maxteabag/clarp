@@ -54,6 +54,14 @@ use crate::once;
 use crate::tools::ToolAnswer;
 use crate::wire;
 
+/// What this desk keeps, declared once (`kept.rs`; judged when read where it says so).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    // One for every attachment ever looked at, listed at the first pass: judged when read.
+    crate::kept::Kind::book(PROGRESS, crate::kept::Key::Plain, crate::kept::json).when_read(),
+    // One for each of a goal's newest receipts, listed at the first pass: judged when read.
+    crate::kept::Kind::book(RECEIPTS, crate::kept::Key::Plain, crate::kept::json).when_read(),
+];
+
 /// The kinds of thing the keeper leaves with the fleet: a keeper's own state of its goals,
 /// under the attachment it is kept for, and a receipt, under its id.
 const PROGRESS: &str = "keeper-progress";
@@ -142,12 +150,12 @@ impl Desk {
         let mut held = self.held.lock().await;
         if held.is_none() {
             let mut kept = Kept::default();
-            for (attachment, written) in app.fleet.kept_all(PROGRESS).await? {
+            for (attachment, written) in app.fleet.kept_listed(PROGRESS).await? {
                 if let Ok(progress) = serde_json::from_slice::<Value>(&written) {
                     kept.progress.insert(attachment, progress);
                 }
             }
-            for (_, written) in app.fleet.kept_all(RECEIPTS).await? {
+            for (_, written) in app.fleet.kept_listed(RECEIPTS).await? {
                 let Ok(receipt) = serde_json::from_slice::<Value>(&written) else {
                     continue;
                 };

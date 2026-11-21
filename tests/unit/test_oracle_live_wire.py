@@ -23,7 +23,7 @@ def test_protocols_have_distinct_model_voice_history_and_audio_transport_contrac
     history = [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Audit is pending."}]}]
     api = LiveWire().session("Be concise.", history=history)
     sub = LiveWire("subscription").session("Be concise.", history=history)
-    assert api["model"] == "gpt-live-1" and api["audio"]["output"]["voice"] == "marin"
+    assert api["model"] == "gpt-live-1.1" and api["audio"]["output"]["voice"] == "marin"  # the Host default
     assert sub["model"] == "gpt-live-1-codex" and sub["audio"]["output"]["voice"] == "cove"
     assert "input" in api and "initial_items" in sub
     assert "format" not in api["audio"] and "format" not in sub["audio"]

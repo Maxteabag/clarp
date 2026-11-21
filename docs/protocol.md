@@ -361,7 +361,7 @@ Rules:
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
 - **A message that waits enters the conversation where its turn starts (feature
-  `waited_send_order`, Host contract 109, provisional).** A user row is written when the
+  `waited_send_order`, Host contract 114, provisional).** A user row is written when the
   message reaches the agent: at once for a send that starts a turn or is steered into one; for
   a send that waits (the agent is busy and cannot take it), only by the write that starts its
   own turn. Rows are never moved or re-timed: a row's place is its place for good. Such a row
@@ -538,17 +538,18 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
-| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 109, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. |
+| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 114, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 108). |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
-| `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
+| `tts-error` | `session`, `agent_id`, `persona`, `message`, `error`, and with the speech_outcome feature `reason`, `provider`, `trace_id` | A reply was not spoken; tell the user instead of playing silence. With speech_outcome: once per turn and reason, `trace_id` names the turn whose reply it is (write the line under that reply), `reason` is an open set (below). |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
 | `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
 | `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. |
 | `artifact-updated` | `session`, `agent_id`, `artifact_id` | An artifact was published or resolved; refetch `/artifacts/<id>`. Extension surface. |
+| `media-changed` | `session`, `agent_id`, `asset_id`, `change` ∈ created, deleted, favorite; `favorite` (only with change favorite); `at` (ms) | A chat's gallery changed (feature `media_manage`): re-read or patch `GET /media`; on `deleted` drop cached bytes of the image. Extension surface. |
 | `attention-updated` | `attention_count` | The number of items awaiting the user changed. Extension surface. |
 | `background-job-updated` | `change_revision`, `observed_at`, `job_id`, `session`, `agent_id`, `status`, `job` | A durable background job changed; `job` is the full row. Extension surface. |
 | `location-request` | `session` | An agent asked for the user's location; show the one-tap share prompt for that session. Extension surface. |
@@ -610,7 +611,7 @@ Rules:
 - If the agent is busy, a user's send waits for the running turn (a Codex
   turn is steered instead) and a `queue-updated` event follows; so does a send
   with `queue_if_busy`. A send that waits is a queue item until its turn starts
-  and only then a `/log` row (Host contract 109, feature `waited_send_order`).
+  and only then a `/log` row (Host contract 114, feature `waited_send_order`).
   A send of another automatic origin without `queue_if_busy` still preempts the
   running turn. A message from another agent (`origin: "agent"` with a
   `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
@@ -662,7 +663,7 @@ nor `/log` (it was deleted).
 
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
 releases one. Each item is `{id, text, enqueued_at, synthesize_audio, client_msg_id,
-sent_at, kind}` (the last three from Host contract 109): `sent_at` is ISO,
+sent_at, kind}` (the last three from Host contract 114): `sent_at` is ISO,
 `kind` is `waiting` (a send that met a busy agent) or `later` (its sender asked
 it to wait). `PUT /turn-queue/<id>` (`{"text"}`) edits and `DELETE /turn-queue/<id>`
 deletes an item of either kind until its turn starts; after that both answer
@@ -676,6 +677,19 @@ recording, e.g. `audio/webm`), headers `X-Hands-Free: 1` for dictation,
 `X-Transcription-ID: <uuid>` for idempotent retries, `X-Transcription-Model`
 to pick a model. Response includes `text`, `trace_id`, and `transcription_id`;
 pass both ids on the following `/send`.
+When the engine cannot be handed the agent's language set (a set such as `no,en` goes only
+to Google Chirp or ElevenLabs Scribe), the Host stays within what the owner chose for
+transcription: its selected engine when that one takes the set, else its own engine when its
+model declares the agent's languages (a model that declares none: unless it is a `.en`
+model). An engine this recording already went to and that failed is not sent it again.
+The response then adds `engine_fallback`:
+`{"from", "to", "reason": "language_set", "languages"}` (`languages`: the codes the engine was
+handed, or `"detected"`). Otherwise it answers `422`
+`{"error": "language_set_unsupported", "message", "engine", "languages", "engines", "reasons"}`,
+where `engines` are the engines that can take a set and `reasons` says in words why none of the
+owner's engines could take over (the Host's own engine being off or unavailable is one such
+reason, never a 500): show `message`, it says what to change. A
+recording is never sent to a provider the owner did not choose for transcription.
 
 In a group call (feature `call_transcription_policy`), a clip captured for a
 participant also sends `X-Clarp-Call-Id: <call_id>` and
@@ -716,6 +730,30 @@ Acknowledge playback with `POST /clips/ack` `{"clip_id": …, "status":
 `GET /clips/recoverable?session=` returns recent clips a client that was
 suspended may still want to play.
 
+**Oracle standby: `oracle_v2.standby`** (Host contract 110). An Oracle call
+created over WebRTC with an API key may run with GPT-Live standby when the Host
+sets `[openai] live_idle_timeout_s` (5 to 60; it ships at 0, off). The Host then
+relays the provider's `session.paused` and `session.resumed` as one event on
+the call's event stream:
+
+```json
+{"type": "oracle_v2.standby", "active": true}
+```
+
+`active: true` means the provider paused inference after that many seconds
+without an input or output transcript; `active: false` means speech woke it and
+it is ready again (the provider also says this at the first wake). The call stays
+connected throughout and keeps its session: **keep sending microphone audio while
+in standby**, because only speech wakes it (muting the microphone does not pause
+it, and a muted call cannot wake). The first answer after a wake may take a little
+longer. No other path sends this event: the default Oracle and the WebSocket
+Oracle hold a WebSocket, and an agent Live call never uses standby. A client that
+does not know the event ignores it; nothing else in the call changes.
+
+`oracle_v2.usage` adds `active_seconds` and `paused_seconds` (numbers or null):
+present only when the provider reports the breakdown; `voice_estimate_usd` then
+prices active time at $0.05 and standby time at $0.02 a minute.
+
 ### 7. Focus: `POST /select`
 
 `{"session": "rachel"}` makes that agent the server-wide focus (hands-free
@@ -741,9 +779,10 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `POST /agent-notes` — `{"session", "text", "note_id"?}` (`clarp-admin
   tell-user`): an agent's note to the user, written into its own chat as a
   row of its running turn (see Provenance: a note). Accepted only from that
-  agent's own running turn: a turn token (`X-Clarp-Turn`) of another agent
-  answers 403, a call outside a running turn 409; without a token (the shared
-  Codex app-server) the agent's running turn is taken. `note_id` (up to 64 of
+  agent's own running turn, proven by its turn token (`X-Clarp-Turn`): a call
+  without one answers 403 for every caller (a device, a peer Host, the Host's
+  own token), so does another agent's token, and a call outside a running turn
+  answers 409. `note_id` (up to 64 of
   `a-z0-9-_`) makes a retry answer the same note. Answers `{"ok", "session",
   "message_id", "trace_id", "created", "notified", "reason"}`. At most 8000
   characters (413); a note with no words answers 400.
@@ -823,7 +862,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Harness sign-in and usage | `/backend-auth` (`?harnesses=all` lists every harness), `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
 | Hotseat account status (read-only snapshot, `accounts_hotseat`) | `/hotseat/status` | `hotseat_status.py` |
 | Model providers inside a harness (OpenCode, DeepSeek card) | `GET /harness-providers?harness=`, `GET /harness-providers/models?harness=&provider=`, `POST /harness-providers/login` (`key`, or `method` for OpenCode's own device/OAuth flow), `/harness-providers/login-code`, `/harness-providers/logout`; full-device scope; keys go to OpenCode's own `auth.json` and are never returned (see `docs/compatibility.md` row 75) | `harness_providers.py` |
-| Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
+| Files and media | `POST /upload` (headers `X-Session`, `X-File-Name`, `X-Upload-ID`), `/media`, `/media/<id>/favorite`, `DELETE /media/<id>`, `/media/delete`, `/media/deleted`, `/agent-files`, `/agent-file` | `upload_results.py`, `media_store.py`, `agent_files.py` |
 | Artifacts and decisions | `/artifacts`, `/artifacts/<id>`, `/decisions`, `/decisions/<id>/resolve`, `/task-plan` | `artifacts.py`, `task_plans.py` |
 | Portraits and personas | `/agent-portraits`, `/agent-portrait-generation`, `/personas`, `/personas/update`, `/personalities/settings`, `/avatar-settings` | `agent_portraits.py`, `portrait_generation.py`, `personas.py`, `model_avatars.py` |
 | Teams | `/teams`, `/teams/<id>`, `/teams/<id>/members`, `/teams/<id>/messages`, `/team-nudging` | `team_store.py`, `team_leader.py` |
@@ -850,6 +889,91 @@ Only the installed Host does that (Host contract 99, [installation.md](installat
 `restart_refusal` is absent whenever a restart was scheduled or none was
 needed. The same Hosts answer `POST /server-update` with
 `409 {"ok": false, "message": "This Host is not the installed Clarp service: …"}`.
+
+### An agent's voice and hearing: `voice_profile` (feature `voice_profile`, Host contract 109)
+
+Each agent row in `GET /agents/snapshot` that is not archived carries `voice_profile` (an
+archived agent speaks to nobody; its row has none, in the snapshot and in `GET /agents/archived`
+alike): what the agent is heard saying and how it hears, as the Host
+resolves it. The Host computes it with the same functions that speak and transcribe, so a
+client shows it and derives nothing from `voice_id`.
+
+```json
+"voice_profile": {
+  "speech": {"provider": "cartesia", "provider_label": "Cartesia Sonic",
+             "voice_id": "…", "voice_label": "Brooke", "origin": "own",
+             "streaming": true, "silent_reason": null, "shared_with": 0},
+  "hearing": {"engines": [{"id": "elevenlabs:scribe_v2", "provider": "elevenlabs",
+                           "model": "scribe_v2", "label": "ElevenLabs Scribe v2"}],
+              "engine_origin": "own", "device_may_override": false,
+              "device_cloud_languages": null,
+              "languages": ["no", "en"], "language_origin": "own"}
+}
+```
+
+- `speech.provider` is the provider the next clip is spoken with (a per-agent override
+  and the configured fallback included), or `"none"`. `voice_id` is null when nothing is
+  heard; `silent_reason` then says why. `voice_label`, `provider_label` and each engine's `label` are a real name or null, never
+  an empty string; a client shows its own words for null.
+- `speech.origin`: `own` (the agent's or its contact's own voice) or `default` (the
+  provider's one default voice, the same for every agent without its own).
+- `speech.shared_with`: how many other active agents speak with the same provider and
+  voice (0: its own). Say it when it is not 0.
+- `speech.streaming`: whether audio begins before the whole clip is made.
+- `hearing.engines`: in the order they are tried, each only after the one before fails.
+  `hearing.languages`: ISO codes the first engine is handed; empty means it detects the
+  language itself (a multilingual local model, or ElevenLabs Scribe given a set).
+- `hearing.engine_origin`, `hearing.language_origin`: `own` (this agent's setting) or
+  `default` (the Host's).
+- `hearing.device_may_override`: the one rule for a client. When it is true (the engine
+  is the Host's default), a phone that sends its own `X-Transcription-Model` is heard
+  with that model instead; such a client shows its own setting.
+- `hearing.device_cloud_languages` (null unless `device_may_override` is true): the codes a
+  hosted engine chosen on the device is handed for this agent (its own set, else the Host's
+  default). When the phone's own model applies, show the phone's engine, and with it these
+  languages for a hosted engine, or for a local or adapter model the `languages` of that
+  model's row in `GET /transcription-capabilities`; never this profile's `languages` beside
+  the phone's engine. A local model chosen on the device ignores the agent's languages (its
+  language is fixed when it loads: English for a `.en` model, detected otherwise), and a
+  custom adapter is handed no language at all.
+- `GET /transcription-capabilities` (and `GET /transcription-providers`): each hosted model
+  row has `accepts_language_set`, whether it can be handed a set such as `no,en`. An engine
+  that cannot refuses a recording for an agent with a set, so a client can warn before
+  recording ("this model cannot hear this agent's languages").
+- **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
+  documented values are `own` and `default` (a later Host adds `parent`), and for
+  `silent_reason`: `no_voice` (no voice for the provider), `provider_off` (the Host speaks
+  with no provider) and `not_configured` (the provider has no credential or is refused).
+  A client shows plain wording for a value it does not know; it never fails on one.
+
+The snapshot head carries `voice_defaults` (the same `speech` and `hearing` shapes for an
+agent not yet created: `speech.voice_id` is null and `speech.assignment` says how its voice
+will be chosen, `contact` today) and `voice_profile_version`, which changes whenever a
+Host-wide input of any agent's profile changes.
+
+Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in the
+`agent-roster` events `created`, `relaunched`, `forked`, `contact-assigned`,
+`agent-renamed` and `voice-changed` (after `POST /agent-voice`). A change that can alter
+every agent (`POST /tts/providers`, `POST /transcription-providers`, a configuration
+edit) sends `agent-roster` with `kind` `voice-profile`: re-read the snapshot.
+
+### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
+
+When a reply's speech ends without audio, the Host sends `tts-error` with `reason`, `provider`
+and `trace_id`, also when no provider had a voice for the agent (before this feature that case
+sent nothing). It is sent once per turn and reason, however many clips of that reply fail.
+
+- `reason` is an open set: `no_voice`, `not_configured`, `provider_off` (the same words and causes
+  as `voice_profile.speech.silent_reason`), `provider_failed` (the provider did not make the clip)
+  and `host_failed`. A client shows plain words for a value it does not know.
+- `message` is a sentence built from the reason and the provider's name ("Not spoken: Cartesia
+  has no voice for Rachel."), never from an error's text; Google's own failures keep their
+  words. `error` now carries the reason, not provider-internal text.
+- `trace_id` is the turn whose reply was not spoken: an assistant row of `GET /log` with the same
+  `trace_id` is that reply, so write the line under it ("Not spoken: this agent has no voice").
+  No retry and no notification.
+- Lines spoken outside a turn (announcements, notes) have no reply row and send nothing yet.
+- An older client shows `message` where it shows `tts-error` today (a status line).
 
 ### Inspecting a background process: `GET /background-jobs/<job_id>`
 
@@ -1000,6 +1124,17 @@ report. Create it with `POST /artifacts`:
   it is never served on the Host origin. Clients before contract 19 show it as
   a form with an empty answer set. Feature `html_reports`.
 
+### Moving a render spec: `GET /artifacts/<id>/export`
+
+For the administrator's token only; any paired device is refused (403), limited or full, and
+the client header plays no part. For a `render_spec` it answers
+`{"kind": "render_spec", "render_spec": {"artifact": ..., "stored": ..., "submission": ...}}`:
+the row as `GET /artifacts` lists it, the stored payload as kept (the spec, its catalog and
+schema identity, its content identity), and the accepted submission or `null` (its
+`submission_id`, `version`, `answers`, `accepted_at`, `payload_hash`, `synthesize_audio`,
+`delivery_status` and `delivered_at`). Another kind is refused with 409 and its `kind`; the body
+is shaped so a kind can be added later. The answers are the user's: no log line carries them.
+
 ### Which turn published an artifact: `source_trace_id`
 
 An artifact row carries `source_trace_id`: the trace of the turn that published it, or `''`.
@@ -1009,6 +1144,84 @@ turn when the artifact is created. A card published after its turn ended, by a j
 started for example, has `''` and is placed by time. A Codex agent through the shared
 app-server has no per-turn token, so its artifacts have `''` too. A later revision of the
 artifact keeps the trace it was created with. `source_message_id` stays `''`.
+
+### A chat's gallery: list, favourite, delete (feature `media_manage`)
+
+The images of one chat are what `GET /media?session=<session>` lists. A Host that does
+not advertise `media_manage` answers `404` on the three writes below, and its rows have
+no `favorite` key: show no heart and no bin there.
+
+**The row.** Every asset row (in `GET /media`, in the favourite answer, in a publish
+answer) carries, besides its other keys, `favorite` (bool), `favorite_at` (ms the mark
+was set, else `null`) and `used_as`: a list of `{"kind": "portrait", "agent_id",
+"persona"}` for each agent whose live portrait is this picture (made from this image, or
+the very same file), usually empty.
+
+**The list.** `GET /media?session=…` takes, all optional: `limit` (1 to 500, default
+100), `before` (the `next_before` of the previous answer, an opaque string; a string the
+Host did not write answers `400 {"error": "bad before"}`) and `favorites=1` (only
+favourites, newest mark first, paged with the same `before`). The answer is
+`{"session", "assets", "next_before", "total", "favorites_total"}`: `next_before` is
+`null` on the last page, `total` counts the chat's images that are not deleted and
+`favorites_total` its favourites. Order without `favorites`: newest first by
+`created_at`, ties by `asset_id` (descending). A deleted image is never listed.
+
+**Favourite.** `POST /media/<asset_id>/favorite` with `{"favorite": true}` or
+`{"favorite": false}` answers `200` with the asset's row. Setting what is already set
+answers the same row and leaves `favorite_at` as it was. `400` for a body without a
+boolean `favorite`, `404` for an unknown id, `410` (below) for a deleted image, `422
+{"error": "not_an_image"}` for a file, audio or other asset that is not an image.
+
+**Delete.** `DELETE /media/<asset_id>` answers `200 {"asset_id", "deleted": true,
+"deleted_at", "still_used_as"}`; `still_used_as` is the row's `used_as` (a portrait made
+from the image is not affected: it keeps showing). Repeating it answers the same `200`
+with the first `deleted_at`. `404 {"error": "not_found"}` for an unknown id, `422
+{"error": "not_an_image"}` as above. Several at once: `POST /media/delete` with
+`{"asset_ids": [...]}` (1 to 200 ids, else `400`) answers `200 {"results": [...]}`, one
+entry per id in the order sent: the delete answer above, or `{"asset_id", "deleted":
+false, "error": "not_found" | "not_an_image"}`. One bad id does not stop the others.
+
+The image's bytes leave the Host's disk. Images are stored by content, so when another
+image that is not deleted, a portrait or an avatar holds the very same file, the file
+stays for it and goes with the last of them. The row is marked deleted first and the
+file removed after; a crash between the two leaves the file, and the next delete of the
+same id removes it.
+
+**Afterwards.** `GET /media/<asset_id>` (also the media url of an artifact that points at
+the image) answers `410 {"error": "removed", "asset_id", "deleted_at"}` for ever: show
+"Image removed" and offer no retry. `404` stays an id the Host never had; any other
+status that is not `200` is "not reachable", retry as before. The chat's `/log` row is not
+rewritten: it keeps its `clarp-media://asset/<id>` markdown. Drop a cached copy of the
+image on the `410` or on the event below.
+
+**A device that was away.** The events stream does not promise to replay
+`media-changed` after a reconnect, and a device with the bytes in its own cache never meets
+the `410`. So ask `GET /media/deleted?since=<ms>` (optional `&session=…`, without it every
+chat; optional `limit`, 1 to 1,000, default 1,000) when the app starts and whenever the
+events stream comes back, then drop the cached bytes of every id listed. It answers `200
+{"deleted": [{"asset_id", "session", "deleted_at"}, …], "next_since": <ms> | null,
+"server_now": <ms>}`: the images deleted strictly after `since`, oldest first by
+`deleted_at`, ties by `asset_id`. A page never ends inside a millisecond: when the limit
+falls among images deleted in the same millisecond, the page takes all of that millisecond,
+so a page may exceed `limit` by the size of one millisecond. `next_since` is the
+`deleted_at` (an integer of ms) of the page's last image when more remain, else `null`; ask
+again at once with `since=next_since`: it never repeats an image, never skips one and always
+advances. `since` is a Host time: when `next_since` is `null`, keep the answer's
+`server_now` for the next time (use `since=0` on the very first call). Every image deleted
+after `server_now` comes in a later answer; one deleted in the millisecond of the read may
+come twice. The Host keeps the record of a deleted image for good. `400` for a missing or
+negative `since` or a `limit` that is not a number. Any device that may read `GET /media`
+may read this.
+
+**Freshness.** `media-changed` (see the event table) is sent for an image published
+into a chat through `POST /media` (`change: "created"`), once per image a delete
+removed, also from the batch call (`"deleted"`), and for each favourite change that
+changed something (`"favorite"`, with `favorite`). `at` is the change's time in ms.
+
+**Who may.** A full device and the administrator. A limited device is refused the three
+writes with `403 full device access required`; it still reads `GET /media`, new keys
+included. A request carrying a turn token (`X-Clarp-Turn`, an agent's) is refused `403
+{"error": "agents_may_not"}`. Publishing is unchanged.
 
 ### Artifact list summaries: `representation=summary-v1`
 

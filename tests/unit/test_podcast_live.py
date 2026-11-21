@@ -31,7 +31,7 @@ def test_context_uses_heard_window_and_source_authority():
     assert "server remains authoritative" in context
     assert "not gameplay proof" in context
     cfg = podcast_live.session_config(context)
-    assert cfg["model"] == "gpt-live-1"
+    assert cfg["model"] == "gpt-live-1.1"
     assert "delegate_to_agent" not in json.dumps(cfg)
     assert cfg["input"][0]["role"] == "user"
 

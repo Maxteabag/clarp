@@ -17,7 +17,7 @@ def test_subscription_configuration_does_not_replace_stable_capability(monkeypat
     from lib import oracle_live_provider
     monkeypatch.setattr(oracle_live_provider,'available',lambda *a:True)
     value=oracle_realtime.capability()
-    assert value['v2']['model']=='gpt-live-1' and value['v2']['voice']=='marin'
+    assert value['v2']['model']=='gpt-live-1.1' and value['v2']['voice']=='marin'
     assert value['v2'].get('webrtc') is None
     assert value['v2_tinkered']['mode']=='subscription'
     assert value['v2_tinkered']['webrtc'] is True
