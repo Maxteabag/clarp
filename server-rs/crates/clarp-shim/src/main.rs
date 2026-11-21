@@ -170,7 +170,7 @@ impl Input {
     }
 
     fn close(&self) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let _ = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
     }
 }
 
@@ -1186,6 +1186,9 @@ fn run(args: Args) -> Result<u8, String> {
         }
     };
     record_now(Entry::Shim(ShimEvent::Spawned { pid }));
+    if args.stdin_until.is_some() {
+        record_now(Entry::Shim(ShimEvent::InputOpen));
+    }
     // Whoever started this shim may wait for this line: the turn is taken, the tool is up and
     // the socket answers. A shim that ends without saying it never had the turn, or said why
     // in the spool.

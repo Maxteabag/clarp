@@ -68,6 +68,7 @@ pub mod deliveries;
 pub mod helper_cells;
 pub mod provider_jobs;
 pub mod takeover;
+mod steering;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
@@ -221,6 +222,8 @@ pub enum Action {
         socket: PathBuf,
         grace_ms: u64,
     },
+    /// Write this accepted follow-up to the same shim's input once.
+    Steer { socket: PathBuf, input: String },
 }
 
 /// What is different after a call, for whoever tells the clients.
@@ -523,6 +526,7 @@ struct Written {
 
 /// The turn that holds the agent, as the actor follows it.
 struct LiveTurn {
+    steering: steering::State,
     opening: bool,
     /// Managed primary pinned to this admission, including after recovery.
     managed_model: Option<String>,
@@ -1382,6 +1386,7 @@ impl Actor {
             let (turn, message_seq, attempt) = (parked.id, parked.message_seq, parked.attempts);
             let message = actor.message_at(message_seq)?;
             actor.live = Some(LiveTurn {
+                steering: steering::State::default(),
                 opening: opening_message(&message),
                 managed_model: message.managed_model.clone(),
                 turn,
@@ -2169,9 +2174,18 @@ impl Actor {
 
     /// The message the log holds at this position.
     fn message_at(&self, message_seq: Seq) -> Result<Message, ActorError> {
-        let stored = self
-            .recorder
-            .log()
+        message_at(self.recorder.log(), message_seq)
+    }
+
+    fn drafts(&self) -> &[Draft] {
+        self.live
+            .as_ref()
+            .map_or(&[], |live| live.drafts.as_slice())
+    }
+}
+
+fn message_at(log: &dyn AgentLog, message_seq: Seq) -> Result<Message, ActorError> {
+        let stored = log
             .read_after(message_seq.saturating_sub(1), Kinds::ALL, 1)?
             .into_iter()
             .next()
@@ -2188,13 +2202,9 @@ impl Actor {
                 "the message at {message_seq} cannot be read: {error}"
             ))
         })
-    }
+}
 
-    fn drafts(&self) -> &[Draft] {
-        self.live
-            .as_ref()
-            .map_or(&[], |live| live.drafts.as_slice())
-    }
+impl Actor {
 
     /// The newest `limit` things of the conversation, as a chat opens.
     pub fn tail(&self, limit: usize) -> Result<Page, ActorError> {
@@ -3483,6 +3493,9 @@ impl Actor {
                 reason: STOPPED_FOR_AN_ACCOUNT.to_string(),
             };
             let mut batch = self.recorder.batch();
+            if let Some(live) = self.live.as_mut() {
+                live.steering.finish_read(&mut batch, now_ms)?;
+            }
             if batch.command(parked, now_ms).is_ok() {
                 let effects = batch.commit()?.effects;
                 if let Some(live) = self.live.as_mut() {
@@ -3527,6 +3540,9 @@ impl Actor {
             })
             .unwrap_or_default();
         let mut batch = self.recorder.batch();
+        if let Some(live) = self.live.as_mut() {
+            live.steering.finish_read(&mut batch, now_ms)?;
+        }
         for draft in unfinished {
             let piece = Entry::Reply(Reply {
                 id: draft.id,
@@ -3819,6 +3835,7 @@ impl Actor {
             None => (message.id.clone(), None, None, None, None),
         };
         self.live = Some(LiveTurn {
+            steering: steering::State::default(),
             opening: opening.is_some(),
             managed_model: message.managed_model.clone(),
             turn,
@@ -3909,6 +3926,7 @@ impl Actor {
                 ..Facts::default()
             };
             let mut batch = self.recorder.batch();
+            steering::State::default().finish_read(&mut batch, now_ms)?;
             if batch.command(command, now_ms).is_ok()
                 && let Some(end) = closing(&mut batch, turn, &message.id, facts)
             {
@@ -3937,6 +3955,7 @@ impl Actor {
         let mut calls = Vec::new();
         let mut first_written = HashMap::new();
         let mut signals = Vec::new();
+        let mut steering = steering::State::default();
         let mut offset = 0;
         // Those who watch are shown the turn as it stands: its items are made again from the
         // same records, with the times the records have. What that sends is for nobody: no
@@ -3962,6 +3981,7 @@ impl Actor {
                 break; // the spool is shorter than the log says: go on from what is there
             }
             for record in &read.records {
+                let evidence = steering.record(&record.entry);
                 interpreter.on_record(record, &mut signals);
                 for signal in signals.drain(..) {
                     match signal {
@@ -3970,7 +3990,11 @@ impl Actor {
                         }
                         Signal::Reply(reply) => {
                             drafts.retain(|draft| draft.id != reply.id);
-                            last_row = reply.id;
+                            if let Some(separate) = steering.separate.as_mut() {
+                                separate.closes = reply.id;
+                            } else {
+                                last_row = reply.id;
+                            }
                         }
                         Signal::Tool(call) => {
                             follow_tool(&mut tools, &mut calls, &call);
@@ -4005,6 +4029,20 @@ impl Actor {
                         _ => {}
                     }
                 }
+                if let Some(event) = evidence {
+                    let facts = Facts {
+                        trace_id: message.trace_id.clone(),
+                        model: model.clone(),
+                        tokens,
+                        total,
+                        context,
+                        limits: limits.clone(),
+                        per_turn_cost,
+                        cost,
+                        ..Facts::default()
+                    };
+                    steering.replay(&event, self.recorder.agent(), self.recorder.log(), facts, &last_row)?;
+                }
             }
             offset = read.next_offset;
         }
@@ -4021,6 +4059,7 @@ impl Actor {
             self.shown_revision = draft.revision;
         }
         self.live = Some(LiveTurn {
+            steering,
             opening: opening_message(&message),
             managed_model: message.managed_model.clone(),
             turn,
@@ -4367,6 +4406,7 @@ impl Actor {
             let mut stopped_at: Option<u64> = None;
             for (place, record) in read.records.iter().enumerate() {
                 let t = record.t;
+                let evidence = live.steering.record(&record.entry);
                 let doing = told_activity(batch.agent());
                 // What the shim says about the process means the same for every backend. A
                 // command the agent refuses is about a turn that is no longer live: late news.
@@ -4480,6 +4520,14 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
+                            live.steering.finish_read(&mut batch, t)?;
+                            let (outcome, parent_facts) = match live.steering.parent() {
+                                Some((outcome, facts, closes)) => {
+                                    live.last_row.clone_from(closes);
+                                    (outcome.clone(), Some(facts.clone()))
+                                }
+                                None => (outcome, None),
+                            };
                             // An attempt that was stopped for its account did not fail: the
                             // turn waits for an account, and the pool is told that nothing
                             // of it runs. One that completed all the same is the turn's end.
@@ -4600,7 +4648,7 @@ impl Actor {
                                     &live.last_row,
                                     Facts {
                                         notes: notes_of(self.turn_notes, turn),
-                                        ..live.facts()
+                                        ..parent_facts.unwrap_or_else(|| live.facts())
                                     },
                                 )
                             {
@@ -4674,6 +4722,14 @@ impl Actor {
                             live.drafts.retain(|draft| draft.id != reply.id);
                             reply.trace_id = live.trace_id.clone();
                             reply.origin = live.origin.clone();
+                            let speak = if let Some(separate) = &live.steering.separate {
+                                reply.turn = separate.turn.0;
+                                reply.trace_id.clone_from(&separate.message.trace_id);
+                                reply.origin = Origin::User;
+                                separate.message.speak
+                            } else {
+                                live.speak
+                            };
                             reply.text = kept(std::mem::take(&mut reply.text), &reply.origin);
                             // The tools it calls are work after what the turn said before.
                             if !reply.tools.is_empty() {
@@ -4684,9 +4740,9 @@ impl Actor {
                             }
                             // What the reply marks for the ear waits to be spoken from the
                             // moment the reply is in the conversation.
-                            if live.speak {
-                                let trace = live.trace_id.as_deref();
-                                for line in lines_of(&reply.id, turn.0, &reply.text, trace, t) {
+                            if speak {
+                                let trace = reply.trace_id.as_deref();
+                                for line in lines_of(&reply.id, reply.turn, &reply.text, trace, t) {
                                     batch.item(record_item(kind::LINE, line.id.clone(), &line, t)?);
                                     aloud.push(line);
                                 }
@@ -4696,6 +4752,11 @@ impl Actor {
                         Signal::Tool(mut call) => {
                             call.origin = live.origin.clone();
                             call.trace_id = live.trace_id.clone();
+                            if let Some(separate) = &live.steering.separate {
+                                call.turn = separate.turn.0;
+                                call.trace_id.clone_from(&separate.message.trace_id);
+                                call.origin = Origin::User;
+                            }
                             // A call no message carries is a row, and work, when it begins.
                             let known = live.tools.iter().any(|tool| tool.id == call.id);
                             if call.reply.is_none()
@@ -4710,7 +4771,11 @@ impl Actor {
                     };
                     // A part of a row is no row: the row it is a part of stays the last.
                     if piece.part_of().is_none() {
-                        live.last_row = piece.id().to_string();
+                        if let Some(separate) = live.steering.separate.as_mut() {
+                            separate.closes = piece.id().to_string();
+                        } else {
+                            live.last_row = piece.id().to_string();
+                        }
                     }
                     // A call that is a row by itself and is written again keeps the time of
                     // its first writing.
@@ -4721,6 +4786,13 @@ impl Actor {
                         _ => t,
                     };
                     batch.item(written(&piece, at)?);
+                }
+                if let Some(event) = evidence {
+                    let facts = live.facts();
+                    if let Some(speak) = live.steering.observe(&event, &mut batch, facts, &live.last_row, t, out)? {
+                        live.speak |= speak;
+                        out.changed.status = true;
+                    }
                 }
                 // The turn moved on to something else: what was read up to here is written
                 // down by itself, and how the agent stood is noted, before what came after.
@@ -4738,6 +4810,7 @@ impl Actor {
             {
                 // The process is gone and its backend did not say how the turn went.
                 let reason = "the tool ended and nothing said how";
+                live.steering.finish_read(&mut batch, now_ms)?;
                 let stopping = batch.agent().stopping().is_some();
                 let outcome = RunOutcome::Interrupted {
                     reason: reason.to_string(),

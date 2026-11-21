@@ -158,6 +158,7 @@ fn streaming_input_closes_at_the_first_top_level_stdout_result() {
     wait_for("the initial prompt", || {
         outs(&records(&running.spool)).contains(&"ready:first")
     });
+    assert!(records(&running.spool).iter().any(|record| record.entry == Entry::Shim(ShimEvent::InputOpen)));
     assert!(ask(&running.socket, &Request::Stdin { data: "second\n".into() }).ok);
     wait_for("EOF after the result", || {
         outs(&records(&running.spool)).contains(&"closed:second")

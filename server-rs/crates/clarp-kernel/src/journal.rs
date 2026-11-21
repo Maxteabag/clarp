@@ -775,6 +775,11 @@ impl Batch<'_> {
         &self.work
     }
 
+    /// Read messages from the committed portion of the transaction.
+    pub fn log(&self) -> &dyn AgentLog {
+        self.recorder.log()
+    }
+
     /// Writes everything in one append, then changes the state.
     pub fn commit(self) -> Result<Committed, JournalError> {
         if let Some(error) = self.failed {

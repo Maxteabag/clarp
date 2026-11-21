@@ -677,14 +677,14 @@ impl Agent {
                 work.record(AgentEvent::Joined { turn, join });
             }
             Command::JoinRead { turn } => {
-                if !work.agent.joins.get(&turn).is_some_and(|join| !join.read) {
+                if !work.agent.joins.get(&turn).is_some_and(|join| join.read_at_ms.is_none()) {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::JoinRead { turn, at_ms: now_ms });
                 work.let_go_of_nothing(DRAINED, now_ms);
             }
             Command::JoinSettled { turn } => {
-                if !work.agent.joins.get(&turn).is_some_and(|join| join.read) {
+                if !work.agent.joins.get(&turn).is_some_and(|join| join.read_at_ms.is_some()) {
                     return Err(Refusal::NotLive(turn));
                 }
                 work.record(AgentEvent::JoinSettled { turn });
@@ -1004,14 +1004,14 @@ impl Agent {
                 self.joins.insert(*turn, FollowUp {
                     join: join.clone(),
                     message_seq: waiting.message_seq,
-                    read: false,
+                    read_at_ms: None,
                 });
             }
             AgentEvent::JoinRead { turn, at_ms } => {
                 let invalid = IllegalTransition { turn: *turn, state: "unavailable", event: "join-read" };
                 let position = self.mailbox.iter().position(|waiting| waiting.id == *turn).ok_or_else(|| invalid.clone())?;
-                let join = self.joins.get_mut(turn).filter(|join| !join.read).ok_or(invalid)?;
-                join.read = true;
+                let join = self.joins.get_mut(turn).filter(|join| join.read_at_ms.is_none()).ok_or(invalid)?;
+                join.read_at_ms = Some(*at_ms);
                 self.mailbox.remove(position);
                 self.unheld.remove(turn);
                 if self.waited.remove(turn) {
@@ -1021,7 +1021,7 @@ impl Agent {
                 self.deliveries.launch(turn.0);
             }
             AgentEvent::JoinSettled { turn } => {
-                if !self.joins.get(turn).is_some_and(|join| join.read) {
+                if !self.joins.get(turn).is_some_and(|join| join.read_at_ms.is_some()) {
                     return Err(IllegalTransition { turn: *turn, state: "unread", event: "join-settled" });
                 }
                 self.joins.remove(turn);
