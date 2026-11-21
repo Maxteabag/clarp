@@ -195,3 +195,34 @@ def test_in_a_call_the_models_left_after_the_last_reached_attempt_are_reported(p
     assert raised is not None and calls == [INKW] and sent == []
     assert [(engine, outcome) for engine, outcome, _ in attempts] == [(INKW, "error"), (INK2, "skipped")]
     assert attempts[1][2] == "provider_already_sent"
+
+
+def test_a_piece_refused_at_connect_does_not_undo_anothers_send(monkeypatch):
+    # Google's pieces of a long clip share one attempt: one got through (HTTP 500), another
+    # was refused at connect; the attempt was still sent.
+    outcomes = [_http_500("https://speech.googleapis.com"),
+                urllib.error.URLError(ConnectionRefusedError(111, "refused"))]
+    import threading
+    lock = threading.Lock()
+
+    def urlopen(request, timeout=None):
+        with lock:
+            raise outcomes.pop(0) if outcomes else _http_500()
+    monkeypatch.setattr(google_stt, "access_token", lambda *a, **k: "token")
+    monkeypatch.setattr(google_stt.urllib.request, "urlopen", urlopen)
+    assert _google(monkeypatch, 110) is True                      # two pieces
+
+
+def test_a_send_that_never_left_does_not_undo_one_that_overlapped_it():
+    # Two pieces in flight at once: the first to start is refused at connect only after the
+    # second already reached the provider. The attempt was sent.
+    with stt_language.capturing_handed() as capture:
+        with pytest.raises(urllib.error.URLError), stt_language.sending_audio():      # piece A
+            with pytest.raises(urllib.error.HTTPError), stt_language.sending_audio():  # piece B
+                raise _http_500()
+            raise urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+    assert stt_language.was_sent(capture)
+    with stt_language.capturing_handed() as capture:
+        with pytest.raises(urllib.error.URLError), stt_language.sending_audio():
+            raise urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+    assert not stt_language.was_sent(capture)
