@@ -74,7 +74,7 @@
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         },
         {
           "engine": "cartesia:ink-2",
@@ -119,7 +119,7 @@
           "language": null,
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in missing key"
+          "reason": "transcription failed"
         },
         {
           "engine": "cartesia:ink-2",
@@ -159,7 +159,7 @@
           "language": "auto",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         },
         {
           "engine": "cartesia:ink-2",
@@ -204,7 +204,7 @@
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         },
         {
           "engine": "cartesia:ink-2",
@@ -251,7 +251,7 @@
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         }
       ],
       "focus": "fixture",
@@ -280,7 +280,7 @@
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         }
       ],
       "focus": "fixture",
@@ -312,7 +312,7 @@
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         },
         {
           "engine": "cartesia:ink-2",
@@ -324,14 +324,14 @@
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         },
         {
           "engine": "elevenlabs:scribe_v2",
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         }
       ],
       "focus": "fixture",
@@ -377,7 +377,7 @@
           "language": "en",
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in provider error"
+          "reason": "transcription failed"
         }
       ],
       "focus": "fixture",
@@ -438,7 +438,7 @@
           "language": null,
           "ms": 0,
           "outcome": "error",
-          "reason": "stand-in unknown model"
+          "reason": "transcription model not installed"
         },
         {
           "engine": "cartesia:ink-2",

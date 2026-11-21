@@ -42547,6 +42547,18 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
         host.heard.lock().unwrap().contains(PRIVATE)
     });
     assert_eq!(
+        change(json!({"call_languages":"","call_engines":"","agent_languages":{"mike":"en,no"}})).0,
+        200
+    );
+    let (code, refused) = hear(&phone, id, &second, "unhanded-set");
+    assert_eq!(code, 500, "{refused}");
+    assert_eq!(refused["error"], "transcription failed");
+    assert_eq!(
+        refused["stt"]["attempts"][0]["reason"],
+        "transcription failed"
+    );
+    assert_eq!(refused["stt"]["attempts"][0]["language"], Value::Null);
+    assert_eq!(
         action("/calls/hold", json!({"agent":second,"call_id":id})).0,
         200
     );

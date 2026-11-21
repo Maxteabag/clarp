@@ -37,6 +37,8 @@ PLANTS += [
      'refuse(status, self.word())', 'refuse(status, "/fixture/private/provider-model.bin")'),
     (H, 'provider', 'a provider error suppresses its log detail',
      'eprintln!("clarp-host: {}: {detail}", kind.client_words().1);', 'let _ = detail;'),
+    (H, 'provider', 'an unhanded call reports the reason for its rejected language set',
+     'Self::LanguageSet => Failure::Failed.client_words().1,', 'Self::LanguageSet => languages::SET_NEEDS,'),
     (H, 'provider', 'the upload drops the provider failure voice event',
      'StatusCode::INTERNAL_SERVER_ERROR => Failure::Failed.voice_detail(),',
      'StatusCode::INTERNAL_SERVER_ERROR => None,'),

@@ -122,7 +122,7 @@ enum AttemptError {
 impl AttemptError {
     fn word(&self) -> &'static str {
         match self {
-            Self::LanguageSet => languages::SET_NEEDS,
+            Self::LanguageSet => Failure::Failed.client_words().1,
             Self::Disabled => heard::DISABLED,
             Self::Failed(kind) => kind.client_words().1,
         }
