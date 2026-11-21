@@ -266,8 +266,15 @@ class HandoffMixin:
         try:
             if next_spec.queue_id:
                 # Queue admission is intentionally invisible. Materialize the
-                # ordinary user turn only at the moment execution begins.
-                self._record_user_message(next_spec)
+                # ordinary user turn only at the moment execution begins: the
+                # row (keeping the time it was sent, as it waited) and the item
+                # shown, in one transaction, with the item's current words.
+                started = self._start_queued_row(replace(next_spec, waited=True))
+                if started is None:
+                    # Deleted from the queue as its turn was about to start.
+                    self._finish_turn(next_spec)
+                    return
+                next_spec = started
             turn_lifecycle.open_turn(
                 agent_id=next_spec.agent_id, source="pwa",
                 trace_id=next_spec.trace_id,

@@ -237,6 +237,12 @@ STORIES = [
      'steps': OPENED + [hears(), deaf(), voice('session.started'), hears()]},
     {'name': 'the user calls, and hangs up', 'call': 'user',
      'steps': [start(), ready(), voice('session.started'), took(), speaks(), hears(), fallback(), close()]},
+    # The model is the grant's, chosen for the client that answered (the reference's PR 479): the session frame and
+    # the voice's session.start name it.
+    {'name': 'a ring answered by a client that accepts the configured model', 'client': 'ios/2986 contract=75',
+     'steps': [start(), ready(), voice('session.started'), took(), speaks(), close()]},
+    {'name': 'the user calls from a client that accepts the configured model', 'call': 'user', 'client': 'android/993 contract=29',
+     'steps': [start(), ready(), voice('session.started'), took(), hears(), close()]},
 ]
 
 
@@ -361,12 +367,12 @@ def run(root) -> dict:
         state.update(made=0, clock=5000.0, devices={PHONE: 'full'}, key=True)
         agent_rings.register_voip_token(PHONE, 'a' * 64, supported_conversation_modes=['classic', LIVE])
         if story.get('call') == 'user':
-            answered = agent_rings.user_call_live(PHONE, 'a-theo', 'call-1', 'nonce-1')
+            answered = agent_rings.user_call_live(PHONE, 'a-theo', 'call-1', 'nonce-1', client=story.get('client'))
         else:
             placed = agent_rings.ring(caller_agent_id='a-theo', agent='', reason=WHY, opening_line=LINE,
                                       conversation_mode=LIVE, event_context=copy.deepcopy(EVENT))
             answered = agent_rings.answer(PHONE, placed['ring']['ring_id'], conversation_mode=LIVE, request_id='answer-1',
-                                          client_nonce='nonce-1')
+                                          client_nonce='nonce-1', client=story.get('client'))
         grant = answered['live']
         ring_id = grant['ring_id']
         join = {'type': 'agent_live.join', **{name: grant[name] for name in socket_.JOIN_KEYS}}
@@ -463,7 +469,7 @@ def run(root) -> dict:
                     return session.fail('live_unavailable', 'provider_connect_failed')
                 if not session.attach_upstream(there):
                     return None
-                wire = LiveWire('api')
+                wire = LiveWire('api', model=session.model)
                 session.downstream({'type': 'agent_live.session', 'protocol': live.PROTOCOL, 'host_id': 'host-1',
                                     'ring_id': session.ring_id, 'agent_id': session.agent_id, **session.ids(),
                                     'context_digest': session.context_digest, 'provider': live.PROVIDER,
@@ -562,7 +568,7 @@ def run(root) -> dict:
         gate.set()
         if clock['thread'] is not None:
             clock['thread'].join(3)
-        return {'name': story['name'], 'call': story.get('call', 'ring'), 'ids': session.ids(),
+        return {'name': story['name'], 'call': story.get('call', 'ring'), 'model': session.model, 'ids': session.ids(),
                 'opening_event_id': session.opening_event_id, 'context_digest': session.context_digest, 'ring_id': ring_id,
                 'snapshot': session.snapshot, 'steps': rows}
 

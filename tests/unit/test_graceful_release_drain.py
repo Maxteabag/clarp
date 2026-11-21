@@ -690,7 +690,8 @@ def test_status_lists_held_work_in_fifo_order_by_stable_ids(tmp_path):
         persisted = runtime.dispatch_request("status", {})["result"]["held_order"]
         assert _traces(persisted, agent) == _traces(order, agent)
         assert all(entry["row"] for entry in persisted[agent])
-        assert persisted[agent][0]["row"] == "drain-park-t-pre-drain normal"
+        # A held plain send is its own queue item since issue 491, not a drain-park row.
+        assert persisted[agent][0]["row"] == "pre-drain normal"
         # Ids only, never message text.
         assert set(persisted[agent][0]) == {"row", "trace", "origin"}
     finally:

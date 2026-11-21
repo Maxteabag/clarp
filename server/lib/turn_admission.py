@@ -275,6 +275,7 @@ class AdmissionMixin:
         # Queue receipts and ordinary user admissions share one SQLite write
         # transaction, preserving client_msg_id idempotency even if concurrent
         # retries switch between normal and queue delivery.
+        waits = False
         if skip_admission:
             if spec.queue_id and not turn_queue.dispatchable(
                     spec.queue_id, agent_id=spec.agent_id, trace_id=spec.trace_id,
@@ -292,6 +293,14 @@ class AdmissionMixin:
             # in-memory slot up front and pass the snapshot in.
             slot = self._slot_snapshot(spec)
             held = self._held_in_memory(spec)
+            # A send that will wait for the agent is admitted as a queue item,
+            # as a queue request is: no conversation row until the write that
+            # starts its turn, so it is shown where its turn starts, never
+            # above an answer that did not see it (issue 491).
+            waits = not queue_if_busy and self._waits_on_arrival(spec, slot)
+            if waits:
+                spec = replace(spec, queue_id=spec.client_msg_id or spec.trace_id,
+                               arrived_waiting=True)
             deferred_events: list[dict] = []
             database = db.conn()
             database.execute("BEGIN IMMEDIATE")
@@ -318,26 +327,54 @@ class AdmissionMixin:
                     spec = replace(
                         spec, prompt_admission_id=prompt_admission_id,
                     )
-                if queue_if_busy:
-                    if message_store.has_client_message(request_id):
+                if queue_if_busy or waits:
+                    shown = message_store.has_client_message(request_id)
+                    if shown:
                         if not self._admitted_but_never_launched(
                                 spec, request_id, slot=slot, held=held):
                             database.execute("COMMIT")
                             return DispatchResult(session=session, backend=backend)
                         message_store.relink_client_message(
                             request_id, trace_id=spec.trace_id)
-                    turn_queue.enqueue(
-                        queue_id=spec.queue_id, agent_id=spec.agent_id,
-                        session=spec.session, text=spec.text,
-                        trace_id=spec.trace_id,
-                        client_msg_id=spec.client_msg_id,
-                        synthesize_audio=spec.synthesize_audio,
-                        origin=spec.origin,
-                        sender_agent_id=spec.sender_agent_id,
-                        prompt_admission_id=spec.prompt_admission_id,
-                        user_word=spec.user_word,
-                    )
+                    try:
+                        turn_queue.enqueue(
+                            queue_id=spec.queue_id, agent_id=spec.agent_id,
+                            session=spec.session, text=spec.text,
+                            trace_id=spec.trace_id,
+                            client_msg_id=spec.client_msg_id,
+                            synthesize_audio=spec.synthesize_audio,
+                            origin=spec.origin,
+                            sender_agent_id=spec.sender_agent_id,
+                            prompt_admission_id=spec.prompt_admission_id,
+                            kind=(turn_queue.KIND_LATER if command.queue_if_busy
+                                  else turn_queue.KIND_WAITING),
+                        # A send that did not ask to wait is not held by a Stop
+                        # pause that already existed (_pause_exempt_on_arrival);
+                        # a later Stop takes that back (turn_queue.set_paused).
+                        allow_paused=waits,
+                            # Its row was written by an earlier attempt: the
+                            # conversation's already, never also the queue's.
+                            shown=shown,
+                            user_word=spec.user_word,
+                        )
+                    except Exception as exc:
+                        if not waits:
+                            raise
+                        # As a busy send that could not be queued always was:
+                        # refused, never acknowledged without its durable item.
+                        log_exception("waitingSendQueueFail", exc, detail=spec.session)
+                        raise DispatchError(503, "could not durably queue message") from exc
                     admission = True
+                    if waits and launch_receipts.eligible(
+                            origin=spec.origin, client_msg_id=spec.client_msg_id,
+                            call_opening=_is_call_opening(spec)):
+                        # As for a send admitted with its row: until a backend
+                        # is handed the prompt, the proof a retry may launch.
+                        launch_receipts.record_pending(
+                            agent_id=spec.agent_id, trace_id=spec.trace_id,
+                            client_msg_id=spec.client_msg_id, origin=spec.origin,
+                            sender_agent_id=spec.sender_agent_id,
+                            user_stop_generation=turn_queue.user_stop_generation(spec.agent_id))
                 else:
                     admission = self._record_user_message(
                         spec, deferred=deferred_events)
@@ -425,11 +462,35 @@ class AdmissionMixin:
             # written before it is acknowledged), rather than preempting the
             # start or holding this request for it (TP-N3).
             wait_for_start = True
-        elif (decision.effective.steer_allowed and not _SLOTS.fenced
-                and self._steer_if_supported(spec)):
-            return DispatchResult(session=session, backend=backend)
-        if self._enqueue_if_busy(spec, queue_if_busy=queue_if_busy, wait_for_start=wait_for_start):
-            if queue_if_busy:
+        elif decision.effective.steer_allowed and not _SLOTS.fenced:
+            steered = self._steer_if_supported(spec)
+            if steered == "later":
+                # Written into the running turn, read when its tool returns: until
+                # then a queue item like any message that waits (issue 491, part C).
+                self._broadcast_queue_state(spec, started=False)
+                queue_state = turn_queue.state(spec.agent_id)
+                return DispatchResult(
+                    session=session, backend=backend, queued=True,
+                    queue_depth=queue_state["count"],
+                    queue_revision=queue_state["revision"])
+            if steered:
+                return DispatchResult(session=session, backend=backend)
+        # A send that waits is a queue item from here on, like a queue request;
+        # its arrival (when a steer could still be refused by a Stop) is over.
+        queued_admission = queue_if_busy or waits
+        if spec.arrived_waiting:
+            spec = replace(spec, arrived_waiting=False)
+        took_over = False
+        if waits and not wait_for_start:
+            # The running Claude turn has printed nothing: end it and give both
+            # messages to one turn, which starts here (issue 491, part B).
+            from . import turn_takeover
+            taken = turn_takeover.take_over_if_silent(self, spec)
+            if taken is not None:
+                spec, took_over = taken, True
+        if not took_over and self._enqueue_if_busy(spec, queue_if_busy=queued_admission,
+                                                   wait_for_start=wait_for_start):
+            if queued_admission:
                 self._broadcast_queue_state(spec, started=False)
             queue_state = turn_queue.state(spec.agent_id)
             return DispatchResult(
@@ -440,11 +501,20 @@ class AdmissionMixin:
             # A listen-first initiative that a greeting withdrew: never runs.
             self._finish_turn(spec)
             return DispatchResult(session=session, backend=backend)
-        if queue_if_busy:
+        if queued_admission:
             # Idle queue request: it starts immediately, so admit its visible
-            # user row now. Recovery may find the row already present.
+            # user row now, with its item shown, in one transaction. Recovery
+            # may find the row already present. One recovered or sent from the
+            # queue waited: its row keeps the time it was sent.
             try:
-                self._record_user_message(spec)
+                started = self._start_queued_row(
+                    replace(spec, waited=bool(durable_queue_id)))
+                if started is None:
+                    # Deleted from the queue before its turn could start.
+                    self._finish_turn(spec)
+                    return DispatchResult(session=session, backend=backend)
+                spec = started
+                text = spec.text
             except DispatchError:
                 # The durable queue receipt remains authoritative. Release the
                 # claimed slot and retry recovery instead of leaving a phantom
@@ -702,8 +772,85 @@ class AdmissionMixin:
             raise DispatchError(503, UNCONFIRMED_DELIVERY)
         return status == "retryable"
 
+    def _start_queued_row(self, spec: _TurnSpec, *, steered: bool = False,
+                          start_item: bool = False) -> _TurnSpec | None:
+        """Write the conversation row of a queue item whose turn starts now (or
+        that was steered into the running turn) and mark the item shown, in ONE
+        transaction (issue 491): a reader finds the message in the queue or in
+        the conversation, never in both and never in neither. The words are the
+        item's as they stand in that transaction, so an edit either lands
+        before it (the turn runs the edited words) or is refused after it
+        (turn_queue.update_text): never a row with one text and a turn run on
+        another. A steered item keeps the words the backend was given.
+
+        Returns the spec to run (its text the row's), or None when the item was
+        deleted or retired before its turn could start: nothing is written and
+        it must not run. A spec without a queue item records its row as before.
+
+        ``start_item``: an accepted steer, whose item is delivered now: its
+        receipt is started in the same transaction, so a crash after the row
+        can never leave the item queued behind it (``turn_queue.start_receipt``;
+        the pause step runs after the commit)."""
+        if not spec.queue_id or _is_call_opening(spec):
+            self._record_user_message(spec)
+            return spec
+        deferred: list[dict] = []
+        database = db.conn()
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            item = database.execute(
+                "SELECT text, status, enqueued_at FROM queued_turns WHERE queue_id = ?",
+                (spec.queue_id,)).fetchone()
+            if item is not None and item["status"] not in ("queued", "claimed", "started"):
+                database.execute("COMMIT")
+                return None
+            if item is not None and item["status"] != "started" and not steered \
+                    and str(item["text"] or "").strip():
+                spec = replace(spec, text=str(item["text"]))
+            sent_at = (int(item["enqueued_at"])
+                       if item is not None and spec.waited else None)
+            appended = self._record_user_message(spec, deferred=deferred, sent_at=sent_at)
+            if appended is not None:
+                turn_queue.show(spec.queue_id, con=database)
+            started_row = None
+            start_failed = False
+            if start_item:
+                # The backend already has the words: the row must stand whatever
+                # happens to the receipt's start (issue 491, review C5). The start
+                # gets a savepoint of its own; if it fails only it is undone, and it
+                # is tried again after the commit (and by recovery at the next start:
+                # turn_queue.start_shown_attempted).
+                database.execute("SAVEPOINT steered_item_start")
+                try:
+                    started_row = turn_queue.start_receipt(spec.queue_id)
+                    database.execute("RELEASE SAVEPOINT steered_item_start")
+                except Exception as exc:  # noqa: BLE001 - logged; retried below
+                    database.execute("ROLLBACK TO SAVEPOINT steered_item_start")
+                    database.execute("RELEASE SAVEPOINT steered_item_start")
+                    log_exception("steeredItemStartFail", exc, detail=spec.queue_id)
+                    start_failed = True
+            database.execute("COMMIT")
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+        for event in deferred:
+            try:
+                events.broadcast(self.ctx.stream, events.as_event(event))
+            except Exception as e:  # noqa: BLE001 - a projection of a durable row
+                log_exception("queuedRowBroadcastFail", e, detail=spec.session)
+        if start_failed:
+            try:
+                started_row = turn_queue.start_receipt(spec.queue_id)
+            except Exception as exc:  # noqa: BLE001 - recovery settles it at the next start
+                log_exception("steeredItemStartRetryFail", exc, detail=spec.queue_id)
+        if start_item:
+            turn_queue.after_start(spec.queue_id, started_row)
+        return spec
+
     def _record_user_message(self, spec: _TurnSpec, *,
-                             deferred: list[dict] | None = None) -> bool | None:
+                             deferred: list[dict] | None = None,
+                             sent_at: int | None = None) -> bool | None:
         """Durably admit the user row. With `deferred`, the transcript
         wake-up is appended there for the caller to broadcast after COMMIT
         instead of fanning out while a write transaction is open."""
@@ -720,6 +867,7 @@ class AdmissionMixin:
                 sender_agent_id=spec.sender_agent_id or None,
                 prompt_admission_id=spec.prompt_admission_id,
                 trace_id=spec.trace_id,
+                sent_at=sent_at,
             )
             if appended and getattr(self.ctx, "stream", None) is not None:
                 event = {

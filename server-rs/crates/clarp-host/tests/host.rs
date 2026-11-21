@@ -19,14 +19,24 @@ use serde_json::{Value, json};
 mod agent_portraits;
 #[path = "host/backend_auth.rs"]
 mod backend_auth;
+#[path = "host/bounded_close.rs"]
+mod bounded_close;
+#[path = "host/cartesia_language.rs"]
+mod cartesia_language;
+#[path = "host/compaction_outcome.rs"]
+mod compaction_outcome;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
 mod controller_actions;
+#[path = "host/coordination.rs"]
+mod coordination;
 #[path = "host/delivery.rs"]
 mod delivery;
 #[path = "host/diagnostics.rs"]
 mod diagnostics;
+#[path = "host/enter_at_start.rs"]
+mod enter_at_start;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
 #[path = "host/harness.rs"]
@@ -39,20 +49,32 @@ mod import_render_specs;
 mod installer;
 #[path = "host/janitor_attention.rs"]
 mod janitor_attention;
+#[path = "host/language_set.rs"]
+mod language_set;
 #[path = "host/launch_directories.rs"]
 mod launch_directories;
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
+#[path = "host/live_model.rs"]
+mod live_model;
 #[path = "host/managed_skills.rs"]
 mod managed_skills;
+#[path = "host/media_manage.rs"]
+mod media_manage;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
+#[path = "host/pairing_identity.rs"]
+mod pairing_identity;
 #[path = "host/pictures.rs"]
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/r108_stream_ids.rs"]
+mod r108_stream_ids;
 #[path = "host/remote_action.rs"]
 mod remote_action;
+#[path = "host/render_spec_export.rs"]
+mod render_spec_export;
 #[path = "host/router_phrases.rs"]
 mod router_phrases;
 #[path = "host/source_trace.rs"]
@@ -63,8 +85,14 @@ mod stand_ins;
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
+#[path = "host/voice_events.rs"]
+mod voice_events;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
+
+// What every process a test starts is given of the environment: nothing of the machine's.
+#[path = "host/sealed.rs"]
+mod sealed;
 
 /// This file holds no more tests than it held when the pieces were given files of their own
 /// (172 `#[test]`, 2 `#[tokio::test]`, and this one): two pieces that both add tests at its
@@ -190,7 +218,20 @@ impl Place {
             std::env::temp_dir().join(format!("clarp-host-{name}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("work")).unwrap();
+        std::fs::create_dir_all(sealed::home(&root)).unwrap();
+        std::fs::create_dir_all(root.join("tmp")).unwrap();
         Self { root }
+    }
+
+    /// A command that a test starts in this place: its environment is [`sealed::sealed`], with
+    /// nothing of the machine the tests run on. What the test adds to it goes over it.
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        sealed_command(&self.root, program)
+    }
+
+    /// The Host's own program, as a test starts it in this place.
+    fn host_command(&self) -> Command {
+        self.command(env!("CARGO_BIN_EXE_clarp-host"))
     }
 
     /// Starts a Host process in this place and waits until it listens.
@@ -213,6 +254,13 @@ impl Place {
         self.start_without(token, more, world, &[])
     }
 
+    /// A Host for a test that runs a real tool of this machine on purpose (only when asked: the
+    /// tests marked `#[ignore]`): the names given are the runner's own, as it has them, and a
+    /// name the runner lacks is taken from the sealed default too. Nothing else of the machine.
+    fn start_on_the_machine(&self, more: &[&str], names: &[&str]) -> Host {
+        self.start_on(&sealed::runner(), names, "", more, &[], &[])
+    }
+
     /// The same, in an environment that lacks what is named last.
     fn start_without(
         &self,
@@ -221,7 +269,22 @@ impl Place {
         world: &[(&str, &str)],
         without: &[&str],
     ) -> Host {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+        self.start_on(&sealed::runner(), &[], token, more, world, without)
+    }
+
+    /// The same on a machine whose environment is `runner`, with what of it is `named` on
+    /// purpose: what a test of the harness itself starts on a machine of its own making.
+    fn start_on(
+        &self,
+        runner: &[(std::ffi::OsString, std::ffi::OsString)],
+        named: &[&str],
+        token: &str,
+        more: &[&str],
+        world: &[(&str, &str)],
+        without: &[&str],
+    ) -> Host {
+        let host = env!("CARGO_BIN_EXE_clarp-host");
+        let mut command = sealed_command_on(runner, &self.root, named, host);
         for name in without {
             command.env_remove(name);
         }
@@ -231,8 +294,6 @@ impl Place {
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
             .args(["--listen", "127.0.0.1:0"])
             .args(more)
-            .env("CLARP_ZOXIDE_PROGRAM", self.root.join("no-zoxide"))
-            .env("CLARP_OPENCODE_PROGRAM", self.root.join("no-opencode"))
             .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)
             .stdin(Stdio::null())
@@ -277,6 +338,22 @@ impl Drop for Place {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
     }
+}
+
+/// A command a test starts with `root` for its place: [`sealed::sealed`] is all of its
+/// environment. A test that has a [`Place`] says `place.command`.
+fn sealed_command(root: &std::path::Path, program: impl AsRef<std::ffi::OsStr>) -> Command {
+    sealed_command_on(&sealed::runner(), root, &[], program)
+}
+
+/// The same on a machine whose environment is `runner`, with what of it is `named` on purpose.
+fn sealed_command_on(
+    runner: &[(std::ffi::OsString, std::ffi::OsString)],
+    root: &std::path::Path,
+    named: &[&str],
+    program: impl AsRef<std::ffi::OsStr>,
+) -> Command {
+    clarp_sealed::command(program, sealed::sealed(runner, root, named))
 }
 
 /// Records in a stopped test Host's fleet store, in the key order of the port.
@@ -492,7 +569,9 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 106);
+    assert_eq!(info["contract"]["host"], 115);
+    assert_eq!(info["contract"]["features"]["voice_profile"], 109);
+    assert_eq!(info["contract"]["features"]["speech_outcome"], 109);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
 
     let session = host.new_agent("Echo");
@@ -730,7 +809,7 @@ fn a_job_registered_between_turns_names_no_trace_and_one_in_a_turn_names_that_tu
     let dir = place.root.clone();
     host.send(&session, "hello", "m1");
     wait_for("the turn to be done", || host.state(&session) == "done");
-    let mut worker = Command::new("sleep").arg("60").spawn().unwrap();
+    let mut worker = place.command("sleep").arg("60").spawn().unwrap();
     let pid = worker.id();
     let register = |id: &str| {
         let args = [
@@ -768,7 +847,7 @@ fn tool(
     worker: Option<u32>,
     args: &[&str],
 ) -> (i32, String, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+    let mut command = sealed_command(dir, env!("CARGO_BIN_EXE_clarp-host"));
     command
         .arg("tool")
         .args(args)
@@ -874,7 +953,7 @@ fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see
     };
 
     // A worker is a process the agent left running. It names itself, and registers its job.
-    let mut worker = Command::new("sleep").arg("60").spawn().unwrap();
+    let mut worker = place.command("sleep").arg("60").spawn().unwrap();
     let pid = worker.id();
     let (code, handle, _) = tool(
         &host,
@@ -1029,7 +1108,7 @@ fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see
     assert_eq!(count(&host), 0);
 
     // The id is used again: a new run, and the Host that is started again still knows it.
-    let mut second = Command::new("sleep").arg("60").spawn().unwrap();
+    let mut second = place.command("sleep").arg("60").spawn().unwrap();
     let (code, handle, _) = tool(
         &host,
         &dir,
@@ -1345,6 +1424,7 @@ fn a_goal_change_keeps_its_event_and_number_in_its_owners_append() {
                 keep_spools: false,
                 accounts: clarp_kernel::recovery::Accounts::None,
                 epoch: "fixture".into(),
+                hides_coordination: false,
             };
             let (mut actor, _) = clarp_actor::Actor::open(
                 profile,
@@ -2657,7 +2737,7 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
             asked_id.clone(),
         );
         std::thread::spawn(move || {
-            Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+            sealed_command(&dir, env!("CARGO_BIN_EXE_clarp-host"))
                 .args([
                     "tool",
                     "clarp-agent-artifacts",
@@ -2830,9 +2910,6 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
     // that was waited for. That is what `POST /repair-slot` gives back there. Here a turn is the
     // agent's log, followed through its shim's socket: each of those ways ends the turn, and what
     // waits runs, with nobody's hand.
-    let kill = |pid: &str| {
-        let _ = Command::new("kill").args(["-9", pid]).status();
-    };
     // The message was answered: each stand-in below answers with the letters of the line it was
     // handed (the message, written as the tool reads it), so its answer holds the message's words.
     let answered = |host: &Host, session: &str, text: &str| {
@@ -2850,6 +2927,9 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
     // A stand-in whose turn, told to hold, writes down its shim's number and its own and runs on
     // while that note is there (a test that fails leaves no tool behind it); tried again (the Host may try a turn whose tool died again), it answers.
     let place = Place::new("no-slot");
+    let kill = |pid: &str| {
+        let _ = place.command("kill").args(["-9", pid]).status();
+    };
     let pids = place.root.join("pids");
     let script = [
         "#!/bin/sh\nread -r message\n",
@@ -4179,6 +4259,29 @@ fn a_host_that_is_killed_in_the_middle_of_turns_comes_back_and_every_turn_finish
     });
 }
 
+/// What of the machine a test of a real Claude Code takes: its program, where it is, and its
+/// login. Nothing else of the machine's.
+const REAL_CLAUDE: &[&str] = &[
+    "HOME",
+    "PATH",
+    "USER",
+    "LANG",
+    "CLARP_CLAUDE_PROGRAM",
+    "CLAUDE_CONFIG_DIR",
+    "XDG_CONFIG_HOME",
+];
+
+/// The same for a real Codex.
+const REAL_CODEX: &[&str] = &[
+    "HOME",
+    "PATH",
+    "USER",
+    "LANG",
+    "CLARP_CODEX_PROGRAM",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
+];
+
 /// A real Claude Code turn through the Host, with the Host killed while Claude's tool runs.
 ///
 /// It spends a few cents of a real account and needs a Claude Code that is logged in, so it runs
@@ -4192,7 +4295,8 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
         return;
     }
     let place = Place::new("claude");
-    let host = place.start();
+    let start = || place.start_on_the_machine(&[], REAL_CLAUDE);
+    let host = start();
     let made = host.post(
         "/agents",
         json!({ "name": "Real", "backend": "claude", "model": "claude-haiku-5-5" }),
@@ -4210,7 +4314,7 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
     // The Host dies while Claude's command sleeps, and is away for a moment.
     host.kill();
     std::thread::sleep(Duration::from_secs(2));
-    let host = place.start();
+    let host = start();
 
     wait_long(&host, &session, "the turn to finish", || {
         host.state(&session) == "done"
@@ -4281,7 +4385,10 @@ fn a_turn_in_a_systemd_scope_gets_its_tool_unchanged_and_outlives_the_host() {
         return;
     }
     let place = Place::new("systemd");
-    let host = place.start_with("", &["--launcher", "systemd"]);
+    let host = place.start_on_the_machine(
+        &["--launcher", "systemd"],
+        &["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"],
+    );
     let session = host.new_agent("Scoped");
 
     // The scripted tool's own script has `${...}` in it. If systemd-run rewrote the tool's
@@ -4329,7 +4436,8 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
         return;
     }
     let place = Place::new("codex");
-    let host = place.start();
+    let start = || place.start_on_the_machine(&[], REAL_CODEX);
+    let host = start();
     let made = host.post(
         "/agents",
         json!({ "name": "Realx", "backend": "codex", "effort": "low" }),
@@ -4347,7 +4455,7 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
     // The Host dies while Codex's command sleeps, and is away for a moment.
     host.kill();
     std::thread::sleep(Duration::from_secs(2));
-    let host = place.start();
+    let host = start();
 
     wait_long(&host, &session, "the turn to finish", || {
         host.state(&session) == "done"
@@ -5275,14 +5383,16 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     );
     assert_eq!(host.get("/peers"), json!([named]), "never its token");
     // The owner's own command for it reads the same.
-    let listed = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let listed = place
+        .host_command()
         .args(["peer", "list", "--host", &host.address])
         .ended();
     assert_eq!(
         String::from_utf8_lossy(&listed.stdout).trim(),
         format!("work http://{}", other.address)
     );
-    let unnamed = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let unnamed = place
+        .host_command()
         .args([
             "peer",
             "add",
@@ -6085,7 +6195,7 @@ fn call_tool(
     session: &str,
     args: &[&str],
 ) -> (i32, Value, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+    let mut command = sealed_command(dir, env!("CARGO_BIN_EXE_clarp-host"));
     command
         .args(["tool", "clarp-admin", "call"])
         .args(args)
@@ -7853,7 +7963,8 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
     // A paired Android phone registers its own token and subscribes to the
     // summary. Only the phone can register it, and a deliverable token comes first.
     let place = Place::new("android-push");
-    let private = Command::new("openssl")
+    let private = place
+        .command("openssl")
         .args([
             "genpkey",
             "-algorithm",
@@ -8201,7 +8312,8 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
     let held_account: Value = serde_json::from_slice(&std::fs::read(&account).unwrap()).unwrap();
     let pem = place.root.join("fixture.pem");
     std::fs::write(&pem, held_account["private_key"].as_str().unwrap()).unwrap();
-    let public = Command::new("openssl")
+    let public = place
+        .command("openssl")
         .args([
             "rsa",
             "-in",
@@ -8520,11 +8632,12 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
             .contains(&canary.to_lowercase())
     );
 
-    // Without a threshold, as the reference ships, nobody sees a spec or can answer one.
+    // A client the default does not name (only iOS from 74 is), here the desktop at any
+    // contract, sees no spec and cannot answer one.
     let (status, made) = ask(
         "POST",
         "/artifacts",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         Some(&envelope("plain")),
     );
     assert_eq!(status, 201, "{made}");
@@ -8544,19 +8657,24 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         (&row["type"], &row["title"], &row["status"]),
         (&json!("render_spec"), &json!("Decide"), &json!("ready"))
     );
-    let (_, read) = ask("GET", "/artifacts/plain", Some("ios/12 contract=999"), None);
+    let (_, read) = ask(
+        "GET",
+        "/artifacts/plain",
+        Some("desktop/12 contract=999"),
+        None,
+    );
     assert_eq!(read["artifact"], row);
     let (status, said) = ask(
         "POST",
         "/artifacts/plain/submit",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         Some(&json!({})),
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
     let (status, said) = raw(
         "POST",
         "/artifacts/plain/submit",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         b"",
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
@@ -8569,10 +8687,118 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     keys.sort();
     assert_eq!(keys, ["agent_id", "artifact_id", "session", "type"]);
 
-    // The owner sets a threshold; it is read at every request. Only a whole number counts.
-    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"74\"\n").unwrap();
-    let (_, read) = ask("GET", "/artifacts/plain", capable, None);
-    assert!(read["artifact"].get("spec").is_none());
+    // The owner lays his minimums over the default; they are read at every request. The old
+    // single number is iOS's: 0 switches iOS off; one that is no whole number counts for
+    // nothing, and the default stands.
+    let spec_of = |client: &str| {
+        let (_, read) = ask("GET", "/artifacts/plain", Some(client), None);
+        read["artifact"].get("spec").is_some()
+    };
+    assert!(spec_of("ios/12 contract=74"), "iOS from 74, by default");
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 0\n").unwrap();
+    assert!(!spec_of("ios/12 contract=74"), "iOS switched off");
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"80\"\n").unwrap();
+    assert!(
+        spec_of("ios/12 contract=74"),
+        "a text is no number: the default stands"
+    );
+    // A table names each client by its name as sent; a name it does not hold keeps the default.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { android = 30, ios = 75 }\n",
+    )
+    .unwrap();
+    assert!(spec_of("android/5 contract=30"));
+    assert!(!spec_of("android/5 contract=29"));
+    assert!(
+        !spec_of("Android/5 contract=30"),
+        "the name as sent, exactly"
+    );
+    assert!(!spec_of("ios/12 contract=74"));
+    assert!(!spec_of("desktop/1 contract=999"));
+    // A key is a client's name in the header's own form, counted exactly as written (one rule
+    // for both of the Python Host's tables, its owner's of 20 Nov): 'IOS' and 'Ios' are taken
+    // for clients that send them so, not for iOS, and that is said once; a key of no such form,
+    // or a value that is no whole number of at least 0, is refused in a line that names it.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Android = 2, Ios = 1, \"a b\" = 1, \"1os\" = 1, \
+         android = -1, web = 2.5 }\n",
+    )
+    .unwrap();
+    assert!(spec_of("IOS/12 contract=1"), "taken, exactly as written");
+    assert!(spec_of("Ios/12 contract=1"));
+    assert!(spec_of("Android/12 contract=2"));
+    assert!(!spec_of("Android/12 contract=1"));
+    assert!(!spec_of("ios/12 contract=73"), "iOS keeps its own minimum");
+    assert!(spec_of("ios/12 contract=74"));
+    assert!(!spec_of("iOs/12 contract=74"), "only the name as written");
+    assert!(
+        !spec_of("android/5 contract=99"),
+        "a value below 0 is refused"
+    );
+    assert!(!spec_of("web/1 contract=99"), "so is a fraction");
+    let said = |line: &str| {
+        host.heard
+            .lock()
+            .unwrap()
+            .lines()
+            .filter(|heard| heard.contains(line))
+            .count()
+    };
+    assert_eq!(
+        said(
+            "config.render_spec_min_contract: refused 'a b', '1os', 'android', 'web': \
+             a key is a client's name as it sends it ([A-Za-z][A-Za-z0-9_-]{0,31}), \
+             a value a whole number of 0 or more"
+        ),
+        1,
+        "the refused keys are named, once: {}",
+        host.heard.lock().unwrap()
+    );
+    let line = "config.render_spec_min_contract: 'IOS' (not 'ios'), 'Android' (not 'android'), \
+                'Ios' (not 'ios'): names are matched exactly as clients send them, so each is \
+                another client and leaves the built-in one as it is";
+    assert_eq!(said(line), 1, "{line}: {}", host.heard.lock().unwrap());
+    assert_eq!(
+        said(
+            "config.render_spec_min_client: applies to iOS only; name other clients in [artifacts] render_spec_min_contract"
+        ),
+        1
+    );
+    assert_eq!(
+        said("config.render_spec_min_client: ignored: not a whole number"),
+        1
+    );
+    // A TOML boolean is not a minimum on either Host.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { ios = true }\n",
+    )
+    .unwrap();
+    assert!(!spec_of("ios/12 contract=73"), "the default stands");
+    // Where the table names iOS, it wins over the old number.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_client = 0\nrender_spec_min_contract = { ios = 80 }\n",
+    )
+    .unwrap();
+    assert!(
+        spec_of("ios/12 contract=80"),
+        "the table's 80, not the old 0"
+    );
+    assert!(!spec_of("ios/12 contract=79"));
+    assert_eq!(
+        said("config.render_spec_min_client: ignored: render_spec_min_contract names ios"),
+        1
+    );
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_contract = 3\n").unwrap();
+    assert!(spec_of("ios/12 contract=74"));
+    assert!(spec_of("ios/12 contract=74"));
+    assert_eq!(
+        said("config.render_spec_min_contract: ignored: expected a table of client = number"),
+        1
+    );
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 74\n").unwrap();
     let (status, made) = ask(
         "POST",
@@ -8907,7 +9133,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 106);
+    assert_eq!(info["contract"]["host"], 115);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -9535,7 +9761,8 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
     );
 
     // The command line asks the same Host for the same thing.
-    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let shown = place
+        .host_command()
         .args([
             "pair",
             "--url",
@@ -9551,7 +9778,8 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
         String::from_utf8_lossy(&shown.stderr)
     );
     assert!(String::from_utf8_lossy(&shown.stdout).starts_with("clarp://pair?name="));
-    let refused = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let refused = place
+        .host_command()
         .args([
             "pair",
             "--url",
@@ -9939,7 +10167,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
 
     // The move, as its owner would run it.
-    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let moved = new_place
+        .host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10138,7 +10367,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         "{refused}"
     );
     // Asked for again, the files are the same files: nothing arrives twice.
-    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let again = new_place
+        .host_command()
         .args(["import", "--files", "--from", &old_host.address])
         .args(["--session", &session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10173,7 +10403,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     ];
     let kept = fetch(&third_host, "", "POST", "/media", &under_its_id, &long_ago);
     assert_eq!(kept.status, 200, "{}", kept.text());
-    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let again = third_place
+        .host_command()
         .args(["import", "--files", "--from", &old_host.address])
         .args(["--session", &session, "--host", &new_host.address])
         .args(["--files-from", &third_host.address])
@@ -10238,7 +10469,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     assert_eq!(queue["paused"], false, "{queue}");
     // The first Host was read, not changed; and an agent arrives once.
     assert_eq!(old_host.conversation(&session), before);
-    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let again = third_place
+        .host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10248,7 +10480,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     // The agent whose picture came along moves too. Its picture is here already, as a file
     // the first agent shows: it becomes its own here, in its gallery as it was, and it is
     // still one file. The first agent's gallery is as it was.
-    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let moved = third_place
+        .host_command()
         .args(["import", "--from", &old_host.address])
         .args(["--session", &other_session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10660,7 +10893,7 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
 
     // An agent reads the roster and tunes itself with its own tool.
     let admin = |own: Option<&str>, args: &[&str]| -> (i32, String, String) {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+        let mut command = place.host_command();
         command
             .args(["tool", "clarp-admin"])
             .args(args)
@@ -10946,7 +11179,8 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
             &json!(true),
         )
     );
-    assert_eq!(agent.as_object().unwrap().len(), 21);
+    assert_eq!(agent.as_object().unwrap().len(), 22);
+    assert!(agent["voice_profile"].is_object());
     let helper = "slice-1";
     let helper_id = agent["agent_id"].as_str().unwrap().to_string();
     // A session name that is taken is not given twice: the next agent gets one of its own.
@@ -13132,7 +13366,7 @@ fn row_id(host: &Host, session: &str) -> String {
 /// One command of git in a directory, for a repository a test makes for itself: under a
 /// name of its own, and with nothing of the settings of whoever runs the tests.
 fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = sealed_command(dir, "git")
         .arg("-C")
         .arg(dir)
         .args([
@@ -13404,7 +13638,8 @@ fn an_agent_forks_itself_into_helpers_that_start_from_its_conversation() {
         r#"{"children": [{"name": "Spec One", "task": "from a file"}]}"#,
     )
     .unwrap();
-    let own = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let own = place
+        .host_command()
         .args([
             "tool",
             "clarp-admin",
@@ -15633,13 +15868,22 @@ printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
     );
     let fork = forked["session"].as_str().unwrap().to_string();
     assert_eq!(texts(&fork)[..3], texts(&agent)[..3]);
-    wait_for("the apps to be told of a fork", || {
-        heard.lock().unwrap().iter().any(|event| {
-            event["type"] == "agent-roster"
-                && event["kind"] == "forked"
-                && event["session"] == fork.as_str()
-        })
-    });
+    let fork_event = || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| {
+                event["type"] == "agent-roster"
+                    && event["kind"] == "forked"
+                    && event["session"] == fork.as_str()
+            })
+            .cloned()
+    };
+    wait_for("the apps to be told of a fork", || fork_event().is_some());
+    let profile = &forked["agent"]["voice_profile"];
+    assert!(profile.is_object());
+    assert_eq!(&fork_event().unwrap()["voice_profile"], profile);
     let snapshot = host.get("/agents/snapshot");
     let row_of = |session: &str| {
         let agents = snapshot["agents"].as_array().unwrap();
@@ -15717,13 +15961,11 @@ fn program(path: &std::path::Path, text: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// The first program of this name on the path the tests run with.
+/// The first system utility of this name on the test harness's fixed path.
 fn on_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|dir| dir.join(name))
-            .find(|candidate| candidate.is_file())
-    })
+    std::env::split_paths(sealed::PATH)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 /// What a stand-in for Claude Code prints for a turn: it began, it answered one line, it ended.
@@ -15837,7 +16079,8 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     assert_eq!(said("script_token"), tools, "{seen}");
 
     // That token opens the tools, from this machine, and nothing the apps read or do.
-    let by_hand = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let by_hand = place
+        .host_command()
         .args(["tool", "clarp-admin", "sessions"])
         .current_dir(&place.root)
         .env("CLARP_HOST_ADDR", &host.address)
@@ -16917,11 +17160,11 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     .unwrap();
     let kept = place.root.join("sub-agents");
     let run = |args: &[&str]| -> (i32, String, String) {
-        let out = Command::new(&python)
+        let out = place
+            .command(&python)
             .arg(script)
             .args(args)
             .current_dir(&place.root)
-            .env_clear()
             .env("PATH", &tools)
             .env("HOME", &place.root)
             .env("CLARP_CONFIG_DIR", &config)
@@ -17224,11 +17467,11 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
     std::fs::write(work.join("run.sh"), "#!/bin/sh\necho hello\n").unwrap();
     let door = format!("http://{}/tools", host.address);
     let run = |world: &[(String, String)], args: &[&str]| -> (i32, String, String) {
-        let out = Command::new(&python)
+        let out = place
+            .command(&python)
             .arg(script)
             .args(args)
             .current_dir(&work)
-            .env_clear()
             .env("HOME", &place.root)
             .envs(world.iter().map(|(name, value)| (name, value)))
             .output()
@@ -17722,6 +17965,44 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
     );
     assert_eq!(in_the_address.status, 403, "{}", in_the_address.text());
     assert!(in_the_address.text().contains("not the URL"));
+    // It is read by where the token that let the request in was found, not by which headers
+    // came with it: a cookie or a header that holds no token beside the token in the address
+    // opens nothing; the token in the Authorization header beside a cookie of no token does.
+    let page = format!("/artifacts/findings/html?token={token}");
+    let cookie = format!("claude_pwa_token={token}");
+    let not_a_token = [("Cookie", "claude_pwa_token=not-a-token")];
+    for (how, got) in [
+        (
+            "a cookie of no token",
+            fetch(&host, "", "GET", &page, &not_a_token, b""),
+        ),
+        (
+            "a header of no token",
+            fetch(&host, "not-a-token", "GET", &page, &[], b""),
+        ),
+    ] {
+        assert_eq!(got.status, 403, "{how} beside the address: {}", got.text());
+        assert!(got.text().contains("not the URL"), "{how}");
+    }
+    let by_header = fetch(
+        &host,
+        token,
+        "GET",
+        "/artifacts/findings/html",
+        &not_a_token,
+        b"",
+    );
+    assert_eq!(by_header.status, 200, "{}", by_header.text());
+    let by_cookie = [("Cookie", cookie.as_str())];
+    let in_a_cookie = fetch(
+        &host,
+        "",
+        "GET",
+        "/artifacts/findings/html",
+        &by_cookie,
+        b"",
+    );
+    assert_eq!(in_a_cookie.status, 200, "{}", in_a_cookie.text());
     let (phone, _) = pair(&host, "phone", "limited");
     let kept_out = fetch(&host, &phone, "GET", "/artifacts/findings/html", &[], b"");
     assert_eq!(kept_out.status, 403);
@@ -19913,6 +20194,7 @@ fn a_clip_is_heard_by_an_engine_over_the_network_with_a_key_read_where_the_owner
         json!([{ "id": "elevenlabs:scribe_v2", "name": "ElevenLabs Scribe v2", "provider": "elevenlabs",
                  "model": "scribe_v2", "weight": "cloud", "available": true,
                  "credential": "ELEVEN_API_KEY", "turn_detection": "native", "biasing": "keyterms",
+                 "accepts_language_set": true,
                  "budget": { "unit": "terms", "capacity": 100, "max_term_chars": 49 } }])
     );
     let (_, settings) = host.ask_as(token, "GET", "/transcription-providers", None);
@@ -20631,10 +20913,16 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
         }),
     );
     answered(&session, "m3");
-    // An agent nobody gave a voice stays silent without a word.
+    // An agent nobody gave a voice is not heard, nothing is announced, and the apps are told
+    // why once for its turn, however many of its clips are not spoken (feature speech_outcome).
     let stranger = host.new_agent("Stranger");
-    host.send(&stranger, "<speak>Unheard.</speak>", "s1");
+    host.send(
+        &stranger,
+        "<speak>Unheard.</speak> and <speak>Nor this.</speak>",
+        "s1",
+    );
     answered(&stranger, "s1");
+    wait_for("the silence to be told", || !told("tts-error").is_empty());
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(
         (
@@ -20642,27 +20930,52 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
             voice.asked().len(),
             told("tts-error").len()
         ),
-        (3, 3, 0)
+        (3, 3, 1)
+    );
+    let silent = told("tts-error")[0].clone();
+    assert_eq!(
+        (
+            &silent["session"],
+            &silent["message"],
+            &silent["error"],
+            &silent["reason"],
+            &silent["provider"]
+        ),
+        (
+            &json!(stranger),
+            &json!("Not spoken: Cartesia Sonic has no voice for Stranger."),
+            &json!("no_voice"),
+            &json!("no_voice"),
+            &json!("cartesia")
+        )
+    );
+    assert!(
+        silent["trace_id"]
+            .as_str()
+            .is_some_and(|trace| !trace.is_empty()),
+        "{silent}"
     );
 
     // The engine is down: the clip that was announced is over, and the apps are told why
     // nothing is heard.
     voice.down.store(true, Ordering::SeqCst);
     host.send(&session, "<speak>Into the void.</speak>", "m4");
-    wait_for("the failure to be told", || !told("tts-error").is_empty());
-    let failed = told("tts-error")[0].clone();
+    wait_for("the failure to be told", || told("tts-error").len() == 2);
+    let failed = told("tts-error")[1].clone();
     assert_eq!(
         (
             &failed["session"],
             &failed["persona"],
             &failed["message"],
-            &failed["error"]
+            &failed["error"],
+            &failed["provider"]
         ),
         (
             &json!("maximus"),
             &json!("Maximus"),
-            &json!("Voice synthesis failed."),
-            &json!("HTTP 500: the stand-in is down")
+            &json!("Not spoken: Cartesia Sonic did not make the clip."),
+            &json!("provider_failed"),
+            &json!("cartesia")
         )
     );
     let lost = told("audio")[3]["clip_id"].as_u64().unwrap();
@@ -21162,6 +21475,354 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
     assert_eq!(
         (status, &told["agent_engines"], &told["agent_languages"]),
         (200, &json!({}), &json!({}))
+    );
+}
+
+/// What an app is shown of how each agent sounds and is heard is what the Host does (feature
+/// voice_profile): the snapshot's rows and head, the creation answer and the roster's events
+/// carry it, the speaker hands an engine the voice the profile shows, and the version of the
+/// Host's part moves for each Host-wide cause and stays when nothing changed.
+#[test]
+fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
+    let place = Place::new("voice-profile");
+    let sound: Vec<u8> = (0..6_000_u32).map(|at| (at % 251) as u8).collect();
+    let voice = cartesia_stand_in(sound);
+    let owners = place.root.join("python-host-config.toml");
+    let file = |more: &str| {
+        let text = format!(
+            "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"key-in-the-owners-file\"\n\n\
+             [cartesia.voices]\nMaximus = \"v-shared\"\nTheo = \"v-shared\"\n{more}"
+        );
+        std::fs::write(&owners, text).unwrap();
+    };
+    file("");
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let world = [
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("DEEPGRAM_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let heard = host.listen();
+    let roster = |kind: &str| -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let of_kind = heard
+            .iter()
+            .filter(|e| e["type"] == "agent-roster" && e["kind"] == kind);
+        of_kind.cloned().collect()
+    };
+    let speech_of = |profile: &Value| profile["speech"].clone();
+
+    // The creation answer carries the new agent's profile, its sharing counted.
+    let made = |name: &str| host.post("/agents", json!({ "name": name, "backend": "scripted" }));
+    let maximus = made("Maximus");
+    let shown = speech_of(&maximus["agent"]["voice_profile"]);
+    assert_eq!(
+        (
+            &shown["provider"],
+            &shown["provider_label"],
+            &shown["voice_id"],
+            &shown["origin"]
+        ),
+        (
+            &json!("cartesia"),
+            &json!("Cartesia Sonic"),
+            &json!("v-shared"),
+            &json!("own")
+        )
+    );
+    assert_eq!(
+        (
+            &shown["streaming"],
+            &shown["silent_reason"],
+            &shown["shared_with"]
+        ),
+        (&json!(true), &Value::Null, &json!(0))
+    );
+    let theo = made("Theo");
+    assert_eq!(
+        theo["agent"]["voice_profile"]["speech"]["shared_with"], 1,
+        "{theo}"
+    );
+    let stranger = made("Stranger");
+    let silent = speech_of(&stranger["agent"]["voice_profile"]);
+    assert_eq!(
+        (
+            &silent["voice_id"],
+            &silent["origin"],
+            &silent["silent_reason"],
+            &silent["shared_with"]
+        ),
+        (&Value::Null, &Value::Null, &json!("no_voice"), &json!(0))
+    );
+    let [maximus, theo, stranger] =
+        [maximus, theo, stranger].map(|made| made["session"].as_str().unwrap().to_string());
+    // And so do the roster's events about one agent.
+    let told_of =
+        |kind: &str, session: &str| roster(kind).into_iter().find(|e| e["session"] == session);
+    wait_for("three agents told with their profiles", || {
+        [&maximus, &theo, &stranger]
+            .iter()
+            .all(|session| told_of("created", session).is_some())
+    });
+    let told = roster("created");
+    let theo_told = told.iter().find(|e| e["session"] == theo.as_str()).unwrap();
+    assert_eq!(
+        theo_told["voice_profile"]["speech"]["voice_id"], "v-shared",
+        "{theo_told}"
+    );
+
+    // The snapshot: every row's profile from one view, its head what a new agent gets.
+    let snapshot = || host.get("/agents/snapshot");
+    let row_of = |shot: &Value, session: &str| -> Value {
+        let rows = shot["agents"].as_array().unwrap();
+        rows.iter()
+            .find(|row| row["session"] == session)
+            .unwrap()
+            .clone()
+    };
+    let first = snapshot();
+    let mine = row_of(&first, &maximus)["voice_profile"].clone();
+    assert_eq!(
+        (&mine["speech"]["voice_id"], &mine["speech"]["shared_with"]),
+        (&json!("v-shared"), &json!(1))
+    );
+    assert_eq!(
+        row_of(&first, &stranger)["voice_profile"]["speech"]["silent_reason"],
+        "no_voice"
+    );
+    wait_for("Relaunch test agent is ready", || {
+        host.state(&theo) == "spawned"
+    });
+    let started = host.post(
+        "/agents",
+        json!({ "replace_sid": theo, "name": "Theo", "backend": "scripted" }),
+    );
+    assert_eq!(
+        &started["agent"]["voice_profile"],
+        &row_of(&first, &theo)["voice_profile"]
+    );
+    wait_for("the relaunch told", || {
+        told_of("relaunched", &theo).is_some()
+    });
+    assert_eq!(
+        told_of("relaunched", &theo).unwrap()["voice_profile"],
+        started["agent"]["voice_profile"]
+    );
+    let hearing = &mine["hearing"];
+    assert_eq!(
+        (
+            &hearing["engine_origin"],
+            &hearing["device_may_override"],
+            &hearing["language_origin"],
+            &hearing["languages"]
+        ),
+        (
+            &json!("default"),
+            &json!(true),
+            &json!("default"),
+            &json!(["en"])
+        )
+    );
+    assert_eq!(hearing["device_cloud_languages"], json!(["en"]));
+    assert_eq!(
+        first["voice_defaults"]["speech"],
+        json!({ "provider": "cartesia", "provider_label": "Cartesia Sonic", "voice_id": null, "voice_label": null,
+                "origin": "default", "streaming": true, "assignment": "contact", "silent_reason": null })
+    );
+    let version = |shot: &Value| shot["voice_profile_version"].as_str().unwrap().to_string();
+    let v0 = version(&first);
+    assert_eq!(v0.len(), 16, "{v0}");
+    assert_eq!(
+        version(&snapshot()),
+        v0,
+        "nothing changed: the same version"
+    );
+
+    // The speaker hands the engine the voice the profile shows, and tells the reason it shows.
+    host.send(&maximus, "<speak>Hello.</speak>", "m1");
+    let spoken = || {
+        voice
+            .asked()
+            .into_iter()
+            .find(|asked| asked["voice"]["id"].is_string())
+    };
+    wait_for("the clip", || spoken().is_some());
+    assert_eq!(spoken().unwrap()["voice"]["id"], mine["speech"]["voice_id"]);
+    host.send(&stranger, "<speak>Nobody hears this.</speak>", "s1");
+    wait_for("the silence told", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "tts-error")
+    });
+    let told = heard
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "tts-error")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (&told["session"], &told["reason"]),
+        (&json!(stranger), &json!("no_voice"))
+    );
+
+    // The speech providers: the apps are told to re-read the agents, and the version moves;
+    // put back, it is the version it was.
+    host.post(
+        "/tts/providers",
+        json!({ "provider": "deepgram", "fallback": "none" }),
+    );
+    wait_for("the change told", || roster("voice-profile").len() == 1);
+    let moved = snapshot();
+    assert_ne!(version(&moved), v0);
+    let deepgram = row_of(&moved, &maximus)["voice_profile"]["speech"].clone();
+    assert_eq!(
+        (
+            &deepgram["provider"],
+            &deepgram["voice_id"],
+            &deepgram["silent_reason"]
+        ),
+        (&json!("deepgram"), &Value::Null, &json!("not_configured")),
+        "no key for Deepgram"
+    );
+    host.post(
+        "/tts/providers",
+        json!({ "provider": "cartesia", "fallback": "none" }),
+    );
+    wait_for("the change back told", || {
+        roster("voice-profile").len() == 2
+    });
+    assert_eq!(
+        version(&snapshot()),
+        v0,
+        "the same inputs, the same version"
+    );
+
+    // The transcription settings: told, and the version moves.
+    let mut its_own = serde_json::Map::new();
+    its_own.insert(maximus.clone(), json!("google:chirp_3"));
+    host.post(
+        "/transcription-providers",
+        json!({ "agent_engines": its_own }),
+    );
+    wait_for("the hearing change told", || {
+        roster("voice-profile").len() == 3
+    });
+    let moved = snapshot();
+    assert_ne!(version(&moved), v0);
+    let own = row_of(&moved, &maximus)["voice_profile"]["hearing"].clone();
+    assert_eq!(
+        (
+            &own["engines"][0]["id"],
+            &own["engine_origin"],
+            &own["device_may_override"],
+            &own["device_cloud_languages"]
+        ),
+        (
+            &json!("google:chirp_3"),
+            &json!("own"),
+            &json!(false),
+            &Value::Null
+        )
+    );
+    let v1 = version(&moved);
+
+    // The owner's file is read when a snapshot is made: one asked after it changed shows the
+    // new voice and a new version at once (no event tells of it: docs/differences.md).
+    file("Stranger = \"v-stranger\"\n");
+    let moved = snapshot();
+    assert_ne!(version(&moved), v1);
+    let found = row_of(&moved, &stranger)["voice_profile"]["speech"].clone();
+    assert_eq!(
+        (
+            &found["voice_id"],
+            &found["origin"],
+            &found["silent_reason"]
+        ),
+        (&json!("v-stranger"), &json!("own"), &Value::Null)
+    );
+
+    // A voice given from an app: told with the profile it makes.
+    host.post(
+        "/agent-voice",
+        json!({ "session": stranger, "voice_id": "v-own", "provider": "cartesia" }),
+    );
+    wait_for("the voice change told", || {
+        roster("voice-changed").len() == 1
+    });
+    let changed = roster("voice-changed")[0].clone();
+    assert_eq!(
+        (
+            &changed["session"],
+            &changed["voice_profile"]["speech"]["voice_id"]
+        ),
+        (&json!(stranger), &json!("v-own"))
+    );
+    // A rename is told with it too.
+    host.post(
+        "/agent-rename",
+        json!({ "session": theo, "name": "Theodor" }),
+    );
+    wait_for("the rename told", || roster("agent-renamed").len() == 1);
+    assert!(roster("agent-renamed")[0]["voice_profile"]["speech"].is_object());
+
+    // Put away, an agent has no profile and shares nobody's voice.
+    host.post(
+        "/agent-archive",
+        json!({ "session": theo, "archived": true }),
+    );
+    let shot = snapshot();
+    assert_eq!(row_of(&shot, &theo).get("voice_profile"), None);
+    assert_eq!(
+        row_of(&shot, &maximus)["voice_profile"]["speech"]["shared_with"],
+        0
+    );
+
+    let assigned = host.post(
+        "/agent-assign",
+        json!({ "session": stranger, "mode": "choose", "name": "Mike" }),
+    );
+    assert_eq!(assigned["ok"], true, "{assigned}");
+    wait_for("the contact assignment told", || {
+        told_of("contact-assigned", &stranger).is_some()
+    });
+    assert_eq!(
+        told_of("contact-assigned", &stranger).unwrap()["voice_profile"],
+        row_of(&snapshot(), &stranger)["voice_profile"]
+    );
+
+    host.send(
+        &maximus,
+        r#"{"session":"profile-parent","reply":"A conversation to fork."}"#,
+        "fork-seed",
+    );
+    wait_for("the parent's native session and conversation", || {
+        host.state(&maximus) == "done"
+            && host
+                .conversation(&maximus)
+                .contains(&said("assistant", "A conversation to fork."))
+    });
+    let children = host.post(
+        &format!("/agents/{maximus}/fork"),
+        json!({ "backend": "scripted", "children": [{ "name": "Profile Fork", "task": "read" }] }),
+    );
+    assert_eq!(children["children"][0]["fork"], "seed");
+    let child = children["children"][0]["session"].as_str().unwrap();
+    wait_for("the seeded child's creation told", || {
+        told_of("created", child).is_some()
+    });
+    let child_row = row_of(&snapshot(), child);
+    let profile = &child_row["voice_profile"];
+    assert!(profile.is_object());
+    assert_eq!(
+        &told_of("created", child).unwrap()["voice_profile"],
+        profile
     );
 }
 
@@ -22918,7 +23579,8 @@ fn an_agent_that_moves_stays_who_it_was() {
         old_host.conversation(&session).len() == 2 && old_host.state(&session) == "done"
     });
 
-    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let moved = new_place
+        .host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .current_dir(&new_place.root)
@@ -24047,7 +24709,8 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
         })
     );
     assert!(!status.to_string().contains(&key));
-    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let shown = place
+        .host_command()
         .args(["network", "relay", "status", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
         .ended();
@@ -24067,7 +24730,8 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
             && link.contains("&url=https%3A%2F%2Frelay.example%2Fh%2Felitebook-test&code="),
         "{link}"
     );
-    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let shown = place
+        .host_command()
         .args(["pair", "--relay", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
         .ended();
@@ -24466,7 +25130,8 @@ fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
     );
     assert!(worker.session_within(1).is_none(), "nothing is dialled");
     // A stand-in for the relay is on this machine, or it is none.
-    let elsewhere = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let elsewhere = place
+        .host_command()
         .args(["--data", place.root.join("other").to_str().unwrap()])
         .env("CLARP_RELAY_DIAL", "ws://relay.example:80")
         .ended();
@@ -25093,13 +25758,13 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
             said["error"].as_str().unwrap_or_default().to_string(),
         )
     };
-    // The news of the queue that names no message: it was held or let go, or one was taken back.
-    let plain_news = || -> Vec<(u64, bool, u64)> {
+    let queue_news = |id: Option<&str>, change: Option<&str>| -> Vec<(u64, bool, u64)> {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
             event["type"] == "queue-updated"
                 && event["session"] == echo.as_str()
-                && event.get("client_msg_id").is_none()
+                && event["client_msg_id"].as_str() == id
+                && event["queue_change"].as_str() == change
         });
         ours.map(|event| {
             (
@@ -25110,6 +25775,8 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
         })
         .collect()
     };
+    let plain_news = || queue_news(None, None);
+    let deleted = |id| queue_news(Some(id), Some("deleted"));
 
     // A turn runs, and four messages are left for later behind it: one of the phone's, whose
     // ids come with the mark, among them.
@@ -25153,7 +25820,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     assert_eq!(waiting(), ["m2", "m4", "m5"]);
     assert_eq!(queue()["revision"], before + 1);
     wait_for("the news that one was taken back", || {
-        plain_news() == [(3, false, before + 1)]
+        deleted(phones) == [(3, false, before + 1)]
     });
     assert_eq!(
         refused("DELETE", &format!("/turn-queue/{phones}")),
@@ -25191,14 +25858,11 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     // One more is taken back, and the last is sent by hand: nothing waits any more, and the
     // hold is over without a resume. That is told with the turn that began, not by itself.
     let told_before = plain_news().len();
+    let before = queue()["revision"].as_u64().unwrap();
     host.ask("DELETE", "/turn-queue/m2", None);
     wait_for("the news of the second one taken back", || {
-        plain_news().len() == told_before + 1
+        deleted("m2") == [(1, true, before + 1)]
     });
-    assert_eq!(
-        plain_news().last().map(|news| (news.0, news.1)),
-        Some((1, true))
-    );
     let (status, _) = host.ask("POST", "/turn-queue/m5/send", Some(&json!({})));
     assert_eq!(status, 202);
     wait_for("the last message to be answered", || {
@@ -25208,7 +25872,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     });
     let free = queue();
     assert_eq!((&free["paused"], waiting().len()), (&json!(false), 0));
-    assert_eq!(plain_news().len(), told_before + 1, "{:?}", plain_news());
+    assert_eq!(plain_news().len(), told_before, "{:?}", plain_news());
     let began: Vec<Value> = {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
@@ -25673,12 +26337,14 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         host.ask("PUT", &format!("/turn-queue/{id}"), Some(&body))
     };
     let refused = |status: u16, why: &str| (status, json!({ "error": why }));
-    let plain_news = || -> usize {
+    let edit_news = || -> usize {
         let heard = heard.lock().unwrap();
         let ours = heard.iter().filter(|event| {
             event["type"] == "queue-updated"
                 && event["session"] == echo.as_str()
-                && event.get("client_msg_id").is_none()
+                && event["client_msg_id"] == "m2"
+                && event["queue_change"] == "edited"
+                && event["text"] == "second, in other words"
         });
         ours.count()
     };
@@ -25740,7 +26406,7 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         ]
     );
     assert_eq!(queue(&host)["revision"], before + 1);
-    wait_for("the news that the queue changed", || plain_news() == 1);
+    wait_for("the news that the queue changed", || edit_news() == 1);
     assert_eq!(
         put(phones, json!({ "text": "third, as the phone has it now" })).0,
         200
@@ -25778,21 +26444,15 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         refused(404, "queued message not found")
     );
 
-    // A message that was said while a turn ran waits its turn in the conversation: what
-    // was said stands. One left for later beside it is changed, and that outlives the Host.
+    // A message that was said while a turn ran waits outside the conversation as one left
+    // for later does (issue 491): the words of both are changed, and that outlives the Host.
     host.send(&echo, "sleep 60", "m5");
     wait_for("a turn to run again", || host.state(&echo) == "thinking");
     host.send(&echo, "said, not left", "m6");
     leave("seventh", "m7");
-    assert_eq!(
-        put("m6", json!({ "text": "x" })),
-        refused(409, "message is already in the conversation")
-    );
+    assert_eq!(put("m6", json!({ "text": "said anew" })).0, 200);
     assert_eq!(put("m7", json!({ "text": "the seventh, anew" })).0, 200);
-    let stands = [
-        named("m6", "said, not left"),
-        named("m7", "the seventh, anew"),
-    ];
+    let stands = [named("m6", "said anew"), named("m7", "the seventh, anew")];
     assert_eq!(waiting(&host), stands);
     let revision = queue(&host)["revision"].clone();
     host.kill();
@@ -28172,7 +28832,8 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
         assert_eq!(card["state"], "signed_out");
         assert_eq!(card["credential_present"], false);
         assert!(
-            Command::new(&binary)
+            place
+                .command(&binary)
                 .arg("seed-history")
                 .env("FAKE_ROOT", root)
                 .status()
@@ -28416,7 +29077,8 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
             effort: Some("high".into()),
         };
         let launch = adapter.once(&q).unwrap();
-        let done = Command::new(launch.program)
+        let done = place
+            .command(launch.program)
             .args(launch.args)
             .envs(launch.env)
             .env("FAKE_ROOT", root)
@@ -29707,10 +30369,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         ("CLARP_CLAUDE_PROGRAM", fallback.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
-    let help = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
-        .arg("--help")
-        .output()
-        .unwrap();
+    let help = place.host_command().arg("--help").output().unwrap();
     assert!(
         format!(
             "{}{}",
@@ -29719,7 +30378,8 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         )
         .contains("--ask-usage")
     );
-    let mut refused = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let mut refused = place
+        .host_command()
         .args([
             "--ask-usage",
             "--data",
@@ -29996,7 +30656,7 @@ else:sys.exit(2)
         )
         .unwrap();
         let mut path = vec![root.clone()];
-        path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        path.extend(std::env::split_paths(sealed::PATH));
         let path = std::env::join_paths(path).unwrap();
         let env = [
             ("HOME", root.to_str().unwrap()),
@@ -30498,7 +31158,7 @@ else:
 fn inherited_models_retry_only_the_isolated_question_and_record_the_actual_model() {
     let place = Place::new("model-fallbacks");
     let scripts = r#"#!/usr/bin/env python3
-import json,sys,pathlib,time
+import json,os,sys,pathlib,time
 root=pathlib.Path(__file__).parent
 provider=pathlib.Path(__file__).name
 args=sys.argv[1:]
@@ -30515,12 +31175,15 @@ if provider=="codex" and mode in ("decline","unavailable","slow"):
     print("permission denied" if mode=="decline" else "fetch failed",file=sys.stderr)
     sys.exit(1)
 if mode=="slow":
-    (root/"alternate-entered").touch()
+    parent=os.getppid()
+    (root/"alternate-entered").write_text(str(os.getpid()))
     for _ in range(100):
+        # The crash case deliberately kills the Host without running its cleanup.
+        if os.getppid()!=parent:sys.exit(0)
         if (root/"release").exists():break
         time.sleep(.05)
 if model=="timeout-explanation":
-    (root/"slow-explanation-started").touch()
+    (root/"slow-explanation-started").write_text(str(os.getpid()))
     time.sleep(120)
     sys.exit(9)
 if mode=="reads":
@@ -31159,6 +31822,18 @@ else:print(answer)
     wait_for("the explanation model's timeout", || {
         slow_explanation()["items"][0]["status"] == "failed"
     });
+    let fixture_pid = |file: &str| -> Option<u32> {
+        std::fs::read_to_string(place.root.join(file))
+            .ok()?
+            .parse()
+            .ok()
+    };
+    // A zombie has no executable image; the build supervisor or init can reap it.
+    let is_running = |pid| std::fs::read_link(format!("/proc/{pid}/exe")).is_ok();
+    let explanation = fixture_pid("slow-explanation-started").unwrap();
+    wait_for("the timed-out explanation's process to end", || {
+        !is_running(explanation)
+    });
     assert_eq!(
         slow_explanation()["items"],
         json!([{"id":"slow","status":"failed","reason":"timeout"}])
@@ -31198,10 +31873,23 @@ else:print(answer)
     let mut socket = TcpStream::connect(&h.address).unwrap();
     write!(socket,"POST /send HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",h.token,interrupted.len(),interrupted).unwrap();
     wait_for("the alternate to start before the crash", || {
-        place.root.join("alternate-entered").exists()
+        fixture_pid("alternate-entered").is_some()
     });
+    let alternate = fixture_pid("alternate-entered").unwrap();
+    assert!(
+        is_running(alternate),
+        "the alternate was already gone before the crash"
+    );
     h.kill();
     drop(socket);
+    let after_crash = Instant::now();
+    while is_running(alternate) && after_crash.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !is_running(alternate),
+        "slow fallback {alternate} survived the Host crash"
+    );
     let crash_request = clarp_kernel::router::flow::request_id(None, "u-claim-at-crash");
     let crash_run =
         clarp_kernel::janitors::demand::request_run_id("message-delegator", &crash_request)
@@ -33914,7 +34602,8 @@ fn a_phone_streams_what_it_hears_and_is_told_what_the_engine_says_of_the_turns()
             "an address on this machine",
         ),
     ] {
-        let started = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        let started = other
+            .host_command()
             .args(["--data", other.root.join("elsewhere").to_str().unwrap()])
             .env(variable, elsewhere)
             .ended();
@@ -34199,7 +34888,7 @@ fn the_controller_speaks_a_short_line_and_keeps_only_its_primary_voice() {
     assert_eq!(first[0]["model_id"], "model-a");
     let digest =
         clarp_kernel::controller_narration::cache_key("Press+once now", "tutorial", "model-a");
-    let file = cache.join(format!("narration-{digest}.mp3"));
+    let file = cache.join(format!("narration-{digest}-en.mp3"));
     assert_eq!(
         std::fs::metadata(&cache).unwrap().permissions().mode() & 0o777,
         0o700
@@ -34768,6 +35457,7 @@ fn a_clip_is_heard_by_deepgram_and_its_engine_may_be_set_to_find_the_ends_of_tur
         json!([{ "id": "deepgram:nova-3", "name": "Deepgram Nova-3", "provider": "deepgram",
                  "model": "nova-3", "weight": "cloud", "available": true,
                  "credential": "DEEPGRAM_API_KEY", "turn_detection": "own", "biasing": "keyterm",
+                 "accepts_language_set": false,
                  "budget": { "unit": "terms", "capacity": 50, "max_term_chars": null } }])
     );
     let told = host.get("/transcription-providers");
@@ -35279,6 +35969,19 @@ fn stand_in_live_voice() -> LiveVoice {
                         "session.start" => {
                             noted.lock().unwrap().push(said);
                             says(&mut socket, json!({ "type": "session.started" }));
+                            // What a voice says that a Host does not read: a session's
+                            // standby (`session.paused`, `session.resumed`), and a kind to
+                            // come. A Host passes them over and says each kind once.
+                            for kind in [
+                                "session.paused",
+                                "session.resumed",
+                                "session.paused",
+                                "session.of_a_kind_to_come",
+                            ] {
+                                let what =
+                                    json!({ "type": kind, "said": "nothing a journal shows" });
+                                says(&mut socket, what);
+                            }
                         }
                         "session.instructions.append" => {
                             let named = said["event_id"].clone();
@@ -35633,7 +36336,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
             &json!(ring_id),
             &json!(1),
             &json!("openai"),
-            &json!("gpt-live-1"),
+            &json!(clarp_kernel::live_call::MODEL),
             &json!("marin"),
             &json!(false),
             &json!("live")
@@ -35742,7 +36445,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
         ("agent_id", json!(theo_id)),
         ("context_digest", grant["context_digest"].clone()),
         ("provider", json!("openai")),
-        ("model", json!("gpt-live-1")),
+        ("model", json!(clarp_kernel::live_call::MODEL)),
         ("voice", json!("marin")),
     ] {
         of_the_call[name] = value;
@@ -35783,7 +36486,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     assert_eq!(
         (&start["model"], &start["audio"], &start["delegation"]),
         (
-            &json!("gpt-live-1"),
+            &json!(clarp_kernel::live_call::MODEL),
             &json!({ "output": { "voice": "marin" }, "format": { "type": "audio/pcm", "rate": 24000 } }),
             &json!({ "type": "client" })
         )
@@ -35804,8 +36507,39 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     // What the voice is told is written as the Python Host writes it there: with a blank
     // after each colon and comma.
     let written = voice.written.lock().unwrap().clone();
-    let begins = "{\"type\": \"session.start\", \"session\": {\"model\": \"gpt-live-1\", ";
-    assert!(written[0].starts_with(begins), "{}", &written[0][..80]);
+    let begins = format!(
+        "{{\"type\": \"session.start\", \"session\": {{\"model\": \"{}\", ",
+        clarp_kernel::live_call::MODEL
+    );
+    assert!(written[0].starts_with(&begins), "{}", &written[0][..80]);
+    // What the voice said that this Host does not read went by: each kind said once in the
+    // journal, by its type alone, and the call goes on below.
+    let unread = |host: &Host| -> Vec<String> {
+        let heard = host.heard.lock().unwrap().clone();
+        heard
+            .lines()
+            .filter(|line| line.starts_with("agentLiveEventUnread"))
+            .map(str::to_string)
+            .collect()
+    };
+    wait_for("the voice's unread kinds to be said", || {
+        unread(&host).len() == 3
+    });
+    assert_eq!(
+        unread(&host),
+        [
+            "agentLiveEventUnread type=session.paused",
+            "agentLiveEventUnread type=session.resumed",
+            "agentLiveEventUnread type=session.of_a_kind_to_come",
+        ]
+    );
+    assert!(
+        !host
+            .heard
+            .lock()
+            .unwrap()
+            .contains("nothing a journal shows")
+    );
 
     // The user's sound goes to the voice; breaking in tells the voice to be still and the
     // phone to be quiet.
@@ -36918,23 +37652,23 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         "call_ended"
     );
     assert_eq!(answer(&host, &r, true).0, 409);
-    // This new turn reuses the retired greeting's trace. It still speaks and
-    // only the original reply keeps the opening tag.
-    host.post("/send",json!({"session":alma,"client_msg_id":"ordinary-again","trace_id":"test-greeting","text":"<speak>Ordinary speech.</speak>"}));
-    wait_for("an unbound reply with a reused trace is available", || {
-        let events = host.get(&format!("/clips/recoverable?session={alma}"));
-        let same: Vec<_> = events["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|e| e["trace_id"] == "test-greeting")
-            .collect();
-        same.iter()
-            .any(|e| e["clip_id"] != clip["clip_id"] && e.get("opening").is_none())
-            && same
+    // A new turn speaks under a fresh trace. Only the original reply keeps the opening tag.
+    let ordinary = host.post("/send",json!({"session":alma,"client_msg_id":"ordinary-again","text":"<speak>Ordinary speech.</speak>"}));
+    assert_ne!(ordinary["trace_id"], "test-greeting");
+    wait_for(
+        "an unbound reply and the retired greeting are available",
+        || {
+            let events = host.get(&format!("/clips/recoverable?session={alma}"));
+            let all = events["events"].as_array().unwrap();
+            all.iter().any(|e| {
+                e["trace_id"] == ordinary["trace_id"]
+                    && e["clip_id"] != clip["clip_id"]
+                    && e.get("opening").is_none()
+            }) && all
                 .iter()
                 .any(|e| e["clip_id"] == clip["clip_id"] && e["opening"]["token"] == op["token"])
-    });
+        },
+    );
 
     // Model the crash after journal admission and before the fleet records
     // the binding. The journal remembers the admission's epoch and ring.
@@ -36975,25 +37709,22 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     assert_eq!(recovered["tag"]["opening"], clip["opening"]);
     drop(db);
 
-    // A later opening for the same agent uses the identical trace. It gets
-    // its own playable greeting while the original keeps its retirement fence.
+    // A later opening for the same agent gets its own playable greeting while the original
+    // keeps its retirement fence.
     let later = ring(&host, &alma);
     let next = answer(&host, &later, true).1["opening"].clone();
-    let request = json!({"session":alma,"text":"<speak>Second greeting.</speak>","trace_id":"test-greeting","client_msg_id":"greet-2",
+    let request = json!({"session":alma,"text":"<speak>Second greeting.</speak>","client_msg_id":"greet-2",
         "call_id":next["call_id"],"call_opening":{"token":next["token"],"epoch":next["epoch"]}});
     assert_eq!(host.ask_as(&phone, "POST", "/send", Some(&request)).0, 200);
-    wait_for(
-        "two openings retain distinct clips for the same trace",
-        || {
-            let events = host.get(&format!("/clips/recoverable?session={alma}"));
-            let all = events["events"].as_array().unwrap();
-            all.iter().any(|e| {
-                e["opening"]["token"] == next["token"] && e["opening"]["admission_id"] == "greet-2"
-            }) && all
-                .iter()
-                .any(|e| e["clip_id"] == clip["clip_id"] && e["opening"] == clip["opening"])
-        },
-    );
+    wait_for("two openings retain distinct clips", || {
+        let events = host.get(&format!("/clips/recoverable?session={alma}"));
+        let all = events["events"].as_array().unwrap();
+        all.iter().any(|e| {
+            e["opening"]["token"] == next["token"] && e["opening"]["admission_id"] == "greet-2"
+        }) && all
+            .iter()
+            .any(|e| e["clip_id"] == clip["clip_id"] && e["opening"] == clip["opening"])
+    });
     assert_eq!(
         host.ask_as(
             &phone,
@@ -39356,7 +40087,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
         json!({
             "context_memory": true, "context_reset": true, "direct_contact": true,
             "direct_contact_available": true, "available": true,
-            "model": words::model(), "voice": words::voice(),
+            "model": clarp_kernel::live_call::LIVE_MODEL_DEFAULT, "voice": words::voice(),
             "podcast": false, "podcast_history": false,
             "voice_provider": "openai", "voice_providers": ["openai"],
         })
@@ -39459,7 +40190,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
             &begun["delegation"]
         ),
         (
-            &json!(words::model()),
+            &json!(clarp_kernel::live_call::LIVE_MODEL_DEFAULT),
             &json!(words::voice()),
             &json!({ "type": "client" })
         )
@@ -41216,7 +41947,8 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
         assert_eq!(refused_a_socket(&absent, &phone, "/oracle/v2").0, 503);
         assert_eq!(connections.load(Ordering::SeqCst), 0);
     }
-    let mut child = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let mut child = place
+        .host_command()
         .arg("--data")
         .arg(place.root.join("data"))
         .arg("--run")

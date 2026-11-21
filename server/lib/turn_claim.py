@@ -140,6 +140,10 @@ class ClaimMixin:
                     synthesize_audio=spec.synthesize_audio, origin=spec.origin,
                     sender_agent_id=spec.sender_agent_id,
                     prompt_admission_id=spec.prompt_admission_id,
+                    # Admitted with its row (it met the agent idle and found it
+                    # busy only now): the conversation's already, so the item
+                    # is kept for the dispatcher but not shown (issue 491).
+                    kind=turn_queue.KIND_WAITING, shown=True,
                     user_word=spec.user_word)
             except Exception as exc:  # noqa: BLE001 - never queue only in memory
                 log_exception("userBusyQueueFail", exc, detail=spec.agent_id)

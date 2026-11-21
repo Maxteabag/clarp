@@ -405,6 +405,16 @@ def exhausted_backends(now_ms: int | None = None) -> dict[str, dict[str, Any]]:
     return out
 
 
+# "0" keeps the refresher from starting at all. The test suite sets it: every
+# in-process Host a test builds would otherwise poll the providers 20 s later,
+# reaching for the real Codex app-server from whatever test was running then.
+REFRESH_WORKER_ENV = "CLARP_USAGE_REFRESH_WORKER"
+
+
+def refresh_worker_enabled() -> bool:
+    return os.environ.get(REFRESH_WORKER_ENV, "").strip() != "0"
+
+
 class UsageRefreshWorker:
     """Keeps provider usage current so exhaustion is known before a send.
 
@@ -421,6 +431,8 @@ class UsageRefreshWorker:
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
+            return
+        if not refresh_worker_enabled():
             return
         self._stop.clear()
         self._thread = threading.Thread(
