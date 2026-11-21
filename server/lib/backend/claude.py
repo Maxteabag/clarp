@@ -44,6 +44,7 @@ from .. import agents as agents_db
 from .. import config as _config
 from .. import events
 from .claude_models import claude_model_pin
+from .. import takeover as turn_takeover_steps
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..stream_pacing import LivePacer
@@ -54,8 +55,190 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
 from ..backend_catalogue import CLAUDE
-from .base import CatalogueDefault, BackendBrand, CliMissing, Backend, CompactionStrategy, resolve
+from .base import CatalogueDefault, BackendBrand, CliMissing, Backend, CompactionStrategy, Unsupported, resolve
 from .stream_json import launch, start_drain, stop_after_drain_failure
+
+
+# The namespace of the uuids the Host writes on Claude's stdin lines.
+_PROMPT_UUID_NAMESPACE = uuid.UUID("5f0e7c52-9a5b-4d9e-8f53-2f0b9b1d4910")
+
+
+def prompt_uuid(trace_id: str) -> str:
+    """The uuid the Host writes on the stdin line of the turn of ``trace_id``:
+    the same for the same trace, so it can be named again later (a takeover
+    drops that entry, issue 491). A turn without a trace gets a fresh one."""
+    trace = (trace_id or "").strip()
+    if not trace:
+        return str(uuid.uuid4())
+    return str(uuid.uuid5(_PROMPT_UUID_NAMESPACE, trace))
+
+
+def note_output(handle, ev: dict) -> None:
+    """What a takeover judges (issue 491, part B): every line the drain has
+    read, and whether any of them was output: a word or a tool call, in a
+    stream event or a whole assistant message. Thinking alone is nothing."""
+    handle.lines_read = int(getattr(handle, "lines_read", 0)) + 1
+    if getattr(handle, "output_seen", False):
+        return
+    kinds = []
+    if ev.get("type") == "stream_event":
+        inner = ev.get("event") or {}
+        block = inner.get("content_block") or {}
+        delta = inner.get("delta") or {}
+        kinds = [block.get("type"), delta.get("type")]
+    elif ev.get("type") == "assistant":
+        content = (ev.get("message") or {}).get("content") or []
+        kinds = [part.get("type") for part in content if isinstance(part, dict)]
+    if any(kind in {"text", "text_delta", "tool_use", "input_json_delta", "server_tool_use"}
+           for kind in kinds):
+        handle.output_seen = True
+
+
+# Steering a running Claude turn (issue 491, part C; recordings 2, 9, 10, 11): a follow-up
+# is written to the turn's stdin and is read by the CLI when the running tool call returns,
+# inside the same turn; one answer covers both. The CLI's replay echo (--replay-user-messages)
+# of that line says when it was read: that is the moment its row is due. Written only while a
+# tool call is open; a turn that only writes would answer it as a second turn of its own.
+STEER_MIN_VERSION = (2, 1, 321)
+
+
+class _Follow:
+    __slots__ = ("on_read", "on_unread", "results_at_write")
+
+    def __init__(self, on_read, on_unread, results_at_write: int):
+        self.on_read, self.on_unread = on_read, on_unread
+        self.results_at_write = results_at_write
+
+
+class SteerState:
+    """A Claude turn's open stdin and what its drain has seen of the stream."""
+
+    def __init__(self, stdin):
+        import threading
+        self.lock = threading.Lock()
+        self.stdin = stdin
+        self.open = True
+        self.tools: set[str] = set()      # tool calls started, no result yet
+        self.results = 0                  # top-level results printed
+        self.pending: dict[str, _Follow] = {}
+        # Lines waiting to be written, in order, by one writer thread that holds no lock
+        # while it writes: a follow-up bigger than the pipe, written while the CLI does not
+        # read its stdin, must never hold the lock the drain needs for every line.
+        self.outbox: list[tuple[str, str]] = []
+        self.writing = False
+
+    def close(self) -> None:
+        """No more follow-ups: EOF to the CLI (the caller holds the lock). With a write
+        under way, the writer closes stdin after its last line."""
+        if self.open:
+            self.open = False
+            if not self.writing:
+                self._close_stdin()
+
+    def _close_stdin(self) -> None:
+        try:
+            self.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+    def send(self, uid: str, line: str) -> None:
+        """Queue one line for the writer (the caller holds the lock)."""
+        self.outbox.append((uid, line))
+        if not self.writing:
+            import threading
+            self.writing = True
+            threading.Thread(target=self._write_all, name="claude-steer-writer",
+                             daemon=True).start()
+
+    def _write_all(self) -> None:
+        while True:
+            with self.lock:
+                if not self.outbox:
+                    self.writing = False
+                    if not self.open:
+                        self._close_stdin()
+                    return
+                uid, line = self.outbox.pop(0)
+            try:
+                self.stdin.write(line)
+                self.stdin.flush()
+                continue
+            except (OSError, ValueError) as exc:
+                log_exception("claudeSteerWriteFail", exc, detail=uid)
+            with self.lock:                       # not delivered: it runs as its own turn
+                follow = self.pending.pop(uid, None)
+            if follow is not None:
+                try:
+                    follow.on_unread()
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("claudeSteerUnreadFail", exc, detail=uid)
+
+
+def _tool_ids(ev: dict) -> tuple[list[str], list[str]]:
+    """(tool calls started, tool calls answered) in one stream line."""
+    started, answered = [], []
+    if ev.get("type") == "stream_event":
+        block = (ev.get("event") or {}).get("content_block") or {}
+        if block.get("type") in ("tool_use", "server_tool_use") and block.get("id"):
+            started.append(str(block["id"]))
+    content = (ev.get("message") or {}).get("content")
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if ev.get("type") == "assistant" and part.get("type") in ("tool_use", "server_tool_use") \
+                    and part.get("id"):
+                started.append(str(part["id"]))
+            if ev.get("type") == "user" and part.get("type") == "tool_result" \
+                    and part.get("tool_use_id"):
+                answered.append(str(part["tool_use_id"]))
+    return started, answered
+
+
+def note_steer(handle, ev: dict) -> bool:
+    """The drain's side of steering. Returns True for a replay echo (not a stream event
+    the rest of the drain should see)."""
+    state = getattr(handle, "steer_state", None)
+    if state is None:
+        return bool(ev.get("type") == "user" and ev.get("isReplay"))
+    if ev.get("type") == "user" and ev.get("isReplay"):
+        uid = str(ev.get("uuid") or "")
+        with state.lock:
+            follow = state.pending.pop(uid, None)
+            joined = follow is not None and state.results == follow.results_at_write
+        if follow is not None:
+            try:
+                follow.on_read(joined)
+            except Exception as exc:  # noqa: BLE001 - the stream goes on
+                log_exception("claudeSteerReadFail", exc, detail=uid)
+        return True
+    started, answered = _tool_ids(ev)
+    with state.lock:
+        state.tools.update(started)
+        state.tools.difference_update(answered)
+        if ev.get("type") == "result":
+            state.results += 1
+            state.tools.clear()
+            if not state.pending:
+                state.close()
+    return False
+
+
+def end_steering(handle) -> None:
+    """The process is done: no more follow-ups; any written but never read stays its own
+    message (it runs as its own turn)."""
+    state = getattr(handle, "steer_state", None)
+    if state is None:
+        return
+    with state.lock:
+        state.close()
+        unread = list(state.pending.values())
+        state.pending.clear()
+    for follow in unread:
+        try:
+            follow.on_unread()
+        except Exception as exc:  # noqa: BLE001
+            log_exception("claudeSteerUnreadFail", exc)
 
 
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path | None:
@@ -306,7 +489,7 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
 _SPAWN_KWARGS = frozenset({
     "text", "cwd", "backend_session_id", "is_new_session", "session",
     "agent_id", "on_session_init", "on_result", "on_error", "trace_id",
-    "model", "effort", "stream", "isolated", "hook_session",
+    "model", "effort", "stream", "isolated", "hook_session", "takeover",
 })
 
 
@@ -349,6 +532,84 @@ class ClaudeBackend(Backend):
     )
     fallback_models = CatalogueDefault('fallback_models')
 
+
+    # Resume before message 1 and drop it, both messages in one line (recording cases 5, 7).
+    takeover_strategy = "resume_pair"
+
+    def takeover_ready(self) -> bool:
+        from .. import takeover
+        return takeover.claude_version_ok(self.executable(_config.load()))
+
+    def takeover_plan(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                      running_trace: str, first_text: str) -> dict | None:
+        from .. import takeover
+        drops_turn = prompt_uuid(running_trace)
+        path = self.find_transcript(session_id, home, cwd=cwd)
+        return takeover.takeover_plan(takeover.session_facts(path, drops_turn),
+                                      drops_turn, first_text)
+
+    # A follow-up is read later than it is written (the replay echo says when).
+    steer_reads_later = True
+
+    def steer_ready(self) -> bool:
+        """The installed Claude Code is the recorded one or later (part C's recordings)."""
+        from .. import takeover
+        version = takeover._cli_version(self.executable(_config.load()))
+        return version is not None and version >= STEER_MIN_VERSION
+
+    def steer_was_read(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                       trace_id: str) -> bool | None:
+        """Whether the CLI read a follow-up written into its stdin: the session file holds a
+        user entry with the uuid its line carried (prompt_uuid). None: the file cannot be
+        found or read."""
+        if not session_id:
+            return None
+        path = self.find_transcript(session_id, home, cwd=cwd)
+        if path is None:
+            return None
+        uid = prompt_uuid(trace_id)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as lines:
+                for line in lines:
+                    if uid not in line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue          # a half line a killed write left
+                    if isinstance(entry, dict) and entry.get("type") == "user" \
+                            and str(entry.get("uuid") or "") == uid:
+                        return True
+        except OSError:
+            return None
+        return False
+
+    def steer(self, agent_id: str, text: str, *, client_msg_id: str = "",
+              synthesize_audio: bool = False, trace_id: str = "",
+              on_read=None, on_unread=None) -> bool:
+        """Write a follow-up into the agent's running turn while one of its tool calls is
+        open (issue 491, part C). True: written; ``on_read(joined)`` runs when the CLI echoes
+        it (``joined``: inside the running turn), ``on_unread()`` when the process ends first.
+        False: nothing was written (no turn, no open tool call, stdin closed)."""
+        if on_read is None or on_unread is None:
+            # Without a way to tell when the CLI read it, a follow-up cannot be
+            # placed: Claude is not steerable that way (the Backend contract).
+            raise Unsupported(f"{self.id} is steered only with read callbacks")
+        uid = prompt_uuid(trace_id)
+        line = json.dumps({"type": "user", "uuid": uid,
+                           "message": {"role": "user",
+                                       "content": [{"type": "text", "text": text}]}})
+        for handle in self.active_handles(agent_id):
+            state = getattr(handle, "steer_state", None)
+            if state is None:
+                continue
+            with state.lock:
+                if not state.open or not state.tools:
+                    return False
+                state.pending[uid] = _Follow(on_read, on_unread, state.results)
+                state.send(uid, line + "\n")          # written outside the lock
+            return True
+        return False
 
     # --- the runner -------------------------------------------------------
 
@@ -460,8 +721,18 @@ class ClaudeBackend(Backend):
         stream=None,
         isolated: bool = False,
         hook_session: str | None = None,
+        takeover: dict | None = None,
     ) -> TurnHandle:
         """Spawn the configured Claude CLI for ONE turn carrying `text` as the prompt.
+
+        ``takeover`` (issue 491, part B): this turn takes over one that was
+        ended before it printed anything. ``{"first": text, "resume_at": U,
+        "drops_turn": M}``: resume the session at entry U, dropping turn M
+        (message 1, never answered), and give BOTH messages as one user line
+        of two text blocks, so one answer covers both. With no ``resume_at``
+        (the session's first turn), message 1 is already the session's last,
+        unanswered entry: a plain resume with message 2 alone (recording case
+        7, first-plain).
 
         The subprocess is started immediately and a daemon thread is started
         that drains its stdout, parsing stream-json events and calling the
@@ -487,6 +758,15 @@ class ClaudeBackend(Backend):
             persona=persona,
             session=session,
         )
+        # Steering keeps stdin open and needs the CLI's echo of what it read.
+        steering = bool(agent_id) and not isolated and self.steer_ready()
+        if steering:
+            cmd += ["--replay-user-messages"]
+        blocks = [text]
+        if takeover and takeover.get("resume_at"):
+            cmd += ["--resume-session-at", str(takeover["resume_at"]),
+                    "--resume-drops-turn", str(takeover["drops_turn"])]
+            blocks = [str(takeover.get("first") or ""), text]
         cli_bin = cmd[0]
         if shutil.which(cli_bin) is None:
             hint = (
@@ -500,9 +780,15 @@ class ClaudeBackend(Backend):
         # (clarp used to accept the positional form, hence the historical bug:
         # passing the prompt as argv + stdin=DEVNULL made clarp exit rc=0 with no
         # init/result — the "clarp exited without stream-json result" symptom.)
+        # Every line carries a uuid, which Claude Code keeps as that entry's uuid
+        # in its session file. It is derived from the turn's trace, so the Host
+        # can name this prompt again without storing it: a takeover drops it
+        # with --resume-drops-turn (issue 491, part B).
         user_msg = json.dumps({
             "type": "user",
-            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            "uuid": prompt_uuid(trace_id),
+            "message": {"role": "user",
+                        "content": [{"type": "text", "text": block} for block in blocks]},
         })
         env_session = session if hook_session is None else hook_session
         flag = "new" if is_new_session else ("resume" if backend_session_id else "∅")
@@ -526,16 +812,25 @@ class ClaudeBackend(Backend):
                 log_exception("providerTurnStartFail", e, detail=trace_id)
         if not recorded:
             turn_token = ""  # nothing to close at exit
-        # Hand the CLI the single user message, then close stdin so it sees EOF and
-        # runs exactly one turn. Guard the write: if clarp died on spawn the pipe
-        # is already broken, and the drainer will surface the non-zero exit.
+        # Hand the CLI the user message. Without steering stdin is closed at once, so
+        # the CLI sees EOF and runs exactly one turn; with steering (issue 491, part
+        # C) it stays open for follow-ups and is closed at the turn's result. Guard the
+        # write: if clarp died on spawn the pipe is already broken, and the drainer
+        # will surface the non-zero exit.
         try:
             if proc.stdin is not None:
                 proc.stdin.write(user_msg + "\n")
                 proc.stdin.flush()
-                proc.stdin.close()
+                if steering:
+                    handle.steer_state = SteerState(proc.stdin)
+                else:
+                    proc.stdin.close()
         except (BrokenPipeError, OSError) as e:
             log_exception("clarpStdinWriteFail", e, detail=trace_id)
+        # A takeover may judge this turn (issue 491, part B): the drain below
+        # tells it what the CLI has printed, the process group lets it freeze.
+        handle.takeover_capable = not isolated and handle.process_group is not None
+        handle.takeover_of = bool(takeover)
         self.register_handle("" if isolated else agent_id, handle)
         start_drain(
             handle, self._drain_stdout, backend=self.runner,
@@ -613,7 +908,7 @@ class ClaudeBackend(Backend):
         try:
             if proc.stdout is None:
                 return
-            for line in proc.stdout:
+            for line in turn_takeover_steps.read_lines(proc.stdout, handle):
                 line = line.rstrip("\n")
                 if not line:
                     continue
@@ -625,6 +920,10 @@ class ClaudeBackend(Backend):
                     continue
                 typ = ev.get("type")
                 sub = ev.get("subtype")
+                if handle is not None:
+                    if note_steer(handle, ev):
+                        continue                  # a replay echo is no stream event
+                    note_output(handle, ev)
                 if evidence.suppress_event(ev):
                     continue
                 items.on_event(ev)
@@ -695,6 +994,8 @@ class ClaudeBackend(Backend):
                     final_result = self._drain_result(ev, isolated, isolated_texts, live_text, evidence)
                     live_text = ""
                     isolated_texts = []
+            if handle is not None:
+                end_steering(handle)
             rc = proc.wait()
             if final_result is not None and on_result is not None:
                 reported = True
@@ -718,6 +1019,8 @@ class ClaudeBackend(Backend):
         except Exception as e:                            # noqa: BLE001
             self._drain_failure(e, proc, handle, on_error, trace_id, reported)
         finally:
+            if handle is not None:
+                end_steering(handle)              # idempotent: also on an early return
             self._drain_cleanup(
                 proc, handle, pacer, message, isolated, saw_result,
                 agent_id, turn_token, trace_id)

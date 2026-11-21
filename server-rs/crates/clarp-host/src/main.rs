@@ -164,6 +164,12 @@ async fn serve(config: Config) -> Result<(), String> {
             Vec::new()
         };
     let (opening_gate, opening_requests) = clarp_host::calls::opening_launch::channel();
+    let gallery_db = tables
+        .open(&config.data_dir.join("gallery.db"))
+        .map_err(|error| error.to_string())?;
+    let gallery = clarp_host::gallery::Store::open(gallery_db, blobs.clone())
+        .map_err(|error| error.words().to_owned())?;
+    let gallery = clarp_host::gallery::Writer::start(gallery).map_err(|error| error.to_string())?;
     let works = Works {
         runtime: tokio::runtime::Handle::current(),
         opening_gate,
@@ -177,6 +183,12 @@ async fn serve(config: Config) -> Result<(), String> {
         tool_env: tool_env(&address.to_string(), &config.auth_token),
         pusher: pusher.clone(),
         blobs: blobs.clone(),
+        portrait_hints: Some(clarp_host::media_created::Announcer {
+            writer: gallery.clone(),
+            hub: hub.clone(),
+            clock: clock.clone(),
+            log: clarp_host::unkept::Log::stderr(clock.clone()),
+        }),
         speaks,
         // Who speaks for an agent is in the owner's file, where the keys of speech are.
         telling: Telling::new(OwnerFile::new(config.speech_keys.clone())),
@@ -264,6 +276,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clock,
         mouth,
         faces,
+        gallery,
         server_id,
         revisions,
         pusher,
@@ -334,9 +347,13 @@ async fn serve(config: Config) -> Result<(), String> {
     {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
+    clarp_host::media_manage::import_history(&app)
+        .await
+        .map_err(|e| e.words().to_owned())?;
     clarp_host::portrait_generation::recover(&app)
         .await
         .map_err(|e| e.0)?;
+    clarp_host::media_manage::recover(&app).await;
     // The janitors a Host has of its own are installed, each once, paused.
     if let Err(why) = clarp_host::janitors::install(&app).await {
         eprintln!("clarp-host: its own janitors were not installed: {}", why.0);

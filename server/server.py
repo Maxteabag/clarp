@@ -1216,6 +1216,33 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-events",
     })
 
+    # What a limited app needs to chat, speak and answer decisions, and nothing else (R123): a
+    # limited device may GET exactly these routes and route families; every other GET is refused
+    # as /dirs is. Not on the list, because their answers are the owner's setup or data: the
+    # owner's directories, settings, providers, accounts and background jobs (whose answer
+    # carries the worker's folder and log path).
+    _LIMITED_DEVICE_GET_EXACT = frozenset({
+        "/server-info", "/events", "/live", "/status",
+        "/agents/snapshot", "/log", "/message-tool-details", "/turn-queue", "/location",
+        "/attention", "/attention/inbox", "/artifacts", "/pinned-artifacts",
+        "/task-plan", "/task-plans", "/task-plan/document", "/goal-ledger",
+        "/clips/message", "/clips/recoverable", "/media",
+        "/voice-events", "/voice-events/utterances", "/voices", "/voice-catalog",
+        "/voice-preview", "/voice-humanness", "/transcription-guidance",
+        "/controller-actions", "/controller-narration",
+    })
+    _LIMITED_DEVICE_GET_PREFIXES = (
+        "/artifacts/", "/artifact-catalogs/", "/clips/", "/media/", "/audio/", "/avatars/",
+        "/stt/stream", "/controller-actions/",
+    )
+
+    def _limited_get_allowed(self, path: str) -> bool:
+        # An artifact's export (/artifacts/<id>/export) is the administrator's: the whole stored
+        # request, refused to a limited device though the family is on the list.
+        if path.startswith("/artifacts/") and path.rstrip("/").endswith("/export"):
+            return False
+        return path in self._LIMITED_DEVICE_GET_EXACT or path.startswith(self._LIMITED_DEVICE_GET_PREFIXES)
+
     def _device_forbidden(self, path: str, method: str) -> bool:
         if getattr(self, "_request_device_scope", "") != "limited":
             return False
@@ -1226,7 +1253,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
         ):
             return True
-        # Exactly the routes, so unmatched paths keep their 404 (HTTP-01/03).
+        # Named routes before the allow-list. A limited device's GET outside the allow-list is
+        # refused, a path no route serves included; a full device keeps its 404 (HTTP-01/03).
         # /past-sessions with any scope: a caller-chosen cwd lists that
         # directory's sessions and their first messages (HTTP-03b).
         # /launch-directories and /favorite-paths: the owner's directories, for
@@ -1235,7 +1263,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 path.startswith("/terminal/") and method == "GET"):
             return True
         if method == "GET":
-            return False
+            return not self._limited_get_allowed(path)
         from lib import controller_actions_http
         if controller_actions_http.handles(path):
             return not controller_actions_http.limited_device_allowed(path, method)
@@ -2561,8 +2589,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         if not self._authorized():
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
-        if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):
-            # Only the route: an unmatched PATCH keeps its 404 (HTTP-02).
+        if self._device_forbidden(path, "PATCH"):
+            # A limited device is refused every PATCH, before routing (R123).
             return self._json_error(403, "full device access required")
         return route_registry.dispatch(self, "PATCH", path)
 
@@ -2619,6 +2647,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             "client_msg_id": row["client_msg_id"] or "",
             "sent_at": iso_from_ms(int(row["enqueued_at"])),
             "kind": row["kind"] or turn_queue.KIND_LATER,
+            **turn_queue.item_provenance(row),
         } for row in turn_queue.waiting_items(agent["agent_id"])]
         return self._json_ok({
             "items": items,
@@ -2656,7 +2685,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     def _broadcast_turn_queue(self, agent_id: str, session: str, *,
                               client_msg_id: str = "", change: str = "",
-                              text: str | None = None) -> None:
+                              text: str | None = None, provenance: dict | None = None) -> None:
         """queue-updated. For an edit or a deletion of one item it names the
         item (client_msg_id) and what changed (``queue_change``: edited, with
         the new ``text``, or deleted), so a device's waiting bubble follows."""
@@ -2670,7 +2699,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             queue_started=False, queue_revision=state["revision"],
             **({"client_msg_id": client_msg_id} if client_msg_id else {}),
             **({"queue_change": change} if change else {}),
-            **({"text": text} if text is not None else {}))
+            **({"text": text} if text is not None else {}),
+            **(provenance or {}))
         events.broadcast(self.ctx.stream, event)
 
     def _handle_turn_queue_update(self, queue_id: str):
@@ -2691,7 +2721,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
                                    client_msg_id=str(row["client_msg_id"] or ""),
-                                   change="edited", text=text)
+                                   change="edited", text=text,
+                                   provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_delete(self, queue_id: str):
@@ -2706,7 +2737,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             return self._json_error(404, "queued message not found")
         self._broadcast_turn_queue(str(row["agent_id"]), str(row["session"]),
                                    client_msg_id=str(row["client_msg_id"] or ""),
-                                   change="deleted")
+                                   change="deleted", provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
     def _handle_turn_queue_send(self, queue_id: str):

@@ -374,6 +374,7 @@ pub struct Waiting {
     pub text: String,
     pub speak: bool,
     pub accepted_at_ms: i64,
+    pub admission: Admission,
 }
 
 /// A row of the conversation an agent had on another Host, on its way in.
@@ -464,6 +465,8 @@ pub struct Status {
     pub last: Option<Settled>,
     /// The turns that wait, in the order they will run.
     pub waiting: Vec<TurnId>,
+    /// How many of the waiting turns have yet to put a row in the conversation.
+    pub queue_depth: usize,
     pub paused: bool,
     pub queue_revision: u64,
     pub stop_generation: u64,
@@ -1713,6 +1716,7 @@ impl Actor {
             live,
             last: agent.last().cloned(),
             waiting: agent.waiting().map(|queued| queued.id).collect(),
+            queue_depth: self.recorder.unshown_waiting().count(),
             paused: agent.is_paused(),
             queue_revision: agent.queue_revision(),
             stop_generation: agent.stop_generation(),
@@ -2026,7 +2030,7 @@ impl Actor {
     pub fn queue_state(&self) -> QueueState {
         let agent = self.recorder.agent();
         QueueState {
-            waiting: agent.waiting().count(),
+            waiting: self.recorder.unshown_waiting().count(),
             paused: agent.is_paused(),
             revision: agent.queue_revision(),
         }
@@ -2034,20 +2038,53 @@ impl Actor {
 
     /// The messages that wait, in the order they will run.
     pub fn queue(&self) -> Result<Vec<Waiting>, ActorError> {
-        let mut waiting = Vec::new();
-        for queued in self.recorder.agent().waiting() {
-            let message = self.message_at(queued.message_seq)?;
-            waiting.push(Waiting {
-                turn: queued.id,
-                client_id: message.client_id().to_string(),
-                told_id: message.told_id().to_string(),
-                message_id: message.id,
-                text: message.text,
-                speak: message.speak,
-                accepted_at_ms: queued.accepted_at_ms,
-            });
-        }
-        Ok(waiting)
+        self.recorder
+            .unshown_waiting()
+            .map(|queued| {
+                self.queue_message(
+                    queued.id,
+                    queued.message_seq,
+                    queued.accepted_at_ms,
+                    queued.admission,
+                )
+            })
+            .collect()
+    }
+
+    /// The item a user can edit or withdraw while it is waiting.
+    pub fn queue_item(&self, turn: TurnId) -> Result<Option<Waiting>, ActorError> {
+        self.recorder
+            .unshown_waiting()
+            .find(|queued| queued.id == turn)
+            .map(|queued| {
+                self.queue_message(
+                    queued.id,
+                    queued.message_seq,
+                    queued.accepted_at_ms,
+                    queued.admission,
+                )
+            })
+            .transpose()
+    }
+
+    fn queue_message(
+        &self,
+        turn: TurnId,
+        message_seq: Seq,
+        accepted_at_ms: i64,
+        admission: Admission,
+    ) -> Result<Waiting, ActorError> {
+        let message = self.message_at(message_seq)?;
+        Ok(Waiting {
+            turn,
+            client_id: message.client_id().to_string(),
+            told_id: message.told_id().to_string(),
+            message_id: message.id,
+            text: message.text,
+            speak: message.speak,
+            accepted_at_ms,
+            admission,
+        })
     }
 
     /// The message a turn that ended answered.

@@ -458,16 +458,34 @@ class AdmissionMixin:
             # written before it is acknowledged), rather than preempting the
             # start or holding this request for it (TP-N3).
             wait_for_start = True
-        elif (decision.effective.steer_allowed and not _SLOTS.fenced
-                and self._steer_if_supported(spec)):
-            return DispatchResult(session=session, backend=backend)
+        elif decision.effective.steer_allowed and not _SLOTS.fenced:
+            steered = self._steer_if_supported(spec)
+            if steered == "later":
+                # Written into the running turn, read when its tool returns: until
+                # then a queue item like any message that waits (issue 491, part C).
+                self._broadcast_queue_state(spec, started=False)
+                queue_state = turn_queue.state(spec.agent_id)
+                return DispatchResult(
+                    session=session, backend=backend, queued=True,
+                    queue_depth=queue_state["count"],
+                    queue_revision=queue_state["revision"])
+            if steered:
+                return DispatchResult(session=session, backend=backend)
         # A send that waits is a queue item from here on, like a queue request;
         # its arrival (when a steer could still be refused by a Stop) is over.
         queued_admission = queue_if_busy or waits
         if spec.arrived_waiting:
             spec = replace(spec, arrived_waiting=False)
-        if self._enqueue_if_busy(spec, queue_if_busy=queued_admission,
-                                 wait_for_start=wait_for_start):
+        took_over = False
+        if waits and not wait_for_start:
+            # The running Claude turn has printed nothing: end it and give both
+            # messages to one turn, which starts here (issue 491, part B).
+            from . import turn_takeover
+            taken = turn_takeover.take_over_if_silent(self, spec)
+            if taken is not None:
+                spec, took_over = taken, True
+        if not took_over and self._enqueue_if_busy(spec, queue_if_busy=queued_admission,
+                                                   wait_for_start=wait_for_start):
             if queued_admission:
                 self._broadcast_queue_state(spec, started=False)
             queue_state = turn_queue.state(spec.agent_id)

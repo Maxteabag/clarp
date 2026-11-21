@@ -71,7 +71,7 @@ FULL_SAMPLES = {
     SSEType.QUEUE_UPDATED: lambda: events.queue_updated(
         session="s", agent_id="a", queue_depth=0, queue_paused=False,
         queue_started=False, queue_revision=1, client_msg_id="m",
-        queue_change="edited", text="t"),
+        queue_change="edited", text="t", origin="agent", sender={"agent_id": "b", "name": "B"}),
     SSEType.ARTIFACT_UPDATED: lambda: events.artifact_updated(
         session="s", agent_id="a", artifact_id="x"),
     SSEType.MEDIA_CHANGED: lambda: events.media_changed(
