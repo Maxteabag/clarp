@@ -550,7 +550,10 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         row of its own trace and changes nothing here."""
         from . import coordination
         if coordination.is_coordination(agent_id=spec.agent_id, origin=spec.origin,
-                                        sender_agent_id=spec.sender_agent_id):
+                                        sender_agent_id=spec.sender_agent_id) \
+                and not spec.user_word:
+            # Another agent's message, unless it is the front desk relaying the
+            # user's words (verified at /send, issue 481): that shows the turn.
             return
         try:
             moved = coordination.loosen(spec.agent_id, active_trace)
