@@ -419,6 +419,7 @@ pub(crate) mod at_the_port {
         /// The engine the fleet's store was opened from: a second handle on the same tables, to
         /// read what no desk reads (a copy set aside).
         engine: MemKeyValue,
+        teams: Arc<crate::teams::Desk>,
     }
 
     impl Place {
@@ -495,10 +496,7 @@ pub(crate) mod at_the_port {
                 activity: Arc::default(),
                 calls: Arc::default(),
                 schedules: Arc::default(),
-                teams: Arc::new(
-                    crate::teams::Desk::open(self.engine.open(&self.dir.join("teams.db")).unwrap())
-                        .unwrap(),
-                ),
+                teams: self.teams.clone(),
                 heartbeat: Arc::default(),
                 fallbacks: Arc::default(),
                 janitors: Arc::default(),
@@ -549,7 +547,12 @@ pub(crate) mod at_the_port {
         let said: Arc<Mutex<Vec<String>>> = Arc::default();
         let heard = said.clone();
         let hub = Arc::new(Hub::new(0));
+        let engine = MemKeyValue::new();
+        let teams = Arc::new(
+            crate::teams::Desk::open(engine.open(&dir.join("teams.db")).unwrap()).unwrap(),
+        );
         let works = fleet::Works {
+            teams: Some(teams.clone()),
             runtime: tokio::runtime::Handle::current(),
             opening_gate: crate::calls::opening_launch::channel().0,
             config: config.clone(),
@@ -579,7 +582,6 @@ pub(crate) mod at_the_port {
         };
         let refused: Refused = Arc::default();
         let refused_read: Refused = Arc::default();
-        let engine = MemKeyValue::new();
         let mut store = Refusing {
             refused_read: refused_read.clone(),
             inner: engine.open(Path::new(&dir)).unwrap(),
@@ -602,6 +604,7 @@ pub(crate) mod at_the_port {
             refused,
             said,
             engine,
+            teams,
         })
     }
 
