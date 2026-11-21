@@ -127,11 +127,7 @@ impl Machine {
     }
 
     fn start(&self, place: &Place, accounts: Option<&str>) -> Host {
-        let path = format!(
-            "{}:{}",
-            self.programs.display(),
-            std::env::var("PATH").unwrap_or_default()
-        );
+        let path = format!("{}:{}", self.programs.display(), sealed::PATH);
         let args = self.args(accounts);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let world = [
@@ -539,7 +535,8 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
     for name in ["clarp-host", "clarp-shim"] {
         program(&from.join(name), "#!/bin/sh\n");
     }
-    let sums = Command::new("sha256sum")
+    let sums = place
+        .command("sha256sum")
         .args(["clarp-host", "clarp-shim"])
         .current_dir(&from)
         .output()
@@ -565,14 +562,11 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
             units.display()
         ),
     );
-    let path = format!(
-        "{}:{}",
-        bin.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
+    let path = format!("{}:{}", bin.display(), sealed::PATH);
     let run_from = |commit: &str, skills: &Path| -> std::process::Output {
         std::fs::write(from.join("COMMIT"), format!("{commit}\n")).unwrap();
-        Command::new("bash")
+        place
+            .command("bash")
             .arg(&tool)
             .args([
                 "--from",

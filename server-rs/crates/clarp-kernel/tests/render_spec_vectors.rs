@@ -465,8 +465,19 @@ fn a_client_may_see_a_spec_as_the_python_host_says() {
     let (mut may, mut may_not) = (0, 0);
     for case in vectors["clients"].as_array().unwrap() {
         let header = case["header"].as_str();
-        let minimum = case["minimum"].as_i64();
-        let capable = spec::capable(header, minimum);
+        // Nothing: the default; a number: iOS's minimum (the old single key); a table: the
+        // owner's, by client name, laid over the default.
+        let minimum: Option<std::collections::BTreeMap<String, i64>> = match &case["minimum"] {
+            serde_json::Value::Null => None,
+            serde_json::Value::Number(n) => Some([("ios".to_string(), n.as_i64().unwrap())].into()),
+            serde_json::Value::Object(set) => Some(
+                set.iter()
+                    .map(|(name, n)| (name.clone(), n.as_i64().unwrap()))
+                    .collect(),
+            ),
+            other => panic!("a minimum of no kind: {other}"),
+        };
+        let capable = spec::capable(header, minimum.as_ref());
         assert_eq!(capable, case["capable"], "{header:?} at {minimum:?}");
         if let Some(wire) = case.get("wire") {
             assert_eq!(capable, *wire, "the wire vectors: {header:?}");
@@ -477,7 +488,7 @@ fn a_client_may_see_a_spec_as_the_python_host_says() {
             may_not += 1;
         }
     }
-    assert_eq!((may, may_not), (22, 256));
+    assert_eq!((may, may_not), (66, 654));
 }
 
 #[test]

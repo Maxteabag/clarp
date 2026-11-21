@@ -86,6 +86,16 @@ def principal_of(handler) -> Principal:
     )
 
 
+def from_an_agent(headers) -> bool:
+    """Whether a request comes from an agent: it carries a turn token (``X-Clarp-Turn``, an
+    agent's own turn) or names a paired peer Host (``X-Clarp-Peer``, whose agents asked). Both
+    are claims the Host makes itself and never takes from outside (relay_connector.APP_HEADERS).
+    A route only the user may use answers such a request ``403 {"error": "agents_may_not"}``:
+    deleting or marking gallery images, hiding coordination (R178)."""
+    return bool((headers.get("X-Clarp-Turn") or "").strip()
+                or (headers.get("X-Clarp-Peer") or "").strip())
+
+
 def require_full_scope(principal: Principal, *,
                        message: str = "This route requires full-device authentication") -> str | None:
     """The error to answer with, or None when `principal` may proceed."""

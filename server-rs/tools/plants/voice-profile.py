@@ -40,7 +40,9 @@ rules(KERNEL, 'vectors', [
     ('ElevenLabs refuses ids with no dashes at the UUID length', "value.matches('-').count() == 4", "value.matches('-').count() <= 4"),
     ('ElevenLabs refuses short ids with four dashes', 'value.chars().count() == 36', 'value.chars().count() <= 36'),
     ('ElevenLabs treats an empty id as usable', '!value.is_empty() && !value.starts_with', '!value.starts_with'),
-    ('Gemini shows an opaque designed id as a label', '!voice.starts_with("voice_")', 'true'),
+    ('Gemini shows an opaque unregistered id as a label',
+     '.and_then(|named| named.get(voice))\n        .cloned();',
+     '.and_then(|named| named.get(voice))\n        .cloned().or_else(|| (provider == GEMINI).then(|| voice.to_string()));'),
     ('A voice without a label is shown with a made-up name', '.map(|label| label.trim().to_string())', '.or_else(|| Some("Unnamed".into())).map(|label| label.trim().to_string())'),
     ('Cartesia and Gemini without a voice report a configuration failure', 'CARTESIA | GEMINI if !voiced => Some(NO_VOICE)', 'CARTESIA | GEMINI if !voiced => Some(NOT_CONFIGURED)'),
     ('Cartesia, Gemini and Deepgram speak without a key', 'CARTESIA | GEMINI | DEEPGRAM => (!keyed).then_some(NOT_CONFIGURED)', 'CARTESIA | GEMINI | DEEPGRAM => None'),
@@ -57,8 +59,12 @@ rules(KERNEL, 'vectors', [
     ('The speaker hands over a different id than the profile', 'Some((tried.provider.clone(), tried.voice_id.clone()?))', 'Some((tried.provider.clone(), "other-voice".into()))'),
     ('The speaker loses the primary silent reason', 'reason: primary.silent_reason.unwrap_or(NO_VOICE)', 'reason: NO_VOICE'),
     ('A personal engine falls behind the Host engine', 'heard::plan("", &own_engines, &view.cloud_engine, "", false)', 'heard::plan("", &[], &view.cloud_engine, "", false)'),
-    ('The Host own model is dropped when no model stands in', 'view.own_engine.clone()', 'String::new()'),
-    ('The later hearing engines are omitted', '.chain(plan.fallbacks)', '.chain(std::iter::empty())'),
+    ('The Host own model is dropped when no model stands in', 'view.own_engine.as_str()', '""'),
+])
+rules('clarp-kernel/src/heard.rs', 'vectors', [
+    ('The later hearing engines are omitted', '.chain(self.fallbacks.iter().map(String::as_str))', '.chain(std::iter::empty())'),
+])
+rules(KERNEL, 'vectors', [
     ('A personal engine can be overridden by the device', 'let device_may_override = engine_origin == DEFAULT;', 'let device_may_override = true;'),
     ('The device never learns the configured set', 'device_may_override.then(|| codes(set))', 'Some(Vec::<String>::new())'),
     ('Local English models autodetect the language', 'if first.ends_with(".en")', 'if false'),
