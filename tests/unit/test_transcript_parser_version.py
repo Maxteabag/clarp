@@ -14,8 +14,9 @@ to a listed file fails here until its author records the decision.
   or a different store carry, for lines already imported, or whether what a tail
   resumes from changed (``parser_carry``, ``parse_range``, ``_RangePath`` and the
   boundary rules live in transcript_incremental.py, a store source). If so, raise
-  ``transcript_incremental.STORE_FORMAT`` (every checkpoint is then refused once);
-  if not, leave it. Then update the golden.
+  ``transcript_incremental.STORE_FORMAT``. That is a deliberate choice with a cost:
+  every checkpoint is refused, so every transcript is read again in full on the
+  install that ships it. If not, leave it. Then update the golden.
 
 Update with ``UPDATE_TRANSCRIPT_VERSION_GOLDEN=1``; the diff shows the decision.
 """
@@ -50,8 +51,9 @@ def test_a_change_to_the_parser_or_the_store_is_a_recorded_decision():
     assert current["store"] == golden["store"] and current["store_format"] == golden["store_format"], (
         "a store source changed: if a full import now writes different rows or a different store "
         "carry for lines already imported, or if what a tail resumes from changed (parser_carry, "
-        "parse_range, _RangePath, the boundary rules), raise transcript_incremental.STORE_FORMAT; "
-        "either way update the golden (UPDATE_TRANSCRIPT_VERSION_GOLDEN=1).")
+        "parse_range, _RangePath, the boundary rules), raise transcript_incremental.STORE_FORMAT. "
+        "Raising it is a deliberate choice: every transcript is then read again in full on the "
+        "install that ships it. Either way update the golden (UPDATE_TRANSCRIPT_VERSION_GOLDEN=1).")
 
 
 def test_the_version_follows_the_parser_and_store_format_not_the_store_sources(monkeypatch):
