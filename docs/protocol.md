@@ -668,6 +668,10 @@ where `engines` are the engines that can take a set and `reasons` says in words 
 owner's engines could take over (the Host's own engine being off or unavailable is one such
 reason, never a 500): show `message`, it says what to change. A
 recording is never sent to a provider the owner did not choose for transcription.
+An agent's engines are tried in order, each once, and never the same recording to one provider
+twice: a provider the recording reached (it answered, or failed after the audio left) is not asked
+again with another of its models. A refusal before any audio left (a language set the engine cannot
+take, no key, an unknown model) does not use up its provider, so its next model may still try.
 
 In a group call (feature `call_transcription_policy`), a clip captured for a
 participant also sends `X-Clarp-Call-Id: <call_id>` and
