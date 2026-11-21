@@ -84,3 +84,20 @@ def test_roster_is_nudged_only_when_a_job_changes_status():
     nudges = [e for e in stream.events if e["type"] == "agent-roster"]
     # started, then finished; the running-to-running update is not a change.
     assert len(nudges) == 2
+
+
+def test_jobs_nobody_runs_are_looked_for_once_a_second_not_every_tick(monkeypatch):
+    """Failing a stale job waits on timeouts of seconds to minutes: once a second is
+    soon enough, and four passes a second read every queued and running job for nothing."""
+    from lib import background_job_watcher as module
+    watcher = BackgroundJobWatcher(FakeStream())
+    passes = []
+    monkeypatch.setattr(module.background_jobs, "reconcile_stale", lambda *a, **k: passes.append(1) or [])
+    monkeypatch.setattr(watcher, "_poll_once", lambda: None)
+    monkeypatch.setattr(watcher._provider_observer, "poll_once", lambda: None)
+    clock = [1000.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    for _ in range(8):                      # two seconds of 0.25 s ticks
+        watcher._tick()
+        clock[0] += 0.25
+    assert len(passes) == 2
