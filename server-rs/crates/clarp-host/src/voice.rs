@@ -2121,18 +2121,19 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
             _ => return Err(bad("bad json")),
         }
     };
-    let text = |name: &str| said.get(name).and_then(Value::as_str).map_or("", str::trim);
+    let status = crate::edge::body_text(&said, "status")?;
     let meant = spoken::clip_meant(said.get("clip_id")).map_err(|_| bad("bad clip_id"))?;
-    let status = text("status");
+    let url = crate::edge::body_text(&said, "url")?;
+    let error = crate::edge::body_text(&said, "error")?;
+    let error = (!error.is_empty()).then_some(error);
     if !spoken::PLAYED.contains(&status) {
         return Err(bad("bad status"));
     }
-    let error = Some(text("error")).filter(|error| !error.is_empty());
     let directory = app.fleet.directory();
     let found = match meant {
         Meant::Clip(clip) => clip_of(&directory, clip),
         // By the name at the end of its address.
-        Meant::ByAddress => match text("url").rsplit('/').next() {
+        Meant::ByAddress => match url.rsplit('/').next() {
             Some(name) if !name.is_empty() => clip_named(&directory, name),
             _ => None,
         },
@@ -2174,7 +2175,7 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
             &app,
             event,
             json!({"trace_id":trace,"session":identity.as_ref().map(|(s,_)|s),
-            "detail":{"clip_id":said.get("clip_id").and_then(|v| v.as_i64().or_else(||v.as_str()?.parse().ok())),"url":Some(text("url")).filter(|u|!u.is_empty()),"error":error}}),
+            "detail":{"clip_id":said.get("clip_id").and_then(|v| v.as_i64().or_else(||v.as_str()?.parse().ok())),"url":(!url.is_empty()).then_some(url),"error":error}}),
         );
     }
     Ok(Json(json!({ "ok": true, "updated": updated })))

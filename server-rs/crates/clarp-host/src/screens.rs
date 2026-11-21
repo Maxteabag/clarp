@@ -66,11 +66,7 @@ async fn set_of_agent(app: &App, body: &[u8], field: &str, what: &str) -> Answer
     let Some(asked) = asked.as_object() else {
         return Err(bad("bad json"));
     };
-    let session = asked
-        .get("session")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    let session = crate::edge::body_text(asked, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
     }

@@ -41,11 +41,5 @@ fn shortcut_events_and_refusals_match_the_reference() {
             fixture["limited"][method]
         );
     }
-    // A truthy non-string raises in the reference before it can answer. Here it is an unknown action.
-    let malformed = fixture["malformed_actions"].as_array().unwrap();
-    for raw in malformed {
-        let action = remote_action::post(raw.as_str().unwrap().as_bytes(), now, || unreachable!());
-        assert_eq!(action, Err("unknown action".into()));
-    }
-    assert_eq!((count, malformed.len()), (150, 4));
+    assert_eq!(count, 154);
 }

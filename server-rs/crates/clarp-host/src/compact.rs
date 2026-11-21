@@ -45,9 +45,10 @@ async fn compact(State(app): State<App>, body: Bytes) -> Response {
     let Ok(Value::Object(asked)) = serde_json::from_slice::<Value>(&body) else {
         return bad("bad json");
     };
-    let session = asked.get("session").and_then(Value::as_str).map(str::trim);
-    let Some(session) = session.filter(|session| !session.is_empty()) else {
-        return bad("session required");
+    let session = match crate::edge::body_text(&asked, "session") {
+        Ok("") => return bad("session required"),
+        Ok(session) => session,
+        Err(why) => return why.into_response(),
     };
     let directory = app.fleet.directory();
     let Some(member) = directory.named(session) else {

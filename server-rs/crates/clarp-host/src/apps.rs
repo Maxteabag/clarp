@@ -41,8 +41,7 @@ async fn focus(
     let Ok(Value::Object(said)) = serde_json::from_slice::<Value>(&body) else {
         return Err(bad("bad json"));
     };
-    let session = said.get("session").and_then(Value::as_str).unwrap_or("");
-    let session = session.trim();
+    let session = crate::edge::body_text(&said, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
     }

@@ -267,9 +267,9 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
             _ => return Err(bad("bad json")),
         }
     };
-    let text = |name: &str| said.get(name).and_then(Value::as_str).map_or("", str::trim);
-    let (session, voice) = (text("session"), text("voice_id"));
-    let provider = text("provider").to_lowercase();
+    let session = crate::edge::body_text(&said, "session")?;
+    let voice = crate::edge::body_text(&said, "voice_id")?;
+    let provider = crate::edge::body_text(&said, "provider")?.to_lowercase();
     if session.is_empty() || voice.is_empty() {
         return Err(bad("session and voice_id required"));
     }
@@ -487,24 +487,27 @@ async fn cartesia_preview(
 }
 
 async fn legacy_preview(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
-    let data: Value = serde_json::from_slice(&body).map_err(|_| bad("bad json"))?;
-    let voice = data["voice_id"].as_str().unwrap_or("").trim();
+    let data = crate::personas::object(&body)?;
+    let voice = crate::edge::body_text(&data, "voice_id")?;
+    let text = crate::edge::body_text(&data, "text")?;
+    let session = crate::edge::body_text(&data, "session")?;
     if voice.is_empty() {
         return Err(bad("voice_id required"));
     }
-    let text = data["text"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Hi there, this is what I sound like.")
-        .trim();
-    let owners = app.mouth.owners();
-    let default =
-        owner::text_at(&owners, &["server", "default_session"]).unwrap_or_else(|| "claude".into());
-    let session = data["session"]
-        .as_str()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&default);
+    let text = if text.is_empty() {
+        "Hi there, this is what I sound like."
+    } else {
+        text
+    };
+    let default;
+    let session = if session.is_empty() {
+        let owners = app.mouth.owners();
+        default = owner::text_at(&owners, &["server", "default_session"])
+            .unwrap_or_else(|| "claude".into());
+        &default
+    } else {
+        session
+    };
     let name = app
         .mouth
         .legacy_preview(session, voice, clarp_kernel::python::first(text, 200))

@@ -564,6 +564,21 @@ impl ApiError {
     }
 }
 
+/// A JSON body field read as text, as in the Python Host's R146 reader.
+pub(crate) fn body_text<'a>(
+    body: &'a serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<&'a str, ApiError> {
+    match body.get(field).filter(|value| python::truthy(value)) {
+        None => Ok(""),
+        Some(Value::String(text)) => Ok(python::strip(text)),
+        Some(_) => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("{field} must be text"),
+        )),
+    }
+}
+
 impl From<Unavailable> for ApiError {
     fn from(unavailable: Unavailable) -> Self {
         Self::new(StatusCode::SERVICE_UNAVAILABLE, unavailable.0)
@@ -2958,12 +2973,21 @@ async fn repair_slot(
 async fn select(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
-    Json(request): Json<SessionRequest>,
+    body: axum::body::Bytes,
 ) -> Result<Json<SelectResponse>, ApiError> {
-    match app.fleet.select(request.session.clone()).await? {
+    let data = crate::personas::object(&body)?;
+    let session = body_text(&data, "session")?;
+    if session.is_empty()
+        || !session
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad session name"));
+    }
+    match app.fleet.select(session.to_owned()).await? {
         Some(record) => {
             // The chat this client opened, for what it records next.
-            opened_by(&app, &principal, request.session.trim()).await;
+            opened_by(&app, &principal, session).await;
             // The user turned to this agent: what the herald held of it is played.
             app.mouth.opened(&record.session).await;
             Ok(Json(SelectResponse {

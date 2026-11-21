@@ -406,13 +406,16 @@ fn refuse(status: StatusCode, why: &str) -> Response {
 }
 
 /// What a request says: an object, or nothing at all, which is an empty one.
-fn said(bytes: &Bytes) -> Option<Value> {
+fn said(bytes: &Bytes) -> Option<serde_json::Map<String, Value>> {
     let said = if bytes.is_empty() {
         json!({})
     } else {
         serde_json::from_slice(bytes).unwrap_or(Value::Null)
     };
-    said.is_object().then_some(said)
+    match said {
+        Value::Object(fields) => Some(fields),
+        _ => None,
+    }
 }
 
 fn shown(settings: &Settings) -> Response {
@@ -440,7 +443,7 @@ async fn change_settings(State(app): State<App>, bytes: Bytes) -> Response {
     };
     let desk = app.heartbeat.clone();
     let changed = desk.ask(&app, |book| {
-        let changed = book.settings.changed(&said)?;
+        let changed = book.settings.changed(&Value::Object(said))?;
         book.settings = changed.clone();
         Ok::<Settings, String>(changed)
     });
@@ -457,10 +460,10 @@ async fn switch(State(app): State<App>, bytes: Bytes) -> Response {
     let Some(said) = said(&bytes) else {
         return refuse(StatusCode::BAD_REQUEST, "bad json");
     };
-    let session = said["session"]
-        .as_str()
-        .map(python::strip)
-        .unwrap_or_default();
+    let session = match edge::body_text(&said, "session") {
+        Ok(session) => session,
+        Err(why) => return why.into_response(),
+    };
     if session.is_empty() {
         return refuse(StatusCode::BAD_REQUEST, "session required");
     }

@@ -59,7 +59,7 @@ async fn register(
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
     let data = object(&body)?;
-    let token = text(&data, "token");
+    let token = crate::edge::body_text(&data, "token")?;
     if token.is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "token required"));
     }
@@ -73,8 +73,10 @@ async fn register(
     };
     // An Android phone says with its token how it can hold a ring's conversation; any other
     // registration says nothing of it, whatever it sent.
-    let (platform, provider) = (text(&data, "platform"), text(&data, "provider"));
-    let android = platform == "android" && devices::provider_for(&platform, &provider) == "fcm";
+    let platform = crate::edge::body_text(&data, "platform")?;
+    let platform = if platform.is_empty() { "ios" } else { platform };
+    let provider = text(&data, "provider");
+    let android = platform == "android" && devices::provider_for(platform, &provider) == "fcm";
     let modes = match data.get("supported_conversation_modes") {
         Some(said) if android => match clarp_kernel::rings::declared_modes(said) {
             Ok(modes) => modes.into_iter().map(str::to_string).collect(),
@@ -83,11 +85,11 @@ async fn register(
         _ => Vec::new(),
     };
     let registration = PushRegistration {
-        token,
-        session: text(&data, "session"),
-        environment: text(&data, "environment"),
-        platform,
-        base_url: text(&data, "base_url"),
+        token: token.to_owned(),
+        session: crate::edge::body_text(&data, "session")?.to_owned(),
+        environment: crate::edge::body_text(&data, "environment")?.to_owned(),
+        platform: platform.to_owned(),
+        base_url: crate::edge::body_text(&data, "base_url")?.to_owned(),
         push_grant: text(&data, "push_grant"),
         owner,
         provider,

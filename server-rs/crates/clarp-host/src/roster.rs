@@ -134,7 +134,7 @@ async fn amend(app: &App, key: &str, change: Amend) -> Result<AgentRecord, Refus
 /// What it says is marked unread either way.
 async fn mute(State(app): State<App>, body: Bytes) -> Answered {
     let asked = object(&body)?;
-    let session = text(&asked, "session");
+    let session = edge::body_text(&asked, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
     }
@@ -142,7 +142,7 @@ async fn mute(State(app): State<App>, body: Bytes) -> Answered {
         return Err(bad("muted required"));
     };
     // Muted is what is plainly true. Anything else is not.
-    let record = amend(&app, &session, Amend::Mute(*muted == Value::Bool(true))).await?;
+    let record = amend(&app, session, Amend::Mute(*muted == Value::Bool(true))).await?;
     Ok(Json(
         json!({ "ok": true, "session": session, "muted": record.muted }),
     ))
@@ -152,7 +152,7 @@ async fn mute(State(app): State<App>, body: Bytes) -> Answered {
 /// and the id stay, so everything that names the agent goes on naming it.
 async fn rename(State(app): State<App>, body: Bytes) -> Answered {
     let asked = object(&body)?;
-    let session = text(&asked, "session");
+    let session = edge::body_text(&asked, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
     }
@@ -164,7 +164,7 @@ async fn rename(State(app): State<App>, body: Bytes) -> Answered {
     let Some(name) = rules::display_name(&said) else {
         return Err(bad(rules::NAME_REFUSED));
     };
-    let record = amend(&app, &session, Amend::Rename(name)).await?;
+    let record = amend(&app, session, Amend::Rename(name)).await?;
     Ok(Json(
         json!({ "ok": true, "session": session, "name": record.persona }),
     ))
@@ -192,7 +192,7 @@ async fn archive(State(app): State<App>, body: Bytes) -> Answered {
 /// turn has to be started again for it.
 async fn narration(State(app): State<App>, body: Bytes) -> Answered {
     let asked = object(&body)?;
-    let session = text(&asked, "session");
+    let session = edge::body_text(&asked, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
     }
@@ -217,7 +217,7 @@ async fn narration(State(app): State<App>, body: Bytes) -> Answered {
             }),
         ));
     };
-    let record = amend(&app, &session, Amend::Narration(level)).await?;
+    let record = amend(&app, session, Amend::Narration(level)).await?;
     Ok(Json(json!({
         "ok": true,
         "session": session,
@@ -246,11 +246,11 @@ async fn llm(State(app): State<App>, body: Bytes) -> Answered {
 /// Sets an agent's model and effort from what a request said, and answers what the route
 /// answers. The agent's own tool for it (`clarp-admin model`) asks the same thing.
 pub(crate) async fn tune(app: &App, asked: &Fields) -> Result<Value, Refusal> {
-    let session = text(asked, "session");
+    let session = edge::body_text(asked, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
     }
-    let Some(member) = app.fleet.directory().named(&session).cloned() else {
+    let Some(member) = app.fleet.directory().named(session).cloned() else {
         return Err(no_such_agent());
     };
     let backend = member.record.backend.clone();
