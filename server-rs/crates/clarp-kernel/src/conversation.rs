@@ -283,8 +283,11 @@ pub struct TurnEnd {
     pub turn: u64,
     /// The id of the row that closed the turn.
     pub closes: String,
-    /// `completed`, `failed` or `interrupted`: the three ends a client tells apart.
+    /// How the turn ended, in the client's words.
     pub status: String,
+    /// The taking-over turn's public id, when the turn ended without an answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     pub ended_at_ms: i64,
@@ -339,13 +342,19 @@ impl TurnEnd {
             Outcome::Completed => "completed",
             Outcome::Failed { .. } => "failed",
             Outcome::Stopped { .. } | Outcome::Interrupted { .. } => "interrupted",
+            Outcome::Replaced { .. } => "replaced",
             Outcome::Withdrawn { .. } => return None,
+        };
+        let replaced_by = match &settled.outcome {
+            Outcome::Replaced { by, trace } => Some(trace.clone().unwrap_or_else(|| by.0.to_string())),
+            _ => None,
         };
         Some(Self {
             id: format!("t-{}", settled.id.0),
             turn: settled.id.0,
             closes: closes.to_string(),
             status: status.to_string(),
+            replaced_by,
             started_at_ms: settled.started_at_ms,
             ended_at_ms: settled.ended_at_ms,
             tool_count: settled.tool_count,
@@ -631,6 +640,7 @@ mod tests {
                 turn: 3,
                 closes: "r-msg_1".to_string(),
                 status: "completed".to_string(),
+                replaced_by: None,
                 started_at_ms: Some(5),
                 ended_at_ms: 30,
                 tool_count: 1,
