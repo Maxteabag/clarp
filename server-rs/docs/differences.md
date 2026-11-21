@@ -27,7 +27,9 @@ introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 19 Nov 2026 
 can reach an activity with its relay account or direct key, `agent_live_fcm`, `push_fcm` and `live_activity_fcm` (the last two with an Android service account), `hotseat_desk` on a Host that was told its owner's tool for the
 account seats and whose owner did not turn the desk off (`[hotseat] desk = false` in his file, as there), `hotseat_desk_actions` beside it on such a Host that keeps the logins itself (`--accounts select`), `accounts_hotseat`, `tts`, `tts_provider_google`, `tts_google_id_guard`, `message_audio_replay`, `tool_explanations`, `tool_explanation_sources`, `tool_explanation_stats`, `tool_explanation_setting`, `transcription` and the seven narrower speech features (`transcription_language`, `transcription_agent_language`, `transcription_agent_language_set`, `transcription_session_header`, `transcription_agent_engine`, `transcription_agent_engine_fallback`, `transcription_google_chirp`), `janitor_scheduled_tasks`, `janitor_adaptive_intervals`, `turn_failure_reason`, `location`, `calendar`, `herald`, `personalities`, `voice_humanness`, `orchestrator`, `background_process_detail`, `opencode_model_efforts`, `runtime_drain_status`, `sse_heartbeat`, `stale_work_labels`, `server_home_terminal`, `send_delivery_state`, `compaction_outcome`, `voice_profile` and `speech_outcome` (both contract 109). `oracle` is listed for the calls this Host holds (`GET /oracle/v2`,
 with what `GET /oracle/status` says of them); its calls of the first kind are left out for now by the owner's decision of 19 Nov 2026, and the status says
-so. Everything else in the Python Host's list is absent, also where a part of it is built, each for
+so. `pairing_identity` is listed at contract 114. The public identity response has its own per-source
+budget, and a limited device can revoke its own pairing. Everything else in the Python Host's list is absent,
+also where a part of it is built, each for
 one of these:
 
 | Not listed here | Why |
