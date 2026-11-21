@@ -37,6 +37,8 @@ pub mod kind {
     /// [`AGENT_EVENT`] so that a build that does not know the note passes it by, as it passes
     /// by every kind a newer build wrote, and still opens the agent.
     pub const NOTE: u16 = 4;
+    /// The queue item whose row was written in this append. Older readers skip this marker.
+    pub const QUEUE_SHOWN: u16 = 5;
     /// A [`Message`](crate::conversation::Message) to the agent.
     pub const MESSAGE: u16 = 100;
     /// A [`Reply`](crate::conversation::Reply) of the agent.
@@ -315,6 +317,7 @@ impl Recorder {
                     kind::SPOOL_CURSOR => {
                         cursor = Some(serde_json::from_slice(&item.body).map_err(corrupt)?);
                     }
+                    kind::QUEUE_SHOWN => agent.queue_item_shown(),
                     // A kind a newer build wrote: not ours to understand, not ours to refuse.
                     _ => {}
                 }
@@ -702,7 +705,10 @@ impl Batch<'_> {
                     let body = sent(stored.body, sent_at);
                     let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);
                     item.key = stored.key;
+                    self.items
+                        .push(NewItem::new(kind::QUEUE_SHOWN, now_ms, Vec::new()).in_turn(turn.0));
                     self.items.push(item);
+                    self.work.queue_item_shown();
                 }
             }
             Err(error) => {
@@ -1517,6 +1523,7 @@ mod tests {
         let reworded_seq = recorder.agent().waiting().next().unwrap().message_seq;
         assert_ne!(reworded_seq, waiting[0].message_seq);
         let before = recorder.last_seq();
+        let revision = recorder.agent().queue_revision();
         let effects = recorder.handle(ended(1), 30).unwrap();
         assert_eq!(
             effects,
@@ -1535,6 +1542,9 @@ mod tests {
             "the row stands where its turn starts, and keeps when it was sent"
         );
         assert_eq!(recorder.conversation_seq(), recorder.last_seq());
+        assert_eq!(recorder.agent().queue_revision(), revision + 2);
+        let mut recorder = open(&engine);
+        assert_eq!(recorder.agent().queue_revision(), revision + 2);
         assert_eq!(
             recorder
                 .reword(TurnId(2), |_| Ok(body("too late", "u-m2")), 31)

@@ -22,7 +22,7 @@ OUTSIDE = '        let outside = !self.agent.starts_at_once(message.admission);\
 AT_ONCE = '        self.live.is_none() && !(self.paused && admission == Admission::Background)\n'
 SENT_AT = '                    let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);\n'
 ROW = '                    let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);\n'
-KEYED = '                    item.key = stored.key;\n                    self.items.push(item);\n'
+KEYED = '                    item.key = stored.key;\n'
 # NOT PLANTED, each with its reason:
 #   that a turn accepted in the very batch that starts it is no waiting item (`if message_seq >
 #     self.recorder.last_seq`, in `Batch::enter`) as `>=`: a waiting item is always followed in its write by the
@@ -71,8 +71,10 @@ PLANTS = [
      '                    let mut item = NewItem::new(kind::MESSAGE, sent_at, body).in_turn(turn.0);\n'),
     (J, 'kernel', 'the row is in no turn', ROW,
      '                    let mut item = NewItem::new(kind::MESSAGE, now_ms, body);\n'),
-    (J, 'kernel', 'the row has no id', KEYED, '                    self.items.push(item);\n'),
-    (J, 'kernel', 'the row is not written', KEYED, '                    item.key = stored.key;\n                    let _ = item;\n'),
+    (J, 'kernel', 'the row has no id', KEYED, '                    let _ = &mut item;\n'),
+    (J, 'kernel', 'the row is not written',
+     '                    self.items.push(item);\n                    self.work.queue_item_shown();',
+     '                    let _ = item;\n                    self.work.queue_item_shown();'),
     (J, 'kernel', 'the send time under another key',
      '    message.insert(crate::conversation::SENT_AT.to_string(), at_ms.into());\n',
      '    message.insert("sent_at".to_string(), at_ms.into());\n'),
@@ -134,6 +136,11 @@ PLANTS = [
     (J, 'kernel', 'the legacy queue marker survives the start',
      '                self.recorder.shown_waiting.remove(turn);',
      '                let _ = turn;'),
+    (J, 'kernel', 'showing the row does not advance the live queue revision',
+     '                    self.work.queue_item_shown();', ''),
+    (J, 'kernel', 'replay omits the queue revision advance for shown rows',
+     '                    kind::QUEUE_SHOWN => agent.queue_item_shown(),',
+     '                    kind::QUEUE_SHOWN => {},'),
 ]
 
 if __name__ == '__main__':
