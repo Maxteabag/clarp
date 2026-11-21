@@ -110,6 +110,7 @@ def synth(text, route, sink: AudioSink, purpose, *, cfg, raw_voice, agent, emit,
             written = cartesia_synthesize_raw_pcm(
                 text=plain, voice_id=cartesia_voice, out_path=sink.out_path,
                 api_key=cfg.cartesia_key(), model=cfg.cartesia_model,
+                language=registry.cartesia_language,
                 on_chunk=sink.on_chunk, trace_id=sink.trace_id,
                 encoding=sink.delivery_fields["audio_format"]["encoding"],
                 sample_rate=sink.delivery_fields["audio_format"]["sample_rate"])
