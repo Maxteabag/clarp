@@ -59,7 +59,16 @@ def test_no_route_reads_a_body_value_with_a_string_method_unchecked():
     import pathlib
     import re
     routes = pathlib.Path(__file__).resolve().parents[2] / "server" / "lib" / "routes"
-    shape = re.compile(r'(?<!str)\((data|body|payload)\.get\([^()]*\) or ""\)\.(strip|split|lower)\(')
+    shape = re.compile(r'(?<!str)\((data|body|payload)\.get\([^()]*\) or [^()]*\)\.(strip|split|lower)\(')
     found = [f"{path.name}:{n}" for path in sorted(routes.glob("*.py"))
              for n, line in enumerate(path.read_text().splitlines(), 1) if shape.search(line)]
     assert not found, found
+
+
+@pytest.mark.parametrize("key", ["session", "environment", "base_url", "platform"])
+def test_a_device_registration_value_that_is_not_text_is_answered_400_not_register_failed(
+        running_server, key):  # noqa: F811
+    """Read before the registration's own try, so it is the caller's 400 and no traceback."""
+    base, _ctx, _srv = running_server
+    status, body = _post(base + "/devices", {"token": "a" * 64, key: 1})
+    assert (status, body.get("error")) == (400, f"{key} must be text")

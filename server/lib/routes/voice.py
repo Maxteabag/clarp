@@ -263,8 +263,8 @@ class VoiceRoutes:
         if data is None:
             return self._json_error(400, "bad json")
         voice_id = body_text(data, "voice_id")
-        text = (data.get("text") or "Hi there, this is what I sound like.").strip()
-        session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
+        text = body_text(data, "text") or "Hi there, this is what I sound like."
+        session = body_text(data, "session") or self.ctx.default_session
         if not voice_id:
             return self._json_error(400, "voice_id required")
         from lib.google_tts import GoogleIdCollision

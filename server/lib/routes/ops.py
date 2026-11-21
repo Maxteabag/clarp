@@ -194,7 +194,7 @@ class OpsRoutes:
         from lib.agent_ring_live import device_ok
         from lib.group_calls import CallError
         from lib.http_utils import principal_of
-        platform = (data.get("platform") or "ios").strip() or "ios"
+        platform = body_text(data, "platform") or "ios"
         modes: list[str] = []   # an Android phone's declaration; any other registration ignores the field
         if platform == "android" and apns.provider_for(platform, str(data.get("provider") or "")) == "fcm":
             try:
@@ -206,13 +206,17 @@ class OpsRoutes:
         who = principal_of(self)
         owner = who.principal if (who.full_scope and who.principal.startswith("device_")
                                   and device_ok(who.principal)) else ""
+        # Read before the try: a value that is not text is the caller's 400, not 'register failed'.
+        session = body_text(data, "session") or None
+        environment = body_text(data, "environment") or None
+        base_url = body_text(data, "base_url")
         try:
             apns.register_token(
                 token,
-                session=body_text(data, "session") or None,
-                environment=body_text(data, "environment") or None,
+                session=session,
+                environment=environment,
                 platform=platform,
-                base_url=body_text(data, "base_url"),
+                base_url=base_url,
                 push_grant=str(data.get("push_grant") or ""),
                 owner=owner,
                 provider=str(data.get("provider") or ""),
