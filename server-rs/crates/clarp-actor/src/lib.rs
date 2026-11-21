@@ -4058,6 +4058,7 @@ impl Actor {
             draft.revision = base + self.unstored_changes.min(REVISION_STEP - 1);
             self.shown_revision = draft.revision;
         }
+        let speak = message.speak || steering.joined_speech;
         self.live = Some(LiveTurn {
             steering,
             opening: opening_message(&message),
@@ -4069,7 +4070,7 @@ impl Actor {
             origin: message.origin,
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
-            speak: message.speak,
+            speak,
             model,
             tokens,
             total,

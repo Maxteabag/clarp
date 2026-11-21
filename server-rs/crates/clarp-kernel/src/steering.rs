@@ -18,7 +18,35 @@ pub struct Join {
 pub struct FollowUp {
     pub join: Join,
     pub message_seq: u64,
-    pub read_at_ms: Option<i64>,
+    pub stage: Stage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    Pending,
+    Read(i64),
+    Settled,
+}
+
+impl Stage {
+    pub fn read_at(self) -> Option<i64> {
+        match self {
+            Self::Read(at) => Some(at),
+            _ => None,
+        }
+    }
+}
+
+/// The first Claude Code version whose echo and result behavior the Host has recorded.
+pub fn supported_version(output: &str) -> bool {
+    let Ok(pattern) = regex::Regex::new(r"([0-9]+)\.([0-9]+)\.([0-9]+)") else {
+        return false;
+    };
+    let Some(version) = pattern.captures(output) else {
+        return false;
+    };
+    let digits = [1, 2, 3].map(|index| version[index].parse::<u32>().ok());
+    matches!(digits, [Some(major), Some(minor), Some(patch)] if [major, minor, patch] >= [2, 1, 321])
 }
 
 /// Tool IDs opened and answered by one Claude stream record.
