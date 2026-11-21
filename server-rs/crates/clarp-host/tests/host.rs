@@ -71,6 +71,8 @@ mod mcp_selection;
 mod media_manage;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
+#[path = "host/native_agent_goal.rs"]
+mod native_agent_goal;
 #[path = "host/pairing_identity.rs"]
 mod pairing_identity;
 #[path = "host/pictures.rs"]
@@ -24307,8 +24309,6 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
     };
     // What the Python Host registers and this Host has not built: refused in words.
     for (path, what) in [
-        ("/agent-goal/pause", "A goal of this kind is"),
-        ("/agent-goal/clear", "A goal of this kind is"),
         ("/oracle/calls", "The Oracle is"),
         ("/oracle/calls/close", "The Oracle is"),
         ("/oracle/v2/calls", "The Oracle is"),
@@ -24654,8 +24654,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     // A change to any of it is refused, and says that it is not built: nothing is taken
     // and then not done.
     for (path, body) in [
-        ("/agent-goal", json!({ "session": echo, "goal": "g" })),
-        ("/agent-goal/pause", json!({ "session": echo })),
         ("/server-update", json!({})),
         ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
         ("/team-nudging", json!({ "team_id": "t", "enabled": true })),

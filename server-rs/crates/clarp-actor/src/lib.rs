@@ -44,6 +44,8 @@ pub mod bookkeeping;
 use clarp_kernel::launch_refused;
 pub mod delegation;
 mod goal_ledger;
+pub mod native_goal;
+mod native_goal_reservation;
 mod orphan;
 use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
@@ -2497,7 +2499,11 @@ fn message_at(log: &dyn AgentLog, message_seq: Seq) -> Result<Message, ActorErro
         .into_iter()
         .next()
         .filter(|item| {
-            item.seq == message_seq && matches!(item.kind, kind::MESSAGE | kind::WAITING)
+            item.seq == message_seq
+                && matches!(
+                    item.kind,
+                    kind::MESSAGE | kind::WAITING | kind::NATIVE_GOAL_ATTEMPT
+                )
         })
         .ok_or_else(|| {
             ActorError::Corrupt(format!(
@@ -4149,9 +4155,10 @@ impl Actor {
             }
             _ => None,
         };
-        // A turn in which the tool makes its conversation shorter is started with the tool's
-        // own word for it and nothing else: nothing of the Host's before it or beside it.
-        let bare = matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION);
+        // Compaction takes the tool's own word alone. Native goal reservations are
+        // bare too: the lane sends no prompt, so it cannot deliver a team brief.
+        let bare = message.origin == Origin::NativeGoal
+            || matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION);
         let prompt = match recovering.filter(|_| !bare) {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
             None => message.text,

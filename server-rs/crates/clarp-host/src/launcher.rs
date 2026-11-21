@@ -94,15 +94,13 @@ impl Launcher {
         }
     }
 
-    /// The command that starts a shim for this order.
-    pub fn command(&self, order: &ShimOrder) -> Command {
-        let mut command = match self {
+    fn shim_command(&self, unit: &str) -> Command {
+        match self {
             Self::Direct { shim } => crate::child::command(shim),
             Self::SystemdScope { shim } => {
                 let mut command = crate::child::command("systemd-run");
                 // The unit's name is new every time: a second shim for a turn must be able to
                 // start, find the turn taken and leave, which is how a turn starts only once.
-                let unit = format!("clarp-turn-{}-{}", order.turn.0, ids::hex(4));
                 command
                     .args([
                         "--user",
@@ -114,13 +112,41 @@ impl Launcher {
                         // them: a prompt or a script would arrive changed.
                         "--expand-environment=no",
                         "--unit",
-                        &unit,
+                        unit,
                         "--",
                     ])
                     .arg(shim);
                 command
             }
-        };
+        }
+    }
+
+    /// The same launcher and lifetime scope used by an ordinary turn. No
+    /// per-turn identity is carried in the environment of this persistent process.
+    pub(crate) fn goal_lane_command(
+        &self,
+        socket: &Path,
+        program: &str,
+        options: &Path,
+        cwd: &Path,
+    ) -> Command {
+        let mut command = self.shim_command(&format!("clarp-codex-goal-{}", ids::hex(4)));
+        command
+            .args(["codex-goal-lane"])
+            .arg(socket)
+            .arg(program)
+            .arg(options)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        command
+    }
+
+    /// The command that starts a shim for this order.
+    pub fn command(&self, order: &ShimOrder) -> Command {
+        let mut command =
+            self.shim_command(&format!("clarp-turn-{}-{}", order.turn.0, ids::hex(4)));
         if order.prompt_as_file {
             command.arg("--prompt-as-file");
         }
