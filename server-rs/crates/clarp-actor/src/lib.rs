@@ -2924,7 +2924,7 @@ impl Actor {
         // Show this turn for good if it cannot leave a note at acceptance, even if
         // a later key or backend change allows notes from new turns.
         let marks = Marks {
-            coordination: if self.profile.hides_coordination {
+            coordination: if self.profile.hides_coordination || marks.user_word {
                 marks.coordination.clone()
             } else {
                 None
@@ -3039,6 +3039,9 @@ impl Actor {
         )?;
         let mut out = Outputs::default();
         if accepted.duplicate {
+            if marks.user_word && marks.coordination.is_some() {
+                out.changed.conversation = self.reveal_relay_retry(message, now_ms)?;
+            }
             let sent = Sent {
                 message_seq: accepted.message_seq,
                 turn: None,
@@ -3079,6 +3082,39 @@ impl Actor {
             queue: self.queue_state(),
         };
         Ok((sent, out))
+    }
+
+    fn reveal_relay_retry(&mut self, message: &Message, now_ms: i64) -> Result<bool, ActorError> {
+        let Some(row) = self.recorder.log().find(&message.id)? else {
+            return Ok(false);
+        };
+        let Some(turn) = row
+            .turn
+            .filter(|_| matches!(row.kind, kind::MESSAGE | kind::WAITING))
+        else {
+            return Ok(false);
+        };
+        let earlier = message_at(self.recorder.log(), row.seq)?;
+        if earlier.trace_id != message.trace_id
+            || earlier.text != message.text
+            || trace_owner_of(&earlier) != trace_owner_of(message)
+        {
+            return Ok(false);
+        }
+        let first = (row.kind == kind::MESSAGE).then_some(row.seq);
+        let mut batch = self.recorder.batch();
+        let revealed = conversation::loosen_from(&mut batch, TurnId(turn), first, now_ms)?;
+        if revealed {
+            batch.commit()?;
+            self.unstored_changes = 0;
+            if self.recorder.agent().live().map(Turn::id) == Some(TurnId(turn)) {
+                self.shown_events.extend(
+                    self.shown
+                        .set_turn_audience(clarp_kernel::coordination::USER, now_ms),
+                );
+            }
+        }
+        Ok(revealed)
     }
 
     /// Takes over the conversation an agent had on another Host: its rows as that Host served

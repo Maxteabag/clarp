@@ -65,6 +65,11 @@ if text.startswith("add-"):
     raise SystemExit(0)
 
 mode = text.removeprefix("case-")
+if mode == "desk":
+    (root / "desk-token").write_text(os.environ["CLARP_PROVIDER_TURN"])
+    release("release-desk")
+    answer("desk-finished", first)
+    raise SystemExit(0)
 tool = "tool-" + mode
 start(tool, "Task" if mode == "task" else "Bash")
 if mode == "task":
@@ -132,7 +137,10 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         ("CLARP_MUSE_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_OPENCODE_PROGRAM", nowhere.to_str().unwrap()),
     ];
-    let mut host = place.start_in("", &[], &world);
+    let owners = place.root.join("owner.toml");
+    std::fs::write(&owners, "[agents]\nfront_desk_sessions = ['desk']\n").unwrap();
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let mut host = place.start_in("", &args, &world);
     let subscribe = |host: &Host| {
         let heard = host.listen();
         wait_for("the event stream", || {
@@ -160,7 +168,8 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
     };
 
     for mode in [
-        "race", "task", "double", "unread", "stop", "restart", "mixed", "large", "ledger",
+        "race", "task", "double", "unread", "stop", "restart", "mixed", "relayed", "large",
+        "ledger",
     ] {
         let session = format!("steer-{mode}");
         let made = host.post(
@@ -170,8 +179,19 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             }),
         );
         assert_eq!(made["session"], session);
+        let relay_token = if mode == "relayed" {
+            host.post(
+                "/agents",
+                json!({"name":"Desk","session":"desk","backend":"claude"}),
+            );
+            host.send("desk", "case-desk", "desk-owner");
+            await_file("desk-token");
+            Some(std::fs::read_to_string(place.root.join("desk-token")).unwrap())
+        } else {
+            None
+        };
         let case = format!("case-{mode}");
-        let first = if mode == "mixed" {
+        let first = if matches!(mode, "mixed" | "relayed") {
             host.post(
                 "/send",
                 json!({
@@ -188,7 +208,15 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         wait_for("the tool in the live projection", || {
             host.state(&session) == "tool"
         });
-        let hidden = (mode == "mixed").then(|| {
+        let hidden = matches!(mode, "mixed" | "relayed").then(|| {
+            let filtered = host.get(&format!("/log?session={session}&coordination=hide"));
+            assert!(
+                !filtered["turns"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["id"] == "u-first")
+            );
             let page = host.get(&format!("/log?session={session}"));
             let first = page["turns"]
                 .as_array()
@@ -215,7 +243,25 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             } else {
                 id.clone()
             };
-            let sent = host.send(&session, &text, &id);
+            let sent = if let Some(token) = &relay_token {
+                let body = json!({"session":session,"text":text,"client_msg_id":id});
+                let reply = fetch(
+                    &host,
+                    &host.token,
+                    "POST",
+                    "/send",
+                    &[
+                        ("Content-Type", "application/json"),
+                        ("X-Clarp-Turn", token),
+                    ],
+                    body.to_string().as_bytes(),
+                );
+                assert_eq!(reply.status, 200);
+                mark("release-desk");
+                serde_json::from_slice(&reply.body).unwrap()
+            } else {
+                host.send(&session, &text, &id)
+            };
             assert_eq!(sent["queued"], true, "{sent}");
             traces.push(sent["trace_id"].clone());
             if mode == "large" {
@@ -268,7 +314,7 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         } else {
             if matches!(mode, "restart" | "ledger") {
                 host.kill();
-                host = place.start_in("", &[], &world);
+                host = place.start_in("", &args, &world);
                 heard = subscribe(&host);
                 assert_eq!(ids(&host, &session), ["u-first"]);
             }
@@ -308,7 +354,9 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
                 wait_for("the live audience to include the user", || {
                     host.get(&format!("/live?session={session}"))["turn"]["audience"] == "user"
                 });
-                let delta = host.get(&format!("/log?session={session}&after_revision={cursor}"));
+                let delta = host.get(&format!(
+                    "/log?session={session}&after_revision={cursor}&coordination=hide"
+                ));
                 let prior = delta["turns"]
                     .as_array()
                     .unwrap()
@@ -318,6 +366,17 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
                 assert_eq!(prior["audience"], "user");
                 assert_eq!(&prior["sender_agent_id"], sender);
                 assert_eq!(prior["origin"], "agent");
+                if relay_token.is_some() {
+                    let relay = delta["turns"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|row| row["id"] == "u-add-relayed-0")
+                        .unwrap();
+                    assert_eq!(relay["origin"], "agent");
+                    assert_eq!(relay["sender_name"], "Desk");
+                    assert_eq!(relay["audience"], "user");
+                }
             }
             mark(&format!("answer-{mode}"));
             collect_answer(&host, &session, &format!("joined-{mode}"));

@@ -241,6 +241,17 @@ pub fn coordination_key(turn: u64) -> String {
     format!("coordination-{turn}")
 }
 
+/// The mark of a turn that also carries the user's word.
+pub fn mixed_coordination_key(turn: u64) -> String {
+    format!("coordination-mixed-{turn}")
+}
+
+pub fn mixed_turn(turn: u64, at: i64) -> NewItem {
+    NewItem::new(kind::MIXED_TURN, at, Vec::new())
+        .in_turn(turn)
+        .keyed(mixed_coordination_key(turn))
+}
+
 /// The key of the item that says which message a trace belongs to ([`kind::TRACE`]).
 pub fn trace_key(trace: &str) -> String {
     format!("trace-{trace}")
@@ -648,6 +659,9 @@ impl Recorder {
         batch.item(item);
         for item in with {
             batch.item(item);
+        }
+        if message.user_word && message.coordination.is_some() {
+            batch.item(mixed_turn(turn.0, now_ms));
         }
         batch
             .command(
