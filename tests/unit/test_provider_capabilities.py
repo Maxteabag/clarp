@@ -986,3 +986,17 @@ def test_discovery_probe_selection_requires_exact_registered_id(provider):
     assert row["source"]["kind"] == "static_fallback"
     assert row["models"]
     assert all(model["supported_efforts"] is None for model in row["models"])
+
+
+def test_an_agy_model_is_checked_without_copying_the_catalogue(monkeypatch):
+    """Every launch and janitor pass asks whether an agy model may be dispatched; the cached
+    catalogue is read in place, not deep-copied for each question."""
+    import copy as copy_module
+    from lib import provider_capabilities as caps
+    monkeypatch.setattr(caps, "_cache", (0, {"providers": {"agy": {
+        "source": {"kind": "cli_probe"}, "models": [{"id": "gemini-3-pro"}]}}}))
+    monkeypatch.setattr(copy_module, "deepcopy", lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError("the catalogue was copied")))
+    assert caps.is_dispatchable_agy_model("gemini-3-pro")
+    assert not caps.is_dispatchable_agy_model("gemini-9-ultra")
+    assert caps.observed_model_ids("agy") == frozenset({"gemini-3-pro"})
