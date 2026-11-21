@@ -37,6 +37,38 @@ _PLAN_INDEX: RevisionedCache[str, dict] = RevisionedCache("task_plans.index", ma
 CLAIM_SKIP_STATES = frozenset({"blocked", "attention", "not_enrolled"})
 
 
+# The plans the goal tick claims (ready, retry, waiting) are read whole every 15 s: one goal's
+# JSON can be megabytes. The rows are kept by the plan's version, at most this many bytes of
+# goal text in all, so a tick reads one version row per plan instead of the plan.
+CLAIM_ROWS_MAX_BYTES = 32 * 1024 * 1024
+_CLAIM_ROWS: RevisionedCache[str, dict] = RevisionedCache(
+    "task_plans.claim_rows", max_entries=1024, max_weight=CLAIM_ROWS_MAX_BYTES,
+    weight=lambda _key, _version, plan: len(plan["goal_json"] or ""))
+
+
+def claim_row(plan_id: str, database=None) -> dict | None:
+    """The plan's row as ``SELECT *`` gives it, as a dict (callers must not change it),
+    or None. Kept until the plan's version moves; the version is read before the row, so
+    a plan written in between is only read again next time. Inside a transaction it is
+    read and not kept."""
+    database = database if database is not None else db.conn()
+    keep = not database.in_transaction
+    row = database.execute("SELECT version FROM task_plan_versions WHERE plan_id = ?",
+                           (plan_id,)).fetchone()
+    version = None if row is None else int(row[0])
+    if keep and version is not None:
+        hit, plan = _CLAIM_ROWS.get(plan_id, version)
+        if hit:
+            return plan
+    found = database.execute("SELECT * FROM task_plans WHERE plan_id = ?", (plan_id,)).fetchone()
+    if found is None:
+        return None
+    plan = dict(found)
+    if keep and version is not None and len(plan["goal_json"] or "") <= CLAIM_ROWS_MAX_BYTES:
+        _CLAIM_ROWS.put(plan_id, version, plan)
+    return plan
+
+
 def _plan_summary(row) -> dict[str, Any]:
     """What the scheduler decides a plan by before it reads the whole plan: its status and
     enrolment, its continuation's state and lease, and the peer request it waits on (as
