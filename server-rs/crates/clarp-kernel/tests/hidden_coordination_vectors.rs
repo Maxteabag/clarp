@@ -10,7 +10,10 @@ fn coordination_choices_and_policy_follow_the_reference() {
     let choices = vectors["choices"].as_array().unwrap();
     for case in choices {
         let text = |field: &str| case[field].as_str().unwrap();
-        let global = Visibility::read(text("global_choice")).unwrap();
+        let global = case["global_choice"]
+            .as_str()
+            .and_then(Visibility::read)
+            .unwrap_or_default();
         let chat = rules::chat_choice(text("own")).unwrap();
         let mode = Mode::parse(text("mode")).unwrap().unwrap();
         assert_eq!(json!(mode.policy(global, chat)), case["policy"]);
@@ -35,7 +38,7 @@ fn coordination_choices_and_policy_follow_the_reference() {
             .unwrap_or_else(|error| json!({"error":error}));
         assert_eq!(chat, input["chat"]);
     }
-    assert_eq!(choices.len(), 18);
+    assert_eq!(choices.len(), 27);
     assert_eq!(inputs.len(), 6);
     assert_eq!(rules::reminder("ivy", Some("Boss")), vectors["reminder"]);
 }

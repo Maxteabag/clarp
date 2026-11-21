@@ -13,8 +13,8 @@ pub const MODE_ERROR: &str = "coordination must be auto, hide or show";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Visibility {
-    #[default]
     Show,
+    #[default]
     Hide,
 }
 
