@@ -21,6 +21,7 @@ itself, so that no other module of the server runs. No engine is called and no c
 from __future__ import annotations
 
 import ast
+import builtins
 import hashlib
 import json
 import pathlib
@@ -232,11 +233,18 @@ def spoken_to() -> dict:
     names = ['LANGUAGE_KEY', 'AGENT_LANGUAGES_KEY', 'AGENT_ENGINES_KEY', 'DEFAULT_LANGUAGE', '_CODE', 'selected',
              'parse_language', 'parse_map', 'parse_agent_languages', 'split_engines', 'match',
              '_map', 'agent_languages', 'agent_engines', 'engines_for', 'validate', 'validate_agent',
-             'merge_agent_engines', 'merge_agent_languages']
-    # Whose entry it is, is decided by the agent's name, persona and session, which are not
-    # read here: the settings are asked for one key.
+             'merge_agent_engines', 'merge_agent_languages', '_agent_ids_for']
+    agents = [{'agent_id': 'agent-a', 'persona': 'Koko', 'session': 'koko-8255'},
+              {'agent_id': 'agent-b', 'persona': 'Mochi', 'session': 'mochi-12ab'}]
+
+    def imports(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == '' and level == 1 and fromlist == ('agents',):
+            return types.SimpleNamespace(agents=types.SimpleNamespace(list_agents=lambda: agents))
+        return builtins.__import__(name, globals, locals, fromlist, level)
+
     language = taken(LIB / 'stt_language.py', names,
                      {'settings_store': settings, 'json': json,
+                      '__builtins__': {**vars(builtins), '__import__': imports},
                       '_for_session': lambda overrides, session: overrides.get(session)})
     codes = [None, 1, True, '', ' ', 'en', 'EN', ' no ', 'nb', 'nob', 'e', 'engl', 'e1', 'en-GB', 'en,no', 'ÉN',
              'é', '\ten\n', 'En', 'zh', ['en'], 'en ', 'n o']
@@ -273,6 +281,8 @@ def spoken_to() -> dict:
         ('{"koko":"google:chirp_3"}', 'koko'),
         ('{"koko":"google:chirp_3"}', {}),
         ('nonsense', {'b': 'deepgram:nova-3', 'a': 'google:chirp_3'}),
+        ('{"agent-a":"google:chirp_3"}', {'koko-8255': 'elevenlabs:scribe_v2'}),
+        ('{"agent-a":"google:chirp_3","koko-8255":"google:chirp_3"}', {' KOKO-8255 ': None}),
         ('{"koko":"google:chirp_3"}', {7: 'google:chirp_3'}),
     ]
     language_changes = [
@@ -288,6 +298,8 @@ def spoken_to() -> dict:
         ('{"koko":"no"}', {}),
         ('{"koko":"english","mochi":"pt"}', {'new': 'sv'}),
         ('nonsense', {'b': 'no', 'a': 'en,en'}),
+        ('{"agent-b":"en"}', {'mochi-12ab': 'pt,en'}),
+        ('{"agent-b":"en","mochi-12ab":"en"}', {'MOCHI-12AB': None}),
     ]
 
     def changed(function, raw, change, key, **more):
@@ -299,6 +311,10 @@ def spoken_to() -> dict:
         return {'value': raw, 'engines': language['engines_for']('koko')}
 
     return {
+        'agents': agents,
+        'matches': [{'agent': row, 'overrides': {'agent-a': 'no', 'koko': 'pt', 'mochi': 'sv'},
+                     'result': language['match']({'agent-a': 'no', 'koko': 'pt', 'mochi': 'sv'}, row)}
+                    for row in agents],
         'default': language['DEFAULT_LANGUAGE'],
         'keys': [language['LANGUAGE_KEY'], language['AGENT_LANGUAGES_KEY'], language['AGENT_ENGINES_KEY']],
         'codes': [{'given': code, **said(language['validate'], code)} for code in codes],
