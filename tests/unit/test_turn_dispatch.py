@@ -3080,6 +3080,8 @@ def _wait_until(predicate, timeout=3.0):
 
 
 def test_a_peer_message_to_a_busy_agent_waits_for_its_turn_instead_of_killing_it(tmp_path):
+    from lib import coordination
+    coordination.set_global("show")      # the prompt as sent (under 'hide' it carries the reminder)
     service, backends, agent_id = _process_service(tmp_path)
     service.dispatch(text="build the chip", requested_session="mike",
                      trace_id="t-work", synthesize_audio=False)
