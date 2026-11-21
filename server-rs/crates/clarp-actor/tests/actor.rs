@@ -5205,11 +5205,14 @@ fn paired_medians<const N: usize>(
     mut work: impl FnMut(&mut CostFixture, usize),
 ) -> [u128; 2] {
     let mut samples = [[0; N]; 2];
-    for round in 0..N {
-        for size in [round % 2, (round + 1) % 2] {
+    let [small, big] = &mut samples;
+    for (round, (small, big)) in small.iter_mut().zip(big.iter_mut()).enumerate() {
+        let mut pair = [(0, small), (1, big)];
+        pair.rotate_left(round % 2);
+        for (size, sample) in pair {
             let began = std::time::Instant::now();
             work(&mut fixtures[size], round);
-            samples[size][round] = began.elapsed().as_micros();
+            *sample = began.elapsed().as_micros();
         }
     }
     samples.map(|mut times| {
