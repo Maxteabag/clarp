@@ -402,5 +402,37 @@
       "tail": true,
       "answer": null
     }
+  ],
+  "look_back": [
+    {
+      "nearest": "mtttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttmm",
+      "tail": true,
+      "answer": {
+        "messages": 2,
+        "exchanges": 400,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": true
+      }
+    },
+    {
+      "nearest": "mtttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "tail": false,
+      "answer": {
+        "messages": 1,
+        "exchanges": 400,
+        "agents": [
+          {
+            "agent_id": "agent-2",
+            "name": "Boss"
+          }
+        ],
+        "capped": true
+      }
+    }
   ]
 }

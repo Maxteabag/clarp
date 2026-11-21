@@ -328,7 +328,7 @@ impl<'a> Reader<'a> {
             return Ok(None);
         }
         match item.turn.or(entry.turn()) {
-            Some(turn) => self.mark(turn),
+            Some(turn) => self.mark(turn).map(|(sender, _)| sender),
             None => Ok(None),
         }
     }
@@ -586,8 +586,14 @@ fn adjacent(
     mut cursor: Seq,
     forward: bool,
     which: Which,
+    bound_look_back: bool,
 ) -> Result<Counting, ActorError> {
     let mut counted = Counting::default();
+    let mut budget = if bound_look_back {
+        COUNT_ROW_CAP + 1
+    } else {
+        usize::MAX
+    };
     let mut size = 1;
     loop {
         let mut items = if forward {
@@ -607,19 +613,59 @@ fn adjacent(
             let Some(entry) = Entry::from_item(&item).map_err(|why| corrupt(&item, why))? else {
                 continue;
             };
-            if let Some(sender) = reader.hidden(&item, &entry)? {
+            let sender = reader.hidden(&item, &entry)?;
+            if sender.is_none() && which.keeps(&entry) {
+                return Ok(counted);
+            }
+            budget -= 1;
+            if budget == 0 {
+                counted.run.capped = true;
+                return Ok(counted);
+            }
+            if let Some(sender) = sender {
                 counted.push(&entry, item.turn.or(entry.turn()), sender);
                 if counted.run.capped {
                     return Ok(counted);
                 }
-            } else if which.keeps(&entry) {
-                return Ok(counted);
             }
         }
         if end {
             return Ok(counted);
         }
-        size = CHUNK;
+        size = CHUNK.min(budget);
+    }
+}
+
+/// On a delta or an empty tail page, find the newest visible row without walking
+/// an arbitrarily long hidden suffix. The extra row is the exclusive cut for the count.
+fn tail_boundary(
+    reader: &mut Reader<'_>,
+    floor: Seq,
+    which: Which,
+) -> Result<(Seq, bool), ActorError> {
+    let mut cursor = Seq::MAX;
+    let mut remaining = COUNT_ROW_CAP + 1;
+    let mut size = 1;
+    loop {
+        let items = reader.log.read_before(cursor, kind::ROWS, size)?;
+        let end = items.len() < size;
+        for item in items.into_iter().rev() {
+            cursor = item.seq;
+            if cursor <= floor {
+                return Ok((floor, false));
+            }
+            if reader.keeps_item(&item, which)? {
+                return Ok((cursor, false));
+            }
+            remaining -= 1;
+            if remaining == 0 {
+                return Ok((cursor, true));
+            }
+        }
+        if end {
+            return Ok((floor, false));
+        }
+        size = CHUNK.min(remaining);
     }
 }
 
@@ -632,6 +678,7 @@ fn gaps(
     span: Span,
     which: Which,
     tail: bool,
+    contiguous: bool,
 ) -> Result<Gaps, ActorError> {
     if !which.hides() {
         return Ok((HashMap::new(), None));
@@ -639,6 +686,7 @@ fn gaps(
     let mut reader = Reader::new(log);
     let mut before = HashMap::new();
     let mut saw_draft = false;
+    let mut last_stored = None;
     for row in entries {
         let position = if row.live {
             if saw_draft {
@@ -652,17 +700,26 @@ fn gaps(
             };
             item.seq
         };
-        if let Some(run) = adjacent(&mut reader, span.floor, position, false, which)?.finish() {
+        let bound = !contiguous || last_stored.is_none();
+        if let Some(run) =
+            adjacent(&mut reader, span.floor, position, false, which, bound)?.finish()
+        {
             before.insert(row.entry.id().to_owned(), run);
+        }
+        if contiguous && !row.live {
+            last_stored = Some(position);
         }
     }
     let after = if tail {
-        let (last, _) = items_before(log, (Seq::MAX, span.floor), 1, which)?;
-        let start = last.last().map_or(span.floor, |item| item.seq);
-        let mut counted = adjacent(&mut reader, span.floor, start, true, which)?;
+        let (start, cut) = match last_stored {
+            Some(position) => (position, false),
+            None => tail_boundary(&mut reader, span.floor, which)?,
+        };
+        let mut counted = adjacent(&mut reader, span.floor, start, true, which, false)?;
+        counted.run.capped |= cut;
         for draft in drafts {
             let visible = draft.versioned();
-            if let Some(sender) = reader.mark(draft.turn)? {
+            if let (Some(sender), _) = reader.mark(draft.turn)? {
                 counted.push(&visible.entry, Some(draft.turn), sender);
             } else if which.keeps(&visible.entry) {
                 counted = Counting::default();
@@ -746,7 +803,7 @@ pub(crate) fn older(
         let mut reader = Reader::new(log);
         for draft in drafts {
             let mut shown = draft.versioned();
-            shown.coordination = reader.mark(draft.turn)?;
+            (shown.coordination, _) = reader.mark(draft.turn)?;
             if which.keeps_row(&shown) {
                 live.push(shown);
             }
@@ -769,8 +826,8 @@ pub(crate) fn older(
         entries.drain(..entries.len() - limit);
         has_more = true;
     }
-    let (hidden_before, hidden_after) =
-        gaps(log, &entries, drafts, span, which, before == Seq::MAX)?;
+    let tail = before == Seq::MAX;
+    let (hidden_before, hidden_after) = gaps(log, &entries, drafts, span, which, tail, true)?;
     Ok(Page {
         entries,
         latest_revision: head_revision,
@@ -885,7 +942,7 @@ pub(crate) fn after(
     // Changes in the order of their revisions: a reply being written took its revision when
     // it last grew, and what was stored since stands above it.
     entries.sort_by_key(|row| row.revision);
-    let (hidden_before, hidden_after) = gaps(log, &entries, drafts, span, which, true)?;
+    let (hidden_before, hidden_after) = gaps(log, &entries, drafts, span, which, true, false)?;
     Ok(Page {
         entries,
         latest_revision,
@@ -1059,6 +1116,100 @@ mod tests {
             }
         }
         assert_eq!(cases.len(), 7);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn gaps_limit_the_look_back_for_a_tail_or_delta() {
+        use clarp_kernel::conversation::Imported;
+        use clarp_kernel::turn::Admission;
+        use clarp_ports::log::LogEngine;
+        use serde_json::{Value, json};
+
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/hidden-coordination-vectors.json"
+        ))
+        .unwrap();
+        let cases = vectors["look_back"].as_array().unwrap();
+        for case in cases {
+            let mut log = clarp_store_mem::MemEngine::new()
+                .open(
+                    std::path::Path::new("/agents/recipient"),
+                    clarp_codec::standard_set("zstd").unwrap(),
+                )
+                .unwrap();
+            let tail = case["tail"].as_bool().unwrap();
+            let nearest = case["nearest"].as_str().unwrap();
+            let order = if tail {
+                nearest.to_owned()
+            } else {
+                nearest.chars().rev().collect()
+            };
+            let mut items = Vec::new();
+            for (number, symbol) in (1..).zip(order.chars()) {
+                let turn = TurnId(number);
+                let accepted = AgentEvent::Turn {
+                    turn,
+                    change: TurnEvent::Accepted {
+                        turn,
+                        message_seq: 0,
+                        origin: Origin::Agent {
+                            agent_id: "agent-2".into(),
+                        },
+                        admission: Admission::Queue,
+                        at_ms: 0,
+                        coordination: Some("agent-2".into()),
+                        user_word: Some(false),
+                    },
+                };
+                items.push(
+                    NewItem::new(kind::AGENT_EVENT, 0, serde_json::to_vec(&accepted).unwrap())
+                        .keyed(coordination_key(number)),
+                );
+                let id = format!("h-{number}");
+                let row = Imported {
+                    id: id.clone(),
+                    row: json!({"role": "assistant", "text": if symbol == 'm' { "words" } else { "" }}),
+                };
+                items.push(
+                    NewItem::new(kind::IMPORTED, 0, serde_json::to_vec(&row).unwrap())
+                        .in_turn(number)
+                        .keyed(id),
+                );
+            }
+            if !tail {
+                let row = Imported {
+                    id: "visible".into(),
+                    row: json!({"role":"user","text":"visible"}),
+                };
+                items.push(
+                    NewItem::new(kind::IMPORTED, 0, serde_json::to_vec(&row).unwrap())
+                        .keyed("visible"),
+                );
+            }
+            log.append(&items).unwrap();
+            let entries: Vec<_> = one(log.as_ref(), "visible").unwrap().into_iter().collect();
+            let (before, after) = gaps(
+                log.as_ref(),
+                &entries,
+                &[],
+                Span::default(),
+                Which::WithoutCoordination,
+                tail,
+                tail,
+            )
+            .unwrap();
+            let run = if tail {
+                after.as_ref()
+            } else {
+                before.get("visible")
+            }
+            .unwrap();
+            assert_eq!(json!(run.messages), case["answer"]["messages"], "{case}");
+            assert_eq!(json!(run.exchanges), case["answer"]["exchanges"], "{case}");
+            assert_eq!(json!(run.capped), case["answer"]["capped"], "{case}");
+        }
+        assert_eq!(cases.len(), 2);
     }
 
     #[test]

@@ -3638,8 +3638,11 @@ the roster hint. It never edits a conversation for this purpose. An explicit log
 under one choice and echoes its source. A hidden reader applies its mark check before the
 page limit and still carries hidden changes in the revision cursor. Notes remain visible.
 The gap count names the hidden turns between visible rows and the current tail, nearest
-its visible boundary, with the reference's caps of 100 messages or 400 rows. An acceptance
-made when an agent cannot leave notes stays shown after that agent changes capability.
+its visible boundary, with the reference's caps of 100 messages or 400 rows. When a
+previous visible boundary is outside the count's reach, its search stops at the row cap
+and reports a capped gap. The settings routes are for full-scope clients, and both
+writes refuse requests bearing a turn or peer header. An acceptance made when an agent
+cannot leave notes stays shown after that agent changes capability.
 
 ## 7. Stages and gates
 

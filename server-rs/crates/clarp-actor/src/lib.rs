@@ -2922,6 +2922,7 @@ impl Actor {
                 None
             },
             trace_named: marks.trace_named,
+            user_word: marks.user_word,
         };
         self.take(message, admission, Vec::new(), reservation, &marks, now_ms)
             .map(Ok)
