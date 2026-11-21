@@ -552,6 +552,7 @@ impl Recorder {
                 origin,
                 admission: Admission::Queue,
                 coordination: None,
+                user_word: false,
             },
             now_ms,
         )
@@ -1309,6 +1310,7 @@ mod tests {
             origin: Origin::User,
             admission,
             coordination: None,
+            user_word: false,
         }
     }
 
@@ -1529,6 +1531,7 @@ mod tests {
             origin,
             admission,
             coordination: None,
+            user_word: false,
         };
         let items = |r: &Recorder, key: &str| {
             let all = r.log().read_after(0, Kinds::ALL, 1_000).unwrap();
@@ -1830,6 +1833,7 @@ mod tests {
             origin: Origin::User,
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         };
         batch.command(accept, now_ms).unwrap();
         batch.commit().unwrap();
@@ -2244,6 +2248,7 @@ mod tests {
             origin: Origin::User,
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         };
         batch.command(accept, 3).unwrap();
         let stop = Command::Stop {
