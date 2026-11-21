@@ -37,10 +37,12 @@ def test_sends_during_a_compaction_wait_and_run_after_it_in_order(tmp_path):
     world._collect()
     assert world.started == []
     assert world.provider.spawned == []
-    assert _waiting(world) == ["u1", "p1", "q1", "u2"]   # durable, in order
+    # Durable, in the order taken: the user's word first, in the order sent
+    # (issue 481), then the other agents' messages in arrival order.
+    assert _waiting(world) == ["u1", "u2", "p1", "q1"]
     td.finish_compaction(world.service, world.agent)
     world.settle()
-    assert world.started == ["u1", "p1", "q1", "u2"]
+    assert world.started == ["u1", "u2", "p1", "q1"]
     assert _waiting(world) == []
 
 
