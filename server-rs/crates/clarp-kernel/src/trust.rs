@@ -271,6 +271,8 @@ pub fn failure_source(peer: &str, headers: &[(String, String)]) -> String {
 
 /// How many failed authentications one asker has before it is told to wait, in how long.
 pub const FAILURES_MOST: u32 = 20;
+/// How many public pairing identity reads a source may make in the same window.
+pub const IDENTITY_READS_MOST: u32 = 30;
 pub const FAILURES_WINDOW_S: f64 = 60.0;
 /// How many askers are remembered: a scan from many addresses cannot fill the memory.
 pub const FAILURE_SOURCES_MOST: usize = 4096;

@@ -201,6 +201,13 @@ next turn resumed Codex's thread (`CLARP_TEST_CODEX=1`, run the same way as the 
 **Pairing is there** (`clarp-host pair --url ...`, `POST /pairing/exchange`, scopes, revoke), the Python Host's
 scheme word for word.
 
+**Pairing identity** (21 Nov 2026, R172). Before spending its code a device can read this Host's id,
+name and contract at `GET /pairing/identity` without a token. The trusted request source has 30 reads a
+minute in its own budget. Pairing failures still count in the authentication budget. A device paired
+with limited access can revoke its own pairing using its token's exact device id after stripping the
+requested text. Revocation invalidates the token and uses the existing stream and call teardown.
+The pairing and device-scope vectors hold these rules to the Python Host.
+
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first (it does, since 15 Nov 17:14). Since the
