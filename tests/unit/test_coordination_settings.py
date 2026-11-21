@@ -44,6 +44,9 @@ class _Request(AgentRoutes, SettingsRoutes):
     def _json_error(self, code, message):
         self.answer = (code, {"error": message})
 
+    def _json(self, code, payload):
+        self.answer = (code, payload)
+
 
 @pytest.fixture
 def chats(tmp_path):
@@ -127,3 +130,31 @@ def test_a_setting_change_writes_nothing_to_any_conversation(chats):
     _Request({"session": "ivy", "visibility": "show"})._handle_agent_coordination()
     _Request({"session": "rex", "visibility": "default"})._handle_agent_coordination()
     assert _heads() == before and before
+
+
+@pytest.mark.parametrize("header", ["X-Clarp-Turn", "X-Clarp-Peer"])
+@pytest.mark.parametrize("body, handler", [
+    ({"coordination_visibility": "hide"}, "_handle_coordination_settings_post"),
+    ({"session": "ivy", "visibility": "hide"}, "_handle_agent_coordination"),
+])
+def test_an_agent_may_not_change_what_the_user_sees_of_coordination(chats, header, body, handler):
+    """Z1: a request with a turn token, or from a paired peer Host, would let an agent hide its own
+    coordination from the user (or the whole Host's): 403 agents_may_not, nothing written, no event."""
+    request = _Request(body)
+    request.headers = {header: "tok-or-peer"}
+    getattr(request, handler)()
+    assert request.answer == (403, {"error": "agents_may_not"})
+    assert request.ctx.stream.events == []
+    assert _rows() == {"ivy": ("show", None), "rex": ("show", None)}
+    assert coordination.global_visibility() == "show"
+
+
+@pytest.mark.parametrize("body, handler", [
+    ({"coordination_visibility": "hide"}, "_handle_coordination_settings_post"),
+    ({"session": "ivy", "visibility": "hide"}, "_handle_agent_coordination"),
+])
+def test_a_device_still_changes_it(chats, body, handler):
+    request = _Request(body)
+    request.headers = {"X-Clarp-Turn": "  "}        # an empty header names no turn
+    getattr(request, handler)()
+    assert request.answer[0] == 200 and len(request.ctx.stream.events) == 1

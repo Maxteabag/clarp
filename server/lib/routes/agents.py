@@ -73,6 +73,8 @@ class AgentRoutes:
         choice ('default' follows the Host). Answers and broadcasts the chat's effective
         visibility in the same step."""
         from lib import coordination
+        if coordination.from_an_agent(self.headers):
+            return self._json(403, {"error": "agents_may_not"})
         data = self._read_json()
         if not isinstance(data, dict):
             return self._json_error(400, "bad json")

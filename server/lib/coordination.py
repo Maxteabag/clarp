@@ -210,6 +210,14 @@ COUNT_CAP = 100
 COUNT_ROW_CAP = 400
 
 
+def from_an_agent(headers) -> bool:
+    """Whether a request comes from an agent: it carries a turn token (an agent's own turn) or
+    names a paired peer Host. Such a request may not change what the user sees of coordination
+    (POST /coordination-settings, POST /agent-coordination): an agent would hide its own
+    coordination from the user. Refused with 403 agents_may_not, as the media writes are."""
+    return bool((headers.get("X-Clarp-Turn") or "").strip() or (headers.get("X-Clarp-Peer") or "").strip())
+
+
 MODES = ("auto", "hide", "show")
 
 

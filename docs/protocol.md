@@ -466,7 +466,8 @@ the previous visible row of the chat, not of the page, so a run is counted once,
 row, however the pages fall. A tail page or a delta carries `hidden_after` (same shape) for the
 rows left out after the newest visible row. A count reads at most 100 messages (or 400 rows of
 any kind) of its run, nearest its row (`hidden_after`: nearest the newest visible row), and
-then says `capped: true`: draw it as "100+ messages between agents". `messages`, `exchanges`
+says `capped: true` when another message of the run lies beyond them: draw it as "100+
+messages between agents". A run of exactly 100 messages is not capped. `messages`, `exchanges`
 and `agents` are then what those first rows hold, not the whole run; a page never waits on
 counting a long run. `capped` is `false` on a count that holds the whole run. Hidden rows still move the revision: a delta that holds only
 hidden rows answers no rows and the new `latest_revision`. To show a hidden run, read the chat
@@ -848,7 +849,10 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   written, then an `agent-roster` event (`kind: coordination-changed`) carries the new
   effective value; the next snapshot's agent rows carry it too
   (`coordination_visibility`, the effective value, and `coordination_override`, the chat's
-  own choice or null). A change writes nothing to any conversation.
+  own choice or null). A change writes nothing to any conversation. A request that carries
+  a turn token (`X-Clarp-Turn`) or comes from a paired peer Host (`X-Clarp-Peer`) is refused
+  on both POSTs with `403 {"error": "agents_may_not"}`: an agent may not hide coordination
+  from the user.
 - `GET /agent-helper-state?session=` — `{"agent_id", "session", "role",
   "parent_agent_id", "helper_state", "helper_completed_at", "archived_at"}`
   for one agent, so a watcher can poll without the snapshot.
