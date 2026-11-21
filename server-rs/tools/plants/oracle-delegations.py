@@ -189,7 +189,7 @@ PLANTS = [
     (H, 'host', "a delegation's turn is said to the agent and not left for later", '        queue_if_busy: Some(true),', '        queue_if_busy: None,'),
     (H, 'host', "a delegation's turn is followed by a trace of the Host's own", '        trace_id: Some(admit.trace_id.clone()),', '        trace_id: None,'),
     (H, 'host', 'a turn that cannot be admitted leaves its delegation open', '            book.fail(&admit.delegation_id, refused.message(), app.clock.now_ms());\n', ''),
-    (H, 'host', 'a turn that cannot be admitted is refused as the Host\'s own failure', '            return Err(ApiError::new(refused.status(), refused.message()));', '            return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, refused.message()));'),
+    (H, 'host', 'a turn that cannot be admitted is refused as the Host\'s own failure', '                return Err(refused);', '                return Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, refused.message()));'),
     (H, 'host', 'a turn that waits is said to be under way', '    let waits = sent.queued == Some(true);', '    let waits = false;'),
     (H, 'host', "the session of the agent's tool is another's", '        tool_session.as_deref().unwrap_or(""),', '        tool_session.as_deref().map_or("", |_| "another"),'),
     (H, 'host', 'only what is still to be told is ever listed', '        let rows = if all {\n            book.recent(&owner, limit)', '        let rows = if false {\n            book.recent(&owner, limit)'),
