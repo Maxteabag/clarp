@@ -1070,8 +1070,10 @@ def start_shown_attempted() -> list[str]:
             log_exception("shownAttemptedStartFail", exc, detail=str(row["queue_id"]))
             continue
         if moved is not None:
+            # Bookkeeping only: no after_start, which would end a Stop's pause
+            # once nothing else waits. Only the user's fresh message or a
+            # resume ends a pause; a pass of this repair never does.
             started.append(str(row["queue_id"]))
-            after_start(str(row["queue_id"]), moved)
     if started:
         log("shownAttemptedStarted", " ".join(started))
     return started
