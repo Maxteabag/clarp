@@ -631,9 +631,16 @@ impl Agent {
             && self.stopping.is_none()
             && self.selected_takeover.is_none()
             && self.mailbox.iter().any(|waiting| {
-                waiting.id == turn
-                    && waiting.admission == Admission::Queue
-                    && waiting.origin.is_user()
+                if waiting.id != turn {
+                    return false;
+                }
+                match waiting.admission {
+                    Admission::Queue => waiting.origin.is_user(),
+                    Admission::Later => {
+                        waiting.user_word && matches!(waiting.origin, Origin::Agent { .. })
+                    }
+                    _ => false,
+                }
             })
             && !self.holds(turn)
             && !join.uuid.is_empty()
