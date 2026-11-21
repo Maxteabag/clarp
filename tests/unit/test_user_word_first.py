@@ -619,3 +619,62 @@ def test_an_agent_withdrawing_its_card_is_not_the_users_word():
     assert not origins.is_user_word("automation", card_answered_by="agent:desk",
                                     card_choice="withdrawn")
     assert not origins.is_user_word("automation", card_answered_by="agent", card_choice="answered")
+
+
+def test_recovery_passes_over_a_busy_agent_leave_its_rows_overtakable(tmp_path):
+    """Review: a recovery pass that defers or skips a busy agent's rows does
+    not make them taken; a later user's word still goes first."""
+    world = World(tmp_path)
+    _busy_with_peers(world)
+    td._SLOTS.drop_queued(world.agent, lambda spec: True)   # durable only, as after a restart
+    for _ in range(3):
+        world.service.recover_queued()                      # busy: deferred each time
+    assert not any(turn_queue.row_taken(turn_queue.get(c)) for c in ("p1", "p2", "p3"))
+    world.send("u1", queue=True)
+    assert _waiting(world) == ["u1", "p1", "p2", "p3"]
+    world.settle()
+    assert world.started == ["t0", "u1", "p1", "p2", "p3"]
+
+
+def test_a_claim_released_unlaunched_leaves_the_row_overtakable(tmp_path):
+    """Review: a claim that is released without a launch (recovery backing
+    off, a withdrawn send) is not a choice that sticks."""
+    world = World(tmp_path)
+    _busy_with_peers(world)
+    assert turn_queue.claim("p1") is not None
+    assert turn_queue.release_claim("p1")
+    assert not turn_queue.row_taken(turn_queue.get("p1"))
+    world.send("u1", queue=True)
+    assert _waiting(world) == ["u1", "p1", "p2", "p3"]
+
+
+def test_a_withdrawn_card_records_no_answer_and_no_delivery(tmp_path):
+    """Review lead L3, through the store: withdraw writes resolved_by 'agent'
+    and choice 'withdrawn' and wakes nobody; neither reads as the user's word."""
+    from lib import artifacts
+    World(tmp_path)
+    card = artifacts.create_decision(session="mike", title="T", question="Proceed?")
+    decision_id = card["decision"]["decision_id"]
+    artifacts.withdraw(decision_id, session="mike")
+    row = agents_db.conn().execute(
+        "SELECT resolved_by, resolved_choice FROM artifact_decisions WHERE decision_id = ?",
+        (decision_id,)).fetchone()
+    assert tuple(row) == ("agent", "withdrawn")
+    assert not origins.is_user_word("automation", card_answered_by=row[0], card_choice=row[1])
+    assert decision_id not in {d["decision_id"] for d in artifacts.pending_deliveries()}
+
+
+def test_a_card_the_user_resolved_is_delivered_as_the_users_word(tmp_path):
+    """The delivery row the worker reads carries resolved_by and choice, the
+    two facts the rule reads."""
+    from lib import artifacts
+    World(tmp_path)
+    card = artifacts.create_decision(
+        session="mike", title="T", question="Which?", response_type="single_choice",
+        options=[{"id": "a", "label": "A"}, {"id": "b", "label": "B"}])
+    decision_id = card["decision"]["decision_id"]
+    artifacts.resolve(decision_id, expected_revision=1, answer={"text": "keep A"})
+    delivery = next(d for d in artifacts.pending_deliveries() if d["decision_id"] == decision_id)
+    assert (delivery["resolved_by"], delivery["choice"]) == ("user", "answered")
+    assert origins.is_user_word("automation", card_answered_by=delivery["resolved_by"],
+                                card_choice=delivery["choice"])
