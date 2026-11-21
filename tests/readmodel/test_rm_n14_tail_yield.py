@@ -5,8 +5,8 @@ BEGIN IMMEDIATE, and the writer is then given away for a moment. A tail's
 transaction begins with reading and hashing the session's rows; on a long
 conversation that alone exceeds the budget, so the tail yielded before it had
 written anything, and whoever was waiting for the writer committed in that
-gap. A foreign commit during a yield refuses the tail's publication, and the
-import after it is a full one.
+gap. A foreign commit during a yield refuses the tail's publication; the
+import after it tails from the checkpoint and frontier the store still holds.
 
 With the switch a tail's budgets count from its first write. Only WHEN the
 writer is given away changes; what the publication fence checks does not.
@@ -88,7 +88,7 @@ def test_a_foreign_commit_in_a_tails_first_yield_is_still_caught(tmp_path, backe
     """One row a batch, and another writer commits in the first gap the tail
     leaves: with the switch that gap comes after the tail's first row instead
     of before it. Either way the fence sees the foreign commit, the tail's
-    rows stand, its frontier is not published and the next import is full."""
+    rows stand and its frontier is not published."""
     with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
         ordinal = world.started(6)
         world.grow(_turn(backend, ordinal))
@@ -113,3 +113,27 @@ def test_a_foreign_commit_in_a_tails_first_yield_is_still_caught(tmp_path, backe
         world.published = True
         world.grow(_turn(backend, ordinal + 2))
         assert world.imported() == ("tail_applied", [])
+
+
+@SWITCH
+@BACKENDS
+def test_after_a_foreign_commit_the_next_import_tails_from_the_stored_pair(tmp_path, backend, switch):
+    """The refused tail wrote its rows but neither its checkpoint nor its frontier,
+    so the store holds the previous pair, consistent with each other. The next
+    import restores it (`publication_foreign_commit_yield` is restorable) and
+    tails: it re-applies the refused tail's lines and the new one, and both
+    lanes' products are equal, with no full read."""
+    with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
+        ordinal = world.started(6)
+        world.grow(_turn(backend, ordinal))
+        foreign = {**world.faults, "client_on_yield": True, "yield_at": 1}
+        report = world.actual.tick(world.tick, faults=(
+            {**foreign, "evict": True} if world.state == "evicted" else foreign))
+        assert report["yield_intervention"] == 1
+        world.full.tick(world.tick, faults={**foreign, "yield_before_seq": report["yield_seq"]})
+        world.tick += 1
+        world.published = False
+        world.grow(_turn(backend, ordinal + 1))
+        code, changed = world.imported()
+        assert code == "tail_applied", (code, changed)
+        harness.assert_product_equal(world.reference, world.candidate)
