@@ -63,8 +63,39 @@ def reference(root):
                 cartesia_one=lambda *_: {},
                 eleven_one=lambda _key, id: {'name': fetched['elevenlabs'][id]},
                 voices_in_use=lambda _: {'cartesia': {'missing'}, 'elevenlabs': {'e1'}})
-        merged.append({'case': case, 'current': current, 'fetched': fetched, 'providers': done,
+        update = dict(fetched)
+        if 'cartesia' in fetched:
+            update['_catalogue'] = {
+                'cartesia': {id: {'language': '', 'public': False, 'owner': False}
+                             for id in fetched['cartesia']},
+            }
+        if fetched:
+            update['_gone'] = {provider: [] for provider in fetched}
+        merged.append({'case': case, 'current': current, 'fetched': update, 'providers': done,
                        'result': json.loads(names.read_text()), 'same_bytes': names.read_bytes() == before})
+
+    deleted_path = root / 'deleted.json'
+    previous = {
+        'cartesia': {'missing': 'Former name', 'retired': 'Keep the old label'},
+        '_catalogue': {'cartesia': {'retired': {'language': 'no', 'public': False, 'owner': True}}},
+    }
+    update = {
+        'cartesia': {'c1': 'Current voice'},
+        '_catalogue': {'cartesia': {'c1': {'language': 'en', 'public': True, 'owner': False}}},
+        '_gone': {'cartesia': ['missing']},
+    }
+    deleted_path.write_text(json.dumps(previous), encoding='utf-8')
+    gone_lines = []
+    def missing(_key, _id):
+        raise type('Gone', (Exception,), {'status': 404})()
+    with patch.object(voice_names, 'holders', return_value=['Fixture']), \
+            patch.object(log, 'log', lambda *a: gone_lines.append(list(a)) if a[0] == 'voiceGone' else None):
+        for _ in range(2):
+            voice_names.refresh(
+                SimpleNamespace(cartesia_key=lambda: 'test', eleven_key=lambda: ''),
+                path=deleted_path, cartesia_all=lambda _: [
+                    {'id': 'c1', 'name': 'Current voice', 'language': 'en', 'is_public': True}],
+                cartesia_one=missing, voices_in_use=lambda _: {'cartesia': {'missing'}})
 
     list_path = root / 'limit.json'
     used = {f'voice{i:03}' for i in range(109)}
@@ -78,6 +109,8 @@ def reference(root):
         voice_names.refresh(cfg, path=list_path, cartesia_all=lambda _: pages,
                             cartesia_one=by_id, voices_in_use=lambda _: {'cartesia': used})
     return {'startup': startup, 'merge': merged,
+            'deleted': {'current': previous, 'fetched': update, 'result': json.loads(deleted_path.read_text()),
+                        'logged': gone_lines},
             'lookup': {'used': sorted(used), 'listed': {row['id']: row['name'] for row in pages},
                        'asked': looked_up}}
 

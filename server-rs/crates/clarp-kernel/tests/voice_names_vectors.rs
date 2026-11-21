@@ -18,10 +18,18 @@ fn voice_names_follow_the_reference_age_merge_and_lookup_rules() {
     }
     let cases = fixture["merge"].as_array().unwrap();
     for row in cases {
-        let mut current = voice_names::from_file(&row["current"]);
-        voice_names::merge(&mut current, voice_names::from_file(&row["fetched"]));
+        let mut current = voice_names::Snapshot::from_file(&row["current"]);
+        current.apply(voice_names::Snapshot::from_file(&row["fetched"]));
         assert_eq!(json!(current), row["result"], "{row}");
     }
+    let deleted = &fixture["deleted"];
+    let mut current = voice_names::Snapshot::from_file(&deleted["current"]);
+    let fetched = voice_names::Snapshot::from_file(&deleted["fetched"]);
+    let newly_gone = current.apply(fetched.clone());
+    assert_eq!(newly_gone, [(String::from("cartesia"), String::from("missing"))]);
+    assert_eq!(json!(current), deleted["result"]);
+    assert!(current.apply(fetched).is_empty());
+    assert_eq!(deleted["logged"].as_array().unwrap().len(), 1);
     let lookup = &fixture["lookup"];
     let used = serde_json::from_value(lookup["used"].clone()).unwrap();
     let listed = serde_json::from_value(lookup["listed"].clone()).unwrap();
