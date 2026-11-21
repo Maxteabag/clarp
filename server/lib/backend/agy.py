@@ -378,6 +378,23 @@ def _conversation_id_from_log(log_path: str) -> str:
     return ""
 
 
+
+def note_output(handle, event: dict) -> None:
+    """What a takeover judges (issue 491, part B): every line agy has printed,
+    and whether any was output: answer text (an ``agent_response`` step with a
+    text delta) or a tool step. The init, a user step and a checkpoint are not."""
+    if handle is None:
+        return
+    handle.lines_read = int(getattr(handle, "lines_read", 0)) + 1
+    if event.get("event") != "step_update" or not isinstance(event.get("step_update"), dict):
+        return
+    update = event["step_update"]
+    step_type = str(update.get("step_type") or "")
+    if step_type == "tool" or (step_type == "agent_response"
+                               and str(update.get("text_delta") or "").strip()):
+        handle.output_seen = True
+
+
 def _turn_evidence_scope(agent_id: str, trace_id: str) -> dict[str, Any]:
     computer_id = server_identity.get_server_info()["server_id"]
     row = None
@@ -749,8 +766,17 @@ class AgyBackend(StreamJsonBackend):
         effort: str = "",
         run_if_owned: Optional[Callable[[Callable[[], None]], bool]] = None,
         isolated: bool = False,
+        takeover: Optional[dict] = None,
     ) -> TurnHandle:
-        """Spawn one AGY turn and normalize its NDJSON stream asynchronously."""
+        """Spawn one AGY turn and normalize its NDJSON stream asynchronously.
+
+        ``takeover`` (issue 491, part B): this turn takes over one that was
+        ended before it printed anything and before its message reached the
+        conversation. The same conversation is resumed and given BOTH messages
+        as one ``--print`` input, message 1 first (the recorded seeded resume:
+        one answer covering both, each message once)."""
+        if takeover:
+            text = f"{takeover.get('first') or ''}\n\n{text}"
         agy_bin = self.required_binary
         if shutil.which(agy_bin) is None:
             raise CliMissing(
@@ -829,6 +855,10 @@ class AgyBackend(StreamJsonBackend):
                 pass
             raise
         handle = make_handle(proc)
+        # A takeover may judge this turn (issue 491, part B): the drain tells
+        # it what agy has printed; the process group lets it freeze.
+        handle.takeover_capable = bool(runtime_agent_id) and handle.process_group is not None
+        handle.takeover_of = bool(takeover)
         self.register_handle(runtime_agent_id, handle)
         self.start_drain(
             handle, self._drain_stream,
@@ -872,6 +902,7 @@ class AgyBackend(StreamJsonBackend):
                         continue  # bounded stdout noise is only terminal if no result
                     if not isinstance(event, dict):
                         continue
+                    note_output(handle, event)
                     revision += 1
                     try:
                         if not run_if_owned(lambda: self._handle_event(

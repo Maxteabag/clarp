@@ -1,8 +1,10 @@
 """A turn that has produced nothing, taken over by the user's next message (issue 491, part B).
 
-Only for a backend with its own recording of the steps below: Claude today. Codex runs on
-one app-server that serves every Codex agent, which may not be frozen; its follow-up is
-steered instead. Every other backend waits for its own recording; their follow-up waits
+Only for a backend with its own recording of the steps below: Claude, and agy (one recorded
+trial of a seeded resume, so a guard: take over only while message 1 is not yet in the
+conversation's transcript, judged while the turn is frozen; ``agy_plan``). Codex runs on one
+app-server that serves every Codex agent, which may not be frozen; its follow-up is steered
+instead. grok, muse, OpenCode and DeepSeek wait for their own recordings; their follow-up waits
 (part A).
 
 The order is FREEZE, JUDGE, END, never "judge, then signal" (recording case 5: a SIGTERM to
@@ -39,6 +41,8 @@ from .log import log, log_exception
 
 # The resume pair (--resume-session-at / --resume-drops-turn) exists from this version on.
 MIN_CLAUDE_VERSION = (2, 1, 223)
+# Antigravity: the version of the one recorded seeded resume after a pre-stdout kill.
+MIN_AGY_VERSION = (1, 5, 13)
 # How long the drain may take to read what the frozen CLI had printed.
 DRAIN_BOUND_S = 0.5
 _DRAIN_POLL_S = 0.02
@@ -62,6 +66,31 @@ def claude_version_ok(executable: str) -> bool:
     """The installed Claude Code knows the resume pair. Unknown: no (the follow-up waits)."""
     version = _cli_version(executable)
     return version is not None and version >= MIN_CLAUDE_VERSION
+
+
+def agy_version_ok(executable: str) -> bool:
+    """The installed agy is at least the recorded one. Unknown: no (the follow-up waits)."""
+    version = _cli_version(executable)
+    return version is not None and version >= MIN_AGY_VERSION
+
+
+def agy_plan(transcript: pathlib.Path | None, first_text: str) -> dict | None:
+    """agy's judge (one recorded trial, so a guard makes it enough): take over ONLY when
+    the conversation's transcript can be read and message 1 is NOT in it, as recorded after
+    a pre-stdout hold and kill. Message 1 there, or no readable transcript: None."""
+    if transcript is None or not first_text.strip():
+        return None
+    from . import agy_transcript
+    try:
+        turns = agy_transcript.parse_turns(pathlib.Path(transcript))
+    except Exception as exc:  # noqa: BLE001 - unreadable: no takeover
+        log_exception("takeoverAgyTranscriptFail", exc, detail=str(transcript))
+        return None
+    words = first_text.strip()
+    if any(turn.get("role") == "user" and words in str(turn.get("text") or "")
+           for turn in turns):
+        return None
+    return {"first": first_text}
 
 
 # --- the durable record ------------------------------------------------------------------
