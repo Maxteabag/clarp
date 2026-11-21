@@ -428,6 +428,10 @@ impl Agent {
         self.queue_revision
     }
 
+    pub(crate) fn queue_item_shown(&mut self) {
+        self.queue_revision += 1;
+    }
+
     /// Whether the live turn came through the queue: it had to wait, or it was left for later.
     pub fn live_from_queue(&self) -> bool {
         self.live.is_some() && self.live_from_queue

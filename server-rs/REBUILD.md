@@ -3483,6 +3483,8 @@ withdrawal adds `queue_change: deleted`. The PWA keeps an optimistic send marked
 `queued: true` reply, and drops its bubble when the deletion event arrives.
 Here the launch of a new turn follows the append that starts it and records its row, even when the CLI has
 yet to report its session. There is no separately claimed or started item for recovery to make visible.
+The start and the row becoming visible each advance the queue revision. The visibility marker is in the
+same append as the row, so replay recovers both advances and older rows do not acquire a new one.
 Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversation_when_its_turn_starts`,
 `a_message_to_a_parked_or_a_stopping_turn_enters_when_its_own_turn_starts`,
 `a_message_an_older_build_put_into_the_conversation_while_it_waited_stays_there`), the actor's, the Host's test
