@@ -687,6 +687,8 @@ fn what_was_written_after_a_time_is_read_from_the_revision_the_conversation_had_
 
 #[test]
 fn a_takeover_reads_every_record_at_the_fence_before_it_consumes_the_hold() {
+    use std::io::Write;
+
     let block = |kind| {
         Line::Out(
             json!({
@@ -735,6 +737,14 @@ fn a_takeover_reads_every_record_at_the_fence_before_it_consumes_the_hold() {
         );
         assert!(!actor.takeover_quiet(&offer, after - 1).unwrap());
         assert!(!actor.takeover_quiet(&offer, after + 1).unwrap());
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&spool)
+            .unwrap()
+            .write_all(b"{\"t\":42,\"s\":\"out")
+            .unwrap();
+        let with_half_line = std::fs::metadata(&spool).unwrap().len();
+        assert!(!actor.takeover_quiet(&offer, with_half_line).unwrap());
 
         actor.stop("user", world.tick()).unwrap();
         assert!(!actor.takeover_quiet(&offer, after).unwrap());

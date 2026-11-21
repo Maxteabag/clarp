@@ -197,6 +197,15 @@ pub fn claude_with_children(transcript: &str, children: &Children) -> Vec<Value>
         if !cells.is_empty() {
             row["display_cells"] = Value::Array(cells);
         }
+        if role == "user" && cards.is_empty() {
+            let parts: Vec<_> = said
+                .into_iter()
+                .filter(|part| !python::strip(part).is_empty())
+                .collect();
+            if parts.len() >= 2 {
+                row["parts"] = json!(parts);
+            }
+        }
         turns.push(row);
     }
     for (row, col) in calls.values().copied() {
