@@ -346,7 +346,9 @@ impl TurnEnd {
             Outcome::Withdrawn { .. } => return None,
         };
         let replaced_by = match &settled.outcome {
-            Outcome::Replaced { by, trace } => Some(trace.clone().unwrap_or_else(|| by.0.to_string())),
+            Outcome::Replaced { by, trace } => {
+                Some(trace.clone().unwrap_or_else(|| by.0.to_string()))
+            }
             _ => None,
         };
         Some(Self {

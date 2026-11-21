@@ -84,7 +84,9 @@ pub enum Command {
     /// The shim: the tool process is gone, and this is how it went.
     TurnEnded { turn: TurnId, outcome: RunOutcome },
     /// Reserve the next user's turn before asking the shim whether its hold can be consumed.
-    SelectTakeover { selected: crate::takeover::Selection },
+    SelectTakeover {
+        selected: crate::takeover::Selection,
+    },
     /// The held tool was not killed for takeover. Leave the next message in the queue.
     ClearTakeover { from: TurnId },
     /// The shim durably marked the selected attempt and ended its tool.
@@ -799,23 +801,32 @@ impl Agent {
             }
             Command::SelectTakeover { selected } => {
                 if work.agent.selected_takeover.is_some()
-                    || !work.agent.can_take_over(selected.start.from, selected.into, selected.attempt)
+                    || !work.agent.can_take_over(
+                        selected.start.from,
+                        selected.into,
+                        selected.attempt,
+                    )
                 {
                     return Err(Refusal::TakeoverStale);
                 }
                 work.record(AgentEvent::TakeoverSelected { selected });
             }
             Command::ClearTakeover { from } => {
-                if work.agent.selected_takeover.as_ref().is_some_and(|selected| {
-                    selected.start.from == from
-                }) {
+                if work
+                    .agent
+                    .selected_takeover
+                    .as_ref()
+                    .is_some_and(|selected| selected.start.from == from)
+                {
                     work.record(AgentEvent::TakeoverCleared { from });
                 }
             }
             Command::FinishTakeover { from } => {
                 let Some(selected) = work.agent.selected_takeover.clone().filter(|selected| {
                     selected.start.from == from
-                        && work.agent.can_take_over(from, selected.into, selected.attempt)
+                        && work
+                            .agent
+                            .can_take_over(from, selected.into, selected.attempt)
                 }) else {
                     return Err(Refusal::TakeoverStale);
                 };
@@ -1041,9 +1052,11 @@ impl Agent {
                 self.selected_takeover = Some(selected.clone());
             }
             AgentEvent::TakeoverCleared { from } => {
-                if self.selected_takeover.as_ref().is_some_and(|selected| {
-                    selected.start.from == *from
-                }) {
+                if self
+                    .selected_takeover
+                    .as_ref()
+                    .is_some_and(|selected| selected.start.from == *from)
+                {
                     self.selected_takeover = None;
                 }
             }
@@ -1338,7 +1351,10 @@ impl Work {
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
             turn,
-            change: TurnEvent::Started { at_ms: now_ms, takeover },
+            change: TurnEvent::Started {
+                at_ms: now_ms,
+                takeover,
+            },
         });
         self.decision
             .effects

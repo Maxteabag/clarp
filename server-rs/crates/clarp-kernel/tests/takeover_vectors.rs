@@ -126,7 +126,12 @@ fn a_claude_takeover_preserves_the_point_before_the_old_prompt() {
     use takeover::Input;
 
     let choose = |facts, first_turn| {
-        takeover::claude_input(facts, first_turn, "first".to_string(), "prompt-id".to_string())
+        takeover::claude_input(
+            facts,
+            first_turn,
+            "first".to_string(),
+            "prompt-id".to_string(),
+        )
     };
     assert_eq!(
         choose(ClaudeFacts::default(), true),
@@ -150,7 +155,13 @@ fn a_claude_takeover_preserves_the_point_before_the_old_prompt() {
         })
     );
     assert_eq!(
-        choose(ClaudeFacts { answered: true, ..prior }, true),
+        choose(
+            ClaudeFacts {
+                answered: true,
+                ..prior
+            },
+            true
+        ),
         None
     );
 }
