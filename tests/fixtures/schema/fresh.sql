@@ -1,4 +1,4 @@
--- user_version 132
+-- user_version 133
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -281,6 +281,9 @@ CREATE INDEX idx_queued_turns_status_seq ON queued_turns(status, queue_seq);
 
 -- index idx_queued_turns_trace on queued_turns
 CREATE INDEX idx_queued_turns_trace ON queued_turns(trace_id);
+
+-- index idx_queued_turns_waiting on queued_turns
+CREATE INDEX idx_queued_turns_waiting ON queued_turns(agent_id, status, queue_seq);
 
 -- index idx_runtimes_live_backend_session on runtimes
 CREATE INDEX idx_runtimes_live_backend_session ON runtimes(backend_session_id) WHERE ended_at IS NULL;
@@ -1990,7 +1993,9 @@ CREATE TABLE queued_turns (
     prompt_admission_id TEXT NOT NULL DEFAULT '',
     allow_paused INTEGER NOT NULL DEFAULT 0,
     kind TEXT NOT NULL DEFAULT 'later',
-    shown_at INTEGER
+    shown_at INTEGER,
+    user_word INTEGER NOT NULL DEFAULT 0,
+    taken INTEGER NOT NULL DEFAULT 0
 );
 
 -- table runtimes on runtimes

@@ -16,10 +16,10 @@ def rules(file, run, changes):
     PLANTS.extend((file, run, name, old, new) for name, old, new in changes)
 
 
+# The earlier plant for multiple models sending audio now lives in provider-once.py.
 rules(KERNEL, 'vectors', [
-    ('Each model at one hosted provider is sent the audio', 'return Engine::Hosted(provider.id);', 'return Engine::Other(model);'),
-    ('Local default aliases each get the audio', 'return Engine::Own;', 'return Engine::Other(model);'),
-    ('An explicit own model id is a different engine', ' || own_id == Some(model)', ''),
+    ('Local default aliases each get the audio', '        Engine::Own\n', '        Engine::Other(name)\n'),
+    ('An explicit own model id is a different engine', 'engine_order::is_own(name, own_id)', 'engine_order::is_own(name, own_id.filter(|_| false))'),
 ])
 rules('clarp-kernel/src/languages.rs', 'vectors', [
     ('Norwegian Bokmal is treated as another language', '"nb" | "nn" => "no".to_string(),', '"nn" => "no".to_string(),'),
@@ -57,12 +57,11 @@ rules(KERNEL, 'vectors', [
     ('The receipt gives another reason', '"reason": "language_set", "languages": languages', '"reason": "outage", "languages": languages'),
 ])
 rules(ORDER, 'vectors', [
-    ('The route does not suppress repeated set attempts', "!language.contains(',') || seen.insert", 'true || seen.insert'),
-    ('Single-language routes also lose later entries', "!language.contains(',') || seen.insert", 'false || seen.insert'),
+    ('The route does not suppress repeated engine names', 'engine_order::distinct_engines(order, own_id)', '(order.collect(), Vec::new())'),
 ])
 rules(HOST, 'host', [
     ('An unsupported hosted set is treated as an ordinary failure', '.map_err(|_| AttemptError::LanguageSet)?', '.map_err(|why| refuse(StatusCode::INTERNAL_SERVER_ERROR, why))?'),
-    ('An earlier incompatible engine overrides the planned chain', 'Err(AttemptError::LanguageSet) if !more =>', 'Err(AttemptError::LanguageSet) =>'),
+    ('An earlier incompatible engine overrides the planned chain', 'AttemptError::LanguageSet if !more =>', 'AttemptError::LanguageSet =>'),
     ('The selected engine is taken from the original request', 'selected: &plan.selected,', 'selected: model,'),
     ('The selected hosted provider is told only English', 'chat_attempt(app, ears, target, language, listen_for, clip, false).await;\n            let heard', 'chat_attempt(app, ears, target, "en", listen_for, clip, false).await;\n            let heard'),
     ('The fallback records requested languages even for Scribe', 'language_set::receipt(plan.from, target, handed.as_deref())', 'language_set::receipt(plan.from, target, Some(language))'),

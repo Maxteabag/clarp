@@ -286,6 +286,12 @@ SHAPES_OTHERS = [
     {'name': 'X', 'operations': ['Read: a', 'Bad Label: b']}, {'name': 'X', 'title': 'T', 'input': {'title': 'from input', 'query': 'q'}},
     {'name': 'N' * 200, 'path': 'p/q.txt'}, {'name': 'Bash', 'command': 'ls', 'description': 'List files'},
     {'kind': 'command', 'summary': 'cd /srv && cat a.txt | head -5', 'name': 'Shell'},
+    {'name': 'Bash', 'description': 'Read another log'}, {'name': 'Bash', 'summary': 'Read another log'},
+    {'name': 'Bash', 'command': '  bAsH  '},
+    {'name': 'Bash', 'command': '', 'input': {'description': 'Read the fixture'}},
+    {'name': 'exec_command', 'input': {}}, {'name': 'shell', 'command': 'shell'},
+    {'kind': 'command', 'summary': 'Bash'},
+    {'kind': 'command', 'name': 'terminal', 'summary': ' Terminal '},
 ]
 
 # Words, and what kind each is.
@@ -319,6 +325,13 @@ PARAMETERISED = [
     ('Shows x.', 'Shows {id1}.', {'id1': 'x'}), ('Shows x and x.', 'Shows {id1} and x.', {'id1': 'x'}), ('Shows AB and ab.', 'Shows {id1} and ab.', {'id1': 'AB'}),
     ('Runs one test in a.py.', 'Runs one test in {path1}.', {'path1': 'a.py', 'num1': '1'}), ('Opens example.org.', 'Opens {url1_host}.', {'url1': 'https://example.org/x'}),
     ('Does it.', 7, {}), ('Reads \u00c9T\u00c9.', 'Reads {path1_name} \u00e9t\u00e9.', {'path1': 'x/\u00c9T\u00c9'}),
+    ('Reads /fixture/notes.txt for x.', 'Reads /fixture/notes.txt for {text1}.', {'text1': 'x'}),
+    ('Opens ~/fixture for x.', 'Opens ~/fixture for {text1}.', {'text1': 'x'}),
+    ('Runs sample-night-job for x.', 'Runs sample-night-job for {text1}.', {'text1': 'x'}),
+    ('Checks input.toml for x.', 'Checks input.toml for {text1}.', {'text1': 'x'}),
+    ('Waits 30 seconds for x.', 'Waits 30 seconds for {text1}.', {'text1': 'x'}),
+    ('Calls fixture_helper for x.', 'Calls fixture_helper for {text1}.', {'text1': 'x'}),
+    ('Runs a well-known check on x.', 'Runs a well-known check on {text1}.', {'text1': 'x'}),
 ]
 # The sentences of a call's parts, and the one sentence they make.
 JOINS = [[], [''], ['Lists files.'], ['Lists files.', 'Reads a file.'], ['Lists files.', 'Lists files.', 'Reads a file.'], ['  Lists files.  ', '', 'Reads a file.'],

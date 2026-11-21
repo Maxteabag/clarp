@@ -86,6 +86,22 @@ pub(crate) fn from_a_peer(headers: &HeaderMap) -> bool {
         .is_some_and(|peer| !peer.as_bytes().is_empty())
 }
 
+/// Whether the request carries a non-blank turn or paired-Host claim.
+pub(crate) fn from_an_agent(headers: &HeaderMap) -> bool {
+    [crate::turn_identity::HEADER, PEER_HEADER]
+        .into_iter()
+        .any(|name| {
+            headers.get(name).is_some_and(|value| {
+                value
+                    .as_bytes()
+                    .iter()
+                    .copied()
+                    .map(char::from)
+                    .any(|character| !character.is_whitespace())
+            })
+        })
+}
+
 /// `POST /agent-notes {session, text, note_id?}`: an agent's note to its user, from its own
 /// running turn, proven by the turn's token (`X-Clarp-Turn`).
 pub(crate) async fn agent_note(

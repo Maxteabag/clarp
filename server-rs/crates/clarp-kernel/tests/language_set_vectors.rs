@@ -1,8 +1,8 @@
-//! Python's R152 choices and wire shapes, with its duplicate attempt held as a defect.
+//! Python's R152 choices and wire shapes after R175.
 
 #![allow(clippy::unwrap_used)]
 
-use clarp_kernel::heard::{self, language_set as set};
+use clarp_kernel::heard::{self, engine_order::ChatOrder, language_set as set};
 use clarp_kernel::languages;
 use serde_json::{Value, json};
 
@@ -116,16 +116,18 @@ fn the_same_provider_or_local_default_is_attempted_only_once_for_a_set() {
         .map(str::to_string)
         .collect();
     let plan = heard::plan("", &ordinary, "", "", false);
-    // The Python Host sends to Scribe twice before Nova rejects the set.
-    assert_eq!(
-        repeated["sent"],
-        json!(["elevenlabs:scribe_v2", "elevenlabs:scribe_v2"])
-    );
-    assert_eq!(
-        plan.chat_order(repeated["language"].as_str().unwrap(), None),
-        ["elevenlabs:scribe_v2", "deepgram:nova-3"]
-    );
-    assert_eq!(plan.chat_order("en", None), words(&repeated["order"]));
+    let (kept, _) = plan.chat_order(None);
+    assert_eq!(kept, ["elevenlabs:scribe_v2", "deepgram:nova-3"]);
+    let mut pending = ChatOrder::new(kept);
+    let mut sent = Vec::new();
+    while let Some((engine, _)) = pending.attempt() {
+        let reached = engine.starts_with("elevenlabs:");
+        if reached {
+            sent.push(engine);
+        }
+        pending.failed(engine, reached);
+    }
+    assert_eq!(sent, words(&repeated["sent"]));
     let aliases = [
         "local",
         "server-default",
@@ -137,7 +139,12 @@ fn the_same_provider_or_local_default_is_attempted_only_once_for_a_set() {
     .map(str::to_string);
     let plan = heard::plan("", &aliases, "", "", false);
     assert_eq!(
-        plan.chat_order("no,en", Some("faster-whisper:small")),
-        ["local", "cartesia:ink-2", "faster-whisper:base"]
+        plan.chat_order(Some("faster-whisper:small")).0,
+        [
+            "local",
+            "cartesia:ink-2",
+            "cartesia:ink-whisper",
+            "faster-whisper:base"
+        ]
     );
 }
