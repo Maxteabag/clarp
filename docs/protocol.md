@@ -58,6 +58,17 @@ scope: a caller-selected root can contain configuration credentials, even
 though the operation is read-only. So do an agent's interactive terminal
 (`/terminal/<session>`) and `PATCH /schedules/<id>`.
 
+A limited device may `POST /paired-devices/revoke` with its own `device_id`
+(an app that finds it paired the wrong Host ends its own pairing); any other
+`device_id` answers `403 full device access required`. Its token stops working
+at once.
+
+`GET /pairing/identity` needs no token: it answers exactly `{"server_id",
+"name", "contract": {"host"}}`, so an app opening a pairing link can compare the
+link's `server_id` before it spends the one-time code. Each source may read it
+30 times a minute; more answer `429` with `Retry-After` (feature
+`pairing_identity`).
+
 Limited scope is an API permission boundary, not an agent sandbox. It still
 allows sending work to agents that run with the host user's permissions.
 
@@ -114,7 +125,9 @@ Rules:
   {"session": …}` is the only way the Host compacts an agent: it never does so
   by itself, on a timer, at a threshold or at launch. It answers at once
   (`{"ok": true, "status": "started"}`, `"already_compacting"`, or
-  `{"ok": false, "error": "<reason in words>"}`); `compacting` is true while it
+  `{"ok": false, "error": "<reason in words>"}`; 409). When it cannot start
+  at all it still answers in that shape: 503 with `"retryable": true` while
+  the runtime is unreachable, 500 otherwise; `compacting` is true while it
   runs, and a send that arrives meanwhile waits and runs after it, in order.
   When it ends, `last_compaction` is `{"outcome", "before_tokens",
   "after_tokens", "after_is_estimate", "detail", "backend", "at"}` (`at` in
@@ -361,7 +374,7 @@ Rules:
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
 - **A message that waits enters the conversation where its turn starts (feature
-  `waited_send_order`, Host contract 114, provisional).** A user row is written when the
+  `waited_send_order`, Host contract 115).** A user row is written when the
   message reaches the agent: at once for a send that starts a turn or is steered into one; for
   a send that waits (the agent is busy and cannot take it), only by the write that starts its
   own turn. Rows are never moved or re-timed: a row's place is its place for good. Such a row
@@ -540,7 +553,7 @@ Event types and payloads:
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
-| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 114, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. |
+| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 108). |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
@@ -611,7 +624,7 @@ Rules:
 - If the agent is busy, a user's send waits for the running turn (a Codex
   turn is steered instead) and a `queue-updated` event follows; so does a send
   with `queue_if_busy`. A send that waits is a queue item until its turn starts
-  and only then a `/log` row (Host contract 114, feature `waited_send_order`).
+  and only then a `/log` row (Host contract 115, feature `waited_send_order`).
   A send of another automatic origin without `queue_if_busy` still preempts the
   running turn. A message from another agent (`origin: "agent"` with a
   `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
@@ -663,7 +676,7 @@ nor `/log` (it was deleted).
 
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
 releases one. Each item is `{id, text, enqueued_at, synthesize_audio, client_msg_id,
-sent_at, kind}` (the last three from Host contract 114): `sent_at` is ISO,
+sent_at, kind}` (the last three from Host contract 115): `sent_at` is ISO,
 `kind` is `waiting` (a send that met a busy agent) or `later` (its sender asked
 it to wait). `PUT /turn-queue/<id>` (`{"text"}`) edits and `DELETE /turn-queue/<id>`
 deletes an item of either kind until its turn starts; after that both answer
@@ -857,7 +870,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 
 | Surface | Routes | Server module |
 |---|---|---|
-| Device pairing | `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
+| Device pairing | `GET /pairing/identity`, `POST /pairing/exchange`, `GET /paired-devices`, `POST /paired-devices/revoke`, `GET /devices`, `GET /server-info` | `device_pairing.py`, `server_identity.py` |
 | Push notifications | `POST /devices` (APNs token, or an Android FCM token with `"platform": "android", "provider": "fcm"`: [push-android.md](push-android.md); an FCM registration may declare `"supported_conversation_modes": ["agent_live_v1"]`, which makes the phone Live-capable for `POST /calls/live` and Live rings, feature `agent_live_fcm`: [Live calls](push-android.md#live-calls-feature-agent_live_fcm-host-contract-94)), `DELETE /devices`, `GET /devices/push-tokens` ([unregistering](push-android.md#unregistering-and-revocation)), `POST`/`DELETE /devices/live-activity` (an ActivityKit token; or `"platform": "fcm"`, the agents-working summary for an Android phone, feature `live_activity_fcm`: [agents working](push-android.md#agents-working-feature-live_activity_fcm-host-contract-95)), `GET /notification-avatars/…`, `/attention` | `apns.py`, `fcm.py`, `user_notifications.py` |
 | Harness sign-in and usage | `/backend-auth` (`?harnesses=all` lists every harness), `/backend-auth/login`, `/backend-auth/login-code`, `/backend-auth/logout`, `/backend-usage` | `backend_auth.py`, `backend_usage.py` |
 | Hotseat account status (read-only snapshot, `accounts_hotseat`) | `/hotseat/status` | `hotseat_status.py` |
@@ -1210,13 +1223,20 @@ advances. `since` is a Host time: when `next_since` is `null`, keep the answer's
 `server_now` for the next time (use `since=0` on the very first call). Every image deleted
 after `server_now` comes in a later answer; one deleted in the millisecond of the read may
 come twice. The Host keeps the record of a deleted image for good. `400` for a missing or
-negative `since` or a `limit` that is not a number. Any device that may read `GET /media`
+negative `since` or a `limit` that is not a number from 1 to 1,000. Any device that may read `GET /media`
 may read this.
 
-**Freshness.** `media-changed` (see the event table) is sent for an image published
-into a chat through `POST /media` (`change: "created"`), once per image a delete
-removed, also from the batch call (`"deleted"`), and for each favourite change that
-changed something (`"favorite"`, with `favorite`). `at` is the change's time in ms.
+**Freshness.** `media-changed` (see the event table) with `change: "created"` is sent
+once for every image added to a chat's gallery, whatever made it: published through
+`POST /media`, a podcast companion's concept image once it is saved, or an image a
+portrait generation run kept, when the run ends. `"deleted"` is sent once per image a
+delete removed, also from the batch call, and for each image a portrait generation run
+discarded, when the run ends. `"favorite"` (with `favorite`) for each favourite change that
+changed something. Each is sent after the change has committed; a save that rolls back
+sends nothing. `at` is the change's time in ms. `created` is a hint, idempotent per
+`asset_id`: a client may receive it more than once for the same image (rarely: a late write
+to a long-finished portrait run after the Host has stopped tracking that run) and must patch
+or re-read by `asset_id`, never append.
 
 **Who may.** A full device and the administrator. A limited device is refused the three
 writes with `403 full device access required`; it still reads `GET /media`, new keys

@@ -230,12 +230,14 @@ def test_codex_answers_false_to_a_steer_only_before_it_sends_anything():
     client.request = lambda method, params, *a, **k: sent.append(method)
     client._actives, client.active = {}, None
     assert client.steer("words", agent_id="agent-1") is False and sent == []
-    not_started = SimpleNamespace(handle=SimpleNamespace(is_alive=lambda: True),
+    # The stand-ins carry every _ActiveTurn field steer reads (compaction since #483).
+    not_started = SimpleNamespace(handle=SimpleNamespace(is_alive=lambda: True), compaction=False,
                                   steer_ready=SimpleNamespace(wait=lambda timeout: False), turn_id="")
     client._actives = {"agent-1": not_started}
     assert client.steer("words", agent_id="agent-1") is False and sent == []
     started = SimpleNamespace(handle=SimpleNamespace(is_alive=lambda: True), steer_ready=threading.Event(),
-                              turn_id="turn-1", thread_id="thread-1", voice=True, session="s")
+                              turn_id="turn-1", thread_id="thread-1", voice=True, session="s",
+                              compaction=False)
     started.steer_ready.set()
     client._actives = {"agent-1": started}
     assert client.steer("words", agent_id="agent-1") is True and sent == ["turn/steer"]

@@ -99,7 +99,8 @@ class Call:
                 tools=self.tools, router_backend=self.cfg.oracle_router_backend, wire=self.wire,
                 images=self.podcast["images"], history_id=self.history_id, media_dir=getattr(self.ctx, "media_dir", None),
                 memory=self.memory, provider_session=result["session_id"],
-                delegation_strategy=self.delegation_strategy, router_reuse=getattr(self.cfg, "oracle_router_reuse", False))
+                delegation_strategy=self.delegation_strategy, router_reuse=getattr(self.cfg, "oracle_router_reuse", False),
+                stream=getattr(self.ctx, "stream", None))
             self.emit({"type": "podcast.history", "conversation_id": self.history_id, "saved": True,
                        "position": self.podcast["position"]})
         else:
