@@ -42,7 +42,7 @@ fn leader_memory_only_a_leaders_turn_gets_the_values_and_can_call_its_tool() {
     std::fs::create_dir_all(cfg.join("clarp")).unwrap();
     let file = cfg.join("clarp/user-values.md");
     let seed = "# Values\n\n## Current Value Model\nUse a scratch proof.\n\n## Recent Promotions\nA held promotion.";
-    std::fs::write(&file, &seed).unwrap();
+    std::fs::write(&file, seed).unwrap();
     let fake = place.root.join("claude");
     program(
         &fake,
