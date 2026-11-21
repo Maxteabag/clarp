@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
+use clarp_kernel::takeover::{self, Input};
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -95,32 +96,67 @@ impl Backend for Claude {
         };
         option("--model", &spec.model);
         option("--effort", &spec.effort);
-        option("--append-system-prompt", &spec.identity);
-        // A session it has: continue it. None yet: start one under the name the Host chose,
-        // or, with no name given, under one of the tool's own, which its first line tells.
-        if spec
-            .backend_session
-            .as_ref()
-            .is_some_and(|session| !session.is_empty())
+        let (first, fresh) = match &spec.takeover {
+            Some(Input::ClaudeFresh { first }) => (Some(first.as_str()), true),
+            Some(Input::ClaudeResume { first, .. }) => (Some(first.as_str()), false),
+            _ => (None, false),
+        };
+        // Normal turns keep the Host's reminder after the user's text. A takeover uses
+        // exactly two user blocks, so its reminder travels with the system instructions.
+        let reminder = spec.told.as_ref().map(|told| {
+            let said = told::beside(&told.persona, &spec.session, told.spoken);
+            let said = told::in_call(said, told.call.as_deref());
+            let (opens, ends) = REMINDER;
+            format!("{opens}\n{said}\n{ends}")
+        });
+        let identity = if first.is_some() {
+            let instructions = spec
+                .identity
+                .as_deref()
+                .into_iter()
+                .chain(reminder.as_deref())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            Some(instructions).filter(|value| !value.is_empty())
+        } else {
+            spec.identity.clone()
+        };
+        option("--append-system-prompt", &identity);
+        if !fresh
+            && spec
+                .backend_session
+                .as_ref()
+                .is_some_and(|session| !session.is_empty())
         {
             option("--resume", &spec.backend_session);
         } else {
             option("--session-id", &spec.new_session);
         }
-        let mut content = vec![json!({"type": "text", "text": spec.prompt})];
-        // What the Host says with the prompt: after the user's own words, and marked as
-        // not theirs. On the Python Host a hook of Claude Code's says it, and Claude Code
-        // hands the model what a hook says between the same marks.
-        if let Some(told) = &spec.told {
-            let said = told::beside(&told.persona, &spec.session, told.spoken);
-            let said = told::in_call(said, told.call.as_deref());
-            let (opens, ends) = REMINDER;
-            content.push(json!({"type": "text", "text": format!("{opens}\n{said}\n{ends}")}));
+        if let Some(Input::ClaudeResume {
+            resume_at,
+            drops_turn,
+            ..
+        }) = &spec.takeover
+        {
+            args.extend([
+                "--resume-session-at".to_string(),
+                resume_at.clone(),
+                "--resume-drops-turn".to_string(),
+                drops_turn.clone(),
+            ]);
         }
-        let message = json!({
-            "type": "user",
-            "message": {"role": "user", "content": content},
-        });
+        let mut texts = Vec::with_capacity(2);
+        texts.extend(first);
+        texts.push(spec.prompt.as_str());
+        if first.is_none() {
+            texts.extend(reminder.as_deref());
+        }
+        let uuid = spec
+            .trace_id
+            .as_deref()
+            .and_then(takeover::prompt_uuid)
+            .unwrap_or_else(|| takeover::untraced_uuid(&spec.agent_id, spec.turn));
+        let message = takeover::claude_user_line(&uuid, &texts);
         let mut stdin = message.to_string().into_bytes();
         stdin.push(b'\n');
         Launch {
@@ -1662,6 +1698,8 @@ mod tests {
             agent_id: "a1".to_string(),
             session: "maximus".to_string(),
             turn: 1,
+            trace_id: Some("trace-one".to_string()),
+            takeover: None,
             cwd: PathBuf::from("/work"),
             prompt: "say \"hi\"\nplease".to_string(),
             backend_session: None,
@@ -1700,6 +1738,7 @@ mod tests {
             "the message is one line, whatever it contains"
         );
         let sent: Value = serde_json::from_slice(&fresh.stdin).unwrap();
+        assert_eq!(sent["uuid"], "5905c1ea-7df9-5e20-9081-547464dcda44");
         assert_eq!(sent["message"]["content"][0]["text"], "say \"hi\"\nplease");
         assert_eq!(
             sent["message"]["content"].as_array().unwrap().len(),
@@ -1776,6 +1815,59 @@ mod tests {
                 .any(|pair| pair == ["--session-id", "conv-1"]),
             "a first turn starts the session under the name the Host chose"
         );
+        for (plan, expected) in [
+            (
+                Input::ClaudeResume {
+                    first: "the first message".to_string(),
+                    resume_at: "previous-uuid".to_string(),
+                    drops_turn: "first-uuid".to_string(),
+                },
+                [
+                    Some(["--resume", "sess-1"]),
+                    Some(["--resume-session-at", "previous-uuid"]),
+                    Some(["--resume-drops-turn", "first-uuid"]),
+                ],
+            ),
+            (
+                Input::ClaudeFresh {
+                    first: "the first message".to_string(),
+                },
+                [Some(["--session-id", "conv-new"]), None, None],
+            ),
+        ] {
+            let launch = Claude::new().launch(&TurnSpec {
+                backend_session: Some("sess-1".to_string()),
+                new_session: Some("conv-new".to_string()),
+                takeover: Some(plan),
+                told: Some(told::Turn {
+                    persona: "Maximus".to_string(),
+                    spoken: None,
+                    call: None,
+                }),
+                ..spec.clone()
+            });
+            for pair in expected.into_iter().flatten() {
+                assert!(launch.args.windows(2).any(|window| window == pair));
+            }
+            assert_eq!(
+                launch.args.iter().any(|arg| arg == "--resume"),
+                expected[1].is_some()
+            );
+            assert_eq!(launch.stdin.iter().filter(|byte| **byte == b'\n').count(), 1);
+            let input: Value = serde_json::from_slice(&launch.stdin).unwrap();
+            assert_eq!(
+                input["message"]["content"],
+                json!([
+                    {"type": "text", "text": "the first message"},
+                    {"type": "text", "text": spec.prompt},
+                ])
+            );
+            assert!(
+                launch.args.windows(2).any(|pair| {
+                    pair[0] == "--append-system-prompt" && pair[1].contains("<system-reminder>")
+                })
+            );
+        }
         let resumed = Claude::with_program("/opt/claude").launch(&TurnSpec {
             backend_session: Some("sess-1".to_string()),
             new_session: Some("conv-1".to_string()),
