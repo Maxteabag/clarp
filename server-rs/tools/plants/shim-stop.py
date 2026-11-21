@@ -21,7 +21,7 @@ PLANTS = [
      'let _ = kill(pid, early.signal);', 'let _ = killpg(pid, early.signal);'),
     (MAIN, 'plain', 'a stop cannot reach descendants after leader exit',
      'if !matches!(*stage, StopStage::Ready) {', 'if self.leader_exited.load(Ordering::SeqCst) || !matches!(*stage, StopStage::Ready) {'),
-    (MAIN, 'plain', 'plain Stop does nothing', '*stage = StopStage::Asked;', 'if self.before_stop.is_none() { return; } *stage = StopStage::Asked;'),
+    (MAIN, 'plain', 'plain Stop does nothing', '*stage = StopStage::Asked;\n        // A held tool', 'if self.before_stop.is_none() { return; } *stage = StopStage::Asked;\n        // A held tool'),
     (MAIN, 'plain', 'each request starts a fresh escalation',
      'if !matches!(*stage, StopStage::Ready) {', 'if matches!(*stage, StopStage::Finished | StopStage::Signalled) {'),
     (MAIN, 'plain', 'the group is killed as soon as stop is asked',
