@@ -1275,6 +1275,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         told: None,
         passed: Vec::new(),
         held: None,
+        followups: None,
         pooled: None,
         terminals: 0,
         behind_terminal: None,
@@ -1337,6 +1338,8 @@ struct Worker {
     /// The launch of an attempt that waits for an account: carried out when the pool of the
     /// tool's accounts takes the turn up.
     held: Option<ShimOrder>,
+    /// Socket requests from this agent are written in the order it accepted them.
+    followups: Option<mpsc::Sender<(PathBuf, String)>>,
     /// The turn the pool was last told of.
     pooled: Option<TurnId>,
     /// How many terminals are open on the agent's own tool.
@@ -3509,9 +3512,34 @@ impl Worker {
             } => std::thread::Builder::new()
                 .name("stop".to_string())
                 .spawn(move || launcher::stop(&socket, grace_ms)),
+            Action::Steer { socket, input } => {
+                self.write_followup(socket, input);
+                return;
+            }
         };
         if let Err(error) = spawned {
             eprintln!("clarp-host: a turn's thread could not be started: {error}");
+        }
+    }
+
+    fn write_followup(&mut self, socket: PathBuf, input: String) {
+        if self.followups.is_none() {
+            let (send, receive) = mpsc::channel::<(PathBuf, String)>();
+            if let Err(error) = std::thread::Builder::new()
+                .name("follow-up-input".to_string())
+                .spawn(move || {
+                    for (socket, input) in receive {
+                        launcher::steer(&socket, input);
+                    }
+                })
+            {
+                eprintln!("clarp-host: follow-up input thread could not be started: {error}");
+                return;
+            }
+            self.followups = Some(send);
+        }
+        if let Some(send) = &self.followups {
+            let _ = send.send((socket, input));
         }
     }
 

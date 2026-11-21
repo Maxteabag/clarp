@@ -112,6 +112,7 @@ impl World {
                     }
                     Action::Follow { turn, .. } => self.followed.push(turn.0),
                     Action::Stop { turn, .. } => self.stopped.push(turn.0),
+                    Action::Steer { .. } => panic!("the scripted tool cannot be steered"),
                 }
             }
         }

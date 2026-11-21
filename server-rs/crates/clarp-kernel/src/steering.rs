@@ -18,7 +18,7 @@ pub struct Join {
 pub struct FollowUp {
     pub join: Join,
     pub message_seq: u64,
-    pub read: bool,
+    pub read_at_ms: Option<i64>,
 }
 
 /// Tool IDs opened and answered by one Claude stream record.
@@ -99,5 +99,36 @@ impl Stream {
             self.tools.remove(id);
         }
         Observation::Other
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn only_the_live_tool_window_takes_new_input() {
+        let mut stream = Stream::default();
+        let text = json!({"type":"stream_event","event":{"content_block":{"type":"text"}}});
+        stream.observe(&text);
+        assert!(!stream.can_join());
+
+        let parent = json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"task"}]}});
+        stream.observe(&parent);
+        let child = json!({"type":"stream_event","parent_tool_use_id":"task","event":{"content_block":{"type":"tool_use","id":"child"}}});
+        stream.observe(&child);
+        let answered = |id| json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":id}]}});
+        stream.observe(&answered("child"));
+        assert!(stream.can_join(), "the foreground Task still owns the window");
+        stream.observe(&answered("task"));
+        assert!(!stream.can_join());
+
+        let echo = json!({"type":"user","isReplay":true,"uuid":"two"});
+        assert!(matches!(stream.observe(&echo), Observation::Echo("two")));
+        let result = json!({"type":"result","user_message_uuids":["one","two"]});
+        assert!(matches!(stream.observe(&result), Observation::Result { prompts, failed: false } if prompts == [json!("one"), json!("two")]));
+        stream.observe(&parent);
+        assert!(!stream.can_join(), "the first result closed the input");
     }
 }

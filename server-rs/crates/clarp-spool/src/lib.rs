@@ -32,6 +32,8 @@ pub enum ShimEvent {
     Spawned {
         pid: u32,
     },
+    /// The launch opted into streaming input until this record type.
+    InputOpen,
     SpawnFailed {
         error: String,
     },
