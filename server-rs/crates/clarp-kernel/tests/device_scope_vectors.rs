@@ -41,6 +41,15 @@ fn a_limited_device_is_refused_what_the_python_host_refuses_it() {
             let_through += 1;
         }
     }
-    assert_eq!((refused, let_through, others), (661, 319, 1960));
+    assert_eq!((refused, let_through, others), (1645, 85, 3460));
+    let projections = vectors["server_info"].as_array().unwrap();
+    assert_eq!(projections.len(), 6);
+    for case in projections {
+        assert_eq!(
+            devices::limited_server_info(case["full"].clone()),
+            case["limited"],
+            "{case}"
+        );
+    }
     assert_eq!(devices::LIMITED_REFUSAL, "full device access required");
 }
