@@ -1495,6 +1495,7 @@ impl Actor {
         };
         match &settled.outcome {
             Outcome::Completed => ("completed", None),
+            Outcome::Replaced { .. } => ("replaced", None),
             Outcome::Failed { reason, kind } => {
                 let kind = match kind.as_str() {
                     "" => failures::classify_error(reason),

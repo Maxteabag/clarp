@@ -112,7 +112,7 @@ pub fn state_kind(status: &Status) -> AgentStateKind {
             Outcome::Stopped { .. } | Outcome::Interrupted { .. } | Outcome::Failed { .. } => {
                 AgentStateKind::Interrupted
             }
-            Outcome::Withdrawn { .. } => AgentStateKind::Idle,
+            Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => AgentStateKind::Idle,
         },
     }
 }
@@ -294,7 +294,7 @@ fn ending_detail(last: &Settled, backend: &str, model: &str, end: Option<&TurnEn
             "message": reason,
             "source": "turn_failed",
         }),
-        Outcome::Completed | Outcome::Withdrawn { .. } => json!({}),
+        Outcome::Completed | Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => json!({}),
     }
 }
 
@@ -1233,6 +1233,9 @@ fn turn_end(end: &TurnEnd) -> Value {
     if end.note_count > 0 {
         summary["note_count"] = json!(end.note_count);
     }
+    if let Some(replaced_by) = &end.replaced_by {
+        summary["replaced_by"] = json!(replaced_by);
+    }
     summary
 }
 
@@ -2035,6 +2038,7 @@ mod tests {
             turn: 1,
             closes: "r-1".to_string(),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(10),
             ended_at_ms: 40,
             tool_count: 3,
@@ -2320,6 +2324,7 @@ mod tests {
             turn: 1,
             closes: "r-1".to_string(),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(1_100),
             ended_at_ms: 4_000,
             tool_count: 0,
@@ -2896,6 +2901,7 @@ mod tests {
             turn: 1,
             closes: "r-1".to_string(),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(10),
             ended_at_ms,
             tool_count: 0,

@@ -7,7 +7,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 
-use crate::python;
+use crate::{python, turn::TurnId};
+
+/// The takeover persisted on its new turn, including the exact native session to launch on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Start {
+    pub from: TurnId,
+    pub session: String,
+    pub input: Input,
+}
+
+/// The attempt chosen before asking the shim to consume its hold.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Selection {
+    pub into: TurnId,
+    pub attempt: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<String>,
+    pub start: Start,
+}
 
 /// A provider launch chosen while the first turn's tool stood still.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -160,6 +160,12 @@ pub enum Outcome {
     Interrupted {
         reason: String,
     },
+    /// A quiet turn superseded by the next user's message. Its receipt is still handed over.
+    Replaced {
+        by: TurnId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace: Option<String>,
+    },
     /// Taken back before it started.
     Withdrawn {
         by: String,
@@ -236,6 +242,8 @@ pub enum TurnEvent {
     },
     Started {
         at_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        takeover: Option<crate::takeover::Start>,
     },
     /// The tool told us which of its own sessions carries this turn.
     Bound {
@@ -457,7 +465,13 @@ impl Queued {
             account: AccountWaits::default(),
             recovering: false,
         };
-        (next, TurnEvent::Started { at_ms })
+        (
+            next,
+            TurnEvent::Started {
+                at_ms,
+                takeover: None,
+            },
+        )
     }
 
     pub fn withdraw(self, by: String, at_ms: i64) -> (Settled, TurnEvent) {
@@ -781,7 +795,7 @@ impl Turn {
             event: event.name(),
         };
         match (self, event) {
-            (Self::Queued(t), TurnEvent::Started { at_ms }) => {
+            (Self::Queued(t), TurnEvent::Started { at_ms, .. }) => {
                 Ok(Self::Starting(t.start(*at_ms).0))
             }
             (
@@ -800,9 +814,10 @@ impl Turn {
             ) => Ok(Self::Running(t.running(*at_ms).0)),
             // An ended turn is as its log says it ended: nothing is read a second time.
             (Self::Starting(t), TurnEvent::Settled { outcome, at_ms }) => match outcome {
-                Outcome::Failed { .. } | Outcome::Stopped { .. } | Outcome::Interrupted { .. } => {
-                    Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
-                }
+                Outcome::Failed { .. }
+                | Outcome::Stopped { .. }
+                | Outcome::Interrupted { .. }
+                | Outcome::Replaced { .. } => Ok(Self::Settled(t.ended(outcome.clone(), *at_ms))),
                 Outcome::Completed | Outcome::Withdrawn { .. } => Err(illegal(&Self::Starting(t))),
             },
             (Self::Running(t), TurnEvent::Bound { backend_session }) => {
@@ -815,9 +830,8 @@ impl Turn {
                 Outcome::Completed
                 | Outcome::Failed { .. }
                 | Outcome::Stopped { .. }
-                | Outcome::Interrupted { .. } => {
-                    Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
-                }
+                | Outcome::Interrupted { .. }
+                | Outcome::Replaced { .. } => Ok(Self::Settled(t.ended(outcome.clone(), *at_ms))),
                 Outcome::Withdrawn { .. } => Err(illegal(&Self::Running(t))),
             },
             (
@@ -839,7 +853,9 @@ impl Turn {
                 Outcome::Failed { .. } | Outcome::Stopped { .. } | Outcome::Interrupted { .. } => {
                     Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
                 }
-                Outcome::Completed | Outcome::Withdrawn { .. } => Err(illegal(&Self::Parked(t))),
+                Outcome::Completed | Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => {
+                    Err(illegal(&Self::Parked(t)))
+                }
             },
             (state, _) => Err(illegal(&state)),
         }
@@ -970,7 +986,7 @@ mod tests {
                 activity: Activity::Thinking,
                 at_ms: 1_400,
             },
-            TurnEvent::Started { at_ms: 1_400 },
+            TurnEvent::Started { at_ms: 1_400, takeover: None },
         ] {
             let mut wrong = waited.to_vec();
             wrong.push(illegal);
@@ -1142,7 +1158,7 @@ mod tests {
     #[test]
     fn a_log_that_makes_no_sense_is_refused() {
         let (_, accepted) = accepted();
-        let started = TurnEvent::Started { at_ms: 2 };
+        let started = TurnEvent::Started { at_ms: 2, takeover: None };
         let thinking = TurnEvent::Moved {
             activity: Activity::Thinking,
             at_ms: 3,
