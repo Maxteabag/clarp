@@ -133,11 +133,12 @@ def _arm_wait(plan, plan_id, request_id, recipient, deadline_s, point, own, read
 NOT_DELIVERED = "was not delivered"
 
 
-def abandon_wait(plan_id: str, request_id: str, error: str) -> bool:
+def abandon_wait(plan_id: str, request_id: str, error: str, *, by_host: bool = False) -> bool:
     """The Host refused the request: settle the wait truthfully, not silently.
 
     Only for a definite refusal; after a timeout or a server error the request
-    may have arrived, and the wait (with its deadline) must stay.
+    may have arrived, and the wait (with its deadline) must stay. ``by_host``:
+    the Host settles it on its own (settle_failed_waits), not the requester.
     """
     for _ in range(3):
         plan = task_plans.get(plan_id)
@@ -146,8 +147,10 @@ def abandon_wait(plan_id: str, request_id: str, error: str) -> bool:
             return False
         try:
             from . import goal_ledger, turn_identity
-            with goal_ledger.acting_as("owner", plan["agent_id"],
-                                       verified=turn_identity.caller_agent_id() == plan["agent_id"]):
+            actor = (goal_ledger.acting_as("system") if by_host else
+                     goal_ledger.acting_as("owner", plan["agent_id"],
+                                           verified=turn_identity.caller_agent_id() == plan["agent_id"]))
+            with actor:
                 task_plans._goal_mutate(plan_id, revision=plan["revision"], action="dependency", data={
                     "key": dependency_key(request_id), "outcome": "failed",
                     "evidence": f"request {request_id} {NOT_DELIVERED}: {error}"[:MAX_EVIDENCE]})
@@ -155,6 +158,50 @@ def abandon_wait(plan_id: str, request_id: str, error: str) -> bool:
         except ValueError:
             continue
     return False
+
+
+# The Host notices a queue row's failure writes (lib.turn_queue), by the reason it ended for.
+_UNRUN_NOTICES = ("launch_refused", "held_send_not_run")
+
+
+def unrun_reason(request_id: str) -> str:
+    """Why this request's queued message was never run, or "" while it may still run or has
+    run: its queue row ended ``failed`` (refused launches, a held send). The reason is the detail
+    of the Host notice that failure wrote to the recipient's chat."""
+    row = conn().execute(
+        """SELECT queue_id, status FROM queued_turns WHERE client_msg_id = ?
+            ORDER BY queue_seq DESC LIMIT 1""", (request_client_id(request_id),)).fetchone()
+    if row is None or row["status"] != "failed":
+        return ""
+    for kind in _UNRUN_NOTICES:
+        notice = conn().execute("SELECT text FROM messages WHERE message_id = ?",
+                                (f"notice:{kind}:{row['queue_id']}",)).fetchone()
+        if notice and notice["text"]:
+            parts = str(notice["text"]).split("\n\n", 1)
+            return (parts[1] if len(parts) == 2 else parts[0]).strip()
+    return "its queued message ended failed and was never run"
+
+
+def settle_failed_waits() -> int:
+    """Settle at once every open peer wait whose request ended unrun (R136), so the requester
+    hears it within one tick of the agent scheduler instead of at its deadline: the same record
+    abandon_wait writes (outcome failed, 'was not delivered', with the reason), which wakes the
+    requester's goal. A request delivered, still queued or already answered is left alone; a
+    wait already settled (its deadline passed) no longer waits on the key, so nothing is woken
+    twice. Returns how many were settled."""
+    rows = conn().execute(
+        """SELECT plan_id, json_extract(goal_json, '$.continuation.dependency_key') AS waiting
+             FROM task_plans
+            WHERE status = 'active'
+              AND json_extract(goal_json, '$.continuation.state') = 'waiting'
+              AND json_extract(goal_json, '$.continuation.dependency_key') LIKE 'peer:%'""").fetchall()
+    settled = 0
+    for row in rows:
+        request_id = str(row["waiting"])[len("peer:"):]
+        reason = unrun_reason(request_id)
+        if reason and abandon_wait(row["plan_id"], request_id, reason, by_host=True):
+            settled += 1
+    return settled
 
 
 def find_request(replier: dict, request_id: str) -> dict:
