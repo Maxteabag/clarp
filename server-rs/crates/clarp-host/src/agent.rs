@@ -3670,7 +3670,10 @@ impl Worker {
                     // before does not hold it: a goal that is being worked was resumed or made
                     // after the last Stop.
                     let woken =
-                        actor.keep_with(&kept_goal(&change), &message, Admission::Later, now)?;
+                        actor.keep_with(
+                            &kept_goal(&change), &message, Admission::Later,
+                            &clarp_actor::Marks::default(), now,
+                        )?;
                     outs.push(woken.1);
                 }
             }

@@ -170,6 +170,13 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             decision.response_type == "approval"
                 && matches!(decision.status.as_str(), "accepted" | "rejected")
         });
+        let user_word = artifact.decision.as_ref().is_some_and(|decision| {
+            clarp_kernel::user_word::is_user_word(
+                "automation",
+                &decision.resolved_by,
+                &decision.status,
+            )
+        });
         let admission = if approval {
             Admission::Queue
         } else {
@@ -187,7 +194,8 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             ..Message::default()
         };
         let told = [told];
-        outs.push(actor.keep_with(&kept(&told), &message, admission, now)?.1);
+        let marks = clarp_actor::Marks { user_word, ..Default::default() };
+        outs.push(actor.keep_with(&kept(&told), &message, admission, &marks, now)?.1);
     }
     // What a user answered to a form is left for the form's agent the way a user leaves a
     // message for an agent that is busy: it waits its turn in the queue, where its user can
@@ -208,7 +216,9 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             ..Message::default()
         };
         let told = [form];
-        let said = actor.keep_with(&kept(&told), &message, Admission::Later, now)?;
+        let said = actor.keep_with(
+            &kept(&told), &message, Admission::Later, &clarp_actor::Marks::default(), now,
+        )?;
         outs.push(said.1);
     }
     Ok(outs)

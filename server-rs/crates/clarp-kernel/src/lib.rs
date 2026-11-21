@@ -26,6 +26,7 @@ pub mod controller_actions;
 pub mod controller_narration;
 pub mod conversation;
 pub mod coordination;
+pub mod user_word;
 pub mod delivery;
 pub mod desk;
 pub mod destination;

@@ -49,6 +49,8 @@ pub enum Command {
         /// Another agent addresses this one: its id ("" for a peer Host's agent). `None`: the
         /// user's ([`TurnEvent::Accepted`]).
         coordination: Option<String>,
+        /// The Host verified a designated front desk or a card answered by its user.
+        user_word: bool,
     },
     /// Reserve a queued message for input to the live turn.
     Join { turn: TurnId, join: Join },
@@ -663,15 +665,21 @@ impl Agent {
                 origin,
                 admission,
                 coordination,
+                user_word,
             } => {
                 let turn = TurnId(work.agent.next_turn);
                 let (_, mut accepted) =
                     Queued::accept(turn, message_seq, origin, admission, now_ms);
                 if let TurnEvent::Accepted {
-                    coordination: mark, ..
+                    coordination: mark,
+                    user_word: priority,
+                    ..
                 } = &mut accepted
                 {
                     *mark = coordination;
+                    if user_word {
+                        *priority = Some(true);
+                    }
                 }
                 work.record(AgentEvent::Turn {
                     turn,
@@ -1302,7 +1310,7 @@ impl Agent {
     }
 
     fn move_turn(&mut self, turn: TurnId, change: &TurnEvent) -> Result<(), IllegalTransition> {
-        if let TurnEvent::Accepted { turn: accepted, .. } = change {
+        if let TurnEvent::Accepted { turn: accepted, user_word, .. } = change {
             if *accepted != turn || turn.0 != self.next_turn {
                 return Err(IllegalTransition {
                     turn,
@@ -1334,6 +1342,11 @@ impl Agent {
                         .iter()
                         .position(|waiting| waiting.admission != Admission::Direct)
                         .unwrap_or(self.mailbox.len());
+                    self.mailbox.insert(at, queued);
+                } else if *user_word == Some(true) {
+                    let at = crate::user_word::slot(self.mailbox.iter().map(|waiting| {
+                        waiting.user_word || waiting.admission == Admission::Direct
+                    }));
                     self.mailbox.insert(at, queued);
                 } else {
                     self.mailbox.push_back(queued);
