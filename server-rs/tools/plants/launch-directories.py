@@ -63,10 +63,12 @@ for why,a,b in [
     ('misname the matches field','"matches":matches','"rows":matches'),
     ('misname result label','"label":label','"name":label')]:
     plant(K,'vectors',why,a,b)
-protected='"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"'
+limited_reads='return !LIMITED_GETS.contains(&path)'
 for path in ("/launch-directories", "/favorite-paths"):
-    plant(D,'scope',f'open {path} to a limited device',protected,protected.replace(' | "'+path+'"',''))
-    plant(D,'scope',f'close descendants of {path}',protected,protected+' | "'+path+'/x"')
+    plant(D,'scope',f'open {path} to a limited device',limited_reads,
+          f'return path != "{path}" && !LIMITED_GETS.contains(&path)')
+    plant(D,'scope',f'open descendants of {path} to a limited device',limited_reads,
+          f'return !path.starts_with("{path}/") && !LIMITED_GETS.contains(&path)')
 for why,a,b in [
     ('keep zoxide alive past the timeout','.kill_on_drop(true)','.kill_on_drop(false)'),
     ('wait too long for zoxide','Duration::from_millis(500)','Duration::from_secs(3)'),
