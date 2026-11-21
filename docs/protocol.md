@@ -499,6 +499,12 @@ Start the same reload for an open chat when the agent's `coordination_visibility
 snapshot or an `agent-roster` event differs from what it was read under. A page read with
 `coordination=show` for one visit is never written to the cache.
 
+Live rows follow the same rule (both apps). Under an effective `hide`, a live turn whose
+`audience` is `agents` (the `/live` `turn` op) is not drawn; the chat's working line may still
+name the agent the turn works with. A live note, decision card or artifact is always drawn, and
+a turn whose `audience` is `user` is drawn as before. When a `turn` op changes an open turn's
+`audience` to `user` (the user stepped into it), draw it from then on.
+
 **What a chat list shows of it (feature `coordination_working_state`).** The snapshot follows
 the same rule as `/log` with `coordination=auto`: in a chat whose effective
 `coordination_visibility` is `hide`, `last_message`, `last_completed_message`,
