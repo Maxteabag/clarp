@@ -198,6 +198,13 @@ pub fn public_record(record: &Value) -> Option<Value> {
     Some(Value::Object(fields))
 }
 
+/// A registry line is removable by its id, regardless of whether its files are installed.
+pub fn removal_index(records: &[Value], id: &str) -> Option<usize> {
+    records
+        .iter()
+        .position(|record| record["id"].as_str() == Some(id))
+}
+
 /// A Linux faster-whisper record requires all three files at its recorded path.
 pub fn installed(record: &Value, file_exists: impl Fn(&str) -> bool) -> bool {
     record["provider"] == "faster-whisper"
