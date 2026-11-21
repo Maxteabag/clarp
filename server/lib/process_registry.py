@@ -32,6 +32,8 @@ class TurnHandle:
     output_seen: bool = False
     takeover_capable: bool = False
     takeover_of: bool = False
+    # The reader waits in its read with every line read handled (takeover.read_lines).
+    reader_waiting: bool | None = None
 
     @property
     def pid(self) -> int:

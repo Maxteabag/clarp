@@ -337,6 +337,68 @@ def test_a_stop_taking_the_slot_while_frozen_thaws_and_takes_nothing_over(world,
     assert settings_frozen() == []
 
 
+@pytest.mark.parametrize("raises_at", ["slot claim", "trace write"])
+def test_a_raise_before_the_end_thaws_the_turn_and_gives_its_slot_back(world, monkeypatch,
+                                                                       raises_at):
+    """Reviewer 4 on df7af42c: once the plan is made, the slot claim or the session's trace
+    write can raise (slots exhausted, a locked database) before the end. The frozen turn
+    must run on (never left stopped), keep its slot, and its record go only once it runs;
+    the follow-up waits."""
+    import sqlite3
+    from lib import turn_takeover
+    from lib.turn_dispatch_state import _INFLIGHT
+    w = world
+    _the_turn_before(w)
+    _running(w, 2)
+    if raises_at == "slot claim":
+        real_claim = turn_takeover._SLOTS.claim
+
+        def claim(agent_id, trace_id):
+            if trace_id == "t-m2":
+                raise RuntimeError("slots exhausted")
+            return real_claim(agent_id, trace_id)
+        monkeypatch.setattr(turn_takeover._SLOTS, "claim", claim)
+    else:
+        real_trace = agents_db.set_trace_for_session
+
+        def set_trace(session, trace_id):
+            if trace_id == "t-m2":
+                raise sqlite3.OperationalError("database is locked")
+            return real_trace(session, trace_id)
+        monkeypatch.setattr(agents_db, "set_trace_for_session", set_trace)
+    result = _send(w, "m2")
+    cli, _mcp = _pids(w, 2)
+    assert result.queued is True and _calls(w) == 2         # nothing taken over: m2 waits
+    assert _alive(cli) and not takeover.stopped(cli)         # runs on, never left in state T
+    assert _beating(w, 2)                                    # its MCP child too
+    assert _INFLIGHT.get(w.agent) == "t-m1"                  # the slot is the running turn's
+    assert settings_frozen() == []                           # the record went after the thaw
+
+
+def test_a_thaw_that_fails_keeps_the_record_for_the_next_runtime(world, monkeypatch):
+    """If the group cannot be thawed, its record stays, so the next runtime thaws it."""
+    from lib import turn_takeover
+    w = world
+    _the_turn_before(w)
+    _running(w, 2)
+    real_thaw = takeover.thaw
+
+    def claim(agent_id, trace_id):
+        raise RuntimeError("slots exhausted")
+
+    def thaw(handle):
+        raise PermissionError("not permitted")
+    monkeypatch.setattr(turn_takeover._SLOTS, "claim", claim)
+    monkeypatch.setattr(takeover, "thaw", thaw)
+    _send(w, "m2")
+    cli, _mcp = _pids(w, 2)
+    assert takeover.stopped(cli) and len(settings_frozen()) == 1
+    monkeypatch.setattr(takeover, "thaw", real_thaw)
+    assert takeover.thaw_left_frozen() == 1                 # the next runtime's pass
+    assert _wait(lambda: not takeover.stopped(cli)) and settings_frozen() == []
+    assert _beating(w, 2)
+
+
 def test_a_crash_while_frozen_is_thawed_by_the_next_runtime(world):
     w = world
     _the_turn_before(w)
