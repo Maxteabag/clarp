@@ -3510,7 +3510,9 @@ impl Actor {
             out.actions.push(Action::Follow {
                 turn,
                 attempt: self.attempt_of_live(turn),
-                socket: self.profile.socket_path_of(turn, self.attempt_of_live(turn)),
+                socket: self
+                    .profile
+                    .socket_path_of(turn, self.attempt_of_live(turn)),
             });
             return Ok(out);
         }
@@ -3947,7 +3949,9 @@ impl Actor {
         let reader = SpoolReader::new(&spool);
         if !reader.exists() {
             if !steering::inactive_owner(self.recorder.agent())? {
-                return Err(ActorError::Io("streaming shim still owns input but its spool is missing".into()));
+                return Err(ActorError::Io(
+                    "streaming shim still owns input but its spool is missing".into(),
+                ));
             }
             if starting {
                 // The attempt was decided and no shim ever took it. Nothing ran: start it now.

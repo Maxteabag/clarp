@@ -31,22 +31,36 @@ fn process(pid: u32) -> io::Result<Option<Process>> {
         let group = fields.nth(1)?.parse().ok()?;
         let session = fields.next()?.parse().ok()?;
         let start = fields.nth(15)?.parse().ok()?;
-        Some(Process { pid, group, session, start, ended })
+        Some(Process {
+            pid,
+            group,
+            session,
+            start,
+            ended,
+        })
     };
-    parsed().map(Some).ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "invalid process stat"))
+    parsed()
+        .map(Some)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "invalid process stat"))
 }
 
 fn start_on_boot(token: &str, boot: &str) -> io::Result<Option<u64>> {
-    let (recorded, start) = token.split_once(':')
+    let (recorded, start) = token
+        .split_once(':')
         .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "invalid process start token"))?;
     if recorded != boot {
         return Ok(None);
     }
-    start.parse().map(Some).map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid process start time"))
+    start
+        .parse()
+        .map(Some)
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid process start time"))
 }
 
 fn kill_exact(member: Process) -> io::Result<()> {
-    let pid = i32::try_from(member.pid).ok().and_then(Pid::from_raw)
+    let pid = i32::try_from(member.pid)
+        .ok()
+        .and_then(Pid::from_raw)
         .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "invalid tool pid"))?;
     let fd = match pidfd_open(pid, PidfdFlags::empty()) {
         Ok(fd) => fd,
@@ -65,7 +79,11 @@ fn kill_exact(member: Process) -> io::Result<()> {
 fn members(owner: &InputOwner, tool_start: u64) -> io::Result<Vec<Process>> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir("/proc")? {
-        let Some(pid) = entry?.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+        let Some(pid) = entry?
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
             continue;
         };
         if let Some(member) = process(pid)?
@@ -83,7 +101,10 @@ fn members(owner: &InputOwner, tool_start: u64) -> io::Result<Vec<Process>> {
 /// True once the old tool cannot read the pipe. False means the recorded shim still owns it.
 pub(super) fn ended(owner: &InputOwner) -> io::Result<bool> {
     if owner.group == 0 || owner.group != owner.tool_pid || owner.shim_pid == 0 {
-        return Err(io::Error::new(ErrorKind::InvalidData, "invalid streaming process group"));
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "invalid streaming process group",
+        ));
     }
     let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
     let boot = boot.trim();
@@ -123,7 +144,10 @@ pub(super) fn ended(owner: &InputOwner) -> io::Result<bool> {
             }
         }
         if Instant::now() >= deadline {
-            return Err(io::Error::new(ErrorKind::TimedOut, "orphaned tool group did not exit"));
+            return Err(io::Error::new(
+                ErrorKind::TimedOut,
+                "orphaned tool group did not exit",
+            ));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -143,10 +167,15 @@ mod tests {
                     tool = subprocess.Popen(['sleep', '30'], process_group=0)\n\
                     print(tool.pid, flush=True)\n\
                     time.sleep(30)\n";
-        let mut shim = Command::new("python3").args(["-c", code])
-            .stdout(Stdio::piped()).spawn().unwrap();
+        let mut shim = Command::new("python3")
+            .args(["-c", code])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
         let mut line = String::new();
-        BufReader::new(shim.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        BufReader::new(shim.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
         let tool_pid = line.trim().parse().unwrap();
         let tool = process(tool_pid).unwrap().unwrap();
         let shim_pid = shim.id();
@@ -163,7 +192,10 @@ mod tests {
         assert!(!ended(&owner).unwrap(), "the live shim stays in charge");
         shim.kill().unwrap();
         shim.wait().unwrap();
-        let stale = InputOwner { tool_start: token(tool.start + 1), ..owner.clone() };
+        let stale = InputOwner {
+            tool_start: token(tool.start + 1),
+            ..owner.clone()
+        };
         assert!(ended(&stale).unwrap());
         assert!(process(tool_pid).unwrap().is_some_and(|seen| !seen.ended));
         assert!(ended(&owner).unwrap());

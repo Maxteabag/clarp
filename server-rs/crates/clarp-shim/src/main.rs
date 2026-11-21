@@ -155,9 +155,12 @@ fn streaming_owner(tool_pid: u32, cwd: Option<&Path>) -> Option<ShimEvent> {
     let projects = if config.is_absolute() {
         config
     } else {
-        let base = cwd.map(Path::to_path_buf).or_else(|| std::env::current_dir().ok())?;
+        let base = cwd
+            .map(Path::to_path_buf)
+            .or_else(|| std::env::current_dir().ok())?;
         base.join(config)
-    }.join("projects");
+    }
+    .join("projects");
     Some(ShimEvent::InputOpen {
         shim_pid,
         shim_start: format!("{}:{shim}", boot.trim()),
@@ -1046,7 +1049,9 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
             Err(error) => Reply::failed(format!("not a request: {error}")),
         };
         drop(turn);
-        if let Some(receipt) = after_write && receipt.recv() != Ok(true) {
+        if let Some(receipt) = after_write
+            && receipt.recv() != Ok(true)
+        {
             reply = Reply::failed("the tool's input is closed");
         }
         let text = serde_json::to_string(&reply).map(|text| text + "\n");

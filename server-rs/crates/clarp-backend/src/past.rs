@@ -570,10 +570,12 @@ pub fn claude_read_followups(
         if let Some((uuid, joined)) = clarp_kernel::steering::transcript_read_uuid(&entry)
             && waiting.contains(uuid)
         {
-            let at_ms = entry["timestamp"].as_str()
+            let at_ms = entry["timestamp"]
+                .as_str()
                 .and_then(|stamp| stamp.parse::<jiff::Timestamp>().ok())
                 .map(|stamp| stamp.as_millisecond());
-            read.entry(uuid.to_owned()).or_insert(ReadFollowup { joined, at_ms });
+            read.entry(uuid.to_owned())
+                .or_insert(ReadFollowup { joined, at_ms });
             if read.len() == waiting.len() {
                 break;
             }

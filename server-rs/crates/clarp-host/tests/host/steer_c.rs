@@ -218,11 +218,19 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             traces.push(sent["trace_id"].clone());
             if mode == "large" {
                 mark("flood-large");
-                wait_for("stdout made progress while the stdin reader was still held", || {
-                    host.get("/agents/snapshot")["agents"].as_array().unwrap().iter().any(|row| {
-                        row["session"] == session && row["activity"]["tool"] == "LargeProducer"
-                    })
-                });
+                wait_for(
+                    "stdout made progress while the stdin reader was still held",
+                    || {
+                        host.get("/agents/snapshot")["agents"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|row| {
+                                row["session"] == session
+                                    && row["activity"]["tool"] == "LargeProducer"
+                            })
+                    },
+                );
                 mark("read-large");
             }
             await_file(&format!("received-{id}"));

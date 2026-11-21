@@ -174,17 +174,29 @@ mod tests {
     #[test]
     fn a_read_follow_up_is_a_user_entry_or_a_queued_command_attachment() {
         for (entry, expected) in [
-            (json!({"type": "user", "uuid": "prompt"}), Some(("prompt", false))),
+            (
+                json!({"type": "user", "uuid": "prompt"}),
+                Some(("prompt", false)),
+            ),
             (json!({"type": "assistant", "uuid": "prompt"}), None),
-            (json!({"type": "attachment", "uuid": "entry", "attachment": {
-                "type": "queued_command", "source_uuid": "prompt"
-            }}), Some(("prompt", true))),
-            (json!({"type": "attachment", "attachment": {
-                "type": "background", "source_uuid": "same"
-            }}), None),
-            (json!({"type": "attachment", "uuid": "entry", "attachment": {
-                "type": "queued_command"
-            }}), None),
+            (
+                json!({"type": "attachment", "uuid": "entry", "attachment": {
+                    "type": "queued_command", "source_uuid": "prompt"
+                }}),
+                Some(("prompt", true)),
+            ),
+            (
+                json!({"type": "attachment", "attachment": {
+                    "type": "background", "source_uuid": "same"
+                }}),
+                None,
+            ),
+            (
+                json!({"type": "attachment", "uuid": "entry", "attachment": {
+                    "type": "queued_command"
+                }}),
+                None,
+            ),
         ] {
             assert_eq!(transcript_read_uuid(&entry), expected);
         }

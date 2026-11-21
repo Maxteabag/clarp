@@ -2100,7 +2100,7 @@ mod tests {
                         join: crate::steering::Join {
                             into: TurnId(1),
                             uuid: uuid.to_string(),
-                    recovery: None,
+                            recovery: None,
                         },
                     },
                     3,
