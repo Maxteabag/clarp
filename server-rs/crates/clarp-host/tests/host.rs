@@ -5280,10 +5280,23 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         all.extend_from_slice(args);
         tool(&host, &dir, None, &all)
     };
-    let over = |text: &str| {
-        let reply = said("assistant", text);
-        wait_for("the answer", || host.conversation(&worker).contains(&reply));
-        wait_for("the turn to be over", || host.state(&worker) == "done");
+    let shown = |at: &Host, session: &str| {
+        at.get(&format!("/log?session={session}&coordination=show"))["turns"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let over = |at: &Host, session: &str, trace: &Value| {
+        assert!(trace.as_str().is_some_and(|trace| !trace.is_empty()));
+        // The scripted tool echoes only the first line, which can be Host context.
+        wait_for("an answer on the delivered trace", || {
+            shown(at, session).iter().any(|row| {
+                row["role"] == "assistant"
+                    && row["trace_id"] == *trace
+                    && row["text"].as_str().is_some_and(|reply| !reply.is_empty())
+            })
+        });
+        wait_for("the turn to be over", || at.state(session) == "done");
     };
 
     // One agent hands another something, as the skill tells it to.
@@ -5302,8 +5315,8 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (&sent["ok"], &sent["session"], &sent["queued"]),
         (&json!(true), &json!(worker), &json!(false))
     );
-    over("please look at the build");
-    let rows = host.turns(&worker);
+    over(&host, &worker, &sent["trace_id"]);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (
             &rows[0]["origin"],
@@ -5312,7 +5325,11 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         ),
         (&json!("agent"), &json!(asker), &json!("Asker"))
     );
+    assert_eq!(rows[0]["text"], "please look at the build");
     assert_eq!(rows[1]["origin"], "agent");
+    let hidden = host.get(&format!("/log?session={worker}&coordination=auto"));
+    assert_eq!(hidden["coordination"]["visibility"], "hide");
+    assert!(hidden["turns"].as_array().unwrap().is_empty());
     // The writer is named as the roster has it when the row is read: renamed, the row says the
     // new name, and its revision does not move (a follower learns of it from the roster).
     let revision = rows[0]["revision"].clone();
@@ -5321,7 +5338,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         json!({ "session": asker, "name": "Asker Renamed" }),
     );
     assert_eq!(renamed["name"], "Asker Renamed", "{renamed}");
-    let rows = host.turns(&worker);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (
             &rows[0]["sender_name"],
@@ -5342,7 +5359,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     assert_eq!(host.get("/agents/snapshot")["focus"], focus_before);
 
     // Something that runs by itself writes without a sender.
-    let (code, _, err) = admin(&[
+    let (code, out, err) = admin(&[
         "prompt",
         "--to",
         &worker,
@@ -5352,8 +5369,9 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         "the queue is long",
     ]);
     assert_eq!(code, 0, "{err}");
-    over("the queue is long");
-    let rows = host.turns(&worker);
+    let sent: Value = serde_json::from_str(&out).unwrap();
+    over(&host, &worker, &sent["trace_id"]);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (&rows[2]["origin"], &rows[2]["text"], &rows[2]["automated"]),
         (
@@ -5391,7 +5409,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (stranger.0, stranger.2.as_str()),
         (1, "clarp-admin prompt: unknown or disabled peer: work\n")
     );
-    assert_eq!(host.turns(&worker).len(), 4, "nothing else was sent");
+    assert_eq!(shown(&host, &worker).len(), 4, "nothing else was sent");
 
     // Another Host, which the owner names: an agent here writes to an agent there.
     let elsewhere = Place::new("message-elsewhere");
@@ -5456,11 +5474,9 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     assert_eq!(code, 0, "{err}");
     let sent: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(sent["session"], remote.as_str());
-    let reply = said("assistant", "greetings from the other host");
-    wait_for("the answer on the other Host", || {
-        other.conversation(&remote).contains(&reply)
-    });
-    let rows = other.turns(&remote);
+    over(&other, &remote, &sent["trace_id"]);
+    let rows = shown(&other, &remote);
+    assert_eq!(rows[0]["text"], "greetings from the other host");
     assert_eq!(
         (&rows[0]["origin"], &rows[0]["sender_session"]),
         (&json!("agent"), &json!(asker)),
@@ -5491,7 +5507,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     // so after the Host was started again.
     assert_eq!(host.ask("DELETE", &format!("/agents/{asker}"), None).0, 200);
     let named = |host: &Host| {
-        let rows = host.turns(&worker);
+        let rows = shown(&host, &worker);
         (
             rows[0]["sender_name"].clone(),
             rows[0]["sender_session"].clone(),
