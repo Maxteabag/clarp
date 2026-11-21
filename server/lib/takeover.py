@@ -28,6 +28,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import signal
 import struct
 import subprocess
@@ -51,15 +52,32 @@ REPLACED = "replaced"
 _RECORD_PREFIX = "takeover.frozen."
 
 
-@functools.lru_cache(maxsize=8)
 def _cli_version(executable: str) -> tuple[int, ...] | None:
+    """The installed CLI's version, or None when it is not found or does not say. The
+    binary is resolved on PATH first (nothing is run when it is not there) and the answer
+    is cached per binary and modification time, as the thinking-display probe does."""
+    path = shutil.which(executable) or ""
+    if not path:
+        return None
     try:
-        out = subprocess.run([executable, "--version"], capture_output=True, text=True,
+        stamp = os.stat(path).st_mtime
+    except OSError:
+        return None
+    return _cli_version_of(path, stamp)
+
+
+@functools.lru_cache(maxsize=8)
+def _cli_version_of(path: str, stamp: float) -> tuple[int, ...] | None:
+    try:
+        out = subprocess.run([path, "--version"], capture_output=True, text=True,
                              timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return None
     match = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
     return tuple(int(part) for part in match.groups()) if match else None
+
+
+_cli_version.cache_clear = _cli_version_of.cache_clear     # the tests reset the cache
 
 
 def claude_version_ok(executable: str) -> bool:
