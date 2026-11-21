@@ -1252,8 +1252,8 @@ Host could reach it, and that is said here plainly: it is installed, as its inst
 the owner's keys in his own file each time one is needed (`--speech-keys`), and that file has his key for
 this voice. What keeps a call from being held is that it takes a paired phone that says it can hold one,
 and an approved profile in this Host's own folder: this Host has neither, and neither was made. The same
-file names the owner's key at the push service; the pushing of a ring as an incoming call is a word of its
-own for that reason, and it is not given here (the next landing).
+file also names the owner's key at the push service. This historical installation had no
+push-key file configured.
 
 What the installed Host answers was asked at its door, as the administrator and as nobody (nothing was
 placed, nothing rang):
@@ -1276,21 +1276,18 @@ Every agent's row says how it takes the user's call (`call_mode`: `classic` for 
 profile says otherwise).
 
 What stands open of this, for the owner's own test once everything is built: a call held with the real
-voice from his phone; a ring that reaches his locked phone as an incoming call (the next landing, with his
-word for the key); and a call with the tools his own profile opts into, which this Host refuses in words
-until they are built.
+voice from his phone; a ring that reaches his locked phone as an incoming call; and a call
+with the tools his own profile opts into, which this Host refuses in words until they are built.
 
 ## The Oracle's contact and voice, and a call push that is not armed, at the door of the installed Host (18 Nov 2026, L34)
 
 Installed at 09:25 from the landed commit (`442a131a`), the relay back after 70 ms, 23 agents, their rows
 as before.
 
-The pushing of a ring as an incoming call is in this build and is not armed here: the installed Host was
-given no word for a key (`--push-keys`; the installer keeps it off unless it is given), so it hands the push
-service nothing, whatever its owner's file of speech keys names. No ring was placed to show it on this
-Host; that a Host without the word hands the service nothing is shown by the test of the live call, whose
-Host reads such a file. A ring pushed to the owner's locked phone stays for his own test, with his word for
-the key.
+This historical installation supported incoming-call pushes and had no push-key file configured.
+The live-call test covers that configuration. No ring was placed on the installed Host.
+The installer now uses the owner's `[apns]` and `[fcm]` settings by default. Use
+`--push-keys off` to disable use of those keys.
 
 What the installed Host answers of the Oracle was asked at its door, as the administrator and as nobody.
 Nothing was chosen and nothing was changed:
@@ -1310,7 +1307,7 @@ phone, and the Oracle's conversation that uses it, which is not built yet.
 
 ## A call of the Oracle, as far as the door of the installed Host goes (18 Nov 2026, L35)
 
-The installed Host is `30575557ab81`, installed at 13:53:51, without the word for a push key. It holds calls
+The installed Host is `30575557ab81`, installed at 13:53:51, without a configured push-key file. It holds calls
 of the Oracle now (`GET /oracle/v2`). No call was opened to show it, and nothing was handed to an agent:
 a call reaches the owner's provider with the owner's key, and work handed on runs a turn of one of the
 agents here, both of which are the owner's to begin. What a call does is held by the tests, whose voice and
@@ -1334,7 +1331,7 @@ his voice, his router and his agents.
 
 ## After the reference's contract 101, and with what agents finished (18 Nov 2026, L36)
 
-The installed Host is `5a43170fc86c`, installed at 15:34:18, without the word for a push key; the relay was
+The installed Host is `5a43170fc86c`, installed at 15:34:18, without a configured push-key file; the relay was
 back 68 ms after the start, and its 23 agents were as before (`verify-rows.py`). It says the contract the
 Python Host has since the release owner's fix of that day (`GET /server-info`: `contract.host` 101), and
 answers of the Oracle at its door as the build before it did. What it does with a ring that is pushed as a
@@ -1346,7 +1343,7 @@ delegations 165 of 165).
 
 ## With calls put through to agents (18 Nov 2026, L37)
 
-The installed Host is `ca35c8acf826`, installed at 16:44:34, without the word for a push key; the relay was
+The installed Host is `ca35c8acf826`, installed at 16:44:34, without a configured push-key file; the relay was
 back 92 ms after the start, and its 23 agents were as before (`verify-rows.py`). At its door, with the
 Host's own token and no call open, so that every request is one the Host answers without doing anything:
 

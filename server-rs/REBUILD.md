@@ -1960,14 +1960,12 @@ with it: the same summary for a phone of another kind.
 
 **A ring pushed as an incoming call** (18 Nov 2026). A ring reaches a phone that is locked or asleep as an
 incoming call only by a push of a kind the relay does not carry: the Host hands it to the push service
-itself, with a key its owner gave it there. The owner's Python Host has such a key, and his rings ring so.
-This Host does it where it is told the file that names the owner's key (`--push-keys`; in it `[apns]`:
-`key_path`, `key_id`, `team_id`, and `bundle_id` and `environment` where they are not the usual ones, as
-the Python Host reads them). That word is one of its own, and off where a Host is installed: the file of
-the keys of speech is read by a Host that is only being tried too, and such a Host is not to push to its
-owner's phones with his key because that file names it (shown in the test of the live call, whose Host
-reads such a file and hands the push service nothing). Without the word, or the key, nothing is handed to
-the service, and whoever rings is told so (`delivery.voip.enabled` is false). The rules are the kernel's, held to the Python Host's own module: who is pushed a ring as a call,
+itself, using the owner's APNs key. The installer uses `~/.config/clarp/config.toml` (under
+`XDG_CONFIG_HOME` when set) when it contains `[apns]` or `[fcm]`. The `[apns]` section names
+`key_path`, `key_id`, `team_id`, and any nonstandard `bundle_id` or `environment`, as on the
+Python Host. `--push-keys FILE` selects another file and `--push-keys off` disables these keys.
+When no APNs key is configured, `delivery.voip.enabled` is false. The kernel rules match the
+Python Host's module for who is pushed a ring as a call,
 what became of it as the one who rang is told, and that the alert follows only where no phone was reached
 and never for a ring held as a live voice call (`rings/live.rs`, by that Host's `send_agent_ring_voip` run
 over a stand-in for the push service in `tools/live-ring-vectors.py`: 80 pushes handed over in 13 scripts
@@ -2542,14 +2540,14 @@ is a no, a word counted in signs and not in bytes, and this Host's own words whe
 its language's.
 
 **Pushes with the Host's own key, and Android** (18 Nov 2026). An alert can go through the
-phone's grant, the Host's relay account or the key named by its explicit `--push-keys` file.
+phone's grant, the Host's relay account or the owner's key selected by the installer.
 Direct mode bypasses the relay. Auto mode falls back when the relay is unavailable, and
 a refused phone grant is cleared even when another path delivers the push. The routing
 vectors run the reference router across four consecutive deliveries for each configuration
 and service response. A desktop reply suppresses the phone alert on both Hosts. Neither
 Host sends a silent sync push (R64). An iOS activity receives updates, including the idle state, over
 the selected account or key. An uncertain relay send cannot spend the same reservation twice.
-Android phones receive data messages over FCM using the explicitly named service account.
+Android phones receive data messages over FCM using the configured service account.
 A live ring is queued for the Android phones that declared it. An end is delivered to the
 eligible tokens its ringing was tried on. A registered Android summary receives updates
 and an end when work becomes idle, with a durable daily count and refill budget per device.
@@ -3754,11 +3752,9 @@ connection relay under the name the phone is paired with. Each of these is true 
    calls `clarp-admin`, which is fenced. They are looked at again before an agent of his moves.
 4. **The phones' pairings are there.** The paired devices of the Python Host, each with the hash of its
    token, its scope and its name, are in the Rust Host before it dials: a phone presents the token it has.
-5. **Pushes have an account.** The Rust Host has a credential of its own at the push relay, given by the
-   owner; the Python Host's is never copied. And for a ring to ring a locked phone as an incoming call, the
-   Host is installed with the word that names the file of the owner's key at the push service
-   (`tools/install-host --push-keys FILE`): it is his word to give, the key stays where he keeps it, and
-   without it this Host pushes no call.
+5. **Pushes have an account.** The Rust Host uses its own relay credential. The Host is
+   installed with the owner's push keys for calls and other direct pushes. The installer reads
+   the owner's existing `[apns]` and `[fcm]` settings, and the keys stay in their existing locations.
 6. **What the owner set for all his agents is set here.** The settings a Host keeps for itself do not
    come with an agent: the heartbeat's interval, strategy, cap and dormancy, the herald's, and what else an
    app's settings screens write. They are read from the Python Host's own routes and set on this Host

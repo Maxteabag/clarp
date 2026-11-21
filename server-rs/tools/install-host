@@ -58,11 +58,10 @@
 #                  config, when it is there. Nothing of it is copied or kept: a key the owner
 #                  changes there is the key this Host uses next. `off`: only the Host's own
 #                  environment (ELEVEN_API_KEY in ~/.config/clarp-host/env) is asked
-#   --push-keys    the file that names the owner's key at the push service ([apns] key_path, key_id,
-#                  team_id): with it this Host pushes a ring to a phone as an incoming call, as the
-#                  Python Host does with the same key. Default: `off`, whatever --speech-keys names:
-#                  a Host that is installed to be tried does not push to its owner's phones with
-#                  his key. It is given on the day this Host takes the phones, with his word
+#   --push-keys    the owner's APNs or FCM configuration. By default the installer uses
+#                  ~/.config/clarp/config.toml (under XDG_CONFIG_HOME when set) if it has an
+#                  [apns] or [fcm] section. An explicit FILE selects another file. Use off
+#                  to disable the owner's push keys. This setting is independent of --speech-keys.
 #   --transcription-engine   the engine that hears a clip no app named one for: `local` (the
 #                  Host's own, the default) or a cloud engine's name (elevenlabs:scribe_v2)
 #   --relay        whether phones reach this Host through the connection relay: `on` or `off` (the
@@ -118,7 +117,7 @@ while [ $# -gt 0 ]; do
         --listen|--name|--claude|--codex|--agy|--opencode|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool|--contact-pictures) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--skills-from DIR] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--push-keys FILE|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--skills-from DIR] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 if [ "$skills_named" = 1 ] && [ ! -f "$skills_from/manifest.json" ]; then
@@ -246,9 +245,13 @@ if [ "$whisper" != off ]; then
     speech=" --whisper-python \"$whisper\" --whisper-worker \"$share/libexec/whisper-worker.py\" --whisper-model $whisper_model --whisper-compute $whisper_compute${whisper_source:+ --whisper-source \"$whisper_source\"}"
 fi
 speech="$speech${speech_keys:+ --speech-keys \"$speech_keys\"} --transcription-engine $transcription_engine"
-# Whether this Host pushes a ring to a phone as an incoming call, with the owner's key at the
-# push service: only where it is told the file that names the key.
-push_keys="${chosen[push-keys]:-off}"
+# Use the owner's push settings on install and update unless an override was saved.
+push_keys="${chosen[push-keys]:-}"
+owner_push_config="${XDG_CONFIG_HOME:-$HOME/.config}/clarp/config.toml"
+if [ -z "$push_keys" ] && [ -f "$owner_push_config" ] &&
+    grep -Eq '^[[:blank:]]*\[[[:blank:]]*(apns|fcm)[[:blank:]]*\][[:space:]]*(#.*)?$' "$owner_push_config" 2>/dev/null; then
+    push_keys="$owner_push_config"
+fi
 [ "$push_keys" = off ] && push_keys=""
 if [ -n "$push_keys" ] && [ ! -f "$push_keys" ]; then echo "install-host: --push-keys $push_keys: no such file" >&2; exit 2; fi
 speech="$speech${push_keys:+ --push-keys \"$push_keys\"}"
