@@ -88,6 +88,7 @@ pub mod socket;
 pub mod speech_stream;
 pub mod spoken;
 pub mod standing;
+pub mod takeover;
 pub mod told;
 pub mod tools;
 pub mod trust;
