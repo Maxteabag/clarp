@@ -1296,15 +1296,16 @@ _READ_PREFIXES = RevisionedCache("transcript-read-prefix", max_entries=256)
 # changed in that gap) wrote rows but neither its checkpoint nor its frontier:
 # the fence refuses both in the same place (`checkpoint_allowed`). So the
 # store still holds the PREVIOUS pair, written together and consistent with
-# each other (the frontier is keyed to that checkpoint's digest). A tail from
-# it reads the same bytes after the same boundary and re-applies the lines the
-# refused tail wrote; the import's writes are idempotent per line. Its guard
-# re-checks the rows before the boundary against the stored record, as for
-# any restored frontier, so whatever the foreign commit changed there is
-# judged by the carry rules, not trusted.
+# each other (the frontier is keyed to that checkpoint's digest). The refused
+# tail's rows stand above that pair's mark, so its guard would refuse them; a
+# tail from the pair passes them only when its plan writes every one of them
+# again exactly as it stands, reproduced from the transcript line for line,
+# and they are still those rows when it applies (``_try_tail``). Anything not
+# reproduced, and anything the foreign commit changed before the boundary, is
+# refused as before and the import is full.
+_YIELD_REFUSALS = frozenset({"publication_foreign_commit_yield", "publication_connection_changed_yield"})
 _RESTORABLE = frozenset({"missing_unknown", "unknown_reset", "evicted", "evicted_empty",
-                         "publication_not_written", "publication_foreign_commit_yield",
-                         "publication_connection_changed_yield"})
+                         "publication_not_written"}) | _YIELD_REFUSALS
 
 
 def _stored_frontier(database, key, revision, agent_id, backend_session_id, path):
@@ -1816,6 +1817,30 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             _tail_log("frontier_not_published_snapshot_failed", retention=True)
             snapshot.append(None)
 
+    accepted = None
+    if restored and reason in _YIELD_REFUSALS:
+        # The refused tail's rows stand above the stored mark. They pass only
+        # if this tail's plan writes each of them again exactly as it stands
+        # (reproduced from the transcript, line for line); anything else is
+        # refused and the import is full, as before.
+        pending: dict = {}
+        rows_now = message_writes._prepare_import_prelude(
+            db.conn(), agent_id, backend_session_id, [], raw_only=True, session_rows=session_rows)
+        what = message_carry.changed(
+            state.inputs, rows_now, rules=rules, carry=cp.store_carry, boundary_seq=cp.boundary_seq,
+            source_file=str(path), backend_session_id=backend_session_id, session_rows=session_rows,
+            pending_tail=pending)
+        if not what and pending:
+            plan = message_writes.plan_transcript_tail(
+                agent_id=agent_id, backend_session_id=backend_session_id, source_file=str(path),
+                turns=turns, start_seq=cp.boundary_seq, carry=cp.store_carry)
+            planned = {str(entry.get("id")) for entry in plan["out"]}
+            touched = set(plan["written"]) | set(plan["updated"]) | set(plan["deleted"])
+            if not pending["ids"] <= planned or pending["ids"] & touched:
+                from .log import log
+                log("transcriptCarryInputsChanged", "what=row_transcript_not_reproduced")
+                return refuse("carry_inputs_changed")
+            accepted = pending
     try:
         message_writes.store_transcript_tail(
             agent_id=agent_id, backend_session_id=backend_session_id,
@@ -1823,7 +1848,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             carry=cp.store_carry, expected_prelude=state.inputs, carry_rules=rules,
             carry_witness=witness,
             yield_after_first_write=bool(conf.get("tail_yield_after_first_write")),
-            on_stored=publish, on_committed=committed, checkpoint_status=checkpoint_status)
+            on_stored=publish, on_committed=committed, checkpoint_status=checkpoint_status,
+            carry_accepted=accepted)
     except message_writes._TailInvalidated as changed:
         # Which rows stood in the way: what a further rule would have to cover.
         from .log import log

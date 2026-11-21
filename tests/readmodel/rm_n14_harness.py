@@ -658,7 +658,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
             stack.enter_context(patch.object(message_import_rows, "_park_adopted_occupant", counted_park))
             stack.enter_context(patch.object(message_writes, "_park_adopted_occupant", counted_park))
             if faults.get("client_on_yield") or faults.get("connection_on_yield") \
-                    or faults.get("live_on_yield"):
+                    or faults.get("live_on_yield") or faults.get("settings_on_yield") \
+                    or faults.get("tail_row_on_yield"):
                 original_yield = message_writes._ImportWriter.yield_writer
                 injected = False
                 metrics["yield_windows"] = 0
@@ -684,6 +685,26 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                                 "UPDATE messages SET text=text || ' and more', revision=?, updated_at=updated_at+1 "
                                 "WHERE message_id=? AND source_file LIKE 'live:%'",
                                 (revision, faults["live_on_yield"])).rowcount == 1
+                    elif faults.get("settings_on_yield"):
+                        # A foreign commit no import reads: a settings row.
+                        with sqlite3.connect(database) as other:
+                            other.execute(
+                                "INSERT INTO settings(key, value, updated_at) VALUES "
+                                "('lane.other_writer', ?, 0) ON CONFLICT(key) DO UPDATE "
+                                "SET value = excluded.value", (str(tick),))
+                    elif faults.get("tail_row_on_yield"):
+                        # Another writer edits the transcript row this tail wrote last:
+                        # a row the transcript does not say.
+                        with sqlite3.connect(database) as other:
+                            revision = other.execute(
+                                "UPDATE message_clock SET revision=revision+1 WHERE singleton=0 RETURNING revision"
+                            ).fetchone()[0]
+                            assert other.execute(
+                                "UPDATE messages SET text=text || ' (edited elsewhere)', revision=? "
+                                "WHERE message_id=(SELECT message_id FROM messages WHERE agent_id=? "
+                                "AND backend_session_id=? AND source_file NOT LIKE '%:%' AND seq>=0 "
+                                "AND seq<800000 ORDER BY revision DESC LIMIT 1)",
+                                (revision, AGENT, SESSION)).rowcount == 1
                     elif faults.get("connection_on_yield"):
                         replacement = sqlite3.connect(database, isolation_level=None)
                         replacement.row_factory = sqlite3.Row
