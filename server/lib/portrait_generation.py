@@ -224,7 +224,7 @@ def _discard_assets(assets: list[dict]) -> None:
     from . import db
     con = db.conn()
     rows = [media_store.get(str(asset.get("asset_id") or "")) for asset in assets]
-    paths = {str(row.get("storage_path") or "") for row in rows if row}
+    files = {(str(row.get("storage_path") or ""), str(row.get("sha256") or "")) for row in rows if row}
     con.execute("BEGIN IMMEDIATE")
     try:
         for asset in assets:
@@ -235,23 +235,8 @@ def _discard_assets(assets: list[dict]) -> None:
     except Exception:
         con.execute("ROLLBACK")
         raise
-    for raw_path in paths:
-        if not raw_path:
-            continue
-        referenced = con.execute(
-            """SELECT 1 FROM media_assets
-                 WHERE storage_path=? AND deleted_at IS NULL
-               UNION ALL
-               SELECT 1 FROM agent_portraits
-                 WHERE storage_path=? AND deleted_at IS NULL
-               LIMIT 1""",
-            (raw_path, raw_path),
-        ).fetchone()
-        if not referenced:
-            try:
-                pathlib.Path(raw_path).unlink()
-            except FileNotFoundError:
-                pass
+    for raw_path, sha256 in files:
+        media_store.release_blob(raw_path, sha256)
 
 
 def _request_edit(*, api_key: str, source: bytes, source_mime: str,
