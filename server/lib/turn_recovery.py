@@ -125,6 +125,14 @@ class RecoveryMixin:
                 if (item is None or item["status"] != "queued" or item["shown_at"] is not None
                         or receipt.get("state") != launch_receipts.ATTEMPTED):
                     continue                           # settled before the runtime died
+                # The steered CLI may have outlived the runtime in a long tool call and
+                # would read the line when its tool returns: it is ended first (only while
+                # its pid is still that process), so "not in the file" means never read.
+                from . import takeover
+                if takeover.kill_group_if_same(int(entry.get("pid") or 0),
+                                               int(entry.get("pgid") or 0),
+                                               entry.get("start_ticks")):
+                    log("steerOrphanEnded", f"agent={item['agent_id']} queue={queue_id}")
                 try:
                     read = by_id(str(entry.get("backend") or "")).steer_was_read(
                         session_id=str(entry.get("session_id") or ""), home=self.home,

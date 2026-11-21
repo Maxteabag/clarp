@@ -17,10 +17,14 @@ _PREFIX = "steer.written."
 
 
 def record(*, agent_id: str, trace_id: str, queue_id: str, backend: str, session_id: str,
-           cwd: str) -> None:
+           cwd: str, pid: int = 0, pgid: int = 0, start_ticks: int | None = None) -> None:
+    """``pid``, ``pgid``, ``start_ticks``: the steered turn's process. A CLI can outlive the
+    runtime in a long tool call and read the line later; the next runtime ends that group
+    (only while the pid is still that process) before it judges whether it was read."""
     settings_store.set_text(f"{_PREFIX}{trace_id}", json.dumps({
         "agent_id": agent_id, "trace_id": trace_id, "queue_id": queue_id,
-        "backend": backend, "session_id": session_id, "cwd": cwd, "at": now_ms()}))
+        "backend": backend, "session_id": session_id, "cwd": cwd, "pid": int(pid or 0),
+        "pgid": int(pgid or 0), "start_ticks": start_ticks, "at": now_ms()}))
 
 
 def clear(trace_id: str) -> None:
