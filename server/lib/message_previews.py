@@ -491,9 +491,19 @@ _FLOOR_CACHE: RevisionedCache[str, dict] = RevisionedCache(
     "message_previews.dashboard_floor", max_entries=1)
 
 
-def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dict[str, Any]:
-    """head, completed_head and activity for one agent via idx_messages_dashboard_activity."""
+# How many of a hiding chat's newest candidate rows its preview looks through for one the user
+# sees. A chat whose newest 200 are all coordination shows no preview, as its /log page would
+# open on rows from long before; reading further would walk a helper's whole chat per snapshot.
+HIDDEN_PREVIEW_ROWS = 200
+
+
+def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...],
+                   hide: bool = False) -> dict[str, Any]:
+    """head, completed_head and activity for one agent via idx_messages_dashboard_activity.
+    ``hide``: the chat leaves coordination out (lib.coordination.hiding_agents), so the preview
+    is its newest row the user sees there, as GET /log coordination=auto shows it."""
     marks = ','.join('?' for _ in routine)
+    hidden = f"CASE WHEN {coordination.HIDDEN_ROW_SQL} THEN 1 ELSE 0 END" if hide else "0"
     entry: dict[str, Any] = {}
     for field, completed_filter in (
         ('head', ''),
@@ -501,16 +511,18 @@ def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dic
     ):
         rows = conn().execute(f"""
             SELECT m.agent_id, m.message_id, m.backend_session_id, m.revision, m.role, m.text, m.origin,
-                   {_message_activity_sql()} AS message_activity
+                   {_message_activity_sql()} AS message_activity, {hidden} AS hidden
               FROM messages m
              WHERE m.agent_id = ?
                AND COALESCE(m.text, '') != '' AND COALESCE(m.tool_name, '') = ''
                {completed_filter}
                AND COALESCE(m.origin, 'user') NOT IN ({marks})
              ORDER BY {_message_activity_sql()} DESC, m.seq DESC, m.updated_at DESC
-             LIMIT 50
-        """, (agent_id, *routine))
+             LIMIT ?
+        """, (agent_id, *routine, HIDDEN_PREVIEW_ROWS if hide else 50))
         for row in rows:
+            if row['hidden']:
+                continue
             if not _automation_kind(role=row['role'], origin=row['origin'], text=row['text']):
                 entry[field] = _format_preview(row, max_len)
                 break
@@ -648,7 +660,9 @@ def _current_keys(agent_ids: list[str]) -> dict[str, tuple]:
     """The keys those agents have now, in one grouped statement."""
     wanted = json.dumps(agent_ids)
     revisions, heads = _revision_maps(_LIVE_AMONG, (wanted,))
-    return {agent_id: _preview_key(agent_id, revisions, heads) for agent_id in agent_ids}
+    hiding = coordination.hiding_agents()
+    return {agent_id: (*_preview_key(agent_id, revisions, heads), agent_id in hiding)
+            for agent_id in agent_ids}
 
 
 def _cache_stamp():
@@ -738,13 +752,17 @@ def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[s
     revisions, heads, live = projection
     result: dict[str, dict[str, Any]] = {}
     pending = []
+    # A setting change writes nothing to a conversation, so whether the chat hides coordination
+    # is part of what a cached preview is valid for.
+    hiding = coordination.hiding_agents(database=database)
     for agent_id in live:
         if agent_ids is not None and agent_id not in agent_ids:
             continue
-        key = _preview_key(agent_id, revisions, heads)
+        key = (*_preview_key(agent_id, revisions, heads), agent_id in hiding)
         hit, cached = ((False, None) if stamp is None or max_len != 80 else
                        _cache_read(_PREVIEW_CACHE, agent_id, key, failed))
-        entry = _preview_copy(cached) if hit else _agent_preview(agent_id, max_len, routine)
+        entry = _preview_copy(cached) if hit else _agent_preview(agent_id, max_len, routine,
+                                                                 agent_id in hiding)
         if not hit and stamp is not None and max_len == 80:
             pending.append((agent_id, key, _preview_copy(entry)))
         if agent_id in revisions:

@@ -496,6 +496,19 @@ Start the same reload for an open chat when the agent's `coordination_visibility
 snapshot or an `agent-roster` event differs from what it was read under. A page read with
 `coordination=show` for one visit is never written to the cache.
 
+**What a chat list shows of it (feature `coordination_working_state`).** The snapshot follows
+the same rule as `/log` with `coordination=auto`: in a chat whose effective
+`coordination_visibility` is `hide`, `last_message`, `last_completed_message`,
+`last_message_id` and the chat's place in the list come from the newest row that chat shows
+(sought among its newest 200; none: an empty preview), never from a hidden coordination row.
+Every agent row carries `working_audience` (`user`, `agents`, or `null` when idle) and
+`working_with` (`{agent_id, name}` of the agent whose message started the running turn, or
+`null`), so a client that connects mid-turn can say "Working with <Name>"; every working
+`agent-state` carries the turn's `audience`, `sender_agent_id` and `sender_name`, not only the
+first one. While such a chat runs a coordination turn, its row's `activity` and
+`live_activity` and the agents-working push say "Working with <Name>" and carry no tool,
+label or reasoning title of that turn. Under `show` nothing is veiled.
+
 A **note** is an agent's words to the user from its own turn:
 `role: assistant`, `kind: "note"`, `origin: "note"`, no `sender_*`,
 `audience: user`, carrying the calling turn's `trace_id`. Draw it as the
