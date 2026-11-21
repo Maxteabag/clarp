@@ -57,6 +57,7 @@ pub mod kept_portraits;
 pub mod languages;
 pub mod launch_directories;
 pub mod launch_refused;
+pub mod leader_memory;
 pub mod live;
 pub mod live_call;
 pub mod live_session;
