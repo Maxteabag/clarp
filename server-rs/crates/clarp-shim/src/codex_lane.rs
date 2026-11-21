@@ -85,6 +85,9 @@ pub struct Snapshot {
     pub instance: u32,
     pub revision: u64,
     pub known_goal: bool,
+    /// The provider started too soon and was interrupted. Resume on the next claim.
+    pub deferred_goal: bool,
+    pub available: bool,
     pub goal: Option<Value>,
     pub claim: Option<Claim>,
     pub native_turn: Option<String>,
