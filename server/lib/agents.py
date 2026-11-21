@@ -453,7 +453,8 @@ def update_agent(agent_id: str, *, persona: str | None = None,
                  personality: str | None = None,
                  voice_verbosity: int | None = None,
                  avatar_path: str | None = None,
-                 dreaming_last_local_date: str | None = None) -> None:
+                 dreaming_last_local_date: str | None = None,
+                 coordination_visibility: str | None = None) -> None:
     """Update mutable agent metadata without changing its stable agent_id.
 
     `model` / `effort` / `mcp_servers` are per-agent overrides read fresh on the
@@ -497,6 +498,10 @@ def update_agent(agent_id: str, *, persona: str | None = None,
     if personality is not None:
         fields.append("personality = ?")
         values.append(personality)
+    if coordination_visibility is not None:
+        # '' follows the Host's setting; 'show' | 'hide' (lib.coordination).
+        fields.append("coordination_visibility = ?")
+        values.append(coordination_visibility)
     if voice_verbosity is not None:
         fields.append("voice_verbosity = ?")
         values.append(_clamp_voice_verbosity(voice_verbosity))
@@ -1367,7 +1372,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   before_message_id: str = "",
                   limit: int = 100,
                   include_automated: bool = True,
-                  extra_backend_session_id: str = "") -> list[dict[str, Any]]:
+                  extra_backend_session_id: str = "",
+                  hide_coordination: bool = False) -> list[dict[str, Any]]:
     from .message_store import list_messages as _list
     return _list(
         agent_id=agent_id, backend_session_id=backend_session_id,
@@ -1375,6 +1381,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         before_message_id=before_message_id,
         include_automated=include_automated,
         extra_backend_session_id=extra_backend_session_id,
+        hide_coordination=hide_coordination,
     )
 
 
