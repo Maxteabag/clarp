@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 117;
+pub const HOST_CONTRACT: u64 = 118;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -326,6 +326,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `delivery-updated` hint: in the in-process mode, the Host owning its turns itself.
     ("send_delivery_state", 81),
     ("waited_send_order", 115),
+    // GET /turn-queue reads the same priority order the mailbox dispatches.
+    ("queue_user_first", 118),
     // What the user's last compaction of an agent did, on its row (`last_compaction`).
     ("compaction_outcome", 107),
     ("voice_profile", 109),
