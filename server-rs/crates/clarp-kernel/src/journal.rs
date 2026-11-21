@@ -267,7 +267,9 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         | AgentEvent::Reworded { turn, .. }
         | AgentEvent::Compacted { turn, .. } => Some(turn.0),
         AgentEvent::TakeoverSelected { selected } => Some(selected.start.from.0),
-        AgentEvent::TakeoverCleared { from } => Some(from.0),
+        AgentEvent::TakeoverOffered { from, .. } | AgentEvent::TakeoverCleared { from } => {
+            Some(from.0)
+        }
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }

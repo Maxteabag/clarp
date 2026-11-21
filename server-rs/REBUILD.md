@@ -3395,7 +3395,8 @@ an unfinished hook report, an answer or tool block that began, an observed call,
 fence leaves the follow-up waiting. Thinking by itself permits takeover. Claude Code 2.1.223 and
 Antigravity 1.5.13 are the minimum versions that support their respective paths.
 
-The actor records its selection before consuming the hold. Under the same lock as release and
+The actor writes the offer before asking the shim to freeze the tool, then records its selection
+before consuming the hold. An offer alone leaves the first turn in place. Under the same lock as release and
 expiry, the shim checks the exact acknowledged fence and writes the takeover marker durably before
 sending SIGKILL. Recovery uses the marker and the old process's exit to finish the selection.
 The actor writes the first turn's `replaced` end and the second turn's start together, keeping

@@ -2601,7 +2601,7 @@ impl Worker {
                     }
                     if sent.queued
                         && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
-                        && let Ok(Some(offer)) = actor.takeover_offer(turn)
+                        && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
                         && let Some(program) = clarp_backend::program(&self.setup.record.backend)
                     {
                         let tx = self.tx.clone();

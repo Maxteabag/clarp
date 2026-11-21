@@ -62,6 +62,26 @@ impl Actor {
         }))
     }
 
+    /// A caller may ask the shim to hold only after this intent is durable.
+    pub fn request_takeover_hold(
+        &mut self,
+        into: TurnId,
+        now_ms: i64,
+    ) -> Result<Option<Offer>, ActorError> {
+        let Some(offer) = self.takeover_offer(into)? else {
+            return Ok(None);
+        };
+        self.recorder.handle(
+            Command::OfferTakeover {
+                from: offer.from,
+                into: offer.into,
+                attempt: offer.attempt,
+            },
+            now_ms,
+        )?;
+        Ok(Some(offer))
+    }
+
     /// Recheck the running attempt through the shim's exact fence. A missing or damaged
     /// record is uncertain and leaves the follow-up in Part A's queue.
     pub fn takeover_quiet(&self, offer: &Offer, until: u64) -> Result<bool, ActorError> {

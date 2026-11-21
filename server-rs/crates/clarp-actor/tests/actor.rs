@@ -764,7 +764,27 @@ fn a_confirmed_takeover_closes_the_first_row_and_leaves_the_third_message_waitin
         .send(&follow_up, Admission::Queue, world.tick())
         .unwrap();
     world.send(&mut actor, "u-third", "third text", Admission::Queue);
-    let offer = actor.takeover_offer(TurnId(2)).unwrap().unwrap();
+    let offer = actor
+        .request_takeover_hold(TurnId(2), world.tick())
+        .unwrap()
+        .unwrap();
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let before_freeze = log
+        .read_after(0, clarp_ports::log::Kinds::only(kind::AGENT_EVENT), 30)
+        .unwrap();
+    assert!(before_freeze.iter().any(|item| {
+        matches!(
+            serde_json::from_slice::<clarp_kernel::agent::AgentEvent>(&item.body),
+            Ok(clarp_kernel::agent::AgentEvent::TakeoverOffered {
+                from: TurnId(1),
+                into: TurnId(2),
+                attempt: 1,
+            })
+        )
+    }));
     let fence = std::fs::metadata(world.profile.spool_path(TurnId(1)))
         .unwrap()
         .len();
@@ -849,21 +869,26 @@ fn restart_resolves_a_takeover_only_with_its_marker_and_exit() {
             .unwrap()
             .len();
         assert!(
-            actor.select_takeover(
-                &offer,
-                fence,
-                "replacement-session".to_string(),
-                clarp_kernel::takeover::Input::ClaudeFresh {
-                    first: offer.first.clone(),
-                },
-                world.tick(),
-            ).unwrap()
+            actor
+                .select_takeover(
+                    &offer,
+                    fence,
+                    "replacement-session".to_string(),
+                    clarp_kernel::takeover::Input::ClaudeFresh {
+                        first: offer.first.clone(),
+                    },
+                    world.tick(),
+                )
+                .unwrap()
         );
         drop(actor);
         if consumed {
             world.write(
                 1,
-                Line::Shim(ShimEvent::Takeover { fence, replaced_by: 2 }),
+                Line::Shim(ShimEvent::Takeover {
+                    fence,
+                    replaced_by: 2,
+                }),
             );
             let actor = world.open();
             assert!(actor.selected_takeover().is_some());
@@ -874,20 +899,30 @@ fn restart_resolves_a_takeover_only_with_its_marker_and_exit() {
         let actor = world.open();
         assert!(actor.selected_takeover().is_none());
         assert_eq!(world.took, [1, 2]);
-        let input: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(world.profile.stdin_path(TurnId(2))).unwrap(),
-        ).unwrap();
+        let input: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(world.profile.stdin_path(TurnId(2))).unwrap())
+                .unwrap();
         let parts: Vec<_> = input["message"]["content"]
-            .as_array().unwrap().iter().map(|block| block["text"].as_str().unwrap()).collect();
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["text"].as_str().unwrap())
+            .collect();
         if consumed {
             assert_eq!(parts, ["first", "second"]);
             let page = actor.tail(10).unwrap();
-            let first = page.entries.iter().find(|row| row.entry.id()=="u-first").unwrap();
+            let first = page
+                .entries
+                .iter()
+                .find(|row| row.entry.id() == "u-first")
+                .unwrap();
             assert_eq!(first.turn.as_ref().unwrap().status, "replaced");
         } else {
             assert_eq!(parts, ["second"]);
             assert!(!actor.tail(10).unwrap().entries.iter().any(|row| {
-                row.turn.as_ref().is_some_and(|end| end.status == "replaced")
+                row.turn
+                    .as_ref()
+                    .is_some_and(|end| end.status == "replaced")
             }));
         }
     }
@@ -5369,6 +5404,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             turn,
             closes: format!("r-p{turn}"),
             status: "completed".to_string(),
+            replaced_by: None,
             started_at_ms: Some(at),
             ended_at_ms: at,
             tool_count: 0,
