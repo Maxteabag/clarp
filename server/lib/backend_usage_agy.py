@@ -38,7 +38,11 @@ def fetch_agy_usage(*, timeout: float = 20.0) -> dict[str, Any] | None:
         return None
     try:
         _AGY_LAST_ATTEMPT_MS[0] = _now_ms()
-        stdout, stderr, returncode = _run_agy_usage(executable, timeout)
+        before, started = _children_usage(), _now_ms()
+        try:
+            stdout, stderr, returncode = _run_agy_usage(executable, timeout)
+        finally:
+            _log_run_cost(before, started)
     finally:
         _AGY_FETCH_LOCK.release()
     if returncode != 0:
@@ -55,6 +59,22 @@ def fetch_agy_usage(*, timeout: float = 20.0) -> dict[str, Any] | None:
     _upsert(AGY, used_percentage=used, resets_at=str(tightest.get("reset_time") or ""),
             source="agy-usage-command", raw={"groups": groups}, error="")
     return {"groups": groups}
+
+
+def _children_usage() -> tuple[float, int]:
+    """CPU seconds and storage blocks of this process's reaped children so far."""
+    import resource
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime, usage.ru_inblock
+
+
+def _log_run_cost(before: tuple[float, int], started: int) -> None:
+    """One line per `agy /usage` run: what the child cost, for the readers report. The
+    figures are of every child this process reaped during the run, nearly always agy alone."""
+    from .log import log
+    after = _children_usage()
+    log("agyUsageFetched", f"ms={_now_ms() - started} child_cpu_ms={round((after[0] - before[0]) * 1000)}"
+        f" child_disk_bytes={max(0, after[1] - before[1]) * 512}")
 
 
 def _run_agy_usage(executable: str, timeout: float) -> tuple[str, str, int]:
