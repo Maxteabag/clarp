@@ -53,6 +53,7 @@ COMPACTED = "compacted"
 NOT_COMPACTED = "not_compacted"
 UNKNOWN = "unknown"
 _OUTCOME_KEY = "compaction.last."
+OUTCOME_PREFIX = _OUTCOME_KEY   # the snapshot reads these with its other settings
 
 _active: set[str] = set()
 # A terminal compaction's CLI that outlived its kill, by session.
@@ -252,8 +253,15 @@ def last_outcomes(agent_ids: list[str]) -> dict[str, dict[str, Any]]:
     except Exception as e:  # noqa: BLE001
         log_exception("compactOutcomeReadFail", e)
         return {}
+    return outcomes_from(raw)
+
+
+def outcomes_from(raw: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """``last_compaction`` by agent from settings rows; keys not under OUTCOME_PREFIX are skipped."""
     found: dict[str, dict[str, Any]] = {}
     for key, text in raw.items():
+        if not key.startswith(_OUTCOME_KEY):
+            continue
         try:
             value = json.loads(text)
         except (TypeError, ValueError):
