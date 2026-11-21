@@ -64,12 +64,15 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         ).fetchone()
         if cursor is None:
             raise UnknownHistoryCursor(before_message_id)
-        where += """ AND (
+        # The plain `timestamp <= ?` in front lets SQLite read idx_messages_log_order as a range
+        # that starts at the cursor; the OR of the three tie cases alone cannot, and an older page
+        # then walked down from the newest row, costing more the further back it was.
+        where += """ AND COALESCE(m.timestamp, '') <= ? AND (
             COALESCE(m.timestamp, '') < ?
             OR (COALESCE(m.timestamp, '') = ? AND m.seq < ?)
             OR (COALESCE(m.timestamp, '') = ? AND m.seq = ? AND m.message_id < ?)
         )"""
-        params.extend([cursor["timestamp"], cursor["timestamp"], int(cursor["seq"]),
+        params.extend([cursor["timestamp"], cursor["timestamp"], cursor["timestamp"], int(cursor["seq"]),
                        cursor["timestamp"], int(cursor["seq"]), cursor["message_id"]])
     if not include_automated:
         # Apply presentation filtering before LIMIT. Otherwise a busy heartbeat

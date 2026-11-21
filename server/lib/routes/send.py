@@ -55,9 +55,19 @@ class SendRoutes:
         session = (data.get("session") or "").strip()
         if not session:
             return self._json_error(400, "session required")
+        from lib.runtime_bridge import RuntimeUnavailable
         from lib.turn_dispatch import TurnDispatchService
-        result = compaction.compact_session(
-            session, dispatch=TurnDispatchService(self.ctx))
+        try:
+            result = compaction.compact_session(
+                session, dispatch=TurnDispatchService(self.ctx))
+        except RuntimeUnavailable as exc:
+            # A raise here would drop the connection with no answer at all.
+            log_exception("compactFail", exc, detail=session)
+            return self._json(503, {"ok": False, "error": "runtime unavailable",
+                                    "retryable": True})
+        except Exception as exc:  # noqa: BLE001 - the app gets an answer, not a closed socket
+            log_exception("compactFail", exc, detail=session)
+            return self._json(500, {"ok": False, "error": "compaction could not start"})
         status = 200 if result.get("ok") else 409
         return self._json(status, result)
 
