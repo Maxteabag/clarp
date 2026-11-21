@@ -29,8 +29,9 @@ DEMAND_RUN_TTL_MS = 180_000  # Two bounded 60-second routing probes plus overhea
 _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "item_count",
     "detail_level", "target_count", "target_agent_id", "policy_revision", "summary", "status", "reason",
     "decision_id", "http_status",
-    # What a routing run's first answer said, so a replay answers the same (R83).
-    "answer_session", "answer_dispatch", "answer_status"})
+    # What a routing run's first answer said, so a replay answers the same (R83), its decision
+    # included: its row by decision_id, and the two keys the row does not hold (R134).
+    "answer_session", "answer_dispatch", "answer_status", "decision_target", "decision_action"})
 
 
 def _role(role: str) -> str:
