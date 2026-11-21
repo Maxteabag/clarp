@@ -228,7 +228,10 @@ def test_a_client_retry_of_a_held_send_is_deduplicated(tmp_path):
 def _held_mixture(tmp_path):
     """Agent mike: a turn running, then (in arrival order) a normal send that
     queued behind the spawning slot before the drain (memory only), a peer
-    message (durable), and two arrivals during the drain."""
+    message (durable), and two arrivals during the drain. The two user sends
+    are the user's word and go first, in the order sent (issue 481): the
+    order taken is pre-drain normal, user during drain, peer note, queued
+    during drain."""
     agent = _agent(tmp_path, "mike")
     service, provider = _service(tmp_path)
     _send(service, "running")
@@ -251,11 +254,11 @@ def test_held_work_starts_in_arrival_order_when_the_fence_is_lifted(tmp_path):
 
     service.lower_admission_fence()
     service.start_held_work()
-    for text in ("pre-drain normal", "peer note", "user during drain"):
+    for text in ("pre-drain normal", "user during drain", "peer note"):
         provider.finish(text)
 
-    assert provider.texts() == ["running", "pre-drain normal", "peer note",
-                                "user during drain", "queued during drain"]
+    assert provider.texts() == ["running", "pre-drain normal", "user during drain",
+                                "peer note", "queued during drain"]
     assert td._SLOTS.queue_depth(agent) == 0
     assert turn_queue.parked(agent) == []
     assert turn_queue.pending(agent) == []
@@ -267,13 +270,13 @@ def test_held_work_survives_the_handoff_in_arrival_order(tmp_path):
 
     new_service, new_provider = _restart(tmp_path)
     _finish_recovered(new_service, new_provider,
-                      ("pre-drain normal", "peer note", "user during drain"))
+                      ("pre-drain normal", "user during drain", "peer note"))
 
-    assert new_provider.texts() == ["pre-drain normal", "peer note",
-                                    "user during drain", "queued during drain"]
+    assert new_provider.texts() == ["pre-drain normal", "user during drain",
+                                    "peer note", "queued during drain"]
     # Identity is kept: each message is the same row, launched once.
     assert [c["trace_id"] for c in new_provider.spawned] == [
-        "t-pre-drain normal", "t-peer", "t-user during drain",
+        "t-pre-drain normal", "t-user during drain", "t-peer",
         "t-queued during drain"]
     assert all(message_store.has_client_message(cid) for cid in (
         "pre-drain normal", "peer note", "user during drain", "queued during drain"))
@@ -290,9 +293,9 @@ def test_a_crash_mid_drain_neither_loses_nor_sticks_the_fence(tmp_path):
     td._INFLIGHT.pop(agent, None)
     new_service.recover_queued()
     _finish_recovered(new_service, new_provider,
-                      ("pre-drain normal", "peer note", "user during drain"))
-    assert new_provider.texts() == ["pre-drain normal", "peer note",
-                                    "user during drain", "queued during drain"]
+                      ("pre-drain normal", "user during drain", "peer note"))
+    assert new_provider.texts() == ["pre-drain normal", "user during drain",
+                                    "peer note", "queued during drain"]
 
 
 # --- pauses, cancels -----------------------------------------------------------------
@@ -679,7 +682,7 @@ def test_status_lists_held_work_in_fifo_order_by_stable_ids(tmp_path):
     try:
         order = runtime.dispatch_request("status", {})["result"]["held_order"]
         assert _traces(order, agent) == [
-            "t-pre-drain normal", "t-peer", "t-user during drain",
+            "t-pre-drain normal", "t-user during drain", "t-peer",
             "t-queued during drain"]
         # The memory-only send has no row until the seal attempt persists it;
         # after that every entry has a durable row id that never changes.
@@ -704,7 +707,7 @@ def test_a_revert_logs_the_held_order_and_starts_exactly_that_order(tmp_path, mo
         runtime.seal_if_drained()           # blocked by the running turn
         provider.finish("running")
         runtime.release_admission_fence()   # the budget expired: revert
-        for text in ("pre-drain normal", "peer note", "user during drain"):
+        for text in ("pre-drain normal", "user during drain", "peer note"):
             provider.finish(text)
     finally:
         runtime.server_close()
@@ -732,7 +735,7 @@ def test_recovery_after_the_handoff_logs_the_rows_it_readmits_in_order(tmp_path,
 
     new_service, new_provider = _restart(tmp_path)
     _finish_recovered(new_service, new_provider,
-                      ("pre-drain normal", "peer note", "user during drain"))
+                      ("pre-drain normal", "user during drain", "peer note"))
     recovered = [d.split("rows=")[1] for e, d in lines
                  if e == "queuedRecoveredOrder" and f"agent={agent}" in d]
     assert ",".join(recovered).split(",") == rows

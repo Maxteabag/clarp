@@ -105,11 +105,19 @@ def test_claude_account_switch_command_requires_explicit_argv(tmp_path, value, e
     ('[" nori-5aac ", "nori-5aac", "front-1"]', ("nori-5aac", "front-1")),
     ('"nori-5aac"', ()), ('[123]', ()), ('[]', ()),
 ])
-def test_decision_on_behalf_sessions_require_an_explicit_list(tmp_path, value, expected):
+@pytest.mark.parametrize("field", ["decision_on_behalf_sessions", "front_desk_sessions"])
+def test_designated_sessions_require_an_explicit_list(tmp_path, value, expected, field):
     path = tmp_path / "config.toml"
-    path.write_text(f'[agents]\ndecision_on_behalf_sessions = {value}\n')
+    path.write_text(f'[agents]\n{field} = {value}\n')
     config.reset_cache()
-    assert config.load(path).decision_on_behalf_sessions == expected
+    assert getattr(config.load(path), field) == expected
+
+
+def test_no_front_desk_by_default(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[agents]\n")
+    config.reset_cache()
+    assert config.load(path).front_desk_sessions == ()
 
 
 @pytest.mark.parametrize('mode', ['tailscale', 'lan', 'manual', 'relay'])

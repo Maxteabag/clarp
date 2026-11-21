@@ -701,6 +701,13 @@ Response `200`:
 `dispatch` names the backend that took the turn (`claude`, `codex`, …);
 `queued` is true when the turn waits behind a running one.
 
+A routed send (`hands_free: true`, or `POST /orchestrator/route-delegation`, which
+answers the same way) replayed with the same `client_msg_id` answers what the first
+answered: the same `orchestrator.action`, `session`, `dispatch`, `decision_id` and
+`decision`, and the FIRST request's `trace_id`; the model is not asked again. A send
+first answered before this answers `decision_id` and `decision` null and its own
+`trace_id`, as before. Same fields, so no contract change.
+
 `200` means accepted, not delivered. Delivery is proven when a `/log` response
 contains a turn with id `u-<client_msg_id>`. A client that wants a delivery
 indicator should treat a send as failed if that id has not appeared within
@@ -730,6 +737,27 @@ deletes an item of either kind until its turn starts; after that both answer
 404. Each sends `queue-updated` with the item's `client_msg_id`, `origin`, `sender` and
 `queue_change`: `edited` (with the new `text`) or `deleted`. A goal wake the Host retires
 sends `queue-updated` with its `client_msg_id`, `origin` and `sender` too.
+
+**The user's word goes first** (feature `queue_user_first`). An agent takes one
+queued item each time a turn ends. An item that carries the user's own word is
+taken before the others: a send whose origin the Host resolved as `user` or
+`oracle` (a send made from an agent's own turn never is, whatever origin it
+names); the Host's delivery of a card the user answered in the app, or that a
+session in `[agents] decision_on_behalf_sessions` answered on the user's
+behalf (not one that expired); and a message sent from the own turn (its
+verified `X-Clarp-Turn`) of a session the owner named in `[agents]
+front_desk_sessions`, the front desk that relays the user's words. Such a
+relay keeps origin `agent` and its sender: it reads, notifies and is marked
+as an agent's message; only its place in line changes. A request that only
+names a front desk, without that session's turn token, gets nothing. Among themselves such items keep the order they were sent; every
+other item keeps its order behind them. An item already taken once (its launch
+failed, or the release drain handed it over) is not overtaken. Nothing else
+changes: a Stop's pause still holds what it held, the release drain's fence
+still holds everything, and the user's items are first when the queue moves
+again. `GET /turn-queue` lists `items` in the order the Host takes them, so a
+user's item that arrives moves the others one place down; `revision` and the
+`queue-updated` event's `queue_revision` change with it. Other agents' messages
+still run: the user's items in front of them are only the few the user sent.
 
 ### 6. Voice
 
