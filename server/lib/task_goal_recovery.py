@@ -10,7 +10,7 @@ import secrets
 import shlex
 import time
 from contextlib import contextmanager
-from . import agents, db, error_classify, task_goal_state
+from . import agents, db, error_classify, task_goal_state, task_plans
 from .log import log, log_exception
 
 PREFIX = "task-goal-"
@@ -469,16 +469,20 @@ def tick(dispatch, *, now=None, cursor=None, retired=None):
     after = cursor[0] if cursor else ""
     # Keyset batches visit every enrolled commitment, including when the first
     # batch is permanently waiting. A fixed oldest-100 slice would starve others.
-    query = (
-        "SELECT plan_id FROM task_plans WHERE recovery_enabled=1 AND status='active' "
-        "AND plan_id>? ORDER BY plan_id LIMIT 100"
-    )
-    ids = [r[0] for r in db.conn().execute(query, (after,))]
+    # The plans are known by their summaries, kept until a plan changes
+    # (task_plans.plan_index), so a tick reads only the plans it may claim.
+    index = task_plans.plan_index()
+    enrolled = sorted(plan_id for plan_id, summary in index.items()
+                      if summary["recovery_enabled"] == 1 and summary["status"] == "active")
+    ids = [plan_id for plan_id in enrolled if plan_id > after][:100]
     if not ids and after:
-        ids = [r[0] for r in db.conn().execute(query, ("",))]
+        ids = enrolled[:100]
     if cursor is not None:
         cursor[:] = [ids[-1] if ids else ""]
     for plan_id in ids:
+        summary = index[plan_id]
+        if (summary["lease_until"] or 0) > now or summary["state"] in task_plans.CLAIM_SKIP_STATES:
+            continue        # what _claim answers for it, without reading the plan
         try:
             claim = _claim(plan_id, now)
         except Exception as exc:  # noqa: BLE001 - one plan never stops the others (AUT-09)
@@ -556,7 +560,7 @@ def _claim(plan_id, now):
     # scheduler took, is left for the next tick, as a revision change was.
     goal = json.loads(text)
     state = goal["continuation"]
-    if state.get("state") in {"blocked", "attention", "not_enrolled"}:
+    if state.get("state") in task_plans.CLAIM_SKIP_STATES:
         return None
     changed = False
     latest = agents.latest_state(plan["agent_id"]) or {}

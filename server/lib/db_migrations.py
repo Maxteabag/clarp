@@ -309,6 +309,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v134(con)
         if version < 135:
             _migrate_to_v135(con)
+        if version < 136:
+            _migrate_to_v136(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1131,6 +1133,36 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v136(con: sqlite3.Connection) -> None:
+    """A version per goal plan (lib.task_plans.plan_index): a counter row and one row per plan,
+    moved by three triggers on every insert, update and delete of task_plans, whatever code
+    wrote. Every existing plan starts at version 0, which no cache holds. Created if missing,
+    so a rerun is a no-op. Older code never reads the tables; the triggers only write their
+    own two tables, so a rollback needs no down-step."""
+    from . import db_schema
+    for statement in _task_plan_version_statements(db_schema._SCHEMA_SQL):
+        con.execute(statement)
+    con.execute("INSERT OR IGNORE INTO task_plan_versions (plan_id, version)"
+                " SELECT plan_id, 0 FROM task_plans")
+
+
+def _task_plan_version_statements(schema_sql: str) -> list[str]:
+    """The CREATE statements of the two tables and three triggers, as the schema has them,
+    each made idempotent."""
+    out, statement = [], ""
+    for line in schema_sql.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            text = statement.strip()
+            if text.startswith(("CREATE TABLE task_plans_clock", "CREATE TABLE task_plan_versions",
+                                "CREATE TRIGGER task_plans_versioned_")):
+                out.append(text.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+                           .replace("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1))
+            statement = ""
+    assert len(out) == 5, out
+    return out
 
 
 def _migrate_to_v135(con: sqlite3.Connection) -> None:
