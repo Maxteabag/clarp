@@ -23,6 +23,7 @@
 //! `routes/voice_timeline.py`, `clip_records.py`, `message_audio.py`): the same statuses,
 //! words and headers.
 
+pub mod held;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt};
@@ -41,6 +42,7 @@ use clarp_kernel::media::{self, Part};
 use clarp_kernel::python;
 use clarp_kernel::said::{self, Who};
 use clarp_kernel::spoken::{self, Line, LineState, Meant};
+use clarp_kernel::voice_profile;
 use clarp_ports::clock::Clock;
 use clarp_speech::cartesia::Cartesia;
 use clarp_speech::gemini::{Gemini, Surface};
@@ -229,6 +231,11 @@ pub struct Mouth {
     /// keeps it until what it said is told to the apps and written, so that a clip is
     /// never let go before its line knows it.
     herald: tokio::sync::Mutex<Herald<HeldClip>>,
+    /// The agents whose lines wait for their call's binding to be recovered (`held.rs`).
+    pub held: held::Held,
+    /// What the apps were told of lines not spoken, and which turns spoke: in memory only,
+    /// bounded and pruned at every write (`voice_profile::Outcomes`).
+    outcomes: Mutex<voice_profile::Outcomes>,
 }
 
 /// How long Cartesia's list of voices is good for.
@@ -242,10 +249,17 @@ impl Mouth {
             .values()
             .fold((0, 0), |(n, a), (p, f)| (n + p, a + f))
     }
+    pub(crate) fn directory(&self) -> Arc<Directory> {
+        self.fleet.directory()
+    }
+
     /// The owner's file as it is now. Nothing named, or nothing readable: an empty one.
     pub(crate) fn owners(&self) -> Table {
+        self.owners_from(&self.fleet.directory())
+    }
+
+    pub(crate) fn owners_from(&self, directory: &Directory) -> Table {
         let mut file = self.owner.read().unwrap_or_default();
-        let directory = self.fleet.directory();
         for (section, key, setting) in [
             ("tts", "provider", "speech.provider"),
             ("tts", "fallback", "speech.fallback"),
@@ -263,6 +277,23 @@ impl Mouth {
         file
     }
 
+    /// What the speaker and the profile resolve every agent's voice from, as the owner's
+    /// file, the app's choice of provider and the keys are now. Google's refusal is looked
+    /// for only where an engine of Google's may speak.
+    pub(crate) fn speech_view(&self, owners: &Table) -> voice_profile::HostView {
+        let voices = owner::voices(owners);
+        let google = |text: &str| text == "google";
+        let named = google(&voices.provider)
+            || google(&voices.fallback)
+            || voices.agents.iter().any(|(_, entry)| {
+                entry
+                    .iter()
+                    .any(|(key, value)| key == "provider" && google(value))
+            });
+        let refusal = named.then(|| self.owner.google_refusal(owners)).flatten();
+        speech_view(owners, &|provider| self.has_key(provider, owners), refusal)
+    }
+
     pub async fn google_refusal(&self) -> Option<&'static str> {
         let owner = self.owner.clone();
         tokio::task::spawn_blocking(move || owner.google_refusal(&owner.read().unwrap_or_default()))
@@ -275,8 +306,26 @@ impl Mouth {
         if provider == "google" {
             owner::google_voice_error(owners).is_none()
         } else {
-            self.owner.key(key_of(provider, owners)).is_some()
+            OwnerFile::key_from(Some(owners), key_of(provider, owners)).is_some()
         }
+    }
+
+    /// The names of Cartesia's voices as this Host last listed them, by id, without asking
+    /// anybody: what a profile calls a voice of Cartesia's. Never listed: none.
+    pub(crate) fn cartesia_names(&self) -> std::collections::BTreeMap<String, String> {
+        let kept = self
+            .cartesia_voices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let listed = kept.iter().flat_map(|(_, voices)| voices.iter());
+        listed
+            .filter_map(|voice| {
+                Some((
+                    voice["id"].as_str()?.to_string(),
+                    voice["name"].as_str()?.to_string(),
+                ))
+            })
+            .collect()
     }
 
     /// The ids of Cartesia's voices as this Host last listed them, however long ago, without
@@ -460,17 +509,13 @@ impl Mouth {
                 .named(session)
                 .map_or("", |m| m.record.persona.as_str())
         };
-        let clip = voices.for_clip(
-            Some(voice),
-            Who {
-                name: persona,
-                persona,
-                session,
-            },
-            &route,
-        );
+        let who = Who {
+            name: persona,
+            persona,
+            session,
+        };
         let resolve =
-            |engine: &str| resolved_voice(owners, &voices, &clip, Some(voice), &route, engine);
+            |engine: &str| resolved_voice(owners, &voices, who, Some(voice), &route, engine);
         let fallback = route.fallback.as_str();
         let fallback = if fallback != provider
             && fallback != "none"
@@ -662,6 +707,8 @@ impl Waiting {
             preview_locks: Default::default(),
             previews: works.config.data_dir.join("voice-previews"),
             herald: tokio::sync::Mutex::default(),
+            held: held::Held::default(),
+            outcomes: Mutex::default(),
         });
         let speaking = mouth.clone();
         tokio::spawn(async move {
@@ -719,58 +766,182 @@ fn sweep(audio: &FilePath, now_ms: i64) {
     }
 }
 
+/// Allocate the ordinary audio URL before offering a copy to any cache.
+fn save_outside_clip(
+    audio: &FilePath,
+    session: &str,
+    now: i64,
+    prefix: &str,
+    sound: &[u8],
+) -> Option<(String, PathBuf)> {
+    if sound.is_empty() {
+        return None;
+    }
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(audio)
+        .ok()?;
+    // A name of its own: the moment it was made, and the next when that is taken.
+    for later in 0..100 {
+        let name = format!("{prefix}{}", said::clip_name(Some(session), now + later));
+        let path = audio.join(&name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path);
+        match file {
+            Ok(mut file) => {
+                return match file.write_all(sound) {
+                    Ok(()) => Some((name, path)),
+                    Err(_) => {
+                        let _ = std::fs::remove_file(&path);
+                        None
+                    }
+                };
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// Google's own code for a failure, when an engine's error begins with one.
+fn google_code(why: &str) -> Option<String> {
+    let code = why.split(':').next().unwrap_or("").trim().to_lowercase();
+    let known = voice_profile::google_words(&code).is_some()
+        || voice_profile::google_reason(&code).is_some();
+    known.then_some(code)
+}
+
+/// The voice the one resolver hands `provider` for this agent (`voice_profile::provider_voice`),
+/// as the door the owner's file names for Gemini knows it.
+fn resolved_voice(
+    file: &Table,
+    voices: &said::Voices,
+    who: Who<'_>,
+    stored: Option<&str>,
+    route: &said::Route,
+    provider: &str,
+) -> Option<String> {
+    let view = voice_profile::HostView {
+        voices: voices.clone(),
+        ..speech_view(file, &|_| true, None)
+    };
+    let agent = voice_profile::Agent { who, stored };
+    let voice = voice_profile::provider_voice(&view, agent, route, provider).voice;
+    let voice = voice.filter(|voice| !voice.is_empty())?;
+    if provider == said::GEMINI {
+        return Some(voices.gemini_voice_at(&voice, owner::gemini(file).vertex));
+    }
+    Some(voice)
+}
+
 /// Who says a line, as the owner's file and the agent decide it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Chosen {
     /// The owner turned speech off: nothing is said, and nobody is told.
     Silent,
-    /// Nothing on this Host can say it. `told`: the apps are told so; an agent that simply
-    /// has no voice stays silent without a word, as on the Python Host.
-    Nobody { why: String, told: bool },
+    /// Nothing on this Host can say it, for the reason the agent's profile shows
+    /// (`clarp_kernel::voice_profile`), with the provider that would have said it.
+    Nobody {
+        why: String,
+        reason: &'static str,
+        provider: String,
+    },
     /// These engines, tried in this order, each with the voice it speaks in.
     By(Vec<(String, String)>),
 }
 
-fn resolved_voice(
+/// The voices the owner's file and the agent give each engine, and which engines can speak:
+/// what the speaker and the profile both resolve from. Read now: nothing of it is kept.
+pub(crate) fn speech_view(
     file: &Table,
-    voices: &said::Voices,
-    clip: &said::ClipVoices,
-    stored: Option<&str>,
-    route: &said::Route,
-    provider: &str,
-) -> Option<String> {
-    let vertex = owner::gemini(file).vertex;
-
-    let voice = match provider {
-        said::CARTESIA => clip.cartesia.clone(),
-        said::GEMINI => {
-            let voice = clip.gemini.as_deref();
-            voice.map(|voice| voices.gemini_voice_at(voice, vertex))
-        }
-        said::ELEVENLABS => clip.elevenlabs.clone(),
-        "google" => said::voice_for(stored, route, "google")
-            .or_else(|| {
-                stored
-                    .map(str::trim)
-                    .filter(|v| clarp_kernel::voices::google_has(v))
-                    .map(str::to_string)
-            })
-            .or_else(|| Some("nb-NO-Chirp3-HD-Kore".into())),
-        "deepgram" => said::voice_for(stored, route, "deepgram").or_else(|| {
-            Some(
-                owner::text_at(file, &["deepgram", "model"])
-                    .unwrap_or_else(|| "flux-haley-en".into()),
-            )
-        }),
-        _ => None,
-    };
-    voice.filter(|voice| !voice.is_empty())
+    has_key: &dyn Fn(&str) -> bool,
+    google_refusal: Option<&str>,
+) -> voice_profile::HostView {
+    voice_profile::HostView {
+        voices: owner::voices(file),
+        deepgram_model: owner::text_at(file, &["deepgram", "model"])
+            .unwrap_or_else(|| "flux-haley-en".into()),
+        keys: BUILT
+            .iter()
+            .filter(|provider| has_key(provider))
+            .map(|provider| (*provider).to_string())
+            .collect(),
+        google_refusal: google_refusal.map(str::to_string),
+        ..voice_profile::HostView::default()
+    }
 }
 
-/// Which engines say an agent's line, and in which voices: the engine the owner chose for
-/// it and the one he chose to be tried after, each when it is built into this Host, has a
-/// voice for the agent and has its key.
-fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) -> Chosen {
+/// An agent as the resolver needs it.
+pub(crate) fn speaker(record: &AgentRecord) -> voice_profile::Agent<'_> {
+    voice_profile::Agent {
+        who: Who {
+            name: &record.persona,
+            persona: &record.persona,
+            session: &record.session,
+        },
+        stored: Some(record.voice_id.as_str()).filter(|voice| !voice.is_empty()),
+    }
+}
+
+/// Which engines say an agent's line, and in which voices: what the one resolver hands
+/// each engine the owner chose for it and the one he chose to be tried after it, each that
+/// can say it. A voice of Gemini's goes through the door the owner's file names for it.
+fn chosen(view: &voice_profile::HostView, file: &Table, record: &AgentRecord) -> Chosen {
+    match voice_profile::speaking_order(view, speaker(record)) {
+        Ok(by) => {
+            let vertex = owner::gemini(file).vertex;
+            let at_door = |(provider, voice): (String, String)| {
+                let voice = if provider == said::GEMINI {
+                    view.voices.gemini_voice_at(&voice, vertex)
+                } else {
+                    voice
+                };
+                (provider, voice)
+            };
+            Chosen::By(by.into_iter().map(at_door).collect())
+        }
+        // The owner turned speech off for the Host: nothing is said, and nobody is told. An
+        // agent whose own entry turns it off while the Host speaks is told so.
+        Err(unheard) if unheard.provider == "none" && view.voices.provider == "none" => {
+            Chosen::Silent
+        }
+        Err(unheard) => {
+            let persona = python::text(&record.persona);
+            let provider = unheard.provider;
+            let why = match unheard.reason {
+                voice_profile::PROVIDER_OFF => SPEECH_OFF.to_string(),
+                voice_profile::NOT_CONFIGURED if !BUILT.contains(&provider.as_str()) => {
+                    format!("the engine {provider} is not built into this Host")
+                }
+                voice_profile::NOT_CONFIGURED => {
+                    format!("the {provider} api_key is not configured")
+                }
+                _ => format!("no {provider} voice configured for {persona}"),
+            };
+            Chosen::Nobody {
+                why,
+                reason: unheard.reason,
+                provider,
+            }
+        }
+    }
+}
+
+fn eleven_model(file: &Table) -> String {
+    owner::text_at(file, &["elevenlabs", "model"]).unwrap_or_else(|| "eleven_flash_v2_5".into())
+}
+
+/// The configured primary voice, before checking credentials or constructing a speaker.
+/// Google and Deepgram select the model through the engine's voice name.
+pub(crate) fn phrase_voices(
+    file: &Table,
+    record: &AgentRecord,
+) -> Vec<(clarp_kernel::router::phrases::Voice, bool)> {
     let voices = owner::voices(file);
     let who = Who {
         name: &record.persona,
@@ -779,44 +950,30 @@ fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) ->
     };
     let route = voices.route(who);
     if route.provider == "none" {
-        return Chosen::Silent;
+        return Vec::new();
     }
     let stored = Some(record.voice_id.as_str()).filter(|voice| !voice.is_empty());
-    let clip = voices.for_clip(stored, who, &route);
-    let mut by: Vec<(String, String)> = Vec::new();
-    // Why the engine the owner chose cannot say it, when it cannot.
-    let mut first: Option<(String, bool)> = None;
-    for provider in [route.provider.as_str(), route.fallback.as_str()] {
-        if matches!(provider, "" | "none") || by.iter().any(|(known, _)| known == provider) {
-            continue;
-        }
-        let cannot = match resolved_voice(file, &voices, &clip, stored, &route, provider) {
-            None => {
-                let persona = python::text(&record.persona);
-                Some((
-                    format!("no {provider} voice configured for {persona}"),
-                    false,
-                ))
-            }
-            Some(_) if !BUILT.contains(&provider) => {
-                let why = format!("the engine {provider} is not built into this Host");
-                Some((why, true))
-            }
-            Some(_) if !has_key(provider) => {
-                Some((format!("the {provider} api_key is not configured"), true))
-            }
-            Some(voice) => {
-                by.push((provider.to_string(), voice));
-                None
-            }
-        };
-        first = first.or(cannot);
-    }
-    match (by.is_empty(), first) {
-        (false, _) => Chosen::By(by),
-        (true, Some((why, told))) => Chosen::Nobody { why, told },
-        (true, None) => Chosen::Silent,
-    }
+    [(&route.provider, true), (&route.fallback, false)]
+        .into_iter()
+        .filter_map(|(provider, primary)| {
+            let voice = resolved_voice(file, &voices, who, stored, &route, provider)?;
+            let model = match provider.as_str() {
+                said::CARTESIA => owner::cartesia_model(file),
+                said::GEMINI => owner::gemini(file).model,
+                said::ELEVENLABS => eleven_model(file),
+                "deepgram" | "google" => voice.clone(),
+                _ => return None,
+            };
+            Some((
+                clarp_kernel::router::phrases::Voice {
+                    provider: provider.clone(),
+                    voice,
+                    model,
+                },
+                primary,
+            ))
+        })
+        .collect()
 }
 
 /// The name of the key an engine needs, as the owner's file is asked for it.
@@ -885,8 +1042,7 @@ impl Mouth {
                 model: if usage == SpeechUse::VoicePreview {
                     "eleven_multilingual_v2".into()
                 } else {
-                    owner::text_at(file, &["elevenlabs", "model"])
-                        .unwrap_or_else(|| "eleven_flash_v2_5".into())
+                    eleven_model(file)
                 },
                 speed: if usage == SpeechUse::VoicePreview {
                     1.0
@@ -977,14 +1133,55 @@ impl Mouth {
 
     /// A line nothing said, or not all of it: it is over, and why is written. The apps are
     /// told when their user should know.
-    async fn unsaid(&self, member: &Member, line: &Line, clip: Option<u64>, why: &str, told: bool) {
+    /// `told`: why, as the agent's profile says it, and the provider that would have said it;
+    /// a turn is told once a reason (`voice_profile::Outcomes`), in words made from the reason
+    /// and the provider's name, never from an engine's text. Nothing: nobody is told.
+    async fn unsaid(
+        &self,
+        member: &Member,
+        line: &Line,
+        clip: Option<u64>,
+        why: &str,
+        told: Option<(&'static str, String)>,
+    ) {
         let ended = member
             .agent
             .line_ended(line.id.clone(), clip, Err(why.to_string()));
-        if matches!(ended.await, Ok(true)) && told {
-            self.hub
-                .publish(wire::tts_error(&member.record, why), self.now_ms());
+        let Some((reason, provider)) = told else {
+            let _ = ended.await;
+            return;
+        };
+        if !matches!(ended.await, Ok(true)) {
+            return;
         }
+        let record = &member.record;
+        let trace = line.trace_id.as_deref().unwrap_or("");
+        let now = self.now_ms();
+        let (first, partly) = {
+            let mut outcomes = self.outcomes();
+            let partly = outcomes.partly(&record.agent_id, trace, now);
+            (outcomes.tell(&record.agent_id, trace, reason, now), partly)
+        };
+        if !first {
+            return;
+        }
+        let code = google_code(why).unwrap_or_default();
+        let label = voice_profile::provider_row(&provider).0;
+        let label = if provider.is_empty() {
+            String::new()
+        } else {
+            label
+        };
+        let message = voice_profile::google_words(&code).map_or_else(
+            || voice_profile::not_spoken_words(reason, &label, &record.persona, partly),
+            str::to_string,
+        );
+        let event = wire::tts_error(record, &message, reason, &provider, trace);
+        self.hub.publish(event, now);
+    }
+
+    fn outcomes(&self) -> std::sync::MutexGuard<'_, voice_profile::Outcomes> {
+        self.outcomes.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     async fn opening_audio(
@@ -1020,32 +1217,38 @@ impl Mouth {
     /// unless the herald holds it for its agent's turn.
     async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
+        // An agent whose call's binding was not recovered speaks only once it is: tried now.
+        if !self.held.may_speak(&record.agent_id).await {
+            return self
+                .unsaid(member, &line, None, "opening lookup unavailable", None)
+                .await;
+        }
         let bound = match self.opening_audio(&record.agent_id, line.turn).await {
             Ok(None) => false,
             Ok(Some(tag)) if tag["skip"] != true => true,
             Ok(Some(_)) => {
                 return self
-                    .unsaid(member, &line, None, "listen-first opening fenced", false)
+                    .unsaid(member, &line, None, "listen-first opening fenced", None)
                     .await;
             }
             Err(_) => {
                 return self
-                    .unsaid(member, &line, None, "opening lookup unavailable", false)
+                    .unsaid(member, &line, None, "opening lookup unavailable", None)
                     .await;
             }
         };
         let owners = self.owners();
-        let has_key = |provider: &str| self.has_key(provider, &owners);
-        let (by, unavailable) = match chosen(&owners, record, &has_key) {
-            Chosen::Silent => return self.unsaid(member, &line, None, SPEECH_OFF, false).await,
-            Chosen::Nobody { why, told } => {
-                let voices = owner::voices(&owners);
-                let route = voices.route(Who {
-                    name: &record.persona,
-                    persona: &record.persona,
-                    session: &record.session,
-                });
-                if route.fallback.is_empty() {
+        let view = self.speech_view(&owners);
+        let (by, unavailable) = match chosen(&view, &owners, record) {
+            Chosen::Silent => return self.unsaid(member, &line, None, SPEECH_OFF, None).await,
+            Chosen::Nobody {
+                why,
+                reason,
+                provider,
+            } => {
+                let route = view.voices.route(speaker(record).who);
+                if reason == voice_profile::PROVIDER_OFF || route.fallback.is_empty() {
+                    let told = Some((reason, provider));
                     return self.unsaid(member, &line, None, &why, told).await;
                 }
                 (
@@ -1070,7 +1273,8 @@ impl Mouth {
             Ok(new) => new,
             Err(error) => {
                 let why = format!("the clip's file could not be made: {error}");
-                return self.unsaid(member, &line, None, &why, true).await;
+                let told = Some((voice_profile::HOST_FAILED, String::new()));
+                return self.unsaid(member, &line, None, &why, told).await;
             }
         };
         let start = Progress {
@@ -1137,7 +1341,7 @@ impl Mouth {
             .map(|_| std::time::Instant::now());
         let made = tokio::task::spawn_blocking(move || {
             if let Some(why) = unavailable {
-                return (Err(why), 0);
+                return (Err((why, false)), 0);
             }
             let listed: Vec<(&dyn Speaker, &str)> = engines
                 .iter()
@@ -1161,15 +1365,15 @@ impl Mouth {
                 }
             });
             let spoke = match (said, broken) {
-                (_, Some(error)) => Err(format!("the clip could not be written: {error}")),
+                (_, Some(error)) => Err((format!("the clip could not be written: {error}"), true)),
                 (Ok((place, _)), None) => Ok((engines[place].2.clone(), engines[place].1.clone())),
-                (Err(Mute::Unavailable(why) | Mute::Failed { why, .. }), None) => Err(why),
+                (Err(Mute::Unavailable(why) | Mute::Failed { why, .. }), None) => Err((why, false)),
             };
             (spoke, written)
         });
         let (spoke, written) = match made.await {
             Ok(made) => made,
-            Err(_) => (Err("the engine's thread ended".to_string()), 0),
+            Err(_) => (Err(("the engine's thread ended".to_string(), true)), 0),
         };
         if let Some(c) = &self.hub.capture {
             c.synthesis(self.now_ms(), spoke.is_ok(), written, started);
@@ -1184,6 +1388,9 @@ impl Mouth {
         });
         match spoke {
             Ok((provider, voice)) => {
+                let trace = line.trace_id.as_deref().unwrap_or("");
+                let now = self.now_ms();
+                self.outcomes().spoke(&record.agent_id, trace, now);
                 let said = Spoke {
                     bytes: written,
                     provider,
@@ -1194,7 +1401,7 @@ impl Mouth {
                     .line_ended(line.id.clone(), Some(clip), Ok(said))
                     .await;
             }
-            Err(why) => {
+            Err((why, host_failed)) => {
                 // A clip nothing came of is no file before anybody is told so, and is not
                 // played later either.
                 let mut heralding = self.herald.lock().await;
@@ -1203,7 +1410,17 @@ impl Mouth {
                 if written == 0 {
                     let _ = std::fs::remove_file(&path);
                 }
-                self.unsaid(member, &line, Some(clip), &why, true).await;
+                // Why, as the agent's profile says it, or an outage of the engine; Google's
+                // own code decides for itself.
+                let told = if host_failed {
+                    Some((voice_profile::HOST_FAILED, String::new()))
+                } else {
+                    let code = google_code(&why);
+                    let failed =
+                        voice_profile::clip_failure(&view, speaker(record), code.as_deref());
+                    Some((failed.reason, failed.provider))
+                };
+                self.unsaid(member, &line, Some(clip), &why, told).await;
             }
         }
         // From here on the clip is found by its line.
@@ -1363,11 +1580,11 @@ impl Mouth {
         prefix: &'static str,
     ) -> Option<(String, PathBuf)> {
         let owners = self.owners();
-        let has_key = |provider: &str| self.has_key(provider, &owners);
-        let Chosen::By(by) = chosen(&owners, record, &has_key) else {
+        let view = self.speech_view(&owners);
+        let Chosen::By(by) = chosen(&view, &owners, record) else {
             return None;
         };
-        let engines: Vec<(Box<dyn Speaker>, String)> = by
+        let engines = by
             .iter()
             .filter_map(|(provider, voice)| {
                 Some((
@@ -1376,8 +1593,45 @@ impl Mouth {
                 ))
             })
             .collect();
+        self.make_clip(record, text, prefix, engines, false)
+            .await
+            .ok()
+            .flatten()
+            .map(|(name, path, _)| (name, path))
+    }
+
+    pub(crate) async fn make_announcement(
+        &self,
+        record: &AgentRecord,
+        text: String,
+        owners: &Table,
+        voice: &clarp_kernel::router::phrases::Voice,
+        primary: bool,
+    ) -> Result<Option<(String, Option<Vec<u8>>)>, Mute> {
+        let engine = self
+            .has_key(&voice.provider, owners)
+            .then(|| self.engine(owners, &voice.provider, SpeechUse::Turn))
+            .flatten();
+        let engines = engine
+            .into_iter()
+            .map(|engine| (engine, voice.voice.clone()))
+            .collect();
+        Ok(self
+            .make_clip(record, text, "", engines, primary)
+            .await?
+            .map(|(name, _, bytes)| (name, bytes)))
+    }
+
+    async fn make_clip(
+        &self,
+        record: &AgentRecord,
+        text: String,
+        prefix: &'static str,
+        engines: Vec<(Box<dyn Speaker>, String)>,
+        retain: bool,
+    ) -> Result<Option<(String, PathBuf, Option<Vec<u8>>)>, Mute> {
         let (audio, session, now) = (self.audio.clone(), record.session.clone(), self.now_ms());
-        let made = tokio::task::spawn_blocking(move || -> Option<(String, PathBuf)> {
+        let made = tokio::task::spawn_blocking(move || {
             let listed: Vec<(&dyn Speaker, &str)> = engines
                 .iter()
                 .map(|(engine, voice)| (engine.as_ref(), voice.as_str()))
@@ -1386,40 +1640,14 @@ impl Mouth {
             let said = said_by_the_first_that_can(&listed, &text, &mut |piece| {
                 sound.extend_from_slice(piece);
             });
-            if said.is_err() || sound.is_empty() {
-                return None;
-            }
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(&audio)
-                .ok()?;
-            // A name of its own: the moment it was made, and the next when that is taken.
-            for later in 0..100 {
-                let name = format!("{prefix}{}", said::clip_name(Some(&session), now + later));
-                let path = audio.join(&name);
-                let file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(&path);
-                match file {
-                    Ok(mut file) => {
-                        return match file.write_all(&sound) {
-                            Ok(()) => Some((name, path)),
-                            Err(_) => {
-                                let _ = std::fs::remove_file(&path);
-                                None
-                            }
-                        };
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                    Err(_) => return None,
-                }
-            }
-            None
+            said?;
+            let clip = save_outside_clip(&audio, &session, now, prefix, &sound);
+            Ok(clip.map(|(name, path)| {
+                let keep = retain && sound.len() <= clarp_kernel::router::phrases::MAX_CLIP;
+                (name, path, keep.then_some(sound))
+            }))
         });
-        made.await.ok().flatten()
+        made.await.unwrap_or(Ok(None))
     }
 
     /// The user opened an agent: what the herald held of it is played.
@@ -1719,6 +1947,12 @@ async fn audio(State(app): State<App>, Path(name): Path<String>, headers: Header
     if name.contains(['/', '\0']) {
         return plain(StatusCode::NOT_FOUND, "not found");
     }
+    if clarp_kernel::router::phrases::blob_name(&name) {
+        return match app.router.phrases.audio(&app, &name).await {
+            Some(bytes) => Preview::Temporary(bytes.into()).send(&header_text(&headers, "range")),
+            None => plain(StatusCode::NOT_FOUND, "not found"),
+        };
+    }
     if let Some(growing) = app.mouth.growing_named(&name) {
         return as_it_grows(growing);
     }
@@ -1844,6 +2078,19 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
         },
         Meant::NoClip => None,
     };
+    let played_event = match status {
+        "play-start" => Some("play_start"),
+        "play-ok" => Some("play_end"),
+        "play-fail" => Some("play_fail"),
+        _ => None,
+    };
+    let identity = if matches!(meant, Meant::Clip(_)) {
+        found
+            .as_ref()
+            .map(|(m, line)| (m.record.session.clone(), line.trace_id.clone()))
+    } else {
+        None
+    };
     let updated = match found.and_then(|(member, line)| Some((member, line.clip_id?, line.turn))) {
         Some((member, clip, turn)) => {
             let error = error.map(str::to_string);
@@ -1857,6 +2104,19 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
         }
         None => false,
     };
+    if let Some(event) = played_event {
+        let trace = said
+            .get("trace_id")
+            .filter(|v| clarp_kernel::python::truthy(v))
+            .cloned()
+            .unwrap_or_else(|| json!(identity.as_ref().and_then(|(_, t)| t.as_ref())));
+        crate::voice_timeline::record(
+            &app,
+            event,
+            json!({"trace_id":trace,"session":identity.as_ref().map(|(s,_)|s),
+            "detail":{"clip_id":said.get("clip_id").and_then(|v| v.as_i64().or_else(||v.as_str()?.parse().ok())),"url":Some(text("url")).filter(|u|!u.is_empty()),"error":error}}),
+        );
+    }
     Ok(Json(json!({ "ok": true, "updated": updated })))
 }
 
@@ -1980,6 +2240,11 @@ mod tests {
         text.parse().unwrap()
     }
 
+    /// Who says an agent's line, with these keys.
+    fn pick(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) -> Chosen {
+        chosen(&speech_view(file, has_key, None), file, record)
+    }
+
     fn by(engines: &[(&str, &str)]) -> Chosen {
         let engines = engines.iter();
         Chosen::By(
@@ -2003,42 +2268,44 @@ mod tests {
         );
         let maximus = record("Maximus", "");
         assert_eq!(
-            chosen(&owners, &maximus, &all),
+            pick(&owners, &maximus, &all),
             by(&[("gemini", "voice_vertex"), ("cartesia", "c-maximus")]),
             "a voice designed at one of Google's doors is the same persona's at the other"
         );
         // The engine whose key is not there is passed over before anything is announced.
         let only_cartesia = |provider: &str| provider == "cartesia";
         assert_eq!(
-            chosen(&owners, &maximus, &only_cartesia),
+            pick(&owners, &maximus, &only_cartesia),
             by(&[("cartesia", "c-maximus")])
         );
         assert_eq!(
-            chosen(&owners, &maximus, &none),
+            pick(&owners, &maximus, &none),
             Chosen::Nobody {
                 why: "the gemini api_key is not configured".to_string(),
-                told: true
+                reason: voice_profile::NOT_CONFIGURED,
+                provider: "gemini".to_string(),
             }
         );
         // An agent nobody gave a voice stays silent without a word.
         let nobody = record("Stranger", "");
         assert_eq!(
-            chosen(&file("[tts]\nprovider = \"gemini\"\n"), &nobody, &all),
+            pick(&file("[tts]\nprovider = \"gemini\"\n"), &nobody, &all),
             Chosen::Nobody {
                 why: "no gemini voice configured for 'Stranger'".to_string(),
-                told: false
+                reason: voice_profile::NO_VOICE,
+                provider: "gemini".to_string(),
             }
         );
         // The voice an agent was given itself is the one it speaks in.
         let stored = record("Stranger", "{\"cartesia\": \"c-own\"}");
         assert_eq!(
-            chosen(&file(""), &stored, &all),
+            pick(&file(""), &stored, &all),
             by(&[("cartesia", "c-own")]),
             "Cartesia unless the owner says otherwise"
         );
         // The owner turned speech off.
         assert_eq!(
-            chosen(&file("[tts]\nprovider = \"none\"\n"), &maximus, &all),
+            pick(&file("[tts]\nprovider = \"none\"\n"), &maximus, &all),
             Chosen::Silent
         );
         // An engine this Host does not have: the next one speaks, or the apps are told.
@@ -2048,12 +2315,12 @@ mod tests {
         );
         let with_both = record("Maximus", "{\"elevenlabs\": \"e-own\"}");
         assert_eq!(
-            chosen(&elsewhere, &with_both, &all),
+            pick(&elsewhere, &with_both, &all),
             by(&[("elevenlabs", "e-own"), ("cartesia", "c-maximus")])
         );
         let alone = file("[tts]\nprovider = \"elevenlabs\"\n");
         assert_eq!(
-            chosen(&alone, &with_both, &all),
+            pick(&alone, &with_both, &all),
             by(&[("elevenlabs", "e-own")])
         );
         // One agent moved to another engine on purpose.
@@ -2061,7 +2328,18 @@ mod tests {
             "[tts]\nprovider = \"cartesia\"\n[tts.agents.maximus]\nprovider = \"gemini\"\n\
              gemini_voice = \"Puck\"\n",
         );
-        assert_eq!(chosen(&moved, &maximus, &all), by(&[("gemini", "Puck")]));
+        assert_eq!(pick(&moved, &maximus, &all), by(&[("gemini", "Puck")]));
+        // One agent whose own entry turns speech off while the Host speaks: it is told so.
+        let quiet =
+            file("[tts]\nprovider = \"cartesia\"\n[tts.agents.maximus]\nprovider = \"none\"\n");
+        assert_eq!(
+            pick(&quiet, &maximus, &all),
+            Chosen::Nobody {
+                why: SPEECH_OFF.to_string(),
+                reason: voice_profile::PROVIDER_OFF,
+                provider: "none".to_string(),
+            }
+        );
     }
 
     #[test]

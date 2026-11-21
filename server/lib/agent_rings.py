@@ -501,7 +501,7 @@ def _admit_user_call(agent: dict, records: list[dict]) -> None:
         raise CallError(409, "the user is already being called")
 
 
-def user_call_live(principal: str, agent: Any, request_id: Any, client_nonce: Any) -> dict:
+def user_call_live(principal: str, agent: Any, request_id: Any, client_nonce: Any, client: Any = None) -> dict:
     """Originate one private, already-answered call, atomically bound to the phone's intent."""
     from . import agent_ring_live as live, agents as agents_db
     live.require_device(principal)
@@ -547,12 +547,13 @@ def user_call_live(principal: str, agent: Any, request_id: Any, client_nonce: An
         }
         records.append(record)
         # This internal answer runs under the same lock and persists only the answered record.
-        _answer_live(records, record, principal, live.MODE_LIVE, request_id, client_nonce)
+        _answer_live(records, record, principal, live.MODE_LIVE, request_id, client_nonce, client)
         return _answered_live(record, changed=True)
 
 
 def answer(principal: str, ring_id: str, conversation_mode: Any = None, *,
-           request_id: Any = None, client_nonce: Any = None, opening_mode: Any = _ABSENT) -> dict:
+           request_id: Any = None, client_nonce: Any = None, opening_mode: Any = _ABSENT,
+           client: Any = None) -> dict:
     """Answer a ring.
 
     A Live ring is answered only by a phone that asks for ``agent_live_v1``; it
@@ -564,14 +565,14 @@ def answer(principal: str, ring_id: str, conversation_mode: Any = None, *,
     mode = live.mode_of(conversation_mode, default=None)
     kind = next((r.get("conversation_mode") for r in _load() if r["ring_id"] == str(ring_id or "")), _ABSENT)
     if kind == live.MODE_LIVE:
-        return _answer_live_ring(principal, ring_id, mode, request_id, client_nonce)
+        return _answer_live_ring(principal, ring_id, mode, request_id, client_nonce, client)
     if kind is not _ABSENT and mode == live.MODE_LIVE:
         raise CallError(409, live.MODE_CONFLICT)
     return _answer_classic(principal, ring_id, opening_mode)
 
 
 def _answer_live_ring(principal: str, ring_id: str, mode: str | None,
-                      request_id: Any, client_nonce: Any) -> dict:
+                      request_id: Any, client_nonce: Any, client: Any = None) -> dict:
     """The Live branch of answer, unchanged from agent_ring_live."""
     from . import agent_ring_live as live
     from . import group_calls
@@ -579,7 +580,7 @@ def _answer_live_ring(principal: str, ring_id: str, mode: str | None,
         records = _load()
         _settle(records, missed)
         ring = _find(records, ring_id)
-        fresh = _answer_live(records, ring, principal, mode, request_id, client_nonce)
+        fresh = _answer_live(records, ring, principal, mode, request_id, client_nonce, client)
         if not fresh:
             # The owner's repeat gets the call's actual state, never a grant it can no longer use.
             phase = ring.get("_live_phase")
@@ -733,9 +734,11 @@ def _answer_classic(principal: str, ring_id: str, opening_mode: Any = _ABSENT) -
 
 
 def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | None,
-                 request_id: Any, client_nonce: Any) -> bool:
+                 request_id: Any, client_nonce: Any, client: Any = None) -> bool:
     """The Live branch of answer (under _lock): one grant per ring, first owner
-    wins. True when this request answered it, False for the owner's repeat."""
+    wins. True when this request answered it, False for the owner's repeat.
+    ``client`` is the answering request's X-Clarp-Client: it chooses the model
+    the call runs on, fixed here with the grant (a repeat keeps it)."""
     from . import agent_ring_live as live
     if ring.get("_user_call") and ring["_user_call"] != principal:
         raise CallError(403, live.AUTH)
@@ -762,7 +765,8 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
                 _live_call_id="alv_" + uuid.uuid4().hex, _live_call_epoch=1, _live_phase="answered_waiting_join",
                 _live_attempt_id="att_" + uuid.uuid4().hex, _live_owner_nonce=secrets.token_hex(32),
                 _live_join_ticket=secrets.token_hex(32), _live_join_expires_at=now + LIVE_JOIN_MS,
-                _live_request_id=request_id, _live_client_nonce=client_nonce)
+                _live_request_id=request_id, _live_client_nonce=client_nonce,
+                _live_model=live.model_for_client(client))
     _save(records)
     _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
             "mode": live.MODE_LIVE, "live_call_id": ring["_live_call_id"]})
@@ -786,7 +790,7 @@ def _answered_live(ring: dict, *, changed: bool) -> dict:
                      "agent_id": ring["agent_id"], "call_id": ring["_live_call_id"],
                      "call_epoch": ring["_live_call_epoch"], "attempt_id": ring["_live_attempt_id"],
                      "context_digest": ring["_live_context_digest"], "provider": live.PROVIDER,
-                     "model": live.MODEL, "voice": live.VOICE, "owner_nonce": ring["_live_owner_nonce"],
+                     "model": live.model_of(ring), "voice": live.VOICE, "owner_nonce": ring["_live_owner_nonce"],
                      "join_ticket": ring["_live_join_ticket"], "expires_at": ring["_live_join_expires_at"],
                      "join_consumed": bool(ring.get("_live_join_consumed")), "opening_owner": "live"}}
 

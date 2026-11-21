@@ -29,6 +29,8 @@ class BackgroundJobWatcher:
         self._last_id = 0
         self._stale_work_due = 0.0
         self._provider_due = 0.0
+        self._voice_due = 0.0
+        self._voice_print: str | None = None
         # (queue_id, queue_seq) -> (not before, the wait that led there),
         # monotonic seconds. A queue id comes again (goal wakes, peer
         # requests); the new row must not inherit the old one's wait.
@@ -53,6 +55,15 @@ class BackgroundJobWatcher:
     def _loop(self) -> None:
         while not self._stop.wait(self.INTERVAL_SEC):
             self._tick()
+            if time.monotonic() >= self._voice_due:
+                self._voice_due = time.monotonic() + self.PROVIDER_INTERVAL_SEC
+                try:
+                    # A hand-edited voice configuration reaches open apps
+                    # (voice_profile); the cached config only, no query.
+                    from . import voice_profile
+                    self._voice_print = voice_profile.watch_config(self.stream, self._voice_print)
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("voiceConfigWatchFail", exc)
             if time.monotonic() >= self._stale_work_due:
                 self._stale_work_due = time.monotonic() + self.STALE_WORK_INTERVAL_SEC
                 try:
@@ -66,6 +77,28 @@ class BackgroundJobWatcher:
                         skip=self._receipt_waiting, on_deferred=self._receipt_deferred)
                 except Exception as exc:  # noqa: BLE001
                     log_exception("idleReceiptSweepFail", exc)
+
+    def _portrait_media_changed(self, job: dict) -> None:
+        """A portrait-generation run ended: its worker published and kept or discarded images
+        in its own process, which has no events stream. Announce them here, after their
+        commits: media-changed created for each image it kept, deleted for each it discarded
+        (never published-then-silently-gone)."""
+        try:
+            from . import media_store
+            from .portrait_generation import CREATED_BY_PREFIX
+            metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+            session = str(job.get("session") or metadata.get("session") or "")
+            until = int(job.get("terminal_at") or job.get("updated_at") or 0)
+            kept, discarded = media_store.published_by(
+                session, created_by_prefix=CREATED_BY_PREFIX,
+                since=int(job.get("started_at") or 0), until=until)
+            for row, change, at in ([(r, "created", r["created_at"]) for r in kept]
+                                    + [(r, "deleted", r["deleted_at"]) for r in discarded]):
+                events.broadcast(self.stream, events.media_changed(
+                    session=row["session"], agent_id=row["agent_id"],
+                    asset_id=row["asset_id"], change=change, at=int(at)))
+        except Exception as exc:  # noqa: BLE001 - the portraits stand; the events are hints
+            log_exception("portraitMediaChangedFail", exc)
 
     def _receipt_waiting(self, queue_id: str, queue_seq: int, *, now: float | None = None) -> bool:
         """This receipt was undecidable a moment ago; not yet time to look again."""
@@ -138,6 +171,9 @@ class BackgroundJobWatcher:
                     for stale_id in list(self._statuses)[:256]:
                         if self._statuses[stale_id][1] not in background_jobs.ACTIVE_STATUSES:
                             self._statuses.pop(stale_id, None)
+                if (job.get("kind") == "portrait-generation"
+                        and job["status"] in background_jobs.TERMINAL_STATUSES):
+                    self._portrait_media_changed(job)
                 if job.get("agent_id"):
                     events.broadcast(self.stream, events.agent_roster("background-job"))
                 elif job.get("kind") == "persona-avatar" and (

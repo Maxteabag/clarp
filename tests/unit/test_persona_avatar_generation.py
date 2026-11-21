@@ -152,16 +152,12 @@ def _stub_cfg(
     monkeypatch.setattr(
         config,
         "load",
-        lambda: SimpleNamespace(
-            openai_key=lambda: "sk-test",
+        # A whole Config (the snapshot and the voice pool read its speech settings).
+        lambda path=None: config.Config(
+            openai_api_key="sk-test",
             contact_avatar_generation=enabled,
             contact_avatar_daily_limit=daily_limit,
             contact_avatar_max_attempts=max_attempts,
-            cartesia_voices={},
-            roster=config.DEFAULT_ROSTER,
-            cartesia_voice_for=lambda name: config.DEFAULT_CARTESIA_VOICES.get(name, ""),
-            gemini_voice_for=lambda _name: "",
-            read_global_mcp_servers=lambda: {},
         ),
     )
 

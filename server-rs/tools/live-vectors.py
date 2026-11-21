@@ -67,8 +67,17 @@ def at(ms, call, **args):
     return {'at': ms, 'call': call, 'args': args}
 
 
+# Whom the turn a step begins is for, as the stand-in of `_turn_audience` answers it.
+AUDIENCE = {'now': 'user'}
+
+
 def a_hub():
+    from lib import live_core
     from lib.live_core import LiveHub
+    # Whom a turn is for (`audience`, the Python Host's PR 482) is asked of its database: here a
+    # stand-in answers what the step says (`user` where it says nothing), so that no hub of this
+    # script ever opens one.
+    live_core._turn_audience = lambda _agent_id, _turn_id: AUDIENCE['now']
     now = {'ms': 0}
     sent: list = []
     manual = Manual(lambda: now['ms'])
@@ -92,6 +101,7 @@ def hub_case(name, steps):
         elif call == 'snapshot':
             answer = hub.snapshot(agent_id=AGENT)
         elif call == 'begin_turn':
+            AUDIENCE['now'] = args.get('audience', 'user')
             hub.begin_turn(agent_id=AGENT, session=args['session'], conv=args['conv'], turn_id=args['turn_id'],
                            started_at_ms=args.get('started_at_ms'))
         elif call == 'end_turn':
@@ -149,6 +159,16 @@ def hub_cases():
         at(T + 900, 'end_turn', status='completed'),
         at(T + 901, 'snapshot'),
         at(T + 902, 'fire'),
+    ])
+    yield hub_case('a turn another agent began is for the agents; the next one, the user\'s, is for the user', [
+        at(T, 'begin_turn', **BEGIN, audience='agents'),
+        at(T + 10, 'message_text', id=msg, text='For the other agent.', phase='final', row_id='r-1', turn_id='tr-1'),
+        at(T + 20, 'snapshot'),
+        at(T + 30, 'begin_turn', session='claire', conv='conv-1', turn_id='tr-2', audience='user'),
+        at(T + 40, 'snapshot'),
+        at(T + 50, 'begin_turn', session='claire', conv='conv-1', turn_id='tr-3', audience='agents'),
+        at(T + 60, 'end_turn', status='completed'),
+        at(T + 70, 'snapshot'),
     ])
     yield hub_case('reasoning has a headline, which changes with what is thought', [
         at(T, 'begin_turn', **BEGIN, started_at_ms=T - 400),
@@ -548,6 +568,7 @@ def claude_case(name, steps):
         now['ms'] = clock
         del sent[:]
         if 'begin' in step:
+            AUDIENCE['now'] = 'user'
             hub.begin_turn(agent_id=AGENT, session='claire', conv='conv-1', turn_id=step['begin'])
         elif 'end' in step:
             hub.end_turn(AGENT, status=step['end'])

@@ -3187,16 +3187,46 @@ def test_recoverable_clips_endpoint_returns_interrupted_session_audio(
     assert [event["clip_id"] for event in payload["events"]] == [clip_id]
 
 
+def _recency(agents_by_name, *, created, started):
+    """The two facts the names are ordered by (VocabService.active_agent_names), set by the test:
+    each agent's creation time and its latest turn's start (None: no turn)."""
+    from lib import db
+    con = db.conn()
+    for name, agent_id in agents_by_name.items():
+        con.execute("UPDATE agents SET created_at=? WHERE agent_id=?", (created[name], agent_id))
+        con.execute("DELETE FROM turns WHERE agent_id=?", (agent_id,))
+        if started.get(name) is not None:
+            con.execute("INSERT INTO turns(agent_id, source, trace_id, started_at) VALUES (?,?,?,?)",
+                        (agent_id, "pwa", f"t-{name}", started[name]))
+    con.commit()
+
+
+def _names(base):
+    status, body = _get(base + "/transcription-guidance")
+    assert status == 200
+    return json.loads(body)["active_agent_names"]
+
+
 def test_transcription_guidance_is_computer_owned_and_editable(running_server):
+    """R131: the names' order is set here, not left to what ran before or to the clock. It is
+    the user's own agents, the most recently used first (the latest turn's start), then by
+    creation, then by agent id. Mike and Rachel are made in the same millisecond more often
+    than not, and their ids are random: without the creation times set here, a tie left the
+    order to the ids."""
     base, ctx, _srv = running_server
+    from lib import agents as agents_db
     from lib.agents import create_agent
     create_agent(persona="Lena", voice_id="V_LENA", cwd=str(ctx.root), session="lena")
+    ids = {name: agents_db.get_by_session(session)["agent_id"]
+           for name, session in (("Mike", "claude"), ("Rachel", "rachel"), ("Lena", "lena"))}
+    created = {"Mike": 1_000, "Rachel": 2_000, "Lena": 3_000}
+    _recency(ids, created=created, started={})
 
     status, body = _get(base + "/transcription-guidance")
     assert status == 200
     initial = json.loads(body)
     assert initial["settings"]["delegation_agent_names_enabled"] is True
-    assert "Lena" in initial["active_agent_names"]
+    assert initial["active_agent_names"] == ["Mike", "Rachel", "Lena"]   # no turns: by creation
     assert initial["defaults"]["technical_glossary"] == ""
 
     status, body = _post(base + "/transcription-guidance", {
@@ -3211,6 +3241,27 @@ def test_transcription_guidance_is_computer_owned_and_editable(running_server):
         "Technical vocabulary: SwiftUI Cloudflare.")
     assert saved["delegation_estimated_prompt_tokens"] <= saved["prompt_token_limit"]
     assert saved["regular_estimated_prompt_tokens"] <= saved["prompt_token_limit"]
+
+
+def test_the_names_go_by_the_latest_turn_both_ways_and_a_tie_by_creation(running_server):
+    base, ctx, _srv = running_server
+    from lib import agents as agents_db
+    ids = {name: agents_db.get_by_session(session)["agent_id"]
+           for name, session in (("Mike", "claude"), ("Rachel", "rachel"))}
+    created = {"Mike": 1_000, "Rachel": 2_000}
+
+    _recency(ids, created=created, started={"Mike": 50_000, "Rachel": 40_000})
+    assert _names(base) == ["Mike", "Rachel"]                       # Mike used last
+    _recency(ids, created=created, started={"Mike": 40_000, "Rachel": 50_000})
+    assert _names(base) == ["Rachel", "Mike"]                       # Rachel used last
+    _recency(ids, created=created, started={"Mike": 50_000, "Rachel": 50_000})
+    assert _names(base) == ["Mike", "Rachel"]                       # same ms: the older first
+    _recency(ids, created={"Mike": 2_000, "Rachel": 1_000}, started={"Mike": 50_000, "Rachel": 50_000})
+    assert _names(base) == ["Rachel", "Mike"]                       # ... whichever that is
+    _recency(ids, created={"Mike": 1_000, "Rachel": 1_000}, started={})
+    first = _names(base)
+    by_id = sorted(ids, key=ids.get)
+    assert first == by_id and all(_names(base) == first for _ in range(3))  # full tie: by id, stable
 
 
 def test_signed_notification_avatar_serves_custom_agent_without_app_auth(
@@ -4069,7 +4120,7 @@ def test_oracle_v2_streams_only_owned_live_contract(running_server, monkeypatch,
         assert json.loads(client.recv())["type"] == "session.closed"
     finally:
         client.close()
-    assert upstream.sent[0]["session"]["model"] == "gpt-live-1"
+    assert upstream.sent[0]["session"]["model"] == "gpt-live-1.1"  # the configured default
     if podcast:
         assert "server remains authoritative" in json.dumps(upstream.sent[0]["session"])
         assert "separate explainer" in upstream.sent[0]["session"]["instructions"]
@@ -4759,6 +4810,31 @@ def test_a_voice_change_writes_only_that_agent(running_server, monkeypatch):
     assert status == 200, body
     assert agents_db.get_by_session("latecomer") is not None
     assert agents_db.get_by_session("claude")["voice_id"] == "fresh-voice"
+
+
+def test_the_snapshot_shows_each_agents_voice_and_changes_are_announced(running_server, monkeypatch):
+    """Issue 475 (feature voice_profile): every agent row shows the voice it is heard with,
+    and a change to it, or to anything every agent's voice depends on, tells open apps."""
+    from lib import events
+    base, _ctx, _srv = running_server
+    sent = []
+    real = events.broadcast
+    monkeypatch.setattr(events, "broadcast", lambda stream, event: (sent.append(dict(event)), real(stream, event)))
+    status, body = _get(base + "/agents/snapshot")
+    snap = json.loads(body)
+    assert status == 200 and snap["voice_profile_version"] and snap["voice_defaults"]["speech"]
+    rows = {row["session"]: row for row in snap["agents"]}
+    assert set(rows["rachel"]["voice_profile"]) == {"speech", "hearing"}
+    assert _post_status(base + "/agent-voice", {
+        "session": "rachel", "voice_id": "c0000000-0000-4000-8000-0000000000ad",
+        "provider": "cartesia"})[0] == 200
+    changed = [e for e in sent if e.get("kind") == "voice-changed"]
+    assert changed and changed[-1]["session"] == "rachel"
+    assert changed[-1]["voice_profile"]["speech"]["provider"]
+    assert _post_status(base + "/transcription-providers", {"language": "no"})[0] == 200
+    assert any(e.get("kind") == "voice-profile" for e in sent)
+    rows = {row["session"]: row for row in json.loads(_get(base + "/agents/snapshot")[1])["agents"]}
+    assert rows["rachel"]["voice_profile"]["hearing"]["language_origin"] == "default"
 
 
 def test_choosing_a_google_voice_accepts_only_the_allowlist_and_keeps_other_providers(

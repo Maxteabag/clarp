@@ -164,6 +164,32 @@ fn there(app: &App) -> impl Fn(&Portrait) -> bool + '_ {
     |portrait| matches!(app.blobs.len(&picture_name(&portrait.sha256)), Ok(Some(_)))
 }
 
+/// If storage failed between the durable pair decision and filling the blob store,
+/// a reader must not mistake the first available alternative for the whole gallery.
+/// Missing legacy files keep their usual projection once there is no pending publication.
+pub(crate) async fn gallery_ready(
+    fleet: &crate::fleet::FleetHandle,
+    blobs: &dyn clarp_ports::blobs::Blobs,
+    record: &AgentRecord,
+) -> Result<(), ApiError> {
+    for portrait in &record.portraits {
+        if portrait.created_by == "portrait_generation:openai"
+            && !matches!(blobs.len(&picture_name(&portrait.sha256)), Ok(Some(_)))
+            && let Some(id) = &portrait.media_asset_id
+            && fleet
+                .kept_book(crate::fleet::portrait_jobs::BYTES, id.clone())
+                .await?
+                .is_some()
+        {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Portraits are being published",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// What the apps are told of an agent's portraits, as its record has them now.
 fn told(app: &App, record: &AgentRecord, portraits: &[Portrait]) -> Value {
     let worn = worn(app, record);
@@ -189,6 +215,7 @@ async fn portraits(
     let record = &member
         .ok_or_else(|| declined(kept::UNKNOWN_SESSION))?
         .record;
+    gallery_ready(&app.fleet, app.blobs.as_ref(), record).await?;
     let worn = worn(&app, record);
     let wears = worn.as_ref().map(|(digest, kind)| (digest.as_str(), *kind));
     let made = (record.agent_id.as_str(), record.created_at_ms);
@@ -206,6 +233,9 @@ async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: Heade
         let record = &member.record;
         let recorded = record.portraits.iter();
         if let Some(found) = recorded.into_iter().find(|kept| kept.portrait_id == id) {
+            if let Err(why) = gallery_ready(&app.fleet, app.blobs.as_ref(), record).await {
+                return why.into_response();
+            }
             let name = picture_name(&found.sha256);
             return media::send_kept(&app.blobs, name, &found.mime_type, &range);
         }
@@ -239,10 +269,12 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
         "" => clarp_kernel::addressed::DEFAULT_SESSION,
         session => session,
     };
+    let _gallery = crate::portrait_generation::GALLERY_WRITE.lock().await;
     let directory = app.fleet.directory();
     let member = directory.by_session(session).cloned();
     let member = member.ok_or_else(|| declined(kept::UNKNOWN_SESSION))?;
     let record = &member.record;
+    gallery_ready(&app.fleet, app.blobs.as_ref(), record).await?;
     let worn = worn(&app, record);
     let wears = worn.as_ref().map(|(digest, kind)| (digest.as_str(), *kind));
     let made = (record.agent_id.as_str(), record.created_at_ms);
@@ -351,8 +383,32 @@ async fn pushed_face(
     media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
 }
 
+async fn avatar_settings(State(app): State<App>) -> Json<Value> {
+    use clarp_kernel::portraits::{MODEL_SETTING, model_avatars};
+    Json(json!({"model_avatars":model_avatars(app.fleet.directory().setting(MODEL_SETTING))}))
+}
+
+async fn set_avatar_settings(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    let value = serde_json::from_slice::<Value>(&body).ok();
+    let on = value
+        .as_ref()
+        .and_then(|v| v["model_avatars"].as_bool())
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "model_avatars required"))?;
+    app.fleet
+        .set(vec![(
+            clarp_kernel::portraits::MODEL_SETTING.to_owned(),
+            on.to_string(),
+        )])
+        .await?;
+    Ok(Json(json!({"model_avatars":on})))
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route(
+            "/avatar-settings",
+            get(avatar_settings).post(set_avatar_settings),
+        )
         .route("/agent-portraits", get(portraits).post(change_portraits))
         .route("/agent-portraits/{id}/content", get(portrait))
         .route("/notification-avatars/{agent}", get(pushed_face))

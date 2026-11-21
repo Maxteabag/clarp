@@ -38,6 +38,10 @@ use crate::edge::{self, ApiError, App};
 use crate::fleet::{Amend, Member};
 use crate::{ids, wire};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits_book).by_entries(unfit_entries)];
+
 /// The kind of thing the heartbeat's book is, among what is left with the fleet.
 const KIND: &str = "heartbeat";
 const ALL: &str = "all";
@@ -62,6 +66,19 @@ struct Book {
 #[derive(Default)]
 pub struct Desk {
     book: tokio::sync::Mutex<Option<Book>>,
+    /// The entries of its document that are not its book's, put back with every save.
+    carried: std::sync::Mutex<crate::kept::Carried>,
+}
+
+/// The fields of the heartbeat's book read entry by entry.
+const ENTRIES: &[&str] = &["agents", "counted"];
+
+fn fits_book(stored: &[u8]) -> bool {
+    crate::kept::fits_carried::<Book, Value>(stored, ENTRIES)
+}
+
+fn unfit_entries(stored: &[u8]) -> Vec<String> {
+    crate::kept::unfit::<Book, Value>(stored, ENTRIES)
 }
 
 impl Desk {
@@ -69,21 +86,30 @@ impl Desk {
     async fn ask<T>(&self, app: &App, ask: impl FnOnce(&mut Book) -> T) -> Result<T, Unavailable> {
         let mut held = self.book.lock().await;
         if held.is_none() {
-            let kept = app.fleet.kept(KIND, ALL.to_string()).await?;
-            // What cannot be read is a book with nothing in it: nobody is woken on a guess.
-            let book = kept.and_then(|kept| serde_json::from_slice(&kept).ok());
-            *held = Some(book.unwrap_or_default());
+            // Through the loader: a document that is not the book's is set aside, an entry that
+            // is not is carried through (`kept.rs`); nobody is woken on a guess.
+            let (book, carried) = app
+                .fleet
+                .read_book::<Book, Value>(KIND, ALL, ENTRIES)
+                .await?;
+            if let Ok(mut kept) = self.carried.lock() {
+                *kept = carried;
+            }
+            *held = Some(book);
         }
         let Some(book) = held.as_mut() else {
             return Err(Unavailable(
                 "the heartbeat's book could not be read".to_string(),
             ));
         };
-        let before = book.clone();
-        let answer = ask(book);
-        if *book != before {
-            let kept = serde_json::to_vec(book).unwrap_or_default();
+        let mut next = book.clone();
+        let answer = ask(&mut next);
+        if next != *book {
+            let carried = self.carried.lock().map(|c| c.clone()).unwrap_or_default();
+            let kept = crate::kept::saved(&next, &carried);
             app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+            *book = next;
+            app.fleet.written_over(KIND, ALL, &self.carried, &*book);
         }
         Ok(answer)
     }
@@ -514,4 +540,34 @@ pub fn routes() -> Router<App> {
         .route("/heartbeat/settings", get(settings).post(change_settings))
         .route("/agent-heartbeat", post(switch))
         .route("/agent-heartbeat/status", get(status))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod due_work_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_cached_book_matches_what_the_store_accepted() {
+        let place = crate::unkept::at_the_port::place("heartbeat-kept");
+        let app = place.app().await;
+        let desk = &app.heartbeat;
+        let read = |book: &mut Book| book.settings.interval_sec;
+        desk.ask(&app, |book| book.settings.interval_sec = 600)
+            .await
+            .unwrap();
+        place.refuse_writes(Some(KIND));
+        let refused = desk
+            .ask(&app, |book| book.settings.interval_sec = 900)
+            .await;
+        assert!(refused.unwrap_err().0.contains("refused here"));
+        assert_eq!(desk.ask(&app, read).await.unwrap(), 600);
+        assert_eq!(Desk::default().ask(&app, read).await.unwrap(), 600);
+        place.refuse_writes(None);
+        desk.ask(&app, |book| book.settings.interval_sec = 900)
+            .await
+            .unwrap();
+        assert_eq!(desk.ask(&app, read).await.unwrap(), 900);
+        assert_eq!(Desk::default().ask(&app, read).await.unwrap(), 900);
+    }
 }

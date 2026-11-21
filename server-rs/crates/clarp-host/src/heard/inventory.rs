@@ -5,33 +5,30 @@ use clarp_kernel::heard::inventory as rules;
 use std::path::Path;
 use std::sync::RwLock;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    "transcription-models",
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Vec<Value>>,
+)];
+
 pub(super) struct Inventory(RwLock<Option<Arc<Vec<Value>>>>);
 
 impl Inventory {
     pub(super) async fn open(fleet: &crate::fleet::FleetHandle) -> Result<Self, String> {
-        let kept = fleet
-            .kept("transcription-models", "records".into())
+        // Through the loader: a list that cannot be read is moved aside, counted and said
+        // (`kept.rs`), and a store that refuses that is the answer.
+        let found = fleet
+            .judged("transcription-models", "records".into())
             .await
             .map_err(|e| e.0)?;
-        let records = match kept {
-            Some(bytes) => match serde_json::from_slice::<Vec<Value>>(&bytes) {
-                Ok(rows) => Some(Arc::new(rows)),
-                Err(_) => {
-                    fleet
-                        .keep(
-                            "transcription-models",
-                            "records.unreadable".into(),
-                            Some(bytes),
-                        )
-                        .await
-                        .map_err(|e| e.0)?;
-                    eprintln!(
-                        "clarp-host: unreadable transcription inventory; using an empty list"
-                    );
-                    None
-                }
-            },
-            None => Some(Arc::default()),
+        let records = match found {
+            crate::kept::Found::Read(bytes) => serde_json::from_slice::<Vec<Value>>(&bytes)
+                .ok()
+                .map(Arc::new),
+            // Moved aside: unreadable, as before; its next change writes the list anew.
+            crate::kept::Found::Unfit => None,
+            crate::kept::Found::Absent => Some(Arc::default()),
         };
         Ok(Self(RwLock::new(records)))
     }
@@ -61,7 +58,7 @@ impl Inventory {
                 self.publish(fleet, rows)
                     .await
                     .map_err(|e| format!("clearing pending default model removal: {e:?}"))?;
-            } else if self.remove(fleet, root, id).await.is_err() {
+            } else if self.remove(fleet, root, id, false).await.is_err() {
                 eprintln!("clarp-host: a pending transcription model removal could not finish");
             }
         }
@@ -142,6 +139,7 @@ impl Inventory {
         fleet: &FleetHandle,
         root: &Path,
         id: &str,
+        rollback: bool,
     ) -> Result<(), ApiError> {
         let mut records = self.records().as_ref().clone();
         let Some(index) = records.iter().position(|r| r["id"] == id) else {
@@ -157,17 +155,13 @@ impl Inventory {
         };
         let record = &records[index];
         let pending = record["_remove_pending"] == true;
-        if !pending && installed_path(record).is_none() {
+        if !rollback && !pending && installed_path(record).is_none() {
             return Ok(());
         }
-        if !record["_managed_root"].is_null() {
-            let bad = |why| ApiError::new(StatusCode::BAD_REQUEST, why);
-            let target = record["_managed_root"]
-                .as_str()
-                .ok_or_else(|| bad("invalid managed folder".to_owned()))?;
-            let folder =
-                super::managed::ManagedFolder::checked(root, id, Path::new(target), pending)
-                    .map_err(bad)?;
+        if let Some(stored) = record.get("_managed_root") {
+            let folder = super::managed::ManagedFolder::checked(root, id)
+                .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+            super::managed::ManagedFolder::note_stored(root, id, stored);
             if !pending {
                 records[index]["_remove_pending"] = json!(true);
                 self.publish(fleet, records.clone()).await?;

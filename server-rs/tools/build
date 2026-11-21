@@ -8,13 +8,15 @@
 # To release the reservation sooner, end the keeper PID shown by build status on the build machine.
 #
 #   server-rs/tools/build check            type-check the workspace (the inner loop: seconds once warm)
-#   server-rs/tools/build test [args...]   cargo test --workspace [args...]
+#   server-rs/tools/build test [args...]   cargo test --workspace [args...], the shim built first
 #   server-rs/tools/build clippy           the lint gate, as CI runs it
 #   server-rs/tools/build fmt              format the sources in place here (runs rustfmt remotely, copies back)
 #   server-rs/tools/build conform [args]   build the Host and compare it with the Python Host's written-down
 #                                          answers (server-rs/conformance); starts only the Rust Host
 #   server-rs/tools/build answers [args]   build the Host, run the corpus against it and bring home what it
 #                                          answered, compared with nothing: for a scenario without a reference yet
+#   server-rs/tools/build voice-timeline-read   time two GETs on a disposable release Host on the build machine
+#   server-rs/tools/build snapshot-read    time GET /agents/snapshot with thirty agents on a disposable release Host
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
 #   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs
@@ -67,11 +69,19 @@ fi
 
 case "$cmd" in
     check)  cargo_cmd="cargo check --workspace --all-targets -j $JOBS" ;;
-    test)   cargo_cmd="cargo test --workspace -j $JOBS $(printf '%q ' "$@")" ;;
+    # The shim a test Host launches its turns through is found beside the Host: build it first,
+    # since a test run named by package or file (-p clarp-host --test host) builds no other binary.
+    test)   cargo_cmd="cargo build -j $JOBS -p clarp-shim --bins && cargo test --workspace -j $JOBS $(printf '%q ' "$@")" ;;
     clippy) cargo_cmd="cargo clippy --workspace --all-targets -j $JOBS -- -D warnings" ;;
     fmt)    cargo_cmd="cargo fmt --all" ;;
     conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
     answers) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py rust --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
+    voice-timeline-read)
+        cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-voice-timeline.py target/release/clarp-host'"
+        ;;
+    snapshot-read)
+        cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-snapshot.py target/release/clarp-host'"
+        ;;
     fleet-load-build) cargo_cmd="timeout 175 cargo build --locked --release -j $JOBS -p clarp-host -p clarp-shim --bins" ;;
     fleet-load)
         [[ $# = 2 && $1 == /var/tmp/* && $1 != *$'\n'* && $2 =~ ^(move|empty|full|populate|observe)$ ]] || exit 2
@@ -112,6 +122,9 @@ ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents $remote/s
 "${up[@]}" --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-sub-agents/" "$HOST:$remote/skills/clarp-sub-agents/"
 # And the program an agent publishes a file with; a test publishes with it.
 "${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../scripts/clarp-media-publish.py" "$HOST:$remote/scripts/"
+# The background-task test runs the repository's goal launcher.
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-background-jobs/scripts"
+"${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-background-jobs/scripts/run_detached_job.sh" "$HOST:$remote/skills/clarp-background-jobs/scripts/"
 if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
     # The conformance driver is the replay harness run against the Rust Host: it needs the
     # harness, and the server's source for the words its report may print.

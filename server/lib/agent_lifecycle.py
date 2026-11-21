@@ -274,12 +274,14 @@ class AgentLifecycleService:
                 self.ctx.speak_announcement(announcement, spec.voice_id, session=spec.session)
         if spec.janitor:
             return
+        from . import voice_profile
         events.broadcast(self.ctx.stream, events.agent_roster(
             "relaunched" if spec.replace_sid else ("forked" if spec.fork_id else "created"),
             session=spec.session,
             persona=spec.persona,
             voice_id=spec.voice_id,
             backend=spec.backend,
+            voice_profile=voice_profile.for_session(spec.session),
         ))
 
     @staticmethod

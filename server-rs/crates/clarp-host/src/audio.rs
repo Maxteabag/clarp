@@ -25,6 +25,13 @@ use clarp_kernel::spoken::{self, Line, LineState, SpeechBook};
 use crate::agent::Unavailable;
 use crate::edge::App;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    FACTS,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Fact>,
+)];
+
 /// The kind of thing a fact is, among what is left with the fleet.
 const FACTS: &str = "audio-facts";
 /// What a run of the bookkeeper is named before its fact's number.
@@ -131,8 +138,9 @@ pub(crate) async fn said(app: &App, agent_id: &str, clip: u64, turn: u64, status
 /// waits is written down where somebody keeps the books for its agent, and what was seen
 /// more than a week ago is forgotten.
 pub(crate) async fn keep(app: &App) {
-    let Ok(mut held) = app.audio.held(app).await else {
-        return;
+    let mut held = match app.audio.held(app).await {
+        Ok(held) => held,
+        Err(why) => return app.fleet.unread(FACTS, &why.0),
     };
     let Some(held) = held.as_mut() else {
         return;
@@ -175,12 +183,24 @@ pub(crate) async fn keep(app: &App) {
         let mut waiting = waiting.filter(|fact| fact.completed_at.is_none());
         waiting.any(|fact| book.audio_kept_for(&fact.agent_id, world))
     });
-    if waits.await.unwrap_or(false) {
-        let seen = &mut held.seen;
-        let written = app.janitors.with(app, |book, world, now_ms| {
-            book.keep_audio(seen, world, now_ms, rules::AT_A_TIME)
-        });
-        changed.extend(written.await.unwrap_or_default());
+    let completed = match waits.await {
+        Ok(true) => {
+            let seen = &mut held.seen;
+            app.janitors
+                .with(app, |book, world, now_ms| {
+                    book.keep_audio(seen, world, now_ms, rules::AT_A_TIME)
+                })
+                .await
+        }
+        Ok(false) => Ok(Vec::new()),
+        Err(why) => {
+            app.fleet.unread(FACTS, &why.0);
+            Ok(Vec::new())
+        }
+    };
+    match completed {
+        Ok(facts) => changed.extend(facts),
+        Err(why) => app.fleet.unkept(FACTS, &why.0),
     }
     // Each fact is kept as it now stands: once, also where it was seen and written down
     // on the same tick.

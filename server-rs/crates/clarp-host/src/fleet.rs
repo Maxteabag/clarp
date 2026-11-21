@@ -38,9 +38,83 @@ use crate::pairing::{self, Device, Issued, Paired, PendingCode, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::wire;
-mod computer_jobs;
+pub(crate) mod computer_jobs;
+pub(crate) mod portrait_jobs;
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
 pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
+
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::table(
+        AGENTS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<AgentRecord>,
+    ),
+    crate::kept::Kind::table(
+        DEVICES,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Device>,
+    ),
+    crate::kept::Kind::table(
+        PUSH,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Secret,
+        crate::kept::fits::<PushRow>,
+    ),
+    crate::kept::Kind::table(
+        PERSONAS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Made>,
+    ),
+    crate::kept::Kind::table(
+        LOOKS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Look>,
+    ),
+    crate::kept::Kind::table(
+        PEERS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Peer>,
+    ),
+    crate::kept::Kind::table(
+        SETTINGS,
+        crate::kept::Policy::Book,
+        crate::kept::Key::Plain,
+        crate::kept::text,
+    ),
+    crate::kept::Kind::table(
+        JOBS,
+        crate::kept::Policy::Book,
+        crate::kept::Key::Plain,
+        crate::kept::text,
+    ),
+    crate::kept::Kind::table(
+        CODES,
+        crate::kept::Policy::Book,
+        crate::kept::Key::Secret,
+        crate::kept::fits::<PendingCode>,
+    ),
+    crate::kept::Kind::book(
+        LAUNCH_USAGE,
+        crate::kept::Key::Secret,
+        crate::kept::fits::<launches::Usage>,
+    ),
+    crate::kept::Kind::book(
+        "opening_by_turn",
+        crate::kept::Key::Plain,
+        crate::kept::json,
+    ),
+];
+
+/// The voice timeline's events and their sequence, written here and declared by its desk
+/// (`voices::KEPT`).
+pub(crate) const VOICE_EVENTS: &str = "voice-events";
+pub(crate) const VOICE_SEQUENCE: &str = "voice-event-sequence";
 
 const AGENTS: &str = "agent";
 const SETTINGS: &str = "setting";
@@ -301,6 +375,10 @@ pub struct Directory {
     pub settings: Arc<BTreeMap<String, String>>,
     /// The personas the owner made, and how he made built-in ones look.
     pub personas: Arc<Book>,
+    /// The agents that were removed, by id: the name and the session each had last. A row an
+    /// agent wrote, or that answers one, still names it by them, as the Python Host's roster
+    /// keeps a removed agent's row.
+    pub gone: Arc<BTreeMap<String, (String, String)>>,
 }
 
 /// The contact a launch asked for in place of a name of its own: always a minted one
@@ -393,6 +471,20 @@ impl Directory {
     /// The agent or the janitor a request names: for what is read of either.
     pub fn anyone(&self, key: &str) -> Option<&Arc<Member>> {
         self.named(key).or_else(|| self.janitor(key))
+    }
+
+    /// The name and the session of the agent of this id as the roster has them now, also of
+    /// one that was removed: what a row that names another agent shows of it when it is read.
+    /// By its id alone, as the Python Host joins its roster.
+    pub fn shown_as(&self, agent_id: &str) -> Option<(String, String)> {
+        let member = self.members.iter().chain(&self.janitors);
+        match member
+            .into_iter()
+            .find(|member| member.record.agent_id == agent_id)
+        {
+            Some(member) => Some((member.record.persona.clone(), member.record.session.clone())),
+            None => self.gone.get(agent_id).cloned(),
+        }
     }
 
     /// The device that presents this token, when it is paired and not revoked.
@@ -490,9 +582,16 @@ pub struct Works {
     pub pools: Vec<Arc<crate::pool::Service>>,
     /// Where what the Host could not keep is said.
     pub log: crate::unkept::Log,
+    /// What could not be read of what the Host keeps, by its kind and key (`kept.rs`).
+    pub left_out: Arc<crate::kept::LeftOut>,
 }
 
 enum Ask {
+    AppendVoice {
+        rows: Vec<serde_json::Value>,
+        answer: Option<Answer<usize>>,
+    },
+
     DelegationMismatch(delegations::Mismatch),
     GoalDelegation {
         request: delegations::Request,
@@ -668,6 +767,18 @@ enum Ask {
         key: Option<String>,
         answer: Answer<Result<Left, Unavailable>>,
     },
+    /// One record of a kind, judged as it is read (`kept::judged`).
+    Judged {
+        kind: &'static str,
+        key: String,
+        answer: Answer<Result<crate::kept::Found, Unavailable>>,
+    },
+    /// A whole kind, each record judged as it is read (`kept::listed_as`), as the desk's type.
+    Listed {
+        kind: &'static str,
+        as_type: Option<fn(&[u8]) -> bool>,
+        answer: Answer<Result<crate::kept::Listed, Unavailable>>,
+    },
     /// The owner makes a persona (`original` is `None`) or changes the one of that name.
     /// `fetched` are the voices of Cartesia's this Host has listed: what a voice is picked
     /// from first. The inner error is why not, in words for the app.
@@ -688,6 +799,21 @@ enum Ask {
         picture: Vec<u8>,
         answer: Answer<Option<String>>,
     },
+    PortraitStatus {
+        id: String,
+        answer: Answer<(Option<ComputerJob>, u32)>,
+    },
+    BeginPortraits {
+        agent: String,
+        answer: Answer<portrait_jobs::Admission>,
+    },
+    AcceptPortraits {
+        id: String,
+        generation: u64,
+        publication: Box<portrait_jobs::Publication>,
+        bytes: [Vec<u8>; 2],
+        answer: Answer<bool>,
+    },
     /// The owner removes a persona of his own. Answers whether there was one to remove.
     PersonaRemove {
         name: String,
@@ -702,9 +828,36 @@ pub struct FleetHandle {
     tx: Arc<mpsc::Sender<Ask>>,
     directory: watch::Receiver<Arc<Directory>>,
     log: crate::unkept::Log,
+    left_out: Arc<crate::kept::LeftOut>,
 }
 
 impl FleetHandle {
+    pub async fn append_voice(&self, rows: Vec<serde_json::Value>) -> Result<usize, Unavailable> {
+        self.ask(|answer| Ask::AppendVoice {
+            rows,
+            answer: Some(answer),
+        })
+        .await
+    }
+
+    pub fn record_voice(&self, row: serde_json::Value) {
+        if self
+            .tx
+            .send(Ask::AppendVoice {
+                rows: vec![row],
+                answer: None,
+            })
+            .is_err()
+        {
+            self.unkept("voice-events", "the fleet is closed");
+        }
+    }
+
+    /// What could not be read of what the Host keeps.
+    pub fn left_out(&self) -> &crate::kept::LeftOut {
+        &self.left_out
+    }
+
     /// The fleet as it is now.
     pub fn directory(&self) -> Arc<Directory> {
         self.directory.borrow().clone()
@@ -1051,6 +1204,36 @@ impl FleetHandle {
         .await
     }
 
+    pub(crate) async fn portrait_status(
+        &self,
+        id: String,
+    ) -> Result<(Option<ComputerJob>, u32), Unavailable> {
+        self.ask(|answer| Ask::PortraitStatus { id, answer }).await
+    }
+    pub(crate) async fn begin_portraits(
+        &self,
+        agent: String,
+    ) -> Result<portrait_jobs::Admission, Unavailable> {
+        self.ask(|answer| Ask::BeginPortraits { agent, answer })
+            .await
+    }
+    pub(crate) async fn accept_portraits(
+        &self,
+        id: String,
+        generation: u64,
+        publication: portrait_jobs::Publication,
+        bytes: [Vec<u8>; 2],
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::AcceptPortraits {
+            id,
+            generation,
+            publication: Box::new(publication),
+            bytes,
+            answer,
+        })
+        .await
+    }
+
     /// Removes a persona the owner made. Answers whether there was one of that name.
     pub async fn persona_remove(&self, name: String) -> Result<bool, Unavailable> {
         self.ask(|answer| Ask::PersonaRemove { name, answer }).await
@@ -1084,6 +1267,10 @@ impl FleetHandle {
     /// record and the store's words, never by what was to be written.
     pub fn unkept(&self, kind: &str, why: &str) {
         self.log.unkept(kind, why);
+    }
+
+    pub fn unread(&self, kind: &str, why: &str) {
+        self.log.unread(kind, why);
     }
 
     /// Keeps as [`Self::keep`] does, for a caller that waits on nothing: a failure is said.
@@ -1147,12 +1334,128 @@ impl FleetHandle {
 
     /// Everything that was left of a kind, ordered by key.
     pub async fn kept_all(&self, kind: &'static str) -> Result<Left, Unavailable> {
-        self.ask(|answer| Ask::Kept {
-            kind,
-            key: None,
-            answer,
-        })
-        .await?
+        let kept: Left = self
+            .ask(|answer| Ask::Kept {
+                kind,
+                key: None,
+                answer,
+            })
+            .await??;
+        // A copy set aside and a row left out are no desk's: the fleet's own read hides them
+        // (`Fleet::kept`).
+        Ok(kept)
+    }
+
+    /// Every record of a kind of rows, judged as its desk's type as it is read (`kept.rs`): those
+    /// that can be read, and one that cannot left out, counted and said.
+    pub async fn kept_rows<T: serde::de::DeserializeOwned>(
+        &self,
+        kind: &'static str,
+    ) -> Result<crate::kept::Rows<T>, Unavailable> {
+        let as_type = Some(crate::kept::fits::<T> as fn(&[u8]) -> bool);
+        let listed = self
+            .ask(|answer| Ask::Listed {
+                kind,
+                as_type,
+                answer,
+            })
+            .await??;
+        Ok(crate::kept::typed(listed))
+    }
+
+    /// Every record of a kind judged when read, each judged as it is read by the one judge
+    /// (`kept.rs`): those that are its desk's, ordered by key. The only way such a kind is
+    /// read whole.
+    pub async fn kept_listed(&self, kind: &'static str) -> Result<Left, Unavailable> {
+        let listed = self
+            .ask(|answer| Ask::Listed {
+                kind,
+                as_type: None,
+                answer,
+            })
+            .await??;
+        Ok(listed.read)
+    }
+
+    /// One record of a kind, read when its desk asks for it (`kept.rs`): one that is not its
+    /// desk's is judged (a book's set aside under `<key>.unreadable` first, a write the store
+    /// refuses being the answer), counted and said, and the desk is answered nothing.
+    pub async fn kept_book(
+        &self,
+        kind: &'static str,
+        key: String,
+    ) -> Result<Option<Vec<u8>>, Unavailable> {
+        Ok(self.judged(kind, key).await?.read())
+    }
+
+    /// What `kept_book` reads, with whether a record was there and did not fit, for a desk that
+    /// would otherwise write over what it could not see.
+    pub async fn judged(
+        &self,
+        kind: &'static str,
+        key: String,
+    ) -> Result<crate::kept::Found, Unavailable> {
+        self.ask(|answer| Ask::Judged { kind, key, answer }).await?
+    }
+
+    /// A book's document, read entry by entry through the loader: a document that is not its
+    /// desk's is set aside (`kept_book`); an entry that is not is carried out of it, counted and
+    /// said, to be put back with every save (`kept::saved`).
+    pub async fn read_book<B, I>(
+        &self,
+        kind: &'static str,
+        key: &str,
+        fields: &[&str],
+    ) -> Result<(B, crate::kept::Carried), Unavailable>
+    where
+        B: serde::de::DeserializeOwned + Default,
+        I: serde::de::DeserializeOwned,
+    {
+        let kept = self.kept_book(kind, key.to_string()).await?;
+        let Some(mut document) =
+            kept.and_then(|kept| serde_json::from_slice::<serde_json::Value>(&kept).ok())
+        else {
+            return Ok((B::default(), crate::kept::Carried::default()));
+        };
+        let carried = crate::kept::carry::<B, I>(&mut document, fields);
+        for at in carried.labels() {
+            self.leave_out(kind, &format!("{key}#{at}"));
+        }
+        let book = serde_json::from_value(document).unwrap_or_default();
+        Ok((book, carried))
+    }
+
+    /// After a book's save: an entry carried out of it whose key the desk wrote since is repaired
+    /// by that write (`Carried::written_over`): said as written anew, counted and carried no more.
+    pub fn written_over(
+        &self,
+        kind: &str,
+        key: &str,
+        carried: &std::sync::Mutex<crate::kept::Carried>,
+        saved: &impl serde::Serialize,
+    ) {
+        let Ok(document) = serde_json::to_value(saved) else {
+            return;
+        };
+        let Ok(mut carried) = carried.lock() else {
+            return;
+        };
+        for (field, entry) in carried.written_over(&document) {
+            carried.forget(&field, &entry);
+            let at = format!("{key}#{field}.{entry}");
+            self.left_out.written(&shelf(kind), &at, &self.log);
+        }
+    }
+
+    /// A record of a kind left out by a desk that could not use it: counted and said by its
+    /// kind and key, as the loader leaves one out.
+    pub fn leave_out(&self, kind: &str, key: &str) {
+        self.left_out.left_out(&shelf(kind), key, &self.log);
+    }
+
+    /// A record left out by a desk is now used after all: no longer counted, and said.
+    pub fn recovered(&self, kind: &str, key: &str) {
+        self.left_out.recovered(&shelf(kind), key, &self.log);
     }
 
     /// Says what became of a push to a token. Does not wait.
@@ -1257,6 +1560,11 @@ struct Fleet {
     works: Works,
     store: Box<dyn KeyValue>,
     members: Vec<Arc<Member>>,
+    /// The agents that were removed, by id: their name and session as last kept.
+    gone: BTreeMap<String, (String, String)>,
+    /// The agents being removed whose thread has not answered its close yet, by id: when they
+    /// were deleted. Their tombstone is kept; nothing else of their removal is done yet.
+    closing: BTreeMap<String, i64>,
     focus: Option<String>,
     /// The devices that may speak, by the digest of their token.
     devices: HashMap<String, Arc<Device>>,
@@ -1273,6 +1581,9 @@ struct Fleet {
     /// The personas the owner made, and how he made built-in ones look.
     book: Arc<Book>,
     directory: watch::Sender<Arc<Directory>>,
+    /// The names of the agents the Host keeps and does not run: those it could not read
+    /// (where their bytes name them) and those it could not set up. Nobody else gets them.
+    held: Vec<crate::kept::Name>,
 }
 
 pub(crate) fn non_empty(text: &str) -> Option<String> {
@@ -1297,6 +1608,15 @@ fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Resul
             .iter()
             .cloned()
             .chain(std::iter::once((
+                "CLARP_DELEGATION_DIR".into(),
+                works
+                    .config
+                    .data_dir
+                    .join("delegations")
+                    .to_string_lossy()
+                    .into_owned(),
+            )))
+            .chain(std::iter::once((
                 "CLARP_SESSION".into(),
                 record.session.clone(),
             )))
@@ -1305,6 +1625,11 @@ fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Resul
         keep_spools: works.config.keep_spools,
         accounts: works.config.accounts,
         epoch: works.hub.epoch().to_string(),
+        hides_coordination: clarp_kernel::coordination::can_leave_note(
+            &record.agent_id,
+            Some(&record.backend),
+            works.turns.has_key(),
+        ),
     };
     Ok(Setup {
         delegation_rejoin: desk.for_worker(),
@@ -1341,9 +1666,16 @@ fn retire_goals(works: &Works, record: &AgentRecord, at: i64) -> Result<(), Stri
     clarp_actor::retire_goal_ledger(log.as_mut(), at).map_err(|e| e.to_string())
 }
 
+/// What is counted of a deleted agent whose goals could not be retired yet: it is tried again at
+/// the next start.
+const RETIRE: &str = "agent-ledger";
+
 /// Opens the fleet from its store, starts a thread for every agent in it, and returns the way
 /// to the fleet's own thread.
 pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
+    // Every kind the Host keeps, read once before anything is opened: the count at the door is
+    // whole, and a book's record that cannot be read is set aside first (`kept.rs`).
+    crate::kept::walk(store.as_mut(), &works.left_out, &works.log).map_err(|e| e.to_string())?;
     // The owner's settings have a dot in their key (`transcription.language`); what the
     // Host keeps for itself in the same table (its id, the focus) has none. They are read
     // first: what an agent's tool is told is worked out from them.
@@ -1358,19 +1690,18 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     }
     works.telling.settings_are(Arc::new(settings.clone()));
     let mut launch_usage = Ledger::new();
-    let mut unreadable = 0usize;
+    // What cannot be read is set aside by the walk above, and counted there.
     for (key, bytes) in store
         .list(&shelf(LAUNCH_USAGE))
         .map_err(|e| e.to_string())?
     {
-        let Ok(usage) = serde_json::from_slice::<launches::Usage>(&bytes) else {
-            unreadable += 1;
+        // A copy set aside is known by the count, not by its name: a directory may be named so.
+        if works.left_out.is_left_out(&shelf(LAUNCH_USAGE), &key) {
             continue;
-        };
-        launch_usage.insert(key, usage);
-    }
-    if unreadable > 0 {
-        eprintln!("clarp-host: unreadable launch-path-usage records skipped: {unreadable}");
+        }
+        if let Ok(usage) = serde_json::from_slice::<launches::Usage>(&bytes) {
+            launch_usage.insert(key, usage);
+        }
     }
     let launch_usage = Arc::new(launch_usage);
     let mut owners = Owners::new();
@@ -1378,15 +1709,40 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     let tx = Arc::new(tx);
     let delegation_desk = delegations::Desk::open(&works, store.as_mut(), &tx)?;
     let mut members = Vec::new();
-    for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
-        let mut record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
-            format!("the fleet's entry for agent {agent_id} cannot be read: {error}")
-        })?;
+    let mut gone = BTreeMap::new();
+    // Every record of every kind is read alone: one that cannot be read is left out, counted
+    // and said, and never written over (`kept.rs`). Its names stay its own.
+    let (left, log) = (works.left_out.clone(), works.log.clone());
+    // One pass for each kind: each record read as its desk's type, alone (`kept.rs`).
+    macro_rules! read {
+        ($type:ty, $table:expr) => {
+            crate::kept::rows::<$type>(store.as_mut(), $table, &left, &log)
+                .map_err(|e| e.to_string())?
+        };
+    }
+    let agents = read!(AgentRecord, AGENTS);
+    let mut held: Vec<crate::kept::Name> = agents.names;
+    let deleted: HashSet<String> = agents
+        .read
+        .iter()
+        .filter(|(_, record)| record.deleted_at_ms.is_some())
+        .map(|(agent_id, _)| agent_id.clone())
+        .collect();
+    for (agent_id, mut record) in agents.read {
         owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
         delegation_desk.known_record(&record);
         if let Some(at) = record.deleted_at_ms {
+            gone.insert(
+                record.agent_id.clone(),
+                (record.persona.clone(), record.session.clone()),
+            );
             if !record.ledger_retired {
-                retire_goals(&works, &record, at)?;
+                // A ledger that cannot be retired now is retired at the next start: counted
+                // until then, and the agent stays deleted.
+                if retire_goals(&works, &record, at).is_err() {
+                    left.retire_later(RETIRE, &agent_id, &log);
+                    continue;
+                }
                 record.ledger_retired = true;
                 let value = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
                 store
@@ -1395,13 +1751,39 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
             }
             continue;
         }
+        // A helper whose parent was deleted, and whose removal did not come to it (its parent's
+        // thread did not close in time, or the Host stopped first), loses it now, as removal
+        // does.
+        let parent_gone = record
+            .parent_agent_id
+            .as_ref()
+            .is_some_and(|parent| deleted.contains(parent));
+        let current = record.helper_state.as_deref().unwrap_or("");
+        if let Some(moved) = helpers::next_state(current, "parent_gone").filter(|_| parent_gone) {
+            record.helper_state = Some(moved.state.to_string());
+            record.helper_completed_at_ms = moved.completed.then(|| works.clock.now_ms());
+            let value = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
+            store
+                .put(AGENTS, &agent_id, &value)
+                .map_err(|e| e.to_string())?;
+        }
         match setup(&works, &delegation_desk, &record) {
             Ok(setup) => members.push(Arc::new(Member {
                 record,
                 agent: agent::spawn(setup),
             })),
-            // The agent stays in the store; a Host that has its backend will run it.
-            Err(why) => eprintln!("clarp-host: agent {} is left out: {why}", record.session),
+            // The agent stays in the store, and its names its own; a Host that has its
+            // backend will run it.
+            Err(why) => {
+                eprintln!("clarp-host: agent {} is left out: {why}", record.session);
+                left.not_run(&record.backend);
+                held.push(crate::kept::Name {
+                    agent_id: record.agent_id.clone(),
+                    session: record.session.clone(),
+                    persona: record.persona.clone(),
+                    voice_id: record.voice_id.clone(),
+                });
+            }
         }
     }
     let focus = store
@@ -1414,9 +1796,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 .any(|member| member.record.agent_id == *agent_id)
         });
     let mut devices = HashMap::new();
-    for (device_id, stored) in store.list(DEVICES).map_err(|error| error.to_string())? {
-        let device: Device = serde_json::from_slice(&stored)
-            .map_err(|error| format!("the entry for device {device_id} cannot be read: {error}"))?;
+    for (_, device) in read!(Device, DEVICES).read {
         if device.revoked_at.is_none() {
             devices.insert(device.token_hash.clone(), Arc::new(device));
         }
@@ -1425,40 +1805,30 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         store.as_ref(),
         computer_id,
         &works.revisions,
-        &works.log,
+        &works.left_out,
     )?;
     let mut jobs = HashMap::new();
     for (job_id, stored) in store.list(JOBS).map_err(|error| error.to_string())? {
         jobs.insert(job_id, String::from_utf8_lossy(&stored).into_owned());
     }
     let mut push = PushBook::new();
-    for (token, stored) in store.list(PUSH).map_err(|error| error.to_string())? {
-        let row: PushRow = serde_json::from_slice(&stored).map_err(|error| {
-            let named: String = token.chars().take(12).collect();
-            format!("the entry for the push token {named}… cannot be read: {error}")
-        })?;
+    for (_, row) in read!(PushRow, PUSH).read {
         push.apply(&[row]);
     }
     // The personas the owner made, and the looks he gave built-in ones.
-    let mut made: Vec<Made> = Vec::new();
-    for (id, stored) in store.list(PERSONAS).map_err(|error| error.to_string())? {
-        made.push(
-            serde_json::from_slice(&stored).map_err(|error| {
-                format!("the entry for the persona {id} cannot be read: {error}")
-            })?,
-        );
-    }
-    let mut looks: Vec<Look> = Vec::new();
-    for (id, stored) in store.list(LOOKS).map_err(|error| error.to_string())? {
-        looks.push(serde_json::from_slice(&stored).map_err(|error| {
-            format!("the entry for the look of the persona {id} cannot be read: {error}")
-        })?);
-    }
+    let made: Vec<Made> = read!(Made, PERSONAS)
+        .read
+        .into_iter()
+        .map(|(_, made)| made)
+        .collect();
+    let looks: Vec<Look> = read!(Look, LOOKS)
+        .read
+        .into_iter()
+        .map(|(_, look)| look)
+        .collect();
     let book = Arc::new(Book::new(made, looks));
     let mut peers = BTreeMap::new();
-    for (name, stored) in store.list(PEERS).map_err(|error| error.to_string())? {
-        let peer: Peer = serde_json::from_slice(&stored)
-            .map_err(|error| format!("the entry for the peer {name} cannot be read: {error}"))?;
+    for (name, peer) in read!(Peer, PEERS).read {
         peers.insert(name, peer);
     }
     let (roster, janitors) = apart(&members);
@@ -1474,9 +1844,18 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         peers: Arc::new(peers.clone()),
         settings: Arc::new(settings.clone()),
         personas: book.clone(),
+        gone: Arc::new(gone.clone()),
     }));
     let log = works.log.clone();
     let delegation_view = delegation_desk.for_worker();
+    let left_out = works.left_out.clone();
+    // A write to a key that was left out is the owner's repair: it is said, and no longer
+    // counted.
+    let store: Box<dyn KeyValue> = Box::new(crate::kept::Watched::new(
+        store,
+        left_out.clone(),
+        log.clone(),
+    ));
     let fleet = Fleet {
         launch_usage,
         cwd_owners,
@@ -1484,6 +1863,8 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         works,
         store,
         members,
+        gone,
+        closing: BTreeMap::new(),
         focus,
         devices,
         jobs,
@@ -1493,6 +1874,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         settings,
         book,
         directory,
+        held,
     };
     std::thread::Builder::new()
         .name("fleet".to_string())
@@ -1503,6 +1885,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         tx,
         directory: read,
         log,
+        left_out,
     })
 }
 
@@ -1669,13 +2052,7 @@ impl Fleet {
                         owner = self
                             .members
                             .iter()
-                            .find(|m| {
-                                m.agent
-                                    .view()
-                                    .jobs
-                                    .iter()
-                                    .any(|j| j.provider_owned() && j.id == job_id)
-                            })
+                            .find(|m| m.agent.view().provider_mirrors.contains_key(&job_id))
                             .map(|m| m.record.agent_id.clone());
                         if let Some(id) = &owner {
                             self.jobs.insert(job_id, id.clone());
@@ -1727,6 +2104,22 @@ impl Fleet {
                 } => {
                     let _ = answer.send(self.picture_made(&persona_id, &picture));
                 }
+                Ask::PortraitStatus { id, answer } => {
+                    let _ = answer.send(Ok((self.computer_jobs.get(&id), self.portrait_count())));
+                }
+                Ask::BeginPortraits { agent, answer } => {
+                    let _ = answer.send(self.begin_portraits(&agent));
+                }
+                Ask::AcceptPortraits {
+                    id,
+                    generation,
+                    publication,
+                    bytes,
+                    answer,
+                } => {
+                    let _ =
+                        answer.send(self.accept_portraits(&id, generation, &publication, bytes));
+                }
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));
                 }
@@ -1740,6 +2133,14 @@ impl Fleet {
                     answer,
                 } => {
                     let _ = answer.send(Ok(self.keep(kind, &key, value)));
+                }
+                Ask::AppendVoice { rows, answer } => {
+                    let result = self.append_voice(rows);
+                    if let Some(answer) = answer {
+                        let _ = answer.send(result);
+                    } else if let Err(error) = result {
+                        self.works.log.unkept("voice-events", &error.0);
+                    }
                 }
                 Ask::KeepTogether { writes, answer } => {
                     let result = self
@@ -1760,6 +2161,26 @@ impl Fleet {
                 Ask::Kept { kind, key, answer } => {
                     let _ = answer.send(Ok(self.kept(kind, key.as_deref())));
                 }
+                Ask::Judged { kind, key, answer } => {
+                    let (left, log) = (&self.works.left_out, &self.works.log);
+                    let found =
+                        crate::kept::judged(self.store.as_mut(), &shelf(kind), &key, left, log);
+                    let _ = answer.send(Ok(found.map_err(|e| Unavailable(e.to_string()))));
+                }
+                Ask::Listed {
+                    kind,
+                    as_type,
+                    answer,
+                } => {
+                    let (left, log) = (&self.works.left_out, &self.works.log);
+                    let table = shelf(kind);
+                    let store = self.store.as_mut();
+                    let listed = match as_type {
+                        Some(as_type) => crate::kept::listed_as(store, &table, as_type, left, log),
+                        None => crate::kept::listed(store, &table, left, log),
+                    };
+                    let _ = answer.send(Ok(listed.map_err(|e| Unavailable(e.to_string()))));
+                }
             }
         }
     }
@@ -1778,11 +2199,18 @@ impl Fleet {
         let found = match key {
             Some(key) => self.store.get(&table, key).map(|value| {
                 let value = value.map(|value| (key.to_string(), value));
-                value.into_iter().collect()
+                value.into_iter().collect::<Left>()
             }),
             None => self.store.list(&table),
         };
-        found.map_err(|error| Unavailable(error.to_string()))
+        let found = found.map_err(|error| Unavailable(error.to_string()))?;
+        // What the judge holds is no desk's (`kept.rs`): a row left out, until the owner repairs
+        // or deletes it, and a copy set aside, known by the count and not by its name.
+        let left = &self.works.left_out;
+        Ok(found
+            .into_iter()
+            .filter(|(key, _)| !left.is_left_out(&table, key))
+            .collect())
     }
 
     fn claim_job(
@@ -1806,6 +2234,48 @@ impl Fleet {
         }
     }
 
+    fn append_voice(&mut self, rows: Vec<serde_json::Value>) -> Result<usize, Unavailable> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        // The high-water mark is committed with the batch. A failed write consumes no IDs,
+        // and a restart never reads the owner's transcripts just to discover the next one.
+        let cursor = shelf("voice-event-sequence");
+        let table = shelf("voice-events");
+        // Judged as it is read (`kept.rs`): one that is not eight bytes is moved aside, and the
+        // sequence is not begun anew over the events it numbered.
+        let (left, log) = (&self.works.left_out, &self.works.log);
+        let found = crate::kept::judged(self.store.as_mut(), &cursor, "last", left, log)
+            .map_err(|e| Unavailable(e.to_string()))?;
+        let mut last = match found {
+            crate::kept::Found::Absent => 0,
+            crate::kept::Found::Read(bytes) => u64::from_be_bytes(
+                bytes
+                    .try_into()
+                    .map_err(|_| Unavailable("invalid voice event sequence".into()))?,
+            ),
+            crate::kept::Found::Unfit => {
+                return Err(Unavailable("invalid voice event sequence".into()));
+            }
+        };
+        let count = rows.len();
+        let mut writes = Vec::with_capacity(count + 1);
+        for mut row in rows {
+            last = last
+                .checked_add(1)
+                .ok_or_else(|| Unavailable("voice event sequence exhausted".into()))?;
+            row["event_id"] = serde_json::json!(last);
+            let bytes = serde_json::to_vec(&row)
+                .map_err(|_| Unavailable("cannot encode voice event".into()))?;
+            writes.push((table.clone(), format!("{last:020}"), Some(bytes)));
+        }
+        writes.push((cursor, "last".into(), Some(last.to_be_bytes().to_vec())));
+        self.store
+            .put_together(&writes)
+            .map_err(|e| Unavailable(e.to_string()))?;
+        Ok(count)
+    }
+
     fn now_ms(&self) -> i64 {
         self.works.clock.now_ms()
     }
@@ -1826,6 +2296,7 @@ impl Fleet {
             peers: Arc::new(self.peers.clone()),
             settings,
             personas: self.book.clone(),
+            gone: Arc::new(self.gone.clone()),
         }));
     }
 
@@ -1962,6 +2433,7 @@ impl Fleet {
             .filter(|at| {
                 let record = &self.members[*at].record;
                 !record.is_janitor
+                    && self.members[*at].agent.accepting_work().is_ok()
                     && record.avatar.is_none()
                     && record.avatar_symbol.is_empty()
                     && record.persona.eq_ignore_ascii_case(&name)
@@ -2136,7 +2608,9 @@ impl Fleet {
     }
 
     fn taken(&self, session: &str) -> bool {
-        self.members
+        let held = self.held.iter().any(|name| name.session == session);
+        held || self
+            .members
             .iter()
             .any(|member| member.record.session == session)
     }
@@ -2163,8 +2637,7 @@ impl Fleet {
         let pooled = {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
-            let wearers =
-                crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+            let wearers = self.wearers();
             let pool = clarp_kernel::contacts::pool(&contacts, &wearers, backend, "");
             pool.first().map(|name| (*name).to_string())
         };
@@ -2191,8 +2664,7 @@ impl Fleet {
         let decided = {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
-            let wearers =
-                crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+            let wearers = self.wearers();
             let agent = clarp_kernel::contacts::Assignee {
                 agent_id: &record.agent_id,
                 persona: &record.persona,
@@ -2224,10 +2696,12 @@ impl Fleet {
             .iter()
             .filter_map(|persona| persona["name"].as_str().map(str::to_string))
             .collect();
+        // The names of agents the Host keeps and does not run are taken too.
         let occupied: Vec<String> = self
             .members
             .iter()
             .map(|member| member.record.persona.clone())
+            .chain(self.held.iter().map(|kept| kept.persona.clone()))
             .collect();
         let Some((name, tier)) = clarp_kernel::contacts::given_name(backend, &occupied, &existing)
         else {
@@ -2244,11 +2718,36 @@ impl Fleet {
             .and_then(|persona| persona["name"].as_str().map(str::to_string)))
     }
 
-    fn owner_of_name(&self, name: &str, except: &str) -> Option<&AgentRecord> {
-        self.members
-            .iter()
-            .map(|member| &member.record)
-            .find(|record| record.agent_id != except && roster::same_name(&record.persona, name))
+    /// Who wears which contact, as the pool reads it: every member, and every agent the Host
+    /// keeps and does not run, whose contact is not given to another.
+    fn wearers(&self) -> Vec<clarp_kernel::contacts::Wearer<'_>> {
+        let mut wearers =
+            crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+        wearers.extend(self.held.iter().map(|kept| clarp_kernel::contacts::Wearer {
+            agent_id: &kept.agent_id,
+            persona: &kept.persona,
+            voice_id: &kept.voice_id,
+        }));
+        wearers
+    }
+
+    /// Who has this name, when it is not `except`: its name and its session. An agent the Host
+    /// keeps and does not run has its name too.
+    fn owner_of_name(&self, name: &str, except: &str) -> Option<crate::kept::Name> {
+        let running = self.members.iter().map(|member| &member.record);
+        let mut running = running
+            .filter(|record| record.agent_id != except && roster::same_name(&record.persona, name));
+        let named = |record: &AgentRecord| crate::kept::Name {
+            agent_id: record.agent_id.clone(),
+            session: record.session.clone(),
+            persona: record.persona.clone(),
+            voice_id: record.voice_id.clone(),
+        };
+        running.next().map(named).or_else(|| {
+            let held = self.held.iter();
+            let mut held = held.filter(|kept| roster::same_name(&kept.persona, name));
+            held.next().cloned()
+        })
     }
 
     /// An agent started again in place, by the Python Host's rules for it
@@ -2273,6 +2772,10 @@ impl Fleet {
             return Err(Told::new(404, why, why).into());
         };
         let before = self.members[at].record.clone();
+        self.members[at]
+            .agent
+            .accepting_work()
+            .map_err(|why| Told::new(503, agent::REMOVING_CODE, why.0))?;
         if before.is_janitor {
             let why = "Janitors are managed from their maintenance configuration";
             return Err(Told::new(409, "janitor_managed", why).into());
@@ -2361,7 +2864,18 @@ impl Fleet {
         forked: Option<String>,
         contact: Option<ContactAsked>,
     ) -> Result<AgentRecord, NotMade> {
-        if let Some(parent) = request.parent.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(parent) = request
+            .parent
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if let Some(at) = self.place_of(parent) {
+                self.members[at]
+                    .agent
+                    .accepting_work()
+                    .map_err(|why| Told::new(503, agent::REMOVING_CODE, why.0))?;
+            }
             match self.has_delegated_ancestor(parent) {
                 Ok(true) => {
                     return Err(Told::new(
@@ -2631,6 +3145,7 @@ impl Fleet {
         let Some(at) = found else {
             return Ok(Err(NotAmended::Unknown));
         };
+        self.members[at].agent.accepting_work()?;
         // A contact chosen by the rule is chosen here, in the turn that gives it.
         let change = match change {
             Amend::ContactAuto(fetched) => match self.contact_of_assignment(at, &fetched)? {
@@ -2763,7 +3278,7 @@ impl Fleet {
         took: oneshot::Sender<()>,
     ) -> Result<(), Unavailable> {
         if record.archived_at_ms.is_some() && self.members[at].record.archived_at_ms.is_none() {
-            self.stop_for_roster(&record, "agent archived")?;
+            self.stop_for_roster(&record, "agent archived", None)?;
         } else {
             self.put(&record).map_err(Unavailable)?;
         }
@@ -2795,6 +3310,10 @@ impl Fleet {
         else {
             return Ok(None);
         };
+        // A helper awaiting removal keeps its own tombstone, including when its parent goes.
+        if self.members[at].agent.accepting_work().is_err() {
+            return Ok(None);
+        }
         let before = &self.members[at].record;
         let current = before.helper_state.as_deref().unwrap_or("");
         let Some(moved) = helpers::next_state(current, event) else {
@@ -2862,6 +3381,7 @@ impl Fleet {
         let Some(at) = self.place_of(key) else {
             return Ok(Err(no_agent(key)));
         };
+        self.members[at].agent.accepting_work()?;
         let helper = self.members[at].record.clone();
         if !helper.is_helper() {
             let why = format!("{} is not a helper", helper.session);
@@ -2915,7 +3435,10 @@ pub fn doing(members: &[Arc<Member>], member: &Member) -> helpers::Doing {
             .jobs
             .iter()
             .filter(|job| job.status.is_active())
-            .filter(|job| wire::mirrored_helper(job, &helper_sessions).is_none());
+            .filter(|job| {
+                !view.mirrored_provider(&job.id)
+                    && wire::mirrored_helper(job, &helper_sessions).is_none()
+            });
         let last_job = view.jobs.iter().map(|job| job.updated_at_ms).max();
         let last_turn = view.status.last.as_ref().map(|last| last.ended_at_ms);
         helpers::Doing {
@@ -3006,6 +3529,7 @@ impl Fleet {
         record.deleted_at_ms = None;
         let setup = setup(&self.works, &self.delegation_desk, &record)?;
         self.put(&record)?;
+        self.gone.remove(&record.agent_id);
         let member = Arc::new(Member {
             record: record.clone(),
             agent: agent::spawn(setup),
@@ -3105,10 +3629,31 @@ impl Fleet {
             return Ok(false);
         };
         let mut record = self.members[at].record.clone();
-        record.deleted_at_ms = Some(self.now_ms());
-        self.stop_for_roster(&record, "agent deleted")?;
-        let member = self.members.remove(at);
-        member.agent.close();
+        // An agent asked to close before is not stopped twice: it was deleted then.
+        let asked_before = self.closing.get(&record.agent_id).copied();
+        record.deleted_at_ms = Some(asked_before.unwrap_or_else(|| self.now_ms()));
+        let agent = self.members[at].agent.clone();
+        if asked_before.is_none() {
+            self.stop_for_roster(&record, "agent deleted", Some(&agent))?;
+            self.closing.insert(
+                record.agent_id.clone(),
+                record.deleted_at_ms.unwrap_or_default(),
+            );
+        }
+        // Its thread is the one writer of what is its own: until it has closed, nothing of
+        // that is touched, and the agent stays as it is. Its tombstone is kept.
+        if !agent.close(agent::CLOSE_WITHIN) {
+            return Err(Unavailable(format!(
+                "The agent's thread did not answer within {} seconds, so it is not removed yet: ask again to finish removing it.",
+                agent::CLOSE_WITHIN.as_secs()
+            )));
+        }
+        self.closing.remove(&record.agent_id);
+        self.gone.insert(
+            record.agent_id.clone(),
+            (record.persona.clone(), record.session.clone()),
+        );
+        self.members.remove(at);
         let retired = retire_goals(
             &self.works,
             &record,
@@ -3300,4 +3845,12 @@ mod opening_reads {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
+mod closing_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod retirement_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tolerance_tests;

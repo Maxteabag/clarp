@@ -375,7 +375,11 @@ def _write_jsonl(record: dict, now: _dt.datetime) -> None:
     line = json.dumps(record, separators=(",", ":")) + "\n"
     path = _path_for(now)
     with _LOCK:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # Only a missing directory is made. Path.mkdir(exist_ok=True) still
+        # asks the kernel to create it on every event; a line logged from a
+        # site that must create nothing (an identity read) then did.
+        if not path.parent.is_dir():
+            path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:

@@ -8,8 +8,8 @@
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned, Which};
@@ -35,7 +35,7 @@ use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
 use crate::fleet::{AgentRecord, non_empty};
@@ -107,6 +107,19 @@ pub struct Spoke {
 pub enum DelegationCommand {
     Inspect(Option<String>),
     Baseline(usize),
+    Applied(String, i64),
+    ListenerRead(
+        String,
+        String,
+        i64,
+        Option<clarp_actor::bookkeeping::ActivityVersion>,
+    ),
+    ListenerWrite(
+        String,
+        String,
+        i64,
+        clarp_actor::bookkeeping::ListenerUpdate,
+    ),
     #[cfg(test)]
     Receipt {
         id: String,
@@ -117,13 +130,20 @@ pub enum DelegationCommand {
 
 #[derive(Debug)]
 pub struct DelegationState {
+    pub activity: Option<clarp_kernel::goals::listener::Activity>,
+    pub version: Option<clarp_actor::bookkeeping::ActivityVersion>,
     pub active: Option<clarp_actor::delegation::Binding>,
     pub prior: Option<(clarp_actor::delegation::Transition, i64)>,
     pub accepted: bool,
     pub baseline: i64,
+    pub applied: Option<clarp_actor::bookkeeping::Applied>,
 }
 
-pub enum Ask {
+enum Ask {
+    Bookkeeping {
+        cmd: crate::bookkeeping::Command,
+        answer: Answer<ToolAnswer>,
+    },
     Delegation {
         command: DelegationCommand,
         answer: mpsc::Sender<Result<DelegationState, Unavailable>>,
@@ -148,7 +168,17 @@ pub enum Ask {
         reservation: Option<Value>,
         message: Message,
         admission: Admission,
-        answer: Answer<Sent>,
+        /// Whether it is another agent's, and whether its caller named its trace.
+        marks: clarp_actor::Marks,
+        answer: Answer<Result<Sent, clarp_actor::TraceTaken>>,
+    },
+    /// A note the agent leaves for its user from its running turn: what became of it, and the
+    /// user's notification of it when one was made (`Err`: why nobody was told).
+    LeaveNote {
+        turn: u64,
+        id: String,
+        text: String,
+        answer: Answer<(clarp_actor::Noted, Option<Result<Value, String>>)>,
     },
     Stop {
         by: Control,
@@ -186,6 +216,11 @@ pub enum Ask {
     Standing {
         turn: u64,
         answer: Answer<Standing>,
+    },
+    /// The trace of one of the agent's turns, when it is the running one now.
+    RunningTrace {
+        turn: u64,
+        answer: Answer<Option<String>>,
     },
     /// Everything that is shown of the agent's turn as it runs: what `GET /live` answers.
     Shown {
@@ -272,6 +307,7 @@ pub enum Ask {
     /// that makes no sense.
     Job {
         command: JobCommand,
+        origin: Option<clarp_kernel::provider_tasks::RegistrationOrigin>,
         answer: Answer<Result<JobChange, JobRefusal>>,
     },
     /// The agent's goal tool was called about this agent's goals. Answers what it prints.
@@ -308,10 +344,14 @@ pub enum Ask {
     /// The agent published a file: its bytes are kept, and this is what is to be written
     /// of it.
     Publish {
-        asset: Box<Asset>,
+        assets: Vec<Asset>,
         answer: Answer<()>,
     },
     /// The newest changes of a job, oldest first.
+    JobRecord {
+        id: String,
+        answer: Answer<Option<Job>>,
+    },
     JobTimeline {
         id: String,
         limit: usize,
@@ -422,7 +462,7 @@ pub enum Ask {
         fields: Value,
     },
     /// The agent was removed: the thread ends.
-    Close(mpsc::Sender<()>),
+    Close(CloseReply),
 }
 
 /// What an agent is doing, as anyone may read it at any time without asking the agent.
@@ -441,6 +481,7 @@ pub struct View {
     pub backend: &'static str,
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
+    pub provider_mirrors: BTreeMap<String, Option<String>>,
     /// Idle native bindings and the last known runtime end, for the shared runner.
     pub provider_bindings: Vec<(String, Option<i64>, Option<i64>)>,
     /// What the agent made and asks, and its goals: what the apps read across agents.
@@ -449,6 +490,12 @@ pub struct View {
     pub speech: Arc<SpeechBook>,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
+}
+
+impl View {
+    pub fn mirrored_provider(&self, id: &str) -> bool {
+        self.provider_mirrors.get(id).is_some_and(Option::is_some)
+    }
 }
 
 /// Everything an agent's thread is given.
@@ -508,7 +555,46 @@ pub struct TerminalFacts {
 pub struct AgentHandle {
     tx: mpsc::Sender<Ask>,
     view: watch::Receiver<Arc<View>>,
+    close: Arc<CloseState>,
 }
+
+#[derive(Default)]
+struct CloseState {
+    state: Mutex<Closing>,
+    changed: Condvar,
+}
+
+impl CloseState {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Closing> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Closing {
+    #[default]
+    Open,
+    Preparing,
+    Requested,
+    Closed,
+}
+
+/// Dropping the reply also covers a thread that exits without receiving the request.
+struct CloseReply(Arc<CloseState>);
+
+impl Drop for CloseReply {
+    fn drop(&mut self) {
+        *self.0.lock() = Closing::Closed;
+        self.0.changed.notify_all();
+    }
+}
+
+/// How long a caller waits for an agent's thread to close. The fleet is one worker, and a close
+/// is answered after the asks put before it: the same three seconds a delegation is given.
+pub const CLOSE_WITHIN: Duration = Duration::from_secs(3);
+pub(crate) const REMOVING: &str =
+    "This agent is being removed. Ask to remove it again to finish removal.";
+pub(crate) const REMOVING_CODE: &str = "agent_removing";
 
 impl AgentHandle {
     pub(crate) fn expire_provider_links(&self, native: &str) {
@@ -520,12 +606,43 @@ impl AgentHandle {
 
     async fn ask<T>(&self, make: impl FnOnce(Answer<T>) -> Ask) -> Result<T, Unavailable> {
         let (answer, reply) = oneshot::channel();
-        self.tx
-            .send(make(answer))
-            .map_err(|_| Unavailable("the agent is closed".to_string()))?;
+        self.enqueue(make(answer))?;
         reply
             .await
             .map_err(|_| Unavailable("the agent did not answer".to_string()))?
+    }
+
+    pub(crate) fn accepting_work(&self) -> Result<(), Unavailable> {
+        Self::check_open(*self.close.lock())
+    }
+
+    fn check_open(state: Closing) -> Result<(), Unavailable> {
+        if state != Closing::Open {
+            return Err(Unavailable(REMOVING.into()));
+        }
+        Ok(())
+    }
+
+    fn enqueue(&self, ask: Ask) -> Result<(), Unavailable> {
+        // An ask either enters before Close or is refused, even through an old handle.
+        let state = self.close.lock();
+        Self::check_open(*state)?;
+        self.tx
+            .send(ask)
+            .map_err(|_| Unavailable("the agent is closed".into()))
+    }
+
+    /// Fence admission before committing the tombstone. The fleet is the only caller.
+    pub(crate) fn keep_removal(
+        &self,
+        keep: impl FnOnce() -> Result<(), Unavailable>,
+    ) -> Result<(), Unavailable> {
+        *self.close.lock() = Closing::Preparing;
+        let kept = keep();
+        if kept.is_err() {
+            *self.close.lock() = Closing::Open;
+        }
+        kept
     }
 
     pub async fn send(&self, message: Message, admission: Admission) -> Result<Sent, Unavailable> {
@@ -538,10 +655,48 @@ impl AgentHandle {
         admission: Admission,
         reservation: Option<Value>,
     ) -> Result<Sent, Unavailable> {
+        let marks = clarp_actor::Marks::default();
+        match self
+            .send_marked(message, admission, reservation, marks)
+            .await?
+        {
+            Ok(sent) => Ok(sent),
+            // A send whose caller named no trace is never refused for it.
+            Err(clarp_actor::TraceTaken) => Err(Unavailable(clarp_actor::TRACE_TAKEN.to_string())),
+        }
+    }
+
+    /// Sends as the Host decided it at the send ([`clarp_actor::Actor::send_marked`]): refused
+    /// when the caller named a trace another message of the agent has.
+    pub async fn send_marked(
+        &self,
+        message: Message,
+        admission: Admission,
+        reservation: Option<Value>,
+        marks: clarp_actor::Marks,
+    ) -> Result<Result<Sent, clarp_actor::TraceTaken>, Unavailable> {
         self.ask(|answer| Ask::Send {
             reservation,
             message,
             admission,
+            marks,
+            answer,
+        })
+        .await
+    }
+
+    /// Leaves a note for the user from the agent's turn `turn` under the row id `id`
+    /// ([`clarp_actor::Actor::leave_note`]), and tells the user of it.
+    pub async fn leave_note(
+        &self,
+        turn: u64,
+        id: String,
+        text: String,
+    ) -> Result<(clarp_actor::Noted, Option<Result<Value, String>>), Unavailable> {
+        self.ask(|answer| Ask::LeaveNote {
+            turn,
+            id,
+            text,
             answer,
         })
         .await
@@ -594,6 +749,11 @@ impl AgentHandle {
     /// as its log says.
     pub async fn standing(&self, turn: u64) -> Result<Standing, Unavailable> {
         self.ask(|answer| Ask::Standing { turn, answer }).await
+    }
+
+    /// The trace of this turn when it is the agent's running turn now (`Actor::running_trace`).
+    pub async fn running_trace(&self, turn: u64) -> Result<Option<String>, Unavailable> {
+        self.ask(|answer| Ask::RunningTrace { turn, answer }).await
     }
 
     /// Everything that is shown of the agent's turn as it runs.
@@ -716,9 +876,25 @@ impl AgentHandle {
         &self,
         command: JobCommand,
     ) -> Result<Result<JobChange, JobRefusal>, Unavailable> {
-        self.ask(|answer| Ask::Job { command, answer }).await
+        self.job_with_origin(command, None).await
     }
 
+    pub async fn job_with_origin(
+        &self,
+        command: JobCommand,
+        origin: Option<clarp_kernel::provider_tasks::RegistrationOrigin>,
+    ) -> Result<Result<JobChange, JobRefusal>, Unavailable> {
+        self.ask(|answer| Ask::Job {
+            command,
+            origin,
+            answer,
+        })
+        .await
+    }
+
+    pub async fn job_record(&self, id: String) -> Result<Option<Job>, Unavailable> {
+        self.ask(|answer| Ask::JobRecord { id, answer }).await
+    }
     pub async fn job_timeline(
         &self,
         id: String,
@@ -897,11 +1073,29 @@ impl AgentHandle {
 
     /// Writes a file the agent published into its log. Its bytes are kept already.
     pub async fn publish(&self, asset: Asset) -> Result<(), Unavailable> {
-        let asset = Box::new(asset);
-        self.ask(|answer| Ask::Publish { asset, answer }).await
+        self.ask(|answer| Ask::Publish {
+            assets: vec![asset],
+            answer,
+        })
+        .await
+    }
+
+    pub(crate) async fn publish_portraits(&self, assets: [Asset; 2]) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Publish {
+            assets: Vec::from(assets),
+            answer,
+        })
+        .await
     }
 
     /// Answers the goal tool from this agent's goals.
+    pub(crate) async fn bookkeeping(
+        &self,
+        cmd: crate::bookkeeping::Command,
+    ) -> Result<ToolAnswer, Unavailable> {
+        self.ask(|answer| Ask::Bookkeeping { cmd, answer }).await
+    }
+
     pub async fn goal(&self, ask: goaltool::Ask) -> Result<ToolAnswer, Unavailable> {
         self.goal_as(ask, GoalCaller::Default).await
     }
@@ -1002,18 +1196,27 @@ impl AgentHandle {
         command: DelegationCommand,
     ) -> Result<mpsc::Receiver<Result<DelegationState, Unavailable>>, Unavailable> {
         let (answer, reply) = mpsc::channel();
-        self.tx
-            .send(Ask::Delegation { command, answer })
-            .map_err(|_| Unavailable("the agent is closed".into()))?;
+        self.enqueue(Ask::Delegation { command, answer })?;
         Ok(reply)
     }
 
-    /// Ends the agent's thread. Its turn, if one runs, is not touched.
-    pub fn close(&self) {
-        let (closed, wait) = mpsc::channel();
-        if self.tx.send(Ask::Close(closed)).is_ok() {
-            let _ = wait.recv();
+    /// Ends the agent's thread, waiting for it no longer than `within`. Its turn, if one runs,
+    /// is not touched. Every attempt waits on the same reply, including after a timeout.
+    pub fn close(&self, within: Duration) -> bool {
+        let mut state = self.close.lock();
+        if matches!(*state, Closing::Open | Closing::Preparing) {
+            *state = Closing::Requested;
+            // A failed send drops the reply and takes the lock to mark the thread closed.
+            drop(state);
+            let _ = self.tx.send(Ask::Close(CloseReply(self.close.clone())));
+            state = self.close.lock();
         }
+        let (state, _) = self
+            .close
+            .changed
+            .wait_timeout_while(state, within, |state| *state == Closing::Requested)
+            .unwrap_or_else(PoisonError::into_inner);
+        *state == Closing::Closed
     }
 }
 
@@ -1032,6 +1235,7 @@ pub(crate) fn never_ran() -> Status {
         label_at_ms: None,
         resting: None,
         context_tokens: None,
+        last_compaction: None,
         completed_at_ms: None,
         answered_by: None,
         arrived: false,
@@ -1051,6 +1255,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         finished: None,
         backend: setup.backend.id(),
         jobs: Vec::new(),
+        provider_mirrors: BTreeMap::new(),
         provider_bindings: Vec::new(),
         books: Arc::default(),
         speech: Arc::default(),
@@ -1100,7 +1305,11 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     if let Err(error) = spawned {
         eprintln!("clarp-host: an agent's thread could not be started: {error}");
     }
-    AgentHandle { tx, view }
+    AgentHandle {
+        tx,
+        view,
+        close: Arc::default(),
+    }
 }
 
 struct Worker {
@@ -1141,7 +1350,7 @@ struct Worker {
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
     /// The revision of each job the clients were last told.
-    jobs_told: BTreeMap<String, u64>,
+    jobs_told: BTreeMap<String, (u64, String)>,
     /// When the running jobs were last looked at.
     jobs_checked: Instant,
     helper_rows: clarp_actor::helper_cells::HelperRows,
@@ -1300,9 +1509,42 @@ impl Drop for Worker {
     }
 }
 
+// A burst of 32 messages amortizes a forced timer turn while bounding the
+// number of mailbox handlers that can run ahead of an already-due deadline.
+const MAILBOX_BURST: usize = 32;
+
+#[derive(Default)]
+struct Mailbox {
+    handled: usize,
+}
+
+impl Mailbox {
+    fn next<T>(
+        &mut self,
+        rx: &mpsc::Receiver<T>,
+        due: Option<Instant>,
+        now: Instant,
+    ) -> Result<T, RecvTimeoutError> {
+        if self.handled >= MAILBOX_BURST && due.is_some_and(|at| at <= now) {
+            self.handled = 0;
+            return Err(RecvTimeoutError::Timeout);
+        }
+        let result = match due {
+            Some(at) => rx.recv_timeout(at.saturating_duration_since(now)),
+            None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        match result {
+            Ok(_) => self.handled = (self.handled + 1).min(MAILBOX_BURST),
+            Err(_) => self.handled = 0,
+        }
+        result
+    }
+}
+
 impl Worker {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
         let mut wait = REOPEN_FIRST;
+        let mut mailbox = Mailbox::default();
         loop {
             if self.actor.is_none() {
                 match self.open() {
@@ -1374,49 +1616,43 @@ impl Worker {
             .into_iter()
             .flatten()
             .min();
-            let ask = match due {
-                None => match rx.recv() {
-                    Ok(ask) => ask,
-                    Err(_) => return,
-                },
-                Some(due) => match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
-                    Ok(ask) => ask,
-                    Err(RecvTimeoutError::Timeout) => {
-                        let now = Instant::now();
-                        if self.transcript_due.is_some_and(|due| due <= now) {
-                            self.tell_transcript();
-                        }
-                        let mut looked = Ok(());
-                        if jobs_due.is_some_and(|due| due <= now) {
-                            looked = self.check_jobs();
-                        }
-                        if looked.is_ok() && goals_due.is_some_and(|due| due <= now) {
-                            looked = self.check_goals();
-                        }
-                        if looked.is_ok() && requests_due.is_some_and(|due| due <= now) {
-                            looked = self.settle_requests();
-                        }
-                        if looked.is_ok() && retry_due.is_some_and(|due| due <= now) {
-                            looked = self.retry_turn();
-                        }
-                        if let Err(error) = looked {
-                            eprintln!(
-                                "clarp-host: agent {} failed and is opened again: {error}",
-                                self.setup.record.session
-                            );
-                            self.actor = None;
-                        }
-                        if shown_due.is_some_and(|due| due <= now) {
-                            let now_ms = self.now_ms();
-                            if let Some(actor) = self.actor.as_mut() {
-                                actor.shown_due(now_ms);
-                            }
-                        }
-                        self.tell_shown();
-                        continue;
+            let ask = match mailbox.next(rx, due, Instant::now()) {
+                Ok(ask) => ask,
+                Err(RecvTimeoutError::Timeout) => {
+                    let now = Instant::now();
+                    if self.transcript_due.is_some_and(|due| due <= now) {
+                        self.tell_transcript();
                     }
-                    Err(RecvTimeoutError::Disconnected) => return,
-                },
+                    let mut looked = Ok(());
+                    if jobs_due.is_some_and(|due| due <= now) {
+                        looked = self.check_jobs();
+                    }
+                    if looked.is_ok() && goals_due.is_some_and(|due| due <= now) {
+                        looked = self.check_goals();
+                    }
+                    if looked.is_ok() && requests_due.is_some_and(|due| due <= now) {
+                        looked = self.settle_requests();
+                    }
+                    if looked.is_ok() && retry_due.is_some_and(|due| due <= now) {
+                        looked = self.retry_turn();
+                    }
+                    if let Err(error) = looked {
+                        eprintln!(
+                            "clarp-host: agent {} failed and is opened again: {error}",
+                            self.setup.record.session
+                        );
+                        self.actor = None;
+                    }
+                    if shown_due.is_some_and(|due| due <= now) {
+                        let now_ms = self.now_ms();
+                        if let Some(actor) = self.actor.as_mut() {
+                            actor.shown_due(now_ms);
+                        }
+                    }
+                    self.tell_shown();
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => return,
             };
             if let Ask::Close(closed) = ask {
                 // The agent is gone: the pool of its tool's accounts does not wait for its
@@ -1425,7 +1661,7 @@ impl Worker {
                     pool.disowned(&self.setup.record.agent_id);
                 }
                 self.actor = None;
-                let _ = closed.send(());
+                drop(closed);
                 return;
             }
             // Whatever happened may have left a goal's owner resting, or ended what a goal
@@ -1752,12 +1988,10 @@ impl Worker {
         self.told = self.actor.as_ref().map(Actor::status);
 
         // Nor are the jobs it has: only what changes from here on is told.
-        self.jobs_told = self
-            .actor
-            .iter()
-            .flat_map(|actor| actor.jobs().jobs())
-            .map(|job| (job.id.clone(), job.revision))
-            .collect();
+        self.jobs_told.clear();
+        if let Some(actor) = self.actor.as_mut() {
+            actor.take_job_events();
+        }
         self.newest = self.newest_row();
         self.ended = self.last_end();
         self.finished = self.last_finished();
@@ -2278,19 +2512,29 @@ impl Worker {
         // the owner's settings and file are read now.
         if matches!(ask, Ask::Send { .. }) {
             actor.retell(Some(self.setup.telling.of(&self.setup.record)));
+            // Whether its turns that answer another agent are shown as such: the key may have
+            // been read since the agent was opened.
+            actor.hide_coordination(clarp_kernel::coordination::can_leave_note(
+                &self.setup.record.agent_id,
+                Some(&self.setup.record.backend),
+                self.setup.turns.has_key(),
+            ));
         }
         let (out, owed) = match ask {
             Ask::Send {
                 message,
                 admission,
                 reservation,
+                marks,
                 answer,
             } => {
-                let sent = match reservation {
-                    Some(proof) => actor.send_for_opening(&message, admission, proof, now),
-                    None => actor.send(&message, admission, now),
-                };
-                if let Ok((sent, _)) = &sent
+                let sent = actor
+                    .send_marked(&message, admission, reservation, &marks, now)
+                    .map(|sent| match sent {
+                        Ok((sent, out)) => (Ok(sent), out),
+                        Err(taken) => (Err(taken), Outputs::default()),
+                    });
+                if let Ok((Ok(sent), _)) = &sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
                     && let Some(c) = &self.setup.hub.capture
@@ -2298,6 +2542,43 @@ impl Worker {
                     c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
                 }
                 answered(sent, answer)?
+            }
+            Ask::LeaveNote {
+                turn,
+                id,
+                text,
+                answer,
+            } => {
+                let left = actor.leave_note(turn, &id, &text, now);
+                let left = left.map(|(noted, out)| {
+                    // Only a note written now tells the user: one asked again was told.
+                    let told = match &noted {
+                        clarp_actor::Noted::Written { id, .. } => {
+                            Some(wire::note_notification(&self.setup.record, id, &text, now))
+                        }
+                        _ => None,
+                    };
+                    ((noted, told), out)
+                });
+                if let Ok(((_, Some(Ok(told))), _)) = &left {
+                    // A phone that is not listening is pushed to, when the rule says so.
+                    if told["push"] == true {
+                        self.setup.pusher.turn_done(TurnDone {
+                            badge: true,
+                            unread: true,
+                            session: self.setup.record.session.clone(),
+                            persona: self.setup.record.persona.clone(),
+                            notification_id: told["notification_id"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            preview: told["preview"].as_str().unwrap_or("").to_string(),
+                            needs_response: actor.artifacts().has_pending_decision(now),
+                        });
+                    }
+                    self.setup.hub.publish(told.clone(), now);
+                }
+                answered(left, answer)?
             }
             Ask::Stop { by, answer } => {
                 // The turn is no longer the agent's to finish: the pool of its tool's
@@ -2356,6 +2637,7 @@ impl Worker {
             Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
             Ask::Standing { turn, answer } => return read(actor.standing_of(turn), answer),
+            Ask::RunningTrace { turn, answer } => return read(actor.running_trace(turn), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
                 from,
@@ -2498,23 +2780,51 @@ impl Worker {
             Ask::RetireLabel { set_at_ms, answer } => {
                 answered(actor.retire_label(set_at_ms, now), answer)?
             }
-            Ask::Job { command, answer } => {
-                let revision = self.setup.revisions.next(now);
-                answered(actor.job(command, now, revision), answer)?
+            Ask::Job {
+                mut command,
+                origin,
+                answer,
+            } => {
+                if let (JobCommand::Register { metadata, .. }, Some(origin)) =
+                    (&mut command, origin)
+                {
+                    let bound = actor.helper_context().1.filter(|native| {
+                        actor
+                            .provider_session(native)
+                            .is_some_and(|s| s.ended_at.is_none() || s.newest_owner().is_some())
+                    });
+                    *metadata = origin
+                        .metadata(
+                            &self.setup.record.agent_id,
+                            &self.setup.record.backend,
+                            bound,
+                        )
+                        .unwrap_or(Value::Null);
+                }
+                answered(
+                    actor.job(command, now, || self.setup.revisions.next(now)),
+                    answer,
+                )?
             }
-            Ask::Publish { asset, answer } => {
+            Ask::Publish { assets, answer } => {
                 let kept = Kept {
-                    media: std::slice::from_ref(&*asset),
+                    media: &assets,
                     ..Kept::default()
                 };
                 answered(actor.keep(&kept, now).map(|out| ((), out)), answer)?
+            }
+            Ask::JobRecord { id, answer } => {
+                return read(Ok(actor.jobs().get(&id).cloned()), answer);
             }
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
             }
             Ask::Delegation { command, answer } => {
                 let result = (|| -> Result<DelegationState, ActorError> {
+                    let mut version = None;
+                    let mut activity = None;
                     let mut baseline = 0;
+                    let mut applied = None;
                     let (prior, accepted) = match command {
                         #[cfg(test)]
                         DelegationCommand::Receipt { id, caller } => {
@@ -2528,6 +2838,34 @@ impl Worker {
                                 )
                             })?;
                             (None, written.is_some())
+                        }
+                        DelegationCommand::ListenerRead(id, caller, initial, known) => {
+                            let accepted = actor.admits_delegate(&id, Some(&caller));
+                            if accepted {
+                                let progress = actor.applied_bookkeeping(&id, initial)?;
+                                version = Some(actor.activity_version(&progress)?);
+                                if version != known {
+                                    activity = Some(actor.listener_activity(
+                                        &id,
+                                        &caller,
+                                        &progress,
+                                        crate::wire::row,
+                                    )?);
+                                }
+                                applied = Some(progress);
+                            }
+                            (None, accepted)
+                        }
+                        DelegationCommand::ListenerWrite(id, caller, initial, update) => {
+                            let accepted = actor.admits_delegate(&id, Some(&caller));
+                            if accepted {
+                                actor.keep_listener(&id, initial, update, now)?;
+                            }
+                            (None, accepted)
+                        }
+                        DelegationCommand::Applied(id, initial) => {
+                            applied = Some(actor.applied_bookkeeping(&id, initial)?);
+                            (None, true)
                         }
                         DelegationCommand::Baseline(offset) => {
                             baseline = actor.delegation_baseline(offset)?;
@@ -2552,6 +2890,9 @@ impl Worker {
                         }
                     };
                     Ok(DelegationState {
+                        version,
+                        activity,
+                        applied,
                         baseline,
                         active: actor.active_delegation().cloned(),
                         prior,
@@ -2568,6 +2909,9 @@ impl Worker {
                         return Err(error);
                     }
                 }
+            }
+            Ask::Bookkeeping { cmd, answer } => {
+                answered(crate::bookkeeping::execute(actor, cmd, now), answer)?
             }
             Ask::KeeperEvents {
                 plan,
@@ -2900,6 +3244,13 @@ impl Worker {
         let spawned = match action {
             Action::Launch(mut order) => {
                 if self.setup.record.backend == "claude" {
+                    if let Some(settings) = self
+                        .setup
+                        .launcher
+                        .claude_settings(&self.setup.record.agent_id)
+                    {
+                        order.args.extend(["--settings".into(), settings]);
+                    }
                     let at = self.now_ms();
                     if let Some(actor) = self.actor.as_mut() {
                         let native = actor
@@ -3144,8 +3495,7 @@ impl Worker {
             .overdue(now, JOB_STALE_AFTER_MS, JOB_LOST_AFTER_MS, &alive);
         let mut all = Outputs::default();
         for command in overdue {
-            let revision = self.setup.revisions.next(now);
-            let (_, out) = actor.job(command, now, revision)?;
+            let (_, out) = actor.job(command, now, || self.setup.revisions.next(now))?;
             all.changed.jobs |= out.changed.jobs;
         }
         self.after(all);
@@ -3207,6 +3557,17 @@ impl Worker {
                     )
                 })
                 .collect(),
+            provider_mirrors: actor
+                .jobs()
+                .jobs()
+                .filter(|j| j.provider_owned())
+                .map(|j| {
+                    (
+                        j.id.clone(),
+                        actor.jobs().provider_replacement(j).map(str::to_owned),
+                    )
+                })
+                .collect(),
             jobs: actor
                 .jobs()
                 .jobs()
@@ -3227,6 +3588,11 @@ impl Worker {
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
+        let job_events = self
+            .actor
+            .as_mut()
+            .map(Actor::take_job_events)
+            .unwrap_or_default();
         let Some(actor) = &self.actor else {
             return;
         };
@@ -3360,7 +3726,15 @@ impl Worker {
                     now,
                 );
             }
-            hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
+            hub.publish(
+                wire::dispatched(
+                    &record,
+                    live,
+                    status.waiting.len(),
+                    &working_with(actor, live),
+                ),
+                now,
+            );
         }
         // A turn that waited for an account is taken up: the word is said once more, as the
         // Python Host says it when it gives the turn to its tool anew.
@@ -3369,7 +3743,15 @@ impl Worker {
             && waits_for_an_account(was)
             && !waits_for_an_account(live)
         {
-            hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
+            hub.publish(
+                wire::dispatched(
+                    &record,
+                    live,
+                    status.waiting.len(),
+                    &working_with(actor, live),
+                ),
+                now,
+            );
         }
         // The mailbox was held or let go, or a waiting message was taken back: it left the
         // queue and no turn began for it. A hold that ended by itself, because the last
@@ -3479,11 +3861,25 @@ impl Worker {
             }
         }
         // A job changed: the clients are told the job as it now stands, once for each change.
-        if changed.jobs {
-            for job in actor.jobs().jobs() {
-                if self.jobs_told.get(&job.id) != Some(&job.revision) {
-                    self.jobs_told.insert(job.id.clone(), job.revision);
-                    hub.publish(wire::job_updated(&record, job, now), now);
+        for event in job_events {
+            if let Some(job) = actor.jobs().get(&event.id) {
+                let replacement = actor.jobs().provider_replacement(job);
+                let mut told = wire::job_updated(&record, job, event.at);
+                told["job"] = clarp_kernel::provider_tasks::projected_event(
+                    &told["job"],
+                    replacement,
+                    event.at,
+                );
+                told["status"] = told["job"]["status"].clone();
+                told["change_revision"] = json!(event.revision);
+                let status = told["status"].as_str().unwrap_or_default().to_owned();
+                hub.publish(told, now);
+                if job.provider_owned() || job.metadata.get("tool_use_id").is_some() {
+                    let key = (job.generation, status);
+                    if self.jobs_told.get(&job.id) != Some(&key) {
+                        self.jobs_told.insert(job.id.clone(), key);
+                        hub.publish(json!({"type":"agent-roster","kind":"background-job"}), now);
+                    }
                 }
             }
         }
@@ -3592,6 +3988,30 @@ fn nobody() -> Owed {
 
 /// The result of a command, for the thread to go on with what follows from it, and the
 /// answer that is owed for it. A command that failed is answered at once.
+/// Whom a turn that begins works for, as its working state says it: the agents when another
+/// agent's message began it and this agent can leave a note (its profile says so), with that
+/// agent named when it is one of this Host; the user otherwise. A mark that cannot be read is
+/// the user's: nothing is hidden by a fault.
+fn working_with(actor: &Actor, live: &clarp_actor::LiveStatus) -> wire::WorkingWith {
+    if !actor.profile().hides_coordination {
+        return wire::WorkingWith::User;
+    }
+    let Ok(Some(sender)) = actor.mark(live.turn.0) else {
+        return wire::WorkingWith::User;
+    };
+    if sender.is_empty() {
+        return wire::WorkingWith::Agents { sender: None };
+    }
+    let name = actor.row(&live.message_id).ok().flatten();
+    let name = name.and_then(|row| match row.entry {
+        Entry::Message(message) => message.sender.map(|sender| sender.name),
+        _ => None,
+    });
+    wire::WorkingWith::Agents {
+        sender: Some((sender, name.unwrap_or_default())),
+    }
+}
+
 fn answered<T: Send + 'static>(
     result: Result<(T, Outputs), ActorError>,
     answer: Answer<T>,
@@ -3637,6 +4057,7 @@ fn refuse_for(
         let refusal = || Unavailable(format!("the agent cannot be opened: {why}"));
         match rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
             Ok(Ask::Send { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::LeaveNote { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Repair { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
@@ -3645,6 +4066,7 @@ fn refuse_for(
             Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Standing { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::RunningTrace { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
@@ -3665,7 +4087,9 @@ fn refuse_for(
             Ok(Ask::TakeLibrary { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::JobRecord { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Bookkeeping { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Delegation { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
@@ -3703,11 +4127,106 @@ fn refuse_for(
                 let _ = taken.send(());
             }
             Ok(Ask::Close(closed)) => {
-                let _ = closed.send(());
+                drop(closed);
                 return false;
             }
             Err(RecvTimeoutError::Disconnected) => return false,
             Err(RecvTimeoutError::Timeout) => return true,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod mailbox_tests {
+    use super::*;
+
+    fn agent_mailbox() -> (AgentHandle, mpsc::Receiver<Ask>) {
+        let (tx, rx) = mpsc::channel();
+        let (_, view) = watch::channel(Arc::new(View {
+            latest_turn_start: 0,
+            status: never_ran(),
+            newest: None,
+            ended: None,
+            finished: None,
+            backend: "scripted",
+            jobs: Vec::new(),
+            provider_mirrors: BTreeMap::new(),
+            provider_bindings: Vec::new(),
+            books: Arc::default(),
+            speech: Arc::default(),
+            broken: None,
+        }));
+        (
+            AgentHandle {
+                tx,
+                view,
+                close: Arc::default(),
+            },
+            rx,
+        )
+    }
+
+    #[test]
+    fn a_later_close_waits_for_the_first_reply_without_sending_another_request() {
+        let (agent, rx) = agent_mailbox();
+        assert!(!agent.close(Duration::ZERO));
+        let Ask::Close(reply) = rx.try_recv().unwrap() else {
+            panic!("expected a close request");
+        };
+        let again = agent.clone();
+        assert!(!again.close(Duration::ZERO));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        drop(reply);
+        assert!(again.close(Duration::ZERO));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn admission_is_fenced_during_a_tombstone_write_and_restored_if_it_fails() {
+        let (agent, rx) = agent_mailbox();
+        let original = agent.clone();
+        let answer = agent.keep_removal(|| {
+            assert!(matches!(original.enqueue(Ask::LoginChanged), Err(Unavailable(why)) if why == REMOVING));
+            Err(Unavailable("storage failed".into()))
+        });
+        assert!(matches!(answer, Err(Unavailable(why)) if why == "storage failed"));
+        original.enqueue(Ask::LoginChanged).unwrap();
+        assert!(matches!(rx.try_recv(), Ok(Ask::LoginChanged)));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn a_ready_deadline_gets_a_turn_under_continuous_mail() {
+        let (tx, rx) = mpsc::channel();
+        let now = Instant::now();
+        let mut mailbox = Mailbox::default();
+        tx.send(0).unwrap();
+        for batch in 0..2 {
+            for n in 0..32 {
+                let expected = batch * 32 + n;
+                tx.send(expected + 1).unwrap();
+                assert_eq!(mailbox.next(&rx, Some(now), now), Ok(expected));
+            }
+            // Mail is still waiting. The timeout branch runs due work before
+            // the 33rd message, then gives the mailbox its turn again.
+            assert_eq!(
+                mailbox.next(&rx, Some(now), now),
+                Err(RecvTimeoutError::Timeout)
+            );
+        }
+        for _ in 0..33 {
+            tx.send(64).unwrap();
+            assert_eq!(mailbox.next(&rx, None, now), Ok(64));
+        }
+        assert_eq!(
+            mailbox.next(&rx, Some(now + Duration::from_secs(1)), now),
+            Ok(64)
+        );
+        drop(tx);
+        assert_eq!(
+            mailbox.next(&rx, None, now),
+            Err(RecvTimeoutError::Disconnected)
+        );
     }
 }

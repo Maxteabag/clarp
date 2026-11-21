@@ -1,4 +1,4 @@
--- user_version 128
+-- user_version 131
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -162,8 +162,17 @@ CREATE INDEX idx_judgment_decisions_site ON judgment_decisions(site, created_at 
 -- index idx_media_assets_agent_created on media_assets
 CREATE INDEX idx_media_assets_agent_created ON media_assets(agent_id, created_at DESC) WHERE deleted_at IS NULL;
 
--- index idx_media_assets_session_created on media_assets
-CREATE INDEX idx_media_assets_session_created ON media_assets(session, created_at DESC) WHERE deleted_at IS NULL;
+-- index idx_media_assets_deleted on media_assets
+CREATE INDEX idx_media_assets_deleted ON media_assets(deleted_at, asset_id, session, mime_type) WHERE deleted_at IS NOT NULL;
+
+-- index idx_media_assets_session_deleted on media_assets
+CREATE INDEX idx_media_assets_session_deleted ON media_assets(session, deleted_at, asset_id, mime_type) WHERE deleted_at IS NOT NULL;
+
+-- index idx_media_assets_session_favorite on media_assets
+CREATE INDEX idx_media_assets_session_favorite ON media_assets(session, favorite_at DESC, asset_id DESC, deleted_at) WHERE deleted_at IS NULL AND favorite_at IS NOT NULL;
+
+-- index idx_media_assets_session_page on media_assets
+CREATE INDEX idx_media_assets_session_page ON media_assets(session, created_at DESC, asset_id DESC, mime_type, deleted_at) WHERE deleted_at IS NULL;
 
 -- index idx_media_assets_sha on media_assets
 CREATE INDEX idx_media_assets_sha ON media_assets(sha256);
@@ -246,6 +255,9 @@ CREATE INDEX idx_podcast_source ON podcast_conversations(source_artifact_id, cre
 -- index idx_prompt_admissions_history on prompt_admissions
 CREATE INDEX idx_prompt_admissions_history ON prompt_admissions(agent_id, cooperative_principal, observed_at DESC, admission_id);
 
+-- index idx_prompt_admissions_trace on prompt_admissions
+CREATE INDEX idx_prompt_admissions_trace ON prompt_admissions(trace_id);
+
 -- index idx_provider_limit_episode_open on provider_limit_episodes
 CREATE INDEX idx_provider_limit_episode_open ON provider_limit_episodes(provider_instance_id, auth_generation_id, window_id, status);
 
@@ -266,6 +278,9 @@ CREATE INDEX idx_queued_turns_agent_time ON queued_turns(agent_id, enqueued_at);
 
 -- index idx_queued_turns_status_seq on queued_turns
 CREATE INDEX idx_queued_turns_status_seq ON queued_turns(status, queue_seq);
+
+-- index idx_queued_turns_trace on queued_turns
+CREATE INDEX idx_queued_turns_trace ON queued_turns(trace_id);
 
 -- index idx_runtimes_live_backend_session on runtimes
 CREATE INDEX idx_runtimes_live_backend_session ON runtimes(backend_session_id) WHERE ended_at IS NULL;
@@ -323,6 +338,9 @@ CREATE INDEX idx_turn_usage_backend_at ON turn_usage(backend, at);
 
 -- index idx_turns_agent_ts on turns
 CREATE INDEX idx_turns_agent_ts ON turns(agent_id, started_at);
+
+-- index idx_turns_trace on turns
+CREATE INDEX idx_turns_trace ON turns(trace_id);
 
 -- index idx_user_notifications_agent_done on user_notifications
 CREATE INDEX idx_user_notifications_agent_done ON user_notifications(agent_id, done_ts DESC);
@@ -831,7 +849,8 @@ CREATE TABLE agents (
     role TEXT NOT NULL DEFAULT 'agent',
     helper_state TEXT,
     helper_completed_at INTEGER,
-    custom_status_at INTEGER
+    custom_status_at INTEGER,
+    coordination_visibility TEXT NOT NULL DEFAULT ''
 );
 
 -- table agy_turn_authority on agy_turn_authority
@@ -999,6 +1018,17 @@ CREATE TABLE conversation_heads (
     replace_revision INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, backend_session_id)
 );
+
+-- table coordination_traces on coordination_traces
+CREATE TABLE coordination_traces (
+    agent_id TEXT NOT NULL,
+    trace_id TEXT NOT NULL,
+    sender_agent_id TEXT NOT NULL DEFAULT '',
+    audience TEXT NOT NULL DEFAULT 'agents' CHECK (audience IN ('agents', 'mixed')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, trace_id)
+) WITHOUT ROWID;
 
 -- table cursor_positions on cursor_positions
 CREATE TABLE cursor_positions (
@@ -1527,7 +1557,9 @@ CREATE TABLE media_assets (
     caption TEXT,
     created_by TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    favorite_at INTEGER,
+    deleted_by TEXT
 );
 
 -- table message_clock on message_clock
@@ -1909,7 +1941,8 @@ CREATE TABLE provider_turns (
     pid INTEGER,
     start_token TEXT NOT NULL DEFAULT '',
     started_at INTEGER NOT NULL,
-    exited_at INTEGER
+    exited_at INTEGER,
+    trace_id TEXT NOT NULL DEFAULT ''
 );
 
 -- table provider_usage_windows on provider_usage_windows

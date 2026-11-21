@@ -5,6 +5,8 @@
 //! started. Changing one is a restart with a different word, not a change of code.
 
 use std::net::SocketAddr;
+
+use clarp_kernel::address::{Local, on_this_machine};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +41,17 @@ pub struct Config {
     /// program's name or its path. Empty: this Host was told none, reads no seat, and says
     /// that the tool is not installed.
     pub seats_tool: String,
+    /// The tree of skills this Host's release ships (`--skills`, written by the install tool:
+    /// `<share>/releases/<commit>/skills`, with its `manifest.json`). Absent: this Host keeps
+    /// no skills. It keeps them only with `--accounts select`: the tools' skill folders are the
+    /// machine's, and one Host keeps a machine's tools.
+    pub skills: Option<PathBuf>,
+    /// The folder of the releases of the Host that kept this machine's tools before
+    /// (`--skills-other-releases`): a link it left into one of them is Clarp's own, outdated.
+    pub skills_other_releases: Option<PathBuf>,
+    /// That Host's record of the skills it kept chosen (`--skills-chosen-before`, its
+    /// `install.json`): read once, at the first start that keeps the tools, and never written.
+    pub skills_chosen_before: Option<PathBuf>,
     pub ask_usage: bool,
     /// Whether a contact nobody gave a picture is drawn one by the provider of pictures
     /// (`--contact-pictures`, which the install tool writes where its own word of that name is
@@ -153,6 +166,13 @@ pub struct Config {
     pub relay_config: Option<PathBuf>,
     /// A stand-in for the relay, on this machine. Empty: the relay the settings name.
     pub relay_stand_in: String,
+    /// The model of GPT-Live this Host runs, as the owner named it in his file (`[openai]
+    /// live_model`, read once, here): one of `live_call::LIVE_MODELS`, else the default.
+    pub live_model: &'static str,
+    /// From which client contract, by the client's exact name, an agent's live call runs on
+    /// that model: `live_call::AGENT_LIVE_MODEL_MIN_CLIENT`, overridden by name by the owner's
+    /// file (`[openai] live_model_min_client`, a table of name and contract, read once here).
+    pub live_model_min_client: Vec<(String, i64)>,
     /// No agent of this Host is woken by a heartbeat, whatever its own switch says, and a
     /// heartbeat sent from outside is refused (`CLARP_HEARTBEATS_DISABLED`, as on the
     /// Python Host).
@@ -172,7 +192,8 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
-[--accounts none|follow|select] [--seats-tool PROGRAM] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
+[--accounts none|follow|select] [--seats-tool PROGRAM] \
+[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -290,6 +311,98 @@ pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
     }
 }
 
+/// The model of GPT-Live the owner named in his file (`[openai] live_model`), read once: none
+/// named, or no file, is the default; another than the two there are is refused, said in one
+/// line, and the default runs.
+fn live_model_of(file: Option<&toml::Table>) -> &'static str {
+    let named = file
+        .and_then(|file| file.get("openai"))
+        .and_then(|openai| openai.get("live_model"));
+    let told = named.map(|named| named.as_str().unwrap_or_default());
+    clarp_kernel::live_call::live_model(told).unwrap_or_else(|model| {
+        eprintln!(
+            "config.openai.live_model refused: not one of {}; {model} runs",
+            clarp_kernel::live_call::LIVE_MODELS.join(", ")
+        );
+        model
+    })
+}
+
+/// The owner's file, where one is given and it reads: read once, where the configuration is.
+fn owners_of(owners: Option<&Path>) -> Option<toml::Table> {
+    owners
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.parse::<toml::Table>().ok())
+}
+
+/// From which client contract an agent's live call runs on the owner's model, by the client's
+/// exact name: the two the apps named, and what the owner's file says of any name (`[openai]
+/// live_model_min_client`; 0 for a name is never for it), read by the one reader of such tables
+/// ([`clarp_kernel::client::minimums`]), as a render spec's table is. What it refused is named
+/// and that name keeps what it had; a key that differs from a built-in name only in its case is
+/// taken as written and said; a value that is no table is ignored and said. Each line carries the
+/// table's name, once, when the configuration is read.
+fn live_model_min_client_of(file: Option<&toml::Table>) -> Vec<(String, i64)> {
+    let built_in = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT;
+    let mut minimums: Vec<(String, i64)> = built_in
+        .iter()
+        .map(|(name, minimum)| ((*name).to_string(), *minimum))
+        .collect();
+    let table = match file
+        .and_then(|file| file.get("openai"))
+        .and_then(|openai| openai.get(MIN_CLIENT_KEY))
+    {
+        None => return minimums,
+        Some(toml::Value::Table(table)) => table,
+        Some(_) => {
+            min_client_said("ignored: expected a table of client = number");
+            return minimums;
+        }
+    };
+    let known: Vec<&str> = built_in.iter().map(|(name, _)| *name).collect();
+    let entries = table
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_integer()));
+    let read = clarp_kernel::client::minimums(entries, &known);
+    for line in read.lines() {
+        min_client_said(&line);
+    }
+    for (name, minimum) in read.taken {
+        match minimums.iter_mut().find(|(known, _)| *known == name) {
+            Some(known) => known.1 = minimum,
+            None => minimums.push((name, minimum)),
+        }
+    }
+    minimums
+}
+
+/// The owner's table of minimums for the model of an agent's live call.
+const MIN_CLIENT_KEY: &str = "live_model_min_client";
+
+/// A line of what the reading of that table says, with the table's name before it.
+fn min_client_said(line: &str) {
+    eprintln!("clarp-host: config.{MIN_CLIENT_KEY}: {line}");
+}
+
+/// A stand-in for a provider or an engine, given in `variable`: none where nothing is given, and
+/// otherwise an address on this machine by one rule for every one of them
+/// (`clarp_kernel::address::on_this_machine`), parsed as a client parses it and kept as it was
+/// rebuilt from its parsed parts, never as it was given. Another is refused, naming the variable
+/// and never the address: what it carries before its host may be a secret.
+pub fn stand_in(variable: &str, given: &str, rule: Local) -> Result<String, String> {
+    if given.is_empty() {
+        return Ok(String::new());
+    }
+    on_this_machine(given, rule).ok_or_else(|| {
+        let what = if rule.scheme == "ws" {
+            "a socket on this machine (ws://127.0.0.1:PORT)"
+        } else {
+            "an address on this machine (http://127.0.0.1:PORT)"
+        };
+        format!("{variable}: {what}")
+    })
+}
+
 impl Config {
     /// Reads the configuration from the command line and the environment.
     pub fn from_args(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
@@ -315,6 +428,7 @@ impl Config {
         let mut contact_pictures = false;
         let mut accounts = clarp_kernel::recovery::Accounts::None;
         let mut seats_tool = String::new();
+        let (mut skills, mut skills_other_releases, mut skills_chosen_before) = (None, None, None);
         let mut logins_checked_every_ms = 5_000;
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
@@ -362,6 +476,13 @@ impl Config {
                         .ok_or(format!("--accounts {named}: none, follow or select"))?;
                 }
                 "--seats-tool" => seats_tool = value("a program")?,
+                "--skills" => skills = Some(PathBuf::from(value("a directory")?)),
+                "--skills-other-releases" => {
+                    skills_other_releases = Some(PathBuf::from(value("a directory")?));
+                }
+                "--skills-chosen-before" => {
+                    skills_chosen_before = Some(PathBuf::from(value("a file")?));
+                }
                 "--push-relay" => {
                     push_relay = value("an address")?.trim_end_matches('/').to_string();
                     // What a phone is told goes over TLS, or stays on this machine.
@@ -470,102 +591,46 @@ impl Config {
             });
             beside.unwrap_or_else(|| PathBuf::from("whisper-worker.py"))
         });
-        // A stand-in for an engine over the network is on this machine, or it is none.
-        let stand_in = |variable: &str| -> Result<String, String> {
-            let address = std::env::var(variable).unwrap_or_default();
-            let local = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"];
-            if address.is_empty() || local.iter().any(|begin| address.starts_with(begin)) {
-                Ok(address)
-            } else {
-                Err(format!("{variable} {address}: an address on this machine"))
-            }
+        // A stand-in for a provider or an engine is on this machine, or it is none: one rule for
+        // every one of them ([`stand_in`]).
+        let here = |variable: &str, rule: Local| {
+            stand_in(variable, &std::env::var(variable).unwrap_or_default(), rule)
         };
-        let judge_endpoint = std::env::var("CLARP_JUDGE_ENDPOINT").unwrap_or_default();
-        if !judge_endpoint.is_empty() {
-            let uri = judge_endpoint
-                .parse::<axum::http::Uri>()
-                .map_err(|_| "invalid judge endpoint")?;
-            let local = uri
-                .authority()
-                .and_then(|a| a.as_str().parse::<std::net::SocketAddr>().ok())
-                .is_some_and(|a| a.ip().is_loopback() && a.port() != 0);
-            if uri.scheme_str() != Some("http") || !local {
-                return Err("CLARP_JUDGE_ENDPOINT needs a loopback HTTP socket address".into());
-            }
-        }
-        let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
-        let voice_endpoint = |variable: &str| -> Result<String, String> {
-            let endpoint = stand_in(variable)?;
-            if !endpoint.is_empty() {
-                let uri = endpoint
-                    .parse::<axum::http::Uri>()
-                    .map_err(|_| format!("invalid {variable}"))?;
-                let authority = uri
-                    .authority()
-                    .ok_or_else(|| format!("missing {variable} host"))?;
-                if authority.as_str().contains('@')
-                    || !matches!(authority.host(), "127.0.0.1" | "[::1]" | "localhost")
-                {
-                    return Err(format!("{variable} must be on loopback"));
-                }
-            }
-            Ok(endpoint)
-        };
-        let deepgram_voice_endpoint = voice_endpoint("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
-        let ink_endpoint = voice_endpoint("CLARP_INK_ENDPOINT")?;
-        let google_voice_endpoint = voice_endpoint("CLARP_GOOGLE_VOICE_ENDPOINT")?;
-        let eleven_voice_endpoint = voice_endpoint("CLARP_ELEVEN_VOICE_ENDPOINT")?;
-        let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
-        let picture_endpoint = stand_in("CLARP_PICTURE_ENDPOINT")?;
+        let web = |variable: &str| here(variable, Local::WEB);
+        let judge_endpoint = web("CLARP_JUDGE_ENDPOINT")?;
+        let scribe_endpoint = web("CLARP_SCRIBE_ENDPOINT")?;
+        let deepgram_voice_endpoint = web("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
+        let ink_endpoint = web("CLARP_INK_ENDPOINT")?;
+        let google_voice_endpoint = web("CLARP_GOOGLE_VOICE_ENDPOINT")?;
+        let eleven_voice_endpoint = web("CLARP_ELEVEN_VOICE_ENDPOINT")?;
+        let nova_endpoint = web("CLARP_NOVA_ENDPOINT")?;
+        let picture_endpoint = web("CLARP_PICTURE_ENDPOINT")?;
         // The engine of a stream is reached by a socket: its stand-in is one on this machine.
-        let flux_endpoint = std::env::var("CLARP_FLUX_ENDPOINT").unwrap_or_default();
-        let local = ["ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:"];
-        if !flux_endpoint.is_empty() && !local.iter().any(|begin| flux_endpoint.starts_with(begin))
-        {
-            let not_here = format!("CLARP_FLUX_ENDPOINT {flux_endpoint}: a socket on this machine");
-            return Err(not_here);
-        }
-        let live_endpoint = std::env::var("CLARP_LIVE_ENDPOINT").unwrap_or_default();
-        if !live_endpoint.is_empty() && !local.iter().any(|begin| live_endpoint.starts_with(begin))
-        {
-            let not_here = format!("CLARP_LIVE_ENDPOINT {live_endpoint}: a socket on this machine");
-            return Err(not_here);
-        }
-        let gemini_live_endpoint = std::env::var("CLARP_GEMINI_LIVE_ENDPOINT").unwrap_or_default();
-        if !gemini_live_endpoint.is_empty() {
-            let uri = gemini_live_endpoint.parse::<http::Uri>().ok();
-            let local = uri.as_ref().is_some_and(|uri| {
-                uri.scheme_str() == Some("ws")
-                    && uri
-                        .authority()
-                        .is_some_and(|a| !a.as_str().contains('@') && a.port_u16().is_some())
-                    && matches!(uri.host(), Some("127.0.0.1" | "[::1]" | "localhost"))
-                    && uri.query().is_none()
-            });
-            if !local {
-                return Err("CLARP_GEMINI_LIVE_ENDPOINT requires a loopback socket".into());
-            }
-        }
-        let router_endpoint = stand_in("CLARP_ROUTER_ENDPOINT")?;
-        let cartesia_endpoint = voice_endpoint("CLARP_CARTESIA_ENDPOINT")?;
-        let apns_endpoint = stand_in("CLARP_APNS_ENDPOINT")?;
-        let fcm_endpoint = std::env::var("CLARP_FCM_ENDPOINT")
-            .ok()
-            .map(|address| {
-                // A single literal loopback socket replaces BOTH credential exchange and messaging.
-                address
-                    .strip_prefix("http://")
-                    .and_then(|host| host.parse::<std::net::SocketAddr>().ok())
-                    .filter(|at| at.ip().is_loopback() && at.port() != 0)
-                    .map(|at| format!("http://{at}"))
-                    .ok_or_else(|| {
-                        "CLARP_FCM_ENDPOINT needs a loopback HTTP socket address".to_string()
-                    })
-            })
-            .transpose()?;
-        let gemini_endpoint = voice_endpoint("CLARP_GEMINI_ENDPOINT")?;
-        let google_token_endpoint = voice_endpoint("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
-        let google_speech_endpoint = stand_in("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
+        let flux_endpoint = here("CLARP_FLUX_ENDPOINT", Local::SOCKET)?;
+        let live_endpoint = here("CLARP_LIVE_ENDPOINT", Local::SOCKET)?;
+        let gemini_live_endpoint = here(
+            "CLARP_GEMINI_LIVE_ENDPOINT",
+            Local {
+                query: false,
+                ..Local::SOCKET
+            },
+        )?;
+        let router_endpoint = web("CLARP_ROUTER_ENDPOINT")?;
+        let cartesia_endpoint = web("CLARP_CARTESIA_ENDPOINT")?;
+        let apns_endpoint = web("CLARP_APNS_ENDPOINT")?;
+        // A single socket replaces both the credential exchange and the messaging: an address
+        // without a path of its own.
+        let fcm_endpoint = here(
+            "CLARP_FCM_ENDPOINT",
+            Local {
+                path: false,
+                ..Local::WEB
+            },
+        )?;
+        let fcm_endpoint = (!fcm_endpoint.is_empty()).then_some(fcm_endpoint);
+        let gemini_endpoint = web("CLARP_GEMINI_ENDPOINT")?;
+        let google_token_endpoint = web("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
+        let google_speech_endpoint = web("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
         // A token of the owner's real account is never handed to a stand-in, and a token a
         // stand-in made up is never sent to Google: both are stood in for, or neither.
         if google_token_endpoint.is_empty() != google_speech_endpoint.is_empty() {
@@ -576,13 +641,9 @@ impl Config {
         let chirp_decoder = std::env::var("CLARP_CHIRP_DECODER").unwrap_or_default();
         // A stand-in for the relay is on this machine too: the key a Host dials with goes
         // over TLS, or stays here.
-        let relay_stand_in = std::env::var("CLARP_RELAY_DIAL").unwrap_or_default();
-        let here = ["ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:"];
-        if !relay_stand_in.is_empty() && !here.iter().any(|begin| relay_stand_in.starts_with(begin))
-        {
-            let only = "an address on this machine (ws://127.0.0.1:PORT)";
-            return Err(format!("CLARP_RELAY_DIAL {relay_stand_in}: {only}"));
-        }
+        let relay_stand_in = here("CLARP_RELAY_DIAL", Local::SOCKET)?;
+        // The owner's file, read once for what this Host keeps of it.
+        let owners = owners_of(speech_keys.as_deref());
         Ok(Self {
             run_dir,
             listen: listen
@@ -618,6 +679,9 @@ impl Config {
                 ),
             },
             seats_tool,
+            skills,
+            skills_other_releases,
+            skills_chosen_before,
             logins_checked_every_ms,
             jobs_checked_every_ms,
             schedules_checked_every_ms,
@@ -643,6 +707,8 @@ impl Config {
             whisper_model,
             whisper_compute,
             speech_language,
+            live_model: live_model_of(owners.as_ref()),
+            live_model_min_client: live_model_min_client_of(owners.as_ref()),
             speech_keys,
             push_keys,
             static_dir,
@@ -921,6 +987,31 @@ mod tests {
                 .unwrap()
                 .relay_config,
             Some(PathBuf::from("/c/config.toml"))
+        );
+    }
+
+    #[test]
+    fn a_stand_in_is_kept_as_it_was_rebuilt_and_refused_without_its_address() {
+        assert_eq!(stand_in("CLARP_X", "", Local::WEB), Ok(String::new()));
+        assert_eq!(
+            stand_in("CLARP_X", "HTTP://LOCALHOST:5000/b", Local::WEB),
+            Ok("http://localhost:5000/b".to_string())
+        );
+        // A path with a dot segment is refused before anything is resolved (R139).
+        assert!(stand_in("CLARP_X", "http://localhost:5000/a/../b", Local::WEB).is_err());
+        assert_eq!(
+            stand_in("CLARP_X", "ws://127.0.0.1:5000", Local::SOCKET),
+            Ok("ws://127.0.0.1:5000".to_string())
+        );
+        let refused = stand_in("CLARP_X", "http://someone:hush@127.0.0.1:5000", Local::WEB);
+        assert_eq!(
+            refused,
+            Err("CLARP_X: an address on this machine (http://127.0.0.1:PORT)".to_string())
+        );
+        let refused = stand_in("CLARP_Y", "ws://someone:hush@127.0.0.1:5000", Local::SOCKET);
+        assert_eq!(
+            refused,
+            Err("CLARP_Y: a socket on this machine (ws://127.0.0.1:PORT)".to_string())
         );
     }
 }

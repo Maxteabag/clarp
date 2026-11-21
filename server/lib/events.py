@@ -71,7 +71,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     SSEType.AGENT_STATE: (
         "agent_id", "session", "persona", "kind", "ts", "detail",
         "status_text", "trace_id", "client_msg_id", "queue_started",
-        "queue_remaining", "origin",
+        "queue_remaining", "origin", "audience", "sender_agent_id", "sender_name",
     ),
     SSEType.AGENT_ACTIVITY: (
         "agent_id", "session", "persona", "kind", "phase", "status", "tool",
@@ -82,7 +82,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "released_trace",
     ),
     SSEType.AGENT_ROSTER: (
-        "kind", "session", "persona", "voice_id", "backend", "name",
+        "kind", "session", "persona", "voice_id", "backend", "name", "voice_profile",
     ),
     SSEType.AGENT_FOCUS: ("session", "agent_id"),
     SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session", "backend_session_id"),
@@ -92,6 +92,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
     SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
+    SSEType.MEDIA_CHANGED: ("session", "agent_id", "asset_id", "change", "favorite", "at"),
     SSEType.ATTENTION_UPDATED: ("attention_count",),
     SSEType.BACKGROUND_JOB_UPDATED: (
         "change_revision", "observed_at", "job_id", "session", "agent_id",
@@ -108,7 +109,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "source_message_id", "cause_message_id", "origin", "push", "badge",
         "unread", "muted", "preview", "reason",
     ),
-    SSEType.TTS_ERROR: ("session", "agent_id", "persona", "message", "error"),
+    SSEType.TTS_ERROR: ("session", "agent_id", "persona", "message", "error", "reason", "provider", "trace_id"),
     SSEType.LOCATION_REQUEST: ("session",),
     SSEType.CALENDAR_REQUEST: (
         "request_id", "session", "title", "start", "end", "time_zone",
@@ -201,7 +202,9 @@ def agent_state(*, session: str, agent_id: str, kind: str,
                 persona: Any = OMIT, ts: Any = OMIT, detail: Any = OMIT,
                 status_text: Any = OMIT, trace_id: Any = OMIT,
                 client_msg_id: Any = OMIT, queue_started: Any = OMIT,
-                queue_remaining: Any = OMIT, origin: Any = OMIT) -> Event:
+                queue_remaining: Any = OMIT, origin: Any = OMIT,
+                audience: Any = OMIT, sender_agent_id: Any = OMIT,
+                sender_name: Any = OMIT) -> Event:
     return _build(SSEType.AGENT_STATE, [
         ("session", session),
         ("agent_id", agent_id),
@@ -215,6 +218,9 @@ def agent_state(*, session: str, agent_id: str, kind: str,
         ("queue_started", queue_started),
         ("queue_remaining", queue_remaining),
         ("origin", origin),
+        ("audience", audience),
+        ("sender_agent_id", sender_agent_id),
+        ("sender_name", sender_name),
     ])
 
 
@@ -277,8 +283,11 @@ def heartbeat(*, ts: int) -> Event:
 
 def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
                  persona: Any = OMIT, voice_id: Any = OMIT,
-                 backend: Any = OMIT, name: Any = OMIT) -> Event:
-    """Refetch the snapshot. Without ``kind`` it is the reconnect nudge."""
+                 backend: Any = OMIT, name: Any = OMIT,
+                 voice_profile: Any = OMIT) -> Event:
+    """Refetch the snapshot. Without ``kind`` it is the reconnect nudge.
+    ``voice_profile`` is the agent's resolved voice and hearing (feature
+    voice_profile) when the event is about one agent's voice."""
     return _build(SSEType.AGENT_ROSTER, [
         ("kind", kind),
         ("session", session),
@@ -286,6 +295,7 @@ def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
         ("voice_id", voice_id),
         ("backend", backend),
         ("name", name),
+        ("voice_profile", voice_profile),
     ])
 
 
@@ -335,6 +345,24 @@ def artifact_updated(*, session: str, agent_id: str,
         ("session", session),
         ("agent_id", agent_id),
         ("artifact_id", artifact_id),
+    ])
+
+
+def media_changed(*, session: str, agent_id: str, asset_id: str, change: str,
+                  at: int, favorite: Any = OMIT) -> Event:
+    """A gallery image was created, deleted or (un)marked; ``favorite`` only with
+    change ``favorite``."""
+    if change not in {"created", "deleted", "favorite"}:
+        raise ValueError(f"media-changed: unknown change {change!r}")
+    if (change == "favorite") != (favorite is not OMIT):
+        raise ValueError("media-changed: favorite goes with change 'favorite' only")
+    return _build(SSEType.MEDIA_CHANGED, [
+        ("session", session),
+        ("agent_id", agent_id),
+        ("asset_id", asset_id),
+        ("change", change),
+        ("favorite", favorite),
+        ("at", at),
     ])
 
 
@@ -408,13 +436,19 @@ def user_notification(*, notification_id: str, agent_id: str, session: str,
 
 
 def tts_error(*, session: Any, agent_id: Any, persona: Any, message: str,
-              error: str) -> Event:
+              error: str, reason: Any = OMIT, provider: Any = OMIT,
+              trace_id: Any = OMIT) -> Event:
+    """A reply that is not spoken (feature speech_outcome adds ``reason``,
+    ``provider`` and ``trace_id``: the turn whose reply it is)."""
     return _build(SSEType.TTS_ERROR, [
         ("session", session),
         ("agent_id", agent_id),
         ("persona", persona),
         ("message", message),
         ("error", error),
+        ("reason", reason),
+        ("provider", provider),
+        ("trace_id", trace_id),
     ])
 
 
@@ -495,6 +529,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.QUEUE_UPDATED: queue_updated,
     SSEType.DELIVERY_UPDATED: delivery_updated,
     SSEType.ARTIFACT_UPDATED: artifact_updated,
+    SSEType.MEDIA_CHANGED: media_changed,
     SSEType.ATTENTION_UPDATED: attention_updated,
     SSEType.BACKGROUND_JOB_UPDATED: background_job_updated,
     SSEType.PROVIDER_LIMIT: provider_limit,

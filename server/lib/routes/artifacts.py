@@ -11,7 +11,16 @@ from lib import events
 def _can_render(handler):
     from lib import config, server_identity
     return server_identity.render_spec_capable(
-        handler.headers.get(server_identity.CLIENT_HEADER), config.load().render_spec_min_client)
+        handler.headers.get(server_identity.CLIENT_HEADER), config.load().render_spec_min_contract)
+
+
+def _administrator(handler):
+    """The local administrator's token (or a Host with no token, from this machine), never a
+    paired device: the same class controller actions use."""
+    if getattr(handler, "_request_principal", "") == "administrator":
+        return True
+    return (not (getattr(handler.ctx, "auth_token", "") or "")
+            and bool(getattr(handler, "_request_is_local", False)))
 
 
 def _spec_refusal(handler, error):
@@ -59,6 +68,29 @@ class ArtifactRoutes:
     def _handle_artifact_archive(self, artifact_id: str):
         return self._handle_artifact_inbox_action(artifact_id, discard=False)
 
+    def _publishing_trace(self, session: str) -> str:
+        """The trace an artifact is published under (R102): the trace of the turn whose token the
+        request carries, only when that turn belongs to the artifact's own agent and is that
+        agent's running turn now. Anything else, a job its turn started publishing after the turn
+        was completed, stopped or closed included, gets '' and the apps place the card by time. Nothing the caller writes is
+        taken: the token is the Host's own proof. A lookup that fails is the retryable 503 the
+        turn identity gives (HTTP-N5)."""
+        from lib import agents, turn_identity
+        from lib.provider_background_jobs import TURN_ENV
+        token = (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")
+        if not token:
+            return ""
+        try:
+            agent_id, trace = turn_identity.caller_turn({TURN_ENV: token})
+        except Exception as exc:  # noqa: BLE001 - fail closed: refused, logged and retryable
+            from lib.log import log_exception
+            log_exception("turnCallerLookupFail", exc)
+            raise turn_identity.TurnIdentityUnavailable() from exc
+        owner = agents.get_by_session(session.strip()) if session.strip() else None
+        if not trace or not owner or owner["agent_id"] != agent_id:
+            return ""
+        return trace if turn_identity.running_trace(agent_id, trace) else ""
+
     def _handle_artifact_create(self):
         from lib import artifacts, render_spec
         data = self._read_json()
@@ -75,7 +107,8 @@ class ArtifactRoutes:
                 status=str(data.get("status") or "ready"),
                 reference_id=str(data.get("reference_id") or ""), payload=data.get("payload"),
                 artifact_id=str(data.get("artifact_id") or ""), expected_version=data.get("expected_version"),
-                validate_only=validate_only)
+                validate_only=validate_only,
+                source_trace_id=self._publishing_trace(str(data.get("session") or "")))
         except render_spec.Refusal as exc:
             return _spec_refusal(self, exc)
         except (ValueError, sqlite3.IntegrityError) as exc:
@@ -97,6 +130,25 @@ class ArtifactRoutes:
                                  else html_form_events.configuration(artifact_id))
         except (ValueError, TypeError) as exc:
             return self._json_error(400, str(exc))
+
+    def _handle_artifact_export(self, artifact_id: str):
+        """GET /artifacts/<id>/export (R137): a render_spec as a move to another Host needs it, for
+        the administrator only: any device is refused, limited or full, whatever its
+        X-Clarp-Client says. Another kind is refused in words, in a body shaped so a kind can be
+        added later: a 'kind' and one object under the kind's name."""
+        from lib import render_spec_store
+        # The administrator's token from the Authorization header only: never one a link carries in
+        # its query string, nor a browser's cookie, for a route that hands out a user's answers.
+        if not _administrator(self) or getattr(self, "_request_auth_source", "") not in ("header", ""):
+            return self._json_error(403, "administrator only")
+        try:
+            exported = render_spec_store.export(artifact_id)
+        except render_spec_store.NotExportable as kind:
+            return self._json(409, {"error": f"export is not available for {kind} artifacts",
+                                    "kind": str(kind)})
+        if exported is None:
+            return self._json_error(404, "not found")
+        return self._json_ok(exported)
 
     def _handle_artifact_get(self, artifact_id: str):
         from lib import artifacts

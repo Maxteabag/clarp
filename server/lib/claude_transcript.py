@@ -450,8 +450,13 @@ def context_tokens_from_jsonl(path: pathlib.Path, tail_bytes: int = 1_000_000) -
     context the model carried on its final step. We deliberately do NOT use the
     `result` event's aggregated usage: that sums every tool-step's cache read,
     so a long turn inflates to millions of tokens and tells you nothing about
-    window occupancy. After a /compact this naturally drops to the small
-    post-summary size.
+    window occupancy.
+
+    A compaction record (``compact_boundary``) newer than the last usage means
+    the conversation was compacted after that call: the old number is no
+    longer its size, and the new one is known only at the next call, so the
+    answer is None until then (R148). The record is met on the same backward
+    read, so this costs no extra pass.
 
     Reads only the tail of the file (transcripts reach tens of MB), so it's
     cheap to call on every snapshot. Returns None if no usage is found.
@@ -501,6 +506,8 @@ def _context_tokens_cached(path_string: str, device: int, inode: int,
                 if start > 0 and lines:
                     lines = lines[1:]  # discard the partial first line
                 for line in reversed(lines):
+                    if compact_boundary_tokens(line) is not None:
+                        return None  # compacted since the last call
                     tokens = _usage_tokens(line)
                     if tokens is not None:
                         return tokens
@@ -509,6 +516,52 @@ def _context_tokens_cached(path_string: str, device: int, inode: int,
                 window = min(window * 4, tail_bytes)
     except OSError:
         return None
+
+
+def compact_boundary_tokens(line: bytes) -> int | None:
+    """For a Claude Code compaction record (``{"type": "system", "subtype":
+    "compact_boundary", "compactMetadata": {"preTokens": N}}``): N, or 0 when
+    the record carries no number. None for any other line."""
+    if b'"compact_boundary"' not in line:
+        return None
+    try:
+        d = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if (not isinstance(d, dict) or d.get("type") != "system"
+            or d.get("subtype") != "compact_boundary"):
+        return None
+    meta = d.get("compactMetadata") if isinstance(d.get("compactMetadata"), dict) else {}
+    pre = meta.get("preTokens")
+    return pre if type(pre) is int and pre >= 0 else 0
+
+
+# The user's compaction looks for Claude Code's compaction record only in
+# what the transcript gained after /compact was typed, at most this much.
+COMPACT_PROOF_BYTES = 4 * 1024 * 1024
+
+
+def compact_boundary_since(path: pathlib.Path, offset: int,
+                           limit: int = COMPACT_PROOF_BYTES) -> int | None:
+    """The ``preTokens`` of the newest compaction record written after byte
+    ``offset`` (0 when it carries no number), or None when there is none in
+    the first ``limit`` bytes written since."""
+    try:
+        with path.open("rb") as f:
+            f.seek(0, 2)
+            end = f.tell()
+            if end <= offset:
+                return None
+            f.seek(offset)
+            raw = f.read(min(end - offset, limit))
+    except OSError:
+        return None
+    found = None
+    for line in raw.splitlines():
+        pre = compact_boundary_tokens(line)
+        if pre is not None:
+            found = pre
+    return found
 
 
 def _usage_tokens(line: bytes) -> int | None:

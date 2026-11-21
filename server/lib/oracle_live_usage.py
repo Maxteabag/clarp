@@ -1,6 +1,11 @@
 """Cumulative Live voice usage; router/worker billing is deliberately separate."""
 import math
 
+# OpenAI pricing, GPT-Live (both models): USD per minute, billed per second.
+# Standby (paused inference) applies only to a WebRTC session configured for it.
+ACTIVE_USD_PER_MINUTE = .05
+STANDBY_USD_PER_MINUTE = .02
+
 
 def _number(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
@@ -12,6 +17,8 @@ class LiveUsage:
             raise ValueError("Unsupported Live billing mode")
         self.mode = mode
         self.seconds = None
+        self.active_seconds = None
+        self.paused_seconds = None
         self.context_ratio = None
         self.expires_at = None
         self.finalized = False
@@ -30,6 +37,11 @@ class LiveUsage:
         seconds = usage.get("seconds") if isinstance(usage, dict) else None
         if _number(seconds):
             self.seconds = seconds  # Replacement snapshot, never addition.
+            # The active/paused breakdown belongs to the same snapshot: never keep an older one.
+            active = usage.get("active_seconds")
+            paused = usage.get("paused_seconds")
+            both = _number(active) and _number(paused)
+            self.active_seconds, self.paused_seconds = (active, paused) if both else (None, None)
         estimate = usage.get("voice_estimate_usd") if isinstance(usage, dict) else None
         if self.mode == "gemini" and _number(estimate):
             self.estimate = estimate  # Token-priced by GeminiUpstream.
@@ -48,8 +60,16 @@ class LiveUsage:
             return {"seconds": self.seconds, "context_ratio": None, "expires_at": None,
                     "finalized": self.finalized, "usage_final": self.usage_final, "reason": self.reason,
                     "voice_estimate_usd": self.estimate, "billing": "gemini_api", "scope": "voice_only"}
-        return {"seconds": self.seconds, "context_ratio": self.context_ratio,
+        return {"seconds": self.seconds, "active_seconds": self.active_seconds,
+                "paused_seconds": self.paused_seconds, "context_ratio": self.context_ratio,
                 "expires_at": self.expires_at, "finalized": self.finalized,
                 "usage_final": self.usage_final, "reason": self.reason,
-                "voice_estimate_usd": round(self.seconds * .05 / 60, 6) if self.seconds is not None and self.mode == "api" else None,
+                "voice_estimate_usd": self._estimate() if self.mode == "api" else None,
                 "billing": "openai_api" if self.mode == "api" else "chatgpt_subscription", "scope": "voice_only"}
+
+    def _estimate(self):
+        """Active and standby time at their rates when the provider gives both, else all time as active."""
+        if self.active_seconds is not None and self.paused_seconds is not None:
+            return round((self.active_seconds * ACTIVE_USD_PER_MINUTE
+                          + self.paused_seconds * STANDBY_USD_PER_MINUTE) / 60, 6)
+        return round(self.seconds * ACTIVE_USD_PER_MINUTE / 60, 6) if self.seconds is not None else None

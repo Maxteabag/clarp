@@ -30,9 +30,11 @@ struct Held {
 pub struct Log {
     say: Arc<dyn Fn(&str) + Send + Sync>,
     clock: Arc<dyn Clock + Send + Sync>,
-    /// By kind and words.
-    held: Arc<Mutex<HashMap<(String, String), Held>>>,
+    writes: Failures,
+    reads: Failures,
 }
+
+type Failures = Arc<Mutex<HashMap<(String, String), Held>>>;
 
 impl Log {
     /// The Host's own log: its standard error, beside its other lines.
@@ -48,7 +50,8 @@ impl Log {
         Self {
             say: Arc::new(said),
             clock,
-            held: Arc::default(),
+            writes: Arc::default(),
+            reads: Arc::default(),
         }
     }
 
@@ -59,10 +62,19 @@ impl Log {
     /// The one way a failed write is said: the kind and the store's words. The first is said
     /// at once; the same again only a minute after, with how often it happened since.
     pub fn unkept(&self, kind: &str, why: &str) {
-        let now = self.clock.now_ms();
         let line = format!("clarp-host: a record of the kind {kind} was not kept: {why}");
+        self.report(&self.writes, kind, why, line);
+    }
+
+    pub fn unread(&self, kind: &str, why: &str) {
+        let line = format!("clarp-host: the records of the kind {kind} could not be read: {why}");
+        self.report(&self.reads, kind, why, line);
+    }
+
+    fn report(&self, failures: &Failures, kind: &str, why: &str, line: String) {
+        let now = self.clock.now_ms();
         let said = {
-            let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut held = failures.lock().unwrap_or_else(PoisonError::into_inner);
             held.retain(|_, failure| now - failure.said_at < FORGOTTEN_AFTER_MS);
             match held.get_mut(&(kind.to_string(), why.to_string())) {
                 None => {
@@ -98,6 +110,29 @@ impl Log {
 impl std::fmt::Debug for Log {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Log")
+    }
+}
+
+/// Keep the operation with its failure when one pass both reads and writes records.
+pub(crate) enum RecordFailure {
+    Read(crate::agent::Unavailable),
+    Write(crate::agent::Unavailable),
+}
+
+impl RecordFailure {
+    pub(crate) fn report(self, fleet: &crate::fleet::FleetHandle, kind: &str) {
+        match self {
+            Self::Read(why) => fleet.unread(kind, &why.0),
+            Self::Write(why) => fleet.unkept(kind, &why.0),
+        }
+    }
+}
+
+impl From<RecordFailure> for crate::agent::Unavailable {
+    fn from(failure: RecordFailure) -> Self {
+        match failure {
+            RecordFailure::Read(why) | RecordFailure::Write(why) => why,
+        }
     }
 }
 
@@ -225,6 +260,31 @@ mod tests {
     }
 
     #[test]
+    fn reads_and_writes_coalesce_independently() {
+        let clock = Arc::new(ManualClock::starting_at(1000));
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let said = lines.clone();
+        let log = super::Log::to(
+            move |text| said.lock().unwrap().push(text.to_owned()),
+            clock.clone(),
+        );
+        log.unread("ring", "busy");
+        log.unkept("ring", "busy");
+        clock.advance_ms(59_999);
+        log.unread("ring", "busy");
+        clock.advance_ms(1);
+        log.unread("ring", "busy");
+        assert_eq!(
+            *lines.lock().unwrap(),
+            [
+                "clarp-host: the records of the kind ring could not be read: busy",
+                "clarp-host: a record of the kind ring was not kept: busy",
+                "clarp-host: the records of the kind ring could not be read: busy (2 times since it was last said)",
+            ]
+        );
+    }
+
+    #[test]
     fn a_failure_that_goes_on_is_said_again_a_minute_after_with_how_often() {
         let clock = Arc::new(ManualClock::starting_at(1_795_000_000_000));
         let lines = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -275,7 +335,7 @@ mod tests {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-mod at_the_port {
+pub(crate) mod at_the_port {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
@@ -300,9 +360,17 @@ mod at_the_port {
     struct Refusing {
         inner: Box<dyn KeyValue>,
         refused: Refused,
+        refused_read: Refused,
     }
 
     impl Refusing {
+        fn reads(&self, table: &str) -> Result<(), StoreError> {
+            if self.refused_read.lock().unwrap().as_deref() == Some(table) {
+                return Err(StoreError("read refused here".into()));
+            }
+            Ok(())
+        }
+
         fn refuses(&self, table: &str) -> Result<(), StoreError> {
             if self.refused.lock().unwrap().as_deref() == Some(table) {
                 return Err(StoreError("refused here".into()));
@@ -314,6 +382,7 @@ mod at_the_port {
     impl KeyValue for Refusing {
         fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
             self.refuses(&format!("read:{table}"))?;
+            self.reads(table)?;
             self.inner.get(table, key)
         }
         fn put(&mut self, table: &str, key: &str, value: &[u8]) -> Result<(), StoreError> {
@@ -332,16 +401,112 @@ mod at_the_port {
         }
         fn list(&self, table: &str) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
             self.refuses(&format!("list:{table}"))?;
+            self.reads(table)?;
             self.inner.list(table)
         }
     }
 
-    struct Place {
+    pub(crate) struct Place {
+        config: Arc<Config>,
+        pub(crate) clock: Arc<clarp_ports::clock::ManualClock>,
+        pub(crate) notice: Arc<tokio::sync::Notify>,
+        refused_read: Refused,
         dir: PathBuf,
-        fleet: FleetHandle,
+        pub(crate) fleet: FleetHandle,
         hub: Arc<Hub>,
         refused: Refused,
-        said: Arc<Mutex<Vec<String>>>,
+        pub(crate) said: Arc<Mutex<Vec<String>>>,
+        /// The engine the fleet's store was opened from: a second handle on the same tables, to
+        /// read what no desk reads (a copy set aside).
+        engine: MemKeyValue,
+    }
+
+    impl Place {
+        pub(crate) fn refuse_writes(&self, kind: Option<&str>) {
+            *self.refused.lock().unwrap() = kind.map(fleet::shelf);
+        }
+
+        pub(crate) fn allow_reads(&self) {
+            *self.refused_read.lock().unwrap() = None;
+        }
+
+        pub(crate) fn refuse_reads(&self, kind: &str) {
+            *self.refused_read.lock().unwrap() = Some(fleet::shelf(kind));
+        }
+
+        /// A desk can use the real fleet and its refusing port without starting any timers.
+        pub(crate) async fn app(&self) -> crate::edge::App {
+            let config = self.config.clone();
+            let clock = self.clock.clone();
+            let fleet = self.fleet.clone();
+            let hub = self.hub.clone();
+            let keys = || OwnerFile::new(Some(self.dir.join("absent.toml")));
+            let direct = Arc::new(crate::direct::Direct::new(keys(), "", clock.clone()));
+            let mouth = crate::voice::mouth().1.run(crate::voice::Works {
+                config: config.clone(),
+                fleet: fleet.clone(),
+                hub: hub.clone(),
+                clock: clock.clone(),
+            });
+            crate::edge::App {
+                capture: crate::diagnostics::Capture::start(
+                    Box::new(clarp_store_files::diagnostics::HourFiles::new(
+                        self.dir.join("diagnostics"),
+                        crate::diagnostics::CAP,
+                    )),
+                    clock.clone(),
+                    Default::default(),
+                    self.dir.clone(),
+                ),
+                controller_actions: Arc::default(),
+                connector: Arc::new(crate::connector::Connector::told(&config)),
+                ears: Arc::new(crate::heard::Ears::new(&config, &fleet).await.unwrap()),
+                seats: Arc::new(crate::seats::Desk::new("", false)),
+                faces: Arc::new(crate::faces::Faces::new(None)),
+                android: Arc::new(crate::fcm::Sender::new(
+                    keys(),
+                    Arc::new(crate::fcm::Http::new(None)),
+                    clock.clone(),
+                )),
+                chip: Arc::new(crate::chip::Chip::new(
+                    None,
+                    direct,
+                    tokio::sync::mpsc::unbounded_channel().0,
+                )),
+                config,
+                clock,
+                fleet,
+                hub,
+                mouth,
+                pusher: crate::pusher::pusher().0,
+                blobs: MemBlobs::new().open(&self.dir).unwrap(),
+                form_event_writer: Arc::default(),
+                skill_links: Arc::default(),
+                turns: Arc::default(),
+                server_id: "test-host".into(),
+                revisions: Arc::default(),
+                android_chip: Arc::default(),
+                desks: Arc::default(),
+                activity: Arc::default(),
+                calls: Arc::default(),
+                schedules: Arc::default(),
+                heartbeat: Arc::default(),
+                fallbacks: Arc::default(),
+                janitors: Arc::default(),
+                router: Arc::default(),
+                explain: Arc::default(),
+                oracle: Arc::default(),
+                keeper: Arc::default(),
+                label_checker: Arc::default(),
+                quota_keeper: Arc::default(),
+                audio: Arc::default(),
+                limits: Arc::default(),
+                pools: Vec::new(),
+                models: Arc::default(),
+                sign_ins: Arc::default(),
+                door: Arc::default(),
+            }
+        }
     }
 
     impl Drop for Place {
@@ -350,7 +515,7 @@ mod at_the_port {
         }
     }
 
-    fn place(name: &str) -> Place {
+    pub(crate) fn place(name: &str) -> Place {
         seeded_place(name, |_| {}, None).unwrap()
     }
 
@@ -363,18 +528,26 @@ mod at_the_port {
         std::fs::create_dir_all(&dir).unwrap();
         let at = dir.to_str().unwrap();
         let config = ["--data", at, "--run", at, "--cwd", at].map(String::from);
-        let config = Config::from_args(config.into_iter()).unwrap();
+        let mut config = Config::from_args(config.into_iter()).unwrap();
+        config.whisper_python.clear();
+        config.speech_keys = Some(dir.join("absent.toml"));
+        let config = Arc::new(config);
+        let clock = Arc::new(clarp_ports::clock::ManualClock::starting_at(
+            1_795_000_000_000,
+        ));
+        let notice = Arc::new(tokio::sync::Notify::new());
+        let notify = notice.clone();
         let said: Arc<Mutex<Vec<String>>> = Arc::default();
         let heard = said.clone();
         let hub = Arc::new(Hub::new(0));
         let works = fleet::Works {
             runtime: tokio::runtime::Handle::current(),
             opening_gate: crate::calls::opening_launch::channel().0,
-            config: Arc::new(config),
+            config: config.clone(),
             engine: Arc::new(MemEngine::new()),
             codecs: clarp_codec::standard_set("zstd").unwrap(),
             launcher: Arc::new(Launcher::by_name("direct", dir.join("unused-shim")).unwrap()),
-            clock: Arc::new(SystemClock),
+            clock: clock.clone(),
             hub: hub.clone(),
             revisions: Arc::default(),
             tool_env: Vec::new(),
@@ -386,13 +559,20 @@ mod at_the_port {
             turns: Arc::default(),
             pools: Vec::new(),
             log: Log::to(
-                move |line| heard.lock().unwrap().push(line.to_string()),
-                Arc::new(SystemClock),
+                move |line| {
+                    heard.lock().unwrap().push(line.to_string());
+                    notify.notify_one();
+                },
+                clock.clone(),
             ),
+            left_out: Arc::default(),
         };
         let refused: Refused = Arc::default();
+        let refused_read: Refused = Arc::default();
+        let engine = MemKeyValue::new();
         let mut store = Refusing {
-            inner: MemKeyValue::new().open(Path::new(&dir)).unwrap(),
+            refused_read: refused_read.clone(),
+            inner: engine.open(Path::new(&dir)).unwrap(),
             refused: refused.clone(),
         };
         store
@@ -402,11 +582,16 @@ mod at_the_port {
         *refused.lock().unwrap() = refuse;
         let fleet = fleet::start(works, Box::new(store))?;
         Ok(Place {
+            refused_read,
+            config,
+            clock,
+            notice,
             dir,
             fleet,
             hub,
             refused,
             said,
+            engine,
         })
     }
 
@@ -558,9 +743,15 @@ mod at_the_port {
         .unwrap();
         let fleet = &place.fleet;
         assert!(fleet.computer_jobs().await.unwrap().is_empty());
+        // Each is moved aside by the start's walk, and said by its key (`kept.rs`).
+        let aside = |key: &str| {
+            format!(
+                "clarp-host: a record of the kind computer-jobs could not be read and is set aside as {key}.unreadable: its desk starts without it"
+            )
+        };
         assert_eq!(
             place.said.lock().unwrap().as_slice(),
-            ["clarp-host: skipped 2 unreadable computer job records; original bytes retained"]
+            [aside("private-one"), aside("private-two")]
         );
         assert!(
             fleet
@@ -583,30 +774,20 @@ mod at_the_port {
         };
         *place.refused.lock().unwrap() = Some(table);
         assert!(fleet.change_computer_job(register.clone()).await.is_err());
-        assert_eq!(place.said.lock().unwrap().len(), 1);
-        assert_eq!(
-            fleet
-                .kept("computer-jobs", "private-one".into())
-                .await
-                .unwrap()
-                .unwrap(),
-            b"private-corrupt-bytes"
-        );
+        assert_eq!(place.said.lock().unwrap().len(), 2);
+        // Moved aside whole, never lost: both copies stand, counted, and no desk reads them.
+        assert_eq!(fleet.left_out().counts().get("computer-jobs"), Some(&2));
+        let copy = fleet.kept("computer-jobs", "private-one.unreadable".into());
+        assert_eq!(copy.await.unwrap(), None);
         *place.refused.lock().unwrap() = None;
         fleet.change_computer_job(register).await.unwrap().unwrap();
         assert_eq!(
-            place.said.lock().unwrap()[1],
+            place.said.lock().unwrap()[2],
             "clarp-host: registration replaced an unreadable computer job record"
         );
         assert_eq!(fleet.computer_jobs().await.unwrap().len(), 1);
-        assert_eq!(
-            fleet
-                .kept("computer-jobs", "private-two".into())
-                .await
-                .unwrap()
-                .unwrap(),
-            b"private-corrupt-bytes"
-        );
+        // The copies stand beside the registered job, counted until somebody removes them.
+        assert_eq!(fleet.left_out().counts().get("computer-jobs"), Some(&2));
     }
 
     #[tokio::test]
@@ -744,12 +925,15 @@ mod at_the_port {
             None
         );
         assert!(crate::heard::Ears::new(&config, &place.fleet).await.is_ok());
+        // Moved aside whole (`kept.rs`): the key is free, the copy stands and is counted, and no
+        // desk reads it.
+        assert_eq!(place.fleet.kept(key, "records".into()).await.unwrap(), None);
+        let counted = place.fleet.left_out().counts();
+        assert_eq!(counted.get("transcription-models"), Some(&1));
+        // The copy holds the bytes that were stored, whole.
+        let raw = place.engine.open(&place.dir).unwrap();
         assert_eq!(
-            place
-                .fleet
-                .kept(key, "records.unreadable".into())
-                .await
-                .unwrap(),
+            raw.get(&fleet::shelf(key), "records.unreadable").unwrap(),
             Some(original)
         );
     }
@@ -930,6 +1114,43 @@ mod at_the_port {
                 .terminal_reason,
             "worker_never_started"
         );
+    }
+
+    #[tokio::test]
+    async fn failed_voice_timeline_writes_are_private_and_consume_no_ids() {
+        let place = place("voice-timeline");
+        let fleet = &place.fleet;
+        let row = serde_json::json!({"event":"fixture","ts":1,"text":"synthetic-secret"});
+        *place.refused.lock().unwrap() = Some(fleet::shelf("voice-events"));
+        assert!(
+            fleet
+                .append_voice(vec![row.clone(), row.clone()])
+                .await
+                .is_err()
+        );
+        for _ in 0..3 {
+            fleet.record_voice(row.clone());
+        }
+        assert!(fleet.kept_all("voice-events").await.unwrap().is_empty());
+        let lines = place.said.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("voice-events") && lines[0].contains("refused here"));
+        assert!(!lines[0].contains("synthetic-secret"));
+        *place.refused.lock().unwrap() = Some(fleet::shelf("voice-event-sequence"));
+        assert!(fleet.append_voice(vec![row.clone()]).await.is_err());
+        assert!(fleet.kept_all("voice-events").await.unwrap().is_empty());
+        *place.refused.lock().unwrap() = None;
+        assert_eq!(fleet.append_voice(vec![row.clone(), row]).await.unwrap(), 2);
+        let saved = fleet.kept_all("voice-events").await.unwrap();
+        assert_eq!(saved.len(), 2);
+        for (index, (key, data)) in saved.iter().enumerate() {
+            let id = index + 1;
+            assert_eq!(key, &format!("{id:020}"));
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(data).unwrap()["event_id"],
+                id
+            );
+        }
     }
 
     fn here(fleet: &FleetHandle, session: &str) -> bool {

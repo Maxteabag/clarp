@@ -1,0 +1,2423 @@
+{
+ "contexts": [
+  "Clarp: this background command belongs to the current turn. Clarp runs one Claude process per turn, and when your reply ends, that process exits and this task stops with it: you will not be notified when it finishes. A process you detach with setsid or nohup outlives the turn but still belongs to the Clarp runtime service, so a runtime restart can kill it, and nothing reports its result to you. When the result must reach you, launch the work only with the clarp-background-jobs skill's run_detached_job.sh --goal <your goal> (\"Completion that must wake you\"): it exits 0 only once the job, its worker and your goal's wake are stored, and starts nothing otherwise. Wakes follow the goal: if it or your queue is paused, or wakes are disabled on this Host, tell the user you will not be woken."
+ ],
+ "cases": [
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Monitor",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Agent",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": false,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": null,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": 1,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": "true",
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   false,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": [],
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   null
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\n",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": null,
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": false,
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": 0,
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": [],
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": {},
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "quote it: '",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nquote it: '",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "one\ntwo",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\none\ntwo",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nunchanged",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nunchanged",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'suffix",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nexport CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'suffix",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": " export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\n export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "a",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"a\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "-9_a",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"-9_a\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "a.b",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "a/b",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "\u00e9",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   " v ",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "a",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"a\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "-9_a",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"-9_a\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "a.b",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "a/b",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": "\u00e9",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "native",
+    "tool_use_id": " v ",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "a",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"a\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "-9_a",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"-9_a\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "a.b",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "a/b",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": "\u00e9",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": "Bash",
+    "session_id": " v ",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"v\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": null,
+    "tool": {
+     "name": "Bash",
+     "input": {
+      "run_in_background": true,
+      "command": "fixture",
+      "description": "Keep me",
+      "extra": [
+       0
+      ]
+     }
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": [],
+    "tool": {
+     "name": "Bash",
+     "input": {
+      "run_in_background": true,
+      "command": "fixture",
+      "description": "Keep me",
+      "extra": [
+       0
+      ]
+     }
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true
+    },
+    "tool": {
+     "name": "Bash",
+     "input": {
+      "run_in_background": true,
+      "command": "fixture",
+      "description": "Keep me",
+      "extra": [
+       0
+      ]
+     }
+    }
+   },
+   "agent",
+   true,
+   null,
+   0
+  ],
+  [
+   {
+    "tool_name": null,
+    "session_id": "native",
+    "tool_use_id": "call",
+    "tool_input": {
+     "run_in_background": true,
+     "command": "fixture",
+     "description": "Keep me",
+     "extra": [
+      0
+     ]
+    },
+    "tool": {
+     "name": "Bash",
+     "input": {
+      "run_in_background": true,
+      "command": "fixture",
+      "description": "Keep me",
+      "extra": [
+       0
+      ]
+     }
+    }
+   },
+   "agent",
+   true,
+   {
+    "run_in_background": true,
+    "command": "export CLARP_BACKGROUND_ORIGIN='{\"agent_id\":\"agent\",\"provider\":\"claude\",\"native_session_id\":\"native\",\"tool_use_id\":\"call\"}'\nfixture",
+    "description": "Keep me",
+    "extra": [
+     0
+    ]
+   },
+   0
+  ]
+ ]
+}

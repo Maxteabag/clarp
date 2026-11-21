@@ -811,3 +811,44 @@ def find_latest_jsonl(
         log_exception("codexFindRolloutFail", e, detail=session_id)
         return None
     return best
+
+
+# The user's compaction reads a Codex conversation's size from the rollout
+# only when the app-server has reported none since the runtime started, and
+# never further back than this.
+CONTEXT_TAIL_BYTES = 64 * 1024
+
+
+def last_context_size(path: pathlib.Path, tail_bytes: int = CONTEXT_TAIL_BYTES) -> int | None:
+    """The conversation's size from the newest ``token_count`` record in the
+    last ``tail_bytes`` of a rollout: ``info.last_token_usage.total_tokens``
+    (what the app-server reports as ``last.totalTokens``). None when no such
+    record is in that bound."""
+    try:
+        with path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            start = max(0, size - tail_bytes)
+            f.seek(start)
+            raw = f.read(size - start)
+    except OSError:
+        return None
+    lines = raw.splitlines()
+    if start > 0 and lines:
+        lines = lines[1:]  # the partial first line
+    for line in reversed(lines):
+        if b'"token_count"' not in line:
+            continue
+        try:
+            record = json.loads(line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        payload = record.get("payload") if isinstance(record, dict) else None
+        if not isinstance(payload, dict) or payload.get("type") != "token_count":
+            continue
+        info = payload.get("info")
+        last = info.get("last_token_usage") if isinstance(info, dict) else None
+        total = last.get("total_tokens") if isinstance(last, dict) else None
+        if type(total) is int and total >= 0:
+            return total
+    return None

@@ -32,11 +32,29 @@ use crate::owner;
 /// The engines that speak which are built into this Host.
 use crate::voice::{Audition, BUILT};
 
-/// How many events of speech an app may report at once (the Python Host's `MAX_BATCH`).
-const MOST_EVENTS: usize = 500;
+/// What this desk keeps, declared once (`kept.rs`): the voice timeline's events, one for every
+/// event, kept for ever and listed only when shown, judged when read as the JSON row it reads;
+/// and their sequence, eight bytes under one key, read by key by the fleet (`append_voice`) and
+/// never begun anew.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(
+        crate::fleet::VOICE_EVENTS,
+        crate::kept::Key::Plain,
+        crate::kept::json,
+    )
+    .when_read(),
+    crate::kept::Kind::book(
+        crate::fleet::VOICE_SEQUENCE,
+        crate::kept::Key::Plain,
+        eight_bytes,
+    )
+    .when_read(),
+];
 
-/// A phone whose clock is further than this from the Host's is taken as not set.
-const CLOCKS_APART_MS: i64 = 6 * 60 * 60 * 1000;
+/// Whether bytes are the voice timeline's sequence as the fleet reads it: eight bytes.
+fn eight_bytes(stored: &[u8]) -> bool {
+    stored.len() == 8
+}
 
 fn bad(why: &str) -> ApiError {
     ApiError::new(StatusCode::BAD_REQUEST, why)
@@ -166,6 +184,9 @@ async fn choose(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiE
             "speech settings could not be saved",
         )
     })?;
+    // Every agent's voice may have changed: open apps re-read the agents.
+    app.hub
+        .publish(crate::profile::changed_for_all(), app.clock.now_ms());
     let Json(mut result) = engines_told(State(app)).await;
     result["restart_scheduled"] = json!(false);
     Ok(Json(result))
@@ -291,6 +312,9 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
     if amended.is_err() {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
     }
+    // Open apps show the voice the agent now speaks with (its profile is added as it is told).
+    let changed = json!({ "type": "agent-roster", "kind": "voice-changed", "session": session });
+    app.hub.publish(changed, app.clock.now_ms());
     Ok(Json(json!({ "ok": true })).into_response())
 }
 
@@ -498,49 +522,65 @@ async fn legacy_preview(State(app): State<App>, body: Bytes) -> Result<Json<Valu
     Ok(Json(json!({"ok":true,"url":format!("/audio/{name}")})))
 }
 
-fn whole(value: Option<&Value>) -> Option<i64> {
-    match value? {
-        Value::Number(number) => number.as_i64().or_else(|| {
-            let float = number.as_f64().filter(|float| float.is_finite())?;
-            // Towards zero, as Python's `int()` cuts.
-            Some(float.trunc() as i64)
-        }),
-        _ => None,
-    }
+async fn voice_events(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    let data = Value::Object(crate::personas::object(&body)?);
+    let batch =
+        clarp_kernel::voice_timeline::batch(&data, app.clock.now_ms()).map_err(|(code, why)| {
+            ApiError::new(
+                StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_REQUEST),
+                why,
+            )
+        })?;
+    let count = app.fleet.append_voice(batch.rows).await?;
+    Ok(Json(
+        json!({"ok":true,"stored":count,"clock_offset_ms":batch.offset,"server_now":app.clock.now_ms()}),
+    ))
 }
 
-/// `POST /voice-events`: an app reports what its microphone and its player did, for the
-/// record of each thing said. This Host keeps no such record yet: the report is read as
-/// the Python Host reads it, refused where that Host refuses it, and answered with how
-/// many events were kept, which is none.
-async fn voice_events(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
-    let said: Map<String, Value> = if body.is_empty() {
-        Map::new()
-    } else {
-        match serde_json::from_slice(&body) {
-            Ok(Value::Object(said)) => said,
-            _ => return Err(bad("bad json")),
+async fn timeline(app: App, raw: Option<String>, grouped: bool) -> Result<Json<Value>, ApiError> {
+    let params: Vec<_> = url::form_urlencoded::parse(raw.as_deref().unwrap_or("").as_bytes())
+        .into_owned()
+        .filter(|(_, v)| !v.is_empty())
+        .collect();
+    let q = clarp_kernel::voice_timeline::Query::read(&params);
+    let stored = app.fleet.kept_listed(crate::fleet::VOICE_EVENTS).await?;
+    tokio::task::spawn_blocking(move || {
+        let mut rows = Vec::with_capacity(stored.len());
+        for (_, bytes) in stored {
+            let row: Value = serde_json::from_slice(&bytes).map_err(|_| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "cannot read voice event")
+            })?;
+            rows.push(row);
         }
-    };
-    let Some(Value::Array(events)) = said.get("events") else {
-        return Err(bad("events must be a list"));
-    };
-    if events.len() > MOST_EVENTS {
-        return Err(ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "batch too large",
-        ));
-    }
-    let now = app.clock.now_ms();
-    // How far the app's clock is from the Host's, by when it says it sent the report.
-    let apart = whole(said.get("sent_at")).map(|sent| now - sent);
-    let apart = apart.filter(|apart| apart.abs() <= CLOCKS_APART_MS);
-    Ok(Json(json!({
-        "ok": true,
-        "stored": 0,
-        "clock_offset_ms": apart,
-        "server_now": now,
-    })))
+        rows.sort_by_key(|r| std::cmp::Reverse((r["ts"].as_i64(), r["event_id"].as_u64())));
+        let selected = q.rows(rows.iter(), grouped);
+        Ok(Json(if grouped {
+            json!({"utterances":q.utterances(&selected)})
+        } else {
+            json!({"events":selected})
+        }))
+    })
+    .await
+    .map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "cannot read voice timeline",
+        )
+    })?
+}
+
+async fn event_rows(
+    State(app): State<App>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> Result<Json<Value>, ApiError> {
+    timeline(app, query, false).await
+}
+
+async fn utterance_rows(
+    State(app): State<App>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> Result<Json<Value>, ApiError> {
+    timeline(app, query, true).await
 }
 
 pub fn routes() -> Router<App> {
@@ -554,7 +594,8 @@ pub fn routes() -> Router<App> {
         .route("/controller-narration", get(controller_narration))
         .route("/cartesia-voice-preview", get(cartesia_preview))
         .route("/preview", post(legacy_preview))
-        .route("/voice-events", post(voice_events))
+        .route("/voice-events", get(event_rows).post(voice_events))
+        .route("/voice-events/utterances", get(utterance_rows))
 }
 
 #[cfg(test)]
@@ -645,8 +686,5 @@ mod tests {
         );
         // ElevenLabs was chosen, with Deepgram as its fallback.
         assert_eq!(ours["voice_available"], true);
-        assert_eq!(whole(Some(&json!(12.9))), Some(12));
-        assert_eq!(whole(Some(&json!(true))), None);
-        assert_eq!(whole(Some(&json!("12"))), None);
     }
 }

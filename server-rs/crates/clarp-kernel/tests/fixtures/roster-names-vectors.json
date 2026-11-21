@@ -1,0 +1,178 @@
+{
+ "about": "Written by server-rs/tools/roster-names-vectors.py from server/lib/message_previews.py (list_messages, provenance_fields). Do not edit by hand.",
+ "owner": "agent-1",
+ "sender": "agent-2",
+ "states": [
+  {
+   "roster": {
+    "agent-1": {
+     "persona": "Hugo",
+     "removed": false,
+     "session": "hugo"
+    },
+    "agent-2": {
+     "persona": "C++ Agent",
+     "removed": false,
+     "session": "cagent"
+    }
+   },
+   "rows": [
+    {
+     "reply_to_agent_id": "",
+     "reply_to_name": "",
+     "reply_to_session": "",
+     "role": "user",
+     "sender_agent_id": "agent-2",
+     "sender_name": "C++ Agent",
+     "sender_session": "cagent",
+     "text": "please look at the build"
+    },
+    {
+     "reply_to_agent_id": "agent-2",
+     "reply_to_name": "C++ Agent",
+     "reply_to_session": "cagent",
+     "role": "assistant",
+     "sender_agent_id": "",
+     "sender_name": "",
+     "sender_session": "",
+     "text": "It is green."
+    },
+    {
+     "reply_to_agent_id": "",
+     "reply_to_name": "",
+     "reply_to_session": "",
+     "role": "user",
+     "sender_agent_id": "agent-2",
+     "sender_name": "C++ Agent",
+     "sender_session": "cagent",
+     "text": "and the tests too"
+    },
+    {
+     "reply_to_agent_id": "agent-2",
+     "reply_to_name": "C++ Agent",
+     "reply_to_session": "cagent",
+     "role": "assistant",
+     "sender_agent_id": "",
+     "sender_name": "",
+     "sender_session": "",
+     "text": "They pass."
+    }
+   ],
+   "state": "as written"
+  },
+  {
+   "roster": {
+    "agent-1": {
+     "persona": "Hugo",
+     "removed": false,
+     "session": "hugo"
+    },
+    "agent-2": {
+     "persona": "C++ Renamed",
+     "removed": false,
+     "session": "cagent"
+    }
+   },
+   "rows": [
+    {
+     "reply_to_agent_id": "",
+     "reply_to_name": "",
+     "reply_to_session": "",
+     "role": "user",
+     "sender_agent_id": "agent-2",
+     "sender_name": "C++ Renamed",
+     "sender_session": "cagent",
+     "text": "please look at the build"
+    },
+    {
+     "reply_to_agent_id": "agent-2",
+     "reply_to_name": "C++ Renamed",
+     "reply_to_session": "cagent",
+     "role": "assistant",
+     "sender_agent_id": "",
+     "sender_name": "",
+     "sender_session": "",
+     "text": "It is green."
+    },
+    {
+     "reply_to_agent_id": "",
+     "reply_to_name": "",
+     "reply_to_session": "",
+     "role": "user",
+     "sender_agent_id": "agent-2",
+     "sender_name": "C++ Renamed",
+     "sender_session": "cagent",
+     "text": "and the tests too"
+    },
+    {
+     "reply_to_agent_id": "agent-2",
+     "reply_to_name": "C++ Renamed",
+     "reply_to_session": "cagent",
+     "role": "assistant",
+     "sender_agent_id": "",
+     "sender_name": "",
+     "sender_session": "",
+     "text": "They pass."
+    }
+   ],
+   "state": "its sender renamed"
+  },
+  {
+   "roster": {
+    "agent-1": {
+     "persona": "Hugo",
+     "removed": false,
+     "session": "hugo"
+    },
+    "agent-2": {
+     "persona": "C++ Renamed",
+     "removed": true,
+     "session": "cagent"
+    }
+   },
+   "rows": [
+    {
+     "reply_to_agent_id": "",
+     "reply_to_name": "",
+     "reply_to_session": "",
+     "role": "user",
+     "sender_agent_id": "agent-2",
+     "sender_name": "C++ Renamed",
+     "sender_session": "cagent",
+     "text": "please look at the build"
+    },
+    {
+     "reply_to_agent_id": "agent-2",
+     "reply_to_name": "C++ Renamed",
+     "reply_to_session": "cagent",
+     "role": "assistant",
+     "sender_agent_id": "",
+     "sender_name": "",
+     "sender_session": "",
+     "text": "It is green."
+    },
+    {
+     "reply_to_agent_id": "",
+     "reply_to_name": "",
+     "reply_to_session": "",
+     "role": "user",
+     "sender_agent_id": "agent-2",
+     "sender_name": "C++ Renamed",
+     "sender_session": "cagent",
+     "text": "and the tests too"
+    },
+    {
+     "reply_to_agent_id": "agent-2",
+     "reply_to_name": "C++ Renamed",
+     "reply_to_session": "cagent",
+     "role": "assistant",
+     "sender_agent_id": "",
+     "sender_name": "",
+     "sender_session": "",
+     "text": "They pass."
+    }
+   ],
+   "state": "its sender removed"
+  }
+ ]
+}

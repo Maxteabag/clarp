@@ -10,11 +10,13 @@
 //! becomes; what a stretch of a tool's output means, with the position in that output the log
 //! has now reached. There is never one without the other.
 
+mod turn_sessions;
+
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, AgentEvent, Command, Effect, Refusal};
-use crate::turn::{Admission, IllegalTransition, Origin, TurnId};
+use crate::turn::{Admission, IllegalTransition, Origin, TurnEvent, TurnId};
 
 /// What an item in an agent's log is. The numbers are permanent once a log holds them.
 pub mod kind {
@@ -56,6 +58,13 @@ pub mod kind {
     /// A change to helper cells on a parent message. Its place in a
     /// conversation page is still the original row.
     pub const HELPER_CELLS: u16 = 113;
+    /// A [`Note`](crate::conversation::Note): what an agent left for its user from a turn
+    /// (`POST /agent-notes`). A row of the conversation, as a reply is.
+    pub const AGENT_NOTE: u16 = 105;
+    /// Which message a trace belongs to: its id, sender and origin, keyed by the trace
+    /// ([`super::trace_key`]), written with the message. A send that names a trace another
+    /// message has is refused by one look by key.
+    pub const TRACE: u16 = 900;
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;
@@ -91,7 +100,7 @@ pub mod kind {
     /// The rows of a conversation: what a page of a chat is counted in. An item of one of
     /// these kinds is where its row stands. What changes a row afterwards is an item of
     /// another kind that names the row: its tools' uses, what followed it, how its turn ended.
-    pub const ROWS: Kinds = Kinds::range(MESSAGE, IMPORTED);
+    pub const ROWS: Kinds = Kinds::range(MESSAGE, AGENT_NOTE);
 }
 
 const PAGE: usize = 1_000;
@@ -149,6 +158,9 @@ pub struct Incoming {
     pub body: Vec<u8>,
     pub origin: Origin,
     pub admission: Admission,
+    /// Another agent addresses this one: its id ("" for a peer Host's agent); `None`: the
+    /// user's. The turn the message becomes is marked so in its acceptance.
+    pub coordination: Option<String>,
 }
 
 /// What a message did: where it is in the log, and what the actor must now do.
@@ -199,6 +211,7 @@ pub enum Reworded {
 
 pub struct Recorder {
     log: Box<dyn AgentLog>,
+    turn_sessions: turn_sessions::TurnSessions,
     agent: Agent,
     cursor: Option<SpoolCursor>,
     /// The position of the newest item. This recorder is the log's one writer, so it knows.
@@ -210,6 +223,17 @@ pub struct Recorder {
     floor: Seq,
 }
 
+/// The key of the acceptance of a turn that answers another agent. Not `c-`, which a reply's
+/// commentary is keyed by (`c-<reply id>`).
+pub fn coordination_key(turn: u64) -> String {
+    format!("coordination-{turn}")
+}
+
+/// The key of the item that says which message a trace belongs to ([`kind::TRACE`]).
+pub fn trace_key(trace: &str) -> String {
+    format!("trace-{trace}")
+}
+
 fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     let body = serde_json::to_vec(event).map_err(|e| JournalError::Encode(e.to_string()))?;
     let written_as = match event {
@@ -217,11 +241,24 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         _ => kind::AGENT_EVENT,
     };
     let mut item = NewItem::new(written_as, ts_ms, body);
+    // A turn that answers another agent is found by its key: once per turn on a page, never by
+    // reading the conversation.
+    if let AgentEvent::Turn {
+        turn,
+        change: TurnEvent::Accepted {
+            coordination: Some(_),
+            ..
+        },
+    } = event
+    {
+        item.key = Some(coordination_key(turn.0));
+    }
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
         | AgentEvent::StopRequested { turn, .. }
         | AgentEvent::SentNow { turn, .. }
-        | AgentEvent::Reworded { turn, .. } => Some(turn.0),
+        | AgentEvent::Reworded { turn, .. }
+        | AgentEvent::Compacted { turn, .. } => Some(turn.0),
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }
@@ -239,6 +276,7 @@ impl Recorder {
         let mut agent = Agent::new();
         // What changed of a send's delivery before the Host started is not told again.
         agent.deliveries_mut().folding(true);
+        let mut turn_sessions = turn_sessions::TurnSessions::default();
         let mut cursor = None;
         let mut after = 0;
         let mut floor = 0;
@@ -265,6 +303,9 @@ impl Recorder {
                                 seq: item.seq,
                                 transition,
                             })?;
+                        if let Some(turn) = turn_sessions::affected(&event) {
+                            turn_sessions.set(turn, agent.backend_session());
+                        }
                     }
                     kind::SPOOL_CURSOR => {
                         cursor = Some(serde_json::from_slice(&item.body).map_err(corrupt)?);
@@ -282,12 +323,18 @@ impl Recorder {
             .map_or(0, |item| item.seq);
         Ok(Self {
             log,
+            turn_sessions,
             agent,
             cursor,
             last_seq,
             conversation_seq,
             floor,
         })
+    }
+
+    /// Native session of this particular turn, as its own log last bound it.
+    pub fn turn_session(&self, turn: u64) -> Option<&str> {
+        self.turn_sessions.get(turn)
     }
 
     /// The position of the newest item in the log.
@@ -391,6 +438,7 @@ impl Recorder {
             cursor: None,
             failed: None,
             started_again: None,
+            turn_bindings: Vec::new(),
         }
     }
 
@@ -456,6 +504,7 @@ impl Recorder {
                 body,
                 origin,
                 admission: Admission::Queue,
+                coordination: None,
             },
             now_ms,
         )
@@ -515,6 +564,7 @@ impl Recorder {
                     message_seq,
                     origin: message.origin,
                     admission: message.admission,
+                    coordination: message.coordination,
                 },
                 now_ms,
             )
@@ -544,6 +594,7 @@ pub struct Batch<'a> {
     failed: Option<JournalError>,
     /// Where in this batch the agent is started again, when it is.
     started_again: Option<usize>,
+    turn_bindings: Vec<(u64, Option<String>)>,
 }
 
 impl Batch<'_> {
@@ -571,6 +622,10 @@ impl Batch<'_> {
             if let Err(transition) = self.work.apply(&event) {
                 self.failed
                     .get_or_insert(JournalError::Illegal { seq: 0, transition });
+            }
+            if let Some(turn) = turn_sessions::affected(&event) {
+                self.turn_bindings
+                    .push((turn, self.work.backend_session().map(str::to_owned)));
             }
             self.events.push(event);
         }
@@ -663,6 +718,9 @@ impl Batch<'_> {
         }
         self.recorder.last_seq = last_seq;
         self.recorder.agent = self.work;
+        for (turn, session) in self.turn_bindings {
+            self.recorder.turn_sessions.set(turn, session.as_deref());
+        }
         if let Some(cursor) = self.cursor {
             self.recorder.cursor = Some(cursor);
         }
@@ -1151,6 +1209,7 @@ mod tests {
             body: key.as_bytes().to_vec(),
             origin: Origin::User,
             admission,
+            coordination: None,
         }
     }
 
@@ -1501,6 +1560,7 @@ mod tests {
             message_seq,
             origin: Origin::User,
             admission: Admission::Queue,
+            coordination: None,
         };
         batch.command(accept, 3).unwrap();
         let stop = Command::Stop {

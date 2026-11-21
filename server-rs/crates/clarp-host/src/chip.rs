@@ -39,6 +39,16 @@ use crate::pairing::Scope;
 use crate::relay::{Limited, Outcome, Push, Relay};
 use clarp_kernel::alert_routes::{ActivityRoutes, Path};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits)];
+
+/// Whether bytes are one of this desk's two records, as it reads them: its activities, or its day
+/// (what `Spent::kept` reads as one).
+fn fits(kept: &[u8]) -> bool {
+    crate::kept::fits::<Vec<Activity>>(kept) || matches!(Spent::kept(Some(kept)), Spent::Of(_))
+}
+
 /// The kind of thing the chip keeps with the fleet, and the names of its parts.
 const KIND: &str = "chip";
 const ACTIVITIES: &str = "activities";
@@ -265,7 +275,13 @@ impl Chip {
     /// by its pace, a push by the budget.
     async fn sleeps(&self, app: &App) -> Option<Duration> {
         let mut guard = self.held.lock().await;
-        let held = Self::read(&mut guard, app).await.ok()?;
+        let held = match Self::read(&mut guard, app).await {
+            Ok(held) => held,
+            Err(why) => {
+                app.fleet.unread(KIND, &why.0);
+                return Some(Duration::from_secs(60));
+            }
+        };
         let now_ms = app.clock.now_ms();
         let paced = held.pacer.wake_at().map(|wake| wake - now_ms);
         let budgeted = held
@@ -646,4 +662,26 @@ async fn unregister(
 
 pub fn routes() -> Router<App> {
     Router::new().route("/devices/live-activity", post(register).delete(unregister))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod due_work_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_unread_chip_arms_a_timed_look_until_its_store_recovers() {
+        let place = crate::unkept::at_the_port::place("chip-retry");
+        let app = place.app().await;
+        place.refuse_reads(KIND);
+        assert_eq!(app.chip.sleeps(&app).await, Some(Duration::from_secs(60)));
+        assert_eq!(
+            *place.said.lock().unwrap(),
+            [
+                "clarp-host: the records of the kind chip could not be read: storage failed: read refused here"
+            ]
+        );
+        place.allow_reads();
+        assert_eq!(app.chip.sleeps(&app).await, None);
+    }
 }

@@ -3,8 +3,8 @@
 The phone opens the socket under full-device authentication and its first
 frame, ``agent_live.join``, presents the exact grant of its Live answer. The
 Host checks every binding and consumes the one-use join ticket before anything
-paid starts, then holds one upstream GPT-Live session (``gpt-live-1``, voice
-``marin``, public API, PCM 24 kHz) built only from the ring's frozen snapshot.
+paid starts, then holds one upstream GPT-Live session (the model its grant named,
+voice ``marin``, public API, PCM 24 kHz) built only from the ring's frozen snapshot.
 
 The opening is admitted exactly once: when the phone said ``client_ready``, the
 provider said ``session.started`` and the call is still current, the Host marks
@@ -170,6 +170,7 @@ class LiveSocket:
         self.call_epoch, self.attempt_id = ring["_live_call_epoch"], ring["_live_attempt_id"]
         self.context_digest, self.agent_id = ring["_live_context_digest"], ring["agent_id"]
         self.snapshot = ring["_live_snapshot"]
+        self.model = live.model_of(ring)   # the grant's model: the session frame and the upstream name it too
         self.upstream = None
         self.stop = threading.Event()
         self.closed = threading.Event()
@@ -936,7 +937,7 @@ def serve(handler) -> None:
         except Exception as exc:  # noqa: BLE001 - a call without its tools still goes ahead
             _quiet_log("agentLiveToolsAttach", exc, session.call_id)
         from .oracle_live_wire import LiveWire
-        wire = LiveWire("api")
+        wire = LiveWire("api", model=session.model)
         session.downstream({"type": "agent_live.session", "protocol": live.PROTOCOL, "host_id": _host_id(),
                             "ring_id": session.ring_id, "agent_id": session.agent_id, **session.ids(),
                             "context_digest": session.context_digest, "provider": live.PROVIDER,
