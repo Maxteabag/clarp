@@ -1,4 +1,4 @@
-"""Part C of issue 491: a follow-up written into a running Claude turn, read when its tool returns.
+"""Part C of issue 491: a follow-up written into a running Claude turn, read at its next boundary.
 
 Driven through the real dispatcher and the real Claude runner, with a stand-in `claude` that keeps
 its stdin open and replays the event orders of the recordings (Claude Code 2.1.321):
@@ -8,8 +8,9 @@ its stdin open and replays the event orders of the recordings (Claude Code 2.1.3
 - case 9: a follow-up echoed after the turn's result (the CLI answers it in a second turn of its
   own in the same process);
 plus: the process ending before it reads a written follow-up (it runs as its own turn, once); a
-turn that only writes (no tool open: not steered, the follow-up waits); a Claude older than the
-recorded one (not steered).
+follow-up written while the model generates between tool calls (read at the next boundary, in
+the same turn) or while the turn only writes (read after its result, in the same process); a
+Claude older than the recorded one (not steered).
 The row of a follow-up is written at its echo, never at its write; until then it is a queue item
 that may not be edited (its receipt says it may have left).
 """
@@ -91,11 +92,44 @@ if mode == "answer":
     answer(f"answer {n}")
     wait_eof(time.time() + 10)
     raise SystemExit(0)
-if mode == "writing":
+def waiting_lines(within):
+    """What sits on stdin now (the CLI reads its queue only at a boundary)."""
+    lines = []
+    while True:
+        ready, _, _ = select.select([stdin], [], [], within)
+        if not ready:
+            return lines
+        raw = stdin.readline()
+        if not raw:
+            return lines
+        lines.append(json.loads(raw))
+        with open(log, "a") as f:
+            f.write(raw)
+if mode == "writing":                   # the model only writes; recording 9 after it
     out({"type": "stream_event", "event": {"type": "content_block_start", "content_block": {"type": "text", "text": ""}}})
     while not (d / f"release-{n}").exists():
         time.sleep(0.02)
     answer(f"answer {n}")
+    for line in waiting_lines(0.5):     # read after the result, answered in this process
+        echo(line)
+        answer("answer to the follow-up")
+    wait_eof(time.time() + 10)
+    raise SystemExit(0)
+if mode == "between-tools":             # a short tool call, the model generating, the next one
+    out({"type": "stream_event", "event": {"type": "content_block_start",
+         "content_block": {"type": "tool_use", "id": f"ta{n}", "name": "Bash", "input": {}}}})
+    out({"type": "user", "message": {"role": "user", "content": [
+         {"type": "tool_result", "tool_use_id": f"ta{n}", "content": "tick"}]}})
+    while not (d / f"release-{n}").exists():
+        time.sleep(0.02)                # generating: no tool call is open
+    out({"type": "stream_event", "event": {"type": "content_block_start",
+         "content_block": {"type": "tool_use", "id": f"tb{n}", "name": "Bash", "input": {}}}})
+    out({"type": "user", "message": {"role": "user", "content": [
+         {"type": "tool_result", "tool_use_id": f"tb{n}", "content": "tick"}]}})
+    follows = waiting_lines(0.5)        # read at the boundary after that tool call
+    for line in follows:
+        echo(line)
+    answer(f"one answer to {1 + len(follows)} messages")
     wait_eof(time.time() + 10)
     raise SystemExit(0)
 # a tool call opens
@@ -294,18 +328,41 @@ def test_a_follow_up_the_process_never_read_runs_as_its_own_turn_once(world):
     assert _calls(w) == 2
 
 
-def test_a_turn_that_only_writes_is_not_steered_and_the_follow_up_waits(world):
+def test_a_follow_up_between_tool_calls_is_read_into_the_same_turn(world):
+    """The common case the old rule refused: the model is generating between two short tool
+    calls (no tool call open). The follow-up is written now and read at the next boundary,
+    inside the same turn; it never waits for the turn to end."""
+    w = world
+    (w.dir / "mode-1").write_text("between-tools")
+    _send(w, "m1")
+    assert _wait(lambda: any(getattr(h, "lines_read", 0) >= 3      # init, tool, its result
+                             for h in real_backends.active_handles("claude", w.agent)))
+    assert not any(h.steer_state.tools for h in real_backends.active_handles("claude", w.agent))
+    answer = _send(w, "m2")
+    assert answer.queued is True                               # written, read later
+    assert _row(w, "m2") is None and _queued(w) == ["m2"]
+    (w.dir / "release-1").write_text("1")
+    assert _wait(lambda: _row(w, "m2") is not None)            # its row at the echo
+    assert _wait(lambda: turn_queue.status("m2") != "queued")
+    time.sleep(0.5)
+    assert _calls(w) == 1                                      # one turn, one process
+    assert [l["uuid"] for l in _read(w, 1)] == [prompt_uuid("t-m2")]
+
+
+def test_a_follow_up_while_the_turn_only_writes_is_answered_in_the_same_process(world):
+    """No tool call comes: the CLI reads the follow-up right after the turn's result and
+    answers it in the same process (recording 9). Written at once, never held."""
     w = world
     _first_turn(w, "writing")
     time.sleep(0.3)
-    (w.dir / "mode-2").write_text("answer")
     answer = _send(w, "m2")
-    assert answer.queued is True
-    time.sleep(0.3)
-    assert _read(w, 1) == [] and _queued(w) == ["m2"]          # nothing written to the turn
+    assert answer.queued is True                               # written, read later
     (w.dir / "release-1").write_text("1")
-    assert _wait(lambda: _calls(w) == 2)                       # its own turn after
     assert _wait(lambda: _row(w, "m2") is not None)
+    assert _wait(lambda: turn_queue.status("m2") != "queued")
+    time.sleep(0.5)
+    assert _calls(w) == 1                                      # no second launch
+    assert [l["uuid"] for l in _read(w, 1)] == [prompt_uuid("t-m2")]
 
 
 def test_a_claude_older_than_the_recording_is_not_steered(world):
