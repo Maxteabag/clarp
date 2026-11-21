@@ -545,8 +545,8 @@ pub fn claude_transcript(
         .flatten()
 }
 
-/// Look only in the named session of this project. A missing or unreadable file leaves the
-/// delivery unknown. Malformed records (including a partial final line) prove nothing.
+/// Look only in the named session within the recorded Claude projects directory. A missing or
+/// unreadable file leaves the delivery unknown. Malformed records prove nothing.
 #[derive(Clone, Copy)]
 pub struct ReadFollowup {
     pub joined: bool,
@@ -559,7 +559,7 @@ pub fn claude_read_followups(
     session: &str,
     waiting: &BTreeSet<String>,
 ) -> Option<BTreeMap<String, ReadFollowup>> {
-    let path = claude_transcript(projects, cwd, session, false)?;
+    let path = claude_transcript(projects, cwd, session, true)?;
     let file = std::fs::File::open(path).ok()?;
     let mut read = BTreeMap::new();
     for line in BufReader::new(file).split(b'\n') {

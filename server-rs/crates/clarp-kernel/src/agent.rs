@@ -525,6 +525,7 @@ impl Agent {
             && origin.is_user()
             && self.stopping.is_none()
             && self.live_takeover.is_none()
+            && self.joins.is_empty()
             && !self.paused
             && self.next_to_run().is_some_and(|next| {
                 next.id == into && next.origin.is_user() && next.admission == Admission::Queue
@@ -619,6 +620,7 @@ impl Agent {
             .as_ref()
             .is_some_and(|live| live.id() == join.into && live.has_process())
             && self.stopping.is_none()
+            && self.selected_takeover.is_none()
             && self.mailbox.iter().any(|waiting| {
                 waiting.id == turn
                     && waiting.admission == Admission::Queue
