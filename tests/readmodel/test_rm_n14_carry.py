@@ -504,6 +504,39 @@ def test_a_new_message_with_the_words_of_an_old_turn_sent_after_every_old_turn_i
         assert world.imported() == ("tail_applied", [])
 
 
+def _untimed(data: bytes, words: str) -> bytes:
+    """The lines of a turn that carry ``words``, without their timestamp."""
+    out = []
+    for line in data.splitlines(keepends=True):
+        if words.encode() in line:
+            record = json.loads(line)
+            record.pop("timestamp", None)
+            line = json.dumps(record).encode() + b"\n"
+        out.append(line)
+    return b"".join(out)
+
+
+@BACKENDS
+def test_a_new_message_with_the_words_of_an_old_turn_without_a_timestamp_is_a_full_import(
+        tmp_path, backend):
+    """The twin by the copy's time (reviewer 1 on 591). The linker bounds a copy
+    by its timestamp; a copy without one can take a row sent at any time. Old
+    turn 2 said the words and took its own row; old turn 4 said them too, with
+    no timestamp and no row. A full replay links turn 4 to a new row with those
+    words however late it was sent, so the carry says a user turn had no
+    timestamp and the row is refused."""
+    history = _history(backend, request2="the same words", request4="the same words")
+    history[4] = _untimed(history[4], "the same words")
+    with World(tmp_path, backend, history) as world:
+        world.send("first", "the same words", at=1900)
+        ordinal = world.started(6)
+        world.send("again", "the same words", at=FAR)
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
 @pytest.mark.parametrize("twin", ["sent within the slack of the old copy",
                                   "sent for the turn running at the old copy's time"])
 @BACKENDS

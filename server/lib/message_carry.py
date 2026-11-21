@@ -83,7 +83,10 @@ LATER_TURNS = "carry_later_turns"
 # a retry's echo (_is_retry_echo) decides alike with or without a row sent
 # more than a second after it. So a row sent more than _START_SLACK_MS after
 # every turn before the boundary (``prefix_latest_ms``), for a trace no old
-# row carries and no turn that began by then has, is never an old turn's.
+# row carries and no turn that began by then has, is never an old turn's:
+# when every user turn before the boundary has a timestamp. A copy without one
+# has no time bound in the linker, so the carry must say there was none
+# (``prefix_untimed_user`` False; a carry from before it was kept does not).
 NEW_SENDS = "carry_new_sends"
 # A live row of this session (the row a reply streams into) may be new,
 # rewritten or gone. It is a different kind of rule: such a row is rewritten
@@ -764,7 +767,7 @@ def _sent_after_old_turns(table, row, carry, early_traces) -> bool:
     linked to it, for a trace none of them can name (NEW_SENDS)."""
     latest = (carry or {}).get("prefix_latest_ms")
     at = table.at.get("timestamp")
-    if latest is None or at is None:
+    if latest is None or at is None or (carry or {}).get("prefix_untimed_user") is not False:
         return False
     sent = iso_ms(row[at])
     if sent is None or sent <= int(latest) + _START_SLACK_MS:
