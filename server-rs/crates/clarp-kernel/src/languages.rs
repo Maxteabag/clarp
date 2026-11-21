@@ -41,6 +41,16 @@ fn is_code(text: &str) -> bool {
     (2..=3).contains(&text.len()) && text.bytes().all(|sign| sign.is_ascii_lowercase())
 }
 
+/// The primary language subtag, including the Norwegian aliases used by speech engines.
+pub(crate) fn primary(code: &str) -> String {
+    let code = strip(code);
+    let code = code.split(['-', '_']).next().unwrap_or("").to_lowercase();
+    match code.as_str() {
+        "nb" | "nn" => "no".to_string(),
+        _ => code,
+    }
+}
+
 /// One language: two or three letters, written small.
 pub fn code(value: &Value) -> Result<String, &'static str> {
     let Value::String(text) = value else {
@@ -206,12 +216,15 @@ pub fn languages_changed(kept_now: Option<&str>, change: &Value) -> Result<Strin
     Ok(kept(entries))
 }
 
+/// The providers whose engines over the network can be handed a set of languages.
+pub const SET_PROVIDERS: [&str; 2] = ["elevenlabs", "google"];
+
 /// The language an engine over the network is handed for a clip. A set of languages is
 /// something only two of them take: Google's Chirp is told the set, and ElevenLabs Scribe
 /// is told nothing and finds out by itself. Any other engine cannot hear such an agent.
 pub fn handed(language: &str, provider: &str) -> Result<Option<String>, &'static str> {
     let several = language.contains(',');
-    if several && !matches!(provider, "google" | "elevenlabs") {
+    if several && !SET_PROVIDERS.contains(&provider) {
         return Err(SET_NEEDS);
     }
     let finds_out = provider == "elevenlabs" && several;

@@ -22,6 +22,7 @@ import {
   unlockAudio,
   addConditionSource,
 } from './audio.svelte.js';
+import { noteQueuedSendDeleted } from './delivery.svelte.js';
 
 let es = null;
 let lastMsgAt = 0;
@@ -190,6 +191,12 @@ function handleEvent(ev) {
     if (!result.accepted) clog('sseDup', `${key} reason=${result.reason}`);
     else                  clog('sseAudio', `key=${key} ts=${ts}`);
 
+  } else if (ev.type === SSEType.QUEUE_UPDATED) {
+    // A waiting send deleted from the queue (here or on another device) will
+    // never get a row: drop its bubble (waited_send_order).
+    if (ev.queue_change === 'deleted' && ev.client_msg_id) {
+      noteQueuedSendDeleted(String(ev.client_msg_id));
+    }
   } else if (ev.type === SSEType.SERVER_VERSION) {
     // Server-pushed reload, faster than waiting for the SW update poll.
     const last = localStorage.getItem('serverVersion');

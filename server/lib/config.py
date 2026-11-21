@@ -871,21 +871,9 @@ def _live_model_min_client(raw: Any) -> dict[str, int]:
     if not isinstance(raw, dict):
         log("config.live_model_min_client", f"refused {raw!r}: expected a table of platform = contract")
         return {}
-    kept = {key: value for key, value in raw.items()
-            if isinstance(key, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", key) and type(value) is int and value >= 0}
-    if len(kept) != len(raw):
-        log("config.live_model_min_client", "refused entries: " + ", ".join(
-            repr(key) for key in raw if key not in kept))
-    # A key that differs from a built-in name only in its case is well formed and is another client: said once
-    # per read, so a slip ('Ios' for 'ios') does not hide.
-    near = [(key, builtin) for key in kept for builtin in AGENT_LIVE_MODEL_MIN_CLIENT
-            if key != builtin and key.lower() == builtin.lower()]
-    if near:
-        log("config.live_model_min_client", "; ".join(
-            f"{key!r} is taken as its own client: it admits only a client that names itself exactly {key!r}; "
-            f"the built-in {builtin!r} keeps its own number ({AGENT_LIVE_MODEL_MIN_CLIENT[builtin]})"
-            for key, builtin in near))
-    return kept
+    # The one rule for a per-client table (server_identity.client_minimums), as render_spec's has it.
+    from .server_identity import client_minimums
+    return client_minimums(raw, setting="config.live_model_min_client", defaults=AGENT_LIVE_MODEL_MIN_CLIENT)
 
 
 # "Claude-5628": the anonymous-launch name suffix (agent_lifecycle mints token_hex(2)).
@@ -1007,7 +995,9 @@ def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
         if "ios" in table and "ios" in out:
             log("config.render_spec_min_client", "ignored: render_spec_min_contract names ios")
         from .server_identity import client_minimums
-        out.update(client_minimums(table, setting="config.render_spec_min_contract"))
+        from .server_identity import RENDER_SPEC_MIN_CONTRACT
+        out.update(client_minimums(table, setting="config.render_spec_min_contract",
+                                   defaults=RENDER_SPEC_MIN_CONTRACT))
     elif table is not None:
         log("config.render_spec_min_contract", "ignored: expected a table of client = number")
     return out or None

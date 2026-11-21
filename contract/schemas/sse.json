@@ -95,6 +95,20 @@
         "agent_id": {"type": "string"}
       }
     },
+    "media-changed": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "session", "agent_id", "asset_id", "change", "at"],
+      "properties": {
+        "type": {"const": "media-changed"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "asset_id": {"type": "string"},
+        "change": {"enum": ["created", "deleted", "favorite"]},
+        "favorite": {"type": "boolean"},
+        "at": {"type": "integer"}
+      }
+    },
     "queue-updated": {
       "type": "object",
       "additionalProperties": true,
@@ -107,7 +121,9 @@
         "queue_paused": {"type": "boolean"},
         "queue_started": {"type": "boolean"},
         "queue_revision": {"type": "integer"},
-        "client_msg_id": {"type": "string"}
+        "client_msg_id": {"type": "string"},
+        "queue_change": {"enum": ["edited", "deleted"], "description": "Host contract 115, feature waited_send_order: what happened to the item client_msg_id; with edited, text is its new words."},
+        "text": {"type": "string"}
       }
     },
     "user-notification": {

@@ -185,6 +185,7 @@ def _handle_modern_item(turns: list[dict], etype: str, item: dict, ts: str) -> N
                 text=text,
                 timestamp=ts,
                 kind=item.get("phase"),
+                provider_id=str(item.get("id") or "") if itype == "agent_message" else "",
             )
         return
     if itype == "reasoning":
@@ -465,8 +466,10 @@ def _is_injected_user_context(text: str) -> bool:
 
 
 def _append_visible_message(turns: list[dict], *, role: str, text: str,
-                            timestamp: str, kind: Any = None) -> None:
-    """Append one visible chat message, deduplicating dual event formats."""
+                            timestamp: str, kind: Any = None, provider_id: str = "") -> None:
+    """Append one visible chat message, deduplicating dual event formats. ``provider_id``: the
+    message's item id, when the rollout names it (a modern item_completed): the key its live
+    row was streamed under (R107)."""
     if not text or role not in {"user", "assistant"}:
         return
     if turns and turns[-1].get("role") == role and (
@@ -481,10 +484,13 @@ def _append_visible_message(turns: list[dict], *, role: str, text: str,
             turns[-1]["text"] = text
         if kind and not turns[-1].get("kind"):
             turns[-1]["kind"] = kind
+        if provider_id and not turns[-1].get("provider_id"):
+            turns[-1]["provider_id"] = provider_id
         return
     turns.append({
         "role": role, "text": text, "tools": [], "display_cells": [],
         "timestamp": timestamp, **({"kind": kind} if kind else {}),
+        **({"provider_id": provider_id} if provider_id else {}),
     })
 
 

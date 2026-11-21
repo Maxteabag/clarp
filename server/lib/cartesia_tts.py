@@ -56,6 +56,53 @@ _BIT_RATE = 128000
 # sequence, so the split points are immaterial.
 _CHUNK_BYTES = 16 * 1024
 
+# The languages each Cartesia model speaks (docs.cartesia.ai: tts-models, older-models,
+# multilingual-voices; read 21 Nov 2026). Any voice speaks any of its model's languages;
+# a request carries one. A code outside the configured model's list is sent as "en",
+# which every request carried before (R168).
+_SONIC_3_LANGUAGES = frozenset({
+    "en", "de", "es", "fr", "ja", "pt", "zh", "hi", "ko", "it", "nl", "pl", "ru", "sv", "tr",
+    "tl", "bg", "ro", "ar", "cs", "el", "fi", "hr", "ms", "sk", "da", "ta", "uk", "hu", "no",
+    "vi", "bn", "th", "he", "ka", "id", "te", "gu", "kn", "ml", "mr", "pa"})
+_SONIC_36_LANGUAGES = _SONIC_3_LANGUAGES | frozenset({"or", "ur"})     # new in sonic-3.6
+_SONIC_2_LANGUAGES = frozenset({"en", "fr", "de", "es", "pt", "zh", "ja", "ko"})
+_SONIC_TURBO_LANGUAGES = _SONIC_2_LANGUAGES | frozenset({"hi"})
+# The 2024 sonic snapshots (sunsetted).
+_SONIC_LANGUAGES = frozenset({
+    "en", "fr", "de", "es", "pt", "zh", "ja", "hi", "it", "ko", "nl", "pl", "ru", "sv", "tr"})
+# Bokmål and Nynorsk are written Norwegian, which Cartesia names "no".
+_SAME_LANGUAGE = {"nb": "no", "nn": "no"}
+
+
+def model_languages(model: str) -> frozenset[str]:
+    """What `model` speaks: sonic-3.6 and sonic-latest; sonic-3 and sonic-3.5 (any
+    snapshot); sonic-2; sonic-turbo; the 2024 sonic snapshots; else English only."""
+    model = (model or "").strip().lower()
+    if model == "sonic-latest" or model.startswith("sonic-3.6"):
+        return _SONIC_36_LANGUAGES
+    if model.startswith("sonic-3"):
+        return _SONIC_3_LANGUAGES
+    if model == "sonic" or model.startswith("sonic-2024"):
+        return _SONIC_LANGUAGES
+    if model.startswith("sonic-2"):
+        return _SONIC_2_LANGUAGES
+    if model.startswith("sonic-turbo"):
+        return _SONIC_TURBO_LANGUAGES
+    return frozenset({"en"})
+
+
+def language_for(code: str | None, model: str) -> str:
+    """The `language` a request on `model` carries for an agent heard in `code` (its
+    first language): that code when the model speaks it, else "en"."""
+    primary = (code or "").strip().lower().replace("_", "-").split("-", 1)[0]
+    primary = _SAME_LANGUAGE.get(primary, primary)
+    if primary and primary in model_languages(model):
+        return primary
+    if primary and primary != "en":
+        from .log import log
+        log("cartesiaLanguageUnsupported", f"{primary} on {model or '-'} -> en")
+    return "en"
+
 
 def synthesize(*,
                text: str,

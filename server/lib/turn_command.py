@@ -129,6 +129,16 @@ class _TurnSpec:
     # The agent's state generation read just before this turn set its live trace (call-open end:
     # hook prompt admissions after it refuse the end's visible write). In memory only.
     s_open: int | None = None
+    # It waited for a running turn: its conversation row, written when this
+    # turn starts, keeps the time it was sent (messages.sent_at, issue 491).
+    waited: bool = False
+    # Admitted just now as a waiting queue item and not yet handed to the queue:
+    # a steer offered at its admission is a fresh send's, not a queue launch's,
+    # so a Stop's fence still refuses it (_record_launch_attempt). In memory only.
+    arrived_waiting: bool = False
+    # This turn takes over one that printed nothing (issue 491, part B): the
+    # Claude launch's plan (takeover.takeover_plan). In memory only.
+    takeover: Any = None
 
 
 def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
@@ -271,7 +281,14 @@ def _can_steer(registry, backend: str) -> bool:
     if by_id is None:
         return True
     try:
-        return bool(getattr(by_id(backend), "supports_steer", True))
+        found = by_id(backend)
+        if bool(getattr(found, "supports_steer", True)):
+            return True
+        # A backend whose CLI takes a follow-up into a running turn only from a recorded
+        # version on (Claude, issue 491 part C): offered; the backend refuses (nothing
+        # written) unless the running turn was launched able to take it. Its advertised
+        # capability is unchanged.
+        return bool(getattr(found, "steer_reads_later", False))
     except Exception:  # noqa: BLE001 - unknown: the steer path as before
         return True
 
@@ -284,7 +301,8 @@ def _record_launch_attempt(spec: "_TurnSpec") -> str:
         return ""
     # A spec launched from a durable queue or park row, or held behind Stop as
     # newer work, is governed by that decision, not by a racing fence.
-    decided = bool(spec.queue_id or spec.park_id or spec.after_stop)
+    decided = bool((spec.queue_id and not spec.arrived_waiting)
+                   or spec.park_id or spec.after_stop)
     try:
         return launch_receipts.mark_attempted(spec.trace_id, override_fence=decided)
     except launch_receipts.HandoffRefused as e:
@@ -409,7 +427,7 @@ def _unlaunched_marked(agent_id: str, trace_id: str) -> bool:
 def _remove_queued_run(queue_id: str) -> None:
     # Use the queue API to preserve revisions and unmaterialized admissions.
     turn_queue.release_claim(queue_id)
-    turn_queue.remove(queue_id)
+    turn_queue.remove(queue_id, withdraw_shown=True)   # internal: as before issue 491
 
 
 def _default_retry_scheduler(delay: float, fn: Callable[[], None]) -> None:
