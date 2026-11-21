@@ -79,6 +79,102 @@ fn selected(host: &Host, session: &str) -> Value {
 }
 
 #[test]
+fn mcp_edit_updates_the_next_turn_and_keeps_the_conversation() {
+    let place = Place::new("edit-mcp");
+    let claude = stand_in(&place);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let alpha = json!({"type": "stdio", "command": "/synthetic/alpha"});
+    let beta = json!({"type": "stdio", "command": "/synthetic/beta"});
+    let extra = json!({"type": "stdio", "command": "/synthetic/extra"});
+    std::fs::write(
+        place.root.join("home/.claude.json"),
+        json!({"mcpServers": {"extra": extra, "beta": beta, "alpha": alpha}}).to_string(),
+    )
+    .unwrap();
+    let host = place.start_in("secret", &[], &world);
+    let made = make(&host, json!({"name": "MCP edit", "mcp_servers": ["alpha"]}));
+    let session = made["session"].as_str().unwrap();
+    let id = made["agent"]["agent_id"].as_str().unwrap();
+    assert_eq!(
+        turn(&host, &place, session, "before-edit"),
+        (
+            "strict".into(),
+            Some(json!({"mcpServers": {"alpha": alpha}}))
+        )
+    );
+    let previous = host.conversation(session);
+    assert!(!previous.is_empty());
+    let changed = host.post(
+        "/agent-mcp",
+        json!({"session": format!(" {id} "), "mcp_servers": [" beta ", "unknown", "alpha", "beta"]}),
+    );
+    assert_eq!(
+        changed,
+        json!({
+            "ok": true, "session": id, "mcp_servers": ["beta", "alpha"],
+            "available_mcp_servers": ["alpha", "beta", "extra"],
+        })
+    );
+    assert_eq!(selected(&host, session), json!(["beta", "alpha"]));
+    assert_eq!(host.conversation(session), previous);
+    assert_eq!(
+        turn(&host, &place, session, "after-edit"),
+        (
+            "strict".into(),
+            Some(json!({"mcpServers": {"beta": beta, "alpha": alpha}}))
+        )
+    );
+    let cleared = host.post("/agent-mcp", json!({"session": session, "mcp_servers": []}));
+    assert_eq!(cleared["mcp_servers"], json!([]));
+    host.kill();
+
+    let host = place.start_in("secret", &[], &world);
+    assert_eq!(selected(&host, session), json!([]));
+    assert_eq!(
+        turn(&host, &place, session, "after-clear"),
+        ("strict".into(), None)
+    );
+}
+
+#[test]
+fn mcp_edit_refuses_bad_requests_in_reference_order() {
+    let place = Place::new("bad-mcp-edit");
+    let host = place.start_with_token("secret");
+    let session = host.new_agent("MCP edit");
+    let malformed = fetch(&host, "secret", "POST", "/agent-mcp", &[], b"{");
+    assert_eq!(malformed.status, 400);
+    let answer: Value = serde_json::from_slice(&malformed.body).unwrap();
+    assert_eq!(answer["error"], "bad json");
+    for (body, status, error) in [
+        (json!([]), 400, "bad json"),
+        (json!({}), 400, "session required"),
+        (json!({"session": 7}), 400, "session must be text"),
+        (json!({"session": "nobody"}), 404, "no such agent"),
+        (
+            json!({"session": session}),
+            400,
+            "mcp_servers must be a list",
+        ),
+        (
+            json!({"session": session, "mcp_servers": null}),
+            400,
+            "mcp_servers must be a list",
+        ),
+        (
+            json!({"session": session, "mcp_servers": "alpha"}),
+            400,
+            "mcp_servers must be a list",
+        ),
+    ] {
+        assert_eq!(
+            host.ask("POST", "/agent-mcp", Some(&body)),
+            (status, json!({"error": error})),
+            "{body}"
+        );
+    }
+}
+
+#[test]
 fn mcp_selection_survives_restart_and_scopes_only_the_agent_that_chose_it() {
     let place = Place::new("creation-mcp");
     let claude = stand_in(&place);
