@@ -598,7 +598,7 @@
         "en"
       ],
       "model": "custom",
-      "refusal": "the Host's own model faster-whisper:custom hears only "
+      "refusal": ""
     },
     {
       "declared": [
@@ -649,7 +649,7 @@
         "en"
       ],
       "model": "custom.en",
-      "refusal": "the Host's own model faster-whisper:custom.en hears only MULTILINGUAL"
+      "refusal": ""
     },
     {
       "declared": [
@@ -662,7 +662,7 @@
         "en"
       ],
       "model": "custom.en",
-      "refusal": "the Host's own model faster-whisper:custom.en hears only   ,  EN "
+      "refusal": "the Host's own model faster-whisper:custom.en hears only en"
     }
   ],
   "reference_repeats_provider": {

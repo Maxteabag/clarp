@@ -30,7 +30,8 @@ def reference(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import config, stt_language, stt_providers as stt, transcription_pipeline as pipe
+    from lib import config, custom_stt_adapters, stt_language, stt_providers as stt
+    from lib import transcription_catalog, transcription_pipeline as pipe
 
     def configured(model='small', enabled=True):
         return SimpleNamespace(whisper_provider='faster-whisper', whisper_model=model,
@@ -40,11 +41,12 @@ def reference(root):
         def declared(_):
             if codes == 'unavailable':
                 raise RuntimeError('/scratch/internal-model-path')
-            return codes
+            return None if codes is None else {'languages': codes}
         return declared
 
     def own_result(data):
-        with patch.object(stt, 'declared_languages', declarations(data['declared'])):
+        with patch.object(custom_stt_adapters, 'get', return_value=None), \
+                patch.object(transcription_catalog, 'model_by_id', declarations(data['declared'])):
             return stt.own_engine_refusal(configured(data['model'], data['enabled']), data['languages'])
 
     def selected(model, keyed):
@@ -81,7 +83,8 @@ def reference(root):
                 patch.object(stt_language, 'current_language', return_value=data['language']), \
                 patch.object(stt, 'selected_engine', return_value=data['selected']), \
                 patch.object(stt, '_key_for', return_value='stand-in' if data['keyed'] else ''), \
-                patch.object(stt, 'declared_languages', declarations(data['declared'])), \
+                patch.object(custom_stt_adapters, 'get', return_value=None), \
+                patch.object(transcription_catalog, 'model_by_id', declarations(data['declared'])), \
                 patch.object(pipe, 'log', lambda *a: None), \
                 patch.object(pipe, 'log_exception', lambda *a, **k: logs.append(str(a[1]))), \
                 patch('lib.log.log_exception', lambda *a, **k: logs.append(str(a[1]))):
