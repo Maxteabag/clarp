@@ -18,6 +18,29 @@ class EnginePlan:
     escalated_from: str | None       # the model long-form escalation replaced, or None
 
 
+def engine_identity(engine: str, own_model_id: str | None = None) -> str:
+    """Which engine `engine` names: the Host's own engine under any of its names ("",
+    server-default, local, its default model id), else the engine id itself (R175)."""
+    name = (engine or "").strip()
+    if name in {"", "server-default", "local"} or (own_model_id and name == own_model_id):
+        return "own"
+    return name
+
+
+def distinct_engines(engines: list[str], own_model_id: str | None = None
+                     ) -> tuple[list[str], list[str]]:
+    """The engines in order with each engine once, and the repeats left out (R175). Two
+    models of one provider are both kept here: whether the second may still be sent the
+    recording depends on whether the first one's attempt reached the provider
+    (transcription_pipeline)."""
+    kept, skipped, seen = [], [], set()
+    for engine in engines:
+        identity = engine_identity(engine, own_model_id)
+        (skipped if identity in seen else kept).append(engine)
+        seen.add(identity)
+    return kept, skipped
+
+
 def wants_cloud_engine(*, requested_model: str, agent_engines: list[str], in_call: bool) -> bool:
     """Whether the cloud engine chosen in settings could stand in for the
     server default (so whether it is worth reading)."""
