@@ -36,6 +36,7 @@
           "audience": {"enum": ["user", "agents"], "description": "Host contract 108: 'agents' for a row of a turn another agent's message started (coordination between agents); a note (kind 'note') is always 'user'."},
           "trace_id": {"type": "string"},
           "phase": {"enum": ["commentary", "final", null]},
+          "sent_at": {"type": "string", "description": "Host contract 115, feature waited_send_order: on a user row that waited for a running turn, when it was sent; its timestamp is when its own turn started."},
           "turn": {
             "type": ["object", "null"],
             "description": "log_turn_summary: on a settled turn's last row, shaped like GET /live's turn.",
