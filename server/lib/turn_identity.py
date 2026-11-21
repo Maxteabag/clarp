@@ -68,8 +68,21 @@ def running_trace(agent_id: str, trace_id: str) -> bool:
     # Parked waiting for an account (TurnEvent.ACCOUNT_RECOVERY_WAIT): its row stays open and
     # unsettled, but the turn makes no progress and its process may still hold the token. Not
     # running, as the Rust Host reads it; a hand-over to an update closes the row already.
-    from .agents import latest_state
-    state = latest_state(agent_id) or {}
-    detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
-    return not (detail.get("account_recovery") == "waiting"
-                and str(detail.get("trace_id") or trace_id) == trace_id)
+    # Decided by the newest state row that speaks of this turn: one that names the trace, or a
+    # park that names none. A row about nothing in particular (an audit note repeating the
+    # state, say) neither parks it nor resumes it; it used to read a parked turn as running.
+    import json
+    for (raw,) in db.conn().execute(
+            "SELECT detail FROM state_log WHERE agent_id=? ORDER BY ts DESC, state_id DESC LIMIT 50",
+            (agent_id,)):
+        try:
+            detail = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(detail, dict):
+            continue
+        parked = detail.get("account_recovery") == "waiting"
+        named = str(detail.get("trace_id") or "")
+        if named == trace_id or (parked and not named):
+            return not parked
+    return True

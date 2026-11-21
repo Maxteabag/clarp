@@ -1334,6 +1334,13 @@ its other process cannot take, and for what it missed while it was away, has no 
 and their explainer are one process. The switch and the janitor stay off as installed: what is asked of a
 model, on whose account, is the owner's to decide, and comes over with the owner's settings.
 
+**A shell call without its command (R184, 21 Nov 2026).** The explanation desk returns
+`failed` with reason `unexplained` when an enabled shell call brings only its name or
+description. The live reader waits until the command arrives. Such calls create no shape,
+model request or learned row. Templates with fixed call-specific values are kept for the exact
+call. A reusable row learned earlier is served only when the new call carries the values the
+sentence names.
+
 One part of the Python Host's explainer is left out on purpose: its memory of each agent's recent commands
 (`tool_explanation_commands`). That Host shows a command of Codex as the name of its row, cut at 80 signs,
 and remembers the whole commands to complete a cut name an app asks about. This Host shows such a command
@@ -3543,6 +3550,15 @@ remains. The R152 recovery's failed list contains the engines that reached their
 Call attempt outcomes and skip reasons are open sets. Clients can display an unfamiliar
 value as words and keep the rest of the response. The reference vectors cover both attempt
 loops with stand-in adapters, and the Host test verifies the provider requests and call report.
+
+**Names for the voice profile (21 Nov 2026, PR 498).** The profile gives the configured
+language set alongside the language arguments of the first hearing engine. Archived rows,
+creation replies and roster events omit the profile. Cartesia and ElevenLabs names are
+read from the Host's published names file, with the Cartesia picker overlay. Gemini names
+use its picker labels and the configured Vertex aliases. The background refresher lists
+Cartesia's catalogue and looks up missing voices in use, handling at most 100 by-ID
+lookups per provider. A check advances the checked date. Only changed names change
+the file content and its digest; a provider failure keeps its earlier names.
 
 ## 7. Stages and gates
 
