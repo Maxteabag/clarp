@@ -74,17 +74,11 @@ def agy_version_ok(executable: str) -> bool:
     return version is not None and version >= MIN_AGY_VERSION
 
 
-def agy_plan(transcript: pathlib.Path | None, first_text: str) -> dict | None:
+def agy_plan(turns: list[dict] | None, first_text: str) -> dict | None:
     """agy's judge (one recorded trial, so a guard makes it enough): take over ONLY when
-    the conversation's transcript can be read and message 1 is NOT in it, as recorded after
-    a pre-stdout hold and kill. Message 1 there, or no readable transcript: None."""
-    if transcript is None or not first_text.strip():
-        return None
-    from . import agy_transcript
-    try:
-        turns = agy_transcript.parse_turns(pathlib.Path(transcript))
-    except Exception as exc:  # noqa: BLE001 - unreadable: no takeover
-        log_exception("takeoverAgyTranscriptFail", exc, detail=str(transcript))
+    the conversation's transcript was read (``turns``) and message 1 is NOT in it, as
+    recorded after a pre-stdout hold and kill. Message 1 there, or nothing read: None."""
+    if turns is None or not first_text.strip():
         return None
     words = first_text.strip()
     if any(turn.get("role") == "user" and words in str(turn.get("text") or "")

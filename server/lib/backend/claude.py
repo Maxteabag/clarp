@@ -368,6 +368,21 @@ class ClaudeBackend(Backend):
     fallback_models = CatalogueDefault('fallback_models')
 
 
+    # Resume before message 1 and drop it, both messages in one line (recording cases 5, 7).
+    takeover_strategy = "resume_pair"
+
+    def takeover_ready(self) -> bool:
+        from .. import takeover
+        return takeover.claude_version_ok(self.executable(_config.load()))
+
+    def takeover_plan(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                      running_trace: str, first_text: str) -> dict | None:
+        from .. import takeover
+        drops_turn = prompt_uuid(running_trace)
+        path = self.find_transcript(session_id, home, cwd=cwd)
+        return takeover.takeover_plan(takeover.session_facts(path, drops_turn),
+                                      drops_turn, first_text)
+
     # --- the runner -------------------------------------------------------
 
     def executable(self, cfg: _config.Config | None = None) -> str:

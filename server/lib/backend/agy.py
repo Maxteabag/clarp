@@ -699,6 +699,29 @@ class AgyBackend(StreamJsonBackend):
     # turns.
     print_timeout = "24h"
 
+    # Resume the same conversation with both messages in one --print input, guarded by
+    # the one recorded trial (message 1 must not be in the transcript yet).
+    takeover_strategy = "same_conversation"
+
+    def takeover_ready(self) -> bool:
+        from .. import takeover
+        return takeover.agy_version_ok(self.required_binary)
+
+    def takeover_plan(self, *, session_id: str, home: pathlib.Path | None, cwd: str,
+                      running_trace: str, first_text: str) -> dict | None:
+        """The judge reads the conversation's own transcript (none, or unreadable: no
+        takeover)."""
+        from .. import takeover
+        path = agy_transcript.find_latest_jsonl(session_id)
+        if path is None:
+            return None
+        try:
+            turns = agy_transcript.parse_turns(pathlib.Path(path))
+        except Exception as exc:  # noqa: BLE001 - unreadable: no takeover
+            log_exception("takeoverAgyTranscriptFail", exc, detail=str(path))
+            return None
+        return takeover.agy_plan(turns, first_text)
+
     def prompt_limit_bytes(self) -> int | None:
         """agy takes the prompt only as ``--print=<prompt>`` (its stdin form
         is stream-json, a protocol of its own); the restore block's

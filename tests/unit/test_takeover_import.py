@@ -20,9 +20,18 @@ import pytest
 from lib import agents as agents_db
 from lib import message_store
 from lib.claude_transcript import parse_turns
+from lib.clock import iso_from_ms, now_ms
 
 SESSION = "00000000-0000-4000-8000-000000000491"
 M0, M1, M2 = "Remember the word harbour.", "What is the capital of Norway?", "And 6 times 7?"
+
+
+_BASE = [0]
+
+
+def _ts(offset_s: float) -> str:
+    """After the client rows were sent: the CLI writes its copy of a message later."""
+    return iso_from_ms(_BASE[0] + int(offset_s * 1000))
 
 
 def _meta(kind):
@@ -49,19 +58,19 @@ def _assistant(uid, parent, text, ts):
 
 def _session_file(path, *, message_one_written: bool):
     rows = [_meta("session-owner"), _meta("queue-operation"),
-            _user("u0", None, [M0], "2026-11-20T10:00:00.000Z"),
-            _attachment("at0", "u0", "2026-11-20T10:00:00.100Z"),
+            _user("u0", None, [M0], _ts(0)),
+            _attachment("at0", "u0", _ts(0.1)),
             _meta("api-request"),
-            _assistant("a0", "at0", "OK", "2026-11-20T10:00:02.000Z"),
+            _assistant("a0", "at0", "OK", _ts(2)),
             _meta("cost-state")]
     if message_one_written:
         rows += [_meta("queue-operation"),
-                 _user("u1", "a0", [M1], "2026-11-20T10:00:10.000Z"),
-                 _attachment("at1", "u1", "2026-11-20T10:00:10.100Z")]
+                 _user("u1", "a0", [M1], _ts(10)),
+                 _attachment("at1", "u1", _ts(10.1))]
     rows += [_meta("queue-operation"),
-             _user("u2", "a0", [M1, M2], "2026-11-20T10:00:20.000Z"),
-             _attachment("at2", "u2", "2026-11-20T10:00:20.100Z"),
-             _assistant("a2", "at2", "Oslo. 6 times 7 is 42.", "2026-11-20T10:00:23.000Z"),
+             _user("u2", "a0", [M1, M2], _ts(20)),
+             _attachment("at2", "u2", _ts(20.1)),
+             _assistant("a2", "at2", "Oslo. 6 times 7 is 42.", _ts(23)),
              _meta("last-prompt")]
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
 
@@ -74,6 +83,7 @@ def test_a_takeover_session_imports_as_the_three_client_rows_and_one_answer(
     for cid, text in (("m0", M0), ("m1", M1), ("m2", M2)):
         message_store.record_user_message(agent_id=agent, backend_session_id=SESSION,
                                           client_msg_id=cid, text=text, trace_id=f"t-{cid}")
+    _BASE[0] = now_ms() + 1_000
     path = tmp_path / f"{SESSION}.jsonl"
     _session_file(path, message_one_written=message_one_written)
     turns = parse_turns(path)
@@ -87,7 +97,8 @@ def test_a_takeover_session_imports_as_the_three_client_rows_and_one_answer(
 
     rows = imported()
     users = [(i, text) for i, role, text, _t in rows if role == "user"]
-    assert users == [("u-m0", M0), ("u-m1", M1), ("u-m2", M2)]
+    # (the three client rows were recorded within one millisecond: their order is not the point)
+    assert sorted(users) == [("u-m0", M0), ("u-m1", M1), ("u-m2", M2)]
     answer = [r for r in rows if r[1] == "assistant" and "42" in r[2]]
     assert len(answer) == 1 and answer[0][3] == "t-m2"
     assert imported() == rows                                  # a second pass: the same
@@ -100,10 +111,11 @@ def test_a_two_block_line_with_a_block_nobody_sent_is_kept_as_it_is(tmp_path):
                                    session="mike", backend="claude")
     message_store.record_user_message(agent_id=agent, backend_session_id=SESSION,
                                       client_msg_id="m1", text=M1, trace_id="t-m1")
+    _BASE[0] = now_ms() + 1_000
     path = tmp_path / f"{SESSION}.jsonl"
     path.write_text("\n".join(json.dumps(r) for r in [
-        _user("u2", None, [M1, "typed in a terminal"], "2026-11-20T10:00:20.000Z"),
-        _assistant("a2", "u2", "Done.", "2026-11-20T10:00:23.000Z")]) + "\n")
+        _user("u2", None, [M1, "typed in a terminal"], _ts(20)),
+        _assistant("a2", "u2", "Done.", _ts(23))]) + "\n")
     message_store.store_transcript_turns(agent_id=agent, backend_session_id=SESSION,
                                          source_file=str(path), turns=parse_turns(path))
     users = [r["text"] for r in message_store.list_messages(agent_id=agent, backend_session_id=SESSION)

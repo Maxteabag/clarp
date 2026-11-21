@@ -49,9 +49,9 @@ if "--version" in sys.argv:
     print((d / "version").read_text().strip() if (d / "version").exists() else "2.1.321 (Claude Code)")
     raise SystemExit(0)
 n = int((d / "count").read_text()) + 1 if (d / "count").exists() else 1
-(d / "count.tmp").write_text(str(n)); os.replace(d / "count.tmp", d / "count")
 line = sys.stdin.readline()
 (d / f"call-{n}.json").write_text(json.dumps({"argv": sys.argv[1:], "stdin": line}))
+(d / "count.tmp").write_text(str(n)); os.replace(d / "count.tmp", d / "count")
 args = sys.argv
 sid = args[args.index("--session-id") + 1] if "--session-id" in args else args[args.index("--resume") + 1]
 msg = json.loads(line)
