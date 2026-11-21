@@ -307,6 +307,7 @@ fn who_shares_a_voice_is_counted_as_the_python_host_counts_it() {
             .iter()
             .map(|row| Row {
                 agent: agent(row),
+                janitor: row["is_janitor"].as_i64().unwrap_or(0) != 0,
                 inactive: !row["archived_at"].is_null()
                     || row["is_janitor"].as_i64().unwrap_or(0) != 0,
             })

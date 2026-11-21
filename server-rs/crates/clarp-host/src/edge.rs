@@ -1771,7 +1771,6 @@ pub(crate) async fn make_agent(
                 }
                 Launch::Pooled(_) | Launch::Minted => Some(crate::fleet::ContactAsked {
                     mint: asked.get("mint_contact") == Some(&Value::Bool(true)),
-                    fetched: app.mouth.cartesia_known(),
                 }),
             };
             let forks = plain("fork_session_id").is_some_and(|said| !said.trim().is_empty());
@@ -1785,7 +1784,7 @@ pub(crate) async fn make_agent(
                 .map(|(session, _, _)| session.clone());
             let made = app
                 .fleet
-                .create_contacted(request, forked, contact)
+                .create_contacted(request, forked, contact, app.mouth.cached_voice_names().0)
                 .await
                 .map_err(unavailable)?;
             let record = made.map_err(not_made)?;

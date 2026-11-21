@@ -19,6 +19,8 @@ provider = "cartesia"
 provider = "elevenlabs"
 [tts.agents.Design]
 provider = "gemini"
+[tts.agents.Unvoiced]
+provider = "none"
 [cartesia]
 api_key = "fixture"
 [elevenlabs]

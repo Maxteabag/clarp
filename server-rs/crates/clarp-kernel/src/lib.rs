@@ -101,6 +101,7 @@ pub mod user_word;
 pub mod vocabulary;
 pub mod voice_migration;
 pub mod voice_names;
+pub mod voice_pool;
 pub mod voice_profile;
 pub mod voice_timeline;
 pub mod voices;

@@ -264,20 +264,7 @@ impl Mouth {
 
     pub(crate) fn owners_from(&self, directory: &Directory) -> Table {
         let mut file = self.owner.read().unwrap_or_default();
-        for (section, key, setting) in [
-            ("tts", "provider", "speech.provider"),
-            ("tts", "fallback", "speech.fallback"),
-            ("local_tts", "voice", "speech.local_voice"),
-        ] {
-            if let Some(value) = directory.setting(setting) {
-                let table = file
-                    .entry(section)
-                    .or_insert_with(|| toml::Value::Table(Table::new()));
-                if let Some(table) = table.as_table_mut() {
-                    table.insert(key.into(), toml::Value::String(value.into()));
-                }
-            }
-        }
+        owner::apply_speech_settings(&mut file, |key| directory.setting(key));
         file
     }
 
@@ -329,19 +316,6 @@ impl Mouth {
                     voice["name"].as_str()?.to_string(),
                 ))
             })
-            .collect()
-    }
-
-    /// The ids of Cartesia's voices as this Host last listed them, however long ago, without
-    /// asking anybody: what a voice for a new persona is picked from first.
-    pub(crate) fn cartesia_known(&self) -> Vec<String> {
-        let kept = self
-            .cartesia_voices
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let listed = kept.iter().flat_map(|(_, voices)| voices.iter());
-        listed
-            .filter_map(|voice| voice["id"].as_str().map(str::to_string))
             .collect()
     }
 

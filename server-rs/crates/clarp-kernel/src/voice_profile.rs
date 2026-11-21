@@ -32,6 +32,7 @@ pub const OWN: &str = "own";
 pub const DEFAULT: &str = "default";
 pub const NO_VOICE: &str = "no_voice";
 pub const VOICE_UNAVAILABLE: &str = "voice_unavailable";
+pub const VOICELESS_ROLE: &str = "voiceless_role";
 pub const PROVIDER_OFF: &str = "provider_off";
 pub const NOT_CONFIGURED: &str = "not_configured";
 /// An outage: the provider did not make the clip.
@@ -435,7 +436,7 @@ pub fn defaults(view: &HostView) -> Value {
     json!({
         "speech": {
             "provider": provider, "provider_label": provider_label, "voice_id": null,
-            "voice_label": null, "origin": DEFAULT, "streaming": streaming, "assignment": "contact",
+            "voice_label": null, "origin": DEFAULT, "streaming": streaming, "assignment": "pool",
             "silent_reason": if provider == "none" { Some(PROVIDER_OFF) } else { None },
         },
         "hearing": hearing(view, nobody),
@@ -448,12 +449,32 @@ pub struct Row<'a> {
     pub agent: Agent<'a>,
     /// Archived or a Janitor: it speaks to nobody and shares nobody's voice.
     pub inactive: bool,
+    pub janitor: bool,
 }
 
 /// Every row's profile as an app is told it, with `speech.shared_with`: how many OTHER
 /// active agents speak with the same provider and voice (0: its own). One pass.
 pub fn profiles(view: &HostView, rows: &[Row<'_>]) -> Vec<Value> {
-    let made: Vec<(Speech, Value)> = rows.iter().map(|row| profile(view, row.agent)).collect();
+    let made: Vec<(Speech, Value)> = rows
+        .iter()
+        .map(|row| {
+            let (mut speech, hearing) = profile(view, row.agent);
+            if row.janitor {
+                let route = view.voices.route(row.agent.who);
+                let (provider_label, streaming) = provider_row(&route.provider);
+                speech = Speech {
+                    provider: route.provider,
+                    provider_label,
+                    streaming,
+                    voice_id: None,
+                    voice_label: None,
+                    origin: None,
+                    silent_reason: Some(VOICELESS_ROLE),
+                };
+            }
+            (speech, hearing)
+        })
+        .collect();
     let key = |speech: &Speech| {
         speech
             .voice_id
@@ -491,10 +512,16 @@ pub fn profile_among(view: &HostView, agent: Agent<'_>, rows: &[Row<'_>]) -> Val
         .copied()
         .collect();
     let at = all.len();
-    let inactive = rows
+    let present = rows
         .iter()
-        .any(|row| row.agent.who.session == agent.who.session && row.inactive);
-    all.push(Row { agent, inactive });
+        .find(|row| row.agent.who.session == agent.who.session);
+    let inactive = present.is_some_and(|row| row.inactive);
+    let janitor = present.is_some_and(|row| row.janitor);
+    all.push(Row {
+        agent,
+        inactive,
+        janitor,
+    });
     profiles(view, &all).swap_remove(at)
 }
 

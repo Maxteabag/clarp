@@ -75,7 +75,7 @@ async fn create(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
     let asked = object(&body)?;
     let voice = text(&asked, "voice_id").trim().to_string();
     let voice = if voice == "{}" { String::new() } else { voice };
-    let fetched = app.mouth.cartesia_known();
+    let fetched = app.mouth.cached_voice_names().0;
     let made = app.fleet.persona_write(None, said(&asked, voice), fetched);
     let persona = made.await?.map_err(refused)?;
     // A persona made without a picture and without a symbol is asked one, unless the request
@@ -98,7 +98,7 @@ async fn create(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
 async fn update(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let asked = object(&body)?;
     let original = text(&asked, "original_name");
-    let fetched = app.mouth.cartesia_known();
+    let fetched = app.mouth.cached_voice_names().0;
     let voice = text(&asked, "voice_id");
     let changed = app
         .fleet
