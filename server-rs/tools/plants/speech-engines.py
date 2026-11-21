@@ -138,7 +138,7 @@ for why,old,new in [
         ('the wrong legacy model is chosen','"eleven_flash_v2_5".into()','"another-model".into()'),
         ('the legacy speed default is changed','.unwrap_or(1.2)','.unwrap_or(0.9)'),
         ('the text preview takes the streaming transport','file: usage == SpeechUse::TextPreview','file: usage == SpeechUse::Turn'),
-        ('a missing fallback prevents a clip failure event','if route.fallback.is_empty()','if !route.fallback.is_empty()'),
+        ('a missing fallback prevents a clip failure event','|| route.fallback.is_empty()','|| !route.fallback.is_empty()'),
         ('the fallback supplies a different Google default','Some("nb-NO-Chirp3-HD-Kore".into())','Some("nb-NO-Chirp3-HD-Aoede".into())')]:
     if 'Google default' not in why:
         wrong(V,'host',why,old,new)

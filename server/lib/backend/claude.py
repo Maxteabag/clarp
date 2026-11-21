@@ -47,6 +47,7 @@ from .claude_models import claude_model_pin
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
 from ..stream_pacing import LivePacer
+from ..message_text import claude_block_is_line
 from ..claude_reply_evidence import ClaudeReplyEvidence, REPLY_CODEC
 from ..log import log, log_exception, log_fault
 from ..proc_util import stderr_text
@@ -216,6 +217,20 @@ def _report_phase(agent_id: str, trace_id: str, phase: str, dispatch: str) -> No
         log_exception("clarpPhaseFail", e, detail=trace_id or agent_id)
 
 
+def _live_items(agent_id: str, conversation, trace_id: str, *, isolated: bool = False):
+    """The live items of one Claude turn. Each text block's item names the row its block is
+    stored under (R108): block 0's is the live row the stream writes; the later blocks' are the
+    ids the import gives them. ``conversation`` is read when an item is made: the turn may bind
+    its conversation after the drain began."""
+    from ..live_claude import ClaudeLiveItems
+    from ..message_import_common import _identity_id
+    from ..message_live import _live_message_id
+    return ClaudeLiveItems(
+        agent_id="" if isolated else agent_id, trace_id=trace_id,
+        row_id=lambda key: _live_message_id(agent_id, conversation(), trace_id, key),
+        block_row_id=lambda key, block: _identity_id(agent_id, conversation(), trace_id, key, block))
+
+
 def _content_text(content) -> str:
     if isinstance(content, str):
         return content
@@ -281,13 +296,14 @@ def _is_message_stop(ev: dict) -> bool:
 
 
 def _settle_live_message(*, agent_id: str, backend_session_id: str, trace_id: str,
-                         item_key: str, session: str, stream) -> None:
+                         item_key: str, session: str, stream, block: int = 0) -> None:
     if not agent_id or not backend_session_id:
         return
     try:
         if agents_db.mark_live_message_final(
                 agent_id=agent_id, backend_session_id=backend_session_id,
-                trace_id=trace_id, item_key=item_key) and stream is not None:
+                trace_id=trace_id, item_key=item_key,
+                **({"block": block} if block else {})) and stream is not None:
             events.broadcast(stream, events.transcript_updated(
                 agent_id=agent_id, session=session,
                 backend_session_id=backend_session_id))
@@ -297,7 +313,7 @@ def _settle_live_message(*, agent_id: str, backend_session_id: str, trace_id: st
 
 def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str,
                         text: str, session: str, stream, item_key: str = "",
-                        provider_genuine: bool = False) -> None:
+                        provider_genuine: bool = False, block: int = 0) -> None:
     if not agent_id or not backend_session_id:
         return
     try:
@@ -307,6 +323,7 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
             trace_id=trace_id,
             text=text,
             item_key=item_key,
+            **({"block": block} if block else {}),
             **({"_provider_genuine": True} if provider_genuine else {}),
         )
         if not row or not row.get("changed"):
@@ -640,29 +657,28 @@ class ClaudeBackend(Backend):
         phase = ""
         bound = {"backend_session_id": backend_session_id}
         # One live row per provider message (message.id), so a turn of
-        # several messages never shows them run together. Each row grows at
-        # markdown-stable boundaries at most every 250 ms, with a trailing
-        # write; the message's final text is written at once and the row is
-        # marked final in place.
-        message = {"key": "", "text": ""}
+        # several messages never shows them run together; for a keyed message,
+        # one row per text block (R108: ``block``, the line the transcript will
+        # hold it as, under the id the import gives that line). Each row grows
+        # at markdown-stable boundaries at most every 250 ms, with a trailing
+        # write; the final text is written at once and the row is marked final
+        # in place.
+        message = {"key": "", "text": "", "block": 0, "lines": 0, "open": False, "streamed": False,
+                   "started": set()}
 
         evidence = ClaudeReplyEvidence()
 
-        def new_pacer(key: str):
+        def new_pacer(key: str, block: int = 0):
             provenance = {"genuine": False}
             paced = LivePacer(lambda text: _store_live_partial(
                 agent_id=agent_id, backend_session_id=bound["backend_session_id"],
                 trace_id=trace_id, text=text, session=session, stream=stream,
-                item_key=key, provider_genuine=provenance["genuine"]))
+                item_key=key, provider_genuine=provenance["genuine"], block=block))
             return paced, provenance
 
         pacer, provenance = new_pacer("")
-        from ..live_claude import ClaudeLiveItems
-        from ..message_live import _live_message_id
-        items = ClaudeLiveItems(
-            agent_id="" if isolated else agent_id, trace_id=trace_id,
-            row_id=lambda key: _live_message_id(
-                agent_id, bound["backend_session_id"] or "", trace_id, key))
+        items = _live_items(agent_id, lambda: bound["backend_session_id"] or "", trace_id,
+                            isolated=isolated)
 
         def settle_message() -> None:
             self._drain_settle(message, pacer, bound, agent_id, trace_id, session, stream)
@@ -725,13 +741,23 @@ class ClaudeBackend(Backend):
                     message_id = "" if isolated else _event_message_id(ev)
                     if message_id and message_id != message["key"]:
                         settle_message()
-                        message["key"], message["text"] = message_id, ""
+                        message.update(key=message_id, text="", block=0, lines=0,
+                                       open=False, streamed=False, started=set())
                         pacer, provenance = new_pacer(message_id)
                     if not isolated and _is_message_stop(ev):
                         settle_message()
                     provenance["genuine"] |= evidence.current_is_genuine
-                    live_text = self._drain_text(
-                        ev, isolated, isolated_texts, live_text, message, pacer)
+                    if message["key"] and not isolated:
+                        live_text = self._drain_text(
+                            ev, isolated, isolated_texts, live_text, message, pacer, offer=False)
+                        pacer, provenance = self._drain_block(
+                            ev, message, pacer, provenance, new_pacer,
+                            lambda paced: self._drain_settle(
+                                message, paced, bound, agent_id, trace_id, session, stream),
+                            evidence)
+                    else:
+                        live_text = self._drain_text(
+                            ev, isolated, isolated_texts, live_text, message, pacer)
                 elif typ == "result":
                     # One process can run several CLI turns: resuming a
                     # session whose last process left background tasks
@@ -774,14 +800,73 @@ class ClaudeBackend(Backend):
                 agent_id, turn_token, trace_id)
 
     def _drain_settle(self, message, pacer, bound, agent_id, trace_id, session, stream):
-        """Settle the current message with the pacer selected by the drain."""
+        """Settle the current message (a keyed message: its open text block) with the pacer
+        selected by the drain."""
         if message["text"]:
             pacer.offer(message["text"], final=True)
             _settle_live_message(
                 agent_id=agent_id, backend_session_id=bound["backend_session_id"],
                 trace_id=trace_id, item_key=message["key"], session=session,
-                stream=stream)
+                stream=stream, block=message.get("block", 0))
         pacer.cancel()
+        if message.get("open"):
+            # A text block with words is a line of the transcript (R108).
+            message["lines"] += claude_block_is_line({"type": "text", "text": message["text"]})
+            message["open"], message["text"] = False, ""
+
+    @staticmethod
+    def _drain_block(ev, message, pacer, provenance, new_pacer, settle, evidence):
+        """One event of a keyed message, one live row per text block (R108).
+
+        A text block's row holds only that block's words, under the id its line will have in
+        /log (block k counts the blocks the transcript keeps as lines: text with words, a
+        client tool use). Thinking, a server tool and its result add nothing to any row. With
+        partial messages the blocks come as content_block events; without them each assistant
+        event is one block. Returns the pacer and provenance now current."""
+        def open_block(text):
+            nonlocal pacer, provenance
+            pacer, provenance = new_pacer(message["key"], message["lines"])
+            provenance["genuine"] |= evidence.current_is_genuine
+            message.update(block=message["lines"], open=True, text=text)
+            if text:
+                pacer.offer(text)
+
+        inner = ev.get("event") if ev.get("type") == "stream_event" else None
+        if isinstance(inner, dict):
+            message["streamed"] = True
+            kind = inner.get("type")
+            if kind == "content_block_start":
+                message["started"].add(inner.get("index"))
+                if message["open"]:
+                    settle(pacer)
+                block = inner.get("content_block")
+                block_type = block.get("type") if isinstance(block, dict) else ""
+                if block_type == "text":
+                    open_block(str(block.get("text") or ""))
+                elif claude_block_is_line(block):
+                    message["lines"] += 1
+            elif kind == "content_block_delta":
+                delta = inner.get("delta")
+                if isinstance(delta, dict) and delta.get("type") == "text_delta" and delta.get("text"):
+                    if not message["open"] and inner.get("index") in message["started"]:
+                        return pacer, provenance  # a late delta of a block already settled
+                    if not message["open"]:
+                        open_block("")          # a text delta whose block start was not seen
+                    message["text"] += str(delta["text"])
+                    pacer.offer(message["text"])
+            elif kind == "content_block_stop" and message["open"]:
+                settle(pacer)
+        elif ev.get("type") == "assistant" and not message["streamed"]:
+            msg = ev.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
+            for part in content if isinstance(content, list) else []:
+                part_type = part.get("type") if isinstance(part, dict) else ""
+                if part_type == "text" and str(part.get("text") or ""):
+                    open_block(str(part["text"]))
+                    settle(pacer)
+                elif claude_block_is_line(part):
+                    message["lines"] += 1
+        return pacer, provenance
 
     def _drain_result(self, ev, isolated, isolated_texts, live_text, evidence):
         """Attach only this result's accumulated assistant text."""
@@ -822,8 +907,9 @@ class ClaudeBackend(Backend):
                               detail=trace_id or sid)
         return True
 
-    def _drain_text(self, ev, isolated, isolated_texts, live_text, message, pacer):
-        """Accumulate a provider text event and offer its current message to the pacer."""
+    def _drain_text(self, ev, isolated, isolated_texts, live_text, message, pacer, offer=True):
+        """Accumulate a provider text event and offer its current message to the pacer (not
+        with ``offer`` False: a keyed message's rows are written block by block)."""
         text, is_delta = _assistant_event_text(ev)
         if text:
             if isolated and not is_delta:
@@ -841,6 +927,8 @@ class ClaudeBackend(Backend):
                 live_text += text
             else:
                 live_text = text
+            if not offer:
+                return live_text
             current_text = message["text"]
             if is_delta:
                 current_text += text

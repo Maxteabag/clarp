@@ -21,5 +21,5 @@ fn cumulative_voice_usage_matches_the_reference() {
             assert_eq!(usage.snapshot(), step["snapshot"]);
         }
     }
-    assert_eq!((stories.len(), count), (9, 126));
+    assert_eq!((stories.len(), count), (9, 189));
 }

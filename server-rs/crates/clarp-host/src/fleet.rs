@@ -1562,6 +1562,9 @@ struct Fleet {
     members: Vec<Arc<Member>>,
     /// The agents that were removed, by id: their name and session as last kept.
     gone: BTreeMap<String, (String, String)>,
+    /// The agents being removed whose thread has not answered its close yet, by id: when they
+    /// were deleted. Their tombstone is kept; nothing else of their removal is done yet.
+    closing: BTreeMap<String, i64>,
     focus: Option<String>,
     /// The devices that may speak, by the digest of their token.
     devices: HashMap<String, Arc<Device>>,
@@ -1622,6 +1625,11 @@ fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Resul
         keep_spools: works.config.keep_spools,
         accounts: works.config.accounts,
         epoch: works.hub.epoch().to_string(),
+        hides_coordination: clarp_kernel::coordination::can_leave_note(
+            &record.agent_id,
+            Some(&record.backend),
+            works.turns.has_key(),
+        ),
     };
     Ok(Setup {
         delegation_rejoin: desk.for_worker(),
@@ -1714,6 +1722,12 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     }
     let agents = read!(AgentRecord, AGENTS);
     let mut held: Vec<crate::kept::Name> = agents.names;
+    let deleted: HashSet<String> = agents
+        .read
+        .iter()
+        .filter(|(_, record)| record.deleted_at_ms.is_some())
+        .map(|(agent_id, _)| agent_id.clone())
+        .collect();
     for (agent_id, mut record) in agents.read {
         owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
         delegation_desk.known_record(&record);
@@ -1736,6 +1750,22 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                     .map_err(|e| e.to_string())?;
             }
             continue;
+        }
+        // A helper whose parent was deleted, and whose removal did not come to it (its parent's
+        // thread did not close in time, or the Host stopped first), loses it now, as removal
+        // does.
+        let parent_gone = record
+            .parent_agent_id
+            .as_ref()
+            .is_some_and(|parent| deleted.contains(parent));
+        let current = record.helper_state.as_deref().unwrap_or("");
+        if let Some(moved) = helpers::next_state(current, "parent_gone").filter(|_| parent_gone) {
+            record.helper_state = Some(moved.state.to_string());
+            record.helper_completed_at_ms = moved.completed.then(|| works.clock.now_ms());
+            let value = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
+            store
+                .put(AGENTS, &agent_id, &value)
+                .map_err(|e| e.to_string())?;
         }
         match setup(&works, &delegation_desk, &record) {
             Ok(setup) => members.push(Arc::new(Member {
@@ -1834,6 +1864,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         store,
         members,
         gone,
+        closing: BTreeMap::new(),
         focus,
         devices,
         jobs,
@@ -2402,6 +2433,7 @@ impl Fleet {
             .filter(|at| {
                 let record = &self.members[*at].record;
                 !record.is_janitor
+                    && self.members[*at].agent.accepting_work().is_ok()
                     && record.avatar.is_none()
                     && record.avatar_symbol.is_empty()
                     && record.persona.eq_ignore_ascii_case(&name)
@@ -2740,6 +2772,10 @@ impl Fleet {
             return Err(Told::new(404, why, why).into());
         };
         let before = self.members[at].record.clone();
+        self.members[at]
+            .agent
+            .accepting_work()
+            .map_err(|why| Told::new(503, agent::REMOVING_CODE, why.0))?;
         if before.is_janitor {
             let why = "Janitors are managed from their maintenance configuration";
             return Err(Told::new(409, "janitor_managed", why).into());
@@ -2828,7 +2864,18 @@ impl Fleet {
         forked: Option<String>,
         contact: Option<ContactAsked>,
     ) -> Result<AgentRecord, NotMade> {
-        if let Some(parent) = request.parent.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(parent) = request
+            .parent
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if let Some(at) = self.place_of(parent) {
+                self.members[at]
+                    .agent
+                    .accepting_work()
+                    .map_err(|why| Told::new(503, agent::REMOVING_CODE, why.0))?;
+            }
             match self.has_delegated_ancestor(parent) {
                 Ok(true) => {
                     return Err(Told::new(
@@ -3098,6 +3145,7 @@ impl Fleet {
         let Some(at) = found else {
             return Ok(Err(NotAmended::Unknown));
         };
+        self.members[at].agent.accepting_work()?;
         // A contact chosen by the rule is chosen here, in the turn that gives it.
         let change = match change {
             Amend::ContactAuto(fetched) => match self.contact_of_assignment(at, &fetched)? {
@@ -3230,7 +3278,7 @@ impl Fleet {
         took: oneshot::Sender<()>,
     ) -> Result<(), Unavailable> {
         if record.archived_at_ms.is_some() && self.members[at].record.archived_at_ms.is_none() {
-            self.stop_for_roster(&record, "agent archived")?;
+            self.stop_for_roster(&record, "agent archived", None)?;
         } else {
             self.put(&record).map_err(Unavailable)?;
         }
@@ -3262,6 +3310,10 @@ impl Fleet {
         else {
             return Ok(None);
         };
+        // A helper awaiting removal keeps its own tombstone, including when its parent goes.
+        if self.members[at].agent.accepting_work().is_err() {
+            return Ok(None);
+        }
         let before = &self.members[at].record;
         let current = before.helper_state.as_deref().unwrap_or("");
         let Some(moved) = helpers::next_state(current, event) else {
@@ -3329,6 +3381,7 @@ impl Fleet {
         let Some(at) = self.place_of(key) else {
             return Ok(Err(no_agent(key)));
         };
+        self.members[at].agent.accepting_work()?;
         let helper = self.members[at].record.clone();
         if !helper.is_helper() {
             let why = format!("{} is not a helper", helper.session);
@@ -3576,14 +3629,31 @@ impl Fleet {
             return Ok(false);
         };
         let mut record = self.members[at].record.clone();
-        record.deleted_at_ms = Some(self.now_ms());
-        self.stop_for_roster(&record, "agent deleted")?;
+        // An agent asked to close before is not stopped twice: it was deleted then.
+        let asked_before = self.closing.get(&record.agent_id).copied();
+        record.deleted_at_ms = Some(asked_before.unwrap_or_else(|| self.now_ms()));
+        let agent = self.members[at].agent.clone();
+        if asked_before.is_none() {
+            self.stop_for_roster(&record, "agent deleted", Some(&agent))?;
+            self.closing.insert(
+                record.agent_id.clone(),
+                record.deleted_at_ms.unwrap_or_default(),
+            );
+        }
+        // Its thread is the one writer of what is its own: until it has closed, nothing of
+        // that is touched, and the agent stays as it is. Its tombstone is kept.
+        if !agent.close(agent::CLOSE_WITHIN) {
+            return Err(Unavailable(format!(
+                "The agent's thread did not answer within {} seconds, so it is not removed yet: ask again to finish removing it.",
+                agent::CLOSE_WITHIN.as_secs()
+            )));
+        }
+        self.closing.remove(&record.agent_id);
         self.gone.insert(
             record.agent_id.clone(),
             (record.persona.clone(), record.session.clone()),
         );
-        let member = self.members.remove(at);
-        member.agent.close();
+        self.members.remove(at);
         let retired = retire_goals(
             &self.works,
             &record,
@@ -3772,6 +3842,10 @@ mod opening_reads {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod closing_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
