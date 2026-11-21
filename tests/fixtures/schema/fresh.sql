@@ -1,4 +1,4 @@
--- user_version 134
+-- user_version 135
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -379,6 +379,9 @@ CREATE INDEX oracle_context_notifications_owner ON oracle_context_notifications(
 CREATE INDEX oracle_threads_owner ON oracle_threads(owner_principal, contact, updated_at);
 
 -- index sqlite_autoindex_agent_goals_1 on agent_goals
+(implicit);
+
+-- index sqlite_autoindex_agent_moves_1 on agent_moves
 (implicit);
 
 -- index sqlite_autoindex_agent_portraits_1 on agent_portraits
@@ -784,6 +787,14 @@ CREATE TABLE agent_goals (
     native INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
+);
+
+-- table agent_moves on agent_moves
+CREATE TABLE agent_moves (
+    agent_id TEXT PRIMARY KEY,
+    to_host TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    moved_at INTEGER NOT NULL
 );
 
 -- table agent_portraits on agent_portraits

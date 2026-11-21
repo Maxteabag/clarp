@@ -91,6 +91,8 @@ class LauncherMixin:
     def _resume_after_account_switch(self, spec, attempt, state):
         if not self._holds_slot(spec):
             return
+        if self._moved_before_spawn(spec, attempt):
+            return  # parked, then moved: never resumed on the other Host's session
         # It is the agent's live turn again. A message queued behind it while
         # it waited may have moved the trace marker (a voice message does),
         # and what reads the marker as the live turn's trace (the hooks in

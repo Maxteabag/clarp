@@ -671,6 +671,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/agent-mute": "_handle_agent_mute",
         "/agent-notes": "_handle_agent_note",
         "/agent-coordination": "_handle_agent_coordination",
+        "/agent-moved": "_handle_agent_moved",
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
@@ -2761,10 +2762,28 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                                    change="deleted", provenance=turn_queue.item_provenance(row))
         return self._json_ok({"ok": True})
 
+    def _answer_moved(self, exc, *, session: str = "", agent_id: str = "") -> bool:
+        """Answer admission's refusal of a moved agent as every door does:
+        ``409 {"error": "agent_moved", "moved_to": {host, id}, "moved_at"}``
+        (lib.agent_moves). False for any other refusal."""
+        from lib import agent_moves
+        if exc.status != 409 or str(exc) != agent_moves.AGENT_MOVED:
+            return False
+        if not agent_id and session:
+            agent_id = str((identity.lookup(session) or {}).get("agent_id") or "")
+        mark = agent_moves.moved(agent_id) or {}
+        self._json(409, {"ok": False, "error": agent_moves.AGENT_MOVED,
+                         "moved_to": mark.get("to"), "moved_at": mark.get("at")})
+        return True
+
     def _handle_turn_queue_send(self, queue_id: str):
         try:
             result = TurnDispatchService(self.ctx).dispatch_queued(unquote(queue_id))
         except DispatchError as exc:
+            from lib import turn_queue
+            row = turn_queue.get(unquote(queue_id)) or {}
+            if self._answer_moved(exc, agent_id=str(row.get("agent_id") or "")):
+                return
             return self._json_error(exc.status, str(exc))
         return self._json(202, {
  "ok": True,
@@ -2962,6 +2981,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         except DispatchError as e:
             if opening is not None and opening["route"] == "greeting":
                 self._greeting_admitted(opening, req, ok=False)
+            if self._answer_moved(e, session=req.session):
+                return
             return self._send(e.status, str(e).encode(), "text/plain")
         if opening is not None and opening["route"] == "greeting":
             self._greeting_admitted(opening, req, ok=True)
