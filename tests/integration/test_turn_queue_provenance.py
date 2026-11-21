@@ -70,3 +70,18 @@ def test_the_events_that_name_an_item_say_who_it_is_from(running_server):
         ("from-mike", "edited", "agent", {"agent_id": mike, "name": "Mike"}),
         ("from-the-phone", "deleted", "user", None),
     ]
+
+
+def test_each_item_says_whether_it_is_still_waiting(running_server):
+    """An item already being read (a steer into the running turn) is listed until its row
+    is written; its status says it is started, so an app does not draw it as queued."""
+    from lib import agents as agents_db, db
+    base, _ctx, _srv = running_server
+    agent = agents_db.get_by_session("claude")
+    _enqueue(agent, "still-waiting", origin="user")
+    _enqueue(agent, "being-read", origin="user")
+    db.conn().execute("UPDATE queued_turns SET status = 'started', started_at = 1 WHERE queue_id = ?",
+                      ("being-read",))
+    items = _items(base)
+    assert items["still-waiting"]["status"] == "queued"
+    assert items["being-read"]["status"] == "started"
