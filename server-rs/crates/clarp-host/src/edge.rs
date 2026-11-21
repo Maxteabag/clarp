@@ -2344,6 +2344,8 @@ async fn log(
     } else {
         (member.agent.tail(limit, which).await?, false)
     };
+    // This view may have advanced since the actor returned the page. It only
+    // supplies conversation identity. The page owns the cursor for its rows.
     let status = &member.agent.view().status;
     let replace = replace
         || (after.is_some()
@@ -3932,6 +3934,71 @@ mod tests {
     use axum::http::HeaderValue;
 
     use super::*;
+
+    #[tokio::test]
+    async fn a_row_committed_after_a_log_page_is_in_the_next_delta() {
+        let place = crate::unkept::at_the_port::place("log-cursor");
+        let app = place.app().await;
+        let record = app
+            .fleet
+            .create(CreateAgentRequest {
+                name: "Cursor".into(),
+                backend: Some("scripted".into()),
+                ..CreateAgentRequest::default()
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let member = app.anyone(&record.session).unwrap();
+        let agent = &member.agent;
+        for id in ["first", "second", "third"] {
+            assert!(agent.note(id.into(), id.into()).await.unwrap());
+        }
+
+        let tail = agent.tail(10, Which::All).await.unwrap();
+        let first = tail.entries[0].revision;
+        let second = tail.entries[1].revision;
+        let third = tail.entries[2].revision;
+        let older = agent
+            .before("third".into(), 1, Which::All)
+            .await
+            .unwrap()
+            .unwrap();
+        let full = agent.after(first, 10, Which::All).await.unwrap();
+        let capped = agent.after(first, 1, Which::All).await.unwrap();
+
+        // The actor has supplied the rows, but the edge has not read its view
+        // to render the response. Commit through the same mailbox in that gap.
+        assert!(
+            agent
+                .note("later".into(), "arrived during the read".into())
+                .await
+                .unwrap()
+        );
+        let view = agent.view();
+        assert!(view.status.head_revision > third);
+
+        for (page, cursor, more, expected) in [
+            (tail, third, false, &["later"][..]),
+            (older, third, true, &["later"][..]),
+            (full, third, false, &["later"][..]),
+            (capped, second, true, &["third", "later"][..]),
+        ] {
+            let rendered = wire::log_response(&record, &view.status, &page, false, false);
+            assert_eq!(rendered["latest_revision"], cursor);
+            assert_eq!(rendered["has_more"], more);
+            let query = serde_json::from_value(json!({
+                "session": record.session,
+                "after_revision": rendered["latest_revision"],
+            }))
+            .unwrap();
+            let Json(delta) = log(State(app.clone()), Query(query)).await.unwrap();
+            let rows = delta["turns"].as_array().unwrap();
+            let ids: Vec<_> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
+            assert_eq!(ids.as_slice(), expected);
+            assert_eq!(delta["latest_revision"], view.status.head_revision);
+        }
+    }
 
     #[test]
     fn a_token_is_read_from_the_header_and_from_the_cookie() {
