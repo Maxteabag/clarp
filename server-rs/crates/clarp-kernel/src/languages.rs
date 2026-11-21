@@ -135,6 +135,19 @@ pub fn of_agent<'a>(entries: &'a [(String, String)], who: Who<'_>) -> Option<&'a
         })
 }
 
+/// IDs whose persona, session, or ID is a transcription setting's key.
+pub fn ids_for<'a>(agents: impl IntoIterator<Item = Who<'a>>, key: &str) -> Vec<String> {
+    agents
+        .into_iter()
+        .filter(|who| {
+            [who.persona, who.session, who.agent_id]
+                .into_iter()
+                .any(|known| strip(known).to_lowercase() == key)
+        })
+        .map(|who| who.agent_id.to_lowercase())
+        .collect()
+}
+
 fn named_engines(value: &str) -> impl Iterator<Item = &str> {
     value.split(',').map(strip).filter(|part| !part.is_empty())
 }

@@ -1373,17 +1373,18 @@ async fn set_providers(
         settings.push((languages::LANGUAGE_KEY.to_string(), language));
     }
     let ids_for = |key: &str| {
-        directory
-            .members
-            .iter()
-            .filter_map(|member| {
+        languages::ids_for(
+            directory.members.iter().map(|member| {
                 let row = &member.record;
-                [&row.persona, &row.session, &row.agent_id]
-                    .into_iter()
-                    .any(|known| known.trim().to_lowercase() == key)
-                    .then(|| row.agent_id.to_lowercase())
-            })
-            .collect()
+                Who {
+                    agent_id: &row.agent_id,
+                    persona: &row.persona,
+                    session: &row.session,
+                    ..Who::default()
+                }
+            }),
+            key,
+        )
     };
     if let Some(change) = named("agent_engines") {
         let known = |engine: &str| heard::cloud_model(engine).is_some();

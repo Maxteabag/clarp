@@ -7,10 +7,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::HashSet;
-
-use clarp_kernel::personas::{
-    Book, Owner, Wanted, archetype, builtins, candidate_voices, personality, picked_voice, tier,
+use clarp_kernel::personas::{Book, Owner, Wanted, archetype, builtins, named, personality, tier};
+use clarp_kernel::{
+    said::{self, Voices},
+    voice_names::Snapshot,
+    voice_pool::{Pool, User},
+    voice_profile::HostView,
 };
 use serde_json::{Value, json};
 
@@ -119,19 +121,65 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
             cartesia: &cartesia,
             gemini: &gemini,
         };
-        // Nothing was fetched from Cartesia in these rooms, and no agent is there.
-        let candidates = candidate_voices(&[], &owner);
-        let nobody = HashSet::new();
+        let host = HostView {
+            voices: Voices {
+                provider: said::CARTESIA.into(),
+                gemini_voices: gemini.clone(),
+                ..Default::default()
+            }
+            .with_cartesia(&cartesia),
+            ..Default::default()
+        };
+        let pool = Pool {
+            host: &host,
+            configured_cartesia: &[],
+            catalogue: &Snapshot::default(),
+            roster: &roster,
+        };
+        let assigned = |book: &Book, name: &str, voice: &str| {
+            let contacts = book.listed(&owner);
+            let users: Vec<_> = contacts
+                .iter()
+                .map(|contact| User {
+                    name: contact["name"].as_str().unwrap(),
+                    stored: contact["voice_id"].as_str().unwrap(),
+                    builtin: contact["builtin"] == true,
+                })
+                .collect();
+            pool.assign(name, voice, &users).stored
+        };
         let mut book = Book::default();
-        let mut voice = picked_voice(&candidates, &nobody, &book.voices(&owner));
         for (at, step) in room["steps"].as_array().unwrap().iter().enumerate() {
             let (what, given) = step["step"].as_object().unwrap().iter().next().unwrap();
             let said = |key: &str| given[key].as_str().unwrap_or("");
             let answered = &step["answered"];
             let refused = step["refused"].as_str();
+            let plain = said("voice_id");
+            let name = named(said("name")).unwrap_or_else(|| said("name").to_string());
+            let original = said("original_name");
+            let current = book.named(&owner, original);
+            let stored = current
+                .as_ref()
+                .and_then(|contact| contact["voice_id"].as_str())
+                .unwrap_or("");
+            let voice = match what.as_str() {
+                "create" => {
+                    let plain = if plain.is_empty() { "{}" } else { plain };
+                    said::canonical_voice(&assigned(&book, &name, plain))
+                }
+                "update" if !plain.is_empty() => {
+                    said::merge_provider_maps(stored, plain, given["base_voice_id"].as_str())
+                }
+                _ => String::new(),
+            };
+            let fallback = if what == "update" && stored.is_empty() && plain.is_empty() {
+                assigned(&book, &name, "{}")
+            } else {
+                String::new()
+            };
             let wanted = Wanted {
                 name: said("name"),
-                voice_id: said("voice_id"),
+                voice_id: &voice,
                 avatar_symbol: said("avatar_symbol"),
                 personality: said("personality"),
                 picture: said("avatar_base64"),
@@ -142,9 +190,9 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
                 "create" => {
                     let id = answered["id"].as_str().unwrap_or("persona-never-made");
                     let now = i64::try_from(at).unwrap();
-                    Some(book.create(&owner, &wanted, (id, &voice), now))
+                    Some(book.create(&owner, &wanted, (id, ""), now))
                 }
-                "update" => Some(book.update(&owner, said("original_name"), &wanted, &voice)),
+                "update" => Some(book.update(&owner, original, &wanted, &fallback)),
                 _ => None,
             };
             match changed {
@@ -191,8 +239,11 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
                 );
             }
             // The voice the next persona would be given.
-            voice = picked_voice(&candidates, &nobody, &book.voices(&owner));
-            assert_eq!(json!(voice), step["next_voice"], "{about}: the next voice");
+            assert_eq!(
+                json!(assigned(&book, "", "{}")),
+                step["next_voice"],
+                "{about}: the next voice"
+            );
         }
     }
     assert!(
