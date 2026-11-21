@@ -261,20 +261,32 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
             where, params = where + " AND " + cmp_sql, params + cmp_params
         direction = "DESC" if from_high else "ASC"
         found = database.execute(
-            f"""SELECT m.trace_id, CASE WHEN {counted_sql} THEN 1 ELSE 0 END AS counted
+            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id, m.trace_id,
+                       CASE WHEN {counted_sql} THEN 1 ELSE 0 END AS counted
                   FROM messages m WHERE {where}
                  ORDER BY {_KEY_SQL} {direction}, m.seq {direction}, m.message_id {direction}
                  LIMIT ?""", [*params, coordination.COUNT_ROW_CAP + 1]).fetchall()
         if not found:
             return None
-        messages, traces, capped = 0, [], len(found) > coordination.COUNT_ROW_CAP
+        # ``capped`` says that another MESSAGE was left out beyond what is counted: a run of
+        # exactly COUNT_CAP messages followed by wordless rows is not "100+".
+        messages, traces, capped, last = 0, [], False, None
         for r in found[:coordination.COUNT_ROW_CAP]:
-            if messages == coordination.COUNT_CAP:
+            if r["counted"] and messages == coordination.COUNT_CAP:
                 capped = True
                 break
             messages += int(r["counted"])
             if r["trace_id"] not in traces:
                 traces.append(r["trace_id"])
+            last = r
+        else:
+            if len(found) > coordination.COUNT_ROW_CAP:
+                # The row cap stopped the reading: capped if a message is among the rows beyond.
+                beyond_sql, beyond_params = _key_cmp("<" if from_high else ">",
+                                                     (last["t"], int(last["seq"]), last["message_id"]))
+                capped = database.execute(
+                    f"SELECT 1 FROM messages m WHERE {where} AND {counted_sql} AND {beyond_sql} LIMIT 1",
+                    [*params, *beyond_params]).fetchone() is not None
         senders: list[str] = []
         for start in range(0, len(traces), 500):
             chunk = traces[start:start + 500]

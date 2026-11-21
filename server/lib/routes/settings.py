@@ -67,6 +67,8 @@ class SettingsRoutes:
         the roster event that carries the new value: every agent row of the next snapshot
         has it (one step; nothing is written to any conversation)."""
         from lib import coordination, events
+        if coordination.from_an_agent(self.headers):
+            return self._json(403, {"error": "agents_may_not"})
         data = self._read_json()
         if not isinstance(data, dict) or "coordination_visibility" not in data:
             return self._json_error(400, "coordination_visibility required")

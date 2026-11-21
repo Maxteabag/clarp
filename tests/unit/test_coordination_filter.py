@@ -298,3 +298,30 @@ def test_a_gap_found_by_the_page_keys_is_still_counted(chat):
     by_id = {t["id"]: t for t in answer["turns"]}
     assert by_id[after[0]]["hidden_before"]["messages"] == 2
     assert "hidden_before" not in by_id[rows[1]] and "hidden_before" not in by_id[after[1]]
+
+
+def test_exactly_the_cap_of_messages_then_a_wordless_row_is_not_capped(chat, monkeypatch):
+    """U4: 'capped' means another message was left out; a run of exactly COUNT_CAP messages that
+    ends with a tool row is counted whole."""
+    monkeypatch.setattr(coordination, "COUNT_CAP", 4)
+    chat.user_turn("u1")
+    chat.coordination_turn("c1")
+    chat.coordination_turn("c2")                         # 4 messages
+    chat._row("assistant", "", "c2", tool=True, origin="agent", sender=chat.boss)
+    after = chat.log()["hidden_after"]
+    assert after["messages"] == 4 and after["capped"] is False
+    chat.coordination_turn("c3")                         # now a fifth message follows
+    after = chat.log()["hidden_after"]
+    assert after["messages"] == 4 and after["capped"] is True
+
+
+def test_the_row_cap_says_capped_only_when_a_message_lies_beyond_it(chat, monkeypatch):
+    monkeypatch.setattr(coordination, "COUNT_ROW_CAP", 3)
+    chat.user_turn("u1")
+    chat.coordination_turn("c1")                         # prompt, tool row, reply
+    for _ in range(2):
+        chat._row("assistant", "", "c1", tool=True, origin="agent", sender=chat.boss)
+    after = chat.log()["hidden_after"]
+    assert after["messages"] == 2 and after["capped"] is False
+    chat.coordination_turn("c2")
+    assert chat.log()["hidden_after"]["capped"] is True
