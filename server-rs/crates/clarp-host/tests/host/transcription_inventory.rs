@@ -233,7 +233,11 @@ for line in sys.stdin:
     };
     let failed = ask_medium();
     assert_eq!(failed.status, 500);
-    assert!(failed.text().contains("test refusal"));
+    let body: Value = serde_json::from_slice(&failed.body).unwrap();
+    assert_eq!(body, json!({"error":"transcription failed"}));
+    wait_for("the failed model load in the private Host log", || {
+        host.heard.lock().unwrap().contains("test refusal")
+    });
     std::fs::remove_file(fail).unwrap();
     assert_eq!(ask_medium().status, 200);
     std::thread::scope(|scope| {

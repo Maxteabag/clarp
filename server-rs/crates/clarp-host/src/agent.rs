@@ -7,7 +7,7 @@
 //! When the actor reports that its log or files failed, the thread drops it and opens it again
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -414,6 +414,10 @@ enum Ask {
         answer: Answer<bool>,
     },
     /// From a turn's thread: the live turn's spool may have grown.
+    TakeoverHeld {
+        offer: clarp_actor::takeover::Offer,
+        held: clarp_shim::Held,
+    },
     SpoolChanged,
     /// From a turn's thread: nothing answers at the shim of this attempt of the turn any more.
     ShimGone {
@@ -1276,6 +1280,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         behind_terminal: None,
         let_go_by_hand: false,
         queue_edit: None,
+        takeover_wait: VecDeque::new(),
         newest: None,
         ended: None,
         finished: None,
@@ -1314,8 +1319,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
 }
 
 enum QueueEdit {
-    Edited { client_id: String, text: String },
-    Deleted(String),
+    Edited { item: Waiting, text: String },
+    Deleted(Waiting),
 }
 
 struct Worker {
@@ -1344,6 +1349,8 @@ struct Worker {
     let_go_by_hand: bool,
     /// The edit or withdrawal committed by the request this worker is handling.
     queue_edit: Option<QueueEdit>,
+    /// Commands that could change the selected turns while a consume verdict is uncertain.
+    takeover_wait: VecDeque<Ask>,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
     /// How the last turn ended.
@@ -1395,7 +1402,7 @@ fn seen_end(last: &Settled) -> Option<TurnSeen> {
         Outcome::Failed { reason, .. } => ("failed", reason.clone()),
         Outcome::Interrupted { reason } => ("interrupted", reason.clone()),
         Outcome::Stopped { by, .. } => ("interrupted", format!("Stopped by {by}")),
-        Outcome::Withdrawn { .. } => return None,
+        Outcome::Withdrawn { .. } | Outcome::Replaced { .. } => return None,
     };
     Some(TurnSeen {
         outcome: outcome.to_string(),
@@ -1621,7 +1628,17 @@ impl Worker {
             .into_iter()
             .flatten()
             .min();
-            let ask = match mailbox.next(rx, due, Instant::now()) {
+            let resolved = self
+                .actor
+                .as_ref()
+                .is_some_and(|actor| actor.selected_takeover().is_none());
+            let queued = if resolved {
+                self.takeover_wait.pop_front()
+            } else {
+                None
+            };
+            let request = queued.map_or_else(|| mailbox.next(rx, due, Instant::now()), Ok);
+            let ask = match request {
                 Ok(ask) => ask,
                 Err(RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
@@ -2415,6 +2432,42 @@ impl Worker {
     }
 
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
+        if matches!(
+            &ask,
+            Ask::Stop { .. }
+                | Ask::Hold { .. }
+                | Ask::Withdraw { .. }
+                | Ask::Reword { .. }
+                | Ask::SendNow { .. }
+                | Ask::Send {
+                    admission: Admission::Direct,
+                    ..
+                }
+        ) && let Some((from, socket)) = self
+            .actor
+            .as_ref()
+            .and_then(Actor::selected_takeover_socket)
+        {
+            // Release is ordered against the consume in the shim. Once it replies, a
+            // missing marker means the old tool was never committed for takeover. If
+            // the commit won, finish its journal batch before applying this command.
+            let replied = crate::launcher::takeover_request(&socket, clarp_shim::Request::Release)
+                .and_then(|reply| reply.let_go)
+                .is_some();
+            let now = self.now_ms();
+            if let Some(actor) = self.actor.as_mut() {
+                let out = actor.spool_changed(now)?;
+                if replied && !actor.selected_takeover_has_marker()? {
+                    actor.clear_takeover(from, now)?;
+                }
+                let defer = actor.selected_takeover().is_some();
+                self.after(out);
+                if defer {
+                    self.takeover_wait.push_back(ask);
+                    return Ok(());
+                }
+            }
+        }
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::TakePlans {
@@ -2542,9 +2595,35 @@ impl Worker {
                 if let Ok((Ok(sent), _)) = &sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
-                    && let Some(c) = &self.setup.hub.capture
                 {
-                    c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
+                    if let Some(c) = &self.setup.hub.capture {
+                        c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
+                    }
+                    if sent.queued
+                        && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
+                        && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
+                        && let Some(program) = clarp_backend::program(&self.setup.record.backend)
+                    {
+                        let tx = self.tx.clone();
+                        let backend = self.setup.record.backend.clone();
+                        self.setup.runtime.spawn(async move {
+                            if !crate::takeover::can_use(&backend, program.into()).await {
+                                return;
+                            }
+                            let socket = offer.socket.clone();
+                            let request = clarp_shim::Request::Hold {
+                                ms: clarp_shim::HOLD_MOST_MS,
+                            };
+                            let held = tokio::task::spawn_blocking(move || {
+                                crate::launcher::takeover_request(&socket, request)
+                                    .and_then(|reply| reply.held)
+                            })
+                            .await;
+                            if let Ok(Some(held)) = held {
+                                let _ = tx.send(Ask::TakeoverHeld { offer, held });
+                            }
+                        });
+                    }
                 }
                 answered(sent, answer)?
             }
@@ -2754,7 +2833,7 @@ impl Worker {
                 let item = actor.queue_item(turn)?;
                 let withdrawn = actor.withdraw(turn, &by, now);
                 if matches!(withdrawn, Ok((true, _))) {
-                    self.queue_edit = item.map(|item| QueueEdit::Deleted(item.told_id));
+                    self.queue_edit = item.map(QueueEdit::Deleted);
                 }
                 let queue = actor.queue_state();
                 answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
@@ -2764,10 +2843,7 @@ impl Worker {
                 let item = actor.queue_item(turn)?;
                 let reworded = actor.reword(turn, &text, now);
                 if matches!(reworded, Ok((Reworded::Done, _))) {
-                    self.queue_edit = item.map(|item| QueueEdit::Edited {
-                        client_id: item.told_id,
-                        text,
-                    });
+                    self.queue_edit = item.map(|item| QueueEdit::Edited { item, text });
                 }
                 answered(reworded, answer)?
             }
@@ -2971,6 +3047,53 @@ impl Worker {
             | Ask::LineEnded { .. }
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
+            Ask::TakeoverHeld { offer, held } => {
+                let release = || {
+                    crate::launcher::takeover_request(&offer.socket, clarp_shim::Request::Release);
+                };
+                let plan = if held.partial_out == 0
+                    && held.partial_err == 0
+                    && held.partial_reports == 0
+                    && held.left_ms > 0
+                    && actor.takeover_quiet(&offer, held.spool)?
+                {
+                    crate::takeover::plan(
+                        &self.setup.record.backend,
+                        &crate::config::home(),
+                        &self.setup.record.cwd,
+                        &self.setup.record.agent_id,
+                        &offer,
+                    )
+                } else {
+                    None
+                };
+                let Some((session, input)) = plan else {
+                    release();
+                    return Ok(());
+                };
+                if !actor.select_takeover(&offer, held.spool, session, input, now)? {
+                    release();
+                    return Ok(());
+                }
+                let reply = crate::launcher::takeover_request(
+                    &offer.socket,
+                    clarp_shim::Request::ConsumeHold {
+                        fence: held.spool,
+                        replaced_by: offer.into.0,
+                    },
+                );
+                let now = self.setup.clock.now_ms();
+                let out = match reply.and_then(|reply| reply.killed) {
+                    Some(true) => actor.finish_takeover(offer.from, now)?,
+                    Some(false) => {
+                        actor.clear_takeover(offer.from, now)?;
+                        release();
+                        Outputs::default()
+                    }
+                    None => actor.spool_changed(now)?,
+                };
+                (out, nobody())
+            }
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::TerminalFacts { answer } => {
@@ -3788,11 +3911,18 @@ impl Worker {
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
+        let directory = queue_edit.as_ref().and_then(|_| hub.queue_directory());
+        let name = |item: &Waiting| wire::queue_sender_name(item, directory.as_deref());
         let update = match &queue_edit {
-            Some(QueueEdit::Edited { client_id, text }) => {
-                Some(wire::QueueUpdate::Edited { client_id, text })
-            }
-            Some(QueueEdit::Deleted(client_id)) => Some(wire::QueueUpdate::Deleted(client_id)),
+            Some(QueueEdit::Edited { item, text }) => Some(wire::QueueUpdate::Edited {
+                item,
+                text,
+                sender_name: name(item),
+            }),
+            Some(QueueEdit::Deleted(item)) => Some(wire::QueueUpdate::Deleted {
+                item,
+                sender_name: name(item),
+            }),
             None if (held_or_let_go && !told_with_its_turn) || taken_back => {
                 Some(wire::QueueUpdate::Mailbox)
             }
@@ -4136,6 +4266,7 @@ fn refuse_for(
             ) => drop(answer.send(Err(refusal()))),
             Ok(
                 Ask::SpoolChanged
+                | Ask::TakeoverHeld { .. }
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
