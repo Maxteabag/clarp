@@ -1096,7 +1096,8 @@ def fail_refused_launch(row, *, failures: int, error: str) -> bool:
     """End the queued ``row`` ``failed`` (queued -> failed, as R120's held
     sends) and tell its sender in the conversation the message was sent to,
     by a Host notice. (A peer request's waiting goal is not settled here:
-    peer requests are a feature above this layer; its deadline ends it.)
+    peer requests are a feature above this layer; the agent scheduler's tick
+    settles it from this row and that notice, lib.peer_requests, R136.)
     Returns whether the row moved; a row no longer queued is left as it is
     and nobody is told."""
     from . import agents, message_store
