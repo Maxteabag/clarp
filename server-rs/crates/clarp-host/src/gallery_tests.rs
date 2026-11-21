@@ -64,7 +64,13 @@ fn restart_and_both_republish_orders_leave_the_old_id_gone() {
         check_removed(&store);
         let (kept, changed) = store.delete(&old.asset.asset_id, "later", 99).unwrap();
         assert!(!changed);
-        assert_eq!(kept.deletion.unwrap(), Deletion { at: 18, by: "owner".into() });
+        assert_eq!(
+            kept.deletion.unwrap(),
+            Deletion {
+                at: 18,
+                by: "owner".into()
+            }
+        );
         store.release_due();
         assert_eq!(blobs.len(&name).unwrap(), Some(5));
         store.delete(&new.asset.asset_id, "owner", 100).unwrap();
@@ -79,21 +85,35 @@ fn media_gallery_storage_cost_at_300_and_30000_assets() {
     use std::time::Instant;
 
     fn measure(count: u64) -> [(u128, u128); 3] {
-        let path = std::env::temp_dir().join(format!("clarp-gallery-cost-{}-{count}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("clarp-gallery-cost-{}-{count}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
-        let db = clarp_store_sqlite::SqliteKeyValue.open(&path.join("gallery.db")).unwrap();
-        let blobs = clarp_store_files::FileBlobs.open(&path.join("blobs")).unwrap();
+        let db = clarp_store_sqlite::SqliteKeyValue
+            .open(&path.join("gallery.db"))
+            .unwrap();
+        let blobs = clarp_store_files::FileBlobs
+            .open(&path.join("blobs"))
+            .unwrap();
         let mut store = Store::open(db, blobs).unwrap();
         store.recover(true);
         let halfway = count / 2;
-        store.import((0..count).map(|id| {
-            let at = i64::try_from(id).unwrap();
-            let mut row = image(id, at, "shared");
-            if id < halfway {
-                row.deletion = Some(Deletion { at, by: "owner".into() });
-            }
-            row
-        }).collect()).unwrap();
+        store
+            .import(
+                (0..count)
+                    .map(|id| {
+                        let at = i64::try_from(id).unwrap();
+                        let mut row = image(id, at, "shared");
+                        if id < halfway {
+                            row.deletion = Some(Deletion {
+                                at,
+                                by: "owner".into(),
+                            });
+                        }
+                        row
+                    })
+                    .collect(),
+            )
+            .unwrap();
         let mut samples = [Vec::new(), Vec::new(), Vec::new()];
         for id in 0..100 {
             let stamp = (halfway + (halfway / 2)) as i64;
@@ -104,7 +124,9 @@ fn media_gallery_storage_cost_at_300_and_30000_assets() {
             samples[0].push(t.elapsed().as_micros());
 
             let t = Instant::now();
-            let page = store.index.deleted("oak", (halfway / 2) as i64, 40, count as i64);
+            let page = store
+                .index
+                .deleted("oak", (halfway / 2) as i64, 40, count as i64);
             assert_eq!(std::hint::black_box(page.deleted).len(), 40);
             samples[1].push(t.elapsed().as_micros());
 
@@ -126,7 +148,10 @@ fn media_gallery_storage_cost_at_300_and_30000_assets() {
 
     let small = measure(300);
     let large = measure(30_000);
-    for (name, from, to) in ["gallery page", "tombstones", "delete"].into_iter().zip(small).zip(large)
+    for (name, from, to) in ["gallery page", "tombstones", "delete"]
+        .into_iter()
+        .zip(small)
+        .zip(large)
         .map(|((name, from), to)| (name, from, to))
     {
         eprintln!("media {name}, 300 -> 30000, median and p90 (us): {from:?} -> {to:?}");
