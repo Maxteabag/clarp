@@ -151,6 +151,18 @@
       "event": {
         "type": "stream_event",
         "event": {
+          "delta": {
+            "type": "signature_delta"
+          }
+        }
+      },
+      "output": false
+    },
+    {
+      "provider": "claude",
+      "event": {
+        "type": "stream_event",
+        "event": {
           "content_block": {
             "type": "text"
           }
