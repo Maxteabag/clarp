@@ -726,6 +726,10 @@ impl MediaBook {
         images
     }
 
+    pub fn assets(&self) -> impl Iterator<Item = &Asset> {
+        self.assets.iter()
+    }
+
     pub fn len(&self) -> usize {
         self.assets.len()
     }
