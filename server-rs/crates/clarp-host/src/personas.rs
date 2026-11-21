@@ -298,17 +298,16 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
         };
         // Its bytes are kept once more under the name an agent's picture is kept by, so
         // that a portrait is found there whatever file it was chosen from.
-        let (from, blobs) = (asset.blob(), app.blobs.clone());
         let to = picture_name(&asset.sha256);
-        let copied = tokio::task::spawn_blocking(move || {
-            let Some(size) = blobs.len(&from)? else {
-                return Ok(false);
-            };
-            let size = usize::try_from(size).unwrap_or(usize::MAX);
-            let bytes = blobs.read(&from, 0, size)?;
-            blobs.put(&to, &bytes).map(|()| true)
-        });
-        if !matches!(copied.await, Ok(Ok(true))) {
+        let id = asset.asset_id.clone();
+        let size = usize::try_from(asset.bytes).unwrap_or(usize::MAX);
+        let blobs = app.blobs.clone();
+        let copied = app.gallery.ask(move |store| {
+            let bytes = store.read(&id, 0, size)?;
+            blobs.put(&to, &bytes)?;
+            Ok(())
+        }).await;
+        if copied.is_err() {
             return Err(declined(kept::ASSET_GONE));
         }
         let published = Portrait {

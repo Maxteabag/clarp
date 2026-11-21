@@ -115,7 +115,11 @@ pub fn ids(body: &Value) -> Result<Vec<&str>, Refusal> {
         .filter(|ids| (1..=200).contains(&ids.len()))
         .ok_or(Refusal::BadIds)?;
     ids.iter()
-        .map(|id| id.as_str().filter(|id| !id.is_empty()).ok_or(Refusal::BadIds))
+        .map(|id| {
+            id.as_str()
+                .filter(|id| !id.is_empty())
+                .ok_or(Refusal::BadIds)
+        })
         .collect()
 }
 
@@ -131,7 +135,11 @@ pub fn deletion_query(since: &str, limit: &str) -> Result<(i64, usize), Refusal>
     } else {
         limit.trim().parse::<i64>().map_err(|_| Refusal::BadLimit)?
     };
-    let limit = if limit == 0 { 1000 } else { limit.clamp(1, 1000) };
+    let limit = if limit == 0 {
+        1000
+    } else {
+        limit.clamp(1, 1000)
+    };
     Ok((since, usize::try_from(limit).unwrap_or(1000)))
 }
 
@@ -155,7 +163,9 @@ fn cursor(before: &str, favorites: bool) -> Result<Key, Refusal> {
         .ok_or(Refusal::BadBefore)?;
     if id.is_empty()
         || id.chars().count() > 180
-        || !id.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        || !id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
     {
         return Err(Refusal::BadBefore);
     }
@@ -213,7 +223,10 @@ impl Index {
         if let Some(previous) = self.images.remove(&id) {
             self.forget(&previous);
         }
-        let session = self.sessions.entry(image.asset.session.clone()).or_default();
+        let session = self
+            .sessions
+            .entry(image.asset.session.clone())
+            .or_default();
         let is_gallery = !image.asset.named_only && is_image(&image.asset.mime_type);
         if let Some(deletion) = &image.deletion {
             self.deleted.insert((deletion.at, id.clone()));
@@ -260,10 +273,16 @@ impl Index {
         before: &str,
         limit: usize,
     ) -> Result<Page<'_>, Refusal> {
-        let before = (!before.is_empty()).then(|| cursor(before, favorites)).transpose()?;
+        let before = (!before.is_empty())
+            .then(|| cursor(before, favorites))
+            .transpose()?;
         let empty = Session::default();
         let session = self.sessions.get(session).unwrap_or(&empty);
-        let order = if favorites { &session.favorites } else { &session.images };
+        let order = if favorites {
+            &session.favorites
+        } else {
+            &session.images
+        };
         let end = before.map_or(Unbounded, Excluded);
         let mut range = order.range((Unbounded, end)).rev();
         let limit = limit.clamp(1, 500);
@@ -274,7 +293,11 @@ impl Index {
             .collect();
         let next_before = rows.last().and_then(|last| {
             range.next()?;
-            let at = if favorites { last.favorite_at? } else { last.asset.created_at };
+            let at = if favorites {
+                last.favorite_at?
+            } else {
+                last.asset.created_at
+            };
             Some(format!("{}{at}.{}", tag(favorites), last.asset.asset_id))
         });
         Ok(Page {
@@ -291,11 +314,12 @@ impl Index {
             next_since: None,
             server_now: now.saturating_sub(1),
         };
-        let empty = Order::new();
         let order = if session.is_empty() {
             &self.deleted
+        } else if let Some(session) = self.sessions.get(session) {
+            &session.deleted
         } else {
-            self.sessions.get(session).map_or(&empty, |session| &session.deleted)
+            return page;
         };
         let Some(first) = since.checked_add(1) else {
             return page;

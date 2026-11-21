@@ -55,6 +55,8 @@ pub struct Store {
     db: Box<dyn KeyValue>,
     blobs: Arc<dyn Blobs>,
     pending: BTreeSet<String>,
+    due: BTreeSet<String>,
+    reclaim: bool,
 }
 
 impl Store {
@@ -65,8 +67,19 @@ impl Store {
                 .map_err(|why| Failure::Store(format!("bad kept media row: {why}")))?;
             index.apply(image);
         }
-        let pending = db.list(REMOVALS)?.into_iter().map(|(name, _)| name).collect();
-        Ok(Self { index, db, blobs, pending })
+        let pending = db
+            .list(REMOVALS)?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        Ok(Self {
+            index,
+            db,
+            blobs,
+            pending,
+            due: BTreeSet::new(),
+            reclaim: false,
+        })
     }
 
     fn record(image: &Image) -> Result<Write, Failure> {
@@ -86,7 +99,10 @@ impl Store {
                 pending.push(image);
             }
         }
-        let writes = pending.iter().map(Self::record).collect::<Result<Vec<_>, _>>()?;
+        let writes = pending
+            .iter()
+            .map(Self::record)
+            .collect::<Result<Vec<_>, _>>()?;
         if !writes.is_empty() {
             self.db.put_together(&writes)?;
         }
@@ -99,6 +115,37 @@ impl Store {
     /// Takes bytes and records an ID on the same writer that can unlink the bytes.
     /// The journal delivery is owed in the same atomic decision as the gallery row.
     pub fn publish(&mut self, image: Image, bytes: &[u8]) -> Result<(Image, bool), Failure> {
+        let (canonical, replace, writes) = self.publication(&image)?;
+        self.blobs.put(&canonical.asset.blob(), bytes)?;
+        self.db.put_together(&writes)?;
+        self.index.apply(canonical.clone());
+        Ok((canonical, replace))
+    }
+
+    /// A generated pair enters the gallery together. A replay skips an ID that was deleted.
+    pub fn publish_pair(&mut self, assets: [(Image, Vec<u8>); 2]) -> Result<(), Failure> {
+        let mut accepted = Vec::new();
+        let mut writes = Vec::new();
+        for (image, bytes) in assets {
+            let (canonical, _, planned) = match self.publication(&image) {
+                Ok(planned) => planned,
+                Err(Failure::Refused(Refusal::Removed(_))) => continue,
+                Err(why) => return Err(why),
+            };
+            self.blobs.put(&canonical.asset.blob(), &bytes)?;
+            writes.extend(planned);
+            accepted.push(canonical);
+        }
+        if !writes.is_empty() {
+            self.db.put_together(&writes)?;
+        }
+        for image in accepted {
+            self.index.apply(image);
+        }
+        Ok(())
+    }
+
+    fn publication(&self, image: &Image) -> Result<(Image, bool, [Write; 2]), Failure> {
         let id = &image.asset.asset_id;
         let existing = self.index.get(id);
         if let Some(known) = existing {
@@ -118,15 +165,10 @@ impl Store {
         if let Some(known) = existing {
             canonical.favorite_at = known.favorite_at;
         }
-        self.blobs.put(&canonical.asset.blob(), bytes)?;
-        let delivery = serde_json::to_vec(&image).map_err(|why| Failure::Store(why.to_string()))?;
+        let delivery = serde_json::to_vec(image).map_err(|why| Failure::Store(why.to_string()))?;
         let key = Self::delivery_key(&image.agent_id, id);
-        self.db.put_together(&[
-            Self::record(&canonical)?,
-            (PUBLICATIONS.to_owned(), key, Some(delivery)),
-        ])?;
-        self.index.apply(canonical.clone());
-        Ok((canonical, replace))
+        let writes = [Self::record(&canonical)?, (PUBLICATIONS.to_owned(), key, Some(delivery))];
+        Ok((canonical, replace, writes))
     }
 
     fn delivery_key(agent_id: &str, asset_id: &str) -> String {
@@ -134,7 +176,8 @@ impl Store {
     }
 
     pub fn delivered(&mut self, agent_id: &str, asset_id: &str) -> Result<(), Failure> {
-        self.db.delete(PUBLICATIONS, &Self::delivery_key(agent_id, asset_id))?;
+        self.db
+            .delete(PUBLICATIONS, &Self::delivery_key(agent_id, asset_id))?;
         Ok(())
     }
 
@@ -142,11 +185,18 @@ impl Store {
         self.db
             .list(PUBLICATIONS)?
             .into_iter()
-            .map(|(_, raw)| serde_json::from_slice(&raw).map_err(|why| Failure::Store(why.to_string())))
+            .map(|(_, raw)| {
+                serde_json::from_slice(&raw).map_err(|why| Failure::Store(why.to_string()))
+            })
             .collect()
     }
 
-    pub fn favorite(&mut self, id: &str, favorite: bool, now: i64) -> Result<(Image, bool), Failure> {
+    pub fn favorite(
+        &mut self,
+        id: &str,
+        favorite: bool,
+        now: i64,
+    ) -> Result<(Image, bool), Failure> {
         let current = self.index.get(id).ok_or(Refusal::Unknown)?;
         let Some(updated) = current.favorite(favorite, now)? else {
             return Ok((current.clone(), false));
@@ -159,6 +209,7 @@ impl Store {
     pub fn delete(&mut self, id: &str, by: &str, now: i64) -> Result<(Image, bool), Failure> {
         let current = self.index.get(id).ok_or(Refusal::Unknown)?;
         let Some(updated) = current.delete(by, now)? else {
+            self.due.insert(current.asset.blob());
             return Ok((current.clone(), false));
         };
         let blob = updated.asset.blob();
@@ -167,6 +218,7 @@ impl Store {
             (REMOVALS.to_owned(), blob.clone(), Some(Vec::new())),
         ])?;
         self.index.apply(updated.clone());
+        self.due.insert(blob.clone());
         self.pending.insert(blob);
         Ok((updated, true))
     }
@@ -185,11 +237,26 @@ impl Store {
         Ok(())
     }
 
-    pub fn recover(&mut self) -> Result<(), Failure> {
-        for name in self.pending.clone() {
-            self.release(&name)?;
+    pub fn recover(&mut self, safe: bool) {
+        self.reclaim = safe;
+        self.due.extend(self.pending.iter().cloned());
+    }
+
+    fn release_due(&mut self) {
+        for name in std::mem::take(&mut self.due) {
+            if self.reclaim && let Err(why) = self.release(&name) {
+                eprintln!("clarp-host: gallery removal remains pending: {}", why.words());
+            }
         }
-        Ok(())
+    }
+
+    pub fn content(&self, id: &str) -> Result<(Image, u64), Failure> {
+        let image = self.index.get(id).ok_or(Refusal::Unknown)?;
+        if let Some(deletion) = &image.deletion {
+            return Err(Refusal::Removed(deletion.at).into());
+        }
+        let total = self.blobs.len(&image.asset.blob())?.ok_or(Refusal::Unknown)?;
+        Ok((image.clone(), total))
     }
 
     /// Gate each streamed chunk on the same record as a content request. A tombstone never
@@ -213,11 +280,14 @@ pub struct Writer {
 impl Writer {
     pub fn start(mut store: Store) -> Result<Self, std::io::Error> {
         let (send, mut read) = mpsc::channel::<Work>(QUEUE);
-        std::thread::Builder::new().name("clarp-gallery".to_owned()).spawn(move || {
-            while let Some(work) = read.blocking_recv() {
-                work(&mut store);
-            }
-        })?;
+        std::thread::Builder::new()
+            .name("clarp-gallery".to_owned())
+            .spawn(move || {
+                while let Some(work) = read.blocking_recv() {
+                    work(&mut store);
+                    store.release_due();
+                }
+            })?;
         Ok(Self { send })
     }
 
@@ -244,3 +314,8 @@ impl Writer {
             .map_err(|_| Failure::Stopped)?
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[path = "gallery_tests.rs"]
+mod tests;
