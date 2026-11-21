@@ -1216,8 +1216,9 @@ or re-read by `asset_id`, never append.
 
 **Who may.** A full device and the administrator. A limited device is refused the three
 writes with `403 full device access required`; it still reads `GET /media`, new keys
-included. A request carrying a turn token (`X-Clarp-Turn`, an agent's) is refused `403
-{"error": "agents_may_not"}`. Publishing is unchanged.
+included. A request carrying a turn token (`X-Clarp-Turn`, an agent's) or coming from a
+paired peer Host (`X-Clarp-Peer`) is refused `403 {"error": "agents_may_not"}`. Publishing
+is unchanged.
 
 ### Artifact list summaries: `representation=summary-v1`
 
