@@ -337,7 +337,7 @@ impl Desk {
             {
                 return Ok(());
             }
-            inventory.remove(fleet, &self.root, id, true).await?;
+            inventory.remove(fleet, &self.root, id).await?;
         } else if let Some(folder) = super::managed::ManagedFolder::checked(&self.root, id)
             .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?
         {
@@ -406,7 +406,7 @@ impl Desk {
         let mut selected = app.ears.variants.exclusive().await;
         app.ears
             .inventory
-            .remove(&app.fleet, &self.root, id, false)
+            .remove(&app.fleet, &self.root, id)
             .await?;
         self.clean_stage(id)?;
         if selected.as_ref().is_some_and(|(loaded, _)| loaded == id) {

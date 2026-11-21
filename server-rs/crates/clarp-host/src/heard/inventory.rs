@@ -58,7 +58,7 @@ impl Inventory {
                 self.publish(fleet, rows)
                     .await
                     .map_err(|e| format!("clearing pending default model removal: {e:?}"))?;
-            } else if self.remove(fleet, root, id, false).await.is_err() {
+            } else if self.remove(fleet, root, id).await.is_err() {
                 eprintln!("clarp-host: a pending transcription model removal could not finish");
             }
         }
@@ -139,10 +139,9 @@ impl Inventory {
         fleet: &FleetHandle,
         root: &Path,
         id: &str,
-        rollback: bool,
     ) -> Result<(), ApiError> {
         let mut records = self.records().as_ref().clone();
-        let Some(index) = records.iter().position(|r| r["id"] == id) else {
+        let Some(index) = rules::removal_index(&records, id) else {
             let unreadable = self
                 .0
                 .read()
@@ -155,9 +154,6 @@ impl Inventory {
         };
         let record = &records[index];
         let pending = record["_remove_pending"] == true;
-        if !rollback && !pending && installed_path(record).is_none() {
-            return Ok(());
-        }
         if let Some(stored) = record.get("_managed_root") {
             let folder = super::managed::ManagedFolder::checked(root, id)
                 .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
