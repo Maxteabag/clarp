@@ -453,6 +453,24 @@ NOT_YET = {
         'fields': ('last_compaction',),
         'events': (),
     },
+    # What an agent sounds like and how it is heard, as the Host resolves them (the Python Host's
+    # PR 485, its contract 109): `voice_profile` on an agent's row of the snapshot, on the
+    # creation answer and on the roster's events; `voice_defaults` and `voice_profile_version` on
+    # the snapshot's head; and the two kinds of roster event that only carry it (`voice-changed`
+    # for one agent, `voice-profile` for a change of the whole Host). An event is named here by
+    # its type and kind. The port to the Rust Host is owed; its contract stays 106 until it lands.
+    'voice_profile': {
+        'fields': ('voice_profile', 'voice_defaults', 'voice_profile_version'),
+        'events': ('agent-roster/voice-changed', 'agent-roster/voice-profile'),
+    },
+    # Why a reply was not spoken (`reason`, `provider` and `trace_id` on `tts-error`, once a turn,
+    # also when no provider had a voice for the agent; the same PR): no scenario of the corpus
+    # has a reply that is not spoken, and those names are too common to be left out everywhere,
+    # so nothing is left out for it. The port is owed with the one above.
+    'speech_outcome': {
+        'fields': (),
+        'events': (),
+    },
 }
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
@@ -934,7 +952,7 @@ def core(raw: dict) -> dict:
     for frame in raw['sse']:
         data = frame.get('data')
         if isinstance(data, dict):
-            if data.get('type') in NOT_YET_EVENTS:
+            if data.get('type') in NOT_YET_EVENTS or f"{data.get('type')}/{data.get('kind')}" in NOT_YET_EVENTS:
                 continue
             data = without_features(data)
             if data.get('type') == 'server-version' and 'version' in data:
