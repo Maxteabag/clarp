@@ -58,6 +58,9 @@ PERSISTENCE = frozenset({
 PERSISTENCE_PACKAGES = ("lib.persistence",)
 CORE = frozenset({f"lib.{m}" for m in (
     'backend_catalogue',
+    # The moved mark (an agent moved to another Host): a table read every door that
+    # starts a turn makes in the dispatcher's admission; it imports only lib.db.
+    'agent_moves',
     'agent_store',
     'agents',
     'backends',
