@@ -156,6 +156,11 @@ class LiveExplainer:
             tool = (op.get("item") or {}).get("tool")
             if not isinstance(tool, dict) or not (tool.get("name") or tool.get("command")):
                 continue
+            from .tool_explanation_shapes import lacks_command
+            if lacks_command(self._activity(tool)):
+                # A shell tool's item before its input arrives names itself as its command
+                # (`Bash`): nothing to explain yet. Its upsert with the real command is (R184).
+                continue
             key = f"{tool.get('name')}\0{tool.get('command') or tool.get('label') or ''}"
             item_id = str(op.get("id") or "")
             with self._lock:
