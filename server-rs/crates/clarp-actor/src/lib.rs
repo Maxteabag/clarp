@@ -68,8 +68,8 @@ pub mod conversation;
 pub mod deliveries;
 pub mod helper_cells;
 pub mod provider_jobs;
-pub mod takeover;
 mod steering;
+pub mod takeover;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
@@ -3841,7 +3841,9 @@ impl Actor {
             }),
         });
         if self.backend.id() == "claude" && !bare && opening.is_none() {
-            launch.args.push(clarp_kernel::steering::REPLAY_USER_MESSAGES.to_owned());
+            launch
+                .args
+                .push(clarp_kernel::steering::REPLAY_USER_MESSAGES.to_owned());
         }
         let stdin_file = self.profile.stdin_path_of(turn, attempt);
         write_whole(&stdin_file, &launch.stdin)?;
@@ -3876,7 +3878,11 @@ impl Actor {
             None => (message.id.clone(), None, None, None, None),
         };
         self.live = Some(LiveTurn {
-            steering: steering::State::for_prompt(&self.profile.agent_id, turn, message.trace_id.as_deref()),
+            steering: steering::State::for_prompt(
+                &self.profile.agent_id,
+                turn,
+                message.trace_id.as_deref(),
+            ),
             opening: opening.is_some(),
             managed_model: message.managed_model.clone(),
             turn,
@@ -4002,7 +4008,8 @@ impl Actor {
         let mut calls = Vec::new();
         let mut first_written = HashMap::new();
         let mut signals = Vec::new();
-        let mut steering = steering::State::for_prompt(&self.profile.agent_id, turn, message.trace_id.as_deref());
+        let mut steering =
+            steering::State::for_prompt(&self.profile.agent_id, turn, message.trace_id.as_deref());
         steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
         let mut offset = 0;
         // Those who watch are shown the turn as it stands: its items are made again from the

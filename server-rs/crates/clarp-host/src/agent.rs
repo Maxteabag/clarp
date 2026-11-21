@@ -2568,7 +2568,12 @@ impl Worker {
         };
         let now = self.now_ms();
         if self.setup.record.backend == "claude"
-            && let Ask::Send { message, admission: Admission::Queue, reservation: None, .. } = &ask
+            && let Ask::Send {
+                message,
+                admission: Admission::Queue,
+                reservation: None,
+                ..
+            } = &ask
             && message.origin.is_user()
             && let Some(actor) = self.actor.as_mut()
         {
@@ -2620,7 +2625,10 @@ impl Worker {
                     }
                     let steer = if sent.queued
                         && can_offer_steering
-                        && let Some(uuid) = message.trace_id.as_deref().and_then(clarp_kernel::takeover::prompt_uuid)
+                        && let Some(uuid) = message
+                            .trace_id
+                            .as_deref()
+                            .and_then(clarp_kernel::takeover::prompt_uuid)
                     {
                         actor.steer_active(turn, uuid, &message.text, now)?
                     } else {
