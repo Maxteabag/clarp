@@ -12,13 +12,13 @@
 //! as it is now, with its parts, and carries the revision of the newest of them: it changed
 //! when that part was written, and a client that asks what is newer is given the row again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clarp_kernel::agent::AgentEvent;
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
-use clarp_kernel::journal::{coordination_key, kind};
-use clarp_kernel::turn::{Origin, TurnEvent, left_out_of_chats};
-use clarp_ports::log::{AgentLog, Item, Seq};
+use clarp_kernel::journal::{Batch, coordination_key, kind};
+use clarp_kernel::turn::{Origin, Turn, TurnEvent, TurnId, left_out_of_chats};
+use clarp_ports::log::{AgentLog, Item, NewItem, Seq};
 
 use crate::ActorError;
 
@@ -171,6 +171,13 @@ fn corrupt(item: &Item, error: serde_json::Error) -> ActorError {
 /// Whether a turn answers another agent: its acceptance, found by its key when it was marked
 /// so. One look by key, whatever the size of the conversation.
 pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
+    if mixed(log, turn)? {
+        return Ok(None);
+    }
+    original_mark(log, turn)
+}
+
+fn original_mark(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
     let Some(stored) = log.find(&coordination_key(turn))? else {
         return Ok(None);
     };
@@ -185,13 +192,68 @@ pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorErr
     })
 }
 
+fn mixed_key(turn: u64) -> String {
+    format!("coordination-mixed-{turn}")
+}
+
+fn restamp_key(id: &str) -> String {
+    format!("coordination-row-{id}")
+}
+
+pub(super) fn mixed(log: &dyn AgentLog, turn: u64) -> Result<bool, ActorError> {
+    Ok(log
+        .find(&mixed_key(turn))?
+        .is_some_and(|item| item.kind == kind::MIXED_TURN))
+}
+
+/// Show a marked turn once a user is heard in it. New revisions let a client read the old
+/// rows again without writing a second message or moving any existing row.
+pub(super) fn loosen(batch: &mut Batch<'_>, turn: TurnId, at: i64) -> Result<bool, ActorError> {
+    if mark_of(batch.log(), turn.0)?.is_none() {
+        return Ok(false);
+    }
+    let Some(message_seq) = (match batch.agent().live() {
+        Some(Turn::Starting(live)) if live.id == turn => Some(live.message_seq),
+        Some(Turn::Running(live)) if live.id == turn => Some(live.message_seq),
+        _ => None,
+    }) else {
+        return Ok(false);
+    };
+    let mut after = message_seq.saturating_sub(1);
+    let mut stamped = HashSet::new();
+    loop {
+        let rows = batch.log().read_after(after, kind::ROWS, CHUNK)?;
+        let Some(last) = rows.last() else { break };
+        after = last.seq;
+        for row in rows.iter().filter(|row| row.turn == Some(turn.0)) {
+            let Some(entry) = Entry::from_item(row).map_err(|error| corrupt(row, error))? else {
+                continue;
+            };
+            let id = entry.id();
+            if stamped.insert(id.to_owned()) {
+                batch.item(
+                    NewItem::new(kind::AUDIENCE_ROW, at, id.as_bytes().to_vec())
+                        .in_turn(turn.0)
+                        .keyed(restamp_key(id)),
+                );
+            }
+        }
+    }
+    batch.item(
+        NewItem::new(kind::MIXED_TURN, at, Vec::new())
+            .in_turn(turn.0)
+            .keyed(mixed_key(turn.0)),
+    );
+    Ok(true)
+}
+
 /// Reads rows as they are now: each with the parts that name it.
 struct Reader<'a> {
     log: &'a dyn AgentLog,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
     /// Whether the turns asked about answer another agent ([`mark_of`]).
-    marks: HashMap<u64, Option<String>>,
+    marks: HashMap<u64, (Option<String>, bool)>,
 }
 
 impl<'a> Reader<'a> {
@@ -204,11 +266,19 @@ impl<'a> Reader<'a> {
     }
 
     /// Whether this turn answers another agent: looked up once per turn.
-    fn mark(&mut self, turn: u64) -> Result<Option<String>, ActorError> {
+    fn mark(&mut self, turn: u64) -> Result<(Option<String>, bool), ActorError> {
         if let Some(known) = self.marks.get(&turn) {
             return Ok(known.clone());
         }
-        let found = mark_of(self.log, turn)?;
+        let loosened = mixed(self.log, turn)?;
+        let found = (
+            if loosened {
+                None
+            } else {
+                original_mark(self.log, turn)?
+            },
+            loosened,
+        );
         self.marks.insert(turn, found.clone());
         Ok(found)
     }
@@ -285,7 +355,14 @@ impl<'a> Reader<'a> {
             }
         }
         if let Some(turn) = row.turn_number {
-            row.coordination = self.mark(turn)?;
+            let (marked, loosened) = self.mark(turn)?;
+            row.coordination = marked;
+            if loosened
+                && let Some(restamp) = self.log.find(&restamp_key(row.entry.id()))?
+                && restamp.kind == kind::AUDIENCE_ROW
+            {
+                newest = newest.max(restamp.seq);
+            }
         }
         if let Some(turn) = row.turn_number
             && let Some((end, seq)) = self.end(turn)?
@@ -329,6 +406,14 @@ fn rows(
     let mut reader = Reader::new(log);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
+        if item.kind == kind::AUDIENCE_ROW {
+            if place == Place::Newest {
+                let id = String::from_utf8_lossy(&item.body);
+                found.retain(|r| r.entry.id() != id.as_ref());
+                found.extend(reader.stored(&id, which)?);
+            }
+            continue;
+        }
         if let Some(id) = super::helper_cells::parent(item)? {
             if place == Place::Newest {
                 found.retain(|r| r.entry.id() != id);
@@ -613,6 +698,90 @@ pub(crate) fn delegation_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn revealing_a_turn_sends_its_old_rows_through_a_delta() {
+        use clarp_kernel::conversation::Message;
+        use clarp_kernel::journal::{Incoming, Recorder};
+        use clarp_kernel::turn::Admission;
+        use clarp_ports::log::LogEngine;
+        use std::path::Path;
+
+        let engine = clarp_store_mem::MemEngine::new();
+        let log = engine
+            .open(
+                Path::new("/agents/recipient"),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
+            .unwrap();
+        let mut recorder = Recorder::open(log).unwrap();
+        let message = Message {
+            id: "u-request".into(),
+            text: "Look at this".into(),
+            origin: Origin::Agent {
+                agent_id: "sender".into(),
+            },
+            ..Message::default()
+        };
+        recorder
+            .accept_message(
+                Incoming {
+                    key: Some(message.id.clone()),
+                    body: serde_json::to_vec(&message).unwrap(),
+                    origin: message.origin.clone(),
+                    admission: Admission::Queue,
+                    coordination: Some("sender".into()),
+                },
+                100,
+            )
+            .unwrap();
+        let mut batch = recorder.batch();
+        let reply = Entry::Reply(Reply {
+            id: "assistant-row".into(),
+            turn: 1,
+            text: "Using a tool".into(),
+            ..Reply::default()
+        });
+        batch.item(reply.to_item(200).unwrap());
+        batch.commit().unwrap();
+        let cursor = recorder.conversation_seq() * REVISION_STEP;
+        assert_eq!(
+            mark_of(recorder.log(), 1).unwrap().as_deref(),
+            Some("sender")
+        );
+
+        let mut batch = recorder.batch();
+        assert!(loosen(&mut batch, TurnId(1), 300).unwrap());
+        batch.commit().unwrap();
+        let span = Span {
+            floor: 0,
+            head_revision: recorder.conversation_seq() * REVISION_STEP,
+        };
+        let first = after(recorder.log(), cursor, &[], span, 1, Which::All).unwrap();
+        assert!(first.has_more);
+        assert_eq!(first.entries[0].entry.id(), "u-request");
+        assert_eq!(first.entries[0].ts_ms, 100);
+        assert!(first.entries[0].coordination.is_none());
+        let next = after(
+            recorder.log(),
+            first.latest_revision,
+            &[],
+            span,
+            1,
+            Which::All,
+        )
+        .unwrap();
+        assert!(!next.has_more);
+        assert_eq!(next.entries[0].entry.id(), "assistant-row");
+        assert_eq!(next.entries[0].ts_ms, 200);
+        assert!(next.entries[0].coordination.is_none());
+        assert_eq!(
+            original_mark(recorder.log(), 1).unwrap().as_deref(),
+            Some("sender")
+        );
+        assert!(!loosen(&mut recorder.batch(), TurnId(1), 400).unwrap());
+    }
 
     #[test]
     fn a_reader_is_told_its_conversation_ended_above_the_head_and_at_or_below_where_it_begins() {

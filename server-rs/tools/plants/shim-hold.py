@@ -124,8 +124,8 @@ PLANTS = [
     (MAIN, 'unit-count', 'the half line of standard error is told as the output', '                        partial_err: err.partial.load(Ordering::SeqCst) as u64,', '                        partial_err: out.partial.load(Ordering::SeqCst) as u64,'),
     (MAIN, 'half', 'a pump does not say what it holds of a line', '            printed.partial.store(held.len(), Ordering::SeqCst);', '            printed.partial.store(0, Ordering::SeqCst);'),
     (MAIN, 'half', 'a pump whose pipe closed still says it holds a line', '                printed.partial.store(0, Ordering::SeqCst);', '                printed.partial.store(held.len(), Ordering::SeqCst);'),
-    (MAIN, 'half', 'standard error is not taken a turn at a time', '            pump(stderr, &to_spool, Entry::Err, errors.as_deref());', '            pump(stderr, &to_spool, Entry::Err, None);'),
-    (MAIN, 'half', 'standard output is not taken a turn at a time', '            pump(stdout, &to_spool, Entry::Out, printed.as_deref());', '            pump(stdout, &to_spool, Entry::Out, None);'),
+    (MAIN, 'half', 'standard error is not taken a turn at a time', '            pump(stderr, &to_spool, Entry::Err, errors.as_deref(), None);', '            pump(stderr, &to_spool, Entry::Err, None, None);'),
+    (MAIN, 'half', 'standard output is not taken a turn at a time', '            pump(stdout, &to_spool, Entry::Out, printed.as_deref(), close);', '            pump(stdout, &to_spool, Entry::Out, None, close);'),
 
     # The answer.
     (MAIN, 'unit-ended', 'a hold ended while it counted answers with its count', '            (_, Hold::Ended) => Reply::failed(ENDED_WHILE_HELD),\n', ''),
