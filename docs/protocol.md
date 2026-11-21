@@ -374,6 +374,14 @@ Rules:
   in the transcript), but a client never parses them: compare ids for equality
   only. A row of a provider message keeps its id when the transcript's lines
   shift; a positional `msg-` id changes with its line's position.
+- **The other agents a row names are the roster's.** The other agents a row
+  names (`sender_name` and `sender_session` by `sender_agent_id`,
+  `reply_to_name` and `reply_to_session` by `reply_to_agent_id`) are the
+  roster's at the moment of reading. They change without the row's revision
+  moving: a follower learns of a rename or a removal from the roster's events,
+  not from the row. A removed or archived agent is named as it was last, until
+  a new agent is created under the removed one's session name: the new agent
+  takes over its id, and the old rows then carry the new name.
 - **`latest_revision` is the cursor.** Store it with the conversation and pass
   it back as `after_revision` on the next delta. After a delta, set the cursor
   to the response's `latest_revision`, which never exceeds the rows actually
