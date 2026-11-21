@@ -251,6 +251,7 @@ class Events(replay.SSE):
         self.frames, self.errors = [], []
         self.ended = False
         self.last_at = time.monotonic()
+        self.last_answer_at = self.last_at
         self._lock = threading.Lock()
         self._stop = threading.Event()
         asked = '/events' if live is None else '/events?live=' + ','.join(live)
@@ -349,8 +350,9 @@ def run_step(host, events, step, http, variables, clock=None):
         asked_at = int(time.time() * 1000)
         # A step may send a body as it is instead of JSON (`raw`: its text and its declared type):
         # a file an agent publishes.
-        replay._record(named, host.request(op.upper(), path, body, step.get('raw'), step.get('headers')),
-                       http, variables)
+        answer = host.request(op.upper(), path, body, step.get('raw'), step.get('headers'))
+        events.last_answer_at = time.monotonic()
+        replay._record(named, answer, http, variables)
         if clock is not None:
             clock.read(http[-1], asked_at)
     elif op == 'wait_reply':
@@ -420,7 +422,9 @@ def capture(make_host, scenario, root: Path) -> dict:
                 run_step(host, events, step, http, variables, clock)
             except replay.StepFailed as exc:
                 raise replay.StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
-        replay._poll('the stream quiet', lambda: time.monotonic() - events.last_at >= replay.QUIET_S)
+        # An HTTP answer can reach the recorder before the stream events that request caused.
+        replay._poll('the stream quiet',
+                     lambda: time.monotonic() - max(events.last_at, events.last_answer_at) >= replay.QUIET_S)
     except replay.StepFailed as exc:
         error = str(exc)
     except OSError as exc:
