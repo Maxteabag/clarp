@@ -385,3 +385,41 @@ def test_a_per_agent_override_voice_is_looked_up_too():
                                                  "bo": {"provider": "elevenlabs", "elevenlabs_voice": ELEVEN}})
     used = voice_names.in_use(cfg)
     assert OTHER in used["cartesia"] and ELEVEN in used["elevenlabs"]
+
+
+# ---------------------------------------------------------------- Cartesia's real row shape (21 Nov 2026)
+
+def _api_row(voice_id, language="en", **over):
+    """A catalogue row exactly as Cartesia-Version 2026-08-14 sends it: access and
+    visibility, is_owner, no is_public."""
+    row = {"id": voice_id, "name": voice_id, "language": language, "access": "public",
+           "visibility": "all", "is_owner": False, "is_pro": False, "status": "active",
+           "accents": [], "country": "", "created_at": "", "description": "", "gender": "",
+           "tagline": ""}
+    row.update(over)
+    return row
+
+
+def test_a_row_in_the_real_api_shape_is_public_and_not_owned(names_file):
+    """Live bug (21 Nov): the pool read is_public, which Cartesia never sends, so all 952
+    voices read not public. Ownership fails closed: only is_owner False exactly is not owned."""
+    no_owner_field = _api_row("unknown-owner")
+    no_owner_field.pop("is_owner")
+    _refresh(_cfg("cartesia"), names_file, pages=[
+        _api_row("public-en"), _api_row("private", access="private", visibility="owner"),
+        _api_row("owned", is_owner=True), no_owner_field, _api_row("old-style", is_public=True)])
+    rows = voice_names.catalogue("cartesia")
+    assert rows["public-en"] == {"language": "en", "public": True, "owner": False}
+    assert rows["private"]["public"] is False
+    assert rows["owned"]["owner"] is True and rows["unknown-owner"]["owner"] is True
+    assert json.loads(names_file.read_text())["_format"] == voice_names.FORMAT
+
+
+def test_a_file_from_the_old_format_is_refreshed_at_the_next_start(names_file):
+    """The files written before this fix hold every voice as not public; they are younger than
+    a day, so without the format mark the pool would stay on the built-in list until tomorrow."""
+    names_file.write_text(json.dumps({"cartesia": {}, "_catalogue": {"cartesia": {
+        "v1": {"language": "en", "public": False, "owner": False}}}}))
+    assert voice_names.start_due() is True                          # format 1, written just now
+    _refresh(_cfg("cartesia"), names_file, pages=[_api_row("v1")])
+    assert voice_names.start_due() is False
