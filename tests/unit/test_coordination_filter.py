@@ -285,7 +285,8 @@ def test_an_ordinary_chat_under_hide_reads_its_counts_in_a_few_statements_whatev
     finally:
         con.set_trace_callback(None)
     assert len(answer["turns"]) == 100 and "hidden_after" not in answer
-    assert len([s for s in seen if "CASE WHEN" in s]) <= 2, len(seen)
+    counts = [s for s in seen if "AS counted" in s]
+    assert 1 <= len(counts) <= 2, counts        # the first row's gap and what follows the newest row
 
 
 def test_a_gap_found_by_the_page_keys_is_still_counted(chat):
