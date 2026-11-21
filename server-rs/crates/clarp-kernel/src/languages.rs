@@ -122,15 +122,17 @@ pub fn selected(text: Option<&str>, otherwise: &str) -> String {
     }
 }
 
-/// An agent's own entry in a map: under its name, its persona or its session, in that order.
+/// An agent's own entry in a map: under its ID, name, persona or session, in that order.
 pub fn of_agent<'a>(entries: &'a [(String, String)], who: Who<'_>) -> Option<&'a str> {
-    [who.name, who.persona, who.session].iter().find_map(|key| {
-        let key = strip(key).to_lowercase();
-        let found = entries
-            .iter()
-            .find(|(known, _)| !key.is_empty() && *known == key);
-        found.map(|(_, value)| value.as_str())
-    })
+    [who.agent_id, who.name, who.persona, who.session]
+        .iter()
+        .find_map(|key| {
+            let key = strip(key).to_lowercase();
+            let found = entries
+                .iter()
+                .find(|(known, _)| !key.is_empty() && *known == key);
+            found.map(|(_, value)| value.as_str())
+        })
 }
 
 fn named_engines(value: &str) -> impl Iterator<Item = &str> {
@@ -170,6 +172,15 @@ pub fn engines_changed(
     change: &Value,
     is_valid: &dyn Fn(&str) -> bool,
 ) -> Result<String, String> {
+    engines_changed_for(kept_now, change, is_valid, |_| Vec::new())
+}
+
+pub fn engines_changed_for(
+    kept_now: Option<&str>,
+    change: &Value,
+    is_valid: &dyn Fn(&str) -> bool,
+    ids_for: impl Fn(&str) -> Vec<String>,
+) -> Result<String, String> {
     let Value::Object(change) = change else {
         return Err("agent_engines must be an object of agent -> engine".to_string());
     };
@@ -192,6 +203,9 @@ pub fn engines_changed(
             }
             _ => return Err(unknown()),
         };
+        for agent_id in ids_for(&name) {
+            set_entry(&mut entries, agent_id, named.clone());
+        }
         set_entry(&mut entries, name, named);
     }
     Ok(kept(entries))
@@ -200,6 +214,14 @@ pub fn engines_changed(
 /// The languages of single agents after a change: `{agent: language}`, where nothing or an
 /// empty text takes an agent's entry away.
 pub fn languages_changed(kept_now: Option<&str>, change: &Value) -> Result<String, String> {
+    languages_changed_for(kept_now, change, |_| Vec::new())
+}
+
+pub fn languages_changed_for(
+    kept_now: Option<&str>,
+    change: &Value,
+    ids_for: impl Fn(&str) -> Vec<String>,
+) -> Result<String, String> {
     let Value::Object(change) = change else {
         return Err("agent_languages must be an object of agent -> language".to_string());
     };
@@ -214,6 +236,9 @@ pub fn languages_changed(kept_now: Option<&str>, change: &Value) -> Result<Strin
             Value::String(text) if text.is_empty() => None,
             other => Some(set(other)?),
         };
+        for agent_id in ids_for(&name) {
+            set_entry(&mut entries, agent_id, named.clone());
+        }
         set_entry(&mut entries, name, named);
     }
     Ok(kept(entries))
@@ -249,6 +274,7 @@ mod tests {
     fn an_agent_is_found_under_its_name_its_persona_or_its_session() {
         let entries = stored(Some(r#"{"Koko": "no,en", "mochi-12ab": "pt", "": "x"}"#));
         let who = |name, persona, session| Who {
+            agent_id: "",
             name,
             persona,
             session,

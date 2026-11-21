@@ -72,6 +72,7 @@ impl Telling {
         // acts out a tag of emotion, and any other would read it aloud.
         let tags = self.owner.read().is_some_and(|file| {
             let who = Who {
+                agent_id: &record.agent_id,
                 name: &record.persona,
                 persona: &record.persona,
                 session: &record.session,

@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use clarp_kernel::said::{merge_voice, resolve_voice};
+use clarp_kernel::said::{self, resolve_voice};
 use clarp_kernel::voices::{self, Agent, Speech};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -273,44 +273,45 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
     if session.is_empty() || voice.is_empty() {
         return Err(bad("session and voice_id required"));
     }
-    // Google's voices are a closed list.
-    if provider == "google" && !voices::google_has(voice) {
-        return Err(bad("unknown voice"));
-    }
-    let directory = app.fleet.directory();
-    let Some(member) = directory.by_session(session) else {
-        return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
+    let provider = if provider.is_empty() {
+        said::infer_provider(voice)
+            .unwrap_or(said::ELEVENLABS)
+            .to_owned()
+    } else {
+        provider
     };
-    for other in directory
-        .members
-        .iter()
-        .filter(|other| other.record.session != session)
-    {
-        let stored = Some(other.record.voice_id.as_str());
-        let has = match provider.as_str() {
-            "" => stored.map(str::to_string),
-            provider => resolve_voice(stored, provider),
-        };
-        if has.as_deref() == Some(voice) {
-            let by = match other.record.persona.as_str() {
-                "" => other.record.session.as_str(),
-                name => name,
-            };
-            let taken = json!({ "error": "voice taken", "by": by });
-            return Ok((StatusCode::CONFLICT, Json(taken)).into_response());
+    if provider == "google" {
+        if let Some(code) = app.mouth.google_refusal().await {
+            return Err(ApiError::new(StatusCode::CONFLICT, code));
+        }
+        if !voices::google_has(voice) {
+            return Err(bad("unknown voice"));
         }
     }
-    let stored = Some(member.record.voice_id.as_str());
-    let given = match provider.as_str() {
-        "" => voice.to_string(),
-        provider => merge_voice(stored, provider, voice),
-    };
-    let amended = app
-        .fleet
-        .amend(session.to_string(), Amend::Voice(given))
-        .await?;
-    if amended.is_err() {
+    if app.fleet.directory().by_session(session).is_none() {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
+    }
+    match app
+        .fleet
+        .amend(
+            session.to_string(),
+            Amend::Voice {
+                provider,
+                voice: voice.to_string(),
+            },
+        )
+        .await?
+    {
+        Ok(_) => {}
+        Err(crate::fleet::NotAmended::Occupied { owner, session }) => {
+            let by = if owner.is_empty() { session } else { owner };
+            return Ok((
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "voice taken", "by": by })),
+            )
+                .into_response());
+        }
+        Err(_) => return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent")),
     }
     // Open apps show the voice the agent now speaks with (its profile is added as it is told).
     let changed = json!({ "type": "agent-roster", "kind": "voice-changed", "session": session });

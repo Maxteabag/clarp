@@ -46,6 +46,7 @@ fn cartesia_uses_the_first_language_matched_for_hearing() {
     for case in cases {
         let agent = &case["agent"];
         let who = agent.is_object().then(|| Who {
+            agent_id: "",
             name: agent["name"].as_str().unwrap_or(""),
             persona: agent["persona"].as_str().unwrap_or(""),
             session: agent["session"].as_str().unwrap_or(""),
