@@ -1143,13 +1143,15 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
         rows = prepared.raw_carry_inputs()
         if judged is not None and rows == judged:
             return      # the rows the probe read and found standing, to the last value
+        why: dict = {}
         what = prepared.carry_change(
             expected_prelude, rules=carry_rules, carry=carry, boundary_seq=start_seq,
             source_file=source_file, backend_session_id=backend_session_id,
-            witness=carry_witness, accepted_tail=carry_accepted)
+            witness=carry_witness, accepted_tail=carry_accepted, why=why)
         if what:
             refusal = _TailInvalidated("tail_carry_inputs_changed")
             refusal.what = what
+            refusal.how = why.get("how", "")
             raise refusal
         judged = rows
 
@@ -1252,7 +1254,8 @@ class _ImportPrelude:
                 self.carry_rows, self.oracle_rows)
 
     def carry_change(self, previous, *, rules=frozenset(), carry=None, boundary_seq=0,
-                     source_file="", backend_session_id="", witness=None, accepted_tail=None) -> str:
+                     source_file="", backend_session_id="", witness=None, accepted_tail=None,
+                     why=None) -> str:
         """'' when the rows ``previous`` recorded still stand for the turns
         before the boundary, else what changed (lib.message_carry.changed).
         Every column of every row is compared, through the record's digests;
@@ -1265,7 +1268,7 @@ class _ImportPrelude:
             previous = message_carry.record(previous, **where)
         return message_carry.changed(previous, self.raw_carry_inputs(), rules=rules,
                                      boundary_seq=boundary_seq, witness=witness,
-                                     accepted_tail=accepted_tail, **where)
+                                     accepted_tail=accepted_tail, why=why, **where)
 
     def for_pass(self) -> _ImportPrelude:
         return _ImportPrelude(

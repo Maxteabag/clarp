@@ -51,7 +51,8 @@ def test_the_record_is_the_same_few_hundred_bytes_for_any_number_of_rows():
     small = carry.record(_inputs(rows=[_row("m-1")]), **WHERE)
     large = carry.record(_inputs(rows=[_row(f"m-{n}", text="x" * 2000, seq=n, revision=n)
                                        for n in range(1, 5001)]), **WHERE)
-    assert len(carry.dumps(small)) == len(carry.dumps(large)) - 2 * (len("5000") - len("1")) < 1400
+    # The mark, the base and one row count: the only numbers that grow with the rows.
+    assert len(carry.dumps(small)) == len(carry.dumps(large)) - 3 * (len("5000") - len("1")) < 1400
     assert large["mark"] == large["base"] == 5000
     assert set(large["rows"]) == {"base", "since"}
     assert all(set(part) == set(carry.KINDS) for part in large["rows"].values())
@@ -642,3 +643,57 @@ def test_no_revisions_are_kept_past_the_limit_or_from_a_record_that_had_none(mon
     monkeypatch.setattr(carry, "_RESTAMP_ROWS", 2)
     assert carry.record(before, **WHERE)["restamp"] == {}
     assert _changed(before, after, **stored) == "row_send,row_transcript"
+
+
+# ---- how a refused kind's rows changed (the log's how=) ----------------------------
+
+def _why(before, after, **stored):
+    why = {}
+    recorded = carry.record(before, carry=stored, **WHERE)
+    what = carry.changed(recorded, after, rules=frozenset(carry.RULES), carry=stored,
+                         boundary_seq=5, why=why, **WHERE)
+    return what, why.get("how")
+
+
+def test_a_refused_kind_says_how_its_rows_changed_by_their_count():
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    old = [_row("m-1", revision=1, trace="t1"), _row("m-2", revision=2, seq=1, trace="t2"),
+           _row("n-1", source="note:1", revision=3, seq=-1, trace="t2")]
+    before = _inputs(rows=old)
+    edited = [{**old[0], "text": "edited"}, *old[1:]]
+    rewritten = [{**old[0], "text": "edited", "revision": 9}, *old[1:]]
+    removed = old[1:]
+    appeared = [*old, _row("m-9", revision=2, seq=3)]
+    note = [*old, _row("n-2", source="note:2", revision=9, seq=-2)]
+    assert _why(before, _inputs(rows=edited), **stored) == ("row_transcript", "row_transcript:in_place")
+    assert _why(before, _inputs(rows=rewritten), **stored) == ("row_transcript", "row_transcript:rewritten")
+    assert _why(before, _inputs(rows=removed), **stored) == ("row_transcript", "row_transcript:removed")
+    assert _why(before, _inputs(rows=appeared), **stored) == \
+        ("row_transcript", "row_transcript:old_revision")
+    # A new row of a kind no rule lets through is named, but its old rows stand: no how.
+    assert _why(before, _inputs(rows=note), **stored) == ("row_other", None)
+    assert _why(before, _inputs(rows=old), **stored) == ("", None)
+
+
+def test_rows_rewritten_by_a_turn_that_settled_since_are_told_apart():
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    old = [_row("m-1", revision=1, trace="t1"), _row("n-1", source="note:1", revision=2, seq=-1, trace="t1")]
+    turns = [_turn("t1", 100)]
+    settled = [{**turns[0], "settled_at": 900, "outcome": "completed"}]
+    stamped = [{**row, "tools_json": "[1]", "revision": 9 + n} for n, row in enumerate(old)]
+    what, how = _why(_inputs(turns=turns, rows=old), _inputs(turns=settled, rows=stamped), **stored)
+    assert how == "row_other:rewritten_settled,row_transcript:rewritten_settled"
+    # Not settled since: rewritten, by some other writer.
+    _, how = _why(_inputs(turns=turns, rows=old), _inputs(turns=turns, rows=stamped), **stored)
+    assert how == "row_other:rewritten,row_transcript:rewritten"
+
+
+def test_a_record_without_counts_says_so():
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    old = [_row("m-1", revision=1)]
+    recorded = carry.record(_inputs(rows=old), carry=stored, **WHERE)
+    recorded["counts"] = None
+    why = {}
+    carry.changed(recorded, _inputs(rows=[{**old[0], "text": "x2"}]), rules=frozenset(carry.RULES),
+                  carry=stored, boundary_seq=5, why=why, **WHERE)
+    assert why["how"] == "row_transcript:uncounted"
