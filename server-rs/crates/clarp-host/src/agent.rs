@@ -4356,7 +4356,14 @@ fn tell_work(
         )
     {
         let who = working_with(actor, live, hub);
-        who.tell(&mut state);
+        // State-watcher events identify the audience through the trace on that event.
+        // A reconnect has no trace, but a hidden turn still needs its activity veiled.
+        if state["detail"]["trace_id"]
+            .as_str()
+            .is_some_and(|trace| !trace.is_empty())
+        {
+            who.tell(&mut state);
+        }
         if hub
             .queue_directory()
             .is_none_or(|directory| crate::hidden_coordination::hides(&directory, &record.agent_id))

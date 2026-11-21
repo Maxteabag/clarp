@@ -16504,6 +16504,14 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
         .filter(|event| event["detail"]["action"] == "reconnecting")
         .collect();
     assert_eq!(reconnects.len(), 1, "{reconnects:?}");
+    assert!(reconnects[0].get("audience").is_none(), "{reconnects:?}");
+    assert!(told("agent-state").iter().any(|event| {
+        event["detail"]["trace_id"]
+            .as_str()
+            .is_some_and(|trace| !trace.is_empty())
+            && event["kind"] == "thinking"
+            && event["audience"] == "user"
+    }));
     assert_eq!(
         (&reconnects[0]["kind"], &reconnects[0]["detail"]),
         (
