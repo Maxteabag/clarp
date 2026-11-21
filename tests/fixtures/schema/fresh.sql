@@ -1,4 +1,4 @@
--- user_version 133
+-- user_version 134
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -275,6 +275,9 @@ CREATE INDEX idx_provider_usage_current ON provider_usage_windows(provider_insta
 
 -- index idx_queued_turns_agent_time on queued_turns
 CREATE INDEX idx_queued_turns_agent_time ON queued_turns(agent_id, enqueued_at);
+
+-- index idx_queued_turns_client_msg on queued_turns
+CREATE INDEX idx_queued_turns_client_msg ON queued_turns(client_msg_id);
 
 -- index idx_queued_turns_status_seq on queued_turns
 CREATE INDEX idx_queued_turns_status_seq ON queued_turns(status, queue_seq);

@@ -305,6 +305,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v132(con)
         if version < 133:
             _migrate_to_v133(con)
+        if version < 134:
+            _migrate_to_v134(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1127,6 +1129,14 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v134(con: sqlite3.Connection) -> None:
+    """A queue row by its client message id (R136): the agent scheduler looks up the
+    queue row of every open peer wait each tick, which read the whole table without
+    it. Older code ignores the index, so a rollback needs no down-step."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_queued_turns_client_msg"
+                " ON queued_turns(client_msg_id)")
 
 
 def _migrate_to_v133(con: sqlite3.Connection) -> None:
