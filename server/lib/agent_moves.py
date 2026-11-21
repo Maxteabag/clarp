@@ -47,6 +47,14 @@ def _public(row) -> dict[str, Any] | None:
     return {"to": {"host": row["to_host"], "id": row["to_id"]}, "at": int(row["moved_at"])}
 
 
+def from_row(row) -> dict[str, Any] | None:
+    """The mark from a roster row read with ``agents.list_agents(with_moves=True)``."""
+    if not row.get("moved_to_host"):
+        return None
+    return {"to": {"host": row["moved_to_host"], "id": row["moved_to_id"]},
+            "at": int(row["moved_at"])}
+
+
 def moved(agent_id: str) -> dict[str, Any] | None:
     """``{"to": {"host", "id"}, "at"}`` when the agent moved, else None."""
     if not agent_id:

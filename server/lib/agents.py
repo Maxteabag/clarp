@@ -27,22 +27,31 @@ def _new_agent_id() -> str:
 
 # ---- read paths --------------------------------------------------------
 
-def list_agents() -> list[dict[str, Any]]:
+_LIST_COLUMNS = """a.agent_id, a.persona, a.voice_id, a.cwd, a.session, a.backend, a.created_at,
+               a.model, a.effort, a.mcp_servers, a.heartbeat_enabled,
+               a.dreaming_enabled, a.dreaming_last_local_date, a.muted,
+               a.custom_status, a.avatar_symbol, a.avatar_path, a.personality,
+               a.archived_at, a.is_janitor, a.voice_verbosity,
+               a.parent_agent_id, a.role, a.helper_state, a.helper_completed_at,
+               a.custom_status_at"""
+
+
+def list_agents(*, with_moves: bool = False) -> list[dict[str, Any]]:
     """Every agent not deleted, ARCHIVED ONES INCLUDED (archived_at in the row), oldest first.
     Each row carries agent_id + session. A caller that wants only the agents in use leaves out
-    the rows with archived_at (R109)."""
+    the rows with archived_at (R109). ``with_moves``: each row also carries where the agent
+    moved (moved_to_host, moved_to_id, moved_at; NULL when it did not, lib.agent_moves), in
+    the same statement, for the snapshot."""
     c = conn()
-    rows = c.execute("""
-        SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
-               model, effort, mcp_servers, heartbeat_enabled,
-               dreaming_enabled, dreaming_last_local_date, muted,
-               custom_status, avatar_symbol, avatar_path, personality,
-               archived_at, is_janitor, voice_verbosity,
-               parent_agent_id, role, helper_state, helper_completed_at,
-               custom_status_at
-          FROM agents
-         WHERE deleted_at IS NULL
-         ORDER BY created_at
+    moves = ("""
+               , mv.to_host AS moved_to_host, mv.to_id AS moved_to_id, mv.moved_at AS moved_at
+          FROM agents a LEFT JOIN agent_moves mv ON mv.agent_id = a.agent_id""" if with_moves
+             else """
+          FROM agents a""")
+    rows = c.execute(f"""
+        SELECT {_LIST_COLUMNS}{moves}
+         WHERE a.deleted_at IS NULL
+         ORDER BY a.created_at
     """).fetchall()
     return [dict(r) for r in rows]
 
