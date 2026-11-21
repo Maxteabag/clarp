@@ -1176,7 +1176,9 @@ class ClaudeBackend(Backend):
                 current_text += text
             elif text.startswith(current_text):
                 current_text = text
-            elif current_text and not current_text.endswith(text):
+            elif current_text and current_text.endswith(text):
+                pass    # a block's snapshot at its stop: its deltas are already in the row
+            elif current_text:
                 # Another block's whole text (assistant events, one a block): a paragraph.
                 current_text += text if current_text.endswith("\n\n") else "\n\n" + text
             else:
