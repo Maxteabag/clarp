@@ -5,8 +5,8 @@ BEGIN IMMEDIATE, and the writer is then given away for a moment. A tail's
 transaction begins with reading and hashing the session's rows; on a long
 conversation that alone exceeds the budget, so the tail yielded before it had
 written anything, and whoever was waiting for the writer committed in that
-gap. A foreign commit during a yield refuses the tail's publication, and the
-import after it is a full one.
+gap. A foreign commit during a yield refuses the tail's publication; the
+import after it tails from the checkpoint and frontier the store still holds.
 
 With the switch a tail's budgets count from its first write. Only WHEN the
 writer is given away changes; what the publication fence checks does not.
@@ -88,7 +88,7 @@ def test_a_foreign_commit_in_a_tails_first_yield_is_still_caught(tmp_path, backe
     """One row a batch, and another writer commits in the first gap the tail
     leaves: with the switch that gap comes after the tail's first row instead
     of before it. Either way the fence sees the foreign commit, the tail's
-    rows stand, its frontier is not published and the next import is full."""
+    rows stand and its frontier is not published."""
     with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
         ordinal = world.started(6)
         world.grow(_turn(backend, ordinal))
@@ -113,3 +113,82 @@ def test_a_foreign_commit_in_a_tails_first_yield_is_still_caught(tmp_path, backe
         world.published = True
         world.grow(_turn(backend, ordinal + 2))
         assert world.imported() == ("tail_applied", [])
+
+
+
+def _refused_by(world, backend, ordinal, fault):
+    """A tail that wrote its first row and gave the writer away, while another
+    writer committed (``fault``): its rows stand, its publication is refused."""
+    world.grow(_turn(backend, ordinal))
+    foreign = {**world.faults, fault: True, "yield_at": 1}
+    report = world.actual.tick(world.tick, faults=(
+        {**foreign, "evict": True} if world.state == "evicted" else foreign))
+    assert report["yield_intervention"] == 1
+    world.full.tick(world.tick, faults={**foreign, "yield_before_seq": report["yield_seq"]})
+    world.tick += 1
+    harness.assert_product_equal(world.reference, world.candidate)
+    codes = [(e["event"], e["code"]) for e in report["tail_events"]]
+    assert ("transcriptTailRetention", "checkpoint_foreign_commit_yield") in codes
+    world.published = False
+
+
+@SWITCH
+@BACKENDS
+def test_a_tail_that_wrote_rows_then_yielded_is_followed_by_a_tail(tmp_path, backend, switch):
+    """The foreign commit touched nothing an import reads. The store holds the
+    previous pair; the refused tail's rows stand above its mark. The next
+    import restores the pair, its plan writes each of those rows again exactly
+    as it stands, and it tails, with both lanes' products equal."""
+    with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
+        ordinal = world.started(6)
+        _refused_by(world, backend, ordinal, "settings_on_yield")
+        world.grow(_turn(backend, ordinal + 1))
+        code, changed = world.imported()
+        assert code == "tail_applied", (code, changed)
+
+
+@SWITCH
+@BACKENDS
+def test_a_row_the_plan_does_not_reproduce_still_forces_a_full_import(tmp_path, backend, switch):
+    """Another writer edited a row the refused tail wrote: the transcript does
+    not say it, so the tail's plan would write it again and it is not passed.
+    The import is full, as before this change."""
+    with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
+        ordinal = world.started(6)
+        _refused_by(world, backend, ordinal, "tail_row_on_yield")
+        world.grow(_turn(backend, ordinal + 1))
+        code, changed = world.imported()
+        assert code.startswith("full"), (code, changed)
+
+
+@SWITCH
+@BACKENDS
+def test_a_send_said_before_committed_in_the_yield_still_forces_a_full_import(tmp_path, backend, switch):
+    """The foreign commit was a client send whose words were said before the
+    boundary: the guard refuses it whatever the tail's rows are."""
+    with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
+        ordinal = world.started(6)
+        _refused_by(world, backend, ordinal, "client_on_yield")
+        world.grow(_turn(backend, ordinal + 1))
+        code, changed = world.imported()
+        assert code == "full_carry_inputs_changed" and "send_said_before" in changed, (code, changed)
+
+
+@SWITCH
+@BACKENDS
+def test_a_parked_positional_row_during_a_restore_goes_full_not_failed(tmp_path, backend, switch):
+    """A parked positional row (one left by a pass that never ended) stands while
+    the next import restores after a refused tail. The guard lets it through (a
+    live row with no trace, under the live-rows rule), so the tail's plan runs,
+    and its pass refuses it (``parked_positional_rows``): the import is full, as
+    on main, and never fails."""
+    settings = {**_settings(switch), "carry_live_rows": True}
+    with World(tmp_path, backend, _history(backend), settings=settings) as world:
+        ordinal = world.started(6)
+        _refused_by(world, backend, ordinal, "settings_on_yield")
+        world.message("live-parked", source_file="live:parked", role="assistant", text="a parked copy",
+                      at=9000)
+        world.write("UPDATE messages SET seq=? WHERE message_id='live-parked'", (2 * 10 ** 12 + 1,))
+        world.grow(_turn(backend, ordinal + 1))
+        code, changed = world.imported()        # a raised refusal here would be the failed import
+        assert code.startswith("full"), (code, changed)
