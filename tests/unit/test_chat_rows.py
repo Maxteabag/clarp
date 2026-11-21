@@ -155,9 +155,14 @@ def test_a_wrapper_row_already_stored_is_removed_by_the_next_import(tmp_path, mo
     assert [(m["role"], m["text"]) for m in visible] == [
         ("user", WORDS), ("assistant", "Okay, stopping here.")]
     assert visible[-1]["id"] == reply["id"]
-    # Why that import comes: the files that decide this are part of the version.
-    for name in ("message_text.py", "message_writes.py", "message_context.py"):
-        assert name in transcript_incremental._COMMON_SOURCES
+    # Why that import comes. A change to the wrapper rule in message_text.py changes the
+    # version by itself (a parser helper, hashed). In message_writes.py or
+    # message_context.py it rests on raising STORE_FORMAT: they are store sources, and
+    # the golden's store message (tests/unit/test_transcript_parser_version.py) asks for
+    # that decision.
+    assert "message_text.py" in transcript_incremental._PARSE_COMMON
+    for name in ("message_writes.py", "message_context.py"):
+        assert name in transcript_incremental._STORE_SOURCES
 
 
 def test_a_wrapper_row_whose_transcript_is_gone_is_served_without_the_wrapper(tmp_path, monkeypatch):
