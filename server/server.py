@@ -1229,6 +1229,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/clips/message", "/clips/recoverable", "/media",
         "/voice-events", "/voice-events/utterances", "/voices", "/voice-catalog",
         "/voice-preview", "/voice-humanness", "/transcription-guidance",
+        # Speech the phones read on a limited device too: the recording models (a stale saved model is
+        # dropped), the live captions' language and turn taking, and replay of the user's retained audio.
+        "/transcription-capabilities", "/transcription-providers", "/transcription-audio",
         "/controller-actions", "/controller-narration",
     })
     _LIMITED_DEVICE_GET_PREFIXES = (
@@ -2936,6 +2939,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 prompt_admission=prompt_admission,
                 queue_if_busy=req.queue_if_busy,
                 unheard_audio_sessions=tuple(req.unheard_audio_sessions),
+                user_word=req.front_desk,
             ))
         except DispatchError as e:
             if opening is not None and opening["route"] == "greeting":

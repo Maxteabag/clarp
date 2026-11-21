@@ -391,6 +391,31 @@ def _decision_row_to_dict(row) -> dict[str, Any]:
     return out
 
 
+def _replayed_decision(receipt: dict) -> tuple[int | None, dict[str, Any] | None, str]:
+    """(decision_id, decision, the first request's trace) a replay answers, as the first answer
+    gave them (R134): the decision row by the id the receipt kept, and the two keys that row does
+    not hold, from the receipt. A receipt written before this kept none of them (or kept only a
+    retryable dispatch's id): the replay then answers no decision and its own trace, as before."""
+    decision_id = receipt.get("decision_id")
+    if not isinstance(decision_id, int) or isinstance(decision_id, bool) or "decision_target" not in receipt:
+        return None, None, ""
+    row = conn().execute(
+        """SELECT trace_id, decision_kind, confidence, addressing, reason, phrase_key
+             FROM orchestrator_decisions WHERE decision_id = ?""", (decision_id,)).fetchone()
+    if row is None:
+        return None, None, ""
+    decision = {
+        "kind": row["decision_kind"],
+        "target_session": str(receipt.get("decision_target") or ""),
+        "confidence": float(row["confidence"] or 0),
+        "addressing": bool(row["addressing"]),
+        "reason": row["reason"] or "",
+        "phrase_key": row["phrase_key"] or "",
+        "control_action": str(receipt.get("decision_action") or ""),
+    }
+    return decision_id, decision, str(row["trace_id"] or "")
+
+
 def _answerable_status(value) -> bool:
     """Whether a status stored in a receipt can be a replay's answer: an integer from 200 to 599
     other than 204 and 304 (a bool is not one). A client cannot read the others as this answer:
@@ -576,6 +601,15 @@ class OrchestratorService:
             receipt.update(said)
             if janitor_builtins.fits_metadata({**receipt, "answer_session": result.session}):
                 receipt["answer_session"] = result.session
+        if result.decision_id and result.decision is not None:
+            # The decision the first answer gave, so a replay gives it too (R134): its row, read
+            # back by id, holds the rest and the first trace; the decided session as the answer
+            # named it and the control action are not columns of that row.
+            decided = {"decision_id": result.decision_id,
+                       "decision_target": str(result.decision.get("target_session") or ""),
+                       "decision_action": str(result.decision.get("control_action") or "")}
+            if janitor_builtins.fits_metadata({**receipt, **decided}):
+                receipt.update(decided)
         outcome = "failed" if failed else "completed"
         error = "Message routing failed" if failed else ""
         try:
@@ -585,7 +619,8 @@ class OrchestratorService:
             # Its least receipt keeps what the first answer said (status and dispatch always fit;
             # the session when it does), so a replay after a failed completion answers the same.
             least = {key: receipt[key] for key in ("status", "target_agent_id", "http_status",
-                                                   "answer_status", "answer_dispatch", "answer_session")
+                                                   "answer_status", "answer_dispatch", "answer_session",
+                                                   "decision_id", "decision_target", "decision_action")
                      if key in receipt}
             if not janitor_builtins.fits_metadata(least):
                 least.pop("answer_session", None)
@@ -730,10 +765,12 @@ class OrchestratorService:
         else:
             session = recipient.get("session", requested_session)
             dispatched = recipient.get("backend", "") if action == FINAL_ROUTE else ""
+        decision_id, decision, first_trace = _replayed_decision(receipt) if not pending else (None, None, "")
         return OrchestratorOutcome(
             handled=True, ok=action != FINAL_ERROR,
             session=session, dispatch=dispatched,
-            trace_id=trace_id, action=action,
+            trace_id=first_trace or trace_id, action=action,
+            decision_id=decision_id, decision=decision,
             error="Message routing failed" if action == FINAL_ERROR else "",
             status=status,
         )
