@@ -126,10 +126,11 @@ def start_ticks(pid: int) -> int | None:
     return _start_ticks(pid)
 
 
-def kill_group_if_same(pid: int, pgid: int, ticks, *, wait_s: float = 5.0) -> bool:
+def kill_group_if_same(pid: int, pgid: int, ticks, *, wait_s: float = 5.0) -> bool | None:
     """SIGKILL the group ``pgid`` only while ``pid`` is still the process recorded (the same
     start ticks: never a reused pid), and wait until it is gone. True: it was there and is
-    gone now."""
+    gone now. False: it was not there (or is another process). None: killed and still there
+    after ``wait_s``; the caller judges nothing yet."""
     if not pid or not pgid or ticks is None or _start_ticks(pid) != ticks:
         return False
     try:
@@ -142,7 +143,7 @@ def kill_group_if_same(pid: int, pgid: int, ticks, *, wait_s: float = 5.0) -> bo
             return True
         time.sleep(0.02)
     log("takeoverGroupKillSlow", f"pid={pid} pgid={pgid}")
-    return False
+    return None
 
 
 def _state(pid: int) -> str:

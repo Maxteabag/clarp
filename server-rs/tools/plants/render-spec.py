@@ -11,12 +11,15 @@ import runner
 RUNS = {
     'vectors': ['test', '--test', 'render_spec_vectors'],
     'host': ['test', '--test', 'host', '--', 'a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once'],
+    'export': ['test', '--test', 'host', '--', 'the_administrator_exports_a_render_spec_with_its_accepted_answer'],
+    'report': ['test', '--test', 'host', '--', 'an_agent_hands_its_user_a_report_and_revises_it'],
 }
 J = 'clarp-kernel/src/artifacts/render_spec/json.rs'
 C = 'clarp-kernel/src/artifacts/render_spec/catalog.rs'
 V = 'clarp-kernel/src/artifacts/render_spec/validate.rs'
 R = 'clarp-kernel/src/artifacts/render_spec.rs'
-# Who a client says it is: the one reader (`clarp_kernel::client`) a render spec's threshold asks.
+# Who a client says it is, and what the owner's tables of minimums by client name come to: the one reader
+# (`clarp_kernel::client`) a render spec's threshold asks, and the live model's.
 CL = 'clarp-kernel/src/client.rs'
 A = 'clarp-kernel/src/artifacts.rs'
 U = 'clarp-kernel/src/artifacts/updates.rs'
@@ -240,7 +243,7 @@ PLANTS = [
     (R, 'vectors', 'the digest of a spec has no mark', '        "sha256": format!("c1:{}", hex(raw.as_bytes())),', '        "sha256": hex(raw.as_bytes()),'),
     (R, 'vectors', 'an element more is counted', '    kept.insert("element_count".to_string(), json!(count));', '    kept.insert("element_count".to_string(), json!(count + 1));'),
     (R, 'vectors', 'a spec does not say its catalog', '    kept.insert("catalog_sha256".to_string(), json!(catalog.sha256));\n', ''),
-    (R, 'vectors', 'a threshold of nothing is one', '    let (Some(header), Some(minimum)) = (header, minimum.filter(|minimum| *minimum >= 1)) else {', '    let (Some(header), Some(minimum)) = (header, minimum.filter(|minimum| *minimum >= 0)) else {'),
+    (R, 'vectors', 'a minimum of nothing switches nothing off', '        .filter(|minimum| *minimum >= 1)\n        .is_some_and(', '        .filter(|minimum| *minimum >= 0)\n        .is_some_and('),
     (CL, 'vectors', 'a platform may begin with a digit', '        .is_some_and(|first| first.is_ascii_alphabetic())', '        .is_some_and(|first| first.is_ascii_alphanumeric())'),
     (CL, 'vectors', 'a platform may have a sign more', '        && platform.len() <= 32', '        && platform.len() <= 33'),
     (CL, 'vectors', 'a platform has no low line', "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');", "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '-');"),
@@ -252,7 +255,7 @@ PLANTS = [
     (CL, 'vectors', 'the contract may be named in large letters', '    let number = contract.strip_prefix("contract=")?;', '    let number = contract.strip_prefix("contract=").or(contract.strip_prefix("Contract="))?;'),
     (CL, 'vectors', 'a contract may have ten digits', "    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());", "    let number_ok = (1..=10).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());"),
     (CL, 'vectors', 'a contract may have a sign', "    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());", '    let number_ok = (1..=9).contains(&number.len());'),
-    (R, 'vectors', 'a contract at the threshold is below it', '    crate::client::named(header).is_some_and(|(_, contract)| contract >= minimum)', '    crate::client::named(header).is_some_and(|(_, contract)| contract > minimum)'),
+    (R, 'vectors', 'a contract at the threshold is below it', '        .is_some_and(|minimum| contract >= minimum)', '        .is_some_and(|minimum| contract > minimum)'),
     (R, 'vectors', 'a submission id may be a sign shorter', '    (16..=80).contains(&text.len())', '    (15..=80).contains(&text.len())'),
     (R, 'vectors', 'a submission id may be a sign longer', '    (16..=80).contains(&text.len())', '    (16..=81).contains(&text.len())'),
     (R, 'vectors', 'a submission id may have a low line', "            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')", "            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')"),
@@ -307,11 +310,12 @@ PLANTS = [
     (U, 'host', 'Updates leave render specs out', '    "render_spec",\n];', '    "render_spec_none",\n];'),
     (F, 'host', 'the answers are not written to the log', '    #[serde(default, skip_serializing_if = "Option::is_none")]\n    pub answers: Option<Value>,', '    #[serde(default, skip_serializing)]\n    pub answers: Option<Value>,'),
     # The Host: who sees a spec, and how it is read.
-    (H, 'host', 'the threshold is a contract lower', '        toml::Value::Integer(minimum) => Some(*minimum),', '        toml::Value::Integer(minimum) => Some(*minimum - 1),'),
-    (H, 'host', 'a threshold written as text counts', '        toml::Value::Integer(minimum) => Some(*minimum),', '        toml::Value::Integer(minimum) => Some(*minimum),\n        toml::Value::String(minimum) => minimum.parse().ok(),'),
-    (H, 'host', 'the threshold is under another table', '    let artifacts = file.get("artifacts")?.as_table()?;', '    let artifacts = file.get("render_spec")?.as_table()?;'),
+    (H, 'host', "iOS's minimum is a contract lower", '            set.insert("ios".to_string(), minimum);', '            set.insert("ios".to_string(), minimum - 1);'),
+    (H, 'host', "iOS's minimum written as text counts", 'artifacts.get(SINGLE_KEY).map(toml_edit::Item::as_integer)',
+     'artifacts.get(SINGLE_KEY).map(|item| item.as_integer().or_else(|| item.as_str()?.parse().ok()))'),
+    (H, 'host', 'the threshold is under another table', '    let artifacts = file.get("artifacts")?.as_table_like()?;', '    let artifacts = file.get("render_spec")?.as_table_like()?;'),
     (H, 'host', 'the client says who it is under another name', 'const CLIENT_HEADER: &str = "x-clarp-client";', 'const CLIENT_HEADER: &str = "x-clarp-clients";'),
-    (H, 'host', 'without a threshold every client is shown a spec', '    header.is_some() && spec::capable(header, threshold(app))', '    header.is_some() && spec::capable(header, threshold(app).or(Some(1)))'),
+    (R, 'vectors', 'a client not named is shown a spec', '        .or_else(defaulted)\n', '        .or_else(defaulted)\n        .or(Some(1))\n'),
     (H, 'host', 'every refusal is a request that was wrong', '    let status = StatusCode::from_u16(Refusal::status(&code)).unwrap_or(StatusCode::BAD_REQUEST);', '    let status = StatusCode::BAD_REQUEST;'),
     (H, 'host', 'a name that is taken is a request that was wrong', '        None => ApiError::new(StatusCode::CONFLICT, why.message),', '        None => ApiError::new(StatusCode::BAD_REQUEST, why.message),'),
     (H, 'host', 'a truth is written in small letters', '        J::Bool(true) => "True".to_string(),', '        J::Bool(true) => "true".to_string(),'),
@@ -365,7 +369,7 @@ PLANTS = [
     (L, 'host', 'what is done with a spec is answered as to a client that cannot see', '    let artifact = shown(app, done.artifact, "", capable).await;', '    let artifact = shown(app, done.artifact, "", false).await;'),
     (L, 'host', 'Updates are answered as to a client that cannot see', '        "artifacts": all_shown(&app, page.artifacts, representation, render_spec::capable(&app, &headers)).await,', '        "artifacts": all_shown(&app, page.artifacts, representation, false).await,'),
     (L, 'host', 'the catalog is at another address', '        .route("/artifact-catalogs/clarp.form/1", get(render_spec::catalog))', '        .route("/artifact-catalogs/clarp.form/2", get(render_spec::catalog))'),
-    (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 109;', 'pub const HOST_CONTRACT: u64 = 108;'),
+    (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 115;', 'pub const HOST_CONTRACT: u64 = 114;'),
     (E, 'host', 'the feature came with the contract before', '    ("render_spec", 102),', '    ("render_spec", 101),'),
     # The texts besides a payload (the reference's PR 438: R71, R72).
     (R, 'vectors', 'a text of the envelope with half a pair is text', '            && !matches!(value, J::Text(Text::Valid(_)))', '            && !matches!(value, J::Text(_))'),
@@ -392,6 +396,50 @@ PLANTS = [
     (T, 'host', 'a refusal is printed as it is not given', '                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),', '                Some(detail) => ToolAnswer::said(1, detail.to_string()),'),
     (T, 'host', 'the tool is an app that can see', '    match library::posted(app, &bytes, validate_only, false, turn(call)).await {', '    match library::posted(app, &bytes, validate_only, true, turn(call)).await {'),
     (T, 'host', 'the tool never only checks', '    let validate_only = parsed.flags.contains("--validate-only");', '    let validate_only = parsed.flags.contains("--validate");'),
+    # Per client, by its name as sent (the Python Host's PR 474), and the export (R137).
+    (R, 'vectors', "the owner's minimums are not laid over the default", '    let named = overrides.and_then(|set| set.get(name).copied());', '    let named: Option<i64> = overrides.and(None);'),
+    (R, 'vectors', 'a key is compared without its case', '    let named = overrides.and_then(|set| set.get(name).copied());',
+     '    let named = overrides.and_then(|set| set.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, minimum)| *minimum));'),
+    (R, 'vectors', 'a name is matched in any case', '            .find(|(known, _)| *known == name)', '            .find(|(known, _)| known.eq_ignore_ascii_case(name))'),
+    (L, 'export', 'a device may export', '    if *principal != Principal::Administrator || !by_header {', '    if !by_header {'),
+    (L, 'export', "the token in a browser's cookie exports", 'matches!(presented, Presented::Header | Presented::Nowhere);',
+     'matches!(presented, Presented::Header | Presented::Nowhere | Presented::Cookie);'),
+    (L, 'export', 'the token in the address exports', 'matches!(presented, Presented::Header | Presented::Nowhere);',
+     'matches!(presented, Presented::Header | Presented::Nowhere | Presented::Address);'),
+    (L, 'report', "a report's page is given for a token in the address", 'if presented == Presented::Address {',
+     'if presented == Presented::Nowhere {'),
+    (L, 'report', "a report's page is refused for a token in a cookie", 'if presented == Presented::Address {',
+     'if matches!(presented, Presented::Address | Presented::Cookie) {'),
+    (E, 'report', 'a token in the address beside a cookie is told as one in a cookie',
+     '    Some((principal, Presented::Address))',
+     '    Some((principal, if headers.contains_key(header::COOKIE) { Presented::Cookie } else { Presented::Address }))'),
+    (E, 'report', 'a token in the address beside an Authorization header is told as one in the header',
+     '    Some((principal, Presented::Address))',
+     '    Some((principal, if headers.contains_key(header::AUTHORIZATION) { Presented::Header } else { Presented::Address }))'),
+    (E, 'export', 'a token in a cookie is told as one in the header', 'return Some((principal, Presented::Cookie));',
+     'return Some((principal, Presented::Header));'),
+    (H, 'host', "a minimum of true in the owner's table is 1", '(key, value.as_integer())',
+     '(key, value.as_integer().or(value.as_bool().map(i64::from)))'),
+    (H, 'host', "the old number wins over the table's iOS", '            set.extend(read.taken);',
+     '            for (key, minimum) in read.taken {\n                set.entry(key).or_insert(minimum);\n            }'),
+    (CL, 'host', 'a refused key is not named', 'self.refused.join(", ")', 'String::new()'),
+    (CL, 'host', 'a key in other letters is said as the name it differs from', 'let (key, name) = (as_said(key), as_said(name));',
+     'let (key, name) = (as_said(name), as_said(key));'),
+    (CL, 'host', 'a key in other letters is not said', 'if !self.cased.is_empty() {', 'if false {'),
+    (CL, 'host', 'Android is not a known client name for diagnostics',
+     'pub const BUILT_IN_NAMES: &[&str] = &["ios", "android"];', 'pub const BUILT_IN_NAMES: &[&str] = &["ios"];'),
+    (H, 'host', 'diagnostics name keys in alphabetical order',
+     'let entries = table.iter().map(|(key, value)| (key, value.as_integer()));',
+     'let mut entries: Vec<_> = table.iter().map(|(key, value)| (key, value.as_integer())).collect();\n            entries.sort_by_key(|(key, _)| *key);'),
+    (H, 'host', 'a non-table is ignored in silence', 'Some(_) => said_once(TABLE_KEY, "ignored: expected a table of client = number"),',
+     'Some(_) => {},'),
+    (CL, 'host', 'a key that differs only in its case is taken without a word',
+     'read.cased.push((key.to_string(), (*name).to_string()));', 'let _ = name;'),
+    (CL, 'host', "a key of no client's name's form is taken", 'Some(minimum) if a_name => {', 'Some(minimum) if a_name || !key.is_empty() => {'),
+    (CL, 'host', 'a value below 0 is taken', 'match value.filter(|minimum| *minimum >= 0) {', 'match value {'),
+    (L, 'export', 'another kind is refused without its kind', '"error": format!("export is not available for {kind} artifacts"), "kind": kind });', '"error": format!("export is not available for {kind} artifacts") });'),
+    (L, 'export', 'the payload is given as shown, not as kept', '"stored": artifact.payload,', '"stored": row["payload"].clone(),'),
+    (L, 'export', 'the accepted answer is not given', '"submission": submission },', '"submission": Value::Null },'),
 ]
 
 
