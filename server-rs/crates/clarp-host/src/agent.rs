@@ -3669,11 +3669,13 @@ impl Worker {
                     // queue, where an app shows it while it waits. A hold that was placed
                     // before does not hold it: a goal that is being worked was resumed or made
                     // after the last Stop.
-                    let woken =
-                        actor.keep_with(
-                            &kept_goal(&change), &message, Admission::Later,
-                            &clarp_actor::Marks::default(), now,
-                        )?;
+                    let woken = actor.keep_with(
+                        &kept_goal(&change),
+                        &message,
+                        Admission::Later,
+                        &clarp_actor::Marks::default(),
+                        now,
+                    )?;
                     outs.push(woken.1);
                 }
             }

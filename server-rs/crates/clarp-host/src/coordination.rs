@@ -79,6 +79,22 @@ pub(crate) async fn made(
     })
 }
 
+pub(crate) async fn front_desk_word(app: &App, made: &Made) -> bool {
+    let Some((_, Some(session))) = made.turn.as_ref().filter(|_| !made.peer) else {
+        return false;
+    };
+    let owners = crate::owner::OwnerFile::new(app.config.speech_keys.clone());
+    let sessions = tokio::task::spawn_blocking(move || {
+        owners
+            .read()
+            .as_ref()
+            .map_or_else(Vec::new, crate::owner::front_desk_sessions)
+    })
+    .await
+    .unwrap_or_default();
+    sessions.contains(session)
+}
+
 /// Whether a request says it comes from a peer Host.
 pub(crate) fn from_a_peer(headers: &HeaderMap) -> bool {
     headers

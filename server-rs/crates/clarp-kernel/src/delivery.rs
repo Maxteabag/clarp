@@ -624,6 +624,7 @@ mod tests {
             admission,
             at_ms: 1_000,
             coordination: None,
+            user_word: None,
         }
     }
 

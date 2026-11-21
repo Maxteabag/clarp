@@ -194,8 +194,15 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             ..Message::default()
         };
         let told = [told];
-        let marks = clarp_actor::Marks { user_word, ..Default::default() };
-        outs.push(actor.keep_with(&kept(&told), &message, admission, &marks, now)?.1);
+        let marks = clarp_actor::Marks {
+            user_word,
+            ..Default::default()
+        };
+        outs.push(
+            actor
+                .keep_with(&kept(&told), &message, admission, &marks, now)?
+                .1,
+        );
     }
     // What a user answered to a form is left for the form's agent the way a user leaves a
     // message for an agent that is busy: it waits its turn in the queue, where its user can
@@ -217,7 +224,11 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
         };
         let told = [form];
         let said = actor.keep_with(
-            &kept(&told), &message, Admission::Later, &clarp_actor::Marks::default(), now,
+            &kept(&told),
+            &message,
+            Admission::Later,
+            &clarp_actor::Marks::default(),
+            now,
         )?;
         outs.push(said.1);
     }

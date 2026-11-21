@@ -1310,7 +1310,12 @@ impl Agent {
     }
 
     fn move_turn(&mut self, turn: TurnId, change: &TurnEvent) -> Result<(), IllegalTransition> {
-        if let TurnEvent::Accepted { turn: accepted, user_word, .. } = change {
+        if let TurnEvent::Accepted {
+            turn: accepted,
+            user_word,
+            ..
+        } = change
+        {
             if *accepted != turn || turn.0 != self.next_turn {
                 return Err(IllegalTransition {
                     turn,
@@ -1659,6 +1664,7 @@ mod tests {
                 origin: Origin::User,
                 admission: Admission::Queue,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1672,6 +1678,7 @@ mod tests {
                 },
                 admission: Admission::Background,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1683,6 +1690,7 @@ mod tests {
                 origin: Origin::User,
                 admission: Admission::Direct,
                 coordination: None,
+                user_word: false,
             })
             .unwrap()
         }
@@ -1737,6 +1745,7 @@ mod tests {
             },
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         };
         let said = |turn: u64, before: u64| Command::RecordCompaction {
             turn: TurnId(turn),
@@ -2303,6 +2312,7 @@ mod tests {
             origin: Origin::User,
             admission: Admission::Later,
             coordination: None,
+            user_word: false,
         };
         assert_eq!(
             a.send(later).unwrap(),
@@ -2555,6 +2565,31 @@ mod tests {
     }
 
     #[test]
+    fn prior_queue_order_is_replayed_and_old_user_words_protect_their_places() {
+        let mut a = Driven::new();
+        a.user(1);
+        a.background(2);
+        a.agent
+            .apply(&AgentEvent::Turn {
+                turn: TurnId(3),
+                change: TurnEvent::Accepted {
+                    turn: TurnId(3),
+                    message_seq: 3,
+                    origin: Origin::User,
+                    admission: Admission::Queue,
+                    at_ms: 3,
+                    coordination: None,
+                    user_word: None,
+                },
+            })
+            .unwrap();
+        a.background(4);
+        a.user(5);
+        let waiting: Vec<_> = a.agent.waiting().map(|queued| queued.id).collect();
+        assert_eq!(waiting, [TurnId(2), TurnId(3), TurnId(5), TurnId(4)]);
+    }
+
+    #[test]
     fn a_direct_message_runs_past_a_stop_and_leaves_the_rest_held() {
         let mut a = Driven::new();
         a.user(10);
@@ -2802,6 +2837,7 @@ mod tests {
                             origin,
                             admission,
                             coordination: None,
+                            user_word: false,
                         }
                     }
                     3 => Command::Stop {

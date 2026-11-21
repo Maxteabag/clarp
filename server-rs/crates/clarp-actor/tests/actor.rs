@@ -2967,6 +2967,7 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
             origin: Origin::User,
             admission: Admission::Queue,
             coordination: None,
+            user_word: false,
         }
     };
     let ended = |recorder: &mut Recorder, turn: TurnId, now: i64| {
@@ -5153,6 +5154,7 @@ fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
     let marks = Marks {
         coordination: Some("a-boss".to_string()),
         trace_named: true,
+        user_word: false,
     };
     (message, marks)
 }
@@ -5378,6 +5380,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             admission: Admission::Queue,
             at_ms: at,
             coordination: marked.then(|| "a-boss".to_string()),
+            user_word: None,
         };
         let mut item = NewItem::new(kind::AGENT_EVENT, at, event(accepted)).in_turn(turn);
         if marked {
