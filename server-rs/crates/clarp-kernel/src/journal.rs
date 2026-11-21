@@ -25,75 +25,91 @@ use crate::turn::{Admission, IllegalTransition, Origin, Queued, Turn, TurnEvent,
 pub mod kind {
     use clarp_ports::log::Kinds;
 
-    /// An [`AgentEvent`](crate::agent::AgentEvent) as JSON.
-    pub const AGENT_EVENT: u16 = 1;
-    /// A [`SpoolCursor`](super::SpoolCursor) as JSON: how far into a turn's spool the log has got.
-    pub const SPOOL_CURSOR: u16 = 2;
-    /// A [`Message`](crate::conversation::Message) that waits its turn outside the conversation.
-    /// When its turn starts, the same message is written again as a [`MESSAGE`]: that is the
-    /// moment it enters the conversation, and where it stands in it.
-    pub const WAITING: u16 = 3;
-    /// The note a repair left on the agent's state: an
-    /// [`AgentEvent::Repaired`](crate::agent::AgentEvent::Repaired) as JSON. Kept apart from
-    /// [`AGENT_EVENT`] so that a build that does not know the note passes it by, as it passes
-    /// by every kind a newer build wrote, and still opens the agent.
-    pub const NOTE: u16 = 4;
-    /// The queue item whose row was written in this append. Older readers skip this marker.
-    pub const QUEUE_SHOWN: u16 = 5;
-    /// A [`Message`](crate::conversation::Message) to the agent.
-    pub const MESSAGE: u16 = 100;
-    /// A [`Reply`](crate::conversation::Reply) of the agent.
-    pub const REPLY: u16 = 101;
-    /// A [`ToolCall`](crate::conversation::ToolCall) that is a row by itself: a call no
-    /// message of the agent carries, and every call written before messages were rows.
-    pub const TOOL: u16 = 102;
-    /// A [`Notice`](crate::conversation::Notice) from the Host.
-    pub const NOTICE: u16 = 103;
-    /// An [`Imported`](crate::conversation::Imported) row: one this agent's conversation had on
-    /// the Host it came from, kept as that Host served it.
-    pub const IMPORTED: u16 = 104;
-    /// A [`TurnEnd`](crate::conversation::TurnEnd): how a turn ended, for the row that closed it.
-    pub const TURN_END: u16 = 110;
-    /// A [`ToolCall`](crate::conversation::ToolCall) that names the reply its message is: a
-    /// part of that row, written when the call starts and again when it ends.
-    pub const TOOL_USE: u16 = 111;
-    /// A [`Commentary`](crate::conversation::Commentary): tool work came after a reply in the
-    /// same turn, for that reply's row.
-    pub const COMMENTARY: u16 = 112;
-    /// A change to helper cells on a parent message. Its place in a
-    /// conversation page is still the original row.
-    pub const HELPER_CELLS: u16 = 113;
-    /// A hidden row whose turn the user joined. Its row stays where it was written.
-    pub const AUDIENCE_ROW: u16 = 114;
-    /// A [`Note`](crate::conversation::Note): what an agent left for its user from a turn
-    /// (`POST /agent-notes`). A row of the conversation, as a reply is.
-    pub const AGENT_NOTE: u16 = 105;
-    /// Which message a trace belongs to: its id, sender and origin, keyed by the trace
-    /// ([`super::trace_key`]), written with the message. A send that names a trace another
-    /// message has is refused by one look by key.
-    pub const TRACE: u16 = 900;
-    /// A coordination turn that the user joined. The original sender mark remains.
-    pub const MIXED_TURN: u16 = 901;
-    pub const TEAM_PROMPT: u16 = 902;
-    pub const TEAM_EFFECT: u16 = 903;
-    pub const TEAM_CURSOR: u16 = 904;
+    // Keep the on-disk numbers and the test's inventory in one declaration,
+    // including kinds outside any contiguous read range.
+    macro_rules! recorded_kinds {
+        ($($(#[$doc:meta])* const $name:ident = $number:literal;)*) => {
+            $($(#[$doc])* pub const $name: u16 = $number;)*
+            #[cfg(test)]
+            pub(super) const RECORDED: &[(&str, u16)] = &[$((stringify!($name), $name)),*];
+        };
+    }
 
-    /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
-    pub const JOB: u16 = 300;
-    pub const PROVIDER_JOBS: u16 = 301;
-    /// A [`GoalRecord`](crate::goals::GoalRecord) as JSON: what one change set in one of the
-    /// agent's plans.
-    pub const GOAL: u16 = 400;
-    /// An event or keyed ledger index in the owner’s log.
-    pub const GOAL_LEDGER: u16 = 800;
-    /// An [`ArtifactRecord`](crate::artifacts::ArtifactRecord) as JSON: an artifact of the
-    /// agent's as a change left it.
-    pub const ARTIFACT: u16 = 500;
-    /// An [`Asset`](crate::media::Asset) as JSON: a file the agent published.
-    pub const MEDIA: u16 = 600;
-    /// A [`Line`](crate::spoken::Line) as JSON: a line the agent says aloud, as a change
-    /// left it.
-    pub const LINE: u16 = 700;
+    recorded_kinds! {
+        /// An [`AgentEvent`](crate::agent::AgentEvent) as JSON.
+        const AGENT_EVENT= 1;
+        /// A [`SpoolCursor`](super::SpoolCursor) as JSON: how far into a turn's spool the log has got.
+        const SPOOL_CURSOR= 2;
+        /// A [`Message`](crate::conversation::Message) that waits its turn outside the conversation.
+        /// When its turn starts, the same message is written again as a [`MESSAGE`]: that is the
+        /// moment it enters the conversation, and where it stands in it.
+        const WAITING= 3;
+        /// The note a repair left on the agent's state: an
+        /// [`AgentEvent::Repaired`](crate::agent::AgentEvent::Repaired) as JSON. Kept apart from
+        /// [`AGENT_EVENT`] so that a build that does not know the note passes it by, as it passes
+        /// by every kind a newer build wrote, and still opens the agent.
+        const NOTE= 4;
+        /// The queue item whose row was written in this append. Older readers skip this marker.
+        const QUEUE_SHOWN= 5;
+        /// A [`Message`](crate::conversation::Message) to the agent.
+        const MESSAGE= 100;
+        /// A [`Reply`](crate::conversation::Reply) of the agent.
+        const REPLY= 101;
+        /// A [`ToolCall`](crate::conversation::ToolCall) that is a row by itself: a call no
+        /// message of the agent carries, and every call written before messages were rows.
+        const TOOL= 102;
+        /// A [`Notice`](crate::conversation::Notice) from the Host.
+        const NOTICE= 103;
+        /// An [`Imported`](crate::conversation::Imported) row: one this agent's conversation had on
+        /// the Host it came from, kept as that Host served it.
+        const IMPORTED= 104;
+        /// A [`TurnEnd`](crate::conversation::TurnEnd): how a turn ended, for the row that closed it.
+        const TURN_END= 110;
+        /// A [`ToolCall`](crate::conversation::ToolCall) that names the reply its message is: a
+        /// part of that row, written when the call starts and again when it ends.
+        const TOOL_USE= 111;
+        /// A [`Commentary`](crate::conversation::Commentary): tool work came after a reply in the
+        /// same turn, for that reply's row.
+        const COMMENTARY= 112;
+        /// A change to helper cells on a parent message. Its place in a
+        /// conversation page is still the original row.
+        const HELPER_CELLS= 113;
+        /// A hidden row whose turn the user joined. Its row stays where it was written.
+        const AUDIENCE_ROW= 114;
+        /// A [`Note`](crate::conversation::Note): what an agent left for its user from a turn
+        /// (`POST /agent-notes`). A row of the conversation, as a reply is.
+        const AGENT_NOTE= 105;
+        /// Which message a trace belongs to: its id, sender and origin, keyed by the trace
+        /// ([`super::trace_key`]), written with the message. A send that names a trace another
+        /// message has is refused by one look by key.
+        const TRACE= 900;
+        /// A coordination turn that the user joined. The original sender mark remains.
+        const MIXED_TURN= 901;
+        const TEAM_PROMPT= 902;
+        const TEAM_EFFECT= 903;
+        const TEAM_CURSOR= 904;
+        /// The goal mirror and thread ownership for the persistent Codex lane.
+        const NATIVE_GOAL= 905;
+        /// An internal turn reservation, without a synthetic row in the conversation.
+        const NATIVE_GOAL_ATTEMPT= 906;
+
+        /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
+        const JOB= 300;
+        const PROVIDER_JOBS= 301;
+        /// A [`GoalRecord`](crate::goals::GoalRecord) as JSON: what one change set in one of the
+        /// agent's plans.
+        const GOAL= 400;
+        /// An event or keyed ledger index in the owner’s log.
+        const GOAL_LEDGER= 800;
+        /// An [`ArtifactRecord`](crate::artifacts::ArtifactRecord) as JSON: an artifact of the
+        /// agent's as a change left it.
+        const ARTIFACT= 500;
+        /// An [`Asset`](crate::media::Asset) as JSON: a file the agent published.
+        const MEDIA= 600;
+        /// A [`Line`](crate::spoken::Line) as JSON: a line the agent says aloud, as a change
+        /// left it.
+        const LINE= 700;
+    }
 
     /// What an agent is rebuilt from.
     pub const MACHINERY: Kinds = Kinds::range(1, 99);
@@ -668,7 +684,10 @@ impl Recorder {
         // it was admitted: at once when its turn starts at once, and otherwise in the write
         // that starts it (D14, issue 491).
         let outside = !self.agent.starts_at_once(message.admission);
-        let kind = if outside {
+        let native_goal = message.origin == Origin::NativeGoal;
+        let kind = if native_goal {
+            kind::NATIVE_GOAL_ATTEMPT
+        } else if outside {
             kind::WAITING
         } else {
             kind::MESSAGE
@@ -700,7 +719,7 @@ impl Recorder {
             message_seq,
             turn: Some(turn),
             duplicate: false,
-            entered: !outside,
+            entered: !outside && !native_goal,
             effects: committed.effects,
         })
     }
@@ -787,6 +806,10 @@ impl Batch<'_> {
     /// same write that starts the turn, and stands where the turn starts. Its row keeps when it
     /// was sent: when its turn was accepted, which a new wording does not move.
     fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64) {
+        if matches!(self.work.live(), Some(Turn::Starting(started)) if started.id == turn && started.origin == Origin::NativeGoal)
+        {
+            return;
+        }
         // Work held before it reached the tool already entered the conversation on its
         // original start. Its message_seq may still point at the original WAITING item.
         if matches!(self.work.live(), Some(Turn::Starting(started)) if started.id == turn && started.attempt > 1)
@@ -957,6 +980,15 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn journal_record_kind_numbers_are_distinct() {
+        let mut declared = std::collections::BTreeMap::new();
+        for &(name, number) in kind::RECORDED {
+            let previous = declared.insert(number, name);
+            assert!(previous.is_none(), "{name} and {previous:?} share record kind {number}");
+        }
     }
 
     /// The commands of a small working life, each with what a crash right after it must preserve.

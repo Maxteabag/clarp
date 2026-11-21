@@ -2,6 +2,7 @@
 
 use std::io;
 
+use clarp_spool::{Entry, Record, ShimEvent, SpoolWriter};
 use serde_json::Value;
 
 use clarp_shim::codex_lane::{Claim, Reservation};
@@ -12,7 +13,10 @@ use clarp_shim::codex_turn::TurnSpool;
 pub(crate) enum Slot {
     #[default]
     Free,
-    Reserved(Reservation),
+    Reserved {
+        binding: Reservation,
+        writer: SpoolWriter,
+    },
     Running {
         binding: Reservation,
         spool: TurnSpool,
@@ -20,36 +24,32 @@ pub(crate) enum Slot {
 }
 
 impl Slot {
-    /// Exactly one claim can be held. Reconnecting with that same claim is harmless.
-    pub(crate) fn reserve_goal(&mut self, claim: Claim) -> bool {
-        match self {
-            Self::Free => {
-                *self = Self::Reserved(Reservation::Goal(claim));
-                true
-            }
-            Self::Reserved(Reservation::Goal(held)) => *held == claim,
-            _ => false,
+    /// Create the attempt's spool before any write that can hand work to the
+    /// provider. A recovered actor can follow that claim instead of relaunching.
+    pub(crate) fn reserve(&mut self, binding: Reservation) -> io::Result<()> {
+        if !matches!(self, Self::Free) {
+            return Err(io::Error::other("the Codex lane is already reserved"));
         }
-    }
-
-    pub(crate) fn reserve_prompt(&mut self, claim: Claim, request: u64) -> bool {
-        match self {
-            Self::Free => {
-                *self = Self::Reserved(Reservation::PromptPending { claim, request });
-                true
-            }
-            _ => false,
-        }
+        let mut writer = SpoolWriter::create(&binding.claim().spool)?;
+        writer.sync()?;
+        *self = Self::Reserved { binding, writer };
+        Ok(())
     }
 
     pub(crate) fn is_goal_reserved(&self) -> bool {
-        matches!(self, Self::Reserved(Reservation::Goal(_)))
+        matches!(
+            self,
+            Self::Reserved {
+                binding: Reservation::Goal(_),
+                ..
+            }
+        )
     }
 
     pub(crate) fn claim(&self) -> Option<&Claim> {
         match self {
             Self::Free => None,
-            Self::Reserved(binding) | Self::Running { binding, .. } => Some(binding.claim()),
+            Self::Reserved { binding, .. } | Self::Running { binding, .. } => Some(binding.claim()),
         }
     }
 
@@ -70,8 +70,8 @@ impl Slot {
         pid: u32,
         now_ms: i64,
     ) -> io::Result<bool> {
-        let binding = match std::mem::take(self) {
-            Self::Reserved(binding) => binding,
+        let (binding, writer) = match std::mem::take(self) {
+            Self::Reserved { binding, writer } => (binding, writer),
             other => {
                 *self = other;
                 return Ok(false);
@@ -83,8 +83,8 @@ impl Slot {
         };
         match bound {
             Ok(binding) => {
-                let spool = TurnSpool::begin(
-                    &binding.claim().spool,
+                let spool = TurnSpool::bind(
+                    writer,
                     thread.to_owned(),
                     native_turn.to_owned(),
                     pid,
@@ -94,7 +94,10 @@ impl Slot {
                 Ok(true)
             }
             Err(held) => {
-                *self = Self::Reserved(held);
+                *self = Self::Reserved {
+                    binding: held,
+                    writer,
+                };
                 Ok(false)
             }
         }
@@ -115,10 +118,32 @@ impl Slot {
         Ok(false)
     }
 
-    pub(crate) fn lost(&mut self, now_ms: i64) -> io::Result<()> {
-        if let Self::Running { mut spool, .. } = std::mem::take(self) {
-            spool.lost(now_ms)?;
+    /// A reservation that never bound a provider turn still settles once.
+    pub(crate) fn cancel(&mut self, now_ms: i64) -> io::Result<()> {
+        if let Self::Reserved { mut writer, .. } = std::mem::take(self) {
+            end_unbound(&mut writer, None, Some(nix::libc::SIGINT), now_ms)?;
         }
         Ok(())
     }
+
+    pub(crate) fn lost(&mut self, now_ms: i64) -> io::Result<()> {
+        match std::mem::take(self) {
+            Self::Free => Ok(()),
+            Self::Running { mut spool, .. } => spool.lost(now_ms),
+            Self::Reserved { mut writer, .. } => end_unbound(&mut writer, Some(1), None, now_ms),
+        }
+    }
+}
+
+fn end_unbound(
+    writer: &mut SpoolWriter,
+    code: Option<i32>,
+    signal: Option<i32>,
+    now_ms: i64,
+) -> io::Result<()> {
+    writer.append(&Record {
+        t: now_ms,
+        entry: Entry::Shim(ShimEvent::Exited { code, signal }),
+    })?;
+    writer.sync()
 }

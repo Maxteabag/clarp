@@ -53,6 +53,8 @@ impl GoalAction {
 pub enum Request {
     /// Obtain the provider goal and the lane's current claim on reconnection.
     Inspect,
+    /// Read native state without loading the thread or activating a goal.
+    Probe,
     /// Inspect first, then receive subsequent snapshots when something changes.
     Watch,
     /// Reopen a thread with a previously stored active goal in its reserved slot.
@@ -80,6 +82,9 @@ pub enum Request {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub thread: String,
+    pub instance: u32,
+    pub revision: u64,
+    pub known_goal: bool,
     pub goal: Option<Value>,
     pub claim: Option<Claim>,
     pub native_turn: Option<String>,
