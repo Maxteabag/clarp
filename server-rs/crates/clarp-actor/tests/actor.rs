@@ -797,7 +797,13 @@ fn a_confirmed_takeover_closes_the_first_row_and_leaves_the_third_message_waitin
         })
         .unwrap();
     assert_eq!(order.turn, TurnId(2));
-    assert_eq!(order.named_session.as_deref(), Some("new-provider-session"));
+    assert!(
+        order
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--session-id", "new-provider-session"])
+    );
+    assert!(!order.args.iter().any(|arg| arg == "--resume"));
     let stdin = std::fs::read_to_string(&order.stdin_file).unwrap();
     assert_eq!(stdin.lines().count(), 1);
     let prompt: serde_json::Value = serde_json::from_str(&stdin).unwrap();
