@@ -23,7 +23,7 @@ pub const HOLD_MOST_MS: u64 = 2_000;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Request {
-    /// Write these bytes to the tool's standard input.
+    /// Write these bytes to the tool's standard input. Success acknowledges a flushed write.
     Stdin {
         data: String,
     },
