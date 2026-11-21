@@ -370,3 +370,38 @@ def test_a_runtime_that_dies_before_the_echo_settles_the_follow_up_at_its_start(
     assert len(rows) == 1 and "m2" not in _queued(w)          # exactly one read
     assert settings_store.keys_with_prefix("steer.written.") == []
 
+
+def test_a_follow_up_bigger_than_the_pipe_never_blocks_the_drain(monkeypatch):
+    """Reviewer 4 on 7e351ba4: the write to the CLI's stdin held the lock the drain takes for
+    every line; a follow-up bigger than the pipe, while the CLI does not read its stdin, then
+    blocked the drain, and the CLI blocked on its stdout. Now the write is the writer
+    thread's, outside the lock: the steer returns, the drain goes on, the line arrives whole."""
+    import threading
+    from lib.backend.claude import SteerState, note_steer
+    r, wfd = os.pipe()
+    state = SteerState(os.fdopen(wfd, "w"))
+    state.tools.add("tu1")
+    handle = SimpleNamespace(steer_state=state)
+    claude = by_id("claude")
+    monkeypatch.setattr(claude, "active_handles", lambda agent_id: [handle])
+    reads, done = [], {}
+    big = "x" * 200_000
+
+    def steer():
+        done["ok"] = claude.steer("a", big, trace_id="t-big",
+                                  on_read=reads.append, on_unread=lambda: reads.append("unread"))
+    caller = threading.Thread(target=steer, daemon=True)
+    caller.start()
+    caller.join(1.0)
+    assert done.get("ok") is True                             # returned, nothing read yet
+    drain = threading.Thread(target=note_steer, daemon=True, args=(handle, {
+        "type": "stream_event", "event": {"type": "content_block_delta"}}))
+    drain.start()
+    drain.join(1.0)
+    assert not drain.is_alive()                               # the drain is never held
+    time.sleep(0.3)                                           # the CLI reads its stdin at last
+    line = json.loads(os.fdopen(r, "r").readline())
+    assert line["uuid"] == prompt_uuid("t-big")
+    assert line["message"]["content"][0]["text"] == big
+    note_steer(handle, {"type": "user", "isReplay": True, "uuid": prompt_uuid("t-big")})
+    assert reads == [True]
