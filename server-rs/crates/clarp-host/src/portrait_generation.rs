@@ -281,7 +281,15 @@ async fn run(app: App, agent: String, generation: u64) {
                     drop(_gallery);
                     let mut delay = 1;
                     loop {
-                        match deliver(&app.fleet, &app.blobs, &app.gallery, &publication, Some(&announcer(&app))).await {
+                        match deliver(
+                            &app.fleet,
+                            &app.blobs,
+                            &app.gallery,
+                            &publication,
+                            Some(&announcer(&app)),
+                        )
+                        .await
+                        {
                             Ok(Delivery::Published) => break,
                             Ok(Delivery::MissingBytes) => {
                                 app.fleet.unread(PENDING, &publication.assets[0].asset_id)
@@ -383,7 +391,10 @@ pub(crate) async fn deliver(
         } else {
             // Live delivery has the candidate and the fleet kept the exact terminal
             // window in its durable copy. Recovery already has that copy.
-            match fleet.kept(PENDING, publication.assets[0].asset_id.clone()).await {
+            match fleet
+                .kept(PENDING, publication.assets[0].asset_id.clone())
+                .await
+            {
                 Ok(Some(raw)) => serde_json::from_slice::<Publication>(&raw)
                     .map(|pending| pending.media_window)
                     .map_err(|why| why.to_string()),
@@ -429,7 +440,14 @@ pub async fn recover(app: &App) -> Result<(), Unavailable> {
         // Cleanup uses the first asset's id. A malformed receipt must never clear a neighbour.
         if publication.assets[0].asset_id != key
             || matches!(
-                deliver(&app.fleet, &app.blobs, &app.gallery, &publication, Some(&announcer(&app))).await?,
+                deliver(
+                    &app.fleet,
+                    &app.blobs,
+                    &app.gallery,
+                    &publication,
+                    Some(&announcer(app))
+                )
+                .await?,
                 Delivery::MissingBytes
             )
         {

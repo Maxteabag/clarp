@@ -129,9 +129,7 @@ pub(crate) async fn favorite(
     Ok(Json(image.row(used_as(&app.fleet.directory(), &image))))
 }
 
-fn remember(
-    store: &mut crate::gallery::Store, image: &Image, change: &str,
-) -> bool {
+fn remember(store: &mut crate::gallery::Store, image: &Image, change: &str) -> bool {
     match store.remember_hint(&image.asset.asset_id, change) {
         Ok(()) => true,
         Err(why) => {

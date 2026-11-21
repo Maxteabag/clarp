@@ -17,9 +17,15 @@ pub struct MediaWindow {
 impl MediaWindow {
     pub fn of(job: &crate::jobs::Job) -> Self {
         Self {
-            session: job.metadata["session"].as_str().unwrap_or_default().to_owned(),
+            session: job.metadata["session"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
             since: job.started_at_ms,
-            until: job.terminal_at_ms.filter(|at| *at != 0).unwrap_or(job.updated_at_ms),
+            until: job
+                .terminal_at_ms
+                .filter(|at| *at != 0)
+                .unwrap_or(job.updated_at_ms),
         }
     }
 }

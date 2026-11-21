@@ -169,8 +169,14 @@ impl Fleet {
                 agent_id: agent_id.clone(),
             }));
         }
-        let before = self.computer_jobs.book.get(id).map(|job| (job.generation, job.status));
-        let deferred = writes.iter().any(|(table, _, _)| table == &shelf(super::portrait_jobs::PENDING));
+        let before = self
+            .computer_jobs
+            .book
+            .get(id)
+            .map(|job| (job.generation, job.status));
+        let deferred = writes
+            .iter()
+            .any(|(table, _, _)| table == &shelf(super::portrait_jobs::PENDING));
         let mut change = match self.computer_jobs.book.decide(command, now, 0) {
             Ok(change) => change,
             Err(why) => return Ok(Err(ComputerJobRefusal::Kernel(why))),
@@ -230,7 +236,9 @@ impl Fleet {
                 && let Some(announcer) = self.works.portrait_hints.clone()
             {
                 let window = clarp_kernel::portrait_generation::MediaWindow::of(job);
-                self.works.runtime.spawn(async move { announcer.tell(window).await });
+                self.works
+                    .runtime
+                    .spawn(async move { announcer.tell(window).await });
             }
             self.computer_jobs.notify_producers(job);
             let computer_id = &self.computer_jobs.computer_id;

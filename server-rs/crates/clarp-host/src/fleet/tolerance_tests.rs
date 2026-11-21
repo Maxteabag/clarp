@@ -108,6 +108,7 @@ impl Place {
             tool_env: vec![],
             pusher: crate::pusher::pusher().0,
             blobs: MemBlobs::new().open(&self.dir).unwrap(),
+            portrait_hints: None,
             speaks: crate::voice::mouth().0,
             telling: crate::telling::Telling::new(crate::owner::OwnerFile::new(Some(
                 self.dir.join("absent"),

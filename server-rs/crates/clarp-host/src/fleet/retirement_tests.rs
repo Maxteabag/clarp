@@ -49,6 +49,7 @@ pub(super) fn test_works(dir: &Path, engine: Arc<dyn LogEngine>, log: crate::unk
         tool_env: vec![],
         pusher: crate::pusher::pusher().0,
         blobs: MemBlobs::new().open(dir).unwrap(),
+        portrait_hints: None,
         speaks: crate::voice::mouth().0,
         telling: crate::telling::Telling::new(crate::owner::OwnerFile::new(Some(
             dir.join("absent"),

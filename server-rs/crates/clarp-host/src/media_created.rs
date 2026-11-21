@@ -20,26 +20,34 @@ impl Announcer {
     pub(crate) async fn tell(&self, window: MediaWindow) {
         let hub = self.hub.clone();
         let clock = self.clock.clone();
-        let said = self.writer.ask(move |store| {
-            for hint in store.portrait_hints(&window)? {
-                hub.publish(json!({
-                    "type": "media-changed",
-                    "session": hint.session,
-                    "agent_id": hint.agent_id,
-                    "asset_id": hint.asset_id,
-                    "change": hint.change,
-                    "at": hint.at,
-                }), clock.now_ms());
-            }
-            Ok(())
-        }).await;
+        let said = self
+            .writer
+            .ask(move |store| {
+                for hint in store.portrait_hints(&window)? {
+                    hub.publish(
+                        json!({
+                            "type": "media-changed",
+                            "session": hint.session,
+                            "agent_id": hint.agent_id,
+                            "asset_id": hint.asset_id,
+                            "change": hint.change,
+                            "at": hint.at,
+                        }),
+                        clock.now_ms(),
+                    );
+                }
+                Ok(())
+            })
+            .await;
         if let Err(why) = said {
             self.failed(why.words());
         }
     }
 
     pub(crate) fn failed(&self, why: &str) {
-        self.log.line(&format!("clarp-host: portrait gallery change could not be announced: {why}"));
+        self.log.line(&format!(
+            "clarp-host: portrait gallery change could not be announced: {why}"
+        ));
     }
 }
 
@@ -55,22 +63,32 @@ mod tests {
     use serde_json::Value;
 
     fn image(id: &str, session: &str, at: i64, deleted: Option<i64>, portrait: bool) -> Image {
-        let mut row = Image::new(Asset {
-            asset_id: id.to_owned(),
-            session: session.to_owned(),
-            source_name: "portrait.png".into(),
-            sha256: format!("digest-{id}"),
-            mime_type: "image/png".into(),
-            extension: ".png".into(),
-            bytes: 1,
-            width: None,
-            height: None,
-            caption: String::new(),
-            created_by: if portrait { format!("{CREATED_BY_PREFIX}local") } else { "agent".into() },
-            created_at: at,
-            named_only: false,
-        }, format!("{session}-id"));
-        row.deletion = deleted.map(|at| Deletion { at, by: String::new() });
+        let mut row = Image::new(
+            Asset {
+                asset_id: id.to_owned(),
+                session: session.to_owned(),
+                source_name: "portrait.png".into(),
+                sha256: format!("digest-{id}"),
+                mime_type: "image/png".into(),
+                extension: ".png".into(),
+                bytes: 1,
+                width: None,
+                height: None,
+                caption: String::new(),
+                created_by: if portrait {
+                    format!("{CREATED_BY_PREFIX}local")
+                } else {
+                    "agent".into()
+                },
+                created_at: at,
+                named_only: false,
+            },
+            format!("{session}-id"),
+        );
+        row.deletion = deleted.map(|at| Deletion {
+            at,
+            by: String::new(),
+        });
         row
     }
 
@@ -84,20 +102,23 @@ mod tests {
             Writer::start(store).unwrap()
         };
         let writer = open();
-        writer.ask(|store| {
-            store.import(vec![
-                image("late-kept", "oak", 15, None, true),
-                image("discarded", "oak", 11, Some(12), true),
-                image("early-kept", "oak", 12, None, true),
-                image("another-chat", "elm", 12, None, true),
-                image("another-producer", "oak", 12, None, false),
-                image("older", "oak", 9, Some(14), true),
-                image("after-end", "oak", 21, None, true),
-                image("already-told", "oak", 12, None, true),
-            ])?;
-            store.remember_hint("already-told", "created")?;
-            Ok(())
-        }).await.unwrap();
+        writer
+            .ask(|store| {
+                store.import(vec![
+                    image("late-kept", "oak", 15, None, true),
+                    image("discarded", "oak", 11, Some(12), true),
+                    image("early-kept", "oak", 12, None, true),
+                    image("another-chat", "elm", 12, None, true),
+                    image("another-producer", "oak", 12, None, false),
+                    image("older", "oak", 9, Some(14), true),
+                    image("after-end", "oak", 21, None, true),
+                    image("already-told", "oak", 12, None, true),
+                ])?;
+                store.remember_hint("already-told", "created")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(SystemClock);
         let hub = Arc::new(Hub::new(clock.now_ms()));
         let announcer = Announcer {
@@ -106,28 +127,59 @@ mod tests {
             clock: clock.clone(),
             log: Log::stderr(clock),
         };
-        announcer.tell(MediaWindow { session: String::new(), since: 10, until: 20 }).await;
-        announcer.tell(MediaWindow { session: "oak".into(), since: 22, until: 25 }).await;
+        announcer
+            .tell(MediaWindow {
+                session: String::new(),
+                since: 10,
+                until: 20,
+            })
+            .await;
+        announcer
+            .tell(MediaWindow {
+                session: "oak".into(),
+                since: 22,
+                until: 25,
+            })
+            .await;
         assert!(hub.subscribe(None).0.is_empty());
-        let window = MediaWindow { session: "oak".into(), since: 10, until: 20 };
+        let window = MediaWindow {
+            session: "oak".into(),
+            since: 10,
+            until: 20,
+        };
         announcer.tell(window.clone()).await;
-        let events = || hub.subscribe(None).0.iter().map(|row| {
-            let event: Value = serde_json::from_str(&row.json).unwrap();
-            assert_eq!(event["session"], "oak");
-            assert_eq!(event["agent_id"], "oak-id");
-            assert_eq!(event["type"], "media-changed");
-            assert!(event.get("favorite").is_none());
-            (event["asset_id"].as_str().unwrap().to_owned(),
-             event["change"].as_str().unwrap().to_owned(),event["at"].as_i64().unwrap())
-        }).collect::<Vec<_>>();
+        let events = || {
+            hub.subscribe(None)
+                .0
+                .iter()
+                .map(|row| {
+                    let event: Value = serde_json::from_str(&row.json).unwrap();
+                    assert_eq!(event["session"], "oak");
+                    assert_eq!(event["agent_id"], "oak-id");
+                    assert_eq!(event["type"], "media-changed");
+                    assert!(event.get("favorite").is_none());
+                    (
+                        event["asset_id"].as_str().unwrap().to_owned(),
+                        event["change"].as_str().unwrap().to_owned(),
+                        event["at"].as_i64().unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
         let actual = events();
-        assert_eq!(actual, vec![
-            ("discarded".into(), "deleted".into(), 12),
-            ("early-kept".into(), "created".into(), 12),
-            ("late-kept".into(), "created".into(), 15),
-        ]);
+        assert_eq!(
+            actual,
+            vec![
+                ("discarded".into(), "deleted".into(), 12),
+                ("early-kept".into(), "created".into(), 12),
+                ("late-kept".into(), "created".into(), 15),
+            ]
+        );
         announcer.tell(window.clone()).await;
-        let restarted = Announcer {writer: open(), ..announcer};
+        let restarted = Announcer {
+            writer: open(),
+            ..announcer
+        };
         restarted.tell(window).await;
         assert_eq!(events(), actual);
     }
@@ -171,14 +223,25 @@ mod tests {
             writer: writer.clone(),
             hub: hub.clone(),
             clock: clock.clone(),
-            log: Log::to(move |line| told.lock().unwrap().push(line.to_owned()), clock),
+            log: Log::to(
+                move |line| told.lock().unwrap().push(line.to_owned()),
+                clock,
+            ),
         };
-        announcer.tell(MediaWindow { session: "oak".into(), since: 10, until: 20 }).await;
+        announcer
+            .tell(MediaWindow {
+                session: "oak".into(),
+                since: 10,
+                until: 20,
+            })
+            .await;
         assert!(hub.subscribe(None).0.is_empty());
         let lines = lines.lock().unwrap().clone();
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("fixture refusal of advisory hint"));
-        assert_eq!(writer.ask(|store| store.content("kept")).await.unwrap(), (kept, 1));
+        assert_eq!(
+            writer.ask(|store| store.content("kept")).await.unwrap(),
+            (kept, 1)
+        );
     }
-
 }

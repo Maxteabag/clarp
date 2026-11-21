@@ -92,9 +92,11 @@ impl Fleet {
         publication: &Publication,
         bytes: [Vec<u8>; 2],
     ) -> Result<bool, Unavailable> {
-        let Some(current) = self.computer_jobs.get(id).filter(|row| {
-            row.job.status == JobStatus::Running && row.job.generation == generation
-        }) else {
+        let Some(current) = self
+            .computer_jobs
+            .get(id)
+            .filter(|row| row.job.status == JobStatus::Running && row.job.generation == generation)
+        else {
             return Ok(false);
         };
         let Some(at) = self.place_of(&publication.agent_id) else {

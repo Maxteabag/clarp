@@ -247,9 +247,13 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     let original = gallery(&host);
     let heard = host.listen_at("/events?token=fixture");
     let hints = || {
-        heard.lock().unwrap().iter().filter(|event| {
-            event["type"] == "media-changed" && event["session"] == sid
-        }).cloned().collect::<Vec<_>>()
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "media-changed" && event["session"] == sid)
+            .cloned()
+            .collect::<Vec<_>>()
     };
     // The duplicate request reuses a Computer job. The second request is not sent until the first edit succeeds.
     let (status, first) = post(&host, sid);
@@ -292,7 +296,10 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     let (body, finish) = receive();
     assert!(body.contains("everyday-life scene") && body.contains("primary"));
     assert_eq!(gallery(&host), original);
-    assert!(hints().is_empty(), "nothing is announced while the second edit is pending");
+    assert!(
+        hints().is_empty(),
+        "nothing is announced while the second edit is pending"
+    );
     finish.send((200, reply("two"))).unwrap();
     wait_for("both alternatives and their publication", || {
         gallery(&host)["portraits"].as_array().unwrap().len() == 3

@@ -229,7 +229,9 @@ impl Index {
             .or_default();
         let is_gallery = !image.asset.named_only && is_image(&image.asset.mime_type);
         if is_gallery {
-            session.published.insert((image.asset.created_at, id.clone()));
+            session
+                .published
+                .insert((image.asset.created_at, id.clone()));
         }
         if let Some(deletion) = &image.deletion {
             self.deleted.insert((deletion.at, id.clone()));
@@ -251,7 +253,9 @@ impl Index {
         let Some(session) = self.sessions.get_mut(&image.asset.session) else {
             return;
         };
-        session.published.remove(&(image.asset.created_at, id.clone()));
+        session
+            .published
+            .remove(&(image.asset.created_at, id.clone()));
         if let Some(deletion) = &image.deletion {
             self.deleted.remove(&(deletion.at, id.clone()));
             session.deleted.remove(&(deletion.at, id.clone()));
@@ -334,7 +338,9 @@ impl Index {
             .range((Included((since, String::new())), Unbounded))
             .take_while(|(at, _)| *at <= until)
         {
-            let Some(image) = self.images.get(id) else { continue };
+            let Some(image) = self.images.get(id) else {
+                continue;
+            };
             if !image.asset.created_by.starts_with(prefix) {
                 continue;
             }
