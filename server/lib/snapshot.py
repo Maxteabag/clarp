@@ -448,7 +448,8 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     voices = voice_profile.Projection(voice_host, agent_rows)
     if messages is None:
         messages = message_store.dashboard_messages(agent_ids={a["agent_id"] for a in selected})
-    tree = helper_tree(agent_rows, states, visible_labels)
+    coordination_hiding = coordination.hiding_agents()
+    tree = helper_tree(agent_rows, states, visible_labels, hiding=coordination_hiding)
     child_count = tree.child_count
     running_children = tree.running_children
     helper_sessions = tree.helper_sessions
@@ -468,7 +469,6 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     # Read once for every row (lib.coordination): the Host's choice and the chats' own.
     coordination_host = coordination.global_visibility()
     coordination_chosen = coordination.overrides()
-    coordination_hiding = coordination.hiding_agents()
     for a in selected:
         agent_id = a["agent_id"]
         backend = a.get("backend") or AgentBackend.CLAUDE
@@ -722,7 +722,9 @@ class HelperTree:
 
 
 def helper_tree(agent_rows: list[dict[str, Any]], states: dict[str, dict[str, Any]],
-                visible_labels: dict[str, Any]) -> HelperTree:
+                visible_labels: dict[str, Any], *, hiding: set[str] = frozenset()) -> HelperTree:
+    """``hiding``: the agents whose chat hides coordination (lib.coordination.hiding_agents); a
+    helper's coordination turn there is described as who it works with, not what it does."""
     tree = HelperTree()
     for a in agent_rows:
         parent_id = a.get("parent_agent_id")
@@ -733,7 +735,8 @@ def helper_tree(agent_rows: list[dict[str, Any]], states: dict[str, dict[str, An
             if a.get("helper_state") == "running":
                 tree.running_children[parent_id] = tree.running_children.get(parent_id, 0) + 1
                 tree.helper_activity.setdefault(parent_id, []).append(
-                    _helper_activity(a, states.get(a["agent_id"], {}), visible_labels))
+                    _helper_activity(a, states.get(a["agent_id"], {}), visible_labels,
+                                     hides=a["agent_id"] in hiding))
     return tree
 
 
@@ -766,16 +769,23 @@ _HELPER_BUCKETS = {
 
 
 def _helper_activity(helper: dict[str, Any], state: dict[str, Any],
-                     visible_labels: dict[str, Any]) -> dict[str, Any]:
-    """One running helper as its parent's status line describes it."""
+                     visible_labels: dict[str, Any], *, hides: bool = False) -> dict[str, Any]:
+    """One running helper as its parent's status line describes it. ``hides``: the helper's chat
+    hides coordination, so a coordination turn of it reads 'Working with <Name>', as its own row
+    does (its own status text is its words to the user and is shown, like a note)."""
     kind = str(state.get("kind") or "")
     detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
     text = str(visible_labels.get(helper["agent_id"], helper.get("custom_status")) or "").strip()
     if not text and kind:
-        text = str(state_activity_event(
+        veil = ""
+        if hides and kind in AgentState.busy_states():
+            working = _working_with(helper["agent_id"], detail.get("trace_id"))
+            if working.get("audience") == coordination.AGENTS:
+                veil = coordination.veiled(working)
+        text = str(coordination.veil_activity(state_activity_event(
             agent_id=helper["agent_id"], session=helper["session"],
             persona=helper["persona"], kind=kind, ts=int(state.get("ts") or 0),
-            detail=detail)["summary"] or "").strip()
+            detail=detail), veil)["summary"] or "").strip()
     bucket = _HELPER_BUCKETS.get(kind, "idle")
     if detail.get("account_recovery"):
         bucket = "waiting"
