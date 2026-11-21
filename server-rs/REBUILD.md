@@ -3406,6 +3406,10 @@ from within the media writer, and those workers never wait for it. A request tha
 receive its writer answer within three seconds receives a refusal. Deletion and favorite
 retries preserve their first timestamps and publish no new event.
 
+The gallery's delete, batch delete and favorite routes refuse any non-blank turn or
+paired-Host claim with 403 `agents_may_not` (R178, the reference's PR 519).
+Gallery reads and publication keep their existing access rules.
+
 Gallery pages seek by creation or favorite time and asset id. Tombstone pages read nothing
 at or before their cursor, and include all rows that share the last millisecond of the
 page. They tell a reconnecting device what it must evict even when it missed the event.
