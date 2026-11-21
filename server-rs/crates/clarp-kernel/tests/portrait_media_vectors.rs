@@ -36,7 +36,12 @@ fn portrait_selection_matches_the_python_hosts_published_by() {
         index.apply(image);
     }
     let ids = |items: Vec<&Image>| {
-        json!(items.into_iter().map(|i| i.asset.asset_id.clone()).collect::<Vec<_>>())
+        json!(
+            items
+                .into_iter()
+                .map(|i| i.asset.asset_id.clone())
+                .collect::<Vec<_>>()
+        )
     };
     let cases = vectors["queries"].as_array().unwrap();
     for row in cases {

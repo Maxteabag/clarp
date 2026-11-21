@@ -155,9 +155,14 @@ impl Store {
             window.since,
             window.until,
         );
-        let candidates = kept.into_iter().map(|image| Hint::of(image, "created", image.asset.created_at))
+        let candidates = kept
+            .into_iter()
+            .map(|image| Hint::of(image, "created", image.asset.created_at))
             .chain(discarded.into_iter().filter_map(|image| {
-                image.deletion.as_ref().map(|deleted| Hint::of(image, "deleted", deleted.at))
+                image
+                    .deletion
+                    .as_ref()
+                    .map(|deleted| Hint::of(image, "deleted", deleted.at))
             }));
         let mut writes = Vec::new();
         let mut hints = Vec::new();
@@ -171,7 +176,7 @@ impl Store {
         if !writes.is_empty() {
             self.db.put_together(&writes)?;
         }
-        hints.sort_unstable_by(|a,b| (a.at, &a.asset_id).cmp(&(b.at,&b.asset_id)));
+        hints.sort_unstable_by(|a, b| (a.at, &a.asset_id).cmp(&(b.at, &b.asset_id)));
         Ok(hints)
     }
 
