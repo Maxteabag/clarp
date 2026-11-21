@@ -95,8 +95,12 @@ for file,why,old,new in [
 ]: plant(file,'keeper',why,old,new)
 for file,why,old,new in [
     ('request_tool.rs','arming trusts a different named requester','Some(id) if id == owner.record.agent_id','Some(id) if !id.is_empty()'),
-    ('request_tool.rs','arming discards the identified owner','request_owner(turn.as_deref(), &requester)','crate::agent::GoalCaller::Default'),
-    ('request_tool.rs','abandoning a definitely refused request loses the caller','request_owner(turn, &owner)','crate::agent::GoalCaller::Default'),
+    ('request_tool.rs','arming discards the identified owner',
+     '                deadline,\n                request_owner(turn.as_deref(), &requester),',
+     '                deadline,\n                crate::agent::GoalCaller::Default,'),
+    ('request_tool.rs','abandoning a definitely refused request loses the caller',
+     '                        &format!("HTTP {status}"),\n                        request_owner(turn.as_deref(), &requester),',
+     '                        &format!("HTTP {status}"),\n                        crate::agent::GoalCaller::Default,'),
     ('request_tool.rs','a verified answer claims the named replier','Peer(who.record.agent_id.clone(), true)','Peer(replier.record.agent_id.clone(), true)'),
     ('request_tool.rs','an answer with no token becomes verified','Peer(replier.record.agent_id.clone(), false)','Peer(replier.record.agent_id.clone(), true)'),
     ('tools.rs','the goal CLI drops its turn','Ok(Some(who)) => crate::agent::GoalCaller::Verified(who.record.agent_id.clone())','Ok(Some(_)) => crate::agent::GoalCaller::Default'),
