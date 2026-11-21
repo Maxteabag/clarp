@@ -50,6 +50,11 @@ class GenerationCancelled(GenerationError):
     pass
 
 
+# The created_by of every image a generation run publishes; the Host's job watcher finds a
+# run's images by it to announce them (background_job_watcher._portrait_media_changed).
+CREATED_BY_PREFIX = "portrait_generation:"
+
+
 def job_id_for(agent_id: str) -> str:
     return "portrait-generation-" + hashlib.sha256(agent_id.encode()).hexdigest()[:20]
 
@@ -204,7 +209,7 @@ def generate_two(
                 source_name=f"generated-portrait-{index}.{extension}",
                 content_type=generated_mime,
                 caption=f"Generated portrait alternative {index}",
-                created_by=f"portrait_generation:{PROVIDER}",
+                created_by=f"{CREATED_BY_PREFIX}{PROVIDER}",
                 media_dir=media_dir or _media_dir(),
             ))
         return agent_portraits.replace_alternates_with_media_assets(

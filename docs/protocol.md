@@ -1189,10 +1189,14 @@ come twice. The Host keeps the record of a deleted image for good. `400` for a m
 negative `since` or a `limit` that is not a number. Any device that may read `GET /media`
 may read this.
 
-**Freshness.** `media-changed` (see the event table) is sent for an image published
-into a chat through `POST /media` (`change: "created"`), once per image a delete
-removed, also from the batch call (`"deleted"`), and for each favourite change that
-changed something (`"favorite"`, with `favorite`). `at` is the change's time in ms.
+**Freshness.** `media-changed` (see the event table) with `change: "created"` is sent
+once for every image added to a chat's gallery, whatever made it: published through
+`POST /media`, a podcast companion's concept image once it is saved, or an image a
+portrait generation run kept, when the run ends. `"deleted"` is sent once per image a
+delete removed, also from the batch call, and for each image a portrait generation run
+discarded, when the run ends. `"favorite"` (with `favorite`) for each favourite change that
+changed something. Each is sent after the change has committed; a save that rolls back
+sends nothing. `at` is the change's time in ms.
 
 **Who may.** A full device and the administrator. A limited device is refused the three
 writes with `403 full device access required`; it still reads `GET /media`, new keys
