@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 115;
+pub const HOST_CONTRACT: u64 = 116;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -3261,7 +3261,11 @@ async fn queue(
         .anyone(&query.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
     let (waiting, state) = member.agent.queue().await?;
-    let items: Vec<Value> = waiting.iter().map(wire::queue_item).collect();
+    let directory = app.fleet.directory();
+    let items: Vec<Value> = waiting
+        .iter()
+        .map(|item| wire::queue_item(item, &directory))
+        .collect();
     Ok(Json(json!({
         "items": items,
         "paused": state.paused,

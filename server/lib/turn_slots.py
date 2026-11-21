@@ -27,6 +27,7 @@ folding in the two facts other modules own: an attached interactive terminal
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import threading
 import time
 from dataclasses import dataclass
@@ -376,18 +377,58 @@ class TurnSlots:
     # --- queue -------------------------------------------------------------
 
     def enqueue(self, agent_id: str, spec: Any) -> int:
-        """Append behind the current owner; returns the new depth."""
+        """Append behind the current owner; returns the new depth. The user's
+        word goes ahead of the waiting work that is not (issue 481), by the
+        rule the durable rows follow (``turn_queue.user_word_slot``)."""
         with self.lock:
             items = self.queued.setdefault(agent_id, [])
             if len(items) >= self.MAX_QUEUE_PER_AGENT:
                 raise SlotsExhausted(
                     f"agent {agent_id} already has "
                     f"{self.MAX_QUEUE_PER_AGENT} turns queued")
-            items.append(spec)
+            self._place(items, spec)
             return len(items)
 
+    @staticmethod
+    def _place(items: list, spec: Any) -> None:
+        """Add ``spec`` to ``items`` where it waits: the user's word at its
+        slot (``turn_queue.user_word_slot``), anything else at the back."""
+        if not getattr(spec, "user_word", False):
+            items.append(spec)
+            return
+        from .turn_queue import user_word_slot
+        items.insert(user_word_slot(
+            items, is_user=lambda item: getattr(item, "user_word", False),
+            started=lambda item: getattr(item, "taken", False)), spec)
+
+    def _joined(self, before: Iterable, later: Iterable) -> list:
+        """The queue before a Stop with what arrived since, by the same rule."""
+        items = list(before)
+        for spec in later:
+            self._place(items, spec)
+        return items
+
+    def follow(self, agent_id: str, order: list[str]) -> bool:
+        """Put the specs that have a durable row (``queue_id`` or ``park_id``
+        in ``order``, the rows' queue order) in that order, each in a place
+        one of them held; specs without a row keep theirs. Recovery calls it
+        after re-admitting rows into a queue that already held some (#481)."""
+        rank = {row_id: index for index, row_id in enumerate(order)}
+        key = lambda spec: getattr(spec, "queue_id", "") or getattr(spec, "park_id", "")
+        with self.lock:
+            items = self.queued.get(agent_id) or []
+            places = [i for i, spec in enumerate(items) if key(spec) in rank]
+            ordered = sorted((items[i] for i in places), key=lambda spec: rank[key(spec)])
+            changed = [items[i] for i in places] != ordered
+            for i, spec in zip(places, ordered):
+                items[i] = spec
+            return changed
+
     def requeue_front(self, agent_id: str, spec: Any) -> None:
-        """Put a spec whose launch failed back at the head of the queue."""
+        """Put a spec whose launch failed back at the head of the queue. It
+        was taken once: the user's word never overtakes it."""
+        if dataclasses.is_dataclass(spec) and hasattr(spec, "taken"):
+            spec = dataclasses.replace(spec, taken=True)
         with self.lock:
             self.queued.setdefault(agent_id, []).insert(0, spec)
 
@@ -517,9 +558,10 @@ class TurnSlots:
             else:
                 self.claimed_at[agent_id] = float(claimed_at)
             # Sends admitted while the barrier was up were appended after the
-            # snapshot. Preserve them behind the restored pre-Stop queue.
-            queued = list(snapshot.get("queued") or []) + list(
-                self.queued.get(agent_id) or [])
+            # snapshot. Preserve them behind the restored pre-Stop queue (the
+            # user's word among them at its slot, as on arrival).
+            queued = self._joined(snapshot.get("queued") or [],
+                                  self.queued.get(agent_id) or [])
             if queued:
                 self.queued[agent_id] = queued
             else:
@@ -531,8 +573,8 @@ class TurnSlots:
         """Put preserved and newly parked specs back, minus cancelled ones."""
         cancelled = set(cancelled_trace_ids)
         with self.lock:
-            queue = list(snapshot.get("queued") or []) + list(
-                self.queued.get(agent_id) or [])
+            queue = self._joined(snapshot.get("queued") or [],
+                                 self.queued.get(agent_id) or [])
             remaining = [spec for spec in queue
                          if spec.trace_id not in cancelled]
             if remaining:

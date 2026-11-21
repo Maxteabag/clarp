@@ -147,7 +147,7 @@ fn what_a_test_gives_a_process_holds_nothing_of_a_machine_full_of_traps() {
     let runner = a_machine_that_has_everything(&place.root);
     let machine = place.root.join("the-machine");
     let given = sealed::sealed(&runner, &place.root, &[]);
-    let constants = [sealed::PATH, clarp_sealed::LANG, clarp_sealed::TZ];
+    let constants = [sealed::PATH, clarp_sealed::LANG, clarp_sealed::TZ, "0"];
     for (name, value) in &given {
         let shown = format!("{}={}", name.to_string_lossy(), value.to_string_lossy());
         let value = std::path::Path::new(value);
@@ -177,6 +177,7 @@ fn what_a_test_gives_a_process_holds_nothing_of_a_machine_full_of_traps() {
     assert_eq!(at("PATH"), Some(sealed::PATH.into()));
     assert_eq!(at("LANG"), Some(clarp_sealed::LANG.into()));
     assert_eq!(at("TZ"), Some(clarp_sealed::TZ.into()));
+    assert_eq!(at("CLARP_VOICE_NAMES_WORKER"), Some("0".into()));
     assert_eq!(
         at("XDG_RUNTIME_DIR"),
         Some(place.root.join("user-run").into())
@@ -194,7 +195,7 @@ fn what_a_test_gives_a_process_holds_nothing_of_a_machine_full_of_traps() {
         assert_eq!(at(name), None, "{name} ({why}) reached the process");
     }
     assert_eq!(at("TRAP_PROVIDER_KEY"), None);
-    assert_eq!(given.len(), 10 + programs.len(), "{given:?}");
+    assert_eq!(given.len(), 11 + programs.len(), "{given:?}");
     // What a test names on purpose is the runner's, and only that; a name the runner lacks
     // is not given at all.
     let named = sealed::sealed(
