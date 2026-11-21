@@ -1797,7 +1797,9 @@ async fn creation_default_model(app: &App, backend: &str) -> Option<String> {
                 let profile = crate::owner::text_at(&config, &["profile"]);
                 profile
                     .as_deref()
-                    .and_then(|profile| crate::owner::text_at(&config, &["profiles", profile, "model"]))
+                    .and_then(|profile| {
+                        crate::owner::text_at(&config, &["profiles", profile, "model"])
+                    })
                     .or_else(|| crate::owner::text_at(&config, &["model"]))
             }
             _ => None,

@@ -3119,24 +3119,43 @@ impl Fleet {
         let given = creation_picture(&said(&request.avatar_base64))?;
         let file = self.voice_pool_settings();
         let [named, cartesia, gemini] = crate::owner::personas(&file);
-        let owner = Owner { roster: &named, cartesia: &cartesia, gemini: &gemini };
+        let owner = Owner {
+            roster: &named,
+            cartesia: &cartesia,
+            gemini: &gemini,
+        };
         let definition = self.book.named(&owner, &persona);
         let presented = |request: &Option<String>, key: &str, most: usize, before: &str| {
             let Some(request) = request else {
                 return before.to_string();
             };
-            let inherited = definition.as_ref().and_then(|row| row[key].as_str()).unwrap_or("");
-            let selected = if strip(request).is_empty() { strip(inherited) } else { strip(request) };
+            let inherited = definition
+                .as_ref()
+                .and_then(|row| row[key].as_str())
+                .unwrap_or("");
+            let selected = if strip(request).is_empty() {
+                strip(inherited)
+            } else {
+                strip(request)
+            };
             python::first(selected, most).to_string()
         };
         let imported_avatar = if request.avatar_path.is_some() {
-            definition.as_ref().and_then(|row| row["id"].as_str())
+            definition
+                .as_ref()
+                .and_then(|row| row["id"].as_str())
                 .and_then(|id| self.book.picture_of(&owner, id))
         } else {
             before.avatar.clone()
         };
         let voice_id = or_kept(said(&request.voice_id), &before.voice_id);
-        self.check_creation_voice(&file, &persona, &voice_id, definition.as_ref(), Some(&before))?;
+        self.check_creation_voice(
+            &file,
+            &persona,
+            &voice_id,
+            definition.as_ref(),
+            Some(&before),
+        )?;
         Self::check_creation_effort(&backend, &model, &effort, &file)?;
         let record = AgentRecord {
             persona,
@@ -3162,9 +3181,22 @@ impl Fleet {
             } else {
                 before.helper_completed_at_ms
             },
-            avatar: given.as_ref().map(|(_, digest)| digest.clone()).or(imported_avatar),
-            personality: presented(&request.personality, "personality", PERSONALITY_MOST, &before.personality),
-            avatar_symbol: presented(&request.avatar_symbol, "avatar_symbol", personas::SYMBOL_MOST, &before.avatar_symbol),
+            avatar: given
+                .as_ref()
+                .map(|(_, digest)| digest.clone())
+                .or(imported_avatar),
+            personality: presented(
+                &request.personality,
+                "personality",
+                PERSONALITY_MOST,
+                &before.personality,
+            ),
+            avatar_symbol: presented(
+                &request.avatar_symbol,
+                "avatar_symbol",
+                personas::SYMBOL_MOST,
+                &before.avatar_symbol,
+            ),
             // A conversation of a new name: an app that kept the old one drops it.
             conversation_id: ids::uuid(),
             ..before.clone()
@@ -3203,7 +3235,9 @@ impl Fleet {
             personas::cartesia_of(voice)
                 .or_else(|| settings.cartesia_voice_for(name).map(str::to_owned))
         };
-        let persona_voice = definition.and_then(|row| row["voice_id"].as_str()).unwrap_or("");
+        let persona_voice = definition
+            .and_then(|row| row["voice_id"].as_str())
+            .unwrap_or("");
         if voice_of(persona, persona_voice).as_deref() == Some(selected.as_str())
             || before.is_some_and(|record| {
                 voice_of(&record.persona, &record.voice_id).as_deref() == Some(selected.as_str())
@@ -3229,8 +3263,10 @@ impl Fleet {
         effort: &str,
         file: &toml::Table,
     ) -> Result<(), NotMade> {
-        if backend == "agy" && !effort.is_empty()
-            && (!model.is_empty() || crate::owner::text_at(file, &["agents", "agy_model"]).is_some())
+        if backend == "agy"
+            && !effort.is_empty()
+            && (!model.is_empty()
+                || crate::owner::text_at(file, &["agents", "agy_model"]).is_some())
         {
             let why = "AGY model-specific effort compatibility is unknown";
             return Err(Told::new(400, why, why).into());
@@ -3442,7 +3478,12 @@ impl Fleet {
             voice => voice,
         };
         self.check_creation_voice(&file, &persona, &voice_id, definition.as_ref(), None)?;
-        Self::check_creation_effort(&backend, request.model.as_deref().unwrap_or(""), &effort, &file)?;
+        Self::check_creation_effort(
+            &backend,
+            request.model.as_deref().unwrap_or(""),
+            &effort,
+            &file,
+        )?;
         let voice_id = if role == "agent" && !was_forked {
             self.assigned_voice(&file, &owner, &persona, &voice_id, catalogue)
         } else {
