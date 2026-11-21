@@ -320,7 +320,7 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
         assert_eq!(event["change"], "created");
         assert_eq!(event["asset_id"], asset["asset_id"]);
         assert_eq!(event["at"], asset["created_at"]);
-        assert_eq!(event["agent_id"], made["agent_id"]);
+        assert_eq!(event["agent_id"], made["agent"]["agent_id"]);
         assert!(event.get("favorite").is_none());
     }
     let mut captions = Vec::new();
