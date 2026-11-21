@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use clarp_kernel::{chip, hidden_coordination};
 use serde_json::{Value, json};
 

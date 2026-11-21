@@ -34,6 +34,6 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Lints
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked
