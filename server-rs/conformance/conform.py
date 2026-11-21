@@ -568,6 +568,8 @@ RING = re.compile(r'rng_[0-9a-f]{32}')
 # The id a Host gives a schedule: `sched_` and twelve hex signs. It is in the schedule's record and
 # in the path a client changes and removes it by. Named as the calls are.
 SCHEDULE = re.compile(r'sched_[0-9a-f]{12}')
+TEAM = re.compile(r'team-[0-9a-f]{12}')
+TEAM_MEMBER_PATH = re.compile(r'^(/teams/[^/]+/members/)([^/]+)$')
 # The id a Host gives a portrait an agent keeps: `portrait_` and twenty-four signs for one chosen
 # from what the agent published, and `portrait_legacy_`, the agent's id and the beginning of the
 # picture's digest for the picture an agent wears. It is in the list of an agent's portraits, in
@@ -1075,9 +1077,16 @@ def published(value, found: dict) -> dict:
     return found
 
 
+def team_member_path(address: str, sessions: dict) -> str:
+    """A team membership is edited by agent id. Keep the agent's identity across Hosts."""
+    match = TEAM_MEMBER_PATH.fullmatch(address)
+    if match and match[2] in sessions:
+        return f'{match[1]}<agent:{sessions[match[2]]}>'
+    return address
+
+
 def called(value, found: dict) -> dict:
-    """The ids of the calls, of the rings and of the schedules a capture names, each with the name it
-    is given here."""
+    """Name generated call, ring, schedule, team and portrait ids in capture order."""
     if isinstance(value, list):
         for item in value:
             called(item, found)
@@ -1092,6 +1101,9 @@ def called(value, found: dict) -> dict:
             elif key == 'schedule_id' and isinstance(item, str) and SCHEDULE.fullmatch(item):
                 known = sum(1 for name in found.values() if name.startswith('<schedule:'))
                 found.setdefault(item, f'<schedule:{known + 1}>')
+            elif key == 'team_id' and isinstance(item, str) and TEAM.fullmatch(item):
+                known = sum(1 for name in found.values() if name.startswith('<team:'))
+                found.setdefault(item, f'<team:{known + 1}>')
             elif key == 'portrait_id' and isinstance(item, str) and PORTRAIT.fullmatch(item):
                 known = sum(1 for name in found.values() if name.startswith('<portrait:'))
                 found.setdefault(item, f'<portrait:{known + 1}>')
@@ -1189,7 +1201,7 @@ def seen_by_a_client(raw: dict) -> dict:
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})
     # An agent's own picture is asked for under the agent's id: the path is named as the address is.
     raw = {**raw, 'http': [{**exchange, 'body': by_session(settle(exchange['body'], sessions), known),
-                            'path': own_face(str(exchange.get('path') or ''), known),
+                            'path': team_member_path(own_face(str(exchange.get('path') or ''), known), known),
                             'headers': told_to_wait(exchange.get('headers'))}
                            for exchange in raw['http']]}
     # What a call's event says of the call is the call's record: its moments and its Host are

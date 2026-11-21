@@ -54,6 +54,14 @@ def check(said: bool, what: str, failed: list) -> None:
 
 def main() -> int:
     failed: list = []
+    team_id, agent_id = 'team-123456789abc', '0123456789abcdef'
+    team = {'team_id': team_id}
+    names = conform.called([team], {})
+    path = conform.by_name(f'/teams/{team_id}/members/{agent_id}', names)
+    check(conform.by_name(team, names) == {'team_id': '<team:1>'}
+          and conform.team_member_path(path, {agent_id: 'claire'}) == '/teams/<team:1>/members/<agent:claire>'
+          and conform.team_member_path(path, {}) == path,
+          'team paths keep the issued team and the named member', failed)
     made = report(('router', '[10].body.session'), ('router', '[14].body.session'))
     ids = [d['id'] for d in made.items]
     shown = set(ids)
