@@ -86,6 +86,7 @@ pub mod seats;
 pub mod sign_in;
 pub mod socket;
 pub mod speech_stream;
+pub mod steering;
 pub mod spoken;
 pub mod standing;
 pub mod takeover;
