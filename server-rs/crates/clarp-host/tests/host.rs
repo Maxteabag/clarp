@@ -41060,6 +41060,10 @@ fn a_call_of_the_oracle_is_told_of_what_agents_finished_and_nobody_wrote_to_sinc
         ("OPENAI_API_KEY", "a-key-of-the-test"),
     ];
     let host = place.start_in(ADMIN, &[], &world);
+    // The scripted tool reads only the first line. Keep the coordination reminder
+    // out of this fixture's prompts so its agent-origin sleep actually holds the turn.
+    let show = json!({"coordination_visibility":"show"});
+    assert_eq!(host.post("/coordination-settings", show.clone()), show);
     let events = host.listen_at(&format!("/events?token={ADMIN}"));
     let names = ["Ida", "Mike", "Zoe", "Theo", "Nora", "Dora", "Rhea", "Ada"];
     let [ida, mike, zoe, theo, nora, dora, rhea, ada] = names.map(|name| host.new_agent(name));
