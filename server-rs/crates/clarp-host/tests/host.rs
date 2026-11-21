@@ -37,8 +37,6 @@ mod delivery;
 mod diagnostics;
 #[path = "host/enter_at_start.rs"]
 mod enter_at_start;
-#[path = "host/takeover_b.rs"]
-mod takeover_b;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
 #[path = "host/harness.rs"]
@@ -85,6 +83,8 @@ mod source_trace;
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
+#[path = "host/takeover_b.rs"]
+mod takeover_b;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
 #[path = "host/voice_events.rs"]
