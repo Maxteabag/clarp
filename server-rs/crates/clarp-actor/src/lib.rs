@@ -375,6 +375,8 @@ pub struct Waiting {
     pub speak: bool,
     pub accepted_at_ms: i64,
     pub admission: Admission,
+    pub origin: Origin,
+    pub sender_agent_id: Option<String>,
 }
 
 /// A row of the conversation an agent had on another Host, on its way in.
@@ -2084,6 +2086,8 @@ impl Actor {
             speak: message.speak,
             accepted_at_ms,
             admission,
+            origin: message.origin,
+            sender_agent_id: message.sender.map(|sender| sender.agent_id),
         })
     }
 

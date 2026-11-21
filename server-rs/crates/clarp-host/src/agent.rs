@@ -1314,8 +1314,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
 }
 
 enum QueueEdit {
-    Edited { client_id: String, text: String },
-    Deleted(String),
+    Edited { item: Waiting, text: String },
+    Deleted(Waiting),
 }
 
 struct Worker {
@@ -2754,7 +2754,7 @@ impl Worker {
                 let item = actor.queue_item(turn)?;
                 let withdrawn = actor.withdraw(turn, &by, now);
                 if matches!(withdrawn, Ok((true, _))) {
-                    self.queue_edit = item.map(|item| QueueEdit::Deleted(item.told_id));
+                    self.queue_edit = item.map(QueueEdit::Deleted);
                 }
                 let queue = actor.queue_state();
                 answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
@@ -2764,10 +2764,7 @@ impl Worker {
                 let item = actor.queue_item(turn)?;
                 let reworded = actor.reword(turn, &text, now);
                 if matches!(reworded, Ok((Reworded::Done, _))) {
-                    self.queue_edit = item.map(|item| QueueEdit::Edited {
-                        client_id: item.told_id,
-                        text,
-                    });
+                    self.queue_edit = item.map(|item| QueueEdit::Edited { item, text });
                 }
                 answered(reworded, answer)?
             }
@@ -3788,11 +3785,18 @@ impl Worker {
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
+        let directory = queue_edit.as_ref().and_then(|_| hub.queue_directory());
+        let name = |item: &Waiting| wire::queue_sender_name(item, directory.as_deref());
         let update = match &queue_edit {
-            Some(QueueEdit::Edited { client_id, text }) => {
-                Some(wire::QueueUpdate::Edited { client_id, text })
-            }
-            Some(QueueEdit::Deleted(client_id)) => Some(wire::QueueUpdate::Deleted(client_id)),
+            Some(QueueEdit::Edited { item, text }) => Some(wire::QueueUpdate::Edited {
+                item,
+                text,
+                sender_name: name(item),
+            }),
+            Some(QueueEdit::Deleted(item)) => Some(wire::QueueUpdate::Deleted {
+                item,
+                sender_name: name(item),
+            }),
             None if (held_or_let_go && !told_with_its_turn) || taken_back => {
                 Some(wire::QueueUpdate::Mailbox)
             }
