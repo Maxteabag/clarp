@@ -2784,7 +2784,7 @@ impl Worker {
                     ..
                 } => {
                     let direct_user = *admission == Admission::Queue
-                        && message.origin.is_user()
+                        && message.origin.is_user_send()
                         && marks.coordination.is_none();
                     let desk_relay = *admission == Admission::Later
                         && marks.user_word

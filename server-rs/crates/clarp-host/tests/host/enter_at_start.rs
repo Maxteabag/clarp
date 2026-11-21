@@ -311,39 +311,30 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     let (status, _) = host.ask("DELETE", "/turn-queue/m2", None);
     assert_eq!(status, 404);
 
-    // The user stops it: the trigger's waits on, held, and is no row. What the user says
-    // after the Stop runs ahead of it, and enters when its turn starts.
+    // Stop holds the trigger outside the conversation. The next fresh send goes first
+    // and releases the hold, so the trigger runs after that send finishes.
     host.post("/stop", json!({ "session": session }));
     wait_for("the second turn to end", || {
         host.state(session) == "interrupted"
     });
+    let queue_path = format!("/turn-queue?session={session}");
+    assert_eq!(host.get(&queue_path)["paused"], true);
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
     let after = host.send(session, "five", "m5");
     assert_eq!(after["ok"], true, "{after}");
     wait_for("the fifth to run", || taken().len() == 3);
     assert!(taken()[2].1.contains("five"), "{:?}", taken());
     assert_eq!(users(&host), ["u-m1", "u-m2", "u-m5"]);
+    assert_eq!(host.get(&queue_path)["paused"], false);
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
     answer(2);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let all = rows(&host);
-        if all.last().is_some_and(|(_, role)| role == "assistant") {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for the fifth's answer: {all:?}{}",
-            what_the_hosts_said()
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert_eq!(users(&host), ["u-m1", "u-m2", "u-m5"], "held, it is no row");
-
-    // Let go: the trigger's runs, and enters at its start, below the answer before it.
-    host.post("/turn-queue/resume", json!({ "session": session }));
-    wait_for("the trigger's turn to run", || taken().len() == 4);
-    wait_for("its row", || users(&host).len() == 4);
+    wait_for("the released trigger's turn to run", || taken().len() == 4);
+    assert!(taken()[3].1.contains("three"), "{:?}", taken());
+    wait_for("the fifth's reply and the trigger's row in order", || {
+        rows(&host).windows(3).any(|window| {
+            window[0].0 == "u-m5" && window[1].1 == "assistant" && window[2].0 == "u-t3"
+        })
+    });
     answer(3);
     wait_for("its answer", || {
         let all = rows(&host);

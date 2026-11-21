@@ -40,6 +40,11 @@ impl Origin {
         *self == Self::User
     }
 
+    /// A fresh instruction from the user, including one carried by the Oracle.
+    pub fn is_user_send(&self) -> bool {
+        self.is_user() || matches!(self, Self::Trigger { name } if name == "oracle")
+    }
+
     /// The word the contract has for it.
     pub fn name(&self) -> &str {
         match self {
