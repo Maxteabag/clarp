@@ -29,5 +29,8 @@ pub(crate) fn sealed(
     place: &Path,
     named: &[&str],
 ) -> BTreeMap<OsString, OsString> {
-    clarp_sealed::sealed(runner, place, &programs(), named)
+    let mut given = clarp_sealed::sealed(runner, place, &programs(), named);
+    // Keep the background provider catalogue worker off in test Hosts.
+    given.insert("CLARP_VOICE_NAMES_WORKER".into(), "0".into());
+    given
 }

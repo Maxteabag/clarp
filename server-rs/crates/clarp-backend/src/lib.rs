@@ -40,6 +40,9 @@ pub struct TurnSpec {
     /// The agent's session name: what its tools know it by.
     pub session: String,
     pub turn: u64,
+    /// The trace of the message this attempt answers.
+    pub trace_id: Option<String>,
+    pub takeover: Option<clarp_kernel::takeover::Input>,
     pub cwd: PathBuf,
     /// The message this turn answers.
     pub prompt: String,

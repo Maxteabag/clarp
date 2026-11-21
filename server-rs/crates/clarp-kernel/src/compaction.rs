@@ -199,6 +199,8 @@ pub fn decide(
             let told = failures::told(kind, reason, model, failures::Known::default());
             outcome(NOT_COMPACTED, gauge, None, false, &told.row)
         }
-        Outcome::Interrupted { .. } => outcome(UNKNOWN, gauge, None, false, ENDED_UNSAID),
+        Outcome::Interrupted { .. } | Outcome::Replaced { .. } => {
+            outcome(UNKNOWN, gauge, None, false, ENDED_UNSAID)
+        }
     }
 }

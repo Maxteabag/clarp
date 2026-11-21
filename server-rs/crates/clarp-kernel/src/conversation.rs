@@ -71,7 +71,16 @@ pub struct Message {
     /// and an app is told of it under none ([`Message::told_id`]).
     #[serde(default, skip_serializing_if = "is_false")]
     pub unminted: bool,
+    /// When it was sent, for a message that had to wait for its turn: its row is written when
+    /// that turn starts and stands there, and this keeps the moment it was sent ([`SENT_AT`]).
+    /// A message whose turn started at once has none: its row's time is when it was sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at_ms: Option<i64>,
 }
+
+/// The key the log keeps a waiting message's send time under in its row ([`Message::sent_at_ms`]).
+/// It is the log's, permanent once written, and no client reads it by this name.
+pub const SENT_AT: &str = "sent_at_ms";
 
 impl Message {
     /// Where a message is filed for the id its app gave it, and whether that id came with
@@ -274,8 +283,11 @@ pub struct TurnEnd {
     pub turn: u64,
     /// The id of the row that closed the turn.
     pub closes: String,
-    /// `completed`, `failed` or `interrupted`: the three ends a client tells apart.
+    /// How the turn ended, in the client's words.
     pub status: String,
+    /// The taking-over turn's public id, when the turn ended without an answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     pub ended_at_ms: i64,
@@ -330,13 +342,21 @@ impl TurnEnd {
             Outcome::Completed => "completed",
             Outcome::Failed { .. } => "failed",
             Outcome::Stopped { .. } | Outcome::Interrupted { .. } => "interrupted",
+            Outcome::Replaced { .. } => "replaced",
             Outcome::Withdrawn { .. } => return None,
+        };
+        let replaced_by = match &settled.outcome {
+            Outcome::Replaced { by, trace } => {
+                Some(trace.clone().unwrap_or_else(|| by.0.to_string()))
+            }
+            _ => None,
         };
         Some(Self {
             id: format!("t-{}", settled.id.0),
             turn: settled.id.0,
             closes: closes.to_string(),
             status: status.to_string(),
+            replaced_by,
             started_at_ms: settled.started_at_ms,
             ended_at_ms: settled.ended_at_ms,
             tool_count: settled.tool_count,
@@ -486,6 +506,26 @@ impl Entry {
 mod tests {
     use super::*;
 
+    /// The log keeps a waiting message's send time under its own key, and a message whose turn
+    /// started at once is written without one, as before issue 491.
+    #[test]
+    fn a_message_keeps_its_send_time_under_the_logs_key_only_when_it_waited() {
+        let at_once = serde_json::to_value(Message::default()).unwrap();
+        assert!(at_once.get(SENT_AT).is_none(), "{at_once}");
+        let waited = Message {
+            sent_at_ms: Some(1_700),
+            ..Message::default()
+        };
+        let row = serde_json::to_value(&waited).unwrap();
+        assert_eq!(row[SENT_AT], 1_700, "{row}");
+        assert_eq!(
+            SENT_AT, "sent_at_ms",
+            "the log's key is permanent once written"
+        );
+        let read: Message = serde_json::from_value(row).unwrap();
+        assert_eq!(read, waited);
+    }
+
     #[test]
     fn a_message_is_filed_under_its_apps_id_and_gives_that_id_back_as_it_was() {
         // An app whose ids come without the mark (the desk), and one whose ids have it
@@ -602,6 +642,7 @@ mod tests {
                 turn: 3,
                 closes: "r-msg_1".to_string(),
                 status: "completed".to_string(),
+                replaced_by: None,
                 started_at_ms: Some(5),
                 ended_at_ms: 30,
                 tool_count: 1,

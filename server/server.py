@@ -1216,6 +1216,36 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-events",
     })
 
+    # What a limited app needs to chat, speak and answer decisions, and nothing else (R123): a
+    # limited device may GET exactly these routes and route families; every other GET is refused
+    # as /dirs is. Not on the list, because their answers are the owner's setup or data: the
+    # owner's directories, settings, providers, accounts and background jobs (whose answer
+    # carries the worker's folder and log path).
+    _LIMITED_DEVICE_GET_EXACT = frozenset({
+        "/server-info", "/events", "/live", "/status",
+        "/agents/snapshot", "/log", "/message-tool-details", "/turn-queue", "/location",
+        "/attention", "/attention/inbox", "/artifacts", "/pinned-artifacts",
+        "/task-plan", "/task-plans", "/task-plan/document", "/goal-ledger",
+        "/clips/message", "/clips/recoverable", "/media",
+        "/voice-events", "/voice-events/utterances", "/voices", "/voice-catalog",
+        "/voice-preview", "/voice-humanness", "/transcription-guidance",
+        # Speech the phones read on a limited device too: the recording models (a stale saved model is
+        # dropped), the live captions' language and turn taking, and replay of the user's retained audio.
+        "/transcription-capabilities", "/transcription-providers", "/transcription-audio",
+        "/controller-actions", "/controller-narration",
+    })
+    _LIMITED_DEVICE_GET_PREFIXES = (
+        "/artifacts/", "/artifact-catalogs/", "/clips/", "/media/", "/audio/", "/avatars/",
+        "/stt/stream", "/controller-actions/",
+    )
+
+    def _limited_get_allowed(self, path: str) -> bool:
+        # An artifact's export (/artifacts/<id>/export) is the administrator's: the whole stored
+        # request, refused to a limited device though the family is on the list.
+        if path.startswith("/artifacts/") and path.rstrip("/").endswith("/export"):
+            return False
+        return path in self._LIMITED_DEVICE_GET_EXACT or path.startswith(self._LIMITED_DEVICE_GET_PREFIXES)
+
     def _device_forbidden(self, path: str, method: str) -> bool:
         if getattr(self, "_request_device_scope", "") != "limited":
             return False
@@ -1226,7 +1256,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             for prefix in self._DEVICE_FULL_ONLY_PREFIXES
         ):
             return True
-        # Exactly the routes, so unmatched paths keep their 404 (HTTP-01/03).
+        # Named routes before the allow-list. A limited device's GET outside the allow-list is
+        # refused, a path no route serves included; a full device keeps its 404 (HTTP-01/03).
         # /past-sessions with any scope: a caller-chosen cwd lists that
         # directory's sessions and their first messages (HTTP-03b).
         # /launch-directories and /favorite-paths: the owner's directories, for
@@ -1235,7 +1266,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 path.startswith("/terminal/") and method == "GET"):
             return True
         if method == "GET":
-            return False
+            return not self._limited_get_allowed(path)
         from lib import controller_actions_http
         if controller_actions_http.handles(path):
             return not controller_actions_http.limited_device_allowed(path, method)
@@ -2561,8 +2592,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         if not self._authorized():
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
-        if path.startswith("/schedules/") and self._device_forbidden(path, "PATCH"):
-            # Only the route: an unmatched PATCH keeps its 404 (HTTP-02).
+        if self._device_forbidden(path, "PATCH"):
+            # A limited device is refused every PATCH, before routing (R123).
             return self._json_error(403, "full device access required")
         return route_registry.dispatch(self, "PATCH", path)
 
@@ -2908,6 +2939,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 prompt_admission=prompt_admission,
                 queue_if_busy=req.queue_if_busy,
                 unheard_audio_sessions=tuple(req.unheard_audio_sessions),
+                user_word=req.front_desk,
             ))
         except DispatchError as e:
             if opening is not None and opening["route"] == "greeting":

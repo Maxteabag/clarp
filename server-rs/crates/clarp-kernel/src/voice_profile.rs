@@ -74,6 +74,8 @@ pub struct HostView {
     pub google_refusal: Option<String>,
     /// The names of voices in memory, by provider and voice: never fetched for a profile.
     pub labels: BTreeMap<String, BTreeMap<String, String>>,
+    /// Content digest of the background names file, from the same snapshot as its labels.
+    pub names_version: Option<String>,
     /// The engine that stands in for the Host's own on a clip nobody named one for. Empty:
     /// none does.
     pub cloud_engine: String,
@@ -213,14 +215,11 @@ pub fn elevenlabs_id_usable(voice: Option<&str>) -> bool {
 /// What a voice is called: a real name, or nothing (never an empty text).
 fn voice_label(view: &HostView, provider: &str, voice: Option<&str>) -> Option<String> {
     let voice = voice.filter(|voice| !voice.is_empty())?;
-    let label = if provider == GEMINI {
-        (!voice.starts_with("voice_")).then(|| voice.to_string())
-    } else {
-        view.labels
-            .get(provider)
-            .and_then(|named| named.get(voice))
-            .cloned()
-    };
+    let label = view
+        .labels
+        .get(provider)
+        .and_then(|named| named.get(voice))
+        .cloned();
     label
         .map(|label| label.trim().to_string())
         .filter(|label| !label.is_empty())
@@ -370,7 +369,8 @@ pub fn hearing(view: &HostView, who: Who<'_>) -> Value {
     let own_language = languages::of_agent(&view.agent_languages, who);
     let set = own_language.unwrap_or(&view.language);
     let engines: Vec<&str> = plan
-        .chat_order(set, Some(&view.own_engine))
+        .chat_order(Some(&view.own_engine))
+        .0
         .into_iter()
         .enumerate()
         .map(|(place, engine)| {
@@ -409,6 +409,7 @@ pub fn hearing(view: &HostView, who: Who<'_>) -> Value {
         "device_cloud_languages": device_cloud,
         "languages": spoken,
         "language_origin": language_origin,
+        "configured_languages": codes(set),
     })
 }
 

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use clarp_kernel::call_transcription::{self as rules, Policy};
+use clarp_kernel::heard::Failure;
 use serde_json::{Value, json};
 fn texts(v: &Value) -> Vec<String> {
     serde_json::from_value(v.clone()).unwrap()
@@ -113,7 +114,7 @@ fn each_attempt_records_only_what_its_engine_was_handed() {
                     &step.engine,
                     handed.as_deref(),
                     125,
-                    &format!("failed {}{}", step.engine, "x".repeat(210)),
+                    Failure::Failed.client_words().1,
                 );
             } else {
                 seen.heard(
