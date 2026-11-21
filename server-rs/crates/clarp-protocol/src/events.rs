@@ -186,6 +186,10 @@ pub struct QueueUpdated {
     pub queue_started: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_msg_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_change: Option<String>,
 }
 
 /// A finished turn the user may want to know about, with what the Host decided to do about it.
