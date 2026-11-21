@@ -3882,14 +3882,10 @@ impl Worker {
             );
         }
         for read in joined_reads {
-            let message = &read.message;
             let mut event = wire::queue_updated(
                 &record,
                 &status,
-                wire::QueueUpdate::Started {
-                    client_id: &message.client_id,
-                    message: Some(message),
-                },
+                wire::QueueUpdate::Started(&read.client_id),
             );
             event["queue_depth"] = json!(read.queue.waiting);
             event["queue_paused"] = json!(read.queue.paused);
@@ -3952,7 +3948,7 @@ impl Worker {
         let told_with_its_turn = !status.paused && !by_hand && began_from_the_queue;
         let taken_back = was_waiting.iter().any(|turn| {
             !status.waiting.contains(turn)
-                && !joined_reads.iter().any(|read| read.message.turn == *turn)
+                && !joined_reads.iter().any(|read| read.turn == *turn)
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });

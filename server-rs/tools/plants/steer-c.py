@@ -18,6 +18,7 @@ R = "clarp-actor/src/lib.rs"
 C = "clarp-actor/src/steering.rs"
 L = "clarp-host/src/launcher.rs"
 H = "clarp-host/src/agent.rs"
+D = "clarp-actor/src/conversation.rs"
 
 PLANTS = [
     (S, "shim", "the initial prompt closes streaming stdin", "if args.stdin_until.is_none() {", "if args.stdin_until.is_some() {"),
@@ -40,6 +41,9 @@ PLANTS = [
     (C, "host", "a read receipt need not make the row due", "batch.command(Command::JoinRead { turn }, now_ms)", "batch.command(Command::JoinRead { turn: TurnId(0) }, now_ms)"),
     (C, "host", "the queue is never told which follow-up was read", "out.joined_reads.push(JoinedRead", "drop(JoinedRead"),
     (H, "host", "several echoes in one batch all get its last queue revision", 'event["queue_revision"] = json!(read.queue.revision);', ''),
+    (C, "host", "a read user follow-up leaves the original turn hidden", "let revealed = !self.mixed && conversation::loosen(batch, into, now_ms)?;", "let revealed = false;"),
+    (D, "host", "revealed old rows are missing from the next delta", "if stamped.insert(id.to_owned()) {", "if !stamped.insert(id.to_owned()) {"),
+    (R, "host", "the running turn stays hidden after its audience changes", "self.shown.set_turn_audience(clarp_kernel::coordination::USER, at)", "self.shown.set_turn_audience(clarp_kernel::coordination::AGENTS, at)"),
     (R, "host", "a separate reply keeps the trace of the first prompt", "reply.trace_id.clone_from(&separate.message.trace_id);", ""),
     (L, "host", "opting into replay does not keep stdin open", 'command.args(["--stdin-until", "result"]);', ""),
 ]

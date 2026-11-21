@@ -410,7 +410,8 @@ impl Waiting {
 /// The queue as it stood when Claude read this follow-up, even if the same batch read another.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinedRead {
-    pub message: Waiting,
+    pub turn: TurnId,
+    pub client_id: String,
     pub queue: QueueState,
 }
 
@@ -3981,6 +3982,7 @@ impl Actor {
         let mut first_written = HashMap::new();
         let mut signals = Vec::new();
         let mut steering = steering::State::default();
+        steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
         let mut offset = 0;
         // Those who watch are shown the turn as it stands: its items are made again from the
         // same records, with the times the records have. What that sends is for nobody: no
@@ -4430,6 +4432,7 @@ impl Actor {
             // Where this reading stops before the end of what was read: after the record in
             // which the turn moved on to something else.
             let mut stopped_at: Option<u64> = None;
+            let mut revealed_at = None;
             for (place, record) in read.records.iter().enumerate() {
                 let t = record.t;
                 let evidence = live.steering.record(&record.entry);
@@ -4815,8 +4818,12 @@ impl Actor {
                 }
                 if let Some(event) = evidence {
                     let facts = live.facts();
-                    if let Some(speak) = live.steering.observe(&event, &mut batch, facts, &live.last_row, t, out)? {
-                        live.speak |= speak;
+                    if let Some(sharing) = live.steering.observe(&event, &mut batch, facts, &live.last_row, t, out)? {
+                        live.speak |= sharing.speak;
+                        if sharing.revealed {
+                            revealed_at = Some(t);
+                            shown.extend(live.drafts.iter().map(|draft| draft.id.clone()));
+                        }
                         out.changed.status = true;
                     }
                 }
@@ -4881,6 +4888,10 @@ impl Actor {
                 batch.cursor(turn, read_until, now_ms);
             }
             let committed = batch.commit()?;
+            if let Some(at) = revealed_at {
+                let events = self.shown.set_turn_audience(clarp_kernel::coordination::USER, at);
+                self.shown_events.extend(events);
+            }
             if !already_refused && self.recorder.agent().refused_live_binding() {
                 clarp_backend::past::report_refused_session(self.backend.id());
             }

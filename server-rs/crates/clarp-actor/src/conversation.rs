@@ -12,13 +12,13 @@
 //! as it is now, with its parts, and carries the revision of the newest of them: it changed
 //! when that part was written, and a client that asks what is newer is given the row again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clarp_kernel::agent::AgentEvent;
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
-use clarp_kernel::journal::{coordination_key, kind};
-use clarp_kernel::turn::{Origin, TurnEvent, left_out_of_chats};
-use clarp_ports::log::{AgentLog, Item, Seq};
+use clarp_kernel::journal::{Batch, coordination_key, kind};
+use clarp_kernel::turn::{Origin, Turn, TurnEvent, TurnId, left_out_of_chats};
+use clarp_ports::log::{AgentLog, Item, NewItem, Seq};
 
 use crate::ActorError;
 
@@ -171,6 +171,13 @@ fn corrupt(item: &Item, error: serde_json::Error) -> ActorError {
 /// Whether a turn answers another agent: its acceptance, found by its key when it was marked
 /// so. One look by key, whatever the size of the conversation.
 pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
+    if mixed(log, turn)? {
+        return Ok(None);
+    }
+    original_mark(log, turn)
+}
+
+fn original_mark(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
     let Some(stored) = log.find(&coordination_key(turn))? else {
         return Ok(None);
     };
@@ -185,13 +192,60 @@ pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorErr
     })
 }
 
+fn mixed_key(turn: u64) -> String {
+    format!("coordination-mixed-{turn}")
+}
+
+fn restamp_key(id: &str) -> String {
+    format!("coordination-row-{id}")
+}
+
+pub(super) fn mixed(log: &dyn AgentLog, turn: u64) -> Result<bool, ActorError> {
+    Ok(log.find(&mixed_key(turn))?.is_some_and(|item| item.kind == kind::MIXED_TURN))
+}
+
+/// Show a marked turn once a user is heard in it. New revisions let a client read the old
+/// rows again without writing a second message or moving any existing row.
+pub(super) fn loosen(batch: &mut Batch<'_>, turn: TurnId, at: i64) -> Result<bool, ActorError> {
+    if mark_of(batch.log(), turn.0)?.is_none() {
+        return Ok(false);
+    }
+    let Some(message_seq) = (match batch.agent().live() {
+        Some(Turn::Starting(live)) if live.id == turn => Some(live.message_seq),
+        Some(Turn::Running(live)) if live.id == turn => Some(live.message_seq),
+        _ => None,
+    }) else {
+        return Ok(false);
+    };
+    let mut after = message_seq.saturating_sub(1);
+    let mut stamped = HashSet::new();
+    loop {
+        let rows = batch.log().read_after(after, kind::ROWS, CHUNK)?;
+        let Some(last) = rows.last() else { break };
+        after = last.seq;
+        for row in rows.iter().filter(|row| row.turn == Some(turn.0)) {
+            let Some(entry) = Entry::from_item(row).map_err(|error| corrupt(row, error))? else {
+                continue;
+            };
+            let id = entry.id();
+            if stamped.insert(id.to_owned()) {
+                batch.item(NewItem::new(kind::AUDIENCE_ROW, at, id.as_bytes().to_vec())
+                    .in_turn(turn.0)
+                    .keyed(restamp_key(id)));
+            }
+        }
+    }
+    batch.item(NewItem::new(kind::MIXED_TURN, at, Vec::new()).in_turn(turn.0).keyed(mixed_key(turn.0)));
+    Ok(true)
+}
+
 /// Reads rows as they are now: each with the parts that name it.
 struct Reader<'a> {
     log: &'a dyn AgentLog,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
     /// Whether the turns asked about answer another agent ([`mark_of`]).
-    marks: HashMap<u64, Option<String>>,
+    marks: HashMap<u64, (Option<String>, bool)>,
 }
 
 impl<'a> Reader<'a> {
@@ -204,11 +258,12 @@ impl<'a> Reader<'a> {
     }
 
     /// Whether this turn answers another agent: looked up once per turn.
-    fn mark(&mut self, turn: u64) -> Result<Option<String>, ActorError> {
+    fn mark(&mut self, turn: u64) -> Result<(Option<String>, bool), ActorError> {
         if let Some(known) = self.marks.get(&turn) {
             return Ok(known.clone());
         }
-        let found = mark_of(self.log, turn)?;
+        let loosened = mixed(self.log, turn)?;
+        let found = (if loosened { None } else { original_mark(self.log, turn)? }, loosened);
         self.marks.insert(turn, found.clone());
         Ok(found)
     }
@@ -285,7 +340,13 @@ impl<'a> Reader<'a> {
             }
         }
         if let Some(turn) = row.turn_number {
-            row.coordination = self.mark(turn)?;
+            let (marked, loosened) = self.mark(turn)?;
+            row.coordination = marked;
+            if loosened && let Some(restamp) = self.log.find(&restamp_key(row.entry.id()))?
+                && restamp.kind == kind::AUDIENCE_ROW
+            {
+                newest = newest.max(restamp.seq);
+            }
         }
         if let Some(turn) = row.turn_number
             && let Some((end, seq)) = self.end(turn)?
@@ -329,6 +390,14 @@ fn rows(
     let mut reader = Reader::new(log);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
+        if item.kind == kind::AUDIENCE_ROW {
+            if place == Place::Newest {
+                let id = String::from_utf8_lossy(&item.body);
+                found.retain(|r| r.entry.id() != id.as_ref());
+                found.extend(reader.stored(&id, which)?);
+            }
+            continue;
+        }
         if let Some(id) = super::helper_cells::parent(item)? {
             if place == Place::Newest {
                 found.retain(|r| r.entry.id() != id);
