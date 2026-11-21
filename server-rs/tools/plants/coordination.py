@@ -154,7 +154,7 @@ PLANTS = [
     (HA, 'host', 'a working state is hidden for an agent that cannot leave a note', '    if !actor.profile().hides_coordination {\n        return wire::WorkingWith::User;\n    }', ''),
     (HF, 'host', 'an agent hides its turns without the key', '            works.turns.has_key(),', '            true,'),
     (HA, 'host', 'an agent sent to hides its turns without the key', '                self.setup.turns.has_key(),', '                true,'),
-    (HE, 'host', 'a page hides the rows of an agent without the key', '        app.turns.has_key(),\n    );\n    let mut answer = wire::log_response', '        true,\n    );\n    let mut answer = wire::log_response'),
+    (HE, 'host', 'a page hides the rows of an agent without the key', '        app.turns.has_key(),\n    );\n    let directory = app.fleet.directory()', '        true,\n    );\n    let directory = app.fleet.directory()'),
     # What a send presents (the Host's edge).
     (HE, 'host', "a send's turn token is not read", '    crate::coordination::made(app, turn_of(headers), peer, trace_named).await', '    crate::coordination::made(app, None, peer, trace_named).await'),
     (HE, 'host', 'a trace the caller named is not looked at', '    let trace_named = named.is_some_and(|trace| !trace.is_empty());', '    let trace_named = false;'),
