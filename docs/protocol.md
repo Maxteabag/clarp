@@ -508,8 +508,9 @@ one `/log` gives the turn's rows: a turn of an agent that cannot leave a note re
 `working_with` is `null`), as its rows do; every working
 `agent-state` carries the turn's `audience`, `sender_agent_id` and `sender_name`, not only the
 first one. While such a chat runs a coordination turn, its row's `activity` and
-`live_activity` and the agents-working push say "Working with <Name>" and carry no tool,
-label or reasoning title of that turn. Under `show` nothing is veiled.
+`live_activity`, the `agent-activity` and `agent-state` events of that turn (its `detail` keeps
+only `trace_id`, `phase` and the words) and the agents-working push say "Working with <Name>"
+and carry no tool, input, label or reasoning title of that turn. Under `show` nothing is veiled.
 
 A **note** is an agent's words to the user from its own turn:
 `role: assistant`, `kind: "note"`, `origin: "note"`, no `sender_*`,
