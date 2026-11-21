@@ -169,6 +169,7 @@ pub struct Incoming {
     /// Another agent addresses this one: its id ("" for a peer Host's agent); `None`: the
     /// user's. The turn the message becomes is marked so in its acceptance.
     pub coordination: Option<String>,
+    pub user_word: bool,
 }
 
 /// What a message did: where it is in the log, and what the actor must now do.
@@ -612,6 +613,7 @@ impl Recorder {
                     origin: message.origin,
                     admission: message.admission,
                     coordination: message.coordination,
+                    user_word: message.user_word,
                 },
                 now_ms,
             )

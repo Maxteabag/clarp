@@ -763,6 +763,8 @@ pub struct Marks {
     /// The caller named the trace (else the Host minted it): a trace another message of this
     /// agent has is refused.
     pub trace_named: bool,
+    /// The verified decision answer or front-desk relay carries the user's word.
+    pub user_word: bool,
 }
 
 /// A send refused: the trace it names belongs to another message of the agent.
@@ -2900,12 +2902,12 @@ impl Actor {
         kept: &Kept<'_>,
         message: &Message,
         admission: Admission,
+        marks: &Marks,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
         let mut written = self.written(kept, now_ms)?;
         let items = std::mem::take(&mut written.items);
-        let (sent, mut out) =
-            self.take(message, admission, items, None, &Marks::default(), now_ms)?;
+        let (sent, mut out) = self.take(message, admission, items, None, marks, now_ms)?;
         if sent.duplicate {
             // The message is there already; what belongs with it has still to be written.
             return Ok((sent, self.keep(kept, now_ms)?));
@@ -2955,6 +2957,7 @@ impl Actor {
                 origin: message.origin.clone(),
                 admission,
                 coordination: marks.coordination.clone(),
+                user_word: marks.user_word,
             },
             with,
             now_ms,
