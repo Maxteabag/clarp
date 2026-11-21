@@ -36,7 +36,7 @@ use sha2::{Digest, Sha256};
 use crate::edge::{ApiError, App, Principal};
 use crate::fleet::Member;
 use crate::ids;
-use crate::media_manage;
+use crate::media_manage::{self, Denied};
 
 /// How much of a file is read and sent at a time: what a response holds in memory, however
 /// large the file is.
@@ -51,7 +51,9 @@ pub fn routes() -> Router<App> {
         .route("/media/delete", post(media_manage::delete_batch))
         .route(
             "/media/{*asset_id}",
-            get(content).delete(media_manage::delete).post(media_manage::favorite),
+            get(content)
+                .delete(media_manage::delete)
+                .post(media_manage::favorite),
         )
 }
 
@@ -74,7 +76,7 @@ async fn publish(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
     request: Request,
-) -> Result<Json<Value>, Response> {
+) -> Result<Json<Value>, Denied> {
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
     // A file that comes with an agent that moves here says which id it had, and whether it
@@ -90,11 +92,12 @@ async fn publish(
             return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
                 "only the administrator says which id a file has",
-            ).into_response());
+            )
+            .into());
         }
         let plain = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-';
         if moved_id.len() > 180 || !moved_id.bytes().all(plain) {
-            return Err(bad("bad asset id").into_response());
+            return Err(bad("bad asset id").into());
         }
     }
     // How long the file is has to be said before it is read, and within what is taken.
@@ -102,35 +105,44 @@ async fn publish(
         .parse::<usize>()
         .ok()
         .filter(|length| (1..=media::MAX_BYTES).contains(length))
-        .ok_or_else(|| bad("bad size").into_response())?;
+        .ok_or_else(|| bad("bad size"))?;
     let blob = axum::body::to_bytes(body, length)
         .await
         .ok()
         .filter(|blob| blob.len() == length)
-        .ok_or_else(|| bad("incomplete body").into_response())?;
+        .ok_or_else(|| bad("incomplete body"))?;
 
     let session = header_text(headers, "x-session");
     if session.is_empty() {
-        return Err(bad("session required").into_response());
+        return Err(bad("session required").into());
     }
     let name = media::unquoted(&header_text(headers, "x-file-name"));
     let caption = media::unquoted(&header_text(headers, "x-caption"));
     let created_by = header_text(headers, "x-created-by");
     let member = app
         .member(&session)
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session").into_response())?;
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
     let reading = media::read(&blob, &name, &header_text(headers, "content-type"))
-        .map_err(|refused| bad(refused.words()).into_response())?;
+        .map_err(|refused| bad(refused.words()))?;
 
     let (sha256, blob) = tokio::task::spawn_blocking(move || {
-        let digest = Sha256::digest(&blob).iter().map(|byte| format!("{byte:02x}")).collect();
+        let digest = Sha256::digest(&blob)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         (digest, blob)
-    }).await.map_err(|_| {
-        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the file could not be kept").into_response()
+    })
+    .await
+    .map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the file could not be kept",
+        )
     })?;
     // Imported files still use the agent's historical idempotency rule.
     let existing = member.agent.view();
-    let known = (!moved_id.is_empty()).then(|| existing.books.media.get(&moved_id))
+    let known = (!moved_id.is_empty())
+        .then(|| existing.books.media.get(&moved_id))
         .flatten()
         .filter(|asset| named_only || !asset.named_only)
         .cloned();
@@ -157,17 +169,27 @@ async fn publish(
             .unwrap_or_else(|| app.clock.now_ms()),
         named_only,
     };
-    if known.as_ref().is_some_and(|known| known.sha256 != asset.sha256) {
-        return Err(media_manage::error(&asset.asset_id, crate::gallery::Failure::Taken));
+    if known
+        .as_ref()
+        .is_some_and(|known| known.sha256 != asset.sha256)
+    {
+        return Err(media_manage::error(
+            &asset.asset_id,
+            crate::gallery::Failure::Taken,
+        ));
     }
     let asset = known.unwrap_or(asset);
     let image = Image::new(asset.clone(), member.record.agent_id.clone());
-    let kept = media_manage::publish(&app, image, blob).await
+    let kept = media_manage::publish(&app, image, blob)
+        .await
         .map_err(|why| media_manage::error(&asset.asset_id, why))?;
-    media_manage::journal(&app, &member, asset.clone()).await
-        .map_err(|why| ApiError::from(why).into_response())?;
+    media_manage::journal(&app, &member, asset.clone())
+        .await
+        .map_err(ApiError::from)?;
     let row = Image { asset, ..kept };
-    Ok(Json(answered(row.row(media_manage::used_as(&app.fleet.directory(), &row)))))
+    Ok(Json(answered(
+        row.row(media_manage::used_as(&app.fleet.directory(), &row)),
+    )))
 }
 
 /// What publishing is answered with: the row twice, as the Python Host answers, under
@@ -190,23 +212,36 @@ struct ListQuery {
     favorites: String,
 }
 
-async fn list(State(app): State<App>, Query(query): Query<ListQuery>) -> Result<Json<Value>, Response> {
-    let session = query.session.filter(|session| !session.is_empty())
+async fn list(
+    State(app): State<App>,
+    Query(query): Query<ListQuery>,
+) -> Result<Json<Value>, Denied> {
+    let session = query
+        .session
+        .filter(|session| !session.is_empty())
         .unwrap_or_else(|| clarp_kernel::addressed::DEFAULT_SESSION.to_owned());
     let session = session.trim().to_owned();
     let limit = media::page_size(query.limit.as_deref());
     let favorites = matches!(query.favorites.trim(), "1" | "true");
     let directory = app.fleet.directory();
-    app.gallery.ask(move |store| {
-        let page = store.index.page(&session, favorites, &query.before, limit)?;
-        let assets: Vec<_> = page.rows.into_iter().map(|image| {
-            image.row(media_manage::used_as(&directory, image))
-        }).collect();
-        Ok(json!({
-            "session": session, "assets": assets, "next_before": page.next_before,
-            "total": page.total, "favorites_total": page.favorites_total
-        }))
-    }).await.map(Json).map_err(|why| media_manage::error("", why))
+    app.gallery
+        .ask(move |store| {
+            let page = store
+                .index
+                .page(&session, favorites, &query.before, limit)?;
+            let assets: Vec<_> = page
+                .rows
+                .into_iter()
+                .map(|image| image.row(media_manage::used_as(&directory, image)))
+                .collect();
+            Ok(json!({
+                "session": session, "assets": assets, "next_before": page.next_before,
+                "total": page.total, "favorites_total": page.favorites_total
+            }))
+        })
+        .await
+        .map(Json)
+        .map_err(|why| media_manage::error("", why))
 }
 
 /// The published file with this id, whichever agent published it.
@@ -258,7 +293,7 @@ async fn content(
     let (image, total) = match app.gallery.ask(move |store| store.content(&key)).await {
         Ok(found) => found,
         Err(crate::gallery::Failure::Refused(Refusal::Unknown)) => return not_found(),
-        Err(why) => return media_manage::error(&id, why),
+        Err(why) => return media_manage::error(&id, why).into_response(),
     };
     let (status, first, last) = match media::byte_range(&header_text(&headers, "range"), total) {
         Part::Missing => {

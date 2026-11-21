@@ -343,13 +343,17 @@ pub(crate) async fn deliver(
                 .await
                 .map_err(|_| Unavailable("portrait write interrupted".into()))?
                 .map_err(|why| Unavailable(why.to_string()))?;
-            prepared.push((clarp_kernel::gallery::Image::new(
-                asset.clone(), publication.agent_id.clone()
-            ), raw));
+            prepared.push((
+                clarp_kernel::gallery::Image::new(asset.clone(), publication.agent_id.clone()),
+                raw,
+            ));
         }
-        let pair = prepared.try_into()
+        let pair = prepared
+            .try_into()
             .map_err(|_| Unavailable("portrait publication is missing an asset".into()))?;
-        gallery.ask(move |store| store.publish_pair(pair)).await
+        gallery
+            .ask(move |store| store.publish_pair(pair))
+            .await
             .map_err(|why| Unavailable(why.words().to_owned()))?;
         let view = member.agent.view();
         if !publication
@@ -365,7 +369,9 @@ pub(crate) async fn deliver(
         for asset in &publication.assets {
             let agent_id = publication.agent_id.clone();
             let id = asset.asset_id.clone();
-            gallery.ask(move |store| store.delivered(&agent_id, &id)).await
+            gallery
+                .ask(move |store| store.delivered(&agent_id, &id))
+                .await
                 .map_err(|why| Unavailable(why.words().to_owned()))?;
         }
     }

@@ -302,11 +302,14 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
         let id = asset.asset_id.clone();
         let size = usize::try_from(asset.bytes).unwrap_or(usize::MAX);
         let blobs = app.blobs.clone();
-        let copied = app.gallery.ask(move |store| {
-            let bytes = store.read(&id, 0, size)?;
-            blobs.put(&to, &bytes)?;
-            Ok(())
-        }).await;
+        let copied = app
+            .gallery
+            .ask(move |store| {
+                let bytes = store.read(&id, 0, size)?;
+                blobs.put(&to, &bytes)?;
+                Ok(())
+            })
+            .await;
         if copied.is_err() {
             return Err(declined(kept::ASSET_GONE));
         }
