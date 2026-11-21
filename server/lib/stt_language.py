@@ -11,6 +11,7 @@ has focus, the same agent the transcript is recorded against.
 from __future__ import annotations
 
 import contextlib
+import threading
 import contextvars
 import json
 import re
@@ -67,6 +68,7 @@ def current_language() -> str | None:
 # attempt (docs/group-calls.md): what the Host passed, not what a provider did
 # with it. An attempt whose boundary was not noted records null: unobserved,
 # never evidence that the engine was or was not invoked.
+_SENT_LOCK = threading.Lock()    # sends of one attempt may run on several threads
 _HANDED: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "transcription_language_handed", default=None)
 
@@ -88,16 +90,18 @@ def sending_audio():
     counts as sent from here on, a reply or not, unless the request provably never left
     (the connection was refused, the host name did not resolve). Whatever an adapter does
     before this (decoding the clip, fetching a token, a missing project) sends nothing.
-    Only records, and only inside a capture."""
+    Only records, and only inside a capture. The capture counts the sends that left, so
+    pieces of one clip sent in parallel (Google) or a retry never undo another's send."""
     seen = _HANDED.get()
-    already = seen is not None and seen.get("sent", False)
     if seen is not None:
-        seen["sent"] = True
+        with _SENT_LOCK:
+            seen["sent"] = seen.get("sent", 0) + 1
     try:
         yield
     except BaseException as error:
-        if seen is not None and not already and _never_left(error):
-            seen.pop("sent", None)
+        if seen is not None and _never_left(error):
+            with _SENT_LOCK:
+                seen["sent"] = seen.get("sent", 1) - 1      # only this send never left
         raise
 
 
@@ -121,7 +125,7 @@ def _never_left(error: BaseException | None) -> bool:
 
 def was_sent(capture: dict) -> bool:
     """Whether the recording reached the provider in this captured attempt (R175)."""
-    return bool(capture.get("sent"))
+    return capture.get("sent", 0) > 0
 
 
 def note_handed(language: str | None) -> None:
