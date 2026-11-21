@@ -98,15 +98,33 @@ def reference(root):
                 'en':row('EN_us'), 'owned':row('en', owner=True), 'private':row('en', public=False),
                 'nb':row('nb-NO'), 'nn':row('nn'), 'no':row('no'), 'de':row('de'),
                 'deleted':row('en'), 'unmarked':row(''),
+                'missing-owner':{'language':'en', 'public':True},
+                'string-public':row('en', public='true'), 'number-owner':row('en', owner=0),
             }}}
     path.write_text(json.dumps(file), encoding='utf-8')
     cfg = config.Config(tts_provider=CART, cartesia_voices={})
+    def selection(language):
+        lines = []
+        with patch.object(log, 'log', lambda *args: lines.append(args)):
+            ids = voice_pool._cartesia_catalogue(language)
+        miss = None
+        if lines:
+            [(event, detail)] = lines
+            assert event == 'voicePoolNoCatalogueVoice'
+            fields = dict(word.split('=', 1) for word in detail.split())
+            assert fields['provider'] == CART and fields['eligible'] == '0'
+            miss = {'language': fields['language'], 'total': int(fields['total'])}
+        return {'language':language, 'ids':ids, 'miss':miss}
+
     with patch.object(voice_names, 'names_path', lambda: path):
-        languages = [{'language':language, 'ids':voice_pool._cartesia_catalogue(language)}
-                     for language in ('en', 'nb-NO', 'NN_no', 'de', 'zh', '')]
+        languages = [selection(language) for language in ('en', 'nb-NO', 'NN_no', 'de', ' ZH_cn ', '')]
         settings_store.set_text(stt_language.AGENT_LANGUAGES_KEY, json.dumps({'ola':'nn,en'}))
         ola = voice_pool.assign(cfg, 'Ola', '{}', agents=[], contacts=[])
-    catalogue = {'file':file,'languages':languages,'ola':ola}
+        quiet = []
+        for quiet_file in ({}, {'_catalogue': {CART: {}}}):
+            path.write_text(json.dumps(quiet_file), encoding='utf-8')
+            quiet.append({'file':quiet_file, **selection('en')})
+    catalogue = {'file':file,'languages':languages,'ola':ola,'quiet':quiet}
     return {'picks':picks,'assignments':assignments,'pinned':pinned,
             'janitor':janitor,'default_assignment':default['speech']['assignment'],
             'catalogue':catalogue}

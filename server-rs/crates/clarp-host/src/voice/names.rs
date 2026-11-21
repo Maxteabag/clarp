@@ -101,7 +101,7 @@ impl Desk {
             Ok(value) => Snapshot::from_file(&value),
             Err(why) => {
                 eprintln!("voiceNamesReadFail {why}");
-                Snapshot::default()
+                Snapshot::from_file(&Value::Null)
             }
         };
         self.publish(Stored {
@@ -113,13 +113,11 @@ impl Desk {
     }
 
     fn start_due(&self) -> bool {
-        let stamp = self
-            .current
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .stamp;
-        let age = stamp.map(|(modified, _)| modified.elapsed().unwrap_or_default());
-        voice_names::start_due(age)
+        let current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
+        let age = current
+            .stamp
+            .map(|(modified, _)| modified.elapsed().unwrap_or_default());
+        voice_names::start_due(age, current.snapshot.format)
     }
 
     fn refresh(&self, sources: &Sources, used: &Used) -> io::Result<()> {
@@ -202,17 +200,7 @@ impl Sources {
                         .iter()
                         .filter_map(|row| {
                             let id = row["id"].as_str().filter(|id| !id.is_empty())?;
-                            Some((
-                                id.to_owned(),
-                                CatalogueVoice {
-                                    language: row["language"]
-                                        .as_str()
-                                        .unwrap_or_default()
-                                        .to_owned(),
-                                    public: clarp_kernel::python::truthy(&row["is_public"]),
-                                    owner: clarp_kernel::python::truthy(&row["is_owner"]),
-                                },
-                            ))
+                            Some((id.to_owned(), CatalogueVoice::from_cartesia(row)))
                         })
                         .collect();
                     let mut listed: ProviderNames = rows
@@ -450,12 +438,12 @@ mod tests {
                     } else if path.contains("starting_after=next%2Fpage") {
                         (
                             200,
-                            json!({"data":[{"id":"c2","name":"Second","language":"no","is_owner":true}]}),
+                            json!({"data":[{"id":"c2","name":"Second","language":"no","visibility":"all"}]}),
                         )
                     } else if path.starts_with("/voices?") {
                         (
                             200,
-                            json!({"data":[{"id":"c1","name":"Updated","language":"en","is_public":true}],
+                            json!({"data":[{"id":"c1","name":"Updated","language":"en","access":"public","is_owner":false}],
                             "has_more":failures != 3,"next_page":"next/page"}),
                         )
                     } else if path == "/voices/c%2Bmissing" && failures != 3 {
@@ -507,7 +495,7 @@ mod tests {
         let initial = br#"{ "cartesia": {"c1":"Old name","retired":"Preserve old voice"}, "elevenlabs": {"old":"Keep this too"} }"#;
         fs::write(&path, initial).unwrap();
         desk.read().unwrap();
-        assert!(!desk.start_due());
+        assert!(desk.start_due());
         let stale =
             SystemTime::now() - voice_names::REFRESH_EVERY - std::time::Duration::from_secs(5);
         File::open(&path).unwrap().set_modified(stale).unwrap();
@@ -582,6 +570,15 @@ mod tests {
 
         use std::os::unix::fs::MetadataExt as _;
         let after = fs::read(&path).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&after).unwrap()["_format"],
+            2
+        );
+        assert!(names.catalogue[CARTESIA]["c2"].public);
+        assert!(names.catalogue[CARTESIA]["c2"].owner);
+        let reopened = Desk::new(path.clone());
+        reopened.read().unwrap();
+        assert!(!reopened.start_due());
         assert_eq!(signature, Some(digest(&after)));
         let inode = fs::metadata(&path).unwrap().ino();
         File::open(&path).unwrap().set_modified(stale).unwrap();

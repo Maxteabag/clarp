@@ -3636,6 +3636,13 @@ with the built-in pool as a fallback. A stable walk reserves built-in contacts' 
 while other voices are free and chooses the least shared voice when the pool is exhausted.
 A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
 
+**Cartesia catalogue access (PR 562, 21 Nov 2026).** The names worker recognizes
+public access, public or all visibility, and the legacy boolean public marker. The
+pool requires explicit non-ownership. A successful Cartesia fetch writes cache format
+2. An older cache is due at startup regardless of age. If a nonempty catalogue has
+no eligible voice in the recipient's language, the Host logs
+`voicePoolNoCatalogueVoice` before using the built-in pool.
+
 **Hidden coordination** (the Python Host's PR 512). Fleet writes the global and per-chat
 visibility settings, publishes the directory, then emits the new effective choice with
 the roster hint. It never edits a conversation for this purpose. An explicit log mode reads

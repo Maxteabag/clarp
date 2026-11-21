@@ -30,13 +30,18 @@ def reference(root):
     from lib import log, voice_names
 
     now = 1_700_000_000
-    path = root / 'age.json'
     startup = []
-    for age in (None, -60, 0, 86399, 86400, 86401):
+    for age, content in (
+        (None, None), (-60, '{"_format":2}'), (0, '{"_format":2}'),
+        (86399, '{"_format":2}'), (86400, '{"_format":2}'), (86401, '{"_format":2}'),
+        (0, '{}'), (0, '{"_format":1}'), (0, '{"_format":3}'),
+        (0, '{"_format":"2"}'), (0, '{broken'),
+    ):
+        path = root / f'age-{len(startup)}.json'
         if age is not None:
-            path.write_text('{}', encoding='utf-8')
+            path.write_text(content, encoding='utf-8')
             os.utime(path, (now - age, now - age))
-        startup.append({'age': age, 'due': voice_names.start_due(path, now)})
+        startup.append({'age': age, 'content': content, 'due': voice_names.start_due(path, now)})
 
     current = {'cartesia': {'missing': 'Former name', 'c1': 'Old Cartesia'},
                'elevenlabs': {'e1': 'Old Eleven'}}
@@ -56,7 +61,7 @@ def reference(root):
         def list_all(_):
             if 'cartesia' not in fetched:
                 raise RuntimeError('stand-in catalogue not available')
-            return [{'id': id, 'name': name} for id, name in fetched['cartesia'].items()]
+            return [{'id': id, 'name': name, 'is_owner': False} for id, name in fetched['cartesia'].items()]
         with patch.object(log, 'log', lambda *a: None), patch.object(log, 'log_exception', lambda *a, **kw: None):
             done = voice_names.refresh(
                 cfg, path=names, cartesia_all=list_all,
@@ -94,8 +99,29 @@ def reference(root):
             voice_names.refresh(
                 SimpleNamespace(cartesia_key=lambda: 'test', eleven_key=lambda: ''),
                 path=deleted_path, cartesia_all=lambda _: [
-                    {'id': 'c1', 'name': 'Current voice', 'language': 'en', 'is_public': True}],
+                    {'id': 'c1', 'name': 'Current voice', 'language': 'en', 'is_public': True, 'is_owner': False}],
                 cartesia_one=missing, voices_in_use=lambda _: {'cartesia': {'missing'}})
+
+    access_path = root / 'access.json'
+    access_rows = [
+        {'id': 'access', 'access': ' PUBLIC ', 'is_owner': False, 'language': 'en-US'},
+        {'id': 'visible', 'visibility': ' All ', 'is_owner': False},
+        {'id': 'public-visibility', 'visibility': ' PUBLIC ', 'is_owner': False},
+        {'id': 'legacy', 'is_public': True, 'is_owner': False},
+        {'id': 'legacy-string', 'is_public': 'true', 'is_owner': False},
+        {'id': 'legacy-number', 'is_public': 1, 'is_owner': False},
+        {'id': 'private', 'access': 'private', 'visibility': 'owner', 'is_owner': False},
+        {'id': 'owned', 'access': 'public', 'is_owner': True},
+        {'id': 'owner-missing', 'access': 'public'},
+        {'id': 'owner-null', 'access': 'public', 'is_owner': None},
+        {'id': 'owner-number', 'access': 'public', 'is_owner': 0},
+        {'id': 'owner-string', 'access': 'public', 'is_owner': 'false'},
+    ]
+    with patch.object(log, 'log', lambda *a: None):
+        voice_names.refresh(
+            SimpleNamespace(cartesia_key=lambda: 'test', eleven_key=lambda: ''),
+            path=access_path, cartesia_all=lambda _: access_rows, voices_in_use=lambda _: {})
+    access = {'rows': access_rows, 'result': json.loads(access_path.read_text())}
 
     list_path = root / 'limit.json'
     used = {f'voice{i:03}' for i in range(109)}
@@ -108,7 +134,7 @@ def reference(root):
     with patch.object(log, 'log', lambda *a: None):
         voice_names.refresh(cfg, path=list_path, cartesia_all=lambda _: pages,
                             cartesia_one=by_id, voices_in_use=lambda _: {'cartesia': used})
-    return {'startup': startup, 'merge': merged,
+    return {'startup': startup, 'merge': merged, 'access': access,
             'deleted': {'current': previous, 'fetched': update, 'result': json.loads(deleted_path.read_text()),
                         'logged': gone_lines},
             'lookup': {'used': sorted(used), 'listed': {row['id']: row['name'] for row in pages},
