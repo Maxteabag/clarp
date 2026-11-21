@@ -1762,6 +1762,10 @@ impl Actor {
         self.recorder.agent().latest_turn_start()
     }
 
+    pub fn latest_turn_activity(&self) -> Option<i64> {
+        self.recorder.agent().latest_turn_activity()
+    }
+
     pub fn moved(&self) -> Option<&clarp_kernel::agent_moves::Mark> {
         self.recorder.agent().moved()
     }

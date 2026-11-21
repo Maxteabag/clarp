@@ -6,6 +6,11 @@ pub fn due(at: Option<i64>, now: i64) -> bool {
     at.is_none_or(|at| now.saturating_sub(at) > 300_000)
 }
 
+/// Whether an Antigravity turn started or changed state in the last six hours.
+pub fn agy_recent_activity(at: Option<i64>, now: i64) -> bool {
+    at.is_some_and(|at| at > now.saturating_sub(6 * 3_600_000))
+}
+
 /// Only quota fields belong in the store. The provider can include unrelated metadata.
 pub fn agy_groups(payload: &Value) -> Option<Value> {
     let groups = payload.pointer("/command/data/groups")?.as_array()?;
