@@ -45,6 +45,9 @@ pub struct ToolCall {
     /// asks again.
     #[serde(default)]
     pub started_ms: i64,
+    /// The note identifier chosen once by a tell-user invocation.
+    #[serde(default)]
+    pub note_id: Option<String>,
 }
 
 /// What the tool prints, and the code it exits with.

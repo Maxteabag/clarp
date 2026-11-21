@@ -1,6 +1,9 @@
 """Canonical injected-context delimiters and pure message text normalization."""
 from __future__ import annotations
 
+import hashlib
+from typing import Any
+
 from .voice_markup import clean_for_display
 
 
@@ -119,3 +122,34 @@ def _strip_block(text: str, opening: str, closing: str) -> str:
         _, after = rest.split(closing, 1)
         out = (before + after).strip()
     return out
+
+
+def claude_block_is_line(block: Any) -> bool:
+    """Whether a content block of a Claude assistant message is a line of its own in the
+    transcript (R108's block count, k): text with words, or a tool use (a client tool or a
+    subagent cell). Thinking, a server tool and its result are not lines. The transcript parser,
+    the live items and the drain's live rows count blocks with this one function, so block k of
+    a message names the same row on the live channel, in the live row and in /log."""
+    if not isinstance(block, dict):
+        return False
+    kind = block.get("type")
+    if kind == "text":
+        return bool(str(block.get("text") or "").strip())
+    return kind == "tool_use"
+
+
+# The keys a key-less stream's rows take in one turn: the first message, then the next ones
+# rolled over to a segment of their own (message_live._live_target). The importer tells a
+# key-less live row from a keyed one by these (R108).
+LIVE_KEYLESS_KEYS = ("",) + tuple(f"seg{n}" for n in range(1, 64))
+
+
+def live_message_id(agent_id: str, backend_session_id: str, trace_id: str, item_key: str = "") -> str:
+    """The id of the live row a turn streams one provider message into (``item_key``: the
+    provider's message id, Claude's message.id or Codex's item id; empty when the stream has none).
+    The importer reads the same id to know a live row as the stream of the message it imports
+    (R107)."""
+    raw = f"{agent_id}\0{backend_session_id}\0{trace_id or 'live'}"
+    if item_key:
+        raw += f"\0{item_key}"
+    return "live-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]

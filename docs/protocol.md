@@ -357,6 +357,13 @@ Rules:
 - **A user message's `id` is `u-` + the `client_msg_id` the client sent.** So
   the optimistic bubble the client paints and the durable row the server files
   have the same id, and confirmation is an id lookup.
+- **Any other `id` is opaque.** The Host's own ids come in forms (`live-…` for
+  a row a turn streamed into, and for the first block of a provider message the
+  import stores under the same id; `blk-…` for that message's later blocks;
+  `msg-…` for a line without a provider message id, which follows its position
+  in the transcript), but a client never parses them: compare ids for equality
+  only. A row of a provider message keeps its id when the transcript's lines
+  shift; a positional `msg-` id changes with its line's position.
 - **`latest_revision` is the cursor.** Store it with the conversation and pass
   it back as `after_revision` on the next delta. After a delta, set the cursor
   to the response's `latest_revision`, which never exceeds the rows actually
@@ -373,6 +380,17 @@ Rules:
   cached chat.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
+- **A message that waits enters the conversation where its turn starts (feature
+  `waited_send_order`, Host contract 115).** A user row is written when the
+  message reaches the agent: at once for a send that starts a turn or is steered into one; for
+  a send that waits (the agent is busy and cannot take it), only by the write that starts its
+  own turn. Rows are never moved or re-timed: a row's place is its place for good. Such a row
+  carries `sent_at` (ISO, the same form as `timestamp`): the time it was sent; `timestamp` is
+  when its turn started. `sent_at` is absent on every row that did not wait. While it waits the
+  message is an item of `GET /turn-queue` (see Queue), not a row. A client may rely on this:
+  an accepted message is either a queue item or a row, never both and never neither, because
+  the write that starts its turn writes the row and takes the item out of the queue in one
+  transaction. A local bubble whose `client_msg_id` is in neither was deleted.
 - **Delivery state (feature `send_delivery_state`, Host contract 78).**
   A user row whose current `trace_id` has a launch
   receipt carries `delivery: {state, rev, seq, for: {client_msg_id,
@@ -542,7 +560,7 @@ Event types and payloads:
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
-| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
+| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 108). |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
@@ -610,9 +628,12 @@ Rules:
   server files the durable user row under that id and ignores a repeated
   request with the same id. Omit it only if you accept the server minting one
   from `trace_id`, in which case you cannot confirm delivery.
-- If the agent is busy the new turn **preempts** the running one unless
-  `queue_if_busy` is true, in which case it queues and a `queue-updated`
-  event follows. A message from another agent (`origin: "agent"` with a
+- If the agent is busy, a user's send waits for the running turn (a Codex
+  turn is steered instead) and a `queue-updated` event follows; so does a send
+  with `queue_if_busy`. A send that waits is a queue item until its turn starts
+  and only then a `/log` row (Host contract 115, feature `waited_send_order`).
+  A send of another automatic origin without `queue_if_busy` still preempts the
+  running turn. A message from another agent (`origin: "agent"` with a
   `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
   queues as if `queue_if_busy` were true. `/stop` pauses the queue to
   hold its backlog. A plain user send runs past the pause and leaves it.
@@ -648,7 +669,11 @@ Response `200`:
 `200` means accepted, not delivered. Delivery is proven when a `/log` response
 contains a turn with id `u-<client_msg_id>`. A client that wants a delivery
 indicator should treat a send as failed if that id has not appeared within
-about 20 s.
+about 20 s, unless the answer said `queued: true`: such a send waits as an item
+of `GET /turn-queue` (with the same `client_msg_id`) and becomes a `/log` row
+only when its turn starts, however long that takes. Draw it as waiting, at the
+end of the chat, while it is in the queue; drop it if it is in neither the queue
+nor `/log` (it was deleted).
 
 ### 5. Stop: `POST /stop`
 
@@ -657,7 +682,13 @@ about 20 s.
 `queue-updated`. Response: `{"ok": true, "terminated": n}`.
 
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
-releases one.
+releases one. Each item is `{id, text, enqueued_at, synthesize_audio, client_msg_id,
+sent_at, kind}` (the last three from Host contract 115): `sent_at` is ISO,
+`kind` is `waiting` (a send that met a busy agent) or `later` (its sender asked
+it to wait). `PUT /turn-queue/<id>` (`{"text"}`) edits and `DELETE /turn-queue/<id>`
+deletes an item of either kind until its turn starts; after that both answer
+404. Each sends `queue-updated` with the item's `client_msg_id` and
+`queue_change`: `edited` (with the new `text`) or `deleted`.
 
 ### 6. Voice
 
@@ -679,6 +710,10 @@ where `engines` are the engines that can take a set and `reasons` says in words 
 owner's engines could take over (the Host's own engine being off or unavailable is one such
 reason, never a 500): show `message`, it says what to change. A
 recording is never sent to a provider the owner did not choose for transcription.
+An agent's engines are tried in order, each once, and never the same recording to one provider
+twice: a provider the recording reached (it answered, or failed after the audio left) is not asked
+again with another of its models. A refusal before any audio left (a language set the engine cannot
+take, no key, an unknown model) does not use up its provider, so its next model may still try.
 
 In a group call (feature `call_transcription_policy`), a clip captured for a
 participant also sends `X-Clarp-Call-Id: <call_id>` and
@@ -692,7 +727,10 @@ language_adapted, requested_model}`, sources `agent | call_policy | device |
 global`; `attempts[].language` is the language the Host handed at that
 engine's boundary (`auto` = no constraint handed, not a detection; `null`, or
 no `language` on a skip = the boundary was unobserved, never a statement that
-the engine was or was not invoked). With a call policy configured, when no
+the engine was or was not invoked). `attempts[].outcome` (`ok`, `error`, `skipped`) and a
+skip's `reason` (such as `language_incompatible` or `provider_already_sent`) are open sets: a
+client shows a value it does not know as plain words and keeps the answer. With a call policy
+configured, when no
 engine can take the call language the clip is refused, with no provider call:
 409 `{"ok": false, "error": "no compatible engine", "language", "engines",
 "attempts"}`. A stored call policy that can never work is refused the same
@@ -896,7 +934,8 @@ client shows it and derives nothing from `voice_id`.
                            "model": "scribe_v2", "label": "ElevenLabs Scribe v2"}],
               "engine_origin": "own", "device_may_override": false,
               "device_cloud_languages": null,
-              "languages": ["no", "en"], "language_origin": "own"}
+              "languages": ["no", "en"], "language_origin": "own",
+              "configured_languages": ["no", "en"]}
 }
 ```
 
@@ -905,7 +944,16 @@ client shows it and derives nothing from `voice_id`.
   heard; `silent_reason` then says why. `voice_label`, `provider_label` and each engine's `label` are a real name or null, never
   an empty string; a client shows its own words for null.
 - `speech.origin`: `own` (the agent's or its contact's own voice) or `default` (the
-  provider's one default voice, the same for every agent without its own).
+  provider's one default voice, the same for every agent without its own); null when nothing
+  is heard (`voice_id` null, `silent_reason` given).
+- `speech.voice_label` comes from the Host's own tables and a names file it fills in the
+  background, never from a request: Cartesia's catalogue name and ElevenLabs' name for a voice
+  in use (null until the Host has fetched them, and for a voice the provider does not know),
+  ElevenLabs' built-in voices, Gemini voices in the voice picker's words (a prebuilt voice by
+  its name, a Voice Design voice as `<Contact> (designed)`, the contact it is stored under in
+  `[gemini_tts.voices]`; null for an id in no map), Google's and Deepgram's voice names.
+- An archived agent has no `voice_profile`: not on its snapshot row, and not in the creation
+  answer or a roster event about it.
 - `speech.shared_with`: how many other active agents speak with the same provider and
   voice (0: its own). Say it when it is not 0.
 - `speech.streaming`: whether audio begins before the whole clip is made.
@@ -914,6 +962,12 @@ client shows it and derives nothing from `voice_id`.
   language itself (a multilingual local model, or ElevenLabs Scribe given a set).
 - `hearing.engine_origin`, `hearing.language_origin`: `own` (this agent's setting) or
   `default` (the Host's).
+- `hearing.configured_languages` (Host contract: next free at merge): the language set chosen
+  for this agent, else the Host's default set, as ISO codes, whatever the first engine is
+  handed. Show it as "listens for": an agent on ElevenLabs Scribe with `no,en` reads
+  `languages: []` (Scribe detects) but `configured_languages: ["no","en"]`. `language_origin`
+  says whose set it is (`own` or `default`), except when the first engine is a local model:
+  then `languages` is the model's own and `language_origin` is `default`.
 - `hearing.device_may_override`: the one rule for a client. When it is true (the engine
   is the Host's default), a phone that sends its own `X-Transcription-Model` is heard
   with that model instead; such a client shows its own setting.

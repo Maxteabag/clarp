@@ -9,7 +9,9 @@ import {
   audio, chime, machine, playerAdapter, scheduler,
 } from './audio.svelte.js';
 import { addOptimisticTurn } from './conversations.svelte.js';
-import { noteSendResult, noteSendStarted, sweepStaleSends } from './delivery.svelte.js';
+import {
+  noteSendQueued, noteSendResult, noteSendStarted, sweepStaleSends,
+} from './delivery.svelte.js';
 
 export const send = $state({
   /** Which agent a capture was started for; a switch mid-capture must not
@@ -52,11 +54,14 @@ export async function sendText(text, opts = {}) {
     }
     chime(true);
     // Accepted, not delivered. Only the transcript coming back with this id
-    // proves it ran; the sweep marks it failed if it never does.
+    // proves it ran; the sweep marks it failed if it never does, unless the
+    // answer says it waits in the agent's queue (its row comes when its turn
+    // starts, however long that takes).
     noteSendResult(clientMsgId, true);
     setTimeout(() => sweepStaleSends(), 20000);
     try {
       const d = await r.json();
+      if (d && d.queued) noteSendQueued(clientMsgId);
       // Hands-free routing may have picked a different agent; follow it.
       if (d && d.session && d.session !== app.session) {
         await setSession(d.session);
