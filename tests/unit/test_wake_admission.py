@@ -32,8 +32,9 @@ def test_holds_autonomous_wake_covers_pause_queued_and_claimed_per_agent():
 
     claimed = turn_queue.claim("q-1")
     assert claimed is not None and claimed["queue_id"] == "q-1"
-    # Even after leaving 'queued' for 'claimed', autonomous wakes must stay out.
-    assert turn_queue.state(target)["count"] == 0
+    # Even after leaving 'queued' for 'claimed', autonomous wakes must stay out. Since
+    # issue 491 a claimed item whose row is not written yet is still in the queue's count.
+    assert turn_queue.state(target)["count"] == 1
     assert turn_queue.holds_autonomous_wake(target) is True
 
     turn_queue.mark_started("q-1")

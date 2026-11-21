@@ -916,7 +916,8 @@ def serve(handler):
                 podcast_context, images=query.get("images", ["0"])[0] == "1",
                 history_id=history_id, media_dir=media_dir, tools=tools, wire=wire,
                 router_backend=getattr(cfg, "oracle_router_backend", "api"), memory=memory,
-                delegation_strategy=strategy, router_reuse=getattr(cfg, "oracle_router_reuse", False))
+                delegation_strategy=strategy, router_reuse=getattr(cfg, "oracle_router_reuse", False),
+                stream=getattr(handler.ctx, "stream", None))
             downstream({"type": "podcast.history", "conversation_id": history_id,
                         "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:

@@ -1119,6 +1119,21 @@ def close_turns_for_trace(agent_id: str, trace_id: str) -> int:
     return MACHINE.close_turns_for_trace(agent_id, trace_id)
 
 
+def settle_replaced(agent_id: str, trace_id: str) -> int:
+    """A turn that printed nothing and was taken over by the user's next message (issue
+    491, part B): its row ends with the outcome 'replaced', not stopped by the user and not
+    failed. No state transition: the agent goes on working, on the turn that took over.
+    Returns how many rows were settled."""
+    from .takeover import REPLACED
+    stamp = now_ms()
+    with _critical_write():
+        cursor = conn().execute(
+            """UPDATE turns SET ended_at = COALESCE(ended_at, ?), settled_at = ?, outcome = ?
+                WHERE agent_id = ? AND trace_id = ? AND settled_at IS NULL""",
+            (stamp, stamp, REPLACED, agent_id, trace_id))
+    return cursor.rowcount
+
+
 def open_turns() -> list[dict[str, Any]]:
     return MACHINE.open_turns()
 

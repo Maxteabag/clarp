@@ -87,7 +87,9 @@ for why,old,new in [
 ]:
     PLANTS.append(('clarp-host/src/library.rs','reply',why,old,new))
 
-PLANTS.append(('clarp-host/src/edge.rs','reply','queued form conceals its audio choice','"synthesize_audio": message.speak','"synthesize_audio": false'))
+PLANTS.append(('clarp-host/src/wire.rs','reply','queued form conceals its audio choice',
+               'item.insert("synthesize_audio".into(), json!(message.speak));',
+               'item.insert("synthesize_audio".into(), json!(false));'))
 RUNS['clock']=['test','--test','forms_events','a_countdown_crosses_its_target']
 RUNS['countdown']=['test','--test','host','countdowns_are_created_with_a_clock']
 CLOCK='clarp-kernel/src/artifacts/countdown.rs'

@@ -100,11 +100,14 @@ def test_media_publish_write_failure(running_server, monkeypatch):
 
 
 def test_media_list_bad_limit_falls_back_to_100(running_server, monkeypatch):
+    """Today's answer plus the keys of feature media_manage (contract 489, section 5)."""
     from lib import media_store
     seen = []
-    monkeypatch.setattr(media_store, "list_for_session",
-                        lambda session, limit: seen.append((session, limit)) or [])
+    page = {"assets": [], "next_before": None, "total": 0, "favorites_total": 0}
+    monkeypatch.setattr(media_store, "list_page",
+                        lambda session, *, limit, before, favorites:
+                        seen.append((session, limit, before, favorites)) or dict(page))
     base, _ctx, _srv = running_server
     assert _call(base, "GET", "/media?session=claude&limit=x") == (
-        200, {"session": "claude", "assets": []})
-    assert seen == [("claude", 100)]
+        200, {"session": "claude", **page})
+    assert seen == [("claude", 100, "", False)]

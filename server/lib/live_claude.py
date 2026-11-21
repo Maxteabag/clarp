@@ -13,14 +13,21 @@ from typing import Any
 
 from . import live_hub
 from .live_tools import classify_tool, diff_stats, output_tail
+from .message_text import claude_block_is_line
 
 
 class ClaudeLiveItems:
-    def __init__(self, *, agent_id: str, trace_id: str, row_id) -> None:
+    def __init__(self, *, agent_id: str, trace_id: str, row_id, block_row_id=None) -> None:
         self.agent_id = agent_id
         self.trace_id = trace_id
         self._row_id = row_id            # message.id -> the live row it streams into
+        # (message.id, k) -> the row block k of the message is stored under (R108), when given: k
+        # counts the blocks the transcript keeps as lines of their own (text with words, a client
+        # tool use), as the import counts them; a server tool, its result and thinking are not.
+        # Without it every block's item names the live row, as before.
+        self._block_row_id = block_row_id
         self._message = ""
+        self._lines = 0
         self._blocks: dict[int, tuple[str, str]] = {}   # index -> (kind, item id)
         self._texts: dict[str, str] = {}
         self._inputs: dict[int, str] = {}
@@ -57,6 +64,7 @@ class ClaudeLiveItems:
         if inner_type == "message_start":
             message = inner.get("message")
             self._message = str(message.get("id") or "") if isinstance(message, dict) else ""
+            self._lines = 0
             self._blocks = {}
             self._inputs = {}
             return
@@ -74,6 +82,9 @@ class ClaudeLiveItems:
 
     def _block_start(self, hub, index: int, block: dict[str, Any]) -> None:
         block_type = block.get("type")
+        line = self._lines
+        if block_type != "text" and claude_block_is_line(block):
+            self._lines += 1             # a line of its own in the transcript (a tool use)
         if block_type in {"thinking", "redacted_thinking"}:
             item_id = f"cl:{self._message}:{index}"
             self._blocks[index] = ("reasoning", item_id)
@@ -84,7 +95,8 @@ class ClaudeLiveItems:
             self._blocks[index] = ("message", item_id)
             self._texts[item_id] = str(block.get("text") or "")
             hub.message_text(self.agent_id, item_id, self._texts[item_id], phase="final",
-                             row_id=self._row_id(self._message), turn_id=self.trace_id or None)
+                             row_id=(self._block_row_id(self._message, line) if self._block_row_id
+                                     else self._row_id(self._message)), turn_id=self.trace_id or None)
         elif block_type in {"tool_use", "server_tool_use"} and block.get("id"):
             call_id = str(block["id"])
             name = str(block.get("name") or "tool")
@@ -110,6 +122,8 @@ class ClaudeLiveItems:
 
     def _block_stop(self, hub, index: int) -> None:
         kind, item_id = self._blocks.get(index, ("", ""))
+        if kind == "message" and claude_block_is_line({"type": "text", "text": self._texts.get(item_id, "")}):
+            self._lines += 1
         if kind in {"reasoning", "message"}:
             hub.done(self.agent_id, item_id, turn_id=self.trace_id or None)
         elif kind == "tool":

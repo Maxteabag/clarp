@@ -23,8 +23,10 @@
   import {
     audio, initAudio, PLAYER_ADAPTER_VERSION, unlockAudio,
   } from './stores/audio.svelte.js';
-  import { ensureLoaded, markTurnFailed, setBusyProbe } from './stores/conversations.svelte.js';
-  import { bindDeliveryFailure } from './stores/delivery.svelte.js';
+  import {
+    dropOptimisticTurn, ensureLoaded, markTurnFailed, markTurnWaiting, setBusyProbe,
+  } from './stores/conversations.svelte.js';
+  import { bindDeliveryFailure, bindDeliveryWaiting } from './stores/delivery.svelte.js';
   import {
     resumeAudioContext, teardownMic, toggleRecord,
   } from './stores/mic.svelte.js';
@@ -53,6 +55,7 @@
   let voiceName = $state('');
 
   bindDeliveryFailure(markTurnFailed);
+  bindDeliveryWaiting(markTurnWaiting, dropOptimisticTurn);
 
   // ---- keyboard ----
   //

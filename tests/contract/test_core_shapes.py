@@ -67,6 +67,7 @@ TYPE_TO_DEF = {
     "tts-error": "tts-error",
     "server-version": "server-version",
     "remote-action": "remote-action",
+    "media-changed": "media-changed",
 }
 
 

@@ -543,3 +543,49 @@ def test_v119_index_migration_is_a_no_op_when_rerun(tmp_path):
     db._migrate_to_v119(con)
     assert con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'"
                        " AND name = 'idx_state_log_agent_state'").fetchone()[0] == 1
+
+
+def test_v131_adds_the_favourite_mark_who_deleted_and_the_gallery_indexes(tmp_path):
+    """v131 (provisional number): media_assets.favorite_at and deleted_by, NULL for every image
+    from before it, the per-chat favourites index and the page index in place of the created
+    one; guarded, so a rerun is a no-op."""
+    from lib import db_migrations, db_schema
+    path = tmp_path / "v130.sqlite"
+    db.reset_for_tests(path)
+    con = db.conn()
+    # The v130 table as v130 created it (db_schema at 91f72f99), rebuilt rather than reached by
+    # DROP COLUMN: SQLite 3.50.4 refuses to drop a column of this table ("error in table
+    # media_assets after drop column: incomplete input"); only this setup ever did (R180).
+    con.executescript("""
+        DROP TABLE media_assets;
+        CREATE TABLE media_assets (
+            asset_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, session TEXT NOT NULL,
+            source_name TEXT NOT NULL, sha256 TEXT NOT NULL, mime_type TEXT NOT NULL,
+            bytes INTEGER NOT NULL, width INTEGER, height INTEGER, storage_path TEXT NOT NULL,
+            caption TEXT, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+            deleted_at INTEGER
+        );
+        CREATE INDEX idx_media_assets_session_created ON media_assets(session, created_at DESC)
+            WHERE deleted_at IS NULL;
+        CREATE INDEX idx_media_assets_agent_created ON media_assets(agent_id, created_at DESC)
+            WHERE deleted_at IS NULL;
+        CREATE INDEX idx_media_assets_sha ON media_assets(sha256);
+    """)
+    con.execute("INSERT INTO media_assets(asset_id, agent_id, session, source_name, sha256, mime_type, "
+                "bytes, storage_path, created_by, created_at) "
+                "VALUES ('asset_a', 'ag', 's', 'a.png', 'x', 'image/png', 1, '/p', 'agent', 1)")
+    con.execute("PRAGMA user_version = 130")
+    con.commit()
+    db.reset_for_tests(path)
+    con = db.conn()
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+    row = con.execute("SELECT favorite_at, deleted_by, deleted_at FROM media_assets "
+                      "WHERE asset_id='asset_a'").fetchone()
+    assert tuple(row) == (None, None, None)
+    indexes = _names(con, "index")
+    assert {"idx_media_assets_session_favorite", "idx_media_assets_session_page",
+            "idx_media_assets_deleted", "idx_media_assets_session_deleted"} <= indexes
+    assert "idx_media_assets_session_created" not in indexes
+    db_migrations._migrate_to_v131(con)
+    columns = [r[1] for r in con.execute("PRAGMA table_info(media_assets)")]
+    assert columns.count("favorite_at") == 1 and columns.count("deleted_by") == 1

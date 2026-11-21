@@ -9,6 +9,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from . import db as _db
+from .clock import iso_from_ms
 from .db import change_stamp, conn
 from . import coordination, origins, team_leader
 from . import log as cache_log
@@ -64,12 +65,15 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         ).fetchone()
         if cursor is None:
             raise UnknownHistoryCursor(before_message_id)
-        where += """ AND (
+        # The plain `timestamp <= ?` in front lets SQLite read idx_messages_log_order as a range
+        # that starts at the cursor; the OR of the three tie cases alone cannot, and an older page
+        # then walked down from the newest row, costing more the further back it was.
+        where += """ AND COALESCE(m.timestamp, '') <= ? AND (
             COALESCE(m.timestamp, '') < ?
             OR (COALESCE(m.timestamp, '') = ? AND m.seq < ?)
             OR (COALESCE(m.timestamp, '') = ? AND m.seq = ? AND m.message_id < ?)
         )"""
-        params.extend([cursor["timestamp"], cursor["timestamp"], int(cursor["seq"]),
+        params.extend([cursor["timestamp"], cursor["timestamp"], cursor["timestamp"], int(cursor["seq"]),
                        cursor["timestamp"], int(cursor["seq"]), cursor["message_id"]])
     if not include_automated:
         # Apply presentation filtering before LIMIT. Otherwise a busy heartbeat
@@ -96,7 +100,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
-                           m.phase, m.turn_json,
+                           m.phase, m.turn_json, m.sent_at,
                            sender.persona AS sender_name,
                            sender.session AS sender_session,
                            {coordination.TRACE_AUDIENCE_SQL} AS trace_audience
@@ -112,7 +116,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
-                           m.phase, m.turn_json,
+                           m.phase, m.turn_json, m.sent_at,
                            sender.persona AS sender_name,
                            sender.session AS sender_session,
                            {coordination.TRACE_AUDIENCE_SQL} AS trace_audience
@@ -120,7 +124,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                             SELECT message_id, agent_id, role, timestamp, text, kind,
                                    tool_name, tools_json, display_cells_json,
                                    seq, revision, origin, sender_agent_id, trace_id,
-                                   phase, turn_json
+                                   phase, turn_json, sent_at
                               FROM messages m
                              WHERE {where}
                              ORDER BY COALESCE(timestamp, '') DESC, seq DESC, message_id DESC
@@ -176,6 +180,10 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             # The settled turn's summary, on its last row only
             # (docs/live-items.md §9).
             **_turn_field(row["turn_json"]),
+            # A user message that waited for a running turn: when it was sent.
+            # Its timestamp is when its own turn started (issue 491).
+            **({"sent_at": iso_from_ms(int(row["sent_at"]))}
+               if row["sent_at"] is not None else {}),
         })
     return out
 
