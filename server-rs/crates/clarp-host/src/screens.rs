@@ -233,15 +233,11 @@ async fn no_servers() -> ApiError {
     not_built("Giving a tool servers of its own is")
 }
 
-async fn no_teams() -> ApiError {
-    not_built("Teams are")
-}
-
 pub fn routes() -> Router<App> {
     Router::new()
         .merge(crate::harness_providers::routes())
         .route("/agent-mcp", post(no_servers))
-        .route("/team-nudging", post(no_teams))
+        .merge(crate::teams::routes())
         .route("/server-update", get(software).post(no_update))
         .route("/backend-auth", get(crate::logins::sign_in::read))
         .route(

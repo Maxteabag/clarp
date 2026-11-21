@@ -414,17 +414,6 @@ async fn status(
     }))
 }
 
-/// The lists an app's screens are made of, for what this Host keeps nothing of: said as
-/// the Python Host says a list, and empty. An app that reads them shows nothing there,
-/// where an answer of "no such route" would be an error on its screen.
-///
-/// Teams and what the Host does by itself are not built, and no voice speaks
-/// here yet (what listens is in `heard.rs`). Which models an agent can be given is a
-/// catalogue this Host does not keep yet; an agent's model is set by name (`/agent-llm`).
-async fn teams() -> Json<Value> {
-    Json(json!({ "teams": [] }))
-}
-
 /// Where the owner's choice of how much a tool's use is explained is kept, and whether it
 /// is explained at all.
 const DETAIL_LEVEL_KEY: &str = "tool_explanations.detail_level";
@@ -725,7 +714,6 @@ pub fn routes() -> Router<App> {
         .route("/upload", post(upload))
         .route("/clog", post(crate::diagnostics::clog))
         .route("/crash", post(app_diagnostics))
-        .route("/teams", get(teams))
         .route("/automation-settings", get(automation_settings))
         .route("/dirs", get(dirs))
         .route(

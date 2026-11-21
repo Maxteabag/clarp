@@ -3635,6 +3635,13 @@ overrides look up the agent ID first. `clarp-admin voice migrate` reports the ch
 requires a matching reviewed digest before applying them. The fleet saves only rows that
 sound the same under the speaker's resolver, along with the new transcription aliases.
 
+**Team management (21 Nov 2026).** The Host saves team metadata, membership,
+messages and inbox receipts through its configured table store. The desktop routes
+edit the name, color, hierarchy, leader, communications and nudge setting. The
+roster snapshot shows each agent's active memberships. Removing a member clears
+that member's inbox for the team. Deleting a team detaches its children and clears
+its messages and inbox. The feature is advertised after the runtime integration.
+
 **Voices for new agents and contacts (PR 553, contract 123).** The fleet assigns voices
 as it creates new agents and contacts. The choice and the write run in the same turn.
 The configured Cartesia pool takes precedence. Otherwise, the pool uses the background

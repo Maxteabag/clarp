@@ -99,6 +99,7 @@ pub mod schedules;
 pub mod screens;
 pub mod seats;
 mod takeover;
+pub mod teams;
 pub mod telling;
 pub mod terminal;
 pub mod tools;

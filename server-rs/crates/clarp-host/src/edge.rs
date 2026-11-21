@@ -384,6 +384,7 @@ pub struct App {
     pub chip: Arc<crate::chip::Chip>,
     /// The prompts agents are sent at set times.
     pub schedules: Arc<crate::schedules::Desk>,
+    pub teams: Arc<crate::teams::Desk>,
     /// The heartbeat: its settings, and what is remembered of each agent it wakes.
     pub heartbeat: Arc<crate::heartbeat::Desk>,
     /// The janitors: what is kept of each agent that has a job of maintenance.
@@ -1478,12 +1479,21 @@ async fn snapshot(
     // Which agents the user calls live: by their profiles, as they are now.
     let called_live = app.calls.taking(&app).await;
     let owners = app.mouth.owners_from(&directory);
+    let teams = app
+        .teams
+        .read(|teams, _| clarp_kernel::teams::memberships(teams));
+    let team_ids = |member: &Member| {
+        teams
+            .get(&member.record.agent_id)
+            .map_or(&[][..], Vec::as_slice)
+    };
     let mut agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
         .map(|member| {
             let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
+            row["team_ids"] = json!(team_ids(member));
             if called_live.contains(&member.record.session) {
                 row["call_mode"] = json!(clarp_kernel::live_call::LIVE);
             }
@@ -1499,6 +1509,7 @@ async fn snapshot(
             continue;
         }
         let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
+        row["team_ids"] = json!(team_ids(member));
         let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
         row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
         row["model_avatar_url"] = json!("");
