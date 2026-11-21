@@ -30634,9 +30634,10 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         first["providers"]["codex"]["windows"][0]["used_percentage"],
         82.0
     );
-    assert_eq!(
-        first["providers"]["agy"]["windows"][0]["used_percentage"],
-        75.0
+    assert_eq!(first["providers"]["agy"]["windows"], json!([]));
+    assert!(
+        !agy.with_extension("calls").exists(),
+        "idle AGY stays unqueried"
     );
     assert_eq!(first["limit_events"][0]["kind"], "warning");
     assert_eq!(
@@ -30653,14 +30654,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         first["providers"]["claude"]["windows"][1]["used_percentage"],
         27.0
     );
-    assert_eq!(
-        first["providers"]["agy"]["windows"][0]["scope"],
-        "model_group"
-    );
-    assert_eq!(
-        first["providers"]["agy"]["windows"][0]["label"],
-        "model family"
-    );
+
     assert_eq!(
         first["providers"]["codex"]["source"]["detail"],
         "/wham/usage"
@@ -30677,6 +30671,10 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
     assert_eq!(calls.lock().unwrap().len(), 2);
     assert!(!fallback.with_extension("calls").exists());
     let next = host.get("/backend-usage?refresh=0&refresh=Yes");
+    let agy_window = &next["providers"]["agy"]["windows"][0];
+    assert_eq!(agy_window["used_percentage"], 75.0);
+    assert_eq!(agy_window["scope"], "model_group");
+    assert_eq!(agy_window["label"], "model family");
     assert_eq!(next["providers"]["claude"], first["providers"]["claude"]);
     assert_eq!(
         next["providers"]["codex"]["windows"][0]["used_percentage"],
@@ -30692,7 +30690,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
     );
     assert_eq!(
         std::fs::read_to_string(agy.with_extension("calls")).unwrap(),
-        "/usage\n/usage\n"
+        "/usage\n"
     );
     assert_eq!(next["limit_events"][0]["kind"], "recovered");
     let auth = host.get("/backend-auth");
