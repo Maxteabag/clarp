@@ -474,6 +474,10 @@ def test_a_user_message_steered_into_an_agents_turn_makes_it_mixed(tmp_path, clo
     (a queue item) and is then steered into that turn makes it 'mixed', never left 'agents';
     its rows are shown to the user."""
     from lib import coordination
+    # The user sees coordination here, so the peer's prompt reaches the backend as sent (under
+    # the Host's default 'hide' it carries the coordination reminder, by design); the mark and
+    # its loosening below do not depend on the setting.
+    coordination.set_global("show")
     world = _SteeredWorld(tmp_path)
     clock.at(0)
     world.service.dispatch(
