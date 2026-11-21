@@ -740,16 +740,30 @@ pub(crate) fn older(
     which: Which,
 ) -> Result<Page, ActorError> {
     let head_revision = span.head_revision;
-    // A page is counted in rows. How the turns ended is looked up for the rows that are in it.
-    let (items, has_more) = items_before(log, (before, span.floor), limit, which)?;
-    let mut entries = rows(log, &items, Place::First, which)?;
-    // A reply being written is shown where its finished version will be: at the end.
-    for draft in drafts {
-        let mut shown = draft.versioned();
-        shown.coordination = mark_of(log, draft.turn)?;
-        if which.keeps_row(&shown) && !entries.iter().any(|known| known.entry.id() == draft.id) {
-            entries.push(shown);
+    // A reply being written belongs at the tail, not on an older filtered page.
+    let mut live = Vec::new();
+    if !which.hides() || before == Seq::MAX {
+        let mut reader = Reader::new(log);
+        for draft in drafts {
+            let mut shown = draft.versioned();
+            shown.coordination = reader.mark(draft.turn)?;
+            if which.keeps_row(&shown) {
+                live.push(shown);
+            }
         }
+    }
+    let stored_limit = if which.hides() {
+        limit.saturating_sub(live.len())
+    } else {
+        limit
+    };
+    let (items, mut has_more) = items_before(log, (before, span.floor), stored_limit, which)?;
+    let mut entries = rows(log, &items, Place::First, which)?;
+    live.retain(|shown| !entries.iter().any(|known| known.entry.id() == shown.entry.id()));
+    entries.extend(live);
+    if which.hides() && entries.len() > limit {
+        entries.drain(..entries.len() - limit);
+        has_more = true;
     }
     let (hidden_before, hidden_after) =
         gaps(log, &entries, drafts, span, which, before == Seq::MAX)?;
@@ -839,6 +853,12 @@ pub(crate) fn after(
                 if draft.revision > revision && which.keeps_row(&shown) {
                     entries.push(shown);
                 }
+            }
+            if which.hides() && entries.len() > limit {
+                entries.sort_by_key(|row| row.revision);
+                entries.truncate(limit);
+                let last = entries.last().map_or(revision, |row| row.revision);
+                break (entries, last, true);
             }
             break (entries, head_revision.max(revision), false);
         }
