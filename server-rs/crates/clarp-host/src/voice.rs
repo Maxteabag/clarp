@@ -353,7 +353,7 @@ impl Mouth {
         }
     }
 
-    pub(crate) fn cached_voice_names(&self) -> (clarp_kernel::voice_names::Names, Option<String>) {
+    pub(crate) fn cached_voice_names(&self) -> (clarp_kernel::voice_names::Snapshot, Option<String>) {
         self.voice_names.snapshot()
     }
 

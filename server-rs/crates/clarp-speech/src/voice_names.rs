@@ -4,6 +4,21 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+#[derive(Debug)]
+pub enum LookupError {
+    Http(u16),
+    Request(String),
+}
+
+impl std::fmt::Display for LookupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Http(status) => write!(f, "HTTP {status}"),
+            Self::Request(why) => f.write_str(why),
+        }
+    }
+}
+
 pub(crate) fn segment(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
@@ -20,7 +35,7 @@ pub(crate) fn get(
     url: &str,
     credentials: &[(&str, &str)],
     extra: Option<(&str, &str)>,
-) -> Result<Value, String> {
+) -> Result<Value, LookupError> {
     let config = ureq::Agent::config_builder()
         .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(15)))
@@ -34,19 +49,20 @@ pub(crate) fn get(
         }
         let mut response = request
             .call()
-            .map_err(|error| format!("request failed: {error}"))?;
+            .map_err(|error| LookupError::Request(format!("request failed: {error}")))?;
         let status = response.status().as_u16();
         if status == 401 && place + 1 < credentials.len() {
             continue;
         }
         if !(200..300).contains(&status) {
-            return Err(format!("HTTP {status}"));
+            return Err(LookupError::Http(status));
         }
         let said = response
             .body_mut()
             .read_to_string()
-            .map_err(|error| format!("request failed: {error}"))?;
-        return serde_json::from_str(&said).map_err(|error| format!("request failed: {error}"));
+            .map_err(|error| LookupError::Request(format!("request failed: {error}")))?;
+        return serde_json::from_str(&said)
+            .map_err(|error| LookupError::Request(format!("request failed: {error}")));
     }
-    Err("voice catalogue credentials are unavailable".into())
+    Err(LookupError::Request("voice catalogue credentials are unavailable".into()))
 }

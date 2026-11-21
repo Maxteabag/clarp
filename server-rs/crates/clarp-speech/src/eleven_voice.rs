@@ -136,7 +136,7 @@ impl Speaker for ElevenVoice {
 }
 
 /// One of the account's voices, resolved by ID for the background names file.
-pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<String, String> {
+pub fn voice_by_id(key: &str, endpoint: &str, id: &str) -> Result<String, crate::LookupError> {
     let endpoint = if endpoint.is_empty() {
         "https://api.elevenlabs.io"
     } else {

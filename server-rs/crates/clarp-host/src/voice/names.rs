@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use clarp_kernel::said::{self, CARTESIA, ELEVENLABS};
-use clarp_kernel::voice_names::{self, Names};
+use clarp_kernel::voice_names::{self, Names, Snapshot};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -22,7 +22,7 @@ type Used = BTreeMap<String, BTreeSet<String>>;
 #[derive(Default)]
 struct Stored {
     stamp: Option<(SystemTime, u64)>,
-    names: Names,
+    snapshot: Snapshot,
     hash: Option<String>,
 }
 
@@ -52,9 +52,9 @@ impl Desk {
         }
     }
 
-    pub(super) fn snapshot(&self) -> (Names, Option<String>) {
+    pub(super) fn snapshot(&self) -> (Snapshot, Option<String>) {
         let current = self.current.lock().unwrap_or_else(PoisonError::into_inner);
-        (current.names.clone(), current.hash.clone())
+        (current.snapshot.clone(), current.hash.clone())
     }
 
     fn publish(&self, stored: Stored) {
@@ -82,14 +82,14 @@ impl Desk {
         }
         let raw = fs::read(&self.path)?;
         let hash = Some(digest(&raw));
-        let names = match serde_json::from_slice::<Value>(&raw) {
-            Ok(value) => voice_names::from_file(&value),
+        let snapshot = match serde_json::from_slice::<Value>(&raw) {
+            Ok(value) => Snapshot::from_file(&value),
             Err(why) => {
                 eprintln!("voiceNamesReadFail {why}");
-                Names::new()
+                Snapshot::default()
             }
         };
-        self.publish(Stored { stamp, names, hash });
+        self.publish(Stored { stamp, snapshot, hash });
         Ok(())
     }
 
@@ -113,20 +113,20 @@ impl Desk {
         }
         self.read()?;
         let (before, old_hash) = self.snapshot();
-        let mut names = before.clone();
-        voice_names::merge(&mut names, fetched);
-        let hash = if old_hash.is_some() && names == before {
+        let mut snapshot = before.clone();
+        voice_names::merge(&mut snapshot.names, fetched);
+        let hash = if old_hash.is_some() && snapshot == before {
             File::open(&self.path)?.set_modified(SystemTime::now())?;
             old_hash
         } else {
-            let raw = serde_json::to_vec(&names).map_err(io::Error::other)?;
+            let raw = serde_json::to_vec(&snapshot).map_err(io::Error::other)?;
             self.replace(&raw)?;
             Some(digest(&raw))
         };
         let meta = fs::metadata(&self.path)?;
         self.publish(Stored {
             stamp: Some((meta.modified()?, meta.len())),
-            names,
+            snapshot,
             hash,
         });
         Ok(())
@@ -199,7 +199,7 @@ fn lookup(
     used: &BTreeSet<String>,
     found: &mut ProviderNames,
     provider: &str,
-    mut fetch_one: impl FnMut(&str) -> Result<String, String>,
+    mut fetch_one: impl FnMut(&str) -> Result<String, clarp_speech::LookupError>,
 ) {
     for id in voice_names::lookups(used, found) {
         match fetch_one(id) {
@@ -477,12 +477,12 @@ mod tests {
         assert_eq!(sent[3], "/v1/voices/e000");
         assert_eq!(sent[102], "/v1/voices/e099");
         let (names, signature) = desk.snapshot();
-        assert_eq!(names[CARTESIA]["retired"], "Preserve old voice");
-        assert_eq!(names[CARTESIA]["c1"], "Updated");
-        assert_eq!(names[CARTESIA]["c2"], "Second");
-        assert_eq!(names[CARTESIA]["c+missing"], "Looked Up");
-        assert_eq!(names[ELEVENLABS]["old"], "Keep this too");
-        assert_eq!(names[ELEVENLABS]["e000"], "Eleven Name");
+        assert_eq!(names.names[CARTESIA]["retired"], "Preserve old voice");
+        assert_eq!(names.names[CARTESIA]["c1"], "Updated");
+        assert_eq!(names.names[CARTESIA]["c2"], "Second");
+        assert_eq!(names.names[CARTESIA]["c+missing"], "Looked Up");
+        assert_eq!(names.names[ELEVENLABS]["old"], "Keep this too");
+        assert_eq!(names.names[ELEVENLABS]["e000"], "Eleven Name");
         assert_ne!(signature, Some(digest(initial)));
         assert!(!desk.start_due());
 
@@ -506,9 +506,9 @@ mod tests {
         server.failures.store(2, Ordering::SeqCst);
         desk.refresh(&sources, &used).unwrap();
         let (after_partial, changed) = desk.snapshot();
-        assert_eq!(after_partial[CARTESIA], names[CARTESIA]);
-        assert_eq!(after_partial[ELEVENLABS]["e000"], "New Eleven");
-        assert_eq!(after_partial[ELEVENLABS]["old"], "Keep this too");
+        assert_eq!(after_partial.names[CARTESIA], names.names[CARTESIA]);
+        assert_eq!(after_partial.names[ELEVENLABS]["e000"], "New Eleven");
+        assert_eq!(after_partial.names[ELEVENLABS]["old"], "Keep this too");
         assert_ne!(changed, signature);
         assert_eq!(server.asked.lock().unwrap().len(), 408);
     }
