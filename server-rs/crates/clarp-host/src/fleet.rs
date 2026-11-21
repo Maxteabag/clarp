@@ -757,6 +757,11 @@ enum Ask {
         reviewed: Option<String>,
         answer: Answer<Result<Result<serde_json::Value, String>, Unavailable>>,
     },
+    SetCoordination {
+        chat: Option<(String, String)>,
+        choice: Option<clarp_kernel::hidden_coordination::Visibility>,
+        answer: Answer<clarp_kernel::hidden_coordination::Visibility>,
+    },
     /// Something small is left with the Host under a key, in the table of its kind, or
     /// taken away (`None`).
     Keep {
@@ -1272,6 +1277,14 @@ impl FleetHandle {
             answer,
         })
         .await?
+    }
+
+    pub(crate) async fn set_coordination(
+        &self,
+        chat: Option<(String, String)>,
+        choice: Option<clarp_kernel::hidden_coordination::Visibility>,
+    ) -> Result<clarp_kernel::hidden_coordination::Visibility, Unavailable> {
+        self.ask(|answer| Ask::SetCoordination { chat, choice, answer }).await
     }
 
     /// Leaves something small with the Host under a key, in the table of its kind (where a
@@ -2166,6 +2179,9 @@ impl Fleet {
                 Ask::Set { settings, answer } => {
                     let _ = answer.send(Ok(self.set(settings)));
                 }
+                Ask::SetCoordination { chat, choice, answer } => {
+                    let _ = answer.send(self.set_coordination(chat, choice));
+                }
                 Ask::Keep {
                     kind,
                     key,
@@ -2630,6 +2646,39 @@ impl Fleet {
         self.settings.extend(settings);
         self.publish();
         Ok(())
+    }
+
+    fn set_coordination(
+        &mut self,
+        chat: Option<(String, String)>,
+        choice: Option<clarp_kernel::hidden_coordination::Visibility>,
+    ) -> Result<clarp_kernel::hidden_coordination::Visibility, Unavailable> {
+        use clarp_kernel::hidden_coordination::{self as rules, Visibility};
+        let key = if let Some((id, _)) = &chat {
+            if self.place_of(id).is_none() {
+                return Err(Unavailable("no such agent".to_owned()));
+            }
+            rules::chat_key(id)
+        } else {
+            rules::GLOBAL_KEY.to_owned()
+        };
+        self.set(vec![(key, choice.map_or("", Visibility::word).to_owned())])?;
+        for member in &self.members {
+            if chat.as_ref().is_none_or(|(id, _)| *id == member.record.agent_id) {
+                member.agent.refresh_telling();
+            }
+        }
+        let effective = choice.unwrap_or_else(|| {
+            self.settings.get(rules::GLOBAL_KEY)
+                .and_then(|value| Visibility::read(value)).unwrap_or_default()
+        });
+        let mut event = serde_json::json!({"type": "agent-roster", "kind": rules::ROSTER_KIND,
+                               "coordination_visibility": effective});
+        if let Some((_, session)) = chat {
+            event["session"] = serde_json::json!(session);
+        }
+        self.works.hub.publish(event, self.now_ms());
+        Ok(effective)
     }
 
     fn peer_add(
