@@ -16,6 +16,7 @@ from . import (background_jobs, agent_goals, agents as agents_db, avatar_setting
                turn_queue, scheduler, janitors, quiet_agents)
 from . import coordination, reconcile, turn_lifecycle
 from .clock import now_ms
+from .revisioned_cache import RevisionedCache
 from .session_models import agent_model
 from . import personas as persona_store
 from .avatar_urls import (versioned_avatar_url, janitor_avatar_url,
@@ -187,26 +188,29 @@ ARCHIVED_LISTING_TTL_S = 300.0
 _LIMIT_TEXT = re.compile(r"[1-9][0-9]{0,2}")
 
 
-# agent_id -> (trace_id, read at, working_with): a running turn's audience, read again after
-# WORKING_TTL_S (a turn the user steps into reads 'user' soon after), so a snapshot does not
-# query every busy agent's turn on every build.
-_WORKING_CACHE: dict[str, tuple[str, float, dict[str, Any]]] = {}
+# A running turn's audience per agent, valid for its trace within one WORKING_TTL_S window (a
+# turn the user steps into reads 'user' soon after), so a snapshot does not query every busy
+# agent's turn on every build. revisioned_cache, bounded (rule 2 of
+# docs/architecture/state-and-boundaries.md).
 WORKING_TTL_S = 5.0
+_WORKING_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache("snapshot.working_with",
+                                                                      max_entries=4096)
 
 
 def _working_with(agent_id: str, trace_id: str | None) -> dict[str, Any]:
     """The running turn's audience for a snapshot row; {} when it cannot be read (a row is
     never lost for it)."""
     trace = str(trace_id or "")
-    known = _WORKING_CACHE.get(agent_id)
-    if known and known[0] == trace and time.monotonic() - known[1] < WORKING_TTL_S:
-        return dict(known[2])
+    window = (trace, int(time.monotonic() // WORKING_TTL_S))
+    hit, cached = _WORKING_CACHE.get(agent_id, window)
+    if hit:
+        return dict(cached)
     try:
         fields = coordination.working_with(agent_id, trace)
     except Exception as exc:  # noqa: BLE001
         log_exception("snapshotWorkingWithFail", exc, detail=agent_id)
         return {}
-    _WORKING_CACHE[agent_id] = (trace, time.monotonic(), fields)
+    _WORKING_CACHE.put(agent_id, window, dict(fields))
     return dict(fields)
 
 
