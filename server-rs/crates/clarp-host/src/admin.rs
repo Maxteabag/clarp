@@ -32,11 +32,13 @@ Host's from CLARP_HOST_TOKEN.";
 pub const IMPORT_USAGE: &str =
     "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT] [--files]
                          [--files-from ADDR:PORT]
+       clarp-host import --back --from ADDR:PORT --session NAME [--host ADDR:PORT]
 Reads the agent NAME, its conversation, its library, its plans and goals and the files it
 published or shows from the Host at --from and gives them to this Host. With --files only
 the files are given, for an agent that is here already: a move whose files did not all
 arrive is finished that way. A file the Host at --from does not have is asked for at
 --files-from: a conversation that came from another Host names files that stayed there.
+With --back, hold the imported agent here and take back the source Host's move mark.
 The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN,
 and the token of the Host at --files-from from CLARP_FILES_TOKEN.";
 
@@ -437,7 +439,7 @@ fn get(address: &str, path: &str, token: &str) -> Result<Value, String> {
 ///
 /// It reads what any app reads from the other Host, and all of it before it gives this Host
 /// anything: the agent's row in the snapshot, the conversation page by page, its plans, its
-/// library, its pictures. The other Host is not changed. Returns what to show.
+/// library, its pictures.
 /// How an agent is heard on the Host it comes from, when it is heard its own way there: the
 /// language it is spoken to in and the engines that hear it, in the order they are tried.
 /// That Host keeps both under the agent's name, its persona or its session.
@@ -540,13 +542,207 @@ fn skipped_report(left: &[String]) -> String {
     )
 }
 
+fn snapshot_agent<'a>(snapshot: &'a Value, session: &str, host: &str) -> Result<&'a Value, String> {
+    snapshot["agents"]
+        .as_array()
+        .and_then(|agents| agents.iter().find(|agent| agent["session"] == session))
+        .ok_or_else(|| format!("the Host at {host} has no agent called {session}"))
+}
+
+fn has_move_mark(info: &Value) -> bool {
+    info["capabilities"]["features"]
+        .as_array()
+        .is_some_and(|features| features.iter().any(|feature| feature == "agent_moved"))
+}
+
+fn move_target(way: &Way<'_>) -> Result<Value, String> {
+    let identity = get(way.host, "/pairing/identity", "")?;
+    let need = |key: &str| {
+        identity[key]
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| format!("this Host's pairing identity is missing {key}"))
+    };
+    Ok(json!({"host": need("name")?, "id": need("server_id")?}))
+}
+
+fn move_request(way: &Way<'_>, target: &Value) -> Result<Value, String> {
+    let body = json!({"session": way.session, "moved_to": target});
+    let (status, answer) = post(way.from, "/agent-moved", way.source_token, &body)?;
+    if status != 200 || answer["ok"] != true {
+        let error = answer["error"].as_str().unwrap_or("no error received");
+        return Err(format!(
+            "the source answered {status} to POST /agent-moved: {error}"
+        ));
+    }
+    let confirmed = if target.is_null() {
+        answer.get("moved") == Some(&Value::Null)
+    } else {
+        answer["moved"]["to"] == *target
+    };
+    if answer["session"] != way.session || !confirmed {
+        return Err("the source answered 200 without confirming the requested move state".into());
+    }
+    Ok(answer)
+}
+
+fn manual_handoff(way: &Way<'_>) -> String {
+    format!(
+        "It is still on the Host at {} too. Archive it there, so that only one of the two takes its turns.\n\
+         Here it is held until then: it answers what you say to it, and what would start by itself \
+         (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, \
+         or POST /turn-queue/resume.",
+        way.from
+    )
+}
+
+fn source_idle(way: &Way<'_>, agent_id: &Value, target: Option<&Value>) -> Result<(), String> {
+    let snapshot = get(way.from, "/agents/snapshot", way.source_token)?;
+    let agent = snapshot_agent(&snapshot, way.session, way.from)?;
+    if !agent_id.is_string() || agent["agent_id"] != *agent_id {
+        return Err("the source agent's identity changed during the move".into());
+    }
+    if target.is_some_and(|target| &agent["moved"]["to"] != target) {
+        return Err("the source no longer confirms this move mark".into());
+    }
+    if agent["busy"] != false {
+        return Err("the source has not confirmed the agent is idle".into());
+    }
+    Ok(())
+}
+
+fn finish_handoff(way: &Way<'_>, agent_id: &Value, held: bool, files: &Followed) -> String {
+    let unfinished = |why: &str| {
+        format!(
+            "The move is incomplete: {why}. The copy here stays held. It is on both Hosts until \
+             marked moved or archived on the Host at {}.",
+            way.from
+        )
+    };
+    if !held {
+        return "The move is incomplete: this Host did not confirm the hold. The source was not marked moved.".into();
+    }
+    let info = match get(way.from, "/server-info", way.source_token) {
+        Ok(info) => info,
+        Err(why) => return unfinished(&why),
+    };
+    if !has_move_mark(&info) {
+        return manual_handoff(way);
+    }
+    if files.failed != 0 {
+        return unfinished(&format!(
+            "{} file(s) could not be transferred ({})",
+            files.failed, files.why
+        ));
+    }
+    let target = match move_target(way) {
+        Ok(target) => target,
+        Err(why) => return unfinished(&why),
+    };
+    if let Err(why) = source_idle(way, agent_id, None) {
+        return unfinished(&why);
+    }
+    if let Err(why) = move_request(way, &target) {
+        return unfinished(&why);
+    }
+
+    let marked = format!(
+        "It is marked moved on the Host at {}. Its turn-start doors there now refuse it.",
+        way.from
+    );
+    // A turn may have started since the first snapshot. The source's mark lets it finish.
+    if let Err(why) = source_idle(way, agent_id, Some(&target)) {
+        return format!("The source accepted the move mark. The copy here stays held: {why}.");
+    }
+    let resumed = match post(
+        way.host,
+        "/turn-queue/resume",
+        way.token,
+        &json!({"session": way.session}),
+    ) {
+        Ok((200, answer)) if answer["session"] == way.session && answer["paused"] == false => {
+            return format!("{marked} It is resumed here.");
+        }
+        Ok((status, answer)) => {
+            let why = answer["error"]
+                .as_str()
+                .unwrap_or("no resumed queue was confirmed");
+            format!("this Host answered {status} to POST /turn-queue/resume: {why}")
+        }
+        Err(why) => why,
+    };
+    // The resume might have landed before the connection was lost. Read back before saying
+    // what the destination is doing. The source is already fenced by its mark.
+    let path = format!("/turn-queue?session={}", ids::in_a_link(way.session));
+    match get(way.host, &path, way.token) {
+        Ok(state) if state["paused"] == false => {
+            format!("{marked} It is resumed here. The resume receipt was unclear: {resumed}.")
+        }
+        Ok(state) if state["paused"] == true => {
+            format!("{marked} The copy here stays held: {resumed}.")
+        }
+        _ => format!("{marked} The queue state here could not be confirmed: {resumed}."),
+    }
+}
+
+fn take_move_back(way: &Way<'_>) -> Result<String, String> {
+    let source = get(way.from, "/agents/snapshot", way.source_token)?;
+    let there = snapshot_agent(&source, way.session, way.from)?;
+    if !has_move_mark(&get(way.from, "/server-info", way.source_token)?) {
+        return Err("the source Host does not advertise agent_moved".into());
+    }
+    let target = move_target(way)?;
+    if there["moved"]["to"]["id"] != target["id"] {
+        return Err("the source has no move mark for this Host".into());
+    }
+    let local = get(way.host, "/agents/snapshot", way.token)?;
+    let here = snapshot_agent(&local, way.session, way.host)?;
+    if !there["agent_id"].is_string() || here["agent_id"] != there["agent_id"] {
+        return Err("this Host has a different agent under that session".into());
+    }
+    if here["busy"] != false {
+        return Err(
+            "this Host has not confirmed the imported agent is idle; the source stays marked moved"
+                .into(),
+        );
+    }
+    let hold = json!({"session": way.session, "reason": "taking the move back"});
+    let (status, stopped) = post(way.host, "/stop", way.token, &hold).map_err(|why| {
+        format!("could not hold this Host's copy: {why}; the source stays marked moved")
+    })?;
+    if status != 200 || stopped["ok"] != true || stopped["queue_paused"] != true {
+        let why = stopped["error"]
+            .as_str()
+            .unwrap_or("no mailbox hold was confirmed");
+        return Err(format!(
+            "this Host answered {status} to POST /stop: {why}; the source stays marked moved"
+        ));
+    }
+    let local = get(way.host, "/agents/snapshot", way.token)?;
+    let here = snapshot_agent(&local, way.session, way.host)?;
+    if here["agent_id"] != there["agent_id"]
+        || here["busy"] != false
+        || here["queue_paused"] != true
+    {
+        return Err("this Host no longer confirms an idle, held copy of the agent; the source stays marked moved".into());
+    }
+    move_request(way, &Value::Null).map_err(|why| {
+        format!("this Host's copy stays held; the return could not be confirmed: {why}")
+    })?;
+    Ok(format!(
+        "{} is held here. What it did here since the move stays here. The source Host at {} goes on from where it was.",
+        way.session, way.from
+    ))
+}
+
 pub fn import(
     mut args: impl Iterator<Item = String>,
     source_token: &str,
     token: &str,
     files_token: &str,
 ) -> Result<String, String> {
-    let (mut from, mut session, mut only_files) = (None, None, false);
+    let (mut from, mut session, mut only_files, mut back) = (None, None, false, false);
     let mut files_from: Option<String> = None;
     let mut host = "127.0.0.1:7690".to_string();
     while let Some(arg) = args.next() {
@@ -556,6 +752,7 @@ pub fn import(
             "--session" => session = Some(value("a session name")?),
             "--host" => host = value("an address")?,
             "--files" => only_files = true,
+            "--back" => back = true,
             "--files-from" => files_from = Some(value("an address")?),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -563,16 +760,22 @@ pub fn import(
     let from = from.ok_or("the move needs --from: the address of the Host the agent is on")?;
     let session = session.ok_or("the move needs --session: the agent's session name")?;
 
+    let way = Way {
+        from: &from,
+        source_token,
+        files_from: files_from.as_deref().map(|other| (other, files_token)),
+        host: &host,
+        token,
+        session: &session,
+    };
+    if back {
+        if only_files || files_from.is_some() {
+            return Err("--back cannot be combined with file transfer options".into());
+        }
+        return take_move_back(&way);
+    }
     let snapshot = get(&from, "/agents/snapshot", source_token)?;
-    let agent = snapshot["agents"]
-        .as_array()
-        .and_then(|agents| {
-            agents
-                .iter()
-                .find(|agent| agent["session"] == session.as_str())
-        })
-        .ok_or(format!("the Host at {from} has no agent called {session}"))?
-        .clone();
+    let agent = snapshot_agent(&snapshot, &session, &from)?.clone();
     movable(&agent)?;
     if agent["busy"] == true && !only_files {
         return Err(format!(
@@ -707,14 +910,6 @@ pub fn import(
     let gallery = gallery["assets"].as_array().cloned().unwrap_or_default();
     let skipped = skipped_report(&left);
     let wants = wanted(&gallery, &library, &plans, &turns);
-    let way = Way {
-        from: &from,
-        source_token,
-        files_from: files_from.as_deref().map(|other| (other, files_token)),
-        host: &host,
-        token,
-        session: &session,
-    };
     if only_files {
         let followed = files(&way, &wants);
         let (came, more) = followed.told(&way);
@@ -800,13 +995,10 @@ pub fn import(
     let (came, more) = followed.told(&way);
     // And how it is heard, when it is heard its own way.
     let heard = bring_hearing(&way, &agent);
+    let handoff = finish_handoff(&way, &agent["agent_id"], answer["held"] == true, &followed);
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {came}.\n\
-         {skipped}{more}{heard}\
-         It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns.\n\
-         Here it is held until then: it answers what you say to it, and what would start by itself \
-         (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, \
-         or POST /turn-queue/resume."
+         {skipped}{more}{heard}{handoff}"
     ))
 }
 

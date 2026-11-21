@@ -45,6 +45,8 @@ mod goal_ledger;
 mod harness;
 #[path = "host/harness_providers.rs"]
 mod harness_providers;
+#[path = "host/import_record_move.rs"]
+mod import_record_move;
 #[path = "host/import_render_specs.rs"]
 mod import_render_specs;
 #[path = "host/installer.rs"]
@@ -21199,6 +21201,20 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
 /// A stand-in on this machine that answers every request with one status and one body, and
 /// keeps what it was asked. `paths` are answered in turn by what they begin with.
 fn answers(routes: Vec<(&'static str, &'static str, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
+    answers_using(move |path, _| {
+        routes
+            .iter()
+            .find(|(begins, _, _)| path.starts_with(begins))
+            .map_or_else(
+                || ("404 Not Found", "nothing here".into()),
+                |(_, status, body)| (*status, body.clone()),
+            )
+    })
+}
+
+fn answers_using(
+    answer: impl Fn(&str, &str) -> (&'static str, String) + Send + 'static,
+) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = format!("http://{}", listener.local_addr().unwrap());
     let taken: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -21208,14 +21224,8 @@ fn answers(routes: Vec<(&'static str, &'static str, String)>) -> (String, Arc<Mu
             let Ok(mut stream) = stream else { break };
             let request = whole_request(&mut stream);
             let path = request.split(' ').nth(1).unwrap_or("").to_string();
-            keeps.lock().unwrap().push(request);
-            let found = routes
-                .iter()
-                .find(|(begins, _, _)| path.starts_with(begins));
-            let (status, body) = match found {
-                Some((_, status, body)) => (*status, body.as_str()),
-                None => ("404 Not Found", "nothing here"),
-            };
+            keeps.lock().unwrap().push(request.clone());
+            let (status, body) = answer(&path, &request);
             let reply = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
                  Connection: close\r\n\r\n{body}",
