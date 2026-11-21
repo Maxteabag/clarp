@@ -37,7 +37,6 @@ one of these:
 | `teams` | Team management is available. The capability will be listed after broadcast, inbox and leader runtime integration. |
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
-| `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
 | `managed_skills` on a Host that does not keep the machine's tools | one Host keeps a machine's tools (the lead's ruling of 20 Nov 2026): it is listed by a Host started with `--accounts select` and the tree of skills the install tool ships, and by no other |
 | `backend_auth` | listed only by the Host that keeps its machine's tools (`--accounts select`); every other refuses a sign-in or sign-out from an app |
 

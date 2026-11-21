@@ -23826,6 +23826,14 @@ fn agent_creation_followup_relaunch_uses_persona_presentation_and_refuses_custom
 fn agent_creation_details_returns_the_named_launch_fields() {
     let place = Place::new("named-agent-creation");
     let host = place.start();
+    let info = host.get("/server-info");
+    assert_eq!(info["contract"]["features"]["agent_creation_details"], 1);
+    assert!(
+        info["capabilities"]["features"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("agent_creation_details"))
+    );
     let cwd = place.root.join("work");
     let (status, made) = host.ask(
         "POST",
