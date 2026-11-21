@@ -732,6 +732,7 @@ mod tests {
                     origin: message.origin.clone(),
                     admission: Admission::Queue,
                     coordination: Some("sender".into()),
+                    user_word: false,
                 },
                 100,
             )

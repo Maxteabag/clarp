@@ -2825,6 +2825,7 @@ async fn send_as(
         // agent has the message, so that no answer is faster than this.
         app.mouth.sent(&member.record.session).await;
     }
+    let user_word = crate::coordination::front_desk_word(app, made).await;
     let guard = if binding.is_some() {
         Some(app.mouth.binding_admission.write().await)
     } else {
@@ -2835,6 +2836,7 @@ async fn send_as(
     let marks = clarp_actor::Marks {
         coordination,
         trace_named: made.trace_named,
+        user_word,
     };
     let sent = member
         .agent

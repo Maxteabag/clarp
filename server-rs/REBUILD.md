@@ -3575,6 +3575,23 @@ Cartesia's catalogue and looks up missing voices in use, handling at most 100 by
 lookups per provider. A check advances the checked date. Only changed names change
 the file content and its digest; a provider failure keeps its earlier names.
 
+**The user's word goes first in an agent's queue (issue 481, PR 506).** An authenticated
+user or Oracle send, a form submission, and a delivered decision answer by the user or on the
+user's behalf take priority. The Host also recognizes a message from a verified local turn of a
+session in `[agents] front_desk_sessions` in the owner's configuration. That relay retains its
+agent origin, sender and audience. A supplied sender name or a peer credential conveys no
+priority. The acceptance event persists the priority bit beside the turn. A new priority
+message queues behind the last earlier priority item, retaining the order of the other items.
+Older acceptances keep their original position on replay and their user or Oracle origin
+protects their position when a new priority message arrives.
+
+The order read by `GET /turn-queue` is the mailbox's dispatch order. Adding priority work advances
+the same queue revision as any enqueue, and a Stop still holds the same work. An attempt that has
+started holds its place through retries and restart. The Rust Host uses a single journal-backed
+mailbox, so it does not re-admit or reconcile a second store's copy of waiting items. The
+acceptance event's optional field supports replay of old journals. The Python Host can also
+retry without the priority fields when a separately installed older runtime refuses them.
+
 ## 7. Stages and gates
 
 Since 21 Nov 2026 at 12:39, stages, trains and pieces have no test gate of their own. A train lands when
