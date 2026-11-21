@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lib import agents, backends, coordination, db, snapshot
+from lib import agents, backends, coordination, db, settings_store, snapshot
 from lib.routes.agents import AgentRoutes
 from lib.routes.settings import SettingsRoutes
 
@@ -158,3 +158,19 @@ def test_a_device_still_changes_it(chats, body, handler):
     request.headers = {"X-Clarp-Turn": "  "}        # an empty header names no turn
     getattr(request, handler)()
     assert request.answer[0] == 200 and len(request.ctx.stream.events) == 1
+
+
+def test_the_roster_view_says_what_the_separate_reads_said(chats):
+    """The snapshot takes the Host's setting and each chat's own choice from the one statement
+    that decides which chats hide (roster_view), not from two reads of its own."""
+    coordination.set_chat(chats["rex"], "hide")
+    view = coordination.roster_view()
+    assert view.host == coordination.global_visibility() == "show"
+    assert view.chosen == {chats["rex"]: "hide"}
+    assert view.hiding == frozenset(coordination.hiding_agents())
+    settings_store.set_text(coordination.GLOBAL_KEY, "hide")
+    view = coordination.roster_view()
+    assert view.host == "hide" and view.chosen == {chats["rex"]: "hide"}
+    for agent_id in chats.values():
+        agents.soft_delete(agent_id)
+    assert coordination.roster_view() == (frozenset(), "hide", {})

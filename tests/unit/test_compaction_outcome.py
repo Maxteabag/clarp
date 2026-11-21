@@ -287,10 +287,20 @@ def test_a_refused_codex_compaction_is_recorded_in_words(monkeypatch, _fresh_slo
 
 
 def test_the_snapshot_row_carries_last_compaction():
-    from lib import snapshot
-    text = (SERVER / "lib" / "snapshot.py").read_text()
-    assert '"last_compaction": last_compactions.get(agent_id)' in text
-    assert snapshot  # imported cleanly
+    """The outcomes are read with the snapshot's other settings, as a key range that names no
+    agent: each row gets its own, an agent with none gets None, and a key that only sorts near
+    the range is not taken for one."""
+    from lib import settings_store, snapshot
+    eve = agents_db.create_agent(persona="Eve", voice_id="v", cwd="/tmp", session="eve")
+    fay = agents_db.create_agent(persona="Fay", voice_id="v", cwd="/tmp", session="fay")
+    outcome = {"outcome": "compacted", "before_tokens": 9, "after_tokens": 2, "backend": "claude", "at": 5}
+    settings_store.set_text(compaction.OUTCOME_PREFIX + eve, json.dumps(outcome))
+    settings_store.set_text("compaction.last", json.dumps({"outcome": "not an agent"}))
+    settings_store.set_text("compaction.lastx" + fay, json.dumps({"outcome": "not an agent"}))
+    rows = {row["session"]: row for row in snapshot.build_agent_snapshot(None)["agents"]}
+    assert rows["eve"]["last_compaction"] == outcome
+    assert rows["fay"]["last_compaction"] is None
+    assert compaction.last_outcomes([eve, fay]) == {eve: outcome}
 
 
 # ---- the PR adds no automation ------------------------------------------------
