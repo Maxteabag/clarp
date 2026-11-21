@@ -560,6 +560,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-humanness": "_handle_voice_humanness_get",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
+        "/coordination-settings": "_handle_coordination_settings_get",
         "/avatar-settings": "_handle_avatar_settings_get",
         "/agent-model-options": "_handle_agent_model_options",
         "/favorite-paths": "_handle_favorite_paths",
@@ -669,6 +670,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
         "/agent-notes": "_handle_agent_note",
+        "/agent-coordination": "_handle_agent_coordination",
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
@@ -681,6 +683,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/judgments/settings": "_handle_judgments_settings_post",
         "/personalities/settings": "_handle_personalities_settings_post",
         "/automation-settings": "_handle_automation_settings_post",
+        "/coordination-settings": "_handle_coordination_settings_post",
         "/avatar-settings": "_handle_avatar_settings_post",
         "/preview": "_handle_preview",
         "/stop": "_handle_stop",
@@ -1766,6 +1769,13 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         include_tool_details = str(
             qs.get("include_tool_details", ["1"])[0]
         ).lower() not in {"0", "false", "no"}
+        # Coordination between agents (issue 478): auto | hide | show; absent = today's answer.
+        # coordination_read: the policy a delta's cache was read under (its echo's visibility).
+        coordination_mode = (qs.get("coordination", [""])[0] or "").strip().lower()
+        coordination_read = (qs.get("coordination_read", [""])[0] or "").strip().lower()
+        from lib import coordination as _coordination
+        if coordination_mode and coordination_mode not in _coordination.MODES:
+            return self._json_error(400, "coordination must be auto, hide or show")
         from lib import agent_conversations
         from lib.message_previews import UnknownHistoryCursor
         if agent_conversations.is_pair_session(session):
@@ -1786,7 +1796,15 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 include_tool_details=include_tool_details,
                 interaction_id=self._interaction_id(),
                 background_import=True,
+                coordination_mode=coordination_mode,
+                coordination_read=coordination_read,
             )
+            if coordination_mode and "coordination" not in body_obj:
+                # A chat with no conversation yet says the policy too (every answer does).
+                agent = agents_db.get_by_session(session)
+                if agent:
+                    policy = _coordination.read_policy(agent["agent_id"], coordination_mode)
+                    body_obj["coordination"] = {key: policy[key] for key in ("hidden", "source", "visibility")}
         except UnknownHistoryCursor:
             return self._json_error(409, "unknown history cursor")
         except OSError as e:
