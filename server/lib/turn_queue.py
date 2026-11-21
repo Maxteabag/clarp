@@ -1237,6 +1237,22 @@ def waiting_items(agent_id: str) -> list[dict]:
             ORDER BY queue_seq""", (agent_id,))]
 
 
+def item_provenance(row) -> dict:
+    """Who a queue item is from, as stored (R182, issue 491): ``origin`` (an open set:
+    user, oracle, agent, automation (a goal wake, a schedule), janitor, heartbeat, ...) and
+    ``sender`` ``{agent_id, name}`` when an agent sent it (``name`` None once that agent is
+    gone), else None. An app tells the user's own waiting send from another device apart
+    from an agent's message or a goal wake by it."""
+    origin = str(row["origin"] or "user")
+    sender_id = str(row["sender_agent_id"] or "")
+    sender = None
+    if sender_id:
+        from . import agents
+        found = agents.get_by_agent_id(sender_id)
+        sender = {"agent_id": sender_id, "name": (found or {}).get("persona") or None}
+    return {"origin": origin, "sender": sender}
+
+
 def get(queue_id: str) -> dict | None:
     row = db.conn().execute(
         "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'",
