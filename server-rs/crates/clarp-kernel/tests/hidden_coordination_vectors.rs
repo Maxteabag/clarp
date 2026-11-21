@@ -24,12 +24,16 @@ fn coordination_choices_and_policy_follow_the_reference() {
         let raw = input["raw"].as_str().unwrap_or("");
         let normalized = Visibility::read(raw).map_or("", Visibility::word);
         assert_eq!(normalized, input["normalized"]);
-        let global = if normalized.is_empty() { json!({"error":rules::GLOBAL_ERROR}) } else { json!(normalized) };
+        let global = if normalized.is_empty() {
+            json!({"error":rules::GLOBAL_ERROR})
+        } else {
+            json!(normalized)
+        };
         assert_eq!(global, input["global"]);
         let chat = rules::chat_choice(raw)
             .map(|choice| json!(choice.map_or("", Visibility::word)))
             .unwrap_or_else(|error| json!({"error":error}));
-        assert_eq!(chat,input["chat"]);
+        assert_eq!(chat, input["chat"]);
     }
     assert_eq!(choices.len(), 18);
     assert_eq!(inputs.len(), 6);
