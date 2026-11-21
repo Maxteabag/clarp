@@ -10,6 +10,7 @@ pub mod activity;
 pub mod address;
 pub mod addressed;
 pub mod agent;
+pub mod agent_goal;
 pub mod agent_moves;
 pub mod alert_routes;
 pub mod artifacts;
