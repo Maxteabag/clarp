@@ -227,7 +227,10 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         if method == "status":
             return {"ok": True, "result": {
                 "protocol_version": PROTOCOL_VERSION,
-                "capabilities": {"janitor_runs": True, "send_delivery_state": True},
+                # agent_moves: this runtime's admission refuses an agent marked moved
+                # (lib.agent_moves); the Host sets a mark only when it is there.
+                "capabilities": {"janitor_runs": True, "send_delivery_state": True,
+                                 "agent_moves": True},
                 "draining": self._draining,
                 "release_id": self.release_id,
                 "instance": self.instance,
