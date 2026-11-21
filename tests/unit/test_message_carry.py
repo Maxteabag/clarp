@@ -664,14 +664,15 @@ def test_a_refused_kind_says_how_its_rows_changed_by_their_count():
     rewritten = [{**old[0], "text": "edited", "revision": 9}, *old[1:]]
     removed = old[1:]
     appeared = [*old, _row("m-9", revision=2, seq=3)]
-    note = [*old, _row("n-2", source="note:2", revision=9, seq=-2)]
+    # A new note of this session passes (NEW_NOTES); another session's note is still refused.
+    note = [*old, _row("n-2", session="other", source="note:2", revision=9, seq=-2)]
     assert _why(before, _inputs(rows=edited), **stored) == ("row_transcript", "row_transcript:in_place")
     assert _why(before, _inputs(rows=rewritten), **stored) == ("row_transcript", "row_transcript:rewritten")
     assert _why(before, _inputs(rows=removed), **stored) == ("row_transcript", "row_transcript:removed")
     assert _why(before, _inputs(rows=appeared), **stored) == \
         ("row_transcript", "row_transcript:old_revision")
     # A new row of a kind no rule lets through is named, but its old rows stand: no how.
-    assert _why(before, _inputs(rows=note), **stored) == ("row_other", None)
+    assert _why(before, _inputs(rows=note), **stored) == ("row_other_session", None)
     assert _why(before, _inputs(rows=old), **stored) == ("", None)
 
 
