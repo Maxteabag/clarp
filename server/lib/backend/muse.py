@@ -135,17 +135,34 @@ class _MuseHandle(TurnHandle):
             return proc
 
 
-def _kernel_lock_holder(lock, pid):
-    """The file's informational pid is insufficient: require the actual flock."""
+def _kernel_lock_holder(lock, pid, *, locks_path='/proc/locks', proc='/proc'):
+    """The file's informational pid is insufficient: require the actual flock.
+
+    /proc/locks names a lock's file by device and inode, but its device is not
+    always the one stat() reports: on btrfs stat() gives the subvolume's
+    anonymous device and /proc/locks the superblock's (R135), so a device match
+    never found the holder there. The lock is matched by inode and holder pid,
+    and proven to be this file by the holder itself: one of its open files
+    stats to this file's (device, inode), the same stat() view on both sides.
+    Anything less is not proof: fail closed."""
     info = lock.stat()
-    device = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
-    for line in pathlib.Path('/proc/locks').read_text().splitlines():
+    held = False
+    for line in pathlib.Path(locks_path).read_text().splitlines():
         fields = line.split()
         if len(fields) < 6 or fields[1:4] != ['FLOCK', 'ADVISORY', 'WRITE']:
             continue
-        major, minor, inode = fields[5].split(':')
-        if (int(major, 16), int(minor, 16), int(inode)) == device:
-            return int(fields[4]) == pid
+        if int(fields[5].rsplit(':', 1)[1]) == info.st_ino and int(fields[4]) == pid:
+            held = True
+            break
+    if not held:
+        return False
+    for fd in pathlib.Path(proc, str(pid), 'fd').iterdir():
+        try:
+            opened = fd.stat()
+        except OSError:
+            continue
+        if (opened.st_dev, opened.st_ino) == (info.st_dev, info.st_ino):
+            return True
     return False
 
 
