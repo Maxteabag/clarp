@@ -15,8 +15,7 @@ if "--version" in sys.argv:
     raise SystemExit(0)
 
 root = pathlib.Path(__file__).resolve().parent
-if "--replay-user-messages" not in sys.argv:
-    raise SystemExit("replay receipts were not requested")
+replay = "--replay-user-messages" in sys.argv
 flag = "--resume" if "--resume" in sys.argv else "--session-id"
 session = sys.argv[sys.argv.index(flag) + 1]
 
@@ -29,7 +28,8 @@ def prompt():
     return record["uuid"], record["message"]["content"][0]["text"]
 
 def echo(uid):
-    say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
+    if replay:
+        say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
 
 def start(tool, name, parent=None):
     say("stream_event", parent_tool_use_id=parent, event={
@@ -56,6 +56,8 @@ def release(name):
 first, text = prompt()
 with (root / "launches").open("a") as rows:
     rows.write(text + "\n")
+if text == "case-race":
+    (root / "steering-argv.json").write_text(json.dumps(sys.argv[1:]))
 say("system", subtype="init")
 echo(first)
 if text.startswith("add-"):
@@ -273,6 +275,11 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             mark(&format!("release-{mode}"));
         }
         if mode == "race" {
+            let argv: Vec<String> = serde_json::from_slice(
+                &std::fs::read(place.root.join("steering-argv.json")).unwrap(),
+            ).unwrap();
+            assert!(argv.iter().any(|arg| arg == "--replay-user-messages"));
+            assert!(argv.windows(2).any(|pair| pair == ["--input-format", "stream-json"]));
             await_file("result-race");
             collect_answer(&host, &session, "first-race");
             assert_eq!(ids(&host, &session), ["u-first"]);
