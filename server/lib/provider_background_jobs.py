@@ -526,12 +526,18 @@ class ProviderJobObserver:
             owner = dict(row)
             native = row['backend_session_id']
             try:
+                # Whether the session is live is asked now, not when the round began: a
+                # session that went live since is not ended, or a task it just launched
+                # would be closed as 'unknown'.
+                owner['live'] = live = int(db.conn().execute(
+                    'SELECT 1 FROM runtimes WHERE agent_id=? AND backend_session_id=?'
+                    ' AND ended_at IS NULL LIMIT 1', (row['agent_id'], native)).fetchone() is not None)
                 path = backends.by_id('claude').find_transcript(native)
                 if path:
-                    pending = observe(owner, native, pathlib.Path(path), ended=not row['live'])
+                    pending = observe(owner, native, pathlib.Path(path), ended=not live)
                     self._sweep_backlog |= bool(pending)
                 else:
-                    self._sweep_backlog |= reconcile_if_needed(owner, native, ended=not row['live'])
+                    self._sweep_backlog |= reconcile_if_needed(owner, native, ended=not live)
             except Exception as exc:
                 log_exception('providerBackgroundObservationFail', exc)
 
