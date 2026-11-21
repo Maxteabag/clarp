@@ -357,7 +357,11 @@ class AgentRoutes:
      "owner": owner["persona"], "session": owner["session"],
  })
         if str(agent.get("persona") or "") != name:
-            agents_db.update_agent(agent["agent_id"], persona=name)
+            # V2b: the voices it speaks with through its current name are written into its
+            # map first, so the rename never silences it.
+            from lib import config as app_config, voice_pool
+            agents_db.update_agent(agent["agent_id"], persona=name,
+                                   voice_id=voice_pool.pinned_before_rename(app_config.load(), agent))
             from lib import voice_profile
             events.broadcast(self.ctx.stream, events.agent_roster(
                 "agent-renamed", session=session, name=name,

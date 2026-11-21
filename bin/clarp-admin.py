@@ -598,7 +598,9 @@ def seed_fresh_roster(backend: str) -> None:
         "import pathlib,sys; "
         "sys.path.insert(0, sys.argv[1]); "
         "from lib.roster_seed import seed_defaults; "
-        "seed_defaults(sys.argv[2], cwd=pathlib.Path(sys.argv[3]))"
+        "from lib import config, voice_pool; "
+        "seed_defaults(sys.argv[2], cwd=pathlib.Path(sys.argv[3]), "
+        "voice_for=lambda name, voice: voice_pool.assign(config.load(), name, voice))"
     )
     run(sys.executable, "-c", script, str(server_root), initial_backend, str(HOME))
 
