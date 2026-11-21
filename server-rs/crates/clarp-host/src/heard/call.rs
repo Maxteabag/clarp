@@ -109,7 +109,7 @@ pub(super) async fn hear(
         &policy.local,
     );
     let mut report = rules::Attempts::new(&resolved);
-    let last = steps.iter().rposition(|step| step.skip.is_none());
+    let mut contacted = engine_order::Contacts::default();
     let (audit, run_id) = if let Some(selected) = steps.iter().find(|step| step.skip.is_none()) {
         crate::vocabulary::compile(app, session, &selected.engine, hands_free, Some(trace))
             .await
@@ -119,7 +119,7 @@ pub(super) async fn hear(
     };
     let listen_for = audit["payload"].as_str().unwrap_or("");
     for (i, step) in steps.iter().enumerate() {
-        if let Some(reason) = step.skip {
+        if let Some(reason) = step.skip_reason(&contacted) {
             report.skipped(&step.engine, reason);
             continue;
         }
@@ -135,9 +135,17 @@ pub(super) async fn hear(
             .as_ref()
             .and_then(|v| v.as_deref())
             .unwrap_or(language);
+        let later = &steps[i + 1..];
         let result = app
             .ears
-            .heard_by(model, lang, listen_for, clip, &mut handed, Some(i) != last)
+            .heard_by(
+                model,
+                lang,
+                listen_for,
+                clip,
+                &mut handed,
+                rules::has_runnable_step(later, &contacted),
+            )
             .await;
         app.capture.transcription(
             app.clock.now_ms(),
@@ -159,7 +167,8 @@ pub(super) async fn hear(
             Err((status, mut body)) => {
                 let reason = body["error"].as_str().unwrap_or("");
                 report.failed(&step.engine, handed.as_deref(), elapsed, reason);
-                if Some(i) == last {
+                contacted.failed(&step.engine, handed.is_some());
+                if !rules::has_runnable_step(later, &contacted) {
                     if status == StatusCode::INTERNAL_SERVER_ERROR {
                         body["stt"] = report.finish();
                     }
