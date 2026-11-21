@@ -2,26 +2,6 @@ name: Cross-platform installer
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "install.sh"
-      - "setup.sh"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "toolchain/**"
-      - "server/lib/service_manager.py"
-      - "server/lib/xdg.py"
-      - "server/lib/whispercpp.py"
-      - "server/lib/transcription_*.py"
-      - "server/lib/bonjour.py"
-      - "server/lib/device_pairing.py"
-      - "server/lib/tts_providers.py"
-      - "bin/clarp-tui.py"
-      - "scripts/install_agent_toolchain.py"
-      - "tests/integration/test_versioned_installer.py"
-      - "tests/unit/test_agent_toolchain_installer.py"
-      - "tests/unit/test_service_manager.py"
-      - ".github/workflows/installer.yml"
 
 permissions:
   contents: read
