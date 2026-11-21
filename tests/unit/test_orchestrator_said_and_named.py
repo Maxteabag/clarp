@@ -648,3 +648,70 @@ def test_the_least_receipts_two_fallbacks_close_the_run(effects, monkeypatch, ki
     second = send()
     assert second.action == kind and second.status == 200            # the run is closed: not pending
     assert _said(first)[1] == kind
+
+
+# ---- R134: a replay answers the first answer's decision and trace -----------------------------
+
+REPLAYED_DECISIONS = sorted(kind for kind in OUTCOMES if kind != "a routed dispatch fails 5xx")
+
+
+@pytest.mark.parametrize("kind", REPLAYED_DECISIONS)
+def test_a_replay_with_another_trace_answers_the_first_decision_and_trace(effects, monkeypatch, kind):
+    """The same client_msg_id again, under a new trace (a retry after an answer lost on the way):
+    the replay answers what the first answered, decision_id and the decision object included (the
+    held spoken message takes its suggested recipient from decision.target_session), and the
+    first trace, as /send's dedup does; the model is not asked again. (A 5xx dispatch's retry
+    sends the decision again instead: RTO-07, not a replay.)"""
+    from lib import prompt_admissions
+    model, setup, dispatch = OUTCOMES[kind]
+    service = _service(model, effects)
+    if setup:
+        setup(monkeypatch)
+    calls = []
+    asked = service.model_call
+    service.model_call = lambda *a: calls.append(1) or asked(*a)
+    admission = prompt_admissions.create(
+        authenticated_at_admission=True, origin="user", sender_agent_id="", channel="voice",
+        observed_at=db.now_ms(), client_admission_id="request-retried", trace_id="route-first",
+        original_text="the request")
+
+    def send(trace):
+        return service.handle_send(
+            text="the request", requested_session="mike", trace_id=trace, prompt_admission=admission,
+            hands_free=True, synthesize_audio=False, fallback_request=True,
+            dispatch=dispatch or (lambda **kw: SimpleNamespace(session=kw["forced_session"], backend="claude")))
+    first = send("route-first")
+    asked_first = len(calls)
+    replay = send("route-retry")
+    assert len(calls) == asked_first
+    if first.decision_id is None:
+        assert replay.decision_id is None and replay.decision is None
+        return
+    assert (replay.decision_id, replay.decision, replay.trace_id) == (first.decision_id, first.decision, "route-first")
+    assert _said(replay) == _said(first)
+
+
+def test_a_receipt_written_before_r134_replays_with_no_decision_and_its_own_trace(effects):
+    """A receipt kept before the decision was (no decision_target): as before, no decision and
+    the replay's trace; never an error."""
+    service = _service(_message("antoni"), effects)
+    send = _sender(service, app=True)
+    first = send()
+    assert first.decision is not None
+    rowid, receipt = _stored_receipt()
+    older = {k: v for k, v in receipt.items() if k not in ("decision_id", "decision_target", "decision_action")}
+    db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(older), rowid))
+    replay = send()
+    assert (replay.decision_id, replay.decision) == (None, None) and _said(replay) == _said(first)
+
+
+def test_a_clarifys_suggestion_survives_its_replay(effects):
+    """Arnie's case on the installed Host: a clarify that suggests a recipient, replayed with the
+    same client_msg_id, still carries that suggestion and its decision_id, not nulls."""
+    service = _service(_message("antoni", 0.4), effects)      # a clarify that suggests antoni
+    send = _sender(service, app=True)
+    first = send()
+    replay = send()
+    assert first.action == replay.action == "clarify"
+    assert replay.decision["target_session"] == first.decision["target_session"] == "antoni"
+    assert replay.decision_id == first.decision_id is not None

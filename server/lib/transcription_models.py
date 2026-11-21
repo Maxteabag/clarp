@@ -82,7 +82,8 @@ def _note_stored_path(model_id: str, stored: object) -> None:
             and any(path == folder for folder in _own_folders(model_id))):
         return
     from .log import log
-    log("transcriptionModelFolderRefused", f"model={model_id} reason=stored_path")
+    # Not a refusal (the removal goes on): its own name, so Refused counts refusals only.
+    log("transcriptionModelStoredPathMismatch", f"model={model_id}")
 
 
 def _shared_hf_folder(model_id: str, records) -> bool:
@@ -670,8 +671,11 @@ def remove(model_id: str, *, allow_active: bool = False) -> None:
             "default or disable server transcription first")
     with _registry_lock:
         with _registry_file_lock(exclusive=True):
-            record = next((item for item in _read_registry()
-                           if item.get("id") == model_id and _valid_record(item)), None)
+            # Its line whether or not its files are whole (R138): a half download, a folder
+            # deleted by hand or a runtime that moved fails _valid_record, and returning here
+            # left that line and those files for ever, out of sight. What is deleted never
+            # depends on the record's files: only the folders the id gives (R112).
+            record = next((item for item in _read_registry() if item.get("id") == model_id), None)
             if record is None:
                 return
             if "_managed_root" not in record:

@@ -530,13 +530,16 @@ fn merged(receipt: &Value, more: &Value) -> Value {
 /// status and tool, and its session where that fits) beside its action, recipient and status of
 /// failure; without the session where that does not fit; else its action alone.
 fn least_receipt(receipt: &Value, action: &str) -> Value {
-    const KEPT: [&str; 6] = [
+    const KEPT: [&str; 9] = [
         "status",
         "target_agent_id",
         "http_status",
         "answer_status",
         "answer_dispatch",
         "answer_session",
+        "decision_id",
+        "decision_target",
+        "decision_action",
     ];
     let kept = KEPT.iter().filter_map(|key| {
         let value = receipt.get(*key)?;
@@ -879,8 +882,38 @@ impl Book {
         }
     }
 
+    /// Reconstruct the first client-facing decision. The row's target can differ from
+    /// the target in the reply. A retryable legacy receipt may have only the decision id.
+    fn replayed_decision(&self, receipt: &Map<String, Value>) -> Option<(&Kept, Value)> {
+        let id = receipt.get("decision_id")?.as_i64()?;
+        let target = receipt.get("decision_target")?;
+        let kept = self.decisions.iter().find(|kept| kept.decision_id == id)?;
+        let word = |value: &Value| {
+            if !python::truthy(value) {
+                String::new()
+            } else {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| python::repr(value))
+            }
+        };
+        let action = receipt.get("decision_action").unwrap_or(&Value::Null);
+        let decision = Decision {
+            kind: kept.decision_kind.clone(),
+            target_session: word(target),
+            confidence: kept.confidence,
+            addressing: kept.addressing,
+            reason: kept.reason.clone(),
+            phrase_key: kept.phrase_key.clone(),
+            control_action: word(action),
+            ..Decision::default()
+        };
+        Some((kept, decision.told()))
+    }
+
     /// What a message is answered that was routed before: by what its run came to.
-    fn replayed(run_id: &str, message: &Message<'_>, around: &mut Around<'_>) -> Outcome {
+    fn replayed(&self, run_id: &str, message: &Message<'_>, around: &mut Around<'_>) -> Outcome {
         let out = |status: &str| ["queued", "running"].contains(&status);
         let is_out = |janitors: &Janitors| {
             janitors
@@ -899,10 +932,20 @@ impl Book {
         let receipt = receipt
             .and_then(Value::as_object)
             .filter(|receipt| !receipt.is_empty());
+        let decision = receipt
+            .filter(|_| !out(status))
+            .and_then(|receipt| self.replayed_decision(receipt));
         let answer = |ok: bool, session: &str, action: &str, status: u16, error: &str| Outcome {
             ok,
             session: session.to_string(),
-            trace_id: message.trace_id.to_string(),
+            trace_id: decision
+                .as_ref()
+                .map(|(kept, _)| kept.trace_id.as_str())
+                .filter(|trace| !trace.is_empty())
+                .unwrap_or(message.trace_id)
+                .to_string(),
+            decision_id: decision.as_ref().map(|(kept, _)| kept.decision_id),
+            decision: decision.as_ref().map(|(_, answer)| answer.clone()),
             action: action.to_string(),
             error: error.to_string(),
             status,
@@ -1115,7 +1158,7 @@ impl Book {
                 return self.again(&prior["demand_result"], message, around);
             }
             let run_id = prior["run_id"].as_str().unwrap_or_default();
-            return Begun::Answered(Self::replayed(run_id, message, around));
+            return Begun::Answered(self.replayed(run_id, message, around));
         }
         let owner = around
             .janitors
@@ -1163,7 +1206,7 @@ impl Book {
         };
         let run_id = run["run_id"].as_str().unwrap_or_default().to_string();
         if !around.janitors.claim_run(&run_id, around.world, now) {
-            return Begun::Answered(Self::replayed(&run_id, message, around));
+            return Begun::Answered(self.replayed(&run_id, message, around));
         }
         // From here on the router is as it was when the run began, whatever is set since.
         let frozen = &run["configuration"];
@@ -1796,6 +1839,16 @@ impl Book {
                 receipt = merged(&receipt, &session);
             }
         }
+        if let (Some(id), Some(decision)) = (outcome.decision_id, &outcome.decision) {
+            let replied = json!({
+                "decision_id": id,
+                "decision_target": decision["target_session"],
+                "decision_action": decision["control_action"],
+            });
+            if demand::fits(&merged(&receipt, &replied)) {
+                receipt = merged(&receipt, &replied);
+            }
+        }
         let answered = routing.decided.as_ref();
         let failed = failed || answered.is_some_and(|(decision, _)| decision.kind == ERROR);
         let (ended, why) = if failed {
@@ -1839,15 +1892,17 @@ mod tests {
             "answer_dispatch": "claude", "answer_session": "antoni",
         });
         assert_eq!(least.to_string(), kept.to_string());
-        // A status of failure is kept beside it; what a retry needs is not.
+        // A status of failure and the decision id are kept beside it, but the retry flag is not.
         let failed = json!({
             "status": "error", "target_agent_id": "id-antoni", "http_status": 413,
             "reason": RETRYABLE, "decision_id": 7, "answer_status": 413,
+            "decision_target": "antoni", "decision_action": "switch",
         });
         let least = least_receipt(&failed, "error");
         let kept = json!({
             "status": "error", "target_agent_id": "id-antoni", "http_status": 413,
-            "answer_status": 413,
+            "answer_status": 413, "decision_id": 7,
+            "decision_target": "antoni", "decision_action": "switch",
         });
         assert_eq!(least.to_string(), kept.to_string());
         // A session the history does not take is left out; the rest stays.

@@ -55,8 +55,8 @@ device credential from `POST /pairing/exchange`. A paired device may have
 what an app needs to chat, speak and answer decisions (`/server-info`,
 `/events`, `/live`, `/status`, `/agents/snapshot`, `/log`, the turn queue,
 attention, artifacts and their catalogs, task plans and the goal ledger, clips,
-media, audio, avatars, voices, the speech stream, controller actions and their
-narration). Every other `GET`, a path no route serves included, and every
+media, audio, avatars, voices, the speech stream, the transcription models,
+providers and retained audio, controller actions and their narration). Every other `GET`, a path no route serves included, and every
 `PATCH`, `PUT` and `DELETE` are refused with `403 full device access required`;
 so is an artifact's export. `/server-info` answers a limited device a fixed set
 of keys, without `default_cwd`. Administrative routes and
@@ -326,6 +326,8 @@ GET /log?…&include_automated=0&include_tool_details=0
 | `before=<message_id>` | **Older history**: the `limit` messages older than that message. |
 | `include_automated=0` | Hide heartbeat, leader, dreaming, and watcher traffic. |
 | `include_tool_details=0` | Collapse tool cards to one summary card per message; fetch `/message-tool-details?session=&message_id=` on demand. |
+| `coordination=auto\|hide\|show` | Feature `hidden_coordination`: leave coordination between agents out (`hide`), keep it (`show`), or follow the chat's setting (`auto`). Absent: every row, as before. |
+| `coordination_read=show\|hide` | With `coordination` on a delta: the `visibility` the client's cache was read under. When it differs from the answer's, the answer says `replace_required: true`. |
 
 Response:
 
@@ -466,8 +468,33 @@ user steps into (a message of theirs steered into it while it runs) is `user`
 from then on: its rows get new revisions, so a delta carries them again, and it
 never goes back to `agents`. An agent's message steered into a turn the user
 started is a row of its own trace and is the only row marked. A turn that holds the user's own word is never `agents`, whatever arrives in it. `POST /send` refuses (409) a `trace_id` that already belongs to another message (an admission, a queued send, a turn or a row) unless the request is a retry of that very message: the same `client_msg_id`, sender and origin. Rows from before
-contract 108 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting. Until feature `hidden_coordination` is advertised
-nothing is filtered: `audience` only describes.
+contract 108 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting, and a turn marked while it could leave no note stays shown after it moves to a backend that can. Until feature `hidden_coordination` is advertised
+
+**Hidden coordination (feature `hidden_coordination`).** Under `coordination=hide`, or `auto`
+on a chat whose effective setting is `hide`, the rows of a turn that is `agents` are left out
+before the page limit: a page of N is N rows the user sees, and older pages page past them.
+A note is never left out, and neither are the turns of an agent that cannot leave a note.
+Every answer to a request with `coordination` (the newest page, each older page, each delta)
+echoes the policy it was read under: `coordination: {hidden, source, visibility}`, with
+`source` one of `global`, `chat`, `request`. A visible row that follows rows left out carries
+`hidden_before: {messages, exchanges, agents: [{agent_id, name}], capped}`. The count runs from
+the previous visible row of the chat, not of the page, so a run is counted once, on the same
+row, however the pages fall. A tail page or a delta carries `hidden_after` (same shape) for the
+rows left out after the newest visible row. A count reads at most 100 messages (or 400 rows of
+any kind) of its run, nearest its row (`hidden_after`: nearest the newest visible row), and
+says `capped: true` when another message of the run lies beyond them: draw it as "100+
+messages between agents". A run of exactly 100 messages is not capped. `messages`, `exchanges`
+and `agents` are then what those first rows hold, not the whole run; a page never waits on
+counting a long run. `capped` is `false` on a count that holds the whole run. Hidden rows still move the revision: a delta that holds only
+hidden rows answers no rows and the new `latest_revision`. To show a hidden run, read the chat
+again with `coordination=show` for that visit; its rows come with `audience: agents`.
+
+Client rules: keep a cached transcript with the echo it was read under, and send its
+`visibility` as `coordination_read` on deltas; `replace_required` then reloads it when the
+setting changed, here or on another device (a change writes nothing to the conversation).
+Start the same reload for an open chat when the agent's `coordination_visibility` in the
+snapshot or an `agent-roster` event differs from what it was read under. A page read with
+`coordination=show` for one visit is never written to the cache.
 
 A **note** is an agent's words to the user from its own turn:
 `role: assistant`, `kind: "note"`, `origin: "note"`, no `sender_*`,
@@ -574,7 +601,7 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text`, `origin`, `sender` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. An event that names an item (edited, deleted, a retired goal wake) also carries its `origin` and `sender` as `GET /turn-queue` does (R182). |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
@@ -682,6 +709,13 @@ Response `200`:
 `dispatch` names the backend that took the turn (`claude`, `codex`, …);
 `queued` is true when the turn waits behind a running one.
 
+A routed send (`hands_free: true`, or `POST /orchestrator/route-delegation`, which
+answers the same way) replayed with the same `client_msg_id` answers what the first
+answered: the same `orchestrator.action`, `session`, `dispatch`, `decision_id` and
+`decision`, and the FIRST request's `trace_id`; the model is not asked again. A send
+first answered before this answers `decision_id` and `decision` null and its own
+`trace_id`, as before. Same fields, so no contract change.
+
 `200` means accepted, not delivered. Delivery is proven when a `/log` response
 contains a turn with id `u-<client_msg_id>`. A client that wants a delivery
 indicator should treat a send as failed if that id has not appeared within
@@ -711,6 +745,27 @@ deletes an item of either kind until its turn starts; after that both answer
 404. Each sends `queue-updated` with the item's `client_msg_id`, `origin`, `sender` and
 `queue_change`: `edited` (with the new `text`) or `deleted`. A goal wake the Host retires
 sends `queue-updated` with its `client_msg_id`, `origin` and `sender` too.
+
+**The user's word goes first** (feature `queue_user_first`). An agent takes one
+queued item each time a turn ends. An item that carries the user's own word is
+taken before the others: a send whose origin the Host resolved as `user` or
+`oracle` (a send made from an agent's own turn never is, whatever origin it
+names); the Host's delivery of a card the user answered in the app, or that a
+session in `[agents] decision_on_behalf_sessions` answered on the user's
+behalf (not one that expired); and a message sent from the own turn (its
+verified `X-Clarp-Turn`) of a session the owner named in `[agents]
+front_desk_sessions`, the front desk that relays the user's words. Such a
+relay keeps origin `agent` and its sender: it reads, notifies and is marked
+as an agent's message; only its place in line changes. A request that only
+names a front desk, without that session's turn token, gets nothing. Among themselves such items keep the order they were sent; every
+other item keeps its order behind them. An item already taken once (its launch
+failed, or the release drain handed it over) is not overtaken. Nothing else
+changes: a Stop's pause still holds what it held, the release drain's fence
+still holds everything, and the user's items are first when the queue moves
+again. `GET /turn-queue` lists `items` in the order the Host takes them, so a
+user's item that arrives moves the others one place down; `revision` and the
+`queue-updated` event's `queue_revision` change with it. Other agents' messages
+still run: the user's items in front of them are only the few the user sent.
 
 ### 6. Voice
 
@@ -835,6 +890,19 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   `a-z0-9-_`) makes a retry answer the same note. Answers `{"ok", "session",
   "message_id", "trace_id", "created", "notified", "reason"}`. At most 8000
   characters (413); a note with no words answers 400.
+- `GET /coordination-settings` → `{"coordination_visibility": "show" | "hide"}`, and
+  `POST /coordination-settings` `{"coordination_visibility"}` (a full device): the Host's
+  choice whether coordination between agents is shown, default `show`. A string that may
+  gain values. `POST /agent-coordination` `{"session", "visibility": "show" | "hide" |
+  "default"}`: one chat's own choice (`default` follows the Host); it answers
+  `{"ok", "session", "coordination_visibility", "coordination_override"}`. Each change is
+  written, then an `agent-roster` event (`kind: coordination-changed`) carries the new
+  effective value; the next snapshot's agent rows carry it too
+  (`coordination_visibility`, the effective value, and `coordination_override`, the chat's
+  own choice or null). A change writes nothing to any conversation. A request that carries
+  a turn token (`X-Clarp-Turn`) or comes from a paired peer Host (`X-Clarp-Peer`) is refused
+  on both POSTs with `403 {"error": "agents_may_not"}`: an agent may not hide coordination
+  from the user.
 - `GET /agent-helper-state?session=` — `{"agent_id", "session", "role",
   "parent_agent_id", "helper_state", "helper_completed_at", "archived_at"}`
   for one agent, so a watcher can poll without the snapshot.
@@ -976,6 +1044,9 @@ client shows it and derives nothing from `voice_id`.
   `[gemini_tts.voices]`; null for an id in no map), Google's and Deepgram's voice names.
 - An archived agent has no `voice_profile`: not on its snapshot row, and not in the creation
   answer or a roster event about it.
+- The rule both Hosts hold (vectors in `tests/unit/test_voice_v2a.py`): no voice of its own =
+  the provider's default voice where the provider has exactly one, silence (`no_voice`) where
+  it has none; a migrated agent must not fall silent where it spoke before.
 - `speech.shared_with`: how many other active agents speak with the same provider and
   voice (0: its own). Say it when it is not 0.
 - `speech.streaming`: whether audio begins before the whole clip is made.
@@ -1007,13 +1078,18 @@ client shows it and derives nothing from `voice_id`.
   recording ("this model cannot hear this agent's languages").
 - **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
   documented values are `own` and `default` (a later Host adds `parent`), and for
-  `silent_reason`: `no_voice` (no voice for the provider), `provider_off` (the Host speaks
-  with no provider) and `not_configured` (the provider has no credential or is refused).
+  `silent_reason`: `no_voice` (no voice for the provider), `voice_unavailable` (the agent has a
+  voice of its own the provider refuses, such as a Google voice off its list, or a Cartesia or
+  ElevenLabs voice the provider has deleted (it answered 404 when the Host looked it up; the
+  Host logs `voiceGone` once); with feature
+  `voice_provider_maps`), `provider_off` (the Host speaks with no provider), `not_configured` (the provider
+  has no credential or is refused) and, with feature `voice_pool`, `voiceless_role` (a role
+  that is never heard: a Janitor).
   A client shows plain wording for a value it does not know; it never fails on one.
 
 The snapshot head carries `voice_defaults` (the same `speech` and `hearing` shapes for an
 agent not yet created: `speech.voice_id` is null and `speech.assignment` says how its voice
-will be chosen, `contact` today) and `voice_profile_version`, which changes whenever a
+will be chosen: `pool` with feature `voice_pool`) and `voice_profile_version`, which changes whenever a
 Host-wide input of any agent's profile changes.
 
 Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in the
@@ -1022,13 +1098,43 @@ Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in
 every agent (`POST /tts/providers`, `POST /transcription-providers`, a configuration
 edit) sends `agent-roster` with `kind` `voice-profile`: re-read the snapshot.
 
+### A stored voice and its edits (feature `voice_provider_maps`; Host contract: next free at merge)
+
+A stored `voice_id` (agent or contact) is a provider map, compact sorted JSON such as
+`{"cartesia":"<uuid>","gemini":"Kore"}`; `{}` means no voice of its own. A bare value stored
+before this release is still read as an ElevenLabs id; `clarp-admin voice migrate` brings
+stored values to the map shape and writes only rows that sound the same under every provider.
+
+- `POST /agent-voice` `{session, voice_id}` without `provider`: the id goes under the provider
+  its form names (a uuid: Cartesia; a Chirp 3 HD name: Google; 20 letters and digits:
+  ElevenLabs; otherwise ElevenLabs), merged into the agent's map. With `provider`, as before.
+- `POST /personas/update` merges `voice_id` into the stored map per provider. Optional
+  `base_voice_id`: the map the app last read. A provider whose incoming value equals the base
+  keeps the stored value (another app may have changed it since); one in the base but not in
+  the incoming map is removed. Without `base_voice_id` nothing is removed by its absence; an
+  empty value for a provider removes it. Only the incoming value is read by its form: an edit
+  never moves a stored value to another provider.
+
+### A working voice for every new agent and contact (feature `voice_pool`)
+
+A new agent (`POST /agents`, an adopted session, an anonymous launch, an assigned or minted
+contact, the first-install roster) and a new contact (`POST /personas`) end with a voice that
+is heard under the Host's configured provider and under its configured fallback. The Host keeps
+every voice the request gave and adds, for each of those providers it has none for, a free
+voice from its pool (`[cartesia] pool`, by default the distinct built-in Cartesia voices; the
+ElevenLabs and Gemini catalogues). A free voice is one no active agent or contact speaks with;
+when there is none, the least shared. With this feature an app may create an agent or contact
+with no voice at all and trust the Host; a phone's `auto-<uuid>` stand-in voice is replaced.
+Existing agents are not changed. A helper or fork, and a Janitor, get no voice from the pool.
+Renaming an agent keeps the voice it spoke with.
+
 ### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
 
 When a reply's speech ends without audio, the Host sends `tts-error` with `reason`, `provider`
 and `trace_id`, also when no provider had a voice for the agent (before this feature that case
 sent nothing). It is sent once per turn and reason, however many clips of that reply fail.
 
-- `reason` is an open set: `no_voice`, `not_configured`, `provider_off` (the same words and causes
+- `reason` is an open set: `no_voice`, `voice_unavailable`, `not_configured`, `provider_off` (the same words and causes
   as `voice_profile.speech.silent_reason`), `provider_failed` (the provider did not make the clip)
   and `host_failed`. A client shows plain words for a value it does not know.
 - `message` is a sentence built from the reason and the provider's name ("Not spoken: Cartesia
