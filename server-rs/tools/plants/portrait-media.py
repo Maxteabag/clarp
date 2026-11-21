@@ -43,7 +43,7 @@ PLANTS = [
      'Hint::of(image, "deleted", deleted.at)', 'Hint::of(image, "created", deleted.at)'),
     (G, 'hints', 'the writer does not remember which hints it sent',
      'if self.db.get(HINTS, &key)?.is_none() {', 'if true {'),
-    (G, 'hints', 'the order is kept first and discarded second',
+    (G, 'hints', 'the recorded selection is emitted in reverse',
      'hints.sort_unstable_by(|a, b| (a.at, &a.asset_id).cmp(&(b.at, &b.asset_id)));',
      'hints.reverse();'),
     (A, 'hints', 'an announcement failure is silent',
