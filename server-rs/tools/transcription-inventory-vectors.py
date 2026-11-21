@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record the Linux catalog and installed public records using disposable model files."""
+"""Record the Linux catalog, installed records and removals using disposable files."""
 import importlib.util
 import itertools
 import json
@@ -45,27 +45,38 @@ def record(tmp):
     from types import SimpleNamespace
     from unittest.mock import patch
     removals = []
-    for kind in ("managed", "external", "outside", "unknown", "incomplete", "active"):
+    for kind in ("managed", "external", "outside", "unknown", "incomplete",
+                 "incomplete-managed", "absent-managed", "active"):
         base = tmp / kind
         managed = base / "models"
         model_id = "faster-whisper:small"
-        target = managed / "faster-whisper--small" if kind == "managed" else base / "external"
+        managed_case = kind in ("managed", "incomplete-managed", "absent-managed")
+        target = managed / "faster-whisper--small" if managed_case else base / "external"
         target.mkdir(parents=True)
         for file in files:
             (target / file).touch()
         with patch.object(models, "MANAGED_MODELS", managed), patch.object(models, "REGISTRY", base / "registry.json"):
             if kind != "unknown":
-                models.register(model_id, str(target), managed_root=str(target) if kind in ("managed", "outside") else None)
-            if kind == "incomplete":
-                (target / files[1]).unlink()
+                stored = str(target) if managed_case or kind == "outside" else None
+                models.register(model_id, str(target), managed_root=stored)
+            if kind in ("incomplete", "incomplete-managed"):
+                (target / files[2]).unlink()
+            if kind == "absent-managed":
+                for file in files:
+                    (target / file).unlink()
+                target.rmdir()
             cfg = SimpleNamespace(whisper_model="small", whisper_enabled=kind == "active")
-            with patch("lib.config.load", return_value=cfg):
+            with patch("lib.config.load", return_value=cfg), patch("lib.log.log") as logged:
                 try:
                     models.remove(model_id)
                     error = None
                 except ValueError as exc:
                     error = str(exc).replace(str(target), "<target>")
+            removal_logs = [list(call.args[:2]) for call in logged.call_args_list
+                            if call.args and call.args[0] in
+                            ("transcriptionModelStoredPathMismatch", "transcriptionModelFolderRefused")]
             removals.append({"kind": kind, "error": error, "files_survive": target.exists(),
+                             "logs": removal_logs,
                              "registered": any(row["id"] == model_id for row in models._read_registry())})
     return {"catalog": cases, "removal": removals}
 

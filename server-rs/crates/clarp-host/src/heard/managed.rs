@@ -61,7 +61,7 @@ impl ManagedFolder {
             .filter(|s| !s.is_empty())
             .is_some_and(|s| Some(Path::new(s)) == expected.as_deref())
         {
-            eprintln!("clarp-host: transcription model removal: model={id} reason=stored_path");
+            eprintln!("clarp-host: transcriptionModelStoredPathMismatch model={id}");
         }
     }
 

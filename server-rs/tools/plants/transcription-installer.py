@@ -104,7 +104,6 @@ changes(H,"restore",[
 ])
 changes(H,"restore",[
     ('gen_id != job.generation', 'gen_id == job.generation'),
-    ('inventory.remove(fleet, &self.root, id, true)', 'inventory.remove(fleet, &self.root, id, false)'),
 ])
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

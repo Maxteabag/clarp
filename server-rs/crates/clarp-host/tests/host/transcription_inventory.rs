@@ -306,7 +306,13 @@ for line in sys.stdin:
             "outside" | "external" | "active" | "incomplete" | "unknown" => external.clone(),
             _ => own.clone(),
         };
-        let mut row = json!({"id":ID,"provider":"faster-whisper","model":"small","_local_path":if kind=="external" || kind=="outside" { &external } else { &own }});
+        let local = if matches!(kind, "external" | "outside" | "incomplete") {
+            &external
+        } else {
+            &own
+        };
+        let mut row =
+            json!({"id":ID,"provider":"faster-whisper","model":"small","_local_path":local});
         if !matches!(kind, "unknown" | "external" | "incomplete" | "active") {
             row["_managed_root"] = json!(target);
         }
@@ -331,8 +337,11 @@ for line in sys.stdin:
             }
             _ => (),
         }
-        if kind == "incomplete" {
-            std::fs::remove_file(own.join("model.bin")).unwrap();
+        if matches!(kind, "incomplete" | "incomplete-managed") {
+            std::fs::remove_file(local.join("tokenizer.json")).unwrap();
+        }
+        if kind == "absent-managed" {
+            std::fs::remove_dir_all(&own).unwrap();
         }
         save(
             &place,
@@ -348,6 +357,16 @@ for line in sys.stdin:
             &[]
         };
         let host = place.start_in("admin", args, &[]);
+        if matches!(kind, "incomplete" | "incomplete-managed" | "absent-managed") {
+            assert!(
+                !host.get("/transcription-capabilities")["models"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|model| model["id"] == ID),
+                "{kind}"
+            );
+        }
         let (status, body) = host.ask("POST", ROUTE, Some(&json!({"model_id":format!(" {ID} ")})));
         if let Some(why) = case["error"].as_str() {
             let why = if why == "R112" {
@@ -380,18 +399,29 @@ for line in sys.stdin:
                 | "missing"
                 | "outside"
         );
+        let diagnostic = format!("clarp-host: transcriptionModelStoredPathMismatch model={ID}");
         assert_eq!(
-            logged
-                .lines()
-                .filter(|l| l.contains(&format!("model={ID} reason=stored_path")))
-                .count(),
+            logged.lines().filter(|line| *line == diagnostic).count(),
             usize::from(bad_stored),
             "{kind}"
         );
-        for line in logged
-            .lines()
-            .filter(|l| l.contains("model removal") || l.contains("model refused"))
-        {
+        if let Some(expected) = case["logs"].as_array() {
+            let actual: Vec<_> = logged
+                .lines()
+                .filter_map(|line| {
+                    let detail =
+                        line.strip_prefix("clarp-host: transcriptionModelStoredPathMismatch ")?;
+                    Some(json!(["transcriptionModelStoredPathMismatch", detail]))
+                })
+                .collect();
+            assert_eq!(&actual, expected, "{kind}");
+        }
+        if bad_stored {
+            assert!(!logged.contains("model refused"), "{kind}: {logged}");
+        }
+        for line in logged.lines().filter(|l| {
+            l.contains("transcriptionModelStoredPathMismatch") || l.contains("model refused")
+        }) {
             assert!(!line.contains(place.root.to_str().unwrap()), "{kind}");
         }
         if kind == "stage-link" {

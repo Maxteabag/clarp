@@ -37,10 +37,12 @@ changes("clarp-host/src/heard.rs", "host", [
     ('self.own_id().as_deref() != Some(model)', 'self.own_id().as_deref() == Some(model)'),
     ('post(inventory::remove_model)', 'get(inventory::remove_model)'),
 ])
+changes("clarp-kernel/src/heard/inventory.rs", "host", [
+    ('record["id"].as_str() == Some(id)', 'record["id"].as_str() != Some(id)'),
+])
+# R138 deliberately removed the removal-time installed_path gate. Listing still requires the files.
 changes("clarp-host/src/heard/inventory.rs", "host", [
-    ('records.iter().position(|r| r["id"] == id)', 'records.iter().position(|r| r["id"] != id)'),
     ('let Some(stored) = record.get("_managed_root")', 'let Some(stored) = record.get("_private_unused")'),
-    ('installed_path(record).is_none()', 'installed_path(record).is_some()'),
     ('r["id"] == model', 'r["id"] != model'), ('judged("transcription-models", "records".into())', 'judged("transcription-models", "unknown".into())'),
     ('records.remove(index);', 'let _ = index;'),
     ('text.trim().to_owned()', 'text.to_owned()'), ('"model_id": id', '"model_id": ""'),
@@ -55,7 +57,7 @@ changes("clarp-host/src/heard/managed.rs", "host", [
     ('if kind.is_symlink()', 'if !kind.is_symlink()'),
     ('its folder is a link or outside the managed models folder','invalid managed path'),
     ('Some(Path::new(s)) == expected.as_deref()', 'Some(Path::new(s)) != expected.as_deref()'),
-    ('reason=stored_path','reason=bad_folder'),
+    ('transcriptionModelStoredPathMismatch', 'transcriptionModelFolderRefused'),
     ('if self.directory','if !self.directory'),
     ('std::fs::remove_dir_all(self.path())', 'Ok(())'),
 ])
