@@ -2425,6 +2425,12 @@ closes it; failing again, archived, failing once more, discarded; a restart keep
 
 **Installed transcription models.** The Linux catalog lists the five faster-whisper models and the two macOS rows. The Host checks its own registered paths for the configuration, tokenizer and model files. A regular clip or a call can select an installed variant by name. The default stays warm. One additional worker loads on demand and stays resident until a different variant replaces it, the model is removed or the Host stops. Default and variant share an inference turn. A request with a fallback gives another variant ten seconds to finish selection and inference. The final choice waits for that turn.
 
+**Transcription failure words (PR 518, 21 Nov 2026).** Missing models, loading, contention, and failed attempts
+map to fixed words and statuses. Upload voice events and call attempt reasons use the same words. Health keeps
+fixed subsystem error labels with its timestamps, including for limited devices. The Host logs the engine detail.
+The speech stream gives a fixed failure message when its provider reports an error. The reference vectors and
+the upload, call, stream and health tests hold the failure paths.
+
 The Host marks a managed model before deleting its folder. While marked it is hidden. A restart finishes pending deletions and clears the mark on a newly configured default. A stored inventory that cannot be parsed is preserved byte for byte under `records.unreadable` before the Host logs a single diagnostic and opens with an empty inventory. Store read or backup failures stop startup.
 
 The additional process holds its model and inference buffers. A published CPU small-int8 benchmark used about 1.5 GB. Resident memory varies with model and workload. An idle timeout could reclaim that memory on machines under swap pressure at the cost of another cold load. This Host retains the worker as the reference does.
@@ -3399,9 +3405,8 @@ hook's report under way, one begun, a vfork parent, a served tool, how a request
 process group. Wrong rules: `tools/plants/shim-hold.py`.
 
 **An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
-profile use the kernel's engine order. With a language set, models of one hosted provider
-share an attempt, as do the aliases of the Host's default local engine. If the ordinary
-chain ends on a hosted engine that cannot take the set, the Host considers its selected
+profile use the kernel's engine order. If the ordinary chain ends on a hosted engine that
+cannot take the set, the Host considers its selected
 model if it is known, keyed and takes language sets. A provider already tried is excluded.
 The Host also considers its own model when no hosted replacement qualifies. Its catalogue
 languages determine coverage, with Norwegian aliases and the Whisper model default for an
@@ -3423,6 +3428,10 @@ existing names and storage. Media writes do not wait for a fleet or agent worker
 from within the media writer, and those workers never wait for it. A request that does not
 receive its writer answer within three seconds receives a refusal. Deletion and favorite
 retries preserve their first timestamps and publish no new event.
+
+The gallery's delete, batch delete and favorite routes refuse any non-blank turn or
+paired-Host claim with 403 `agents_may_not` (R178, the reference's PR 519).
+Gallery reads and publication keep their existing access rules.
 
 Gallery pages seek by creation or favorite time and asset id. Tombstone pages read nothing
 at or before their cursor, and include all rows that share the last millisecond of the
@@ -3500,6 +3509,19 @@ Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversat
 `a_message_an_older_build_put_into_the_conversation_while_it_waited_stays_there`), the actor's, the Host's test
 `a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts` and the wrong rules of
 `tools/plants/enter-at-start.py`.
+
+**One delivery of a recording to each provider (R175, 21 Nov 2026).** Agent and call settings
+keep each engine at its first position. The ordinary upload and voice profile use the same
+distinct engine order. The Host's own model and its aliases name one engine. Two distinct
+models of one hosted provider remain in the order until a failed attempt reaches its adapter.
+A refusal before the adapter receives the language leaves the next model available. The
+ordinary upload logs repeated engines and later models it drops after provider contact. The
+call report records a visited excluded model as `outcome: "skipped"` with
+`reason: "provider_already_sent"`. A model-selection wait is bounded while a runnable fallback
+remains. The R152 recovery's failed list contains the engines that reached their boundary.
+Call attempt outcomes and skip reasons are open sets. Clients can display an unfamiliar
+value as words and keep the rest of the response. The reference vectors cover both attempt
+loops with stand-in adapters, and the Host test verifies the provider requests and call report.
 
 ## 7. Stages and gates
 
