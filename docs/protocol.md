@@ -1071,8 +1071,9 @@ client shows it and derives nothing from `voice_id`.
 - **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
   documented values are `own` and `default` (a later Host adds `parent`), and for
   `silent_reason`: `no_voice` (no voice for the provider), `voice_unavailable` (the agent has a
-  voice of its own the provider refuses, such as a Google voice off its list; with feature
-  `voice_provider_maps`), `provider_off` (the Host speaks with no provider) and `not_configured` (the provider
+  voice of its own the provider refuses, such as a Google voice off its list, or a Cartesia or
+  ElevenLabs voice the provider has deleted (it answered 404 when the Host looked it up; the
+  Host logs `voiceGone` once); with feature `voice_provider_maps`), `provider_off` (the Host speaks with no provider) and `not_configured` (the provider
   has no credential or is refused).
   A client shows plain wording for a value it does not know; it never fails on one.
 
