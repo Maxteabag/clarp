@@ -697,3 +697,36 @@ def test_a_record_without_counts_says_so():
     carry.changed(recorded, _inputs(rows=[{**old[0], "text": "x2"}]), rules=frozenset(carry.RULES),
                   carry=stored, boundary_seq=5, why=why, **WHERE)
     assert why["how"] == "row_transcript:uncounted"
+
+
+# ---- a new note row (NEW_NOTES), and the log's how never deciding ----------------
+
+def test_a_new_note_row_passes_and_an_old_one_that_changed_does_not():
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    old = [_row("m-1", revision=1), _row("note-a", source="note:a", seq=-1, revision=2)]
+    before = _inputs(rows=old)
+    new_note = _row("note-b", source="note:b", seq=-2, revision=9)
+    other = _row("x-1", source="carried:x", seq=-3, revision=9)
+    assert _changed(before, _inputs(rows=[*old, new_note]), **stored) == ""
+    assert _changed(before, _inputs(rows=[*old, new_note]),
+                    rules=set(carry.RULES) - {carry.NEW_NOTES}, **stored) == "row_other"
+    assert _changed(before, _inputs(rows=[*old, other]), **stored) == "row_other"
+    assert _changed(before, _inputs(rows=[old[0], {**old[1], "text": "edited"}]), **stored) == "row_other"
+    assert _changed(before, _inputs(rows=old[:1]), **stored) == "row_other"
+
+
+def test_the_how_word_failing_changes_no_decision(monkeypatch):
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    old = [_row("m-1", revision=1)]
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("synthetic")
+    monkeypatch.setattr(carry, "_how", broken)
+    logged = []
+    monkeypatch.setattr("lib.log.log_exception", lambda event, exc, **_k: logged.append(event))
+    why = {}
+    recorded = carry.record(_inputs(rows=old), carry=stored, **WHERE)
+    assert carry.changed(recorded, _inputs(rows=[{**old[0], "text": "x2"}]),
+                         rules=frozenset(carry.RULES), carry=stored, boundary_seq=5, why=why,
+                         **WHERE) == "row_transcript"
+    assert why == {} and logged == ["carryHowFail"]
