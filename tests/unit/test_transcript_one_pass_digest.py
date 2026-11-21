@@ -181,5 +181,21 @@ def test_the_journals_line_is_a_word_a_count_a_backend_and_a_size(monkeypatch):
     monkeypatch.setattr(host_log, "log", lambda event, detail="": seen.append((event, detail)))
     inc._second_read_log("saved", "claude", 300 * 1024 * 1024)
     inc._second_read_log("grew", "a backend nobody knows", None)
+    inc._second_read_log("grew", "claude", 300 * 1024 * 1024, read_bytes=600 * 1024 * 1024, cpu_ms=6512.7)
     assert seen == [("transcriptFullDigest", "code=saved count=1 backend=claude size=lt1024m"),
-                    ("transcriptFullDigest", "code=grew count=1 backend=other size=unknown")]
+                    ("transcriptFullDigest", "code=grew count=1 backend=other size=unknown"),
+                    ("transcriptFullDigest", "code=grew count=1 backend=claude size=lt1024m"
+                                             " bytes=629145600 cpu_ms=6512")]
+
+
+def test_a_frontier_not_recorded_says_why(monkeypatch):
+    """The reason the next import must read the whole transcript again is in the
+    journal: a fixed word, never a path or an id."""
+    from lib import log as host_log
+    seen = []
+    monkeypatch.setattr(host_log, "log", lambda event, detail="": seen.append((event, detail)))
+    key = ("db", "agent", "session", "/synthetic/path.jsonl")
+    inc._cache_committed_tail(key, "v", None, None, None, unwritten="nothing_written")
+    inc._cache_committed_tail(key, "v", None, None, None)
+    assert seen == [("transcriptTailRetention", "code=checkpoint_not_written count=1 reason=nothing_written"),
+                    ("transcriptTailRetention", "code=checkpoint_not_written count=1 reason=not_published")]
