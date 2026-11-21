@@ -160,7 +160,9 @@ def language_for(session: str | None) -> str:
 
 
 def split_engines(value: str | None) -> list[str]:
-    return [e.strip() for e in (value or "").split(",") if e.strip()]
+    """The engines of a stored value in order, each once: a list saved with a repeat before
+    saving dropped them is read without it (R175)."""
+    return list(dict.fromkeys(e.strip() for e in (value or "").split(",") if e.strip()))
 
 
 def engines_for(session: str | None) -> list[str]:

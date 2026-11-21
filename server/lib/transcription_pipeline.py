@@ -289,21 +289,26 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                 # The agent's fallback engines are tried in order when its
                 # first engine fails, so one provider outage does not lose
                 # the user's recording.
+                from .stt_language import capturing_handed
                 failed: list[str] = []      # engines this recording went to and that failed
-                # Each provider is tried at most once per recording (R175).
-                engines = _once_per_provider([requested_model, *agent_fallbacks], stt, focus)
-                last = len(engines) - 1
-                for index, engine in enumerate(engines):
+                # Never the same recording to one provider twice (R175): each engine once,
+                # and a provider that received it is not asked again with another model.
+                pending = _distinct_engines([requested_model, *agent_fallbacks], stt, focus)
+                sent: set[str] = set()      # hosted providers the recording reached
+                while pending:
+                    engine = pending.pop(0)
                     # Only an engine with a fallback after it gives up on a
                     # variant another request is warming (VP-08).
-                    selection_wait = 10.0 if index < last else None
+                    selection_wait = 10.0 if pending else None
+                    handed: dict = {}
                     try:
-                        with bounded_selection_wait(selection_wait):
+                        with bounded_selection_wait(selection_wait), capturing_handed() as handed:
                             text, ends_terminal, _dur = model_transcribe(
                                 engine, audio_bytes, ctype, prompt, wait=10.0)
                         break
                     except Exception as e:  # noqa: BLE001 - busy, loading or missing too (VP-09)
-                        if index == last:
+                        pending = _not_sent_twice(engine, handed, pending, sent, focus)
+                        if not pending:
                             if not isinstance(e, LanguageSetUnsupported):
                                 raise
                             # R152: the engine (often one the device chose) cannot take the
@@ -317,7 +322,7 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                             requested_model = ran
                             break
                         log_exception("sttAgentEngineFallback", e, detail=engine)
-                        if not isinstance(e, LanguageSetUnsupported):
+                        if _reached(engine, handed):
                             failed.append(engine)
         elif requested_model and requested_model != "server-default":
             raise STTUnknownModelError(
@@ -367,12 +372,45 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
     return text, ends_terminal, _dur, requested_model, engine_fallback
 
 
-def _once_per_provider(engines: list[str], stt, focus: str) -> list[str]:
-    """The engines in order, each provider once (stt_router.once_per_provider, R175)."""
+def _distinct_engines(engines: list[str], stt, focus: str) -> list[str]:
+    """The engines in order, each once (stt_router.distinct_engines, R175)."""
     from . import stt_router
-    kept, skipped = stt_router.once_per_provider(engines, getattr(stt, "default_model_id", None))
+    kept, skipped = stt_router.distinct_engines(engines, getattr(stt, "default_model_id", None))
     for engine in skipped:
-        log("sttEngineRepeatSkipped", f"session={focus or '-'} {engine} (its provider was already tried)")
+        log("sttEngineRepeatSkipped", f"session={focus or '-'} {engine} (listed before)")
+    return kept
+
+
+def _hosted_provider(engine: str) -> str:
+    """The hosted provider `engine` sends audio to, or "" for the Host's own and local ones."""
+    from . import stt_providers
+    provider = stt_providers.provider_of((engine or "").strip())
+    return provider if provider in stt_providers.VALID_IDS else ""
+
+
+def _reached(engine: str, handed: dict) -> bool:
+    """Whether an attempt that failed had the recording: a local engine always; a hosted one
+    only once its audio left for the provider, which stt_providers.transcribe marks by noting
+    the language it hands the adapter. A refusal before that (a language set it cannot take,
+    no key, an unknown model) did not send it."""
+    return not _hosted_provider(engine) or "language" in handed
+
+
+def _not_sent_twice(engine: str, handed: dict, pending: list[str], sent: set[str],
+                    focus: str) -> list[str]:
+    """After a failed attempt: the engines still to try, without another model of a hosted
+    provider the recording has now reached (R175: never the same audio to one provider twice;
+    a refusal before contact uses nothing up)."""
+    provider = _hosted_provider(engine)
+    if provider and "language" in handed:
+        sent.add(provider)
+    kept = []
+    for later in pending:
+        if _hosted_provider(later) in sent:
+            log("sttEngineRepeatSkipped", f"session={focus or '-'} {later} ({_hosted_provider(later)} "
+                f"already had this recording)")
+            continue
+        kept.append(later)
     return kept
 
 
@@ -547,18 +585,30 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
               "effective_engine": None, "attempts": attempts, "language_adapted": None,
               "requested_model": call_stt["requested_model"]}
     call_stt["report"] = report
-    runnable = [step for step in steps if "skip" not in step]
     model_transcribe = getattr(stt, "transcribe_model_bytes", None)
-    for step in steps:
+    sent: set[str] = set()      # hosted providers this clip reached (R175)
+
+    def provider(step):
+        return _hosted_provider(step.get("model", step["engine"]))
+
+    def runs_later(index):
+        return any("skip" not in later and provider(later) not in sent for later in steps[index + 1:])
+
+    for index, step in enumerate(steps):
         if "skip" in step:
             attempts.append({"engine": step["engine"], "outcome": "skipped", "reason": step["skip"]})
+            continue
+        if provider(step) in sent:
+            # Never the same audio to one provider twice: another model of a provider
+            # this clip already reached is not tried (R175).
+            attempts.append({"engine": step["engine"], "outcome": "skipped", "reason": "provider_already_sent"})
             continue
         started = time.monotonic()
         # Each attempt records only what its own engine boundary was handed
         # (null when it was unobserved); nothing carries over to a fallback.
         handed: dict = {}
         try:
-            selection_wait = None if step is runnable[-1] else 10.0  # VP-08, as above
+            selection_wait = 10.0 if runs_later(index) else None  # VP-08, as above
             with bound_session(focus), bound_language(step["language"]), capturing_handed() as handed, \
                     bounded_selection_wait(selection_wait):
                 if step.get("local_default"):
@@ -576,7 +626,9 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
         except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error (VP-09)
             attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
-            if step is runnable[-1]:
+            if provider(step) and "language" in handed:
+                sent.add(provider(step))
+            if not runs_later(index):
                 raise
             log_exception("sttCallEngineFallback", e, detail=step["engine"])
             continue

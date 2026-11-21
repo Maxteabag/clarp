@@ -19,21 +19,20 @@ class EnginePlan:
 
 
 def engine_identity(engine: str, own_model_id: str | None = None) -> str:
-    """Who receives a recording sent to `engine`: a hosted provider whatever its model, the
-    Host's own engine under any of its names ("", server-default, local, its default model
-    id), or any other local or adapter model as itself (R175)."""
-    from .stt_providers import VALID_IDS, provider_of
+    """Which engine `engine` names: the Host's own engine under any of its names ("",
+    server-default, local, its default model id), else the engine id itself (R175)."""
     name = (engine or "").strip()
     if name in {"", "server-default", "local"} or (own_model_id and name == own_model_id):
         return "own"
-    provider = provider_of(name)
-    return provider if provider in VALID_IDS else name
+    return name
 
 
-def once_per_provider(engines: list[str], own_model_id: str | None = None
-                      ) -> tuple[list[str], list[str]]:
-    """The engines in order with each identity once, and the entries left out: a recording
-    is never sent a second time to a provider an earlier entry names (R175)."""
+def distinct_engines(engines: list[str], own_model_id: str | None = None
+                     ) -> tuple[list[str], list[str]]:
+    """The engines in order with each engine once, and the repeats left out (R175). Two
+    models of one provider are both kept here: whether the second may still be sent the
+    recording depends on whether the first one's attempt reached the provider
+    (transcription_pipeline)."""
     kept, skipped, seen = [], [], set()
     for engine in engines:
         identity = engine_identity(engine, own_model_id)
