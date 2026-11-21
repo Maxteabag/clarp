@@ -242,7 +242,9 @@ tool.wait()
         drop(shim.stdin.take());
         assert!(shim.wait().unwrap().success());
         let deferred = ended(&owner);
-        let still_alive = process(survivor.pid).unwrap().is_some_and(|seen| !seen.ended);
+        let still_alive = process(survivor.pid)
+            .unwrap()
+            .is_some_and(|seen| !seen.ended);
         kill_exact(survivor).unwrap();
         assert_eq!(deferred.unwrap_err().kind(), ErrorKind::TimedOut);
         assert!(still_alive);
