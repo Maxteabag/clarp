@@ -372,7 +372,12 @@ fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, message: &M
     };
     out.joined_reads.push(JoinedRead {
         turn,
-        client_id: message.client_id().to_owned(),
+        client_id: message.told_id().to_owned(),
+        origin: message.origin.clone(),
+        sender_agent_id: message
+            .sender
+            .as_ref()
+            .map(|sender| sender.agent_id.clone()),
         queue,
     });
 }

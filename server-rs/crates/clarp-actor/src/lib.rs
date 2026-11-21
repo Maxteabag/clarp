@@ -438,6 +438,8 @@ pub struct JoinedRead {
     pub turn: TurnId,
     pub client_id: String,
     pub queue: QueueState,
+    pub origin: Origin,
+    pub sender_agent_id: Option<String>,
 }
 
 /// A row of the conversation an agent had on another Host, on its way in.
@@ -595,6 +597,7 @@ struct LiveTurn {
     trace_id: Option<String>,
     /// Who asked for it: what every row of the turn is filed under.
     origin: Origin,
+    sender_agent_id: Option<String>,
     /// The last row this turn put into the conversation: the message itself until the turn
     /// says something. It is the row that is told how the turn ended.
     last_row: String,
@@ -1467,6 +1470,7 @@ impl Actor {
                 message_id: message.id,
                 trace_id: message.trace_id,
                 origin: message.origin,
+                sender_agent_id: message.sender.map(|sender| sender.agent_id),
                 model: None,
                 tokens: None,
                 total: None,
@@ -2386,6 +2390,15 @@ impl Actor {
             admission,
             status,
         ))
+    }
+
+    /// The sender stored on the message that opened the live turn.
+    pub fn live_sender_agent_id(&self, turn: TurnId) -> Option<&str> {
+        self.live
+            .as_ref()
+            .filter(|live| live.turn == turn)?
+            .sender_agent_id
+            .as_deref()
     }
 
     /// The message a turn that ended answered.
@@ -4255,6 +4268,7 @@ impl Actor {
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
+            sender_agent_id: message.sender.map(|sender| sender.agent_id),
             model,
             tokens,
             total,
@@ -4508,6 +4522,7 @@ impl Actor {
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
+            sender_agent_id: message.sender.map(|sender| sender.agent_id),
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
             speak,

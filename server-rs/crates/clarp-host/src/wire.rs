@@ -639,20 +639,22 @@ pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
 
 /// A waiting item's sender name comes from the current roster, by agent id only.
 pub(crate) fn queue_sender_name<'a>(
-    message: &Waiting,
+    sender_agent_id: Option<&str>,
     directory: Option<&'a Directory>,
 ) -> Option<&'a str> {
-    let id = message.sender_agent_id.as_deref()?;
+    let id = sender_agent_id?;
     let name = directory?.by_id(id)?.record.persona.as_str();
     (!name.is_empty()).then_some(name)
 }
 
-fn queue_provenance(message: &Waiting, sender_name: Option<&str>) -> [(String, Value); 2] {
-    let origin = message.origin.name();
+fn queue_provenance(
+    origin: &Origin,
+    sender_agent_id: Option<&str>,
+    sender_name: Option<&str>,
+) -> [(String, Value); 2] {
+    let origin = origin.name();
     let origin = if origin.is_empty() { "user" } else { origin };
-    let sender = message
-        .sender_agent_id
-        .as_deref()
+    let sender = sender_agent_id
         .filter(|id| !id.is_empty())
         .map(|id| json!({"agent_id": id, "name": sender_name}));
     [
@@ -679,17 +681,26 @@ pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
     item.insert("enqueued_at".into(), json!(message.accepted_at_ms));
     item.insert("synthesize_audio".into(), json!(message.speak));
     item.extend(queue_provenance(
-        message,
-        queue_sender_name(message, Some(directory)),
+        &message.origin,
+        message.sender_agent_id.as_deref(),
+        queue_sender_name(message.sender_agent_id.as_deref(), Some(directory)),
     ));
     Value::Object(item)
 }
 
 #[derive(Clone, Copy)]
+pub struct QueueIdentity<'a> {
+    pub client_id: &'a str,
+    pub origin: &'a Origin,
+    pub sender_agent_id: Option<&'a str>,
+    pub sender_name: Option<&'a str>,
+}
+
+#[derive(Clone, Copy)]
 pub enum QueueUpdate<'a> {
     Mailbox,
-    Joined(&'a str),
-    Started(&'a str),
+    Joined(QueueIdentity<'a>),
+    Started(QueueIdentity<'a>),
     Edited {
         item: &'a Waiting,
         text: &'a str,
@@ -713,7 +724,14 @@ pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<
         "queue_revision": status.queue_revision,
     });
     match update {
-        QueueUpdate::Joined(id) | QueueUpdate::Started(id) => event["client_msg_id"] = json!(id),
+        QueueUpdate::Joined(item) | QueueUpdate::Started(item) => {
+            event["client_msg_id"] = json!(item.client_id);
+            for (key, value) in
+                queue_provenance(item.origin, item.sender_agent_id, item.sender_name)
+            {
+                event[key] = value;
+            }
+        }
         QueueUpdate::Edited {
             item,
             text,
@@ -736,7 +754,8 @@ fn tell_queue_item(event: &mut Value, item: &Waiting, sender_name: Option<&str>)
     if !item.told_id.is_empty() {
         event["client_msg_id"] = json!(item.told_id);
     }
-    for (key, value) in queue_provenance(item, sender_name) {
+    for (key, value) in queue_provenance(&item.origin, item.sender_agent_id.as_deref(), sender_name)
+    {
         event[key] = value;
     }
 }
@@ -1949,9 +1968,13 @@ mod tests {
             let origin = row["origin"].as_str().unwrap_or_default();
             let item = waiting(origin, row["sender_agent_id"].as_str().map(str::to_owned));
             let actual = Value::Object(
-                queue_provenance(&item, row["name"].as_str())
-                    .into_iter()
-                    .collect(),
+                queue_provenance(
+                    &item.origin,
+                    item.sender_agent_id.as_deref(),
+                    row["name"].as_str(),
+                )
+                .into_iter()
+                .collect(),
             );
             assert_eq!(actual, row["provenance"], "{row}");
         }
@@ -2921,7 +2944,16 @@ mod tests {
             (&json!(1), &json!(true), &json!(7), &json!(false))
         );
         assert!(held.get("client_msg_id").is_none());
-        let left = queue_updated(&record(), &thinking, QueueUpdate::Started("m2"));
+        let left = queue_updated(
+            &record(),
+            &thinking,
+            QueueUpdate::Started(QueueIdentity {
+                client_id: "m2",
+                origin: &Origin::User,
+                sender_agent_id: None,
+                sender_name: None,
+            }),
+        );
         assert_eq!(
             (&left["client_msg_id"], &left["queue_started"]),
             (&json!("m2"), &json!(true))

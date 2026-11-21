@@ -4053,8 +4053,14 @@ impl Worker {
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
+        let tell_read = changed.conversation && !joined_reads.is_empty();
         if changed.conversation {
             self.update_previews();
+        }
+        if tell_read {
+            // The read and the row committed together. Tell clients to read the row
+            // before telling them to remove its queue item.
+            self.tell_transcript();
         }
         let job_events = self
             .actor
@@ -4070,7 +4076,7 @@ impl Worker {
         let was_live = before.as_ref().and_then(|told| told.live.as_ref());
         let was_waiting: &[TurnId] = before.as_ref().map_or(&[], |told| told.waiting.as_slice());
         // The messages that have joined the queue since the clients were last told.
-        let joined: Vec<String> = if status
+        let joined: Vec<Waiting> = if status
             .waiting
             .iter()
             .any(|turn| !was_waiting.contains(turn))
@@ -4080,7 +4086,6 @@ impl Worker {
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|waiting| !was_waiting.contains(&waiting.turn))
-                .map(|waiting| waiting.told_id)
                 .collect()
         } else {
             Vec::new()
@@ -4172,19 +4177,44 @@ impl Worker {
         }
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
 
+        let began_from_the_queue = status
+            .live
+            .as_ref()
+            .is_some_and(|live| live.from_queue && was_live.map(|was| was.turn) != Some(live.turn));
+        let directory = if !joined.is_empty()
+            || !joined_reads.is_empty()
+            || began_from_the_queue
+            || queue_edit.is_some()
+        {
+            hub.queue_directory()
+        } else {
+            None
+        };
+        let name = |sender| wire::queue_sender_name(sender, directory.as_deref());
+
         // The queue: a message joined it, one left it to run, it was held or let go.
-        for client_id in &joined {
+        for waiting in &joined {
+            let sender = waiting.sender_agent_id.as_deref();
+            let item = wire::QueueIdentity {
+                client_id: &waiting.told_id,
+                origin: &waiting.origin,
+                sender_agent_id: sender,
+                sender_name: name(sender),
+            };
             hub.publish(
-                wire::queue_updated(&record, &status, wire::QueueUpdate::Joined(client_id)),
+                wire::queue_updated(&record, &status, wire::QueueUpdate::Joined(item)),
                 now,
             );
         }
         for read in joined_reads {
-            let mut event = wire::queue_updated(
-                &record,
-                &status,
-                wire::QueueUpdate::Started(&read.client_id),
-            );
+            let sender = read.sender_agent_id.as_deref();
+            let item = wire::QueueIdentity {
+                client_id: &read.client_id,
+                origin: &read.origin,
+                sender_agent_id: sender,
+                sender_name: name(sender),
+            };
+            let mut event = wire::queue_updated(&record, &status, wire::QueueUpdate::Started(item));
             event["queue_depth"] = json!(read.queue.waiting);
             event["queue_paused"] = json!(read.queue.paused);
             event["queue_revision"] = json!(read.queue.revision);
@@ -4197,11 +4227,17 @@ impl Worker {
             // It left the queue to run: it had waited there, or it was left for later and
             // nothing was in its way.
             if live.from_queue {
+                let sender = actor.live_sender_agent_id(live.turn);
                 hub.publish(
                     wire::queue_updated(
                         &record,
                         &status,
-                        wire::QueueUpdate::Started(&live.client_id),
+                        wire::QueueUpdate::Started(wire::QueueIdentity {
+                            client_id: &live.client_id,
+                            origin: &live.origin,
+                            sender_agent_id: sender,
+                            sender_name: name(sender),
+                        }),
                     ),
                     now,
                 );
@@ -4239,10 +4275,6 @@ impl Worker {
         let held_or_let_go = before
             .as_ref()
             .is_some_and(|told| told.paused != status.paused);
-        let began_from_the_queue = status
-            .live
-            .as_ref()
-            .is_some_and(|live| live.from_queue && was_live.map(|was| was.turn) != Some(live.turn));
         let told_with_its_turn = !status.paused && !by_hand && began_from_the_queue;
         let taken_back = was_waiting.iter().any(|turn| {
             !status.waiting.contains(turn)
@@ -4250,17 +4282,15 @@ impl Worker {
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
-        let directory = queue_edit.as_ref().and_then(|_| hub.queue_directory());
-        let name = |item: &Waiting| wire::queue_sender_name(item, directory.as_deref());
         let update = match &queue_edit {
             Some(QueueEdit::Edited { item, text }) => Some(wire::QueueUpdate::Edited {
                 item,
                 text,
-                sender_name: name(item),
+                sender_name: name(item.sender_agent_id.as_deref()),
             }),
             Some(QueueEdit::Deleted(item)) => Some(wire::QueueUpdate::Deleted {
                 item,
-                sender_name: name(item),
+                sender_name: name(item.sender_agent_id.as_deref()),
             }),
             None if (held_or_let_go && !told_with_its_turn) || taken_back => {
                 Some(wire::QueueUpdate::Mailbox)
@@ -4386,7 +4416,7 @@ impl Worker {
         }
         self.told = Some(status);
         self.publish_view();
-        if changed.conversation {
+        if changed.conversation && !tell_read {
             let now = Instant::now();
             match self.transcript_sent {
                 Some(sent) if now.duration_since(sent) < TRANSCRIPT_EVERY => {
