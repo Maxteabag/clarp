@@ -1,4 +1,140 @@
 {
+  "access": {
+    "result": {
+      "_catalogue": {
+        "cartesia": {
+          "access": {
+            "language": "en-US",
+            "owner": false,
+            "public": true
+          },
+          "legacy": {
+            "language": "",
+            "owner": false,
+            "public": true
+          },
+          "legacy-number": {
+            "language": "",
+            "owner": false,
+            "public": false
+          },
+          "legacy-string": {
+            "language": "",
+            "owner": false,
+            "public": false
+          },
+          "owned": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-missing": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-null": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-number": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "owner-string": {
+            "language": "",
+            "owner": true,
+            "public": true
+          },
+          "private": {
+            "language": "",
+            "owner": false,
+            "public": false
+          },
+          "public-visibility": {
+            "language": "",
+            "owner": false,
+            "public": true
+          },
+          "visible": {
+            "language": "",
+            "owner": false,
+            "public": true
+          }
+        }
+      },
+      "_format": 2,
+      "_gone": {
+        "cartesia": []
+      },
+      "cartesia": {}
+    },
+    "rows": [
+      {
+        "access": " PUBLIC ",
+        "id": "access",
+        "is_owner": false,
+        "language": "en-US"
+      },
+      {
+        "id": "visible",
+        "is_owner": false,
+        "visibility": " All "
+      },
+      {
+        "id": "public-visibility",
+        "is_owner": false,
+        "visibility": " PUBLIC "
+      },
+      {
+        "id": "legacy",
+        "is_owner": false,
+        "is_public": true
+      },
+      {
+        "id": "legacy-string",
+        "is_owner": false,
+        "is_public": "true"
+      },
+      {
+        "id": "legacy-number",
+        "is_owner": false,
+        "is_public": 1
+      },
+      {
+        "access": "private",
+        "id": "private",
+        "is_owner": false,
+        "visibility": "owner"
+      },
+      {
+        "access": "public",
+        "id": "owned",
+        "is_owner": true
+      },
+      {
+        "access": "public",
+        "id": "owner-missing"
+      },
+      {
+        "access": "public",
+        "id": "owner-null",
+        "is_owner": null
+      },
+      {
+        "access": "public",
+        "id": "owner-number",
+        "is_owner": 0
+      },
+      {
+        "access": "public",
+        "id": "owner-string",
+        "is_owner": "false"
+      }
+    ]
+  },
   "deleted": {
     "current": {
       "_catalogue": {
@@ -50,6 +186,7 @@
           }
         }
       },
+      "_format": 2,
       "_gone": {
         "cartesia": [
           "missing"
@@ -338,6 +475,7 @@
             }
           }
         },
+        "_format": 2,
         "_gone": {
           "cartesia": [],
           "elevenlabs": []
@@ -376,6 +514,7 @@
         "elevenlabs"
       ],
       "result": {
+        "_format": 1,
         "_gone": {
           "elevenlabs": []
         },
@@ -454,6 +593,7 @@
             }
           }
         },
+        "_format": 2,
         "_gone": {
           "cartesia": []
         },
@@ -471,26 +611,57 @@
   "startup": [
     {
       "age": null,
+      "content": null,
       "due": true
     },
     {
       "age": -60,
+      "content": "{\"_format\":2}",
       "due": false
     },
     {
       "age": 0,
+      "content": "{\"_format\":2}",
       "due": false
     },
     {
       "age": 86399,
+      "content": "{\"_format\":2}",
       "due": false
     },
     {
       "age": 86400,
+      "content": "{\"_format\":2}",
       "due": true
     },
     {
       "age": 86401,
+      "content": "{\"_format\":2}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{\"_format\":1}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{\"_format\":3}",
+      "due": false
+    },
+    {
+      "age": 0,
+      "content": "{\"_format\":\"2\"}",
+      "due": true
+    },
+    {
+      "age": 0,
+      "content": "{broken",
       "due": true
     }
   ]

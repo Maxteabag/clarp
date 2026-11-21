@@ -30,9 +30,16 @@ pub struct Exhausted {
     pub shared_by: usize,
 }
 
+#[derive(serde::Serialize)]
+pub struct CatalogueMiss {
+    pub language: String,
+    pub total: usize,
+}
+
 pub struct Assignment {
     pub stored: String,
     pub exhausted: Vec<Exhausted>,
+    pub catalogue_miss: Option<CatalogueMiss>,
 }
 
 const PROVIDERS: [&str; 3] = [CARTESIA, ELEVENLABS, GEMINI];
@@ -45,14 +52,21 @@ fn canonical(stored: &str) -> Map<String, Value> {
 }
 
 /// Voices that can be assigned from today's Cartesia catalogue.
-pub fn language_voices(snapshot: &Snapshot, language: &str) -> Vec<String> {
-    let language = languages::primary(language);
-    let gone = snapshot.gone.get(CARTESIA);
-    snapshot
+pub fn language_voices(
+    snapshot: &Snapshot,
+    language: &str,
+) -> (Vec<String>, Option<CatalogueMiss>) {
+    let Some(rows) = snapshot
         .catalogue
         .get(CARTESIA)
-        .into_iter()
-        .flatten()
+        .filter(|rows| !rows.is_empty())
+    else {
+        return (Vec::new(), None);
+    };
+    let language = languages::primary(language);
+    let gone = snapshot.gone.get(CARTESIA);
+    let ids: Vec<_> = rows
+        .iter()
         .filter(|(id, row)| {
             row.public
                 && !row.owner
@@ -60,7 +74,12 @@ pub fn language_voices(snapshot: &Snapshot, language: &str) -> Vec<String> {
                 && languages::primary(&row.language) == language
         })
         .map(|(id, _)| id.clone())
-        .collect()
+        .collect();
+    let miss = ids.is_empty().then_some(CatalogueMiss {
+        language,
+        total: rows.len(),
+    });
+    (ids, miss)
 }
 
 impl Pool<'_> {
@@ -91,12 +110,12 @@ impl Pool<'_> {
         providers
     }
 
-    pub fn candidates(&self, provider: &str, name: &str) -> Vec<String> {
+    fn candidates(&self, provider: &str, name: &str) -> (Vec<String>, Option<CatalogueMiss>) {
         if provider != CARTESIA {
-            return crate::voices::pool_ids(provider);
+            return (crate::voices::pool_ids(provider), None);
         }
         let mut seen = BTreeSet::new();
-        let source = if self.configured_cartesia.is_empty() {
+        let (source, miss) = if self.configured_cartesia.is_empty() {
             let who = Who {
                 name,
                 persona: name,
@@ -107,22 +126,24 @@ impl Pool<'_> {
                 Some(who),
                 &self.host.language,
             );
-            let live = language_voices(self.catalogue, language);
-            if live.is_empty() {
+            let (live, miss) = language_voices(self.catalogue, language);
+            let source = if live.is_empty() {
                 said::BUILT_IN_CARTESIA_VOICES
                     .iter()
                     .map(|(_, id)| (*id).into())
                     .collect()
             } else {
                 live
-            }
+            };
+            (source, miss)
         } else {
-            self.configured_cartesia.to_vec()
+            (self.configured_cartesia.to_vec(), None)
         };
-        source
+        let ids = source
             .into_iter()
             .filter(|id| !id.is_empty() && seen.insert(id.clone()))
-            .collect()
+            .collect();
+        (ids, miss)
     }
 
     fn reserves(&self, provider: &str) -> BTreeSet<String> {
@@ -181,12 +202,15 @@ impl Pool<'_> {
             return Assignment {
                 stored: kept,
                 exhausted: Vec::new(),
+                catalogue_miss: None,
             };
         }
 
         let mut exhausted = Vec::new();
+        let mut catalogue_miss = None;
         for provider in missing {
-            let candidates = self.candidates(provider, name);
+            let (candidates, miss) = self.candidates(provider, name);
+            catalogue_miss = catalogue_miss.or(miss);
             let mut reserved = self.reserves(provider);
             let mut active = BTreeMap::<String, usize>::new();
             let mut taken = BTreeMap::<String, usize>::new();
@@ -215,6 +239,7 @@ impl Pool<'_> {
         Assignment {
             stored: sorted_ascii(&Value::Object(mapping)),
             exhausted,
+            catalogue_miss,
         }
     }
 
