@@ -21,6 +21,8 @@ mod agent_portraits;
 mod backend_auth;
 #[path = "host/bounded_close.rs"]
 mod bounded_close;
+#[path = "host/cartesia_language.rs"]
+mod cartesia_language;
 #[path = "host/compaction_outcome.rs"]
 mod compaction_outcome;
 #[path = "host/contacts.rs"]
@@ -34604,7 +34606,7 @@ fn the_controller_speaks_a_short_line_and_keeps_only_its_primary_voice() {
     assert_eq!(first[0]["model_id"], "model-a");
     let digest =
         clarp_kernel::controller_narration::cache_key("Press+once now", "tutorial", "model-a");
-    let file = cache.join(format!("narration-{digest}.mp3"));
+    let file = cache.join(format!("narration-{digest}-en.mp3"));
     assert_eq!(
         std::fs::metadata(&cache).unwrap().permissions().mode() & 0o777,
         0o700

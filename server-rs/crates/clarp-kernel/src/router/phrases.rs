@@ -11,6 +11,8 @@ pub struct Voice {
     pub provider: String,
     pub voice: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

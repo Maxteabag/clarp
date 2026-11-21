@@ -41,6 +41,16 @@ fn is_code(text: &str) -> bool {
     (2..=3).contains(&text.len()) && text.bytes().all(|sign| sign.is_ascii_lowercase())
 }
 
+/// The primary language subtag, including the Norwegian aliases used by speech engines.
+pub(crate) fn primary(code: &str) -> String {
+    let code = strip(code);
+    let code = code.split(['-', '_']).next().unwrap_or("").to_lowercase();
+    match code.as_str() {
+        "nb" | "nn" => "no".to_string(),
+        _ => code,
+    }
+}
+
 /// One language: two or three letters, written small.
 pub fn code(value: &Value) -> Result<String, &'static str> {
     let Value::String(text) = value else {

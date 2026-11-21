@@ -37,7 +37,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use clarp_kernel::cartesia_language::{self, Language};
 use clarp_kernel::herald::{self, Attempt, Herald, Moment, Play, Taken};
+use clarp_kernel::languages;
 use clarp_kernel::media::{self, Part};
 use clarp_kernel::python;
 use clarp_kernel::said::{self, Who};
@@ -445,6 +447,23 @@ impl Mouth {
             Audition::Text(session) => (None, session),
         };
 
+        let voices = owner::voices(owners);
+        let directory = self.fleet.directory();
+        let persona = if matches!(audition, Audition::Narration(_)) {
+            clarp_kernel::controller_narration::PERSONA
+        } else {
+            directory
+                .named(session)
+                .map_or("", |m| m.record.persona.as_str())
+        };
+        let who = Who {
+            name: persona,
+            persona,
+            session,
+        };
+        let cartesia = (provider == said::CARTESIA || voices.fallback == said::CARTESIA)
+            .then(|| self.cartesia_language(&directory, who, &owner::cartesia_model(owners)));
+
         let directory_handle = if name.is_some() {
             std::fs::DirBuilder::new()
                 .recursive(true)
@@ -469,9 +488,13 @@ impl Mouth {
         } else {
             ""
         };
-        let file = name
-            .zip(directory_handle.as_ref())
-            .map(|(key, dir)| crate::files::beneath(dir, &format!("{prefix}{key}.mp3")));
+        let file = name.zip(directory_handle.as_ref()).map(|(key, dir)| {
+            let name = match cartesia.as_ref().filter(|_| provider == said::CARTESIA) {
+                Some(language) => format!("{prefix}{key}-{}.mp3", language.code),
+                None => format!("{prefix}{key}.mp3"),
+            };
+            crate::files::beneath(dir, &name)
+        });
         let _lock = if let Some(name) = name {
             let bucket =
                 name.bytes().next().unwrap_or_default() as usize % self.preview_locks.len();
@@ -493,26 +516,13 @@ impl Mouth {
                 } else {
                     SpeechUse::VoicePreview
                 },
+                cartesia.clone(),
             )
             .ok_or_else(|| format!("no engine named {provider} is built"))?;
-        let voices = owner::voices(owners);
         let route = said::Route {
             provider: provider.into(),
             voice: (name.is_some() || provider == "google").then(|| voice.to_string()),
             fallback: voices.fallback.clone(),
-        };
-        let directory = self.fleet.directory();
-        let persona = if matches!(audition, Audition::Narration(_)) {
-            clarp_kernel::controller_narration::PERSONA
-        } else {
-            directory
-                .named(session)
-                .map_or("", |m| m.record.persona.as_str())
-        };
-        let who = Who {
-            name: persona,
-            persona,
-            session,
         };
         let resolve =
             |engine: &str| resolved_voice(owners, &voices, who, Some(voice), &route, engine);
@@ -531,6 +541,7 @@ impl Mouth {
                 } else {
                     SpeechUse::Turn
                 },
+                cartesia,
             )
             .zip(chosen)
         } else {
@@ -939,9 +950,11 @@ fn eleven_model(file: &Table) -> String {
 /// The configured primary voice, before checking credentials or constructing a speaker.
 /// Google and Deepgram select the model through the engine's voice name.
 pub(crate) fn phrase_voices(
+    mouth: &Mouth,
+    directory: &Directory,
     file: &Table,
     record: &AgentRecord,
-) -> Vec<(clarp_kernel::router::phrases::Voice, bool)> {
+) -> Vec<(clarp_kernel::router::phrases::Voice, bool, Option<Language>)> {
     let voices = owner::voices(file);
     let who = Who {
         name: &record.persona,
@@ -964,13 +977,17 @@ pub(crate) fn phrase_voices(
                 "deepgram" | "google" => voice.clone(),
                 _ => return None,
             };
+            let cartesia = (provider == said::CARTESIA)
+                .then(|| mouth.cartesia_language(directory, who, &model));
             Some((
                 clarp_kernel::router::phrases::Voice {
                     provider: provider.clone(),
                     voice,
                     model,
+                    language: cartesia.as_ref().map(|language| language.code.to_string()),
                 },
                 primary,
+                cartesia,
             ))
         })
         .collect()
@@ -1011,9 +1028,36 @@ impl Mouth {
             .cloned()
     }
 
+    fn cartesia_language(&self, directory: &Directory, who: Who<'_>, model: &str) -> Language {
+        let overrides = languages::languages(directory.setting(languages::AGENT_LANGUAGES_KEY));
+        let default =
+            languages::selected(directory.setting(languages::LANGUAGE_KEY), &self.language);
+        let first = cartesia_language::agent_speech_language(&overrides, Some(who), &default);
+        cartesia_language::language_for(first, model)
+    }
+
+    fn engine_for_agent(
+        &self,
+        file: &Table,
+        provider: &str,
+        directory: &Directory,
+        record: &AgentRecord,
+    ) -> Option<Box<dyn Speaker>> {
+        let cartesia = (provider == said::CARTESIA).then(|| {
+            self.cartesia_language(directory, speaker(record).who, &owner::cartesia_model(file))
+        });
+        self.engine(file, provider, SpeechUse::Turn, cartesia)
+    }
+
     /// An engine of this Host, with its key read where the owner keeps it at the moment it
     /// is needed.
-    fn engine(&self, file: &Table, provider: &str, usage: SpeechUse) -> Option<Box<dyn Speaker>> {
+    fn engine(
+        &self,
+        file: &Table,
+        provider: &str,
+        usage: SpeechUse,
+        cartesia: Option<Language>,
+    ) -> Option<Box<dyn Speaker>> {
         let keys = self.owner.clone();
         let key = key_of(provider, file);
         let read = Box::new(move || keys.key(key));
@@ -1060,7 +1104,9 @@ impl Mouth {
                 base: self.deepgram_at.clone(),
             })),
             said::CARTESIA => {
-                let engine = Cartesia::new(owner::cartesia_model(file), &self.language, read);
+                let language = cartesia?;
+                let engine = Cartesia::new(owner::cartesia_model(file), language.code, read)
+                    .with_language_fallback(language.unsupported);
                 Some(Box::new(match self.cartesia_at.as_str() {
                     "" => engine,
                     stand_in => engine.at(stand_in),
@@ -1258,11 +1304,12 @@ impl Mouth {
             }
             Chosen::By(by) => (by, None),
         };
+        let directory = self.fleet.directory();
         let engines: Vec<(Box<dyn Speaker>, String, String)> = by
             .iter()
             .filter_map(|(provider, voice)| {
                 Some((
-                    self.engine(&owners, provider, SpeechUse::Turn)?,
+                    self.engine_for_agent(&owners, provider, &directory, record)?,
                     voice.clone(),
                     provider.clone(),
                 ))
@@ -1584,11 +1631,12 @@ impl Mouth {
         let Chosen::By(by) = chosen(&view, &owners, record) else {
             return None;
         };
+        let directory = self.fleet.directory();
         let engines = by
             .iter()
             .filter_map(|(provider, voice)| {
                 Some((
-                    self.engine(&owners, provider, SpeechUse::Turn)?,
+                    self.engine_for_agent(&owners, provider, &directory, record)?,
                     voice.clone(),
                 ))
             })
@@ -1607,10 +1655,11 @@ impl Mouth {
         owners: &Table,
         voice: &clarp_kernel::router::phrases::Voice,
         primary: bool,
+        cartesia: Option<Language>,
     ) -> Result<Option<(String, Option<Vec<u8>>)>, Mute> {
         let engine = self
             .has_key(&voice.provider, owners)
-            .then(|| self.engine(owners, &voice.provider, SpeechUse::Turn))
+            .then(|| self.engine(owners, &voice.provider, SpeechUse::Turn, cartesia))
             .flatten();
         let engines = engine
             .into_iter()

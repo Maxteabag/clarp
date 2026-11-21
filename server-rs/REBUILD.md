@@ -3378,6 +3378,15 @@ An own-engine failure keeps engine detail in the log. Loading and busy keep thei
 Fallback uses the original audio buffer and current retention policy. The vectors run the
 reference's selection, declarations and fallback at the merge of PR 501.
 
+**Cartesia output language (R168, 21 Nov 2026).** Each Cartesia clip uses the first
+transcription language matched by name, persona or session, else the Host's selected
+language. The model catalogue constrains that code and maps Norwegian variants to `no`.
+A request whose model requires English records the unsupported primary code once, at the
+Cartesia boundary. The same resolution reaches a configured alternative after another
+provider fails. Cartesia auditions, narration and cached router phrases include the resulting
+language in their cache identity, so a language change can produce its own audio. The
+reference's model, request and session rules are held by `cartesia-language-vectors.py`.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |

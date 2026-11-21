@@ -88,6 +88,7 @@ pub struct Cartesia {
     model: String,
     /// The language the line is in (`en`).
     language: String,
+    unsupported_language: Option<String>,
     endpoint: String,
     timeout: Duration,
 }
@@ -98,9 +99,16 @@ impl Cartesia {
             key,
             model: model.into(),
             language: language.into(),
+            unsupported_language: None,
             endpoint: ENDPOINT.to_string(),
             timeout: Duration::from_secs(30),
         }
+    }
+
+    /// A language the model fell back from, reported when the request is made.
+    pub fn with_language_fallback(mut self, primary: Option<String>) -> Self {
+        self.unsupported_language = primary;
+        self
     }
 
     /// The same engine at another address: a stand-in that answers as Cartesia does.
@@ -117,6 +125,14 @@ impl Speaker for Cartesia {
         };
         if line.voice.is_empty() {
             return Err(Mute::Unavailable("voice_id required".to_string()));
+        }
+        if let Some(primary) = &self.unsupported_language {
+            let model = if self.model.is_empty() {
+                "-"
+            } else {
+                &self.model
+            };
+            eprintln!("cartesiaLanguageUnsupported {primary} on {model} -> en");
         }
         // The same sound as every other engine's: 44.1 kHz, one channel, 128 kbit/s.
         let body = json!({
