@@ -199,3 +199,24 @@ def test_a_frontier_not_recorded_says_why(monkeypatch):
     inc._cache_committed_tail(key, "v", None, None, None)
     assert seen == [("transcriptTailRetention", "code=checkpoint_not_written count=1 reason=nothing_written"),
                     ("transcriptTailRetention", "code=checkpoint_not_written count=1 reason=not_published")]
+
+
+def test_the_digest_line_is_written_when_the_second_read_raises(monkeypatch, tmp_path):
+    """A second read that fails (the file gone or unreadable mid-read) still leaves the
+    import's one transcriptFullDigest line, with the parse's bytes, as main wrote it
+    before the read; the error itself goes on to the caller as before."""
+    from lib import log as host_log
+    seen = []
+    monkeypatch.setattr(host_log, "log", lambda event, detail="": seen.append((event, detail)))
+
+    def unreadable(*_args, **_kwargs):
+        raise OSError("gone")
+    monkeypatch.setattr(inc, "_read_digest", unreadable)
+    before = inc.Identity(1, 2, 300 * 1024 * 1024, 4)
+    with pytest.raises(OSError):
+        inc._digest_and_log(tmp_path / "gone.jsonl", None, "grew", None, before, "claude", None)
+    assert seen == [("transcriptFullDigest", f"code=grew count=1 backend=claude size=lt1024m bytes={before.size}")]
+    seen.clear()
+    monkeypatch.setattr(inc, "_read_digest", lambda *a, **k: ("p", "c", None))
+    assert inc._digest_and_log(tmp_path / "f.jsonl", None, "grew", None, before, "claude", None) == ("p", "c", None)
+    assert seen == [("transcriptFullDigest", f"code=grew count=1 backend=claude size=lt1024m bytes={2 * before.size}")]
