@@ -7,6 +7,8 @@
     "observed": false,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,
@@ -27,6 +29,8 @@
     "observed": true,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": 99,
      "finalized": false,
@@ -51,6 +55,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0,
      "expires_at": 99,
      "finalized": false,
@@ -75,6 +81,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -99,6 +107,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1.1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -123,6 +133,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0.4,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -147,6 +159,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 42,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -171,6 +185,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -195,6 +211,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -219,6 +237,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -243,6 +263,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -267,12 +289,180 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
      "usage_final": false,
      "reason": null,
      "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "active_seconds": 20,
+     "paused_seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.026667,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.0425,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "active_seconds": 1.5,
+     "paused_seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.00125,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.044167,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.045,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.010208,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.010208,
      "billing": "openai_api",
      "scope": "voice_only"
     }
@@ -287,13 +477,15 @@
     },
     "observed": true,
     "snapshot": {
-     "seconds": 30,
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
      "usage_final": false,
      "reason": "unknown",
-     "voice_estimate_usd": 0.025,
+     "voice_estimate_usd": 0.010208,
      "billing": "openai_api",
      "scope": "voice_only"
     }
@@ -307,13 +499,15 @@
     },
     "observed": false,
     "snapshot": {
-     "seconds": 30,
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
      "usage_final": false,
      "reason": "unknown",
-     "voice_estimate_usd": 0.025,
+     "voice_estimate_usd": 0.010208,
      "billing": "openai_api",
      "scope": "voice_only"
     }
@@ -328,6 +522,8 @@
     "observed": false,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,
@@ -348,6 +544,8 @@
     "observed": true,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": 99,
      "finalized": false,
@@ -372,6 +570,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0,
      "expires_at": 99,
      "finalized": false,
@@ -396,6 +596,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -420,6 +622,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1.1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -444,6 +648,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0.4,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -468,6 +674,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 42,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -492,6 +700,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -516,6 +726,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -540,6 +752,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -564,6 +778,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -588,12 +804,180 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
      "usage_final": false,
      "reason": null,
      "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "active_seconds": 20,
+     "paused_seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.026667,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.0425,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "active_seconds": 1.5,
+     "paused_seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.00125,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.044167,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.045,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.010208,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.010208,
      "billing": "openai_api",
      "scope": "voice_only"
     }
@@ -609,6 +993,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -629,6 +1015,8 @@
     "observed": false,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -649,6 +1037,8 @@
     "observed": false,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,
@@ -669,6 +1059,8 @@
     "observed": true,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": 99,
      "finalized": false,
@@ -693,6 +1085,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0,
      "expires_at": 99,
      "finalized": false,
@@ -717,6 +1111,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -741,6 +1137,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1.1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -765,6 +1163,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0.4,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -789,6 +1189,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 42,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -813,6 +1215,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -837,6 +1241,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -861,6 +1267,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -885,6 +1293,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -909,12 +1319,180 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
      "usage_final": false,
      "reason": null,
      "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "active_seconds": 20,
+     "paused_seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.026667,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.0425,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "active_seconds": 1.5,
+     "paused_seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.00125,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.044167,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.045,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.010208,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.010208,
      "billing": "openai_api",
      "scope": "voice_only"
     }
@@ -930,6 +1508,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 31.25,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -950,6 +1530,8 @@
     "observed": false,
     "snapshot": {
      "seconds": 31.25,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -970,6 +1552,8 @@
     "observed": false,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,
@@ -990,6 +1574,8 @@
     "observed": true,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": 99,
      "finalized": false,
@@ -1014,6 +1600,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0,
      "expires_at": 99,
      "finalized": false,
@@ -1038,6 +1626,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -1062,6 +1652,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1.1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -1086,6 +1678,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0.4,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1110,6 +1704,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 42,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1134,6 +1730,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1158,6 +1756,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1182,6 +1782,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1206,6 +1808,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1230,6 +1834,174 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "active_seconds": 20,
+     "paused_seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "active_seconds": 1.5,
+     "paused_seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1250,7 +2022,9 @@
     },
     "observed": true,
     "snapshot": {
-     "seconds": 30,
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -1270,7 +2044,9 @@
     },
     "observed": false,
     "snapshot": {
-     "seconds": 30,
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -1291,6 +2067,8 @@
     "observed": false,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,
@@ -1311,6 +2089,8 @@
     "observed": true,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": 99,
      "finalized": false,
@@ -1335,6 +2115,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0,
      "expires_at": 99,
      "finalized": false,
@@ -1359,6 +2141,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -1383,6 +2167,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1.1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -1407,6 +2193,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0.4,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1431,6 +2219,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 42,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1455,6 +2245,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1479,6 +2271,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1503,6 +2297,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1527,6 +2323,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1551,6 +2349,174 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "active_seconds": 20,
+     "paused_seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "active_seconds": 1.5,
+     "paused_seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1572,6 +2538,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -1592,6 +2560,8 @@
     "observed": false,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -1612,6 +2582,8 @@
     "observed": false,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,
@@ -1632,6 +2604,8 @@
     "observed": true,
     "snapshot": {
      "seconds": null,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": null,
      "expires_at": 99,
      "finalized": false,
@@ -1656,6 +2630,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0,
      "expires_at": 99,
      "finalized": false,
@@ -1680,6 +2656,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -1704,6 +2682,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 1.1,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 1,
      "expires_at": 99,
      "finalized": false,
@@ -1728,6 +2708,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 0.4,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1752,6 +2734,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 42,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1776,6 +2760,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1800,6 +2786,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1824,6 +2812,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1848,6 +2838,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1872,6 +2864,174 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "active_seconds": 20,
+     "paused_seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "active_seconds": 1.5,
+     "paused_seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "active_seconds": null,
+     "paused_seconds": null,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "active_seconds": 7.25,
+     "paused_seconds": 12.5,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": false,
@@ -1893,6 +3053,8 @@
     "observed": true,
     "snapshot": {
      "seconds": 31.25,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -1913,6 +3075,8 @@
     "observed": false,
     "snapshot": {
      "seconds": 31.25,
+     "active_seconds": null,
+     "paused_seconds": null,
      "context_ratio": 0.4,
      "expires_at": 99,
      "finalized": true,
@@ -2205,6 +3369,158 @@
    },
    {
     "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
      "type": "session.closed",
      "usage": {
       "seconds": null
@@ -2213,7 +3529,7 @@
     },
     "observed": true,
     "snapshot": {
-     "seconds": 30,
+     "seconds": 55,
      "context_ratio": null,
      "expires_at": null,
      "finalized": true,
@@ -2233,7 +3549,7 @@
     },
     "observed": false,
     "snapshot": {
-     "seconds": 30,
+     "seconds": 55,
      "context_ratio": null,
      "expires_at": null,
      "finalized": true,
@@ -2514,6 +3830,158 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,
@@ -2835,6 +4303,158 @@
     "observed": true,
     "snapshot": {
      "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 50,
+      "active_seconds": 20,
+      "paused_seconds": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 50,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 51,
+      "active_seconds": 21
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 51,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 52,
+      "active_seconds": 1.5,
+      "paused_seconds": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 52,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 53,
+      "active_seconds": 2,
+      "paused_seconds": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 53,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 54,
+      "active_seconds": -1,
+      "paused_seconds": 3
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 54,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 55,
+      "active_seconds": 7.25,
+      "paused_seconds": 12.5
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "active_seconds": 1,
+      "paused_seconds": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 55,
      "context_ratio": null,
      "expires_at": null,
      "finalized": false,

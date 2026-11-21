@@ -27,6 +27,8 @@ from .message_text import (CALL_OPENING_OPEN, _strip_voice_markup, strip_deliver
                            strip_injected_blocks)
 from .message_import_common import (  # noqa: F401 - facade compatibility
     _message_id,
+    _identity_id,
+    IDENTITY_BLOCK_PREFIX,
     _client_message_id,
     _norm_text,
     _next_revision,
@@ -37,6 +39,7 @@ from .message_import_common import (  # noqa: F401 - facade compatibility
     _parse_timestamp,
     _is_retry_echo,
     _PARKED_SEQ_BASE,
+    _PARKED_POSITIONAL_SEQ_BASE,
     _client_provenance_rows,
     _client_provenance,
     _session_parts,
@@ -44,6 +47,7 @@ from .message_import_common import (  # noqa: F401 - facade compatibility
 from .message_import_rows import (  # noqa: F401 - facade compatibility
     _own_turns_row,
     _park_adopted_occupant,
+    _park_positional_occupant,
     _seq_taken,
     _restore_unadopted_parked,
     _parked_twin,
@@ -219,9 +223,12 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                         origin: str = "user", sender_agent_id: str | None = None,
                         prompt_admission_id: str = "",
                         trace_id: str = "",
+                        sent_at: int | None = None,
                         ) -> dict[str, Any] | None:
     """Record a user message the moment /send accepts it, keyed by the
-    client-authored `client_msg_id` (idempotency key).
+    client-authored `client_msg_id` (idempotency key). A message that waited
+    for a running turn is recorded when its own turn starts instead, with
+    ``sent_at`` (ms) the time it was sent (issue 491).
 
     This is the DURABLE user row — not a transient placeholder. The client
     renders its bubble under the same id, so the two match by identity. The
@@ -280,14 +287,15 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                    message_id, agent_id, backend_session_id, source_file, seq,
                    role, timestamp, text, kind, tool_name, tools_json,
                    display_cells_json, updated_at, revision, origin,
-                   sender_agent_id, prompt_admission_id, trace_id
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   sender_agent_id, prompt_admission_id, trace_id, sent_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(message_id) DO NOTHING""",
             (
                 msg_id, agent_id, backend_session_id, f"client:{client_msg_id}", seq,
                 "user", timestamp, text, None, None, "[]", "[]",
                 timestamp_ms, revision, origin, sender_agent_id,
                 prompt_admission_id or None, (trace_id or "").strip() or None,
+                int(sent_at) if sent_at is not None and sent_at < timestamp_ms else None,
             ),
         )
         if inserted.rowcount != 1:
@@ -303,6 +311,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                 sender_agent_id=sender_agent_id,
                 prompt_admission_id=prompt_admission_id,
                 trace_id=trace_id,
+                sent_at=sent_at,
             )
         if coordination.is_coordination(agent_id=agent_id, origin=origin,
                                         sender_agent_id=sender_agent_id):
@@ -1396,6 +1405,92 @@ def _turn_id_is_ours(database, msg_id: str, agent_id: str, backend_session_id: s
     return False
 
 
+def _tail_refusal(what: str) -> _TailInvalidated:
+    """A pass that does not hold every line gives up to a full read; ``what`` is logged
+    (transcriptCarryInputsChanged)."""
+    refusal = _TailInvalidated(what)
+    refusal.what = what
+    return refusal
+
+
+def _keyed_line_id(database, agent_id: str, backend_session_id: str, source_file: str, seq: int,
+                   start_seq: int, trace: str, provider_id: str, blocks: dict, *,
+                   whole: bool, parked: dict) -> str:
+    """The identity id of a keyed assistant line (R108), or '' to keep its positional id.
+
+    Its block index counts the lines of the same provider message in the same turn: in this
+    import, after the ones a tail's earlier imports already stored before its boundary (probed
+    by id). Block 0 is the stream's live-row id, so a live row of the message is adopted in place
+    by its id (order A), and once the line is stored the stream's later writes for the message
+    are refused (order B ends as order A does). A slot already held by its positional row (a row
+    stored before this rule) keeps that row and its id.
+
+    A row that stands elsewhere moves (a shift). When ANOTHER line's positional row holds the
+    slot (any positional row when this line's row stands elsewhere; a user row's otherwise: an
+    assistant row there cannot be told from this line's own row stored before the rule, so it
+    stays), a pass that holds every line (``whole``) parks that row aside, recorded in
+    ``parked`` by its role, timestamp and text, and its line writes it again in the pass; any
+    other pass changes nothing and gives up to a full read."""
+    key = (trace, provider_id)
+    if key not in blocks:
+        held = 0
+        while database.execute(
+                """SELECT 1 FROM messages WHERE message_id = ? AND agent_id = ?
+                     AND backend_session_id = ? AND source_file = ? AND seq >= 0 AND seq < ?""",
+                (_identity_id(agent_id, backend_session_id, trace, provider_id, held), agent_id,
+                 backend_session_id, source_file, start_seq)).fetchone() is not None:
+            held += 1
+        blocks[key] = held
+    block = blocks[key]
+    blocks[key] = block + 1
+    identity = _identity_id(agent_id, backend_session_id, trace, provider_id, block)
+    occupant = database.execute(
+        """SELECT message_id, trace_id, role, timestamp, text FROM messages
+            WHERE agent_id = ? AND backend_session_id = ? AND seq = ?""",
+        (agent_id, backend_session_id, seq)).fetchone()
+    if occupant is None or occupant["message_id"] == identity:
+        return identity
+    positional = occupant["message_id"] == _message_id(agent_id, backend_session_id, source_file, seq)
+    stored = database.execute("SELECT source_file FROM messages WHERE message_id = ? AND agent_id = ?",
+                              (identity, agent_id)).fetchone()
+    elsewhere = stored is not None and not str(stored["source_file"] or "").startswith("live:")
+    if positional and not elsewhere and occupant["role"] == "assistant":
+        # Stored before the rule, or while the trace was unknown: the row keeps its id, and a
+        # live row of the message is retracted as R107 does.
+        return ""
+    if positional:
+        # Another line's row holds the slot: its line moved, or left.
+        if not whole:
+            raise _tail_refusal("identity_shift_occupant")
+        if _park_positional_occupant(database, agent_id, backend_session_id, source_file, seq):
+            parked[(occupant["role"], str(occupant["timestamp"] or ""), occupant["text"])] = \
+                occupant["message_id"]
+        return identity
+    if elsewhere:
+        return identity                 # its row stands elsewhere (a shift): it moves, its id stays
+    if _identity_under_another_trace(database, agent_id, backend_session_id, provider_id, block,
+                                     str(occupant["message_id"]), str(occupant["trace_id"] or "")):
+        # This line's own row, stored when its turn was read as another (R91 places a reply in
+        # the latest turn begun before it, and what is begun can be learnt later): an id never
+        # changes for a row that exists.
+        return str(occupant["message_id"])
+    return identity
+
+
+def _identity_under_another_trace(database, agent_id, backend_session_id, provider_id, block,
+                                  message_id, row_trace) -> bool:
+    """Whether ``message_id`` is block ``block`` of ``provider_id`` under some turn of this agent:
+    the row's own trace first, then every turn's (a mismatch at a slot is rare: a shift, or a
+    trace read differently)."""
+    if not message_id.startswith(("live-", IDENTITY_BLOCK_PREFIX)):
+        return False
+    if row_trace and _identity_id(agent_id, backend_session_id, row_trace, provider_id, block) == message_id:
+        return True
+    return any(_identity_id(agent_id, backend_session_id, str(row["trace_id"]), provider_id, block) == message_id
+               for row in database.execute(
+                   "SELECT DISTINCT trace_id FROM turns WHERE agent_id = ? AND trace_id <> ''", (agent_id,)))
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -1466,6 +1561,19 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                             unanswered_key=(carry or {}).get("unanswered_key", ""))
     # Rows this import already wrote: never moved again (RM-N1).
     placed_ids: set[str] = set()
+    # R108: the next block index of each keyed message (trace, provider id) in this import.
+    identity_blocks: dict[tuple[str, str], int] = {}
+    # R108: a pass that holds every line may park a positional row an identity row's shift
+    # displaced; these copies by (role, timestamp, text), each deleted when its line is written
+    # again. Any other pass refuses while such a copy stands (one left by a pass that never
+    # ended): only a full read, which writes every line again, may remove it.
+    whole = start_seq == 0 and carry is None
+    parked_copies: dict[tuple[Any, str, Any], str] = {}
+    if not whole and database.execute(
+            """SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ? AND seq >= ?
+                LIMIT 1""",
+            (agent_id, backend_session_id, _PARKED_POSITIONAL_SEQ_BASE)).fetchone() is not None:
+        raise _tail_refusal("parked_positional_rows")
     # For the carried-inputs guard (lib.message_carry), recorded with the
     # carry: the latest time a turn so far carries (None: not known, the
     # carry this import started from did not record it), and whether a reply
@@ -1580,6 +1688,12 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         text = str(turn.get("text") or "")
         origin = "user"
         sender_agent_id = ""
+        if role == "assistant" and not turn.get("id") and reply_trace and turn.get("provider_id"):
+            identity = _keyed_line_id(database, agent_id, backend_session_id, source_file, seq,
+                                      start_seq, reply_trace, str(turn["provider_id"]), identity_blocks,
+                                      whole=whole, parked=parked_copies)
+            if identity:
+                turn = {**turn, "id": identity}
         if turn.get("id") and not _turn_id_is_ours(database, str(turn["id"]), agent_id,
                                                     backend_session_id, source_file, seq):
             turn = {key: value for key, value in turn.items() if key != "id"}
@@ -1704,7 +1818,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # those cases retain normalization of the effective value.
                 # An empty prepared value is valid, not a missing value.
                 visible=(visible_replies[index] if visible_replies is not None
-                         and text == str(turn.get("text") or "") else None))
+                         and text == str(turn.get("text") or "") else None),
+                provider_id=str(turn.get("provider_id") or ""))
             skipped_slot_removed = skipped_slot_removed or changed
         row = _upsert_row(
             database, agent_id=agent_id, backend_session_id=backend_session_id,
@@ -1716,6 +1831,15 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         timestamp, tools, display_cells = row.timestamp, row.tools, row.display_cells
         unchanged, revision = row.unchanged, row.revision
         skipped_slot_removed = skipped_slot_removed or row.changed
+        if parked_copies:
+            # The parked copy of the row this line just wrote again goes in the same batch, so
+            # it is shown twice for as short a time as can be (the end-of-pass cleanup removes
+            # whatever was not paired).
+            copy = parked_copies.pop((role, str(timestamp or ""), text), None)
+            if copy is not None and database.execute(
+                    "DELETE FROM messages WHERE message_id = ? AND seq >= ?",
+                    (copy, _PARKED_POSITIONAL_SEQ_BASE)).rowcount:
+                skipped_slot_removed = True
         newest_trace = row.row_trace or newest_trace
         if row.row_trace and not unchanged:
             # Only turns whose rows changed are re-stamped: an import re-reads
@@ -1815,6 +1939,7 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
                       AND trace_id IN (""" + ",".join("?" for _ in selected) + ")",
                 (agent_id, backend_session_id, *selected),
             ).fetchall())
+    own_streams_retracted = 0
     for live in live_rows:
         if final_rows.keep_declined_live(live):
             continue
@@ -1830,8 +1955,18 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
                 "DELETE FROM messages WHERE message_id = ?",
                 (live["message_id"],),
             )
+            if live["message_id"] in getattr(final_rows, "own_streams", ()):
+                own_streams_retracted += 1
             if live["has_turn"] and live_trace:
                 deleted_stamps.add(live_trace)
+    if own_streams_retracted:
+        # Each one is a reload for every client (replace_revision). In a Claude message of
+        # several blocks the stream starts its row again after each import, so this counts
+        # what R108 (adopt instead of retract) would remove. No ids: the backend and a count.
+        from .log import log
+        backend = database.execute("SELECT backend FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        log("importLiveOwnStreamRetracted",
+            f"backend={(backend[0] if backend else '') or 'unknown'} count={own_streams_retracted}")
     if _restore_unadopted_parked(database, agent_id, backend_session_id, source_file):
         skipped_slot_removed = True
     stale = database.execute(

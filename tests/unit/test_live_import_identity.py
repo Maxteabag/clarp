@@ -927,6 +927,10 @@ def test_summary_recovers_after_cleanup_writer_window(tmp_path, monkeypatch, fau
 @pytest.mark.parametrize('prefix_records', [7, 12], ids=['live-final-survives', 'placeholder-final'])
 def test_settled_tool_turn_keeps_summary_after_carry_input_full_import(
         tmp_path, monkeypatch, prefix_records):
+    # The stale remark is a live row written after its line was imported: R108 refuses that write
+    # (the import took the stream's id), so this pins the carry for rows stored before R108.
+    from lib import message_writes
+    monkeypatch.setattr(message_writes, "_keyed_line_id", lambda *a, **k: "")
     from lib import log as log_module
     aid, path, now = _opened_case(tmp_path, monkeypatch, 'defaults')
     first, remark, final = 'A distinct first remark.', 'Another independent remark.', 'The final tool reply.'

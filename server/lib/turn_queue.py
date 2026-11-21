@@ -211,20 +211,43 @@ def _cas(events, where: str, params=(), *, values=None, returning: str = "", con
                                     params=params, now=db.now_ms(), values=values,
                                     returning=returning)
 
+# What a queue item is (``queued_turns.kind``, issue 491). ``later``: its sender
+# asked for it to wait for the agent's current turn (``queue_if_busy``).
+# ``waiting``: a send that did not ask to wait met a busy agent and waits for
+# the running turn. Both are shown in the queue and run in order; the kind only
+# says why it waits.
+KIND_LATER = "later"
+KIND_WAITING = "waiting"
+
+
+def _row_shown(con, client_msg_id: str, trace_id: str) -> bool:
+    """Whether the conversation already holds this message's user row."""
+    from .message_import_common import _client_message_id
+    key = client_msg_id or trace_id
+    return bool(key) and con.execute(
+        "SELECT 1 FROM messages WHERE message_id = ?", (_client_message_id(key),)
+    ).fetchone() is not None
+
+
 def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
             trace_id: str, client_msg_id: str, synthesize_audio: bool,
             origin: str, sender_agent_id: str,
-            prompt_admission_id: str = "") -> bool:
+            prompt_admission_id: str = "", kind: str = KIND_LATER,
+            allow_paused: bool = False, shown: bool = False) -> bool:
+    """A queue item. ``shown``: the message's conversation row exists already
+    (written by an older admission): the item is kept for the dispatcher but is
+    not shown in the queue, so a message is never both (``show``)."""
+    now = db.now_ms()
     cursor = db.conn().execute(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, enqueued_at,
-               prompt_admission_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               prompt_admission_id, kind, allow_paused, shown_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
-         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id),
+         int(synthesize_audio), origin, sender_agent_id, now,
+         prompt_admission_id, kind, int(allow_paused), now if shown else None),
     )
     inserted = cursor.rowcount == 1
     if inserted:
@@ -244,16 +267,21 @@ def park(*, queue_id: str, agent_id: str, session: str, text: str,
          trace_id: str, client_msg_id: str, synthesize_audio: bool,
          origin: str, sender_agent_id: str,
          prompt_admission_id: str = "", allow_paused: bool = False) -> bool:
-    cursor = db.conn().execute(
+    # A parked send keeps the row it was admitted with: when a restart makes it
+    # queued again it is not also shown in the queue (issue 491).
+    con = db.conn()
+    now = db.now_ms()
+    cursor = con.execute(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?)
+               prompt_admission_id, allow_paused, shown_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
-         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id, int(allow_paused)),
+         int(synthesize_audio), origin, sender_agent_id, now,
+         prompt_admission_id, int(allow_paused),
+         now if _row_shown(con, client_msg_id, trace_id) else None),
     )
     return cursor.rowcount == 1
 
@@ -315,15 +343,17 @@ def park_at_head(*, queue_id: str, agent_id: str, session: str, text: str,
     has open, keeping their order behind it. The caller holds the write
     transaction (the release drain's hand-over writes this, the turn's end
     and its state together)."""
-    cursor = db.conn().execute(
+    con = db.conn()
+    now = db.now_ms()
+    cursor = con.execute(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0)""",
+               prompt_admission_id, allow_paused, shown_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0, ?)""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
-         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id))
+         int(synthesize_audio), origin, sender_agent_id, now,
+         prompt_admission_id, now if _row_shown(con, client_msg_id, trace_id) else None))
     if cursor.rowcount != 1:
         raise RuntimeError(f"could not park {queue_id}")
     _move_behind(agent_id, queue_id)
@@ -885,40 +915,103 @@ def mark_started(queue_id: str) -> None:
     The receipt is ``started`` while its turn runs; settle_receipt ends it.
     """
     if queue_id:
-        with _receipt_write("start", (queue_id,)):
-            row = db.conn().execute(
-                "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
-                (queue_id,),
-            ).fetchone()
-            started = _cas("start", "queue_id = ?", (queue_id,),
-                           values={"text": "", "sender_agent_id": ""})  # stamps started_at
-            if started and row:
-                _bump_revision(str(row["agent_id"]))
-                # A fast backend may settle its turn before the dispatcher gets
-                # here; the receipt then ends at once.
-                settled = db.conn().execute(
-                    """SELECT outcome FROM turns
-                        WHERE agent_id = ? AND trace_id = ? AND settled_at IS NOT NULL
-                          AND NOT EXISTS (
-                              SELECT 1 FROM turns o
-                               WHERE o.agent_id = turns.agent_id
-                                 AND o.trace_id = turns.trace_id
-                                 AND o.settled_at IS NULL AND o.ended_at IS NULL)
-                        ORDER BY settled_at DESC LIMIT 1""",
-                    (row["agent_id"], row["trace_id"])).fetchone()
-                if settled:
-                    settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
-                                   str(settled["outcome"] or ""))
+        row = start_receipt(queue_id)
+        after_start(queue_id, row)
+
+
+def start_receipt(queue_id: str):
+    """The receipt's start: joins a caller's open transaction (issue 491: an
+    accepted steer starts its item in the same transaction that writes its row
+    and shows it, so no crash can leave it queued behind a shown row). Returns
+    the started row, or None when nothing moved. ``after_start`` follows once
+    the transaction is committed."""
+    if not queue_id:
+        return None
+    with _receipt_write("start", (queue_id,)):
+        row = db.conn().execute(
+            "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
+            (queue_id,),
+        ).fetchone()
+        shown = db.conn().execute("SELECT shown_at FROM queued_turns WHERE queue_id = ?",
+                                  (queue_id,)).fetchone()
+        # Payload-free once its row is written; until then the words are the
+        # message's only copy (its row is written at the CLI's init, or by
+        # recovery if the Host dies first: issue 491).
+        values = ({"text": "", "sender_agent_id": ""}
+                  if shown is not None and shown["shown_at"] is not None else {})
+        started = _cas("start", "queue_id = ?", (queue_id,),
+                       values=values or None)  # stamps started_at
         if started and row:
-            # A listen-first opening passes a pause that existed when the
-            # call was answered (agent_rings); it never ends that pause.
-            if (not queue_id.startswith("call-open:")
-                    and pending_count(str(row["agent_id"])) == 0
-                    and set_paused(str(row["agent_id"]), False)):
-                # Nothing is held any more, so a Stop's pause ends here. Say
-                # which item ended it: a peer message or goal wake can do so.
-                log("queuePauseEndedByDrain",
-                    f"agent={row['agent_id']} queue={queue_id} origin={row['origin']}")
+            _bump_revision(str(row["agent_id"]))
+            # A fast backend may settle its turn before the dispatcher gets
+            # here; the receipt then ends at once.
+            settled = db.conn().execute(
+                """SELECT outcome FROM turns
+                    WHERE agent_id = ? AND trace_id = ? AND settled_at IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM turns o
+                           WHERE o.agent_id = turns.agent_id
+                             AND o.trace_id = turns.trace_id
+                             AND o.settled_at IS NULL AND o.ended_at IS NULL)
+                    ORDER BY settled_at DESC LIMIT 1""",
+                (row["agent_id"], row["trace_id"])).fetchone()
+            if settled:
+                settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
+                               str(settled["outcome"] or ""))
+            return row
+    return None
+
+
+def start_shown_attempted() -> list[str]:
+    """At a runtime's start: an item still 'queued' whose row is written (shown) and whose
+    launch receipt says the prompt may have left was handed to a backend (an accepted steer,
+    or a launch that crashed before its start was recorded). It is never run again; its
+    receipt is started here so nothing is left 'queued' for good (issue 491, review C5).
+    Returns the queue ids started."""
+    from . import launch_receipts
+    started = []
+    rows = db.conn().execute(
+        """SELECT queue_id, trace_id FROM queued_turns
+            WHERE status = 'queued' AND shown_at IS NOT NULL""").fetchall()
+    for row in rows:
+        receipt = launch_receipts.get(str(row["trace_id"] or "")) or {}
+        if receipt.get("state") != launch_receipts.ATTEMPTED:
+            continue
+        try:
+            moved = start_receipt(str(row["queue_id"]))
+        except Exception as exc:  # noqa: BLE001 - tried again at the next start
+            log_exception("shownAttemptedStartFail", exc, detail=str(row["queue_id"]))
+            continue
+        if moved is not None:
+            started.append(str(row["queue_id"]))
+            after_start(str(row["queue_id"]), moved)
+    if started:
+        log("shownAttemptedStarted", " ".join(started))
+    return started
+
+
+def started_unshown() -> list[dict]:
+    """Items started (or claimed) whose conversation row was never written, with their
+    words: a Host that died between a launch on a session with no backend id and the
+    CLI's init. Recovery writes their row (issue 491)."""
+    return [dict(row) for row in db.conn().execute(
+        """SELECT * FROM queued_turns
+            WHERE status IN ('claimed', 'started') AND shown_at IS NULL
+              AND queue_id NOT LIKE 'call-open:%' AND text <> ''""")]
+
+
+def after_start(queue_id: str, row) -> None:
+    """After a committed start: a Stop's pause ends when nothing is held any more."""
+    if row:
+        # A listen-first opening passes a pause that existed when the
+        # call was answered (agent_rings); it never ends that pause.
+        if (not queue_id.startswith("call-open:")
+                and pending_count(str(row["agent_id"])) == 0
+                and set_paused(str(row["agent_id"]), False)):
+            # Nothing is held any more, so a Stop's pause ends here. Say
+            # which item ended it: a peer message or goal wake can do so.
+            log("queuePauseEndedByDrain",
+                f"agent={row['agent_id']} queue={queue_id} origin={row['origin']}")
 
 
 # R120: a plain send that met a busy agent of a backend that cannot be steered
@@ -1030,7 +1123,23 @@ def fail_refused_launch(row, *, failures: int, error: str) -> bool:
     return True
 
 
-def remove(queue_id: str) -> bool:
+def _may_have_left(row) -> bool:
+    """A waiting item a steer is being handed to (its launch receipt says the
+    prompt may have left): neither edited nor deleted, so the row its turn
+    writes never holds other words than the backend was given (issue 491)."""
+    if not row["trace_id"]:
+        return False
+    from . import launch_receipts
+    receipt = launch_receipts.get(str(row["trace_id"])) or {}
+    return receipt.get("state") == launch_receipts.ATTEMPTED
+
+
+def remove(queue_id: str, *, withdraw_shown: bool = False) -> bool:
+    """Delete a queued item, never one already shown in the conversation (its
+    row was written: the message is the conversation's, not the queue's) or one
+    whose prompt may have left (``_may_have_left``). ``withdraw_shown``: the
+    Host itself withdraws work whose start failed after its row was written
+    (the hotseat desk's prompt): the row stays, the item goes, as before."""
     if not queue_id:
         return False
     row = get(queue_id)
@@ -1039,8 +1148,15 @@ def remove(queue_id: str) -> bool:
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
+        shown = "" if withdraw_shown else " AND shown_at IS NULL"
+        current = con.execute(
+            "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'" + shown,
+            (queue_id,)).fetchone()
+        if current is None or (_may_have_left(current) and not withdraw_shown):
+            con.execute("COMMIT")
+            return False
         cursor = con.execute(
-            "DELETE FROM queued_turns WHERE queue_id = ? AND status = 'queued'",
+            "DELETE FROM queued_turns WHERE queue_id = ? AND status = 'queued'" + shown,
             (queue_id,),
         )
         if cursor.rowcount:
@@ -1081,6 +1197,46 @@ def cancel(queue_id: str) -> bool:
     return row is not None
 
 
+def show(queue_id: str, *, con=None) -> bool:
+    """The message's conversation row is written: from now on it is the
+    conversation's, not the queue's. Called inside the transaction that writes
+    the row (``TurnDispatchService._start_queued_row``), so a reader never
+    finds it in both or in neither. The item stays for the dispatcher (its
+    launch and its retries read it) but is no longer shown, edited or
+    deleted. Idempotent."""
+    if not queue_id:
+        return False
+    con = con or db.conn()
+    cursor = con.execute(
+        "UPDATE queued_turns SET shown_at = ? WHERE queue_id = ? AND shown_at IS NULL",
+        (db.now_ms(), queue_id))
+    if cursor.rowcount:
+        row = con.execute("SELECT agent_id FROM queued_turns WHERE queue_id = ?",
+                          (queue_id,)).fetchone()
+        if row is not None:
+            _bump_revision(str(row["agent_id"]))
+    return bool(cursor.rowcount)
+
+
+# What a client reads as the agent's queue (issue 491): every accepted message whose
+# conversation row is not written yet. That is a queued item, and also one that is
+# claimed or started but has no row yet (a turn on a session with no backend id at
+# its handoff writes its row at the CLI's init, not at the start): until then it is
+# still the queue's, so a message is never in neither read. A listen-first opening
+# never has a row and is no message of the user's.
+IN_QUEUE_READ = ("(status = 'queued' OR (status IN ('claimed', 'started')"
+                 " AND queue_id NOT LIKE 'call-open:%')) AND shown_at IS NULL")
+
+
+def waiting_items(agent_id: str) -> list[dict]:
+    """What a client reads as the agent's queue (GET /turn-queue): the items whose
+    conversation row is not written yet (IN_QUEUE_READ), in order."""
+    return [dict(row) for row in db.conn().execute(
+        f"""SELECT * FROM queued_turns
+            WHERE agent_id = ? AND {IN_QUEUE_READ}
+            ORDER BY queue_seq""", (agent_id,))]
+
+
 def get(queue_id: str) -> dict | None:
     row = db.conn().execute(
         "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'",
@@ -1116,15 +1272,16 @@ def update_text(queue_id: str, text: str) -> bool:
     con.execute("BEGIN IMMEDIATE")
     try:
         row = con.execute(
-            "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'",
+            "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'"
+            " AND shown_at IS NULL",
             (queue_id,),
         ).fetchone()
-        if row is None:
+        if row is None or _may_have_left(row):
             con.execute("COMMIT")
             return False
         cursor = con.execute(
             """UPDATE queued_turns SET text = ?
-                WHERE queue_id = ? AND status = 'queued'""",
+                WHERE queue_id = ? AND status = 'queued' AND shown_at IS NULL""",
             (value, queue_id),
         )
         if cursor.rowcount:
@@ -1432,9 +1589,9 @@ def pending_count(agent_id: str) -> int:
 def state(agent_id: str) -> dict[str, int | bool]:
     """Return the count and revision from one SQLite read snapshot."""
     row = db.conn().execute(
-        """SELECT
+        f"""SELECT
                (SELECT COUNT(*) FROM queued_turns
-                 WHERE agent_id = ? AND status = 'queued') AS pending_count,
+                 WHERE agent_id = ? AND {IN_QUEUE_READ}) AS pending_count,
                COALESCE((SELECT revision FROM queue_state_revisions
                           WHERE agent_id = ?), 0) AS revision,
                COALESCE((SELECT paused FROM queue_state_revisions
@@ -1456,7 +1613,7 @@ def states() -> dict[str, dict[str, int | bool]]:
             "paused": bool(row["paused"]),
         }
         for row in db.conn().execute(
-            """SELECT r.agent_id,
+            f"""SELECT r.agent_id,
                       COALESCE(q.pending_count, 0) AS pending_count,
                       r.revision,
                       r.paused
@@ -1464,7 +1621,7 @@ def states() -> dict[str, dict[str, int | bool]]:
                  LEFT JOIN (
                      SELECT agent_id, COUNT(*) AS pending_count
                        FROM queued_turns
-                      WHERE status = 'queued'
+                      WHERE {IN_QUEUE_READ}
                       GROUP BY agent_id
                  ) q ON q.agent_id = r.agent_id""")
     }

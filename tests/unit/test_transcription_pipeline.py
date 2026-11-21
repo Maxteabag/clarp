@@ -274,16 +274,23 @@ def test_engine_is_read_once_per_request():
 
 
 class PerModelSTT(StubSTT):
-    """Each model raises its own error, or answers with its own name."""
+    """Each model raises its own error, or answers with its own name. A refusal the Host
+    makes itself (a language set the engine cannot take, an unknown model) is raised before
+    the audio leaves; any other error comes after it left, so the handed language is noted
+    first, as stt_providers.transcribe does (R175)."""
 
     def __init__(self, errors):
         super().__init__()
         self.errors = errors
 
     def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        from lib import stt_language
         self.calls.append(("model", model))
-        if self.errors.get(model):
-            raise self.errors[model]
+        error = self.errors.get(model)
+        if error and not isinstance(error, (stt_providers.LanguageSetUnsupported, STTUnknownModelError)):
+            stt_language.note_handed(None)
+        if error:
+            raise error
         return f"from {model}", True, 1.0
 
 
@@ -746,3 +753,113 @@ def test_a_call_attempt_that_finds_whisper_busy_says_so():
         tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
                            ctype="audio/webm", prompt="")
     assert [a.get("reason") for a in call_stt["report"]["attempts"]] == ["whisper busy", "whisper busy"]
+
+# R175: each provider gets a recording at most once, whatever its models; the Host's own engine
+# is one engine under all its names; another local model is its own.
+def test_a_repeated_agent_engine_sends_the_recording_to_its_provider_once(monkeypatch):
+    # The reference case (reference_repeats_provider): Scribe listed twice and down, Nova
+    # refuses the set before contact. Scribe gets the recording once, not twice.
+    import lib.deepgram_stt, lib.eleven_stt
+    from lib import config, stt_language
+    sent = []
+
+    def scribe(**kw):
+        sent.append("elevenlabs")
+        raise RuntimeError("scribe 503")
+    monkeypatch.setattr(lib.eleven_stt, "transcribe", scribe)
+    monkeypatch.setattr(lib.deepgram_stt, "transcribe",
+                        lambda **kw: (sent.append("deepgram"), ("heard", 1.0))[1])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(whisper_model="small.en"))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: [
+        "elevenlabs:scribe_v2", "elevenlabs:scribe_v2", "deepgram:nova-3"])
+    received = []
+    out = _run(_ctx(_RealCloudSTT(received)), Recorder(), focus="rachel")
+    assert sent == ["elevenlabs"] and received == []
+    assert out.status == 422
+
+
+class _ContactSTT(StubSTT):
+    """Each engine either refuses before its audio leaves (no language noted, as
+    stt_providers.transcribe refuses a set, a missing key or an unknown model), or fails or
+    answers after contact (the handed language noted first, as transcribe does)."""
+
+    def __init__(self, before=(), after=()):
+        super().__init__()
+        self.before, self.after = set(before), set(after)
+
+    def transcribe_model_bytes(self, model, audio, ctype, prompt, *, wait=0.0):
+        from lib import stt_language
+        self.calls.append(("model", model))
+        if model in self.before:
+            raise stt_providers.LanguageSetUnsupported("set")
+        stt_language.note_handed("no,en")
+        if model in self.after:
+            raise RuntimeError(f"{model} 503")
+        return f"from {model}", True, 1.0
+
+
+def test_a_refusal_before_contact_leaves_the_provider_for_its_next_model(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: ["google:chirp_2", "google:chirp_3"])
+    stt = _ContactSTT(before={"google:chirp_2"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from google:chirp_3"
+    assert [c[1] for c in stt.calls] == ["google:chirp_2", "google:chirp_3"]
+
+
+def test_a_failure_after_contact_uses_the_provider_up(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for",
+                        lambda session: ["elevenlabs:scribe_v1", "elevenlabs:scribe_v2"])
+    stt = _ContactSTT(after={"elevenlabs:scribe_v1", "elevenlabs:scribe_v2"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 500
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v1"]
+
+
+def test_after_a_used_up_provider_the_next_one_is_still_tried(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: [
+        "elevenlabs:scribe_v1", "elevenlabs:scribe_v2", "deepgram:nova-3"])
+    stt = _ContactSTT(after={"elevenlabs:scribe_v1"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from deepgram:nova-3"
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v1", "deepgram:nova-3"]
+
+
+@pytest.mark.parametrize("engines, default, tried", [
+    (["elevenlabs:scribe_v2", "elevenlabs:scribe_v2"], None, ["elevenlabs:scribe_v2"]),
+    (["server-default", "local", "faster-whisper:small"], "faster-whisper:small", ["server-default"]),
+    (["faster-whisper:medium", "faster-whisper:large-v3"], None,
+     ["faster-whisper:medium", "faster-whisper:large-v3"]),
+])
+def test_an_engine_listed_twice_is_tried_once(monkeypatch, engines, default, tried):
+    from lib import stt_language
+    monkeypatch.setattr(stt_language, "engines_for", lambda session: list(engines))
+    stt = PerModelSTT({engine: RuntimeError(f"{engine} down") for engine in engines})
+    if default:
+        stt.default_model_id = default
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 500
+    assert [c[1] for c in stt.calls] == tried
+
+
+def test_saving_an_agents_engines_keeps_each_engine_once():
+    from lib import stt_language
+    stored = stt_language.merge_agent_engines(
+        {"ada": "elevenlabs:scribe_v2, elevenlabs:scribe_v2,deepgram:nova-3"}, is_valid=lambda e: True)
+    assert json.loads(stored)["ada"] == "elevenlabs:scribe_v2,deepgram:nova-3"
+
+
+def test_a_stored_duplicate_engine_list_sends_a_recording_to_its_provider_once(monkeypatch):
+    # Stored before saving dropped repeats: read once, and sent once (R175).
+    from lib import settings_store, stt_language
+    settings_store.set_text("transcription.agent_engines", json.dumps(
+        {"rachel": "elevenlabs:scribe_v2,elevenlabs:scribe_v2,deepgram:nova-3"}))
+    assert stt_language.engines_for("rachel") == ["elevenlabs:scribe_v2", "deepgram:nova-3"]
+    stt = _ContactSTT(after={"elevenlabs:scribe_v2"})
+    out = _run(_ctx(stt), Recorder(), focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from deepgram:nova-3"
+    assert [c[1] for c in stt.calls] == ["elevenlabs:scribe_v2", "deepgram:nova-3"]
