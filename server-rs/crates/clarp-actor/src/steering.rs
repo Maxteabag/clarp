@@ -44,9 +44,13 @@ pub(super) struct Separate {
 
 impl State {
     pub(super) fn for_prompt(agent: &str, turn: TurnId, trace: Option<&str>) -> Self {
-        let uuid = trace.and_then(takeover::prompt_uuid)
+        let uuid = trace
+            .and_then(takeover::prompt_uuid)
             .unwrap_or_else(|| takeover::untraced_uuid(agent, turn.0));
-        Self { primary_uuid: Some(uuid), ..Self::default() }
+        Self {
+            primary_uuid: Some(uuid),
+            ..Self::default()
+        }
     }
 
     pub(super) fn record(&mut self, entry: &Line) -> Option<Value> {
@@ -254,6 +258,7 @@ impl State {
                 turn: turn.0,
                 closes: separate.closes,
                 status: status.to_string(),
+                replaced_by: None,
                 started_at_ms: Some(read_at),
                 ended_at_ms: now_ms,
                 tool_count: 0,
