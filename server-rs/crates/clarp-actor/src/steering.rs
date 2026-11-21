@@ -8,7 +8,9 @@ use clarp_kernel::turn::{Origin, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
 
-use super::{Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, Waiting, message_at, written};
+use super::{
+    Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, Waiting, message_at, written,
+};
 
 #[derive(Default)]
 pub(super) struct State {
@@ -107,7 +109,8 @@ impl State {
                 let Some(queued) = batch.agent().waiting().find(|queued| queued.id == turn) else {
                     return Ok(None);
                 };
-                let waiting = Waiting::from_message(&message, turn, queued.accepted_at_ms, queued.admission);
+                let waiting =
+                    Waiting::from_message(&message, turn, queued.accepted_at_ms, queued.admission);
                 if batch.command(Command::JoinRead { turn }, now_ms).is_ok() {
                     out.changed.queue = true;
                     let agent = batch.agent();
@@ -116,7 +119,10 @@ impl State {
                         paused: agent.is_paused(),
                         revision: agent.queue_revision(),
                     };
-                    out.joined_reads.push(JoinedRead { message: waiting, queue });
+                    out.joined_reads.push(JoinedRead {
+                        message: waiting,
+                        queue,
+                    });
                     let speak = message.speak;
                     if self.parent.is_some() {
                         if self.separate.is_none() {
