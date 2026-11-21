@@ -368,6 +368,24 @@ pub enum ByHand {
     AtWork,
 }
 
+/// How far a queue item has gone before its conversation row is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueItemStatus {
+    Queued,
+    Claimed,
+    Started,
+}
+
+impl QueueItemStatus {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Claimed => "claimed",
+            Self::Started => "started",
+        }
+    }
+}
+
 /// A message that waits its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
@@ -382,6 +400,7 @@ pub struct Waiting {
     pub speak: bool,
     pub accepted_at_ms: i64,
     pub admission: Admission,
+    pub status: QueueItemStatus,
     pub origin: Origin,
     pub sender_agent_id: Option<String>,
 }
@@ -392,6 +411,7 @@ impl Waiting {
         turn: TurnId,
         accepted_at_ms: i64,
         admission: Admission,
+        status: QueueItemStatus,
     ) -> Self {
         Self {
             turn,
@@ -402,6 +422,7 @@ impl Waiting {
             speak: message.speak,
             accepted_at_ms,
             admission,
+            status,
             origin: message.origin.clone(),
             sender_agent_id: message
                 .sender
@@ -2345,12 +2366,25 @@ impl Actor {
         accepted_at_ms: i64,
         admission: Admission,
     ) -> Result<Waiting, ActorError> {
+        let agent = self.recorder.agent();
+        let status = if agent.joins().contains_key(&turn) {
+            // The follow-up belongs to the running turn until its echo writes the row.
+            QueueItemStatus::Started
+        } else if agent
+            .selected_takeover()
+            .is_some_and(|selected| selected.into == turn)
+        {
+            QueueItemStatus::Claimed
+        } else {
+            QueueItemStatus::Queued
+        };
         let message = self.message_at(message_seq)?;
         Ok(Waiting::from_message(
             &message,
             turn,
             accepted_at_ms,
             admission,
+            status,
         ))
     }
 
