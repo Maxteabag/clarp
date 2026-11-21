@@ -413,6 +413,7 @@ pub struct App {
 /// What the door keeps count of.
 pub struct Door {
     failures: Mutex<FailureLimiter>,
+    identity_reads: Mutex<FailureLimiter>,
     since: std::time::Instant,
     /// The devices whose right to speak was taken away, told to the streams they have open.
     revoked: tokio::sync::broadcast::Sender<String>,
@@ -422,6 +423,11 @@ impl Default for Door {
     fn default() -> Self {
         Self {
             failures: Mutex::default(),
+            identity_reads: Mutex::new(FailureLimiter::new(
+                trust::IDENTITY_READS_MOST,
+                trust::FAILURES_WINDOW_S,
+                trust::FAILURE_SOURCES_MOST,
+            )),
             since: std::time::Instant::now(),
             revoked: tokio::sync::broadcast::channel(64).0,
         }
@@ -429,21 +435,27 @@ impl Default for Door {
 }
 
 impl Door {
-    /// One more failure of an asker. Answers how many seconds it is told to wait: nothing
-    /// while it is within what anybody may fail.
-    fn failed(&self, source: &str) -> u64 {
-        let now = self.since.elapsed().as_secs_f64();
-        let mut failures = self
-            .failures
-            .lock()
-            .unwrap_or_else(|held| held.into_inner());
-        failures.failure(source, now)
+    /// Invalid authentication and pairing attempts spend the same failure budget.
+    fn refused(&self, source: &str, too_many: &str) -> Option<Response> {
+        self.spend(&self.failures, source, too_many)
     }
 
-    /// The answer to a caller that did not say who it is, or said it wrongly: that, or, to
-    /// one that fails too often, how long to wait.
-    fn refused(&self, source: &str, too_many: &str) -> Option<Response> {
-        let wait = self.failed(source);
+    /// An identity read spends only its own budget.
+    fn identity_refused(&self, source: &str) -> Option<Response> {
+        self.spend(&self.identity_reads, source, "too many identity reads")
+    }
+
+    fn spend(
+        &self,
+        budget: &Mutex<FailureLimiter>,
+        source: &str,
+        too_many: &str,
+    ) -> Option<Response> {
+        let now = self.since.elapsed().as_secs_f64();
+        let wait = budget
+            .lock()
+            .unwrap_or_else(|held| held.into_inner())
+            .failure(source, now);
         (wait > 0).then(|| {
             let mut refused =
                 ApiError::new(StatusCode::TOO_MANY_REQUESTS, too_many).into_response();
@@ -608,6 +620,7 @@ pub fn router(app: App) -> Router {
         .route("/turn-queue/resume", post(resume))
         .route("/turn-queue/{id}", delete(take_back).put(reword))
         .route("/turn-queue/{id}/send", post(send_by_hand))
+        .route("/pairing/identity", get(pairing_identity))
         .route("/pairing/exchange", post(pairing_exchange))
         .route("/pairing/issue", post(pairing_issue))
         .route("/paired-devices", get(paired_devices))
@@ -949,8 +962,9 @@ pub(crate) async fn last_opened(app: &App, who: &str) -> String {
     }
 }
 
-/// The only route a caller without a token may use: a device that has a code has no token yet.
+/// A device can check the Host's identity and exchange a code before it has a token.
 const EXCHANGE: &str = "/pairing/exchange";
+const PAIRING_IDENTITY: &str = "/pairing/identity";
 /// And the pictures this Host ships, which anybody may fetch: an address of one is put
 /// where no token goes (a notification, a page), as on the Python Host.
 const PICTURES: &str = "/static/";
@@ -1065,7 +1079,8 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
-    let open = path == EXCHANGE || (picture && request.method() == Method::GET);
+    let read = request.method() == Method::GET;
+    let open = path == EXCHANGE || (read && (path == PAIRING_IDENTITY || picture));
     let (local, source) = asked(&request);
     let mut device = None;
     let mut response = if open {
@@ -3402,6 +3417,19 @@ async fn send_by_hand(
 
 // ---- devices ---------------------------------------------------------------------------------
 
+/// The public bootstrap response holds only the information an app compares before pairing.
+async fn pairing_identity(State(app): State<App>, Extension(asker): Extension<Asker>) -> Response {
+    if let Some(wait) = app.door.identity_refused(&asker.source) {
+        return wait;
+    }
+    Json(json!({
+        "server_id": app.server_id,
+        "name": app.config.name,
+        "contract": { "host": HOST_CONTRACT },
+    }))
+    .into_response()
+}
+
 #[derive(Debug, Deserialize)]
 struct ExchangeRequest {
     #[serde(default)]
@@ -3511,12 +3539,25 @@ struct RevokeRequest {
 
 async fn revoke_device(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Json(request): Json<RevokeRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let device_id = request.device_id.trim().to_string();
-    if device_id.is_empty() {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "device_id required"));
-    }
+    use clarp_kernel::devices::{self, RevokeRefusal};
+    let limited_id = match &principal {
+        Principal::Device {
+            device_id,
+            scope: Scope::Limited,
+        } => Some(device_id.as_str()),
+        _ => None,
+    };
+    let device_id = devices::revoke_target(&request.device_id, limited_id)
+        .map_err(|why| match why {
+            RevokeRefusal::Missing => ApiError::new(StatusCode::BAD_REQUEST, "device_id required"),
+            RevokeRefusal::OtherDevice => {
+                ApiError::new(StatusCode::FORBIDDEN, devices::LIMITED_REFUSAL)
+            }
+        })?
+        .to_owned();
     if app.fleet.revoke(device_id.clone()).await? {
         // What the device still listens to ends now, not when it next asks.
         let _ = app.door.revoked.send(device_id.clone());
@@ -3807,7 +3848,7 @@ mod tests {
             (Method::POST, "/agents", true),
             (Method::DELETE, "/agents/echo", true),
             (Method::GET, "/paired-devices", true),
-            (Method::POST, "/paired-devices/revoke", true),
+            (Method::POST, "/paired-devices/revoke", false),
             (Method::POST, "/pairing/issue", true),
             (Method::GET, "/dirs", true),
             (Method::GET, "/past-sessions", true),
