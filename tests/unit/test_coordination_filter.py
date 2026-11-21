@@ -378,4 +378,4 @@ def test_a_previous_visible_row_within_the_cap_gives_the_same_count_as_before(ch
     by_id = {t["id"]: t for t in delta["turns"]}
     assert by_id[after[0]]["hidden_before"] == {
         "messages": 6, "exchanges": 3, "agents": [{"agent_id": chat.boss, "name": "Boss"}], "capped": False}
-    assert "hidden_before" not in by_id[first[0]]
+    assert "hidden_before" not in by_id[first[1]]      # its own turn's reply: nothing between them
