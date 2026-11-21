@@ -1,2 +1,2 @@
-0692267b46599ab202ebf4ffead9ad3e6a8de468
-The merge of the Python Host's PR 521 (it holds every merge through PR 521: 498, 518, issue 491 part B): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+4365da861e91084db15479e52f3df14cfb99945b
+The merge of the Python Host's PR 534 (it holds every merge through PR 534: 522 issue 491 part C, 524, 523, 525, 528, 526, 520, 519, 502): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
