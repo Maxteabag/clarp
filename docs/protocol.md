@@ -932,7 +932,8 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   characters (413); a note with no words answers 400.
 - `GET /coordination-settings` → `{"coordination_visibility": "show" | "hide"}`, and
   `POST /coordination-settings` `{"coordination_visibility"}` (a full device): the Host's
-  choice whether coordination between agents is shown, default `show`. A string that may
+  choice whether coordination between agents is shown, default `hide` (out of the way unless
+  the user asks for it; earlier releases defaulted to `show`; a stored choice is kept). A string that may
   gain values. `POST /agent-coordination` `{"session", "visibility": "show" | "hide" |
   "default"}`: one chat's own choice (`default` follows the Host); it answers
   `{"ok", "session", "coordination_visibility", "coordination_override"}`. Each change is

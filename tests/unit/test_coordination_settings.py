@@ -68,31 +68,32 @@ def _heads():
         "SELECT * FROM conversation_heads ORDER BY agent_id, backend_session_id")]
 
 
-def test_the_default_is_show_and_every_chat_follows_the_host(chats):
-    assert coordination.global_visibility() == "show"
-    assert _rows() == {"ivy": ("show", None), "rex": ("show", None)}
+def test_the_default_is_hide_and_every_chat_follows_the_host(chats):
+    """Nothing stored: coordination is out of the way unless the user asks for it (issue 478)."""
+    assert coordination.global_visibility() == "hide"
+    assert _rows() == {"ivy": ("hide", None), "rex": ("hide", None)}
     request = _Request(None)
     request._handle_coordination_settings_get()
-    assert request.answer == (200, {"coordination_visibility": "show"})
+    assert request.answer == (200, {"coordination_visibility": "hide"})
 
 
 def test_the_hosts_setting_changes_every_chats_row_in_the_same_step(chats):
-    request = _Request({"coordination_visibility": "hide"})
+    request = _Request({"coordination_visibility": "show"})
     request._handle_coordination_settings_post()
-    assert request.answer == (200, {"coordination_visibility": "hide"})
+    assert request.answer == (200, {"coordination_visibility": "show"})
     assert [(e["type"], e["kind"], e["coordination_visibility"], e.get("session"))
-            for e in request.ctx.stream.events] == [("agent-roster", "coordination-changed", "hide", None)]
-    assert _rows() == {"ivy": ("hide", None), "rex": ("hide", None)}
+            for e in request.ctx.stream.events] == [("agent-roster", "coordination-changed", "show", None)]
+    assert _rows() == {"ivy": ("show", None), "rex": ("show", None)}
 
 
 def test_a_chats_own_choice_wins_and_default_follows_the_host_again(chats):
-    request = _Request({"session": "ivy", "visibility": "hide"})
+    request = _Request({"session": "ivy", "visibility": "show"})
     request._handle_agent_coordination()
-    assert request.answer == (200, {"ok": True, "session": "ivy", "coordination_visibility": "hide",
-                                    "coordination_override": "hide"})
+    assert request.answer == (200, {"ok": True, "session": "ivy", "coordination_visibility": "show",
+                                    "coordination_override": "show"})
     assert [(e["kind"], e["session"], e["coordination_visibility"]) for e in request.ctx.stream.events] == [
-        ("coordination-changed", "ivy", "hide")]
-    assert _rows() == {"ivy": ("hide", "hide"), "rex": ("show", None)}
+        ("coordination-changed", "ivy", "show")]
+    assert _rows() == {"ivy": ("show", "show"), "rex": ("hide", None)}
     coordination.set_global("hide")
     coordination.set_chat(chats["ivy"], "show")
     assert _rows() == {"ivy": ("show", "show"), "rex": ("hide", None)}
@@ -112,7 +113,7 @@ def test_an_unknown_value_is_refused_and_nothing_changes(chats, body, handler):
     request = _Request(body)
     getattr(request, handler)()
     assert request.answer[0] == 400 and request.ctx.stream.events == []
-    assert _rows() == {"ivy": ("show", None), "rex": ("show", None)}
+    assert _rows() == {"ivy": ("hide", None), "rex": ("hide", None)}
 
 
 def test_an_unknown_chat_is_404(chats):
@@ -140,6 +141,7 @@ def test_a_setting_change_writes_nothing_to_any_conversation(chats):
 def test_an_agent_may_not_change_what_the_user_sees_of_coordination(chats, header, body, handler):
     """Z1: a request with a turn token, or from a paired peer Host, would let an agent hide its own
     coordination from the user (or the whole Host's): 403 agents_may_not, nothing written, no event."""
+    coordination.set_global("show")                     # the user chose to see it
     request = _Request(body)
     request.headers = {header: "tok-or-peer"}
     getattr(request, handler)()
@@ -165,7 +167,7 @@ def test_the_roster_view_says_what_the_separate_reads_said(chats):
     that decides which chats hide (roster_view), not from two reads of its own."""
     coordination.set_chat(chats["rex"], "hide")
     view = coordination.roster_view()
-    assert view.host == coordination.global_visibility() == "show"
+    assert view.host == coordination.global_visibility() == "hide"
     assert view.chosen == {chats["rex"]: "hide"}
     assert view.hiding == frozenset(coordination.hiding_agents())
     settings_store.set_text(coordination.GLOBAL_KEY, "hide")
