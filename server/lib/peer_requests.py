@@ -194,10 +194,13 @@ def settle_failed_waits() -> int:
     requester's goal. A request delivered, still queued or already answered is left alone; a
     wait already settled (its deadline passed) no longer waits on the key, so nothing is woken
     twice. Returns how many were settled."""
+    # The substring test is a cheap first cut that spares parsing every active goal's JSON
+    # each tick; the two json_extract terms decide.
     rows = conn().execute(
         """SELECT plan_id, json_extract(goal_json, '$.continuation.dependency_key') AS waiting
              FROM task_plans
             WHERE status = 'active'
+              AND instr(goal_json, '"peer:') > 0
               AND json_extract(goal_json, '$.continuation.state') = 'waiting'
               AND json_extract(goal_json, '$.continuation.dependency_key') LIKE 'peer:%'""").fetchall()
     settled = 0
