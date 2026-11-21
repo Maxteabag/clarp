@@ -399,10 +399,12 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
 
             def capture_log(event, detail=""):
                 if event == "transcriptFullDigest":
-                    # code=<word> count=1 backend=<...> size=<bucket>: nothing else.
-                    code, count, backend_field, size_field = detail.split(" ")
-                    assert count == "count=1" and backend_field.startswith("backend=") \
-                        and size_field.startswith("size=") and code.startswith("code=")
+                    # code=<word> count=1 backend=<...> size=<bucket> bytes=<n> cpu_ms=<n>:
+                    # nothing else (bytes and cpu_ms are numbers, never a path or an id).
+                    import re
+                    assert re.fullmatch(r"code=[a-z_]+ count=1 backend=(?:claude|codex|agy|other)"
+                                        r" size=[a-z0-9]+(?: bytes=[0-9]+)?(?: cpu_ms=[0-9]+)?", detail), detail
+                    code = detail.split(" ")[0]
                     metrics["second_read"].append(code[len("code="):])
                 if event == "transcriptPrefixChanged":
                     metrics["prefix_changed"].append(detail)
@@ -411,6 +413,9 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 if event in ("transcriptTailDecision", "transcriptTailRetention", "transcriptTailFenceRead"):
                     import re
                     shape = r"code=[a-z0-9_]+ count=[1-9][0-9]*"
+                    if event == "transcriptTailRetention" and detail.startswith("code=checkpoint_not_written "):
+                        shape += (r" reason=(?:no_capture|grew_during_store|moved_during_store|not_published"
+                                  r"|nothing_written|snapshot_missing)")
                     if event == "transcriptTailDecision":
                         shape += (r"(?: reason=(?:evicted_empty|evicted|overweight|unknown|consumed|unknown_concurrent|revision|unknown_revision|unknown_removal|unknown_metadata|unknown_reset|missing_unknown|publication_foreign_commit_yield|publication_connection_changed_yield|publication_yield_without_release_sample|publication_data_version_read_failure|publication_refused_unknown|publication_not_written|publication_file_unavailable|publication_file_moved|publication_superseded|oracle_history|automation_provenance|bootstrap_effect|bootstrap_file_moved|bootstrap_empty|bootstrap_assistant_prefix|bootstrap_partial_record|bootstrap_io|bootstrap_refused))?"
                                   r" backend=(?:claude|codex|agy|other)"
@@ -420,7 +425,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     metrics["tail_events"].append({"event": event, "code": fields["code"],
                                                    "count": int(fields["count"])})
                     if "reason" in fields:
-                        assert event == "transcriptTailDecision" and fields["code"] == "full_no_frontier"
+                        assert (event, fields["code"]) in {("transcriptTailDecision", "full_no_frontier"),
+                                                           ("transcriptTailRetention", "checkpoint_not_written")}
                         metrics["tail_events"][-1]["reason"] = fields["reason"]
                 return original_log(event, detail)
 

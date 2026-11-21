@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use clarp_kernel::takeover::{self, ClaudeFacts};
 use serde::Deserialize;
 use serde_json::Value;
