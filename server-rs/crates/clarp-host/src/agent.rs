@@ -1226,6 +1226,7 @@ pub(crate) fn never_ran() -> Status {
         live: None,
         last: None,
         waiting: Vec::new(),
+        queue_depth: 0,
         paused: false,
         queue_revision: 0,
         stop_generation: 0,
@@ -1313,7 +1314,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
 }
 
 enum QueueEdit {
-    Edited(Waiting),
+    Edited { client_id: String, text: String },
     Deleted(String),
 }
 
@@ -2763,9 +2764,9 @@ impl Worker {
                 let item = actor.queue_item(turn)?;
                 let reworded = actor.reword(turn, &text, now);
                 if matches!(reworded, Ok((Reworded::Done, _))) {
-                    self.queue_edit = item.map(|mut item| {
-                        item.text = text;
-                        QueueEdit::Edited(item)
+                    self.queue_edit = item.map(|item| QueueEdit::Edited {
+                        client_id: item.told_id,
+                        text,
                     });
                 }
                 answered(reworded, answer)?
@@ -3616,7 +3617,7 @@ impl Worker {
         let was_live = before.as_ref().and_then(|told| told.live.as_ref());
         let was_waiting: &[TurnId] = before.as_ref().map_or(&[], |told| told.waiting.as_slice());
         // The messages that have joined the queue since the clients were last told.
-        let joined: Vec<Waiting> = if status
+        let joined: Vec<String> = if status
             .waiting
             .iter()
             .any(|turn| !was_waiting.contains(turn))
@@ -3626,6 +3627,7 @@ impl Worker {
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|waiting| !was_waiting.contains(&waiting.turn))
+                .map(|waiting| waiting.told_id)
                 .collect()
         } else {
             Vec::new()
@@ -3721,9 +3723,9 @@ impl Worker {
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
 
         // The queue: a message joined it, one left it to run, it was held or let go.
-        for message in &joined {
+        for client_id in &joined {
             hub.publish(
-                wire::queue_updated(&record, &status, wire::QueueUpdate::Joined(message)),
+                wire::queue_updated(&record, &status, wire::QueueUpdate::Joined(client_id)),
                 now,
             );
         }
@@ -3734,15 +3736,11 @@ impl Worker {
             // It left the queue to run: it had waited there, or it was left for later and
             // nothing was in its way.
             if live.from_queue {
-                let message = actor.started_queue_item().ok().flatten();
                 hub.publish(
                     wire::queue_updated(
                         &record,
                         &status,
-                        wire::QueueUpdate::Started {
-                            client_id: &live.client_id,
-                            message: message.as_ref(),
-                        },
+                        wire::QueueUpdate::Started(&live.client_id),
                     ),
                     now,
                 );
@@ -3751,7 +3749,7 @@ impl Worker {
                 wire::dispatched(
                     &record,
                     live,
-                    status.waiting.len(),
+                    status.queue_depth,
                     &working_with(actor, live),
                 ),
                 now,
@@ -3768,7 +3766,7 @@ impl Worker {
                 wire::dispatched(
                     &record,
                     live,
-                    status.waiting.len(),
+                    status.queue_depth,
                     &working_with(actor, live),
                 ),
                 now,
@@ -3791,7 +3789,9 @@ impl Worker {
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
         let update = match &queue_edit {
-            Some(QueueEdit::Edited(message)) => Some(wire::QueueUpdate::Edited(message)),
+            Some(QueueEdit::Edited { client_id, text }) => {
+                Some(wire::QueueUpdate::Edited { client_id, text })
+            }
             Some(QueueEdit::Deleted(client_id)) => Some(wire::QueueUpdate::Deleted(client_id)),
             None if (held_or_let_go && !told_with_its_turn) || taken_back => {
                 Some(wire::QueueUpdate::Mailbox)
