@@ -1,6 +1,7 @@
 """Opt-in attribution of read syscalls on the janitor-autonomy thread."""
 from __future__ import annotations
 
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -14,6 +15,15 @@ FAMILIES = ("plan_headers", "plan_points", "plain_plans", "heads", "helpers", "m
 def thread_rchar():
     raw = Path("/proc/thread-self/io").read_bytes()
     return int(raw.splitlines()[0].split()[1]), len(raw)
+
+
+def thread_disk():
+    """Bytes this thread caused to be read from storage (read_bytes): what the page
+    cache did not serve, unlike rchar."""
+    for line in Path("/proc/thread-self/io").read_bytes().splitlines():
+        if line.startswith(b"read_bytes:"):
+            return int(line.split()[1])
+    raise ValueError("no read_bytes")
 
 
 def _family(sql):
@@ -68,6 +78,8 @@ class ReadMeter:
     def __init__(self):
         self.passes = self.observer_bytes = 0
         self.lanes, self.families = Counter(), Counter()
+        # Each lane's thread CPU (ms) and storage reads (bytes), beside its rchar.
+        self.lane_cpu, self.lane_disk = Counter(), Counter()
         self.worked = set()
         self.current = None
         self.sweep = self.self_check = self.unavailable = False
@@ -97,10 +109,21 @@ class ReadMeter:
 
     def lane(self, name, fn):
         self.current = name
+        cpu = time.thread_time()
+        try:
+            disk = thread_disk()
+        except (OSError, ValueError):
+            disk = None
         try:
             return self.measure(self.lanes, name, fn)
         finally:
             self.current = None
+            self.lane_cpu[name] += (time.thread_time() - cpu) * 1000
+            if disk is not None:
+                try:
+                    self.lane_disk[name] += max(0, thread_disk() - disk)
+                except (OSError, ValueError):
+                    self.unavailable = True
 
     def finish_pass(self):
         self.passes += 1
@@ -110,6 +133,8 @@ class ReadMeter:
             return {k: round(counter[k] / 1_000_000, 4) for k in names}
         remainder = max(0, self.lanes["keeper"] - sum(self.families.values()))
         detail = {"keeper_other_mb": round(remainder / 1_000_000, 4), "passes": self.passes, "lane_mb": mb(self.lanes, LANES),
+                  "lane_cpu_ms": {k: round(self.lane_cpu[k]) for k in LANES},
+                  "lane_disk_mb": mb(self.lane_disk, LANES),
                   "keeper_family_mb": mb(self.families, FAMILIES), "worked": sorted(self.worked),
                   "sweep": self.sweep, "self_check": self.self_check,
                   "sample_unavailable": self.unavailable}

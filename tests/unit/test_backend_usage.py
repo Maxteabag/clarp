@@ -1005,6 +1005,25 @@ def test_antigravitys_answer_stands_when_a_helper_keeps_its_pipes_open(tmp_path,
     assert backend_usage.fetch_agy_usage(timeout=1.0)["groups"]
 
 
+def test_each_antigravity_usage_run_logs_what_its_child_cost(tmp_path, monkeypatch):
+    """The usage check runs agy as a child process, outside the Host's threads: its cost is
+    logged per run (wall time, the child's CPU and storage reads), no ids, no output."""
+    import pathlib, stat
+    from lib import log as log_module
+    fixture = pathlib.Path(__file__).resolve().parents[1] / "fixtures/agy/1.3.0-usage.json"
+    fake = tmp_path / "bin/agy"
+    fake.parent.mkdir()
+    fake.write_text(f"#!/bin/sh\ncat {fixture}\nexit 0\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
+    lines = []
+    monkeypatch.setattr(log_module, "log", lambda event, detail="": lines.append((event, detail)))
+    assert backend_usage.fetch_agy_usage(timeout=5.0)["groups"]
+    [detail] = [d for e, d in lines if e == "agyUsageFetched"]
+    import re
+    assert re.fullmatch(r"ms=\d+ child_cpu_ms=\d+ child_disk_bytes=\d+", detail), detail
+
+
 def _write_codex_auth(codex_home, token: str, account_id: str) -> None:
     codex_home.mkdir(parents=True, exist_ok=True)
     (codex_home / "auth.json").write_text(json.dumps({

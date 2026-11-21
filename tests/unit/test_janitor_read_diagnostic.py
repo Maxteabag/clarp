@@ -14,7 +14,9 @@ def test_disabled_meter_does_not_sample_and_enabled_meter_emits_once_per_twenty(
         samples.append(1)
         return clock[0], 0
     records = []
+    disk = [0]
     monkeypatch.setattr(diag, "thread_rchar", sample)
+    monkeypatch.setattr(diag, "thread_disk", lambda: disk[0])
     monkeypatch.setattr(eventlog, "emit", lambda _source, name, **fields: records.append((name, fields["detail"])))
     switch = SimpleNamespace(janitor_read_diagnostics=False)
     monkeypatch.setattr(config, "load", lambda: switch)
@@ -23,6 +25,7 @@ def test_disabled_meter_does_not_sample_and_enabled_meter_emits_once_per_twenty(
         def run():
             calls.append(name)
             clock[0] += 1_000_000
+            disk[0] += 500_000
             if name == "keeper" and worker._read_meter:
                 worker._read_meter.work()
                 worker._read_meter.sweep = True
@@ -43,6 +46,10 @@ def test_disabled_meter_does_not_sample_and_enabled_meter_emits_once_per_twenty(
     [(event, detail)] = records
     assert event == "janitorAutonomyReads" and detail["passes"] == 20
     assert detail["lane_mb"] == dict.fromkeys(lanes, 20)
+    # Each lane's storage reads and thread CPU beside its rchar (readers report (f)).
+    assert detail["lane_disk_mb"] == dict.fromkeys(lanes, 10)
+    assert set(detail["lane_cpu_ms"]) == set(lanes) and all(
+        isinstance(ms, int) and ms >= 0 for ms in detail["lane_cpu_ms"].values())
     assert detail["worked"] == ["keeper"] and detail["sweep"] and not detail["self_check"]
 
 
@@ -79,6 +86,7 @@ def test_twentieth_report_reaches_journal_with_capture_off(capfd):
         detail = json.loads(lines[0].split(event, 1)[1])
         assert detail == {
             "passes": 20, "lane_mb": {**dict.fromkeys(diag.LANES, 0), "keeper": 1.5},
+            "lane_cpu_ms": dict.fromkeys(diag.LANES, 0), "lane_disk_mb": dict.fromkeys(diag.LANES, 0),
             "keeper_family_mb": dict.fromkeys(diag.FAMILIES, 0), "keeper_other_mb": 1.5,
             "worked": [], "sweep": False, "self_check": False, "sample_unavailable": False,
         }
