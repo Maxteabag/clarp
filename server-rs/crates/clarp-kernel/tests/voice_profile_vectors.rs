@@ -154,7 +154,7 @@ fn an_agent_speaks_with_the_voice_the_python_host_would_show() {
         }
         checked += 1;
     }
-    assert_eq!((checked, handed), (578, 2890));
+    assert_eq!((checked, handed), (581, 2905));
 }
 
 /// What the speaker hands over is the profile's voice, and it hands over nothing exactly when
@@ -199,7 +199,7 @@ fn the_speaker_hands_over_what_the_profile_shows_and_nothing_when_it_is_silent()
 }
 
 const SPOKEN: usize = 412;
-const SILENT: usize = 166;
+const SILENT: usize = 169;
 
 /// ElevenLabs is handed only an id it can take. An agent that spoke with ElevenLabs before
 /// (it was handed a usable id) still speaks with the same voice; one that was handed a JSON

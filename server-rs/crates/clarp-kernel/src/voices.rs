@@ -142,9 +142,13 @@ fn listed(name: &str) -> Vec<(String, String, String)> {
 /// The bundled ElevenLabs and prebuilt Gemini choices used by the voice pool.
 pub fn pool_ids(provider: &str) -> Vec<String> {
     match provider {
-        ELEVENLABS => listed("elevenlabs")
+        ELEVENLABS => lists()["elevenlabs"]
+            .as_array()
             .into_iter()
-            .map(|(id, _, _)| id)
+            .flatten()
+            .filter_map(|row| row["id"].as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
             .collect(),
         GEMINI => lists()["gemini"]
             .as_array()
