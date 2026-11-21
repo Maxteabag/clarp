@@ -3368,6 +3368,19 @@ a release when free and twice, a spent bound, a tool that has ended, one being s
 hook's report under way, one begun, a vfork parent, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
 process group. Wrong rules: `tools/plants/shim-hold.py`.
 
+**An ordinary recording with a language set (R152, 21 Nov 2026).** The upload and the voice
+profile use the kernel's engine order. With a language set, models of one hosted provider
+share an attempt, as do the aliases of the Host's default local engine. If the ordinary
+chain ends on a hosted engine that cannot take the set, the Host considers its selected
+model if it is known, keyed and takes language sets. A provider already tried is excluded.
+The Host also considers its own model when no hosted replacement qualifies. Its catalogue
+languages determine coverage, with Norwegian aliases and the Whisper model default for an
+undeclared list. The successful response and an idempotent replay carry `engine_fallback`.
+An exhausted plan replies with the fixed `language_set_unsupported` 422 and its reasons.
+An own-engine failure keeps engine detail in the log. Loading and busy keep their statuses.
+Fallback uses the original audio buffer and current retention policy. The vectors run the
+reference's selection, declarations and fallback at the merge of PR 501.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
