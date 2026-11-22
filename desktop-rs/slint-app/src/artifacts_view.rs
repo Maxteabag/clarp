@@ -677,7 +677,8 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     item.keep_line = (item.pending && !item.meta.is_empty()) || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
     item.hints = slint::ModelRc::new(slint::VecModel::from(card_hints(&item, &crate::commands::overrides_of(engine))));
     if item.kind == "render_spec" && !item.spec_state.is_empty() {
-        crate::form_view::spec_fields(&mut item, engine.render_spec(&item.id));
+        let form = engine.render_spec(&item.id);
+        crate::form_view::spec_fields(&mut item, form);
     }
     item
 }
