@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Compare the Python Host's stored owner settings with the Rust Host on this machine, and restore what is missing.
+
+A step of every cut-over (22 Nov 2026: the EliteBook cut-over lost transcription.engine, transcription.retain_audio and
+five janitors' state, and nobody noticed for two hours). Run it on the machine being cut over, right after the Rust
+Host has started with the imported devices, and again after any later install.
+
+  server-rs/tools/compare-settings            report only (exit 0 when nothing owner-facing differs, 1 when something does)
+  server-rs/tools/compare-settings --restore  report, then restore what can be restored here and report again
+
+Reads the Python Host's state.sqlite READ-ONLY and its config.toml / relay.json; asks the Rust Host on 127.0.0.1:7690
+with the token in ~/.config/clarp-host/env. Never prints a token, a key or a secret value.
+
+What it compares:
+  1. the Python `settings` table, less runtime state (launch receipts, queue generations, rings, live activities,
+     Hotseat and janitor bookkeeping, client focus, budgets, observations), against the Rust Host's stored settings;
+     the transcription engine and audio keeping are also compared through GET /transcription-providers;
+  2. the janitors: enabled and options of each Python janitor_configs row against GET /janitors on the Rust Host;
+  3. the connection relay's name (host_id) in each Host's relay.json;
+  4. owner config keys the Rust Host does not read (informational; from the audit of 22 Nov 2026).
+Restores: (1) through POST /transcription-providers; (2) through clarp-admin janitor enable / configure (a configure
+leaves a janitor disabled on the Rust Host, so an enabled one is enabled again right after). account-hotseat is left
+to the operator while the account-switch hang fix is not installed (it makes scheduled account switches).
+"""
+import json
+import os
+import pathlib
+import sqlite3
+import subprocess
+import sys
+import tomllib
+import urllib.error
+import urllib.request
+
+HOME = pathlib.Path.home()
+RUST = "http://127.0.0.1:7690"
+RUNTIME_PREFIXES = (
+    "launch-receipt", "turn_queue.", "client-chat:", "application-activity:", "live_activity", "agent_ring.",
+    "hotseat-", "janitor-adaptive.", "apns.", "live_activity_fcm.", "provider.", "provider_usage_identity_secret",
+    "state_log.", "server_instance_id", "heartbeat.accounting_activation_ms", "usage.", "tool_explanations.program",
+    "group_call.", "diagnostics.capture", "focus", "server_id", "previous_server_ids",
+    "tool_explanations.identity_key",
+    "quota-keeper.", "controller_actions.audit", "label-auditor.last-", "janitor-adaptive.", "desktop-presence",
+    "heartbeat.janitor_adopted", "judgments.errors", "dreaming.",  # runtime, or dreaming (not built on the Rust Host)  # a random key each Host makes for itself, not an owner choice
+)
+SECRET_WORDS = ("key", "token", "secret", "password", "credential", "private", "voip")
+UNREAD_CONFIG = {  # owner config keys the Rust Host does not read (audit 22 Nov 2026), with what that means
+    ("server", "public_base_url"): "links the Python Host built with its public address; the Rust Host builds its own",
+    ("ttyd", "*"): "Python's terminal via ttyd; the Rust Host runs its own terminal",
+    ("audio_central", "*"): "the Python push relay; the Rust Host pushes directly with the owner's keys (--push-relay off)",
+    ("transcript_shadow", "*"): "Python's transcript importer only",
+    ("runtime", "*"): "Python runtime only",
+    ("openai", "realtime_model"): "the Python Oracle's realtime model; the Rust Host's live calls read openai.live_model",
+    ("openai", "realtime_voice"): "as above",
+    ("openai", "realtime_transcription_model"): "as above",
+    ("openai", "oracle_delegation_strategy"): "the Python Oracle",
+    ("openai", "oracle_live_webrtc"): "the Python Oracle",
+}
+
+
+def say(text=""):
+    print(text, flush=True)
+
+
+def secretish(name):
+    return any(word in name.lower() for word in SECRET_WORDS)
+
+
+def rust_token():
+    env = (HOME / ".config/clarp-host/env").read_text().splitlines()
+    return next(l.split("=", 1)[1].strip().strip('"') for l in env if l.startswith("CLARP_HOST_TOKEN="))
+
+
+def rust(method, path, body=None):
+    req = urllib.request.Request(RUST + path, data=None if body is None else json.dumps(body).encode(), method=method,
+                                 headers={"Authorization": f"Bearer {rust_token()}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.load(e)
+        except Exception:  # noqa: BLE001
+            return e.code, {}
+
+
+def janitor_tool(*args):
+    tool = HOME / ".local/share/clarp-host/tools/clarp-admin"
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PWA_CONFIG", "CLARP_CONFIG_DIR")}
+    done = subprocess.run([str(tool), "janitor", *args], capture_output=True, text=True, env=env, timeout=120)
+    try:
+        data = json.loads(done.stdout)
+        return done.returncode, data.get("janitor", data)
+    except ValueError:
+        return done.returncode, {"error": (done.stdout + done.stderr).strip()[:200]}
+
+
+def python_db():
+    db = HOME / ".local/share/clarp/state.sqlite"
+    return sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+
+
+def compare(findings):
+    py = python_db()
+    # 1. stored settings
+    status, kv = rust("GET", "/transcription-providers")
+    rust_settings = {}
+    if status == 200:
+        rust_settings["transcription.engine"] = str(kv.get("engine") or "local")
+        rust_settings["transcription.retain_audio"] = "true" if kv.get("retain_audio") else "false"
+    fleet = HOME / ".local/share/clarp-host/data/fleet.db"
+    if fleet.exists():
+        con = sqlite3.connect(f"file:{fleet}?mode=ro", uri=True)
+        for row in con.execute("select * from kv where 1"):
+            if row[0] == "setting":
+                value = row[2].decode() if isinstance(row[2], bytes) else row[2]
+                rust_settings.setdefault(row[1], value)
+    for key, value in py.execute("select key, value from settings"):
+        if key.startswith(RUNTIME_PREFIXES):
+            continue
+        theirs = rust_settings.get(key)
+        mine = str(value).strip()
+        if theirs is None or str(theirs).strip() != mine:
+            if key == "transcription.engine" and theirs is None and mine == "local":
+                continue
+            shown = "<hidden>" if secretish(key) else mine[:80]
+            findings.append(("setting", key, shown, "missing" if theirs is None else ("<hidden>" if secretish(key) else str(theirs)[:80])))
+    # 2. janitors
+    status, listed = rust("GET", "/janitors")
+    rows = listed.get("janitors", listed) if isinstance(listed, dict) else listed
+    by_template = {j.get("template_id") or j.get("template"): j for j in rows or []}
+    for agent_id, template, enabled, options in py.execute("select agent_id, template_id, enabled, options_json from janitor_configs"):
+        mine = json.loads(options or "{}")
+        theirs = by_template.get(template)
+        if theirs is None:
+            findings.append(("janitor", template, "enabled" if enabled else "off", "missing"))
+            continue
+        if bool(enabled) != bool(theirs.get("enabled")):
+            findings.append(("janitor", template, "enabled" if enabled else "off", "enabled" if theirs.get("enabled") else "off"))
+        their_options = theirs.get("options") or {}
+        for name, value in mine.items():
+            if their_options.get(name) != value:
+                findings.append(("janitor option", f"{template}.{name}", "<hidden>" if secretish(name) else json.dumps(value)[:60],
+                                 "missing" if name not in their_options else json.dumps(their_options.get(name))[:60]))
+    # 3. relay name
+    names = []
+    for path in (HOME / ".config/clarp/relay.json", HOME / ".config/clarp-host/relay.json"):
+        try:
+            names.append(json.loads(path.read_text()).get("host_id"))
+        except (OSError, ValueError):
+            names.append(None)
+    if names[0] and names[0] != names[1]:
+        findings.append(("relay name", "host_id", str(names[0]), str(names[1])))
+    # 4. config keys the Rust Host does not read (informational)
+    try:
+        cfg = tomllib.loads((HOME / ".config/clarp/config.toml").read_text())
+    except (OSError, ValueError):
+        cfg = {}
+    for (section, key), why in UNREAD_CONFIG.items():
+        present = section in cfg and (key == "*" or key in (cfg.get(section) or {}))
+        if present:
+            findings.append(("config not read", f"[{section}] {key}", why, "informational"))
+    return findings
+
+
+def restore(findings):
+    for kind, name, mine, theirs in findings:
+        if kind == "setting" and name in ("transcription.engine", "transcription.retain_audio"):
+            body = {"engine": mine} if name == "transcription.engine" else {"retain_audio": mine == "true"}
+            status, _ = rust("POST", "/transcription-providers", body)
+            say(f"  restored {name} -> {mine} ({status})")
+        elif kind == "janitor" and theirs in ("off", "enabled") and name != "account-hotseat":
+            session = f"clarp-{name}"
+            code, j = janitor_tool("enable" if mine == "enabled" else "pause", session)
+            say(f"  janitor {session} {'enabled' if mine == 'enabled' else 'paused'} (exit {code}, enabled {j.get('enabled')})")
+        elif kind == "janitor option" and not name.startswith("account-hotseat."):
+            template, option = name.split(".", 1)
+            session = f"clarp-{template}"
+            code, j = janitor_tool("inspect", session)
+            was_enabled = bool(j.get("enabled"))
+            options = dict(j.get("options") or {})
+            options[option] = json.loads(mine)
+            code, j = janitor_tool("configure", session, "--config", json.dumps({"options": options}))
+            say(f"  janitor {session} option {option} -> {mine} (exit {code})")
+            if was_enabled and not j.get("enabled"):
+                code, j = janitor_tool("enable", session)
+                say(f"  janitor {session} enabled again after configure (exit {code}, enabled {j.get('enabled')})")
+        else:
+            say(f"  not restored here: {kind} {name} ({mine} vs {theirs})")
+
+
+def report(findings):
+    owner = [f for f in findings if f[0] != "config not read"]
+    say(f"{len(owner)} owner-facing difference(s):")
+    for kind, name, mine, theirs in owner:
+        say(f"  {kind}: {name}: Python {mine} | Rust {theirs}")
+    info = [f for f in findings if f[0] == "config not read"]
+    if info:
+        say(f"{len(info)} owner config key(s) the Rust Host does not read (informational):")
+        for _, name, why, _ in info:
+            say(f"  {name}: {why}")
+    return owner
+
+
+def main():
+    owner = report(compare([]))
+    if "--restore" in sys.argv[1:] and owner:
+        say("restoring:")
+        restore(owner)
+        say("after the restore:")
+        owner = report(compare([]))
+    sys.exit(1 if owner else 0)
+
+
+if __name__ == "__main__":
+    main()
