@@ -78,6 +78,10 @@ export async function refreshServerInfo() {
     const info = await r.json();
     const features = (info && info.capabilities && info.capabilities.features) || [];
     setServerFeatures(features);
+    // The one Host this app reads (several once it reads the all-Hosts list).
+    if (info && (info.server_id || info.name)) {
+      app.hosts = [{ id: String(info.server_id || ''), name: String(info.name || '') }];
+    }
     loadExplanationSettings();
   } catch (_) {}
 }
