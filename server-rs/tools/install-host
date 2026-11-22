@@ -36,10 +36,10 @@
 #                  Host runs the owner's selector itself (the commands the owner's file names,
 #                  `--speech-keys`, under [agents]), for a machine on which it is the only
 #                  Host: it then keeps the machine's tools, their logins, their providers'
-#                  settings and their skills. Never chosen by itself, and refused while the
-#                  Python Host of this machine runs (its unit is anything but stopped), with or
-#                  without a selector: those are the machine's, one Host keeps them, and that
-#                  Host links the skills at every update of its own
+#                  settings and their skills, and verifies logins and reads provider usage.
+#                  Never chosen by itself, and refused while the Python Host of this machine
+#                  runs (its unit is anything but stopped), with or without a selector.
+#                  One Host keeps the machine's tools and links the skills at every update
 #   --seats-tool   the owner's tool that knows the seats of the machine's accounts (Hotseat), which
 #                  the Host runs when an app asks for a reading of the desk of seats, and at no
 #                  other time. Default: `hotseat` where it is found on the path the agents' tools
@@ -198,11 +198,15 @@ python_runs() {
     done
     return 1
 }
-if [ "$accounts" = select ] && python_runs; then
-    echo "install-host: --accounts select: the Python Host of this machine runs." >&2
-    echo "  The tools' logins, the providers' settings and the skills are the machine's, and one Host" >&2
-    echo "  keeps them. Stop that Host first, or use --accounts follow beside it." >&2
-    exit 2
+ask_usage=""
+if [ "$accounts" = select ]; then
+    if python_runs; then
+        echo "install-host: --accounts select: the Python Host of this machine runs." >&2
+        echo "  The tools' logins, the providers' settings and the skills are the machine's, and one Host" >&2
+        echo "  keeps them. Stop that Host first, or use --accounts follow beside it." >&2
+        exit 2
+    fi
+    ask_usage=" --ask-usage"
 fi
 # Speech in. The Host's own engine is a worker run by a Python that has faster-whisper: the
 # Python Host's own interpreter on this machine, where it is, unless another is named. Which
@@ -663,7 +667,7 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts$ask_usage${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
 Restart=on-failure
 RestartSec=2
 
