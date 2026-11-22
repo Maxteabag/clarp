@@ -124,7 +124,7 @@ impl Engine {
     /// The chat is on a peer this engine reads (or may read once it is
     /// found): the primary keeps it selected or open instead of replacing it.
     pub(crate) fn reads_peer_session(&self, session: &str) -> bool {
-        all_hosts::is_peer_session(session) && self.peers.enabled
+        all_hosts::is_peer_session(session) && !self.peer && self.all_hosts()
     }
 
     /// Opens a peer's chat: this engine selects it (panes, Ctrl+R), its own
