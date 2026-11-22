@@ -134,7 +134,7 @@ impl State {
         event: &Value,
         batch: &mut Batch<'_>,
         facts: Facts,
-        closes: &str,
+        (closes, open): (&str, conversation::OpenRows<'_>),
         now_ms: i64,
         out: &mut Outputs,
     ) -> Result<Option<Sharing>, ActorError> {
@@ -160,7 +160,7 @@ impl State {
                     }
                     let revealed = !self.mixed
                         && conversation::mark_of(batch.log(), turn.0)?.is_none()
-                        && conversation::loosen(batch, into, now_ms)?;
+                        && conversation::split(batch, into, open, now_ms)?;
                     self.mixed |= revealed;
                     return Ok(Some(Sharing { speak, revealed }));
                 }
@@ -316,6 +316,7 @@ pub(super) fn inactive_owner(agent: &Agent) -> Result<bool, ActorError> {
 pub(super) fn recover_reads(
     batch: &mut Batch<'_>,
     cwd: &Path,
+    open: conversation::OpenRows<'_>,
     now_ms: i64,
     out: &mut Outputs,
 ) -> Result<bool, ActorError> {
@@ -365,7 +366,7 @@ pub(super) fn recover_reads(
             let message = message_at(batch.log(), message_seq)?;
             queue_started(batch, out, turn, &message);
             if proof.joined && !revealed && conversation::mark_of(batch.log(), turn.0)?.is_none() {
-                revealed = conversation::loosen(batch, into, now_ms)?;
+                revealed = conversation::split(batch, into, open, now_ms)?;
             }
             let _ = batch.command(Command::JoinSettled { turn }, now_ms);
         }
