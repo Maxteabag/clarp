@@ -42,3 +42,13 @@ def test_countdown_integration_preserves_unsettled_policy(tmp_path):
  assert artifacts.get(row['artifact_id'])['status']=='ready'
  db.conn().execute('UPDATE artifacts SET payload_json=? WHERE artifact_id=?',('{"target_at":"invalid"}',row['artifact_id']));db.conn().commit()
  assert attention_index.page()['artifacts'][0]['attention_bucket']=='blocking'
+
+
+def test_an_unanswered_native_form_blocks_and_an_answered_one_is_review():
+    # An open render_spec waits on the user like a decision: apps read 'review' rows
+    # away (archive) when their chat opens, which must never happen to an open form.
+    from lib import attention_index
+    row = lambda status: {"type": "render_spec", "status": status, "artifact_id": "a"}
+    assert attention_index._bucket(row("ready"), {}, 0) == "blocking"
+    assert attention_index._bucket(row("completed"), {}, 0) == "review"
+    assert attention_index._bucket({"type": "report", "status": "ready", "artifact_id": "b"}, {}, 0) == "review"

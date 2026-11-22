@@ -33,6 +33,9 @@ def _bucket(row, payload, now_ms):
     if status in {'draft','cancelled','expired'}:return None
     if status=='failed' or (row['type']=='workflow_run' and payload.get('conclusion') in FAILURES):return 'blocking'
     if status=='active':return 'working'
+    # An unanswered native form waits on the user like a decision: it must not be
+    # read away (archived) when its chat opens, as a finished deliverable is.
+    if row['type']=='render_spec' and status=='ready':return 'blocking'
     if status in {'ready','completed'}:return 'review'
     return None
 
