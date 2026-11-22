@@ -38,6 +38,8 @@ RESET = "test-reset fence and drain bookkeeping of the process-wide import worke
 
 ALLOWED: dict[tuple[str, str], str] = {
     ("lib/apns.py", "_send_locks"): LOCKS,
+    ("lib/peer_reads.py", "_cache"): CACHE,      # the 10 s cache of peers' snapshots (694)
+    ("lib/server_peers.py", "_learned"): CACHE,  # server_ids learned from peers, kept in memory so reads never write peers.json (694)
     ("lib/apns.py", "_CLIENT"): CLIENT,
     ("lib/apns.py", "_CLIENT_CTOR"): CLIENT,
     ("lib/apns.py", "_jwt_cache"): CACHE,

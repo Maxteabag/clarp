@@ -112,6 +112,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     'turn_identity',
     'takeover',
     'turn_lifecycle',
+    'cross_origin',  # pure origin parsing for [server] web_read_origins; config reads it
     'turn_queue',
     'turn_slots',
     'turn_takeover',
