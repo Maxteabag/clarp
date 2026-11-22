@@ -91,7 +91,7 @@ fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
     let skills = crate::managed_skills::keeps(&app.config);
     FEATURES.iter().filter(move |(feature, _)| {
         (*feature != CHIP || chip)
-            && (*feature != SEATS || seats)
+            && (!matches!(*feature, SEATS | "hotseat_desk_read_status") || seats)
             && (*feature != "hotseat_desk_actions" || actions)
             && (*feature != "backend_auth" || crate::logins::sign_in::keeps(app))
             && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
@@ -250,6 +250,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
     (SEATS, 84),
     ("hotseat_desk_actions", 86),
+    ("hotseat_desk_read_status", 148),
     // How the account seats stand as they were last read (`GET /hotseat/status`,
     // `clarp.hotseat-status/1`): served from what was kept, nothing read for it. Listed by
     // every Host, as there: the strict answer of a Host without the owner's tool says so.

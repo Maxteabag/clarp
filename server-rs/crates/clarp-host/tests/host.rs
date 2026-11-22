@@ -33161,6 +33161,10 @@ fn a_reading_of_the_seats_that_fails_says_how_and_one_of_which_a_part_fails_says
     seats_said(&place);
     std::fs::write(place.root.join("tui.exit"), "1").unwrap();
     let host = place.start_with("", &["--seats-tool", tool.to_str().unwrap()]);
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["hotseat_desk_read_status"],
+        148,
+    );
     let asked_at = now_ms();
     let desk = host.get("/hotseat/desk?refresh=1");
     assert_eq!(
@@ -33179,6 +33183,7 @@ fn a_reading_of_the_seats_that_fails_says_how_and_one_of_which_a_part_fails_says
             &json!([])
         )
     );
+    assert_eq!(desk["source_errors"], json!({"tui":"cli_failed"}));
     let next = desk["next_refresh_at"].as_i64().unwrap();
     assert!(
         (asked_at + 10_000..=now_ms() + 10_000).contains(&next),
@@ -33230,6 +33235,15 @@ fn a_reading_of_the_seats_that_fails_says_how_and_one_of_which_a_part_fails_says
         json!({ "tui": "ok", "list": "failed", "work": "failed" })
     );
     assert_eq!(
+        desk["source_errors"],
+        json!({"list":"cli_failed","work":"parse_failed"})
+    );
+    for provider in &desk["providers"].as_array().unwrap()[..2] {
+        assert_eq!(provider["inventory"], "unavailable");
+        assert_eq!(provider["read_state"], "failed");
+        assert_eq!(provider["error_code"], "cli_failed");
+    }
+    assert_eq!(
         (
             &desk["clarp_agents"]["total"],
             &desk["clarp_agents"]["would_use_by_account"]
@@ -33246,6 +33260,19 @@ fn a_reading_of_the_seats_that_fails_says_how_and_one_of_which_a_part_fails_says
         host.get("/hotseat/status")["providers"][0]["read_state"],
         "never"
     );
+    drop(host);
+
+    // A successful empty inventory is different from the failed provider read above.
+    let place = Place::new("seats-empty");
+    let tool = seat_tool(&place);
+    seats_said(&place);
+    std::fs::write(place.root.join("list.said"), r#"{"accounts":[]}"#).unwrap();
+    let host = place.start_with("", &["--seats-tool", tool.to_str().unwrap()]);
+    let empty = host.get("/hotseat/desk?refresh=1");
+    assert_eq!(empty["source_errors"], json!({}));
+    assert_eq!(empty["providers"][0], json!({
+        "provider":"claude","inventory":"empty","read_state":"ok","error_code":null
+    }));
     drop(host);
 
     // A Host that was told a tool that is not there says so, and so does one that was told
