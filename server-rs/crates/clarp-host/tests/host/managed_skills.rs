@@ -16,7 +16,7 @@ struct Machine {
 }
 
 const SEED: &str =
-    "{\"channel\": \"stable\", \"skills\": [\"core1\", \"opt1\", \"dep\", \"gone\"]}";
+    "{\"channel\": \"stable\", \"skills\": [\"gone\"], \"skills_off\": [\"core1\", \"opt2\"]}";
 
 fn skill(tree: &Path, id: &str) {
     std::fs::create_dir_all(tree.join(id)).unwrap();
@@ -43,7 +43,7 @@ impl Machine {
         let manifest = json!({ "version": 1, "skills": [
             { "id": "core1", "pack": "core", "description": "First core" },
             { "id": "core2", "pack": "core", "description": "Core of a newer release" },
-            { "id": "art1", "pack": "artifacts", "description": "Artifacts",
+            { "id": "art1", "pack": "artifacts", "description": "Artifacts", "default_enabled": false,
               "requires": [root.join("programs/clarp-standin-tool").to_str().unwrap()] },
             { "id": "opt1", "pack": "optional", "description": "Either program",
               "requires": ["clarp-absent-tool or clarp-standin-tool"] },
@@ -232,15 +232,27 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
     let tree = std::fs::canonicalize(&machine.tree).unwrap();
     let ours = |id: &str| Some(tree.join(id));
 
-    // At its start the Host took the Python Host's chosen list once, enrolled the core skill a
-    // newer release brought, and linked every chosen skill to its own release: over the
-    // Python Host's link and its own older release's, and where nothing was.
+    let state_path = place.root.join("data/install.json");
+    let state =
+        || -> Value { serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap() };
+    // Start with explicit opt-outs, even when the previous on-list listed only a retired skill.
+    assert_eq!(state()["skills_off"], json!(["core1", "opt2"]));
+    assert_eq!(
+        state()["skills"],
+        json!([
+            "agyown", "art1", "core1", "core2", "dep", "mine", "nosrc", "opt1"
+        ])
+    );
     for tool in ["claude", "codex", "agy"] {
         assert_eq!(machine.leads(tool, "opt1"), ours("opt1"), "{tool}");
         assert_eq!(machine.leads(tool, "dep"), ours("dep"), "{tool}");
         assert_eq!(machine.leads(tool, "core1"), ours("core1"), "{tool}");
-        assert_eq!(machine.leads(tool, "art1"), None, "{tool}: not chosen");
-        assert_eq!(machine.leads(tool, "opt2"), None, "{tool}: not chosen");
+        assert_eq!(
+            machine.leads(tool, "art1"),
+            ours("art1"),
+            "{tool}: on by default"
+        );
+        assert_eq!(machine.leads(tool, "opt2"), None, "{tool}: opted out");
     }
     assert_eq!(machine.leads("claude", "core2"), ours("core2"));
     // What is not Clarp's stays: a link to elsewhere, the user's own skill, Antigravity's own.
@@ -283,7 +295,8 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
     let health = |id: &str| row(&listed, id)["health"].as_str().unwrap().to_owned();
     assert_eq!(health("core2"), "modified");
     assert_eq!(row(&listed, "core2")["links"]["codex"], "modified");
-    assert_eq!(health("art1"), "inactive");
+    assert_eq!(health("art1"), "healthy");
+    assert!(row(&listed, "art1").get("default_enabled").is_none());
     assert_eq!(
         row(&listed, "art1")["requirements_ok"],
         true,
@@ -304,7 +317,7 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
     assert_eq!(health("mine"), "modified");
     assert_eq!(row(&listed, "mine")["links"]["claude"], "modified");
     // Antigravity's folder never decides a skill's health.
-    assert_eq!(health("agyown"), "inactive");
+    assert_eq!(health("agyown"), "healthy");
     assert_eq!(row(&listed, "agyown")["links"]["agy"], "modified");
     assert_eq!(health("nosrc"), "missing");
     let features = host.get("/server-info")["contract"]["features"].clone();
@@ -399,11 +412,13 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
         assert_eq!(machine.leads(tool, "opt1"), None, "{tool}");
     }
     assert_eq!(health_now(&host, "opt1"), "inactive");
+    assert_eq!(state()["skills_off"], json!(["core1", "opt1", "opt2"]));
     host.post(
         "/managed-skills",
         json!({ "skill_id": "opt2", "enabled": true }),
     );
     assert_eq!(health_now(&host, "opt2"), "dependency-missing");
+    assert_eq!(state()["skills_off"], json!(["core1", "opt1"]));
     // A core skill switched on again is linked again.
     let again = host.post(
         "/managed-skills",
@@ -411,10 +426,19 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
     );
     assert_eq!(again["skill"]["id"], "core1");
 
-    // The list is the Host's own: a restart keeps it, and the other Host's record is not read
-    // again (it now names a skill that stays off).
+    // A later manifest adds a skill and retires another. Recreate a link left for an opt-out.
     host.kill();
-    std::fs::write(&machine.seed, "{\"skills\": [\"art1\"]}").unwrap();
+    let other_state = r#"{"skills":[],"skills_off":["art1"]}"#;
+    std::fs::write(&machine.seed, other_state).unwrap();
+    let manifest_path = tree.join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    let items = manifest["skills"].as_array_mut().unwrap();
+    items.retain(|item| item["id"] != "dep");
+    items.push(json!({"id": "new", "pack": "optional", "requires": ["clarp-absent-tool"]}));
+    std::fs::write(manifest_path, manifest.to_string()).unwrap();
+    skill(&tree, "new");
+    link(&machine.folder("claude").join("opt1"), &tree.join("opt1"));
     std::fs::remove_file(machine.folder("claude").join("agyown")).unwrap();
     let host = machine.start(&place, Some("select"));
     let listed = host.get("/managed-skills");
@@ -425,7 +449,24 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
         .filter(|row| row["enabled"] == true)
         .map(|row| row["id"].as_str().unwrap())
         .collect();
-    assert_eq!(enabled, ["core1", "core2", "opt2", "dep", "agyown"]);
+    assert_eq!(
+        enabled,
+        [
+            "core1", "core2", "art1", "opt2", "mine", "agyown", "nosrc", "new"
+        ]
+    );
+    assert_eq!(health_now(&host, "new"), "dependency-missing");
+    for tool in ["claude", "codex", "agy"] {
+        assert_eq!(machine.leads(tool, "new"), ours("new"), "{tool}");
+        assert_eq!(machine.leads(tool, "dep"), None, "{tool}: retired");
+    }
+    assert_eq!(state()["skills_off"], json!(["opt1"]));
+    assert_eq!(
+        state()["skills"],
+        json!([
+            "agyown", "art1", "core1", "core2", "mine", "new", "nosrc", "opt2"
+        ])
+    );
     assert_eq!(
         machine.leads("claude", "agyown"),
         ours("agyown"),
@@ -436,11 +477,8 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
         None,
         "switched off stays off"
     );
-    assert_eq!(machine.leads("claude", "art1"), None);
-    assert_eq!(
-        std::fs::read_to_string(&machine.seed).unwrap(),
-        "{\"skills\": [\"art1\"]}"
-    );
+    assert_eq!(machine.leads("claude", "art1"), ours("art1"));
+    assert_eq!(std::fs::read_to_string(&machine.seed).unwrap(), other_state);
     // The older releases' trees are untouched by all of it.
     assert!(machine.older.join("core1/SKILL.md").is_file());
     assert!(machine.python.join("r0/skills/gone/SKILL.md").is_file());
@@ -533,6 +571,7 @@ fn a_host_that_does_not_keep_the_tools_reads_and_writes_none_of_their_skills() {
     );
     host.kill();
     assert_eq!(machine.snapshot(), before);
+    assert!(!place.root.join("data/install.json").exists());
 }
 
 #[test]

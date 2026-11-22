@@ -1,7 +1,7 @@
 //! The skills a Host keeps installed for its agents' tools.
 //!
 //! A release of Clarp ships a tree of skills with a manifest. A Host that keeps a machine's
-//! tools links each chosen skill into the folders the tools read skills from (Claude Code's,
+//! tools links each enabled skill into the folders the tools read skills from (Claude Code's,
 //! Codex's, and Antigravity's where it is installed) and reports, skill by skill, how those
 //! links stand. Only one Host keeps a machine's tools: the folders are the machine's, not a
 //! Host's (the lead's ruling of 20 Nov 2026), so a Host started with `--accounts follow`, or
@@ -16,11 +16,6 @@
 use serde_json::{Map, Value, json};
 
 use crate::python;
-
-/// The store's key for the skills this Host keeps chosen: a JSON list of their ids, sorted.
-/// Its presence also says that the first list has been taken (from the other Host's list, or
-/// the release's defaults), which happens once.
-pub const CHOSEN_SETTING: &str = "managed_skills.chosen";
 
 /// The word a change is refused with by a Host that does not keep this machine's tools.
 pub const KEPT_ELSEWHERE: &str = "skills_kept_elsewhere";
@@ -298,6 +293,7 @@ pub struct Facts {
 /// A skill's row in `GET /managed-skills`: its manifest entry with what was found.
 pub fn row(item: &Value, facts: &Facts) -> Value {
     let mut row = item.as_object().cloned().unwrap_or_default();
+    row.shift_remove("default_enabled");
     let required: Vec<Link> = facts
         .links
         .iter()
@@ -447,46 +443,35 @@ pub fn chosen_after(chosen: &[String], skill: &str, enabled: bool) -> Vec<String
 /// What a change answers: the manifest entry, switched as asked.
 pub fn changed(item: &Value, enabled: bool) -> Value {
     let mut told = item.as_object().cloned().unwrap_or_default();
+    told.shift_remove("default_enabled");
     told.insert("enabled".into(), json!(enabled));
     Value::Object(told)
 }
 
-/// The first chosen list of a Host that keeps the tools: the other Host's (its `install.json`,
-/// `skills`), where it has one; else the release's defaults, as the Python Host's setup chooses
-/// them: every core skill, and every skill of the artifacts pack that is not off by default.
-pub fn first_chosen(other: Option<&Value>, items: &[Value]) -> Result<Vec<String>, Malformed> {
-    if let Some(Value::Array(listed)) = other.and_then(|state| state.get("skills")) {
-        let mut chosen: Vec<String> = listed
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect();
-        chosen.sort();
-        chosen.dedup();
-        return Ok(chosen);
-    }
-    let mut chosen = Vec::new();
-    for item in items {
-        let pack = item.get("pack").and_then(Value::as_str).unwrap_or("");
-        let on = item
-            .get("default_enabled")
-            .is_none_or(|value| !falsy(value));
-        if pack == "core" || (pack == "artifacts" && on) {
-            chosen.push(skill_id(item)?);
-        }
-    }
-    chosen.sort();
-    chosen.dedup();
-    Ok(chosen)
+/// Explicit opt-outs from a previous Host's install record. A pre-674 positive list
+/// cannot distinguish a decision from an old default, so its omissions are not opt-outs.
+pub fn first_off(other: Option<&Value>) -> Vec<String> {
+    let Some(Value::Array(listed)) = other.and_then(|state| state.get("skills_off")) else {
+        return Vec::new();
+    };
+    let mut off: Vec<String> = listed.iter().map(py_str).collect();
+    off.sort();
+    off.dedup();
+    off
 }
 
-/// The chosen list at a start: core skills a newer release brought are chosen too, as the
-/// Python Host's `clarp-admin skills repair-links` enrols them after an update.
-pub fn enrolled(chosen: &[String], items: &[Value]) -> Result<Vec<String>, Malformed> {
-    let mut after = chosen.to_vec();
+/// Core skills are always on. Every other undecided skill is on by default.
+pub fn enabled(item: &Value, id: &str, off: &[String]) -> bool {
+    item.get("pack") == Some(&json!("core")) || !off.iter().any(|turned_off| turned_off == id)
+}
+
+/// The release's on-list, sorted, without duplicates or skills it no longer ships.
+pub fn enrolled(off: &[String], items: &[Value]) -> Result<Vec<String>, Malformed> {
+    let mut after = Vec::new();
     for item in items {
-        if item.get("pack") == Some(&json!("core")) {
-            after.push(skill_id(item)?);
+        let id = skill_id(item)?;
+        if enabled(item, &id, off) {
+            after.push(id);
         }
     }
     after.sort();
@@ -494,14 +479,11 @@ pub fn enrolled(chosen: &[String], items: &[Value]) -> Result<Vec<String>, Malfo
     Ok(after)
 }
 
-/// What a start does at a chosen skill's place in one folder: a skill this release has is
-/// linked where nothing is or another release's link is, and left where it is linked already
-/// or something not Clarp's is there; a chosen skill this release does not have loses the
-/// links other releases left. No other place is touched.
-pub fn at_start(link: Link, in_release: bool) -> Act {
-    match (in_release, link) {
+/// A start repairs enabled links, removes disabled or retired links, and preserves foreign entries.
+pub fn at_start(link: Link, enabled: bool) -> Act {
+    match (enabled, link) {
         (true, Link::Missing | Link::Outdated) => Act::Link,
-        (false, Link::Outdated) => Act::Unlink,
+        (false, Link::Healthy | Link::Outdated) => Act::Unlink,
         _ => Act::Leave,
     }
 }
