@@ -3119,8 +3119,6 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 self.headers.get("X-Transcription-ID"))
         except ValueError as e:
             return self._json_error(400, str(e))
-        fingerprint = transcription_results.request_fingerprint(
-            audio_bytes, ctype, requested_model, hands_free)
         call_scope = None
         if self.headers.get("X-Clarp-Call-Id") is not None:
             # A clip that names its call is validated before anything else,
@@ -3133,6 +3131,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                     (self.headers.get("X-Transcription-Session") or "").strip())
             except group_calls.CallError as exc:
                 return self._json(exc.status, exc.body())
+        # A call clip's id is bound to its principal, call and session (R87).
+        fingerprint = transcription_results.request_fingerprint(
+            audio_bytes, ctype, requested_model, hands_free, call=call_scope)
 
         # A retry can arrive while the original request is still finishing.
         # Serialize equal IDs, then consult the durable result before invoking
