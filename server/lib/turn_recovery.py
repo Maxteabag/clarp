@@ -269,6 +269,10 @@ class RecoveryMixin:
         self._rehydrate_once()
         from . import agent_rings
         examined = agent_rings.resolve_stale_claims(db.now_ms() - 30_000)
+        try:
+            agent_rings.purge_retired_openings()     # R78: retired openings do not pile up
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("agentRingOpeningPurgeFail", exc)
         turn_queue.reset_stale_claims(exclude=examined)
         recovered = 0
         deferred = False
