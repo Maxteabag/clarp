@@ -1346,6 +1346,7 @@ pub(crate) fn never_ran() -> Status {
         moved: None,
         live: None,
         last: None,
+        interrupted_since_ms: None,
         waiting: Vec::new(),
         queue_depth: 0,
         paused: false,

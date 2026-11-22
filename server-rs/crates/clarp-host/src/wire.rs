@@ -2143,6 +2143,7 @@ mod tests {
                 account_waits: 0,
                 never_ran: false,
             }),
+            interrupted_since_ms: None,
             waiting: vec![TurnId(3)],
             queue_depth: 1,
             paused: true,

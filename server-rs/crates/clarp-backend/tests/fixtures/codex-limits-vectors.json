@@ -1188,7 +1188,7 @@
     "used_percent": 12.25
    },
    "window": {
-    "resets_at": "1900000000000",
+    "resets_at": "",
     "used_percentage": 12.25
    }
   },
@@ -1198,7 +1198,7 @@
     "used_percent": 12.25
    },
    "window": {
-    "resets_at": "nan",
+    "resets_at": "",
     "used_percentage": 12.25
    }
   },
@@ -1213,17 +1213,23 @@
    }
   },
   {
-   "breaks": "OverflowError",
    "given": {
     "resets_at": "inf",
     "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
    }
   },
   {
-   "breaks": "OverflowError",
    "given": {
     "resets_at": "1e400",
     "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
    }
   },
   {
@@ -1237,10 +1243,13 @@
    }
   },
   {
-   "breaks": "ValueError",
    "given": {
     "resets_at": 253402300800,
     "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
    }
   },
   {
@@ -1249,7 +1258,7 @@
     "used_percent": 12.25
    },
    "window": {
-    "resets_at": "253402300800",
+    "resets_at": "",
     "used_percentage": 12.25
    }
   },
@@ -1274,10 +1283,13 @@
    }
   },
   {
-   "breaks": "ValueError",
    "given": {
     "resets_at": 1900000000000,
     "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
    }
   },
   {
