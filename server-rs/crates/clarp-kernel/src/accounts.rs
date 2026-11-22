@@ -1192,6 +1192,19 @@ mod tests {
         let mut here = parked(Some(PLAN_CHECKS_HERE));
         let answered = here.answered(Verdict::NoAccount, 1_000);
         assert!(ends(&answered), "{answered:?}");
+        // A run of the selector that gave no verdict (it ended badly, took too long, said its
+        // own error, could not be run) is no answer that leaves the model out: it ends nothing.
+        for no_verdict in [Verdict::NoAnswer, Verdict::Failed] {
+            let mut here = parked(Some(PLAN_CHECKS_HERE));
+            let answered = here.answered(no_verdict.clone(), 1_000);
+            assert!(!ends(&answered), "{no_verdict:?}: {answered:?}");
+        }
+        assert_eq!(read(Some(1), "", &[]), Verdict::NoAnswer);
+        assert_eq!(read(None, "", &[]), Verdict::NoAnswer);
+        assert_eq!(
+            read(Some(0), r#"{"available": false, "error": "boom"}"#, &[]),
+            Verdict::NoAnswer
+        );
         // The Python coordinator's count waits for three such answers.
         let mut there = parked(None);
         let answered = there.answered(Verdict::NoAccount, 1_000);
