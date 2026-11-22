@@ -3150,8 +3150,8 @@ async fn send_as(
     // A message from another agent of this Host never takes a running turn's place either:
     // it waits behind it like one left for later, and a Stop that came before does not hold
     // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).
-    let from_peer = foreign.is_some()
-        || matches!(&origin, Origin::Agent { agent_id } if !agent_id.is_empty());
+    let from_peer =
+        foreign.is_some() || matches!(&origin, Origin::Agent { agent_id } if !agent_id.is_empty());
     let admission = match (request.queue_if_busy.unwrap_or(false), by_a_person) {
         (false, _) if from_peer => Admission::Later,
         (false, _) => Admission::Queue,
