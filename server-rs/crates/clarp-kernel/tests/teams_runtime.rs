@@ -98,6 +98,7 @@ fn teams_runtime_matches_the_reference_fanout_digest_protocol_and_wake_rules() {
         }),
         digest,
         ids: inbox.clone(),
+        ..Brief::default()
     };
     assert_eq!(brief.prompt("User asks"), vectors["prompt"]);
     let allowed: Vec<_> = ["a-leader", "a-worker", "a-other"]

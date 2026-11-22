@@ -29,6 +29,8 @@ mod body_text;
 mod bounded_close;
 #[path = "host/cartesia_language.rs"]
 mod cartesia_language;
+#[path = "host/chat_view.rs"]
+mod chat_view;
 #[path = "host/compaction_outcome.rs"]
 mod compaction_outcome;
 #[path = "host/contacts.rs"]
@@ -607,7 +609,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 142);
+    assert_eq!(info["contract"]["host"], 145);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
@@ -9236,7 +9238,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 142);
+    assert_eq!(info["contract"]["host"], 145);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
     assert_eq!(info["contract"]["features"]["render_spec_v2"], 133);
     assert_eq!(

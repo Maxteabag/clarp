@@ -41,6 +41,9 @@ pub enum Which {
     Chat {
         include_automated: bool,
         hide_coordination: bool,
+        /// When set, keep conversation rows only. The value says whether the agent
+        /// can have a coordination audience.
+        conversation_only: Option<bool>,
     },
 }
 
@@ -49,6 +52,31 @@ impl Which {
         Self::Chat {
             include_automated,
             hide_coordination: false,
+            conversation_only: None,
+        }
+    }
+
+    pub fn conversation_view(self, can_have_coordination: bool) -> Self {
+        match self {
+            Self::Chat {
+                include_automated,
+                hide_coordination,
+                ..
+            } => Self::Chat {
+                include_automated,
+                hide_coordination,
+                conversation_only: Some(can_have_coordination),
+            },
+            _ => self,
+        }
+    }
+
+    fn conversation_only(self) -> Option<bool> {
+        match self {
+            Self::Chat {
+                conversation_only, ..
+            } => conversation_only,
+            _ => None,
         }
     }
 
@@ -57,10 +85,13 @@ impl Which {
             Self::All => Self::WithoutCoordination,
             Self::WithoutAutomated => Self::WithoutAutomatedOrCoordination,
             Self::Chat {
-                include_automated, ..
+                include_automated,
+                conversation_only,
+                ..
             } => Self::Chat {
                 include_automated,
                 hide_coordination: true,
+                conversation_only,
             },
             _ => self,
         }
@@ -97,13 +128,38 @@ impl Which {
     }
 
     fn keeps_row(self, row: &Versioned) -> bool {
-        self.keeps(&row.entry)
+        self.conversation_only().is_none()
+            && self.keeps(&row.entry)
             && (!self.hides() || row.coordination.is_none() || matches!(row.entry, Entry::Note(_)))
     }
 }
 
 /// How many items are read at a time when some of them are left out.
 const CHUNK: usize = 256;
+
+/// Rows that are conversation without needing to be a turn's anchor.
+pub fn is_conversation(entry: &Entry, session_rows: Option<usize>) -> bool {
+    match entry {
+        Entry::Message(message) => {
+            message.origin.is_user_send()
+                && !clarp_kernel::artifacts::forms::is_answer_row(&message.id)
+        }
+        Entry::Note(_) => true,
+        Entry::Notice(notice) => matches!(
+            notice.code.as_str(),
+            clarp_kernel::conversation::Notice::SYSTEM
+                | clarp_kernel::conversation::Notice::TURN_FAILED
+        ),
+        Entry::Reply(_) => session_rows.is_some(),
+        Entry::Imported(import) => clarp_kernel::chat_view::imported_is_conversation(&import.row),
+        _ => false,
+    }
+}
+
+struct Anchor {
+    id: String,
+    session_rows: usize,
+}
 
 /// A thing of a conversation as it is now.
 #[derive(Debug, Clone, PartialEq)]
@@ -117,6 +173,8 @@ pub struct Versioned {
     pub turn_number: Option<u64>,
     /// How that turn ended, when this is the row that closed it.
     pub turn: Option<TurnEnd>,
+    /// On a settled turn's conversation anchor, the number of rows omitted by that view.
+    pub session_rows: Option<usize>,
     /// The uses of the tools a reply's message calls, as they are now, in its order.
     pub tools: Vec<ToolCall>,
     /// Tool work came after this reply in the same turn: it was said along the way.
@@ -136,6 +194,7 @@ impl Versioned {
             ts_ms,
             live: false,
             turn: None,
+            session_rows: None,
             tools: Vec::new(),
             commentary: false,
             coordination: None,
@@ -330,6 +389,7 @@ struct Reader<'a> {
     log: &'a dyn AgentLog,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
+    anchors: HashMap<u64, Option<Anchor>>,
     /// Whether the turns asked about answer another agent ([`mark_of`]).
     marks: HashMap<u64, (Option<String>, bool)>,
 }
@@ -339,6 +399,7 @@ impl<'a> Reader<'a> {
         Self {
             log,
             ends: HashMap::new(),
+            anchors: HashMap::new(),
             marks: HashMap::new(),
         }
     }
@@ -376,6 +437,37 @@ impl<'a> Reader<'a> {
         Ok(self.ends.get(&turn).and_then(Option::as_ref))
     }
 
+    fn anchor(&mut self, turn: u64) -> Result<Option<&Anchor>, ActorError> {
+        if !self.anchors.contains_key(&turn) {
+            let anchor = match self.end(turn)? {
+                Some((end, seq)) if end.status != "replaced" => {
+                    let seq = *seq;
+                    find_anchor(self.log, turn, seq)?
+                }
+                _ => None,
+            };
+            self.anchors.insert(turn, anchor);
+        }
+        Ok(self.anchors.get(&turn).and_then(Option::as_ref))
+    }
+
+    fn chat_row(&mut self, row: &mut Versioned, which: Which) -> Result<(), ActorError> {
+        if matches!(which, Which::Chat { .. })
+            && let Some(turn) = row.turn_number
+            && let Some((end, seq)) = self.end(turn)?
+            && end.status != "replaced"
+        {
+            let revision = *seq * REVISION_STEP;
+            if let Some(anchor) = self.anchor(turn)?
+                && anchor.id == row.entry.id()
+            {
+                row.session_rows = Some(anchor.session_rows);
+                row.revision = row.revision.max(revision);
+            }
+        }
+        Ok(())
+    }
+
     fn hidden(&mut self, item: &Item, entry: &Entry) -> Result<Option<String>, ActorError> {
         if matches!(entry, Entry::Note(_)) {
             return Ok(None);
@@ -387,7 +479,27 @@ impl<'a> Reader<'a> {
     }
 
     fn allows(&mut self, item: &Item, entry: &Entry, which: Which) -> Result<bool, ActorError> {
-        Ok(which.keeps(entry) && (!which.hides() || self.hidden(item, entry)?.is_none()))
+        if !which.keeps(entry) || (which.hides() && self.hidden(item, entry)?.is_some()) {
+            return Ok(false);
+        }
+        let Some(respect_audience) = which.conversation_only() else {
+            return Ok(true);
+        };
+        if respect_audience
+            && (self.hidden(item, entry)?.is_some()
+                || matches!(entry, Entry::Imported(import) if import.row["audience"] == "agents"))
+        {
+            return Ok(false);
+        }
+        if is_conversation(entry, None) {
+            return Ok(true);
+        }
+        Ok(match item.turn.or(entry.turn()) {
+            Some(turn) => self
+                .anchor(turn)?
+                .is_some_and(|anchor| anchor.id == entry.id()),
+            None => false,
+        })
     }
 
     fn keeps_item(&mut self, item: &Item, which: Which) -> Result<bool, ActorError> {
@@ -395,6 +507,15 @@ impl<'a> Reader<'a> {
             return Ok(true);
         }
         let entry = Entry::from_item(item).map_err(|why| corrupt(item, why))?;
+        if which.conversation_only().is_some()
+            && let Some(Entry::TurnEnd(end)) = &entry
+            && let Some(anchor) = self.anchor(end.turn)?
+        {
+            let id = anchor.id.clone();
+            if self.stored(&id, which)?.is_some() {
+                return Ok(true);
+            }
+        }
         if entry
             .as_ref()
             .and_then(Entry::part_of)
@@ -402,7 +523,7 @@ impl<'a> Reader<'a> {
         {
             return Ok(false);
         }
-        if which.hides() {
+        if which.hides() || which.conversation_only().is_some() {
             let parent = super::helper_cells::parent(item)?;
             if let Some(id) = parent
                 .as_deref()
@@ -511,9 +632,67 @@ impl<'a> Reader<'a> {
         if let Some(entry) = entry
             && self.allows(&stored, &entry, which)?
         {
-            return self.row(&stored, entry).map(Some);
+            let mut row = self.row(&stored, entry)?;
+            self.chat_row(&mut row, which)?;
+            return Ok(Some(row));
         }
         Ok(None)
+    }
+}
+
+/// A turn's anchor and count come from its own rows, even if the page omits all its work.
+fn find_anchor(
+    log: &dyn AgentLog,
+    turn: u64,
+    mut before: Seq,
+) -> Result<Option<Anchor>, ActorError> {
+    let mut seen = HashSet::new();
+    let (mut reply, mut fallback) = (None, None);
+    let mut session_rows = 0;
+    loop {
+        let items = log.read_before(before, kind::ROWS, CHUNK)?;
+        let Some(oldest) = items.first() else { break };
+        before = oldest.seq;
+        let mut reached_prompt = false;
+        for item in items
+            .into_iter()
+            .rev()
+            .filter(|item| item.turn == Some(turn))
+        {
+            let Some(entry) = Entry::from_item(&item).map_err(|why| corrupt(&item, why))? else {
+                continue;
+            };
+            reached_prompt |= matches!(entry, Entry::Message(_));
+            if clarp_kernel::artifacts::forms::is_answer_row(entry.id())
+                || !seen.insert(entry.id().to_owned())
+            {
+                continue;
+            }
+            if is_conversation(&entry, None) {
+                if fallback.is_none() && matches!(entry, Entry::Message(_) | Entry::Note(_)) {
+                    fallback = Some(entry.id().to_owned());
+                }
+            } else {
+                session_rows += 1;
+                if let Entry::Reply(said) = &entry
+                    && reply.is_none()
+                    && !said.text.trim().is_empty()
+                {
+                    reply = Some(said.id.clone());
+                }
+            }
+        }
+        if reached_prompt {
+            break;
+        }
+    }
+    if let Some(id) = reply {
+        Ok(Some(Anchor {
+            id,
+            session_rows: session_rows - 1,
+        }))
+    } else {
+        Ok(fallback.map(|id| Anchor { id, session_rows }))
     }
 }
 
@@ -549,6 +728,16 @@ fn rows(
         let Some(entry) = Entry::from_item(item).map_err(|error| corrupt(item, error))? else {
             continue;
         };
+        if place == Place::Newest
+            && matches!(which, Which::Chat { .. })
+            && let Entry::TurnEnd(end) = &entry
+            && let Some(anchor) = reader.anchor(end.turn)?
+            && anchor.id != end.closes
+        {
+            let id = anchor.id.clone();
+            found.retain(|known| known.entry.id() != id);
+            found.extend(reader.stored(&id, which)?);
+        }
         if let Some(changed) = entry.part_of() {
             if place == Place::Newest {
                 found.retain(|known| known.entry.id() != changed);
@@ -559,7 +748,8 @@ fn rows(
         if !reader.allows(item, &entry, which)? {
             continue;
         }
-        let row = reader.row(item, entry)?;
+        let mut row = reader.row(item, entry)?;
+        reader.chat_row(&mut row, which)?;
         match found
             .iter()
             .position(|known| known.entry.id() == row.entry.id())

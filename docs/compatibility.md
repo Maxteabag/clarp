@@ -14,6 +14,12 @@ contract=<n>` on every request. A pair is compatible when
 constants disagree. The iOS repository keeps the mirror table in its own
 `docs/compatibility.md`, checked by `scripts/verify_static.py`.
 
+**Rust Host contract 145** adds [Conversation and Session views](protocol.md#conversation-and-session-views)
+(issue 702, feature `chat_view`). The Host tags log rows, can filter to conversation rows,
+and counts the omitted work on each settled turn's anchor. The chat's setting is available
+in the snapshot and through `POST /agent-chat-view`. The Python Host's contract history is
+listed below.
+
 | Host contract | Min iOS contract | Host release | What changed |
 |---|---|---|---|
 | 143 | 1 | An unanswered native form blocks (issue 673) | A `render_spec` artifact with status `ready` (open, not answered) now has `attention_bucket` `blocking` in `GET /attention` and wherever the bucket is given; before it was `review`, which both apps read away (archive) when the chat opens, so an unanswered form was archived just by opening its chat. An answered one (`completed`) stays `review`. `MIN_IOS_CONTRACT` stays 1. |
