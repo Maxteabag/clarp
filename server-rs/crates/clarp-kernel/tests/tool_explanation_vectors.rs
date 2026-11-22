@@ -1,7 +1,7 @@
 //! What is said of a tool's use without asking a model is what the Python Host says of it.
 //!
 //! `tests/fixtures/tool-explanation-vectors.json` (written by
-//! `tools/tool-explanation-vectors.py` out of that Host's own functions) holds 795 uses of
+//! `tools/tool-explanation-vectors.py` out of that Host's own functions) holds 797 uses of
 //! tools. Of each: how it is read (the bounded fields), how it is told (the template that
 //! fits with what the use names for it, or why none fits, for each of the seventeen reasons
 //! there are), the sentence at each of the five levels of detail, and the parts the call
@@ -39,8 +39,8 @@ fn a_use_is_read_as_the_python_host_reads_it() {
         let hidden = |value: &Value| value.as_str().is_some_and(|said| said.contains('\u{2026}'));
         withheld += usize::from(hidden(&row["read"]["command"]) || hidden(&row["read"]["summary"]));
     }
-    // Counted over the fixture by a script: 795 uses, in 36 of which a heredoc's body is withheld.
-    assert_eq!((read_of, withheld), (795, 36));
+    // Counted over the fixture by a script: 797 uses, in 36 of which a heredoc's body is withheld.
+    assert_eq!((read_of, withheld), (797, 36));
 }
 
 #[test]
@@ -65,31 +65,18 @@ fn a_use_is_told_and_spoken_of_as_the_python_host_does() {
             none += 1;
         }
     }
-    // Counted by the generator: a template fits 266 uses and none fits 529; 1062 sentences.
-    assert_eq!((fit, none, sentences), (266, 529, 1062));
+    // Counted by the generator: a template fits 266 uses and none fits 531; 1062 sentences.
+    assert_eq!((fit, none, sentences), (266, 531, 1062));
 }
 
 #[test]
 fn a_call_has_the_parts_and_the_shapes_the_python_host_gives_it() {
     let vectors = vectors();
     let key = vectors["identity_key"].as_str().unwrap();
-    let (mut parts, mut exact, mut slotted, mut placed, mut renamed, mut failed) =
-        (0, 0, 0, 0, 0, 0);
+    let (mut parts, mut exact, mut slotted, mut placed, mut renamed) = (0, 0, 0, 0, 0);
     for row in vectors["uses"].as_array().unwrap() {
         let ours = shapes::split(row["read"].as_object().unwrap(), key);
-        let Some(theirs) = row.get("parts").and_then(Value::as_array) else {
-            // The Python Host's splitter fails on a command that has no word at all (defect
-            // R39). This Host tells such a command as one piece.
-            assert_eq!(row["parts_fail"], "IndexError", "{}", row["use"]);
-            assert_eq!(ours.len(), 1, "{}", row["use"]);
-            assert!(
-                ours[0].exact && ours[0].reason == "opaque",
-                "{}",
-                row["use"]
-            );
-            failed += 1;
-            continue;
-        };
+        let theirs = row["parts"].as_array().unwrap();
         assert_eq!(ours.len(), theirs.len(), "{}", row["use"]);
         for (part, theirs) in ours.iter().zip(theirs) {
             let mut written = theirs.as_object().unwrap().clone();
@@ -113,11 +100,11 @@ fn a_call_has_the_parts_and_the_shapes_the_python_host_gives_it() {
             renamed += usize::from(!part.legacy.is_empty());
         }
     }
-    // Counted by the generator: 825 parts, 128 of them exact, 354 with slots, 34 with a
-    // directory, 86 with an earlier name; its splitter fails on 2 uses.
+    // Counted by the generator: 829 parts, 131 exact, 355 with slots, 34 with a directory,
+    // and 86 with an earlier name.
     assert_eq!(
-        (parts, exact, slotted, placed, renamed, failed),
-        (825, 128, 354, 34, 86, 2)
+        (parts, exact, slotted, placed, renamed),
+        (829, 131, 355, 34, 86)
     );
 }
 

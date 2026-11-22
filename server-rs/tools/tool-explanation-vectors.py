@@ -240,7 +240,7 @@ SHAPES_SHELL = [
     # a shell started for one script, inside
     "bash -c 'ls -la'", "cd /srv && bash -lc 'git status && git log -3'", "sh -c 'sh -c \"sh -c ls\"'", 'bash -c "ls" | head -3',
     "bash -c 'cd x && ls'", 'bash -x -c ls', "timeout 5 bash -c 'ls'", "ls && bash -c 'pwd' && cat a", "zsh -lc 'cd /x && true'",
-    "bash -c ''", "bash -c 'for x in y; do ls; done'",
+    ";", "bash -c ''", "cd /srv && bash -c ''", "bash -c 'for x in y; do ls; done'",
     # interpreters and what they run
     'python3 script.py --flag value', 'python3 -m http.server 8000', 'python3 -m "bad module"', "python3 -c 'print(1)'", 'node -e "1"',
     'node --inspect app.js', 'uv run python manage.py migrate', 'python3 "my script.py"', 'python3 - arg', 'ruby -e "puts 1"',
@@ -387,15 +387,7 @@ def run(root) -> dict:
         row['route'] = route
         row['said'] = said
         # The parts of the call, and each part as the templates are asked about it.
-        try:
-            parts = shapes.split(json.loads(json.dumps(read)))
-        except IndexError:
-            # The Python Host's splitter fails on a shell command that has no word at all (a comment
-            # alone, a lone operator, a shell started for an empty script): it looks at the first of
-            # no parts. Written down as what it is; the Rust Host answers such a command.
-            row['parts_fail'] = 'IndexError'
-            out.append(row)
-            continue
+        parts = shapes.split(json.loads(json.dumps(read)))
         row['parts'] = [{**part.to_json(), 'template_activity': part.template_activity()} for part in parts]
         out.append(row)
 
@@ -455,8 +447,6 @@ def main() -> int:
           f'{sum(1 for row in rows for text in row.get("said", []) if text is not None)} sentences said of these uses')
     print('  templates:', dict(templates_used.most_common()))
     parts = [part for row in rows for part in row.get('parts', [])]
-    failed = [row['use'] for row in rows if 'parts_fail' in row]
-    print(f'  the splitter fails on {len(failed)}:', [use.get('command', use.get('name')) for use in failed])
     exact = collections.Counter(part['reason'] for part in parts if part['exact'])
     print(f'  parts: {len(parts)} of {len(rows)} uses; shaped {sum(not part["exact"] for part in parts)}, exact {sum(exact.values())}: '
           f'{dict(exact.most_common())}; with slots {sum(bool(part["slots"]) for part in parts)}, with a directory '

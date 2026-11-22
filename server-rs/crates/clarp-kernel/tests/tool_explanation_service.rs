@@ -147,7 +147,6 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
     let key = vectors["identity_key"].as_str().unwrap();
     let (mut scenes, mut requests, mut refused, mut batches, mut parts, mut learned) =
         (0, 0, 0, 0, 0, 0);
-    let mut where_python_fails = 0;
     for scene in vectors["scenes"].as_array().unwrap() {
         let name = scene["name"].as_str().unwrap();
         let pace = Pace {
@@ -171,48 +170,40 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
         let told = scene["asked"].as_array().unwrap();
         let mut now = 1_800_000_000_000_i64;
         let mut asked = 0;
-        // Where the Python Host fails on a request (defect R39) and this desk answers, the
-        // two are not in the same state afterwards, and are not compared any further.
-        let mut apart = false;
-        let mut settle =
-            |desk: &mut Desk, janitor: &Janitor, now: &mut i64, asked: &mut usize, apart: bool| {
-                for _ in 0..64 {
-                    *now += pace.debounce_ms + 1;
-                    let current = |identity: &str| janitor.identity.as_deref() == Some(identity);
-                    while let Some(batch) = desk.claim(&current, *now) {
-                        let how = match told.get(*asked) {
-                            Some(theirs) => {
-                                let theirs_about = about(theirs["requests"].as_array().unwrap());
-                                assert_eq!(
-                                    about(&batch.requests),
-                                    theirs_about,
-                                    "{name}: batch {asked}"
-                                );
-                                assert_eq!(batch.level, theirs["level"], "{name}: batch {asked}");
-                                assert_eq!(batch.model, janitor.model, "{name}");
-                                assert!(current(&batch.identity), "{name}");
-                                theirs["how"].as_str().unwrap()
-                            }
-                            None => {
-                                assert!(
-                                    apart,
-                                    "{name}: the model is asked a time too many: {batch:?}"
-                                );
-                                "rule"
-                            }
-                        };
-                        batches += 1;
-                        parts += batch.requests.len();
-                        *asked += 1;
-                        *now += 1;
-                        desk.complete(&model(how, batch.level, &batch.requests), *now);
-                    }
-                    if !desk.busy() {
-                        return;
-                    }
+        let mut settle = |desk: &mut Desk, janitor: &Janitor, now: &mut i64, asked: &mut usize| {
+            for _ in 0..64 {
+                *now += pace.debounce_ms + 1;
+                let current = |identity: &str| janitor.identity.as_deref() == Some(identity);
+                while let Some(batch) = desk.claim(&current, *now) {
+                    let how = match told.get(*asked) {
+                        Some(theirs) => {
+                            let theirs_about = about(theirs["requests"].as_array().unwrap());
+                            assert_eq!(
+                                about(&batch.requests),
+                                theirs_about,
+                                "{name}: batch {asked}"
+                            );
+                            assert_eq!(batch.level, theirs["level"], "{name}: batch {asked}");
+                            assert_eq!(batch.model, janitor.model, "{name}");
+                            assert!(current(&batch.identity), "{name}");
+                            theirs["how"].as_str().unwrap()
+                        }
+                        None => {
+                            panic!("{name}: the model is asked a time too many: {batch:?}");
+                        }
+                    };
+                    batches += 1;
+                    parts += batch.requests.len();
+                    *asked += 1;
+                    *now += 1;
+                    desk.complete(&model(how, batch.level, &batch.requests), *now);
                 }
-                panic!("{name}: the desk does not come to rest");
-            };
+                if !desk.busy() {
+                    return;
+                }
+            }
+            panic!("{name}: the desk does not come to rest");
+        };
         for step in scene["steps"].as_array().unwrap() {
             now += 1;
             match step["do"].as_str().unwrap() {
@@ -237,11 +228,7 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
                     if let Some(words) = step.get("refused") {
                         assert_eq!(ours, Err(words.as_str().unwrap()), "{name}: {step}");
                         refused += 1;
-                    } else if step.get("fails").is_some() {
-                        assert!(ours.is_ok(), "{name}: {step}");
-                        where_python_fails += 1;
-                        apart = true;
-                    } else if !apart {
+                    } else {
                         let ours = ours.unwrap();
                         assert_eq!(ours, step["answer"], "{name}: {step}");
                         assert_eq!(
@@ -252,10 +239,8 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
                     }
                 }
                 "settle" => {
-                    settle(&mut desk, &janitor, &mut now, &mut asked, apart);
-                    if !apart {
-                        assert_eq!(asked, step["asked_so_far"], "{name}: {step}");
-                    }
+                    settle(&mut desk, &janitor, &mut now, &mut asked);
+                    assert_eq!(asked, step["asked_so_far"], "{name}: {step}");
                 }
                 "wait" => now += step["ms"].as_i64().unwrap(),
                 "janitor" => {
@@ -283,11 +268,8 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
                 other => panic!("{name}: a step nobody knows: {other}"),
             }
         }
-        settle(&mut desk, &janitor, &mut now, &mut asked, apart);
+        settle(&mut desk, &janitor, &mut now, &mut asked);
         scenes += 1;
-        if apart {
-            continue;
-        }
         assert_eq!(asked, told.len(), "{name}: how often the model was asked");
         let ours: Vec<Value> = desk
             .table()
@@ -321,16 +303,10 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
             "{name}: the ledger's sums"
         );
     }
-    // Counted by the tool that wrote the vectors: 23 scenes, 107 requests of which 23 are
-    // refused and 3 fail on the Python Host (defects R39 and R40); the model was asked 32
-    // times about 84 parts there, and 76 rows were learned. Here the model is also asked
-    // about what the Python Host fails on: two times and three parts more. The row that
-    // Host learned in a scene before it failed is not counted here.
-    assert_eq!(
-        (scenes, requests, refused, where_python_fails),
-        (23, 107, 23, 3)
-    );
-    assert_eq!((batches, parts, learned), (32 + 2, 84 + 3, 76 - 1));
+    // Counted by the generator: 23 scenes, 107 requests of which 23 are refused,
+    // 34 model batches about 88 parts, and 80 learned rows.
+    assert_eq!((scenes, requests, refused), (23, 107, 23));
+    assert_eq!((batches, parts, learned), (34, 88, 80));
 }
 
 #[test]

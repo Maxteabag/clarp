@@ -194,10 +194,11 @@ impl Part {
     pub fn template_activity(&self) -> Map<String, Value> {
         let mut activity = self.activity.clone();
         if !self.cwd.is_empty() && activity.get("name").and_then(Value::as_str) == Some("Bash") {
-            let own = activity
-                .get("command")
+            let kind = activity
+                .get("kind")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            let own = shell_command(&activity, python::strip(kind));
             let command = format!("cd {} && {own}", shell_quote(&self.cwd));
             activity.insert("command".to_string(), text(&command));
             activity.insert("input".to_string(), json!({"command": command}));
@@ -803,6 +804,14 @@ fn shell_parts(command: &str, depth: usize, key: &str) -> Vec<Part> {
             shaped,
         });
     }
+    if parsed.is_empty() {
+        // A wordless inner script leaves the wrapper available for explanation.
+        return if depth == 0 {
+            as_one("opaque")
+        } else {
+            Vec::new()
+        };
+    }
     let mut parts: Vec<Part> = Vec::new();
     let mut cwd = String::new();
     for (index, part) in parsed.iter().enumerate() {
@@ -842,9 +851,7 @@ fn shell_parts(command: &str, depth: usize, key: &str) -> Vec<Part> {
         parts.push(shell_part(&part.text, &part.shaped, &cwd, key));
     }
     if parts.is_empty() {
-        // Every part was a `cd` or did nothing: the first is told. A command that has no
-        // word at all (a comment alone, a shell started for no script) is told as one piece;
-        // the Python Host fails on it (defect R39).
+        // Every part was a `cd` or did nothing: the first is explained.
         return match parsed.first() {
             Some(first) => vec![shell_part(&first.text, &first.shaped, "", key)],
             None => as_one("opaque"),
