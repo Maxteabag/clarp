@@ -187,12 +187,26 @@ def update(*, original_name: str, name: str, voice_id: str,
     collision = get(name)
     if collision and collision["persona_id"] != current["persona_id"]:
         raise ValueError(f"{name} already exists.")
-    if not voice_id:
-        from . import contact_minting
-        voice_id = str(current.get("voice_id") or "") or contact_minting.pick_available_voice(name)
-    else:
-        from .voice import merge_provider_maps
-        voice_id = merge_provider_maps(current.get("voice_id"), voice_id, base_voice_id)
+    from . import voice_pool
+    with voice_pool.assigning():      # a pool pick and its write, against every other pick
+        return _update_assigned(current, name=name, voice_id=voice_id, avatar_symbol=avatar_symbol,
+                                personality=personality, avatar_base64=avatar_base64,
+                                base_voice_id=base_voice_id)
+
+
+def _update_assigned(current: dict, *, name: str, voice_id: str, avatar_symbol: str,
+                     personality: str, avatar_base64: str, base_voice_id: str | None) -> dict:
+    from . import voice_pool
+    from .voice import merge_provider_maps
+    stored = str(current.get("voice_id") or "")
+    voice_id = merge_provider_maps(stored, voice_id, base_voice_id) if voice_id else stored
+    if not stored.strip() or stored.lstrip().startswith("{"):
+        # A contact stored in the one shape (an empty map included) is filled as contact
+        # assignment fills it: a pool voice for each configured provider, or fallback, it
+        # has none for. A contact whose bare value is from before the one shape is merged
+        # only, as it is read: what it is heard with changes only behind the migration's
+        # audible check.
+        voice_id = voice_pool.assign(config.load(), name, voice_id or "{}")
     avatar_path = _store_avatar(current, avatar_base64)
     db.conn().execute(
         """UPDATE personas

@@ -268,7 +268,8 @@ def _admit(agent: dict, records: list[dict]) -> None:
 def _voice(text: str, agent: dict) -> str:
     """The opening line in the agent's own voice, as an /audio URL, or ""."""
     tts = _context["tts"]
-    if tts is None or not agent.get("voice_id"):
+    from .voice import has_voice
+    if tts is None or not has_voice(agent.get("voice_id")):
         return ""
     try:
         path = tts.synthesize(text, str(agent["voice_id"]), session=str(agent["session"]))

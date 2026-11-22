@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Collection, Mapping, Sequence
 
 from .. import roster as contact_roster
-from ..voice import CARTESIA, resolve_voice
+from ..voice import CARTESIA, has_voice, resolve_voice
 from . import helper_state as helper_policy
 
 AVATAR_MAX_BYTES = 512_000
@@ -212,7 +212,9 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         if current is None:
             return SpecError(404, "no such agent to replace")
         session = replace_sid
-        voice_id = voice_id or current.get("voice_id") or voice_id
+        # An empty map ("{}") names no voice, like "": a relaunch keeps the agent's own.
+        if not has_voice(voice_id):
+            voice_id = current.get("voice_id") or voice_id
         persona = persona or current.get("name") or persona
         existing_agent = roster.existing_agent(replace_sid) or {}
         if existing_agent.get("is_janitor"):
@@ -316,10 +318,12 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         effective_validation_model = effective_validation_model or roster.default_model(backend)
     if effort_compatibility_unknown and effective_validation_model and effective_effort:
         return SpecError(400, "AGY model-specific effort compatibility is unknown")
-    if not janitor and not voice_id:
+    if not janitor and not has_voice(voice_id):
         _, roster_voice = contact_roster.lookup_persona(persona)
-        voice_id = ((persona_definition or {}).get("voice_id")
-                    or roster_voice or roster.default_roster_voice)
+        # An empty map is "no voice given", like "": the contact's or roster's voice
+        # first; with none, an explicit "{}" stays (an anonymous launch's).
+        voice_id = next((v for v in ((persona_definition or {}).get("voice_id"), roster_voice)
+                         if has_voice(v)), None) or voice_id or roster.default_roster_voice
     selected_cartesia = "" if janitor else resolve_voice(voice_id, CARTESIA)
     # A relaunch that keeps the voice the agent already speaks with changes
     # nobody's voice, so an older clash must not block restoring the agent.
