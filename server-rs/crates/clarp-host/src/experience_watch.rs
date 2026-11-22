@@ -189,13 +189,19 @@ async fn pass(app: &App, settings: &Settings, now: i64) -> Result<(), String> {
     let mut book = load(app).await?;
     let seen = checks::collect(app, settings, now).await;
     let directory = app.fleet.directory();
-    book.reconcile(seen, settings, &directory, &TimeZone::system(), now);
+    let zone = TimeZone::system();
+    book.reconcile(seen, settings, &directory, &zone, now);
     // Record pending notices before sending, with stable IDs across a restart.
     save(app, &book).await?;
     if book.owed.is_empty() {
         return Ok(());
     }
     for owed in std::mem::take(&mut book.owed) {
+        if let book::Notice::Summary(day) = &owed.notice
+            && book::summary_day(settings, &zone, app.clock.now_ms()).as_ref() != Some(day)
+        {
+            continue;
+        }
         let id = owed.message_id();
         match tell(app, &owed.to, id, owed.text.clone()).await {
             Ok(_) => book.told(owed),
@@ -205,7 +211,7 @@ async fn pass(app: &App, settings: &Settings, now: i64) -> Result<(), String> {
                     owed.to,
                     why.message(),
                 );
-                // A summary can be retried the same day using its original text and id.
+                // A summary can be retried in its hour using its original text and id.
                 if matches!(owed.notice, book::Notice::Summary(_)) {
                     book.owed.push(owed);
                 }

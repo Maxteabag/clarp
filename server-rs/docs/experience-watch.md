@@ -39,12 +39,12 @@ release_hold_minutes = 10
 findings even while the watcher is off. It reports late reads (steered,
 waited, or still waiting), paused or stuck queues, client crash signals, failed
 or refused user sends, unhealthy release skill links, old decision cards,
-and long-running jobs that hold a release. Relaunch requests are counted
-by authenticated device and include the latest reported app build and
-contract. An app-crash finding requires a crash-kind client event or a
-MetricKit report with a nonzero crash count. Launch requests are context
-only, so repeated pushes, reconnects, and background sync cannot open a
-finding on their own. The HTTP counters keep at most
+and long-running jobs that hold a release. The watcher counts requests to
+`POST /devices` and `GET /server-info` by authenticated device and includes
+the latest reported app build and contract. These endpoints also serve
+push-triggered background sync and reconnects. The request count is context
+only. An app-crash finding requires a crash-kind client event or a MetricKit
+report with a nonzero crash count. The HTTP counters keep at most
 32,768 recent events per signal and restart with the Host. Send history
 is rebuilt from the actor journals. The Rust queue has no separate
 `launch_unknown` status. Recent unconfirmed interruptions count in sends.
@@ -54,7 +54,7 @@ for seven days and up to 2,000 rows. The configured owner and front desk get
 one notice on open and on clear, from `experience-watch`. A shared recipient
 gets one copy. `wait` and `sends` use the `queue` owner unless assigned
 separately. `app_crash_ios` and the other platform kinds fall back to
-`app_crash`. The front desk also gets one local-time summary per date. Notices and the
-admin command show the paired device name with its ID and use the Host's
+`app_crash`. The front desk gets one summary during the configured local
+`summary_hour`. A missed hour is skipped. Notices and the admin command show the paired device name with its ID and use the Host's
 local timezone, with a UTC offset. JSON output also keeps the original
 epoch-millisecond timestamps.

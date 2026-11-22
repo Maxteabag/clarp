@@ -100,6 +100,14 @@ impl Row {
     }
 }
 
+pub(super) fn summary_day(settings: &Settings, zone: &TimeZone, now: i64) -> Option<String> {
+    if settings.front_desk.is_empty() {
+        return None;
+    }
+    let time = local(now, zone)?;
+    (time.hour() == settings.summary_hour).then(|| time.strftime("%Y-%m-%d").to_string())
+}
+
 impl Book {
     pub fn reconcile(
         &mut self,
@@ -180,16 +188,12 @@ impl Book {
     }
 
     fn daily(&mut self, settings: &Settings, zone: &TimeZone, now: i64) {
-        let Some(time) = local(now, zone) else { return };
-        let day = time.strftime("%Y-%m-%d").to_string();
+        let day = summary_day(settings, zone, now);
         self.owed.retain(|owed| {
-            !matches!(&owed.notice, Notice::Summary(date) if date != &day || settings.front_desk.is_empty())
+            !matches!(&owed.notice, Notice::Summary(date) if day.as_ref() != Some(date))
         });
-        if settings.front_desk.is_empty() {
-            return;
-        }
-        if time.hour() < settings.summary_hour
-            || self.summary_date == day
+        let Some(day) = day else { return };
+        if self.summary_date == day
             || self
                 .owed
                 .iter()

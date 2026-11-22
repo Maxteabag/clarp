@@ -246,7 +246,7 @@ fn app_crashes(
             &format!("app_crash_{client}"),
             &device,
             format!(
-                "{} crash events. {count} launch requests. Build {build}. Contract {contract}.",
+                "{} crash events. {count} requests to /devices or /server-info. Build {build}. Contract {contract}.",
                 crash.count,
             ),
         );
@@ -494,7 +494,7 @@ mod tests {
         assert_eq!(shown["first_seen"], now);
         assert_eq!(shown["first_seen_local"], "2026-11-22 16:23 +01:00");
         assert!(crash.detail.contains("3 crash events"));
-        assert!(crash.detail.contains("27 launch requests"));
+        assert!(crash.detail.contains("27 requests to /devices or /server-info"));
         assert!(crash.detail.contains("Build 200"));
         let wait = book.rows.iter().find(|row| row.kind == "wait").unwrap();
         assert!(wait.detail.contains("1 steered"));
@@ -552,5 +552,17 @@ mod tests {
 
         book.reconcile(Seen::default(), &settings, &directory, &zone, later + 1);
         assert!(book.owed.is_empty());
+
+        let after_hour = later + 3_600_000;
+        let mut delayed = Book::default();
+        delayed.reconcile(Seen::default(), &settings, &directory, &zone, after_hour);
+        assert!(delayed.owed.is_empty(), "a missed hour is not caught up");
+
+        let next_day = later + 24 * 3_600_000;
+        delayed.reconcile(Seen::default(), &settings, &directory, &zone, next_day);
+        assert_eq!(delayed.owed.len(), 1);
+        assert!(matches!(delayed.owed[0].notice, Notice::Summary(_)));
+        delayed.reconcile(Seen::default(), &settings, &directory, &zone, next_day + 3_600_000);
+        assert!(delayed.owed.is_empty(), "a retry expires after the summary hour");
     }
 }
