@@ -473,7 +473,7 @@ def test_memory_and_durable_order_agree_over_random_sequences(tmp_path, seed):
         elif action == "fail":
             _arm(world); world.provider.fail_next = True
         elif action == "retry":
-            world.service._retry_handoff(world.agent)
+            world.service._retry_handoff(world.agent, due=True)   # its retry fires (R193)
         elif action == "prepfail" and not running() and not fenced:
             _fail_before_the_turn_opens(world)
         elif action == "legacy":
@@ -491,7 +491,7 @@ def test_memory_and_durable_order_agree_over_random_sequences(tmp_path, seed):
     for _ in range(3):
         if turn_queue.is_paused(world.agent):
             turn_queue.set_paused(world.agent, False)
-        world.service._retry_handoff(world.agent)
+        world.service._retry_handoff(world.agent, due=True)   # its retry fires (R193)
         world.settle()
         _agree(world, (seed, "settle"))
     world._collect()

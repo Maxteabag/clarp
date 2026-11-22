@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from . import agents as agents_db
 from . import error_classify, eventlog
@@ -27,6 +28,12 @@ def _working_with(spec: _TurnSpec) -> dict:
     except Exception as exc:  # noqa: BLE001
         log_exception("coordinationStateFail", exc, detail=spec.agent_id)
         return {}
+
+
+# A queued message whose launch fails before its backend starts this many
+# times in a row ends failed, its sender told (R193): with the back-off
+# (1, 2, 4 ... 60 s) about five minutes of tries, not an hour of them.
+HANDOFF_GIVE_UP = 10
 
 
 class HandoffMixin:
@@ -100,7 +107,13 @@ class HandoffMixin:
                 f"slot kept")
             return
         self._release_unsent_opening(spec, error)
-        retry = replace(spec, handoff_failures=spec.handoff_failures + 1)
+        failures = spec.handoff_failures + 1
+        if failures >= HANDOFF_GIVE_UP and spec.queue_id:
+            self._give_up_handoff(agent_id, spec, error, failures)
+            return
+        delay = min(60.0, float(2 ** (failures - 1)))
+        retry = replace(spec, handoff_failures=failures,
+                        handoff_retry_at=time.monotonic() + delay)
         with _TURN_LOCK:
             if not _SLOTS.owns(agent_id, spec.trace_id):
                 return  # Stop or a newer owner already took the slot over
@@ -109,7 +122,6 @@ class HandoffMixin:
         # Taken in memory (requeue_front), taken in the durable store: a user's
         # word that arrives meanwhile goes behind it on both sides (#481).
         turn_queue.mark_taken(spec.queue_id or spec.park_id)
-        delay = min(60.0, float(2 ** (retry.handoff_failures - 1)))
         log("queuedSpawnRequeued",
             f"agent={agent_id} trace={spec.trace_id} failures="
             f"{retry.handoff_failures} retry_in={delay:g}s — launch failed before "
@@ -121,13 +133,55 @@ class HandoffMixin:
             turn_lifecycle.close_turns_for_trace(agent_id, spec.trace_id)
         except Exception as exc:  # noqa: BLE001 - the retry opens a new row
             log_exception("queuedSpawnCloseFail", exc, detail=spec.session)
-        self.retry_scheduler(delay, lambda: self._retry_handoff(agent_id))
+        self.retry_scheduler(delay, lambda: self._retry_handoff(agent_id, due=True))
 
-    def _retry_handoff(self, agent_id: str) -> None:
-        """Hand a free slot to the head of the agent's queue."""
+    def _give_up_handoff(self, agent_id: str, spec: _TurnSpec, error: BaseException,
+                         failures: int) -> None:
+        """Its launch failed before the backend started HANDOFF_GIVE_UP times in a
+        row (the agent's directory is gone, say): it never reached the backend, so it
+        ends failed, its sender told in the conversation (as a refused launch, R121),
+        its turn row closed; what waited behind it goes on (R193)."""
+        with _TURN_LOCK:
+            if not _SLOTS.owns(agent_id, spec.trace_id):
+                return  # Stop or a newer owner already took the slot over
+            _SLOTS.release(agent_id, spec.trace_id)
+        try:
+            turn_lifecycle.close_turns_for_trace(agent_id, spec.trace_id)
+        except Exception as exc:  # noqa: BLE001 - the recovery pass closes it later
+            log_exception("queuedSpawnCloseFail", exc, detail=spec.session)
+        reason = str(error)[:200] or type(error).__name__
+        ended = False
+        row = turn_queue.get(spec.queue_id)
+        if row is not None:
+            try:
+                ended = turn_queue.fail_refused_launch(row, failures=failures, error=reason)
+            except Exception as exc:  # noqa: BLE001 - recovery settles the row
+                log_exception("queuedSpawnGiveUpFail", exc, detail=spec.session)
+        log("queuedSpawnGaveUp",
+            f"agent={agent_id} trace={spec.trace_id} failures={failures} ended={int(ended)} "
+            f"— launch failed before the backend started; not tried again")
+        eventlog.emit("server", "queuedSpawnGaveUp", context=spec.context,
+                      detail={"error": reason, "failures": failures})
+        if ended and getattr(self.ctx, "stream", None) is not None:
+            state = turn_queue.state(agent_id)
+            events.broadcast(self.ctx.stream, events.queue_updated(
+                session=spec.session, agent_id=agent_id, client_msg_id=spec.client_msg_id,
+                queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                queue_revision=state["revision"]))
+        self._retry_handoff(agent_id, due=True)
+
+    def _retry_handoff(self, agent_id: str, *, due: bool = False) -> None:
+        """Hand a free slot to the head of the agent's queue. A head whose launch
+        failed before its backend started waits for its own retry (``due``: that
+        retry, or an explicit repair), never started sooner by another path: the
+        ownerless-queue start once relaunched it every second for an hour (R193)."""
         with _TURN_LOCK:
             if _SLOTS.get(agent_id) or not _SLOTS.queue_depth(agent_id):
                 return  # someone owns the slot; its finish drains the queue
+            waiting = _SLOTS.queued.get(agent_id) or []
+            if (not due and waiting
+                    and getattr(waiting[0], "handoff_retry_at", 0.0) > time.monotonic()):
+                return  # its own retry is scheduled
             head = _SLOTS.pop_next(agent_id)
         if head is not None:
             self._resume_and_spawn(agent_id, head)
@@ -267,7 +321,9 @@ class HandoffMixin:
                     self._finish_turn(next_spec)
                     return
                 next_spec = started
-            turn_lifecycle.open_turn(
+            # A retry after a launch that failed before its backend started opens
+            # the trace's own row again: one turn row per trace (R92, R193).
+            (turn_lifecycle.reopen_turn if next_spec.handoff_failures else turn_lifecycle.open_turn)(
                 agent_id=next_spec.agent_id, source="pwa",
                 trace_id=next_spec.trace_id,
                 synthesize_audio=next_spec.synthesize_audio)
