@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 130;
+pub const HOST_CONTRACT: u64 = 131;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -121,6 +121,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("html_form_network", 59),
     ("html_form_events", 51),
     ("html_form_reply_audio", 50),
+    ("form_answer_rows_hidden", 131),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
     ("provider_background_tasks", 24),
