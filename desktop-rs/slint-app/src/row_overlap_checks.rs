@@ -298,7 +298,8 @@ fn history() -> serde_json::Value {
     }
     turns.push(serde_json::json!({"id": "a-prompt", "role": "user", "timestamp": "2026-10-05T10:00:00Z", "text": "Route the Clarp skills and tell me when it takes effect.", "origin": "user", "trace_id": "t-a"}));
     turns.push(tool_row("a-tool-1", "2026-10-05T10:00:02Z", "t-a", "make test"));
-    turns.push(text_row("a-note", "2026-10-05T10:00:30Z", "t-a", "commentary", "Tests pass; writing it up."));
+    // Spoken (it was said aloud), so it stays in view above the work row (#653).
+    turns.push(text_row("a-note", "2026-10-05T10:00:30Z", "t-a", "commentary", "<speak>Tests pass; writing it up.</speak>"));
     turns.push(tool_row("a-tool-2", "2026-10-05T10:00:40Z", "t-a", "git push origin HEAD:main"));
     turns.push(summed(text_row("a-final", "2026-10-05T10:01:35Z", "t-a", "final", &long_reply()), "t-a", 95_000, 2));
     serde_json::json!({"session": SESSION, "turns": turns})
@@ -829,7 +830,7 @@ pub(super) fn row_overlap_check(out: String) {
             true
         })),
         moment("a long Markdown reply under its folded turn", 1500, || has_row("a-final"), move |_, _| {
-            check(has_row("a-note") && !has_row("a-tool-1") && !has_row("a-tool-2"), "the folded turn keeps its commentary in view and folds its tools");
+            check(has_row("a-note") && !has_row("a-tool-1") && !has_row("a-tool-2"), "the folded turn keeps its spoken commentary in view and folds its tools");
             shot1();
         }),
         read_through("reading the history"),
@@ -842,7 +843,7 @@ pub(super) fn row_overlap_check(out: String) {
             upsert(serde_json::json!([tool_row("b-tool", "2026-10-05T10:05:02Z", "t-b", "git log -1 108e4c8f")]));
         }),
         moment("the next turn runs a tool", 800, || has_row("b-tool") || true, |_, _| {
-            upsert(serde_json::json!([text_row("b-note", "2026-10-05T10:05:04Z", "t-b", "commentary", GO_AHEAD)]));
+            upsert(serde_json::json!([text_row("b-note", "2026-10-05T10:05:04Z", "t-b", "commentary", &format!("<speak>{GO_AHEAD}</speak>"))]));
         }),
         moment("it says what it found", 800, || has_row("b-note") || true, |_, _| {
             upsert(serde_json::json!([{"id": "b-live", "role": "assistant", "kind": "live", "timestamp": "2026-10-05T10:05:05Z", "text": answer(1)}]));
@@ -863,7 +864,7 @@ pub(super) fn row_overlap_check(out: String) {
             agent_state("thinking");
         }),
         moment("the next turn starts and the last one folds into history", 1200, || has_row("c-prompt"), move |app, window| {
-            check(has_row("b-note") && !has_row("b-tool"), "the folded turn keeps its commentary in view and folds its tool");
+            check(has_row("b-note") && !has_row("b-tool"), "the folded turn keeps its spoken commentary in view and folds its tool");
             shot4();
             crate::artifacts_view::open(app, window, "a2a:b-prompt");
         }),

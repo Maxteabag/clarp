@@ -76,6 +76,20 @@ pub struct Folded {
 pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> Folded {
     let mut folded = Folded::default();
     if !options.summaries || options.hide_activity {
+        if options.summaries && options.hide_activity {
+            // Activity hidden: presentation hides the tool rows; the commentary a
+            // finished turn folds into its work (never what was spoken) goes too (#653).
+            let full = present(rows, live, &Options {
+                summaries: true, explanations: false, expanded: HashSet::new(),
+                open_turn: options.open_turn.clone(), held_rows: options.held_rows.clone(),
+                busy: options.busy, hide_activity: false, explain: None,
+            });
+            let commentary: HashSet<&str> = rows.iter()
+                .filter(|m| m.role == "assistant" && m.phase == "commentary" && !m.text.contains("<speak")
+                    && !m.display_text.trim().is_empty())
+                .map(|m| m.id.as_str()).collect();
+            folded.hidden_rows.extend(full.hidden_rows.into_iter().filter(|id| commentary.contains(id.as_str())));
+        }
         retain_unfiled_messages(rows, live, options, &mut folded);
         return folded;
     }
@@ -321,7 +335,10 @@ fn turn(
     let mut unexplained: Vec<(String, Object)> = Vec::new();
     let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, hide_activity: options.hide_activity };
     let mut message = |items: &mut Vec<Object>, row: &Message, phase: &str| {
-        let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id});
+        // The row's text as written says whether it was spoken (a `<speak>` block); the
+        // shown text has the markup taken out.
+        let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id,
+            "spoken": row.text.contains("<speak")});
         let item = item.as_object().cloned().unwrap_or_default();
         let mut entry = live_present::item_entry(&item, &live_options);
         entry.row = row.id.clone();

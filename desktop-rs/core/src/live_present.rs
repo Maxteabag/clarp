@@ -67,6 +67,9 @@ pub struct Entry {
     /// A message's Markdown.
     pub text: String,
     pub phase: String,
+    /// A message that carried speech (it held a `<speak>` block: the user heard
+    /// it). A spoken commentary never folds (#653).
+    pub spoken: bool,
     pub expandable: bool,
     pub expanded: bool,
     /// The items' revisions summed: a row changes only when this does.
@@ -314,6 +317,15 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             if placed.insert(row) {
                 let mut entry = item_entry(item, options);
                 entry.row = row.to_owned();
+                // One row for several messages: it is the answer when one of them is,
+                // and spoken when one of them was, so it never folds then (#653).
+                let carried: Vec<Entry> = items.iter()
+                    .filter(|other| text(other, "kind") == "message" && owner_of(*other) == Some(row))
+                    .map(|other| item_entry(other, options)).collect();
+                if let Some(answer) = carried.iter().find(|e| e.phase != "commentary") {
+                    entry.phase = answer.phase.clone();
+                }
+                entry.spoken = carried.iter().any(|e| e.spoken);
                 rows_of.insert(text(item, "id"), entry);
                 shown.push(*item);
             }
@@ -350,7 +362,10 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let rows_of = rows_of.into_iter().map(|(id, entry)| (id.to_owned(), entry)).collect();
     let mut entries = arrange(&turn_id, turn.expect("a turn"), settled, &shown, rows_of, options);
     if options.hide_activity {
-        entries.retain(|entry| entry.kind == Kind::Message);
+        // Only messages show; once the turn is done, the commentary folded into its
+        // work goes with it, and the answer and what was spoken stay (#653).
+        entries.retain(|entry| entry.kind == Kind::Message
+            && (!settled || entry.phase != "commentary" || entry.spoken));
     }
     presented.entries = entries;
     presented.turn_id = turn_id;
@@ -396,44 +411,36 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
         }
     }
 
-    // A settled turn folds its work (§7.6): its reasoning and tools. What
-    // failed or stopped and every message, commentary too, stay in view in
-    // their places; the fold sits where the folded work begins. Thinking
-    // alone before the turn's first message (the acknowledgment it speaks
-    // first) does not put the fold above that message: the fold then sits
-    // where the work after it begins.
+    // A settled turn folds its work (§7.6, Arnie's ruling for every client, #653): its
+    // reasoning, its tools and the commentary between them, opened in place with the
+    // rest. What failed or stopped stays in its row, and the answer never folds. A
+    // commentary that carried speech (it held a <speak> block: the user heard it) stays
+    // too, above the work row. The row counts the calls it opens to, never the
+    // summary's tool count; with no time and no folded call there is no row.
     if settled {
-        let stays = |entry: &Entry| matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending") || entry.kind == Kind::Message;
+        let spoken = |entry: &Entry| entry.kind == Kind::Message && entry.spoken && entry.phase == "commentary";
+        let stays = |entry: &Entry| {
+            matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending")
+                || (entry.kind == Kind::Message && (entry.phase != "commentary" || entry.spoken))
+        };
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
-        let first_message = entries.iter().position(|e| e.kind == Kind::Message);
-        // The thinking folded above the first message, when that is all that is.
-        let leading: Vec<usize> = match first_message {
-            // Only an acknowledgment, never the answer itself: a turn of
-            // thinking and its answer keeps the fold above the answer.
-            Some(m) if entries[m].phase != "final" => {
-                let before: Vec<usize> = folded.iter().copied().filter(|&i| i < m).collect();
-                if before.iter().all(|&i| entries[i].kind == Kind::Reasoning) { before } else { Vec::new() }
-            }
-            _ => Vec::new(),
-        };
-        // Where the fold goes, as an index among the entries as they are (it
-        // may be one past the last): after the first message when only
-        // thinking came before it, at the work after it or else right below it.
-        let start = match first_message {
-            Some(m) if !leading.is_empty() => Some(folded.iter().copied().find(|&i| i > m).unwrap_or(m + 1)),
-            _ => folded.first().copied(),
-        };
-        if let Some(first) = start {
+        let calls: usize = folded.iter().map(|&i| match entries[i].kind {
+            Kind::Tool => 1,
+            Kind::Explore => entries[i].items.len(),
+            _ => 0,
+        }).sum();
+        let had_calls = entries.iter().any(|e| matches!(e.kind, Kind::Tool | Kind::Explore));
+        let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?));
+        // A row when there is folded work with a time or a call, or when every call
+        // failed and the time is known; never for a turn that used nothing.
+        let row = (!folded.is_empty() || had_calls) && (worked_ms.is_some() || calls > 0);
+        if row {
             let key = format!("live:fold:{turn_id}");
-            let open = options.expanded.contains(&key);
-            let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?));
-            let tools = int(turn, "tool_count").unwrap_or(0).max(0) as usize;
-            // A turn whose worked time nobody recorded says what it used.
+            let open = options.expanded.contains(&key) && !folded.is_empty();
             let title = match worked_ms {
-                Some(ms) if tools > 0 => format!("Worked for {} · {}", worked(ms), plural(tools, "tool", "tools")),
+                Some(ms) if calls > 0 => format!("Worked for {} · {}", worked(ms), plural(calls, "tool", "tools")),
                 Some(ms) => format!("Worked for {}", worked(ms)),
-                None if tools > 0 => format!("Used {}", plural(tools, "tool", "tools")),
-                None => "Worked".to_owned(),
+                None => format!("Used {}", plural(calls, "tool", "tools")),
             };
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
@@ -443,31 +450,27 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
                 kind: Kind::Fold,
                 status: text(turn, "status").to_owned(),
                 title,
-                expandable: true,
+                expandable: !folded.is_empty(),
                 expanded: open,
                 ..Entry::default()
             };
-            // Opened, the folded rows follow it (the leading thinking too, below
-            // the first message); closed, only the fold stands for them.
-            let mut kept = Vec::with_capacity(entries.len() + 1);
-            let mut moved = Vec::new();
-            let mut placed = false;
+            // Above the row: what came before the work and every spoken commentary.
+            // Below it, in their places: what stays and, opened, the folded rows too.
+            let first_work = folded.first().copied()
+                .or_else(|| entries.iter().position(|e| matches!(e.kind, Kind::Tool | Kind::Explore)))
+                .unwrap_or(entries.len());
+            let mut kept: Vec<Entry> = Vec::with_capacity(entries.len() + 1);
+            let mut below: Vec<Entry> = Vec::new();
             for (i, entry) in entries.into_iter().enumerate() {
-                if i == first {
-                    kept.push(fold.clone());
-                    kept.append(&mut moved);
-                    placed = true;
-                }
-                if open && leading.contains(&i) {
-                    moved.push(entry);
-                } else if open || !folded.contains(&i) {
+                let folds = folded.contains(&i);
+                if i < first_work || (!folds && spoken(&entry)) {
                     kept.push(entry);
+                } else if open || !folds {
+                    below.push(entry);
                 }
             }
-            if !placed {
-                kept.push(fold);
-                kept.append(&mut moved);
-            }
+            kept.push(fold);
+            kept.append(&mut below);
             entries = kept;
         }
     }
@@ -528,6 +531,8 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
             let streaming = matches!(status.as_str(), "running" | "pending" | "");
             entry.text = crate::text::cleaned_display_text(text(item, "text"), streaming);
             entry.phase = text(item, "phase").to_owned();
+            entry.spoken = item.get("spoken").and_then(Value::as_bool).unwrap_or(false)
+                || text(item, "text").contains("<speak");
             if status == "interrupted" {
                 entry.meta = "interrupted".into();
             }
