@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 141  # The user's Stop starts his waiting messages at once; other waiting work stays paused until his next message (contract 127 narrowed). Every earlier number is a row in docs/compatibility.md.
+HOST_CONTRACT = 142  # The Android app draws render_spec version 2 from its contract 42 (issue 673). Every earlier number is a row in docs/compatibility.md.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -60,7 +60,7 @@ RENDER_SPEC_MIN_CONTRACT: dict[str, int] = {"ios": 74, "web": 1, "android": 41}
 # draws v2: a client not named (or named with 0) is off and gets a v2 form as the plain card. A
 # client draws v2 only where it also draws v1. The web app from 2 (`web/<version> contract=2`),
 # the first build that draws chart, table and button.
-RENDER_SPEC_V2_MIN_CONTRACT: dict[str, int] = {"web": 2}
+RENDER_SPEC_V2_MIN_CONTRACT: dict[str, int] = {"web": 2, "android": 42}
 
 # A client's name: the form of the X-Clarp-Client header's name, and of the keys of every Host table
 # that admits clients by name (render_spec's minimums, the live model's). It is matched EXACTLY as
