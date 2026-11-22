@@ -211,7 +211,7 @@
        patches only rows whose revision moved. -->
   {#each timeline as entry (entry.key)}
     {#if entry.type === 'turn'}
-      {#if entry.item.hidden_before}<HiddenRun count={entry.item.hidden_before} onShow={showCoordination} />{/if}
+      {#if entry.item.hidden_before && prefs.showCoordinationLine}<HiddenRun count={entry.item.hidden_before} onShow={showCoordination} />{/if}
       {#if fold.byRow.has('before:' + entry.item.id)}<WorkRow fold={fold.byRow.get('before:' + entry.item.id)} />{/if}
       <Turn turn={entry.item} strip={fold.stripped.get(entry.item.id)} />
       {#if fold.byRow.has(entry.item.id)}<WorkRow fold={fold.byRow.get(entry.item.id)} />{/if}
@@ -225,7 +225,7 @@
       </div>
     {/if}
   {/each}
-  {#if conv.hiddenAfter}<HiddenRun count={conv.hiddenAfter} onShow={showCoordination} />{/if}
+  {#if conv.hiddenAfter && prefs.showCoordinationLine}<HiddenRun count={conv.hiddenAfter} onShow={showCoordination} />{/if}
   {#if conv.revealed}
     <div class="turn hidden-run revealed" role="note">
       <span class="hidden-run-text">Showing messages between agents</span>
