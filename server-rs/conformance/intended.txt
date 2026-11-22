@@ -29,10 +29,6 @@ e06c199220a6  router: the second reply of the scenario's own agent
 5187a75b8f02  router: the second reply of the second agent (computed: the defect shows at a later turn or does not, from run to run)
 d7bd0121d397  router: its third reply (computed)
 
-# A notification's preview of what was said aloud does not show an emotion tag the engine
-# acts out (the Python Host shows "[sigh]" there: reference defect R10).
-0d1fdd0f0ff9  voice-markup: the preview of the notification
-
 # After a later turn of an agent, the last completed message is the agent's answer (the Python
 # Host still shows the user's message there, after a turn that had waited in the queue and
 # after plain turns that were not the agent's first: reference defect R12).
@@ -65,10 +61,6 @@ cce40563260b  router: the same of the second agent, after its third turn (comput
 6389f02a8160  turn-timer: the same, after that turn
 c0a2b172559d  send-after-stop: the agent's model after the turn that followed a stopped one (both recordings of the reference showed none: the suite run here on 17 Nov 2026, nine scenarios against both Hosts)
 37e34e387826  the-apps-own-ids: the agent's model at rest, after its third turn (run 44101297003: both recordings of the reference showed none)
-
-# The answer to a discard says the artifact is not pinned (the Python Host says pinned true
-# beside pinned_at null: reference defect R15).
-23ad255cb543  library: pinned in the answer to the discard of a pinned artifact
 
 # Former difference R16: the Python Host stamped a finished reply again on the next send.
 # Closed on issue 360 (comment 7072009553). Conformance run 44964832095 against

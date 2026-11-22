@@ -1075,8 +1075,8 @@ const NOTHING_TO_DO: [&str; 4] = [
 /// when it said something aloud (`speak`), otherwise what it wrote (`text-reply`). `None` for
 /// a reply that has nothing for the user in it.
 pub fn notification_preview(reply: &str) -> Option<(String, &'static str)> {
-    // Cleaned as what it is, something spoken: an emotion tag the engine acts out is not
-    // shown. (The Python Host cleans the blocks' inner text and shows the tag.)
+    // Clean the extracted text inside speak markers so only spoken emotion tags are
+    // removed, as in the Python Host's notification preview (R10).
     let spoken = markup::speak_blocks(&markup::strip_team_blocks(reply), true).join(" ");
     let spoken = markup::clean_for_display(&format!("<speak>{spoken}</speak>"), true);
     if !spoken.is_empty() {
