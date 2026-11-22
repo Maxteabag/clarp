@@ -125,8 +125,11 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     assert_eq!(waiting("u-m2"), queued, "{after_desk}");
     assert_eq!(after_desk["delivery_stop_generation"], 0);
 
-    // The user's Stop: the one that waits is fenced, and the generation moves.
-    host.post("/stop", json!({ "session": session }));
+    // A maintenance Stop fences pending receipts without dispatching the queue.
+    host.post(
+        "/stop",
+        json!({ "session": session, "actor": "maintenance" }),
+    );
     let held = log("&delivery_since=0");
     assert_eq!(waiting("u-m3"), Value::Null, "{held}");
     let stopped = waiting("u-m2");

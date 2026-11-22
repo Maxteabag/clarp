@@ -245,7 +245,7 @@ fn the_users_word_precedes_ordinary_work_across_a_hold_and_restart() {
     assert_eq!(row["queued_turn_count"], want.len());
     assert_eq!(row["queued_turn_revision"], revision);
 
-    host.post("/stop", json!({"session":target}));
+    host.post("/stop", json!({"session":target, "actor":"maintenance"}));
     wait_for("the stopped receiving turn", || {
         host.state(&target) == "interrupted"
     });
