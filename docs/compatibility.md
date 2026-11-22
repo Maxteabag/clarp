@@ -22,6 +22,7 @@ listed below.
 
 | Host contract | Min iOS contract | Host release | What changed |
 |---|---|---|---|
+| `157` (Rust only) | 1 | Stalled turn silence timestamp (issue 249) | `stalled_since` records the tool's last output, or its start if it has never printed, as positive Unix milliseconds. The field is shown only while stalled. The threshold still determines when the Host first reports the stall. |
 | `155` (Rust only) | 1 | Unreported helper turns (issue 399) | Feature `helper_ended_unreported`. A helper whose turn settled without reporting and which has no queued or background work is marked `ended-unreported` and emits a `helper-state` roster event. The maker can inspect the result, accept it, or give the helper more work. |
 | `149` (Rust only) | 1 | Stalled live turns (issue 249) | Feature `stalled_turn`. The agent row, `activity` and `live_activity` in `GET /agents/snapshot` carry `stalled_since` (Unix ms or null) and `stalled_action` (`"stop"` or null). The Host sends both fields in `agent-activity` when a live tool becomes stalled or recovers. The app can offer its existing Stop action. |
 | `146` (Rust only) | 1 | Bounded client log (issue 707) | Feature `client_events_kept`. `POST /clog` acknowledges the always-kept batch with `captured`, `kept` and `full_capture`. `POST /crash` also records a summary. Full-access callers can read the store with `GET /client-log`. The numeric rows below also describe the Python Host. |

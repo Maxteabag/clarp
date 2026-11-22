@@ -521,9 +521,12 @@ the daily schedule.
   or Oracle message is waiting, the Rust Host exposes the stall and the existing
   Stop action. Activity events show both transitions. The `stalled_turn` feature
   adds `stalled_since` and `stalled_action` to snapshots and activity events.
-  Both fields are null when a turn is not stalled. The retired Python reference
-  has neither field. The fourteen occurrences in `stop-with-queue` from run
-  45054107427 are registered in `conformance/intended.txt`.
+  Both fields are null when a turn is not stalled.
+  Rust contract 157 measures `stalled_since` from the tool's last output
+  (or from its start before it has printed). The configured silence
+  threshold still determines when the stall is reported. The retired Python
+  reference has neither field. The fourteen occurrences in `stop-with-queue`
+  from run 45054107427 are registered in `conformance/intended.txt`.
 
 
 The bounded client log (issue 707, contract 146) is available on the Rust Host.
