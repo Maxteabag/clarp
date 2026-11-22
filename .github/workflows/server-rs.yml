@@ -31,9 +31,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server-rs
+      # Every step runs even when one before it failed, and every test binary runs even when one
+      # fails: one run reports all of what is wrong, not the first thing.
       - name: Format
         run: cargo fmt --all -- --check
       - name: Lints
+        if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings
       - name: Tests
-        run: cargo test --workspace --locked
+        if: ${{ !cancelled() }}
+        run: cargo test --workspace --locked --no-fail-fast
