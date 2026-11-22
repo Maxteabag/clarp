@@ -5931,6 +5931,17 @@ fn a_phone_registers_its_push_token_and_a_revoked_phone_is_sent_nothing() {
         })),
     );
     assert_eq!(registered, (200, json!({ "ok": true })));
+    let before_retry = rows(&host, &phone);
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/devices",
+            Some(&json!({ "token": a, "environment": "sandbox" })),
+        ),
+        (200, json!({ "ok": true }))
+    );
+    assert_eq!(rows(&host, &phone), before_retry);
     assert_eq!(
         host.ask_as(&tablet, "POST", "/devices", Some(&json!({ "token": a }))),
         (200, json!({ "ok": true }))
