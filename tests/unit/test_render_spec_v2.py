@@ -335,3 +335,22 @@ def test_the_v2_table_is_read_by_the_one_rule(monkeypatch):
 def test_the_feature_has_its_own_contract():
     assert "render_spec_v2" in server_identity.FEATURES
     assert server_identity.FEATURE_CONTRACTS["render_spec_v2"] == 133  # introduced at 133; later bumps leave it
+
+
+def test_a_v2_form_follows_the_v2_files_identifier_rule(tmp_path, monkeypatch, form):
+    """Each version's identifiers come from its own file: a stricter rule in v2's file refuses a v2
+    form and leaves a v1 form alone."""
+    import shutil
+    folder = tmp_path / "catalogs"
+    shutil.copytree(CATALOGS, folder)
+    data = json.loads((folder / "clarp.form.v2.json").read_text())
+    data["identifiers"]["maxLength"] = 3
+    (folder / "clarp.form.v2.json").write_text(json.dumps(data))
+    monkeypatch.setattr(spec, "_catalog_dir", lambda: folder)
+    spec._loaded.cache_clear()
+    try:
+        assert _verdict(form) == ("schema_shape", "/answer_schema/required")  # "action" is longer than 3
+        v1 = json.loads((ROOT / "tests/fixtures/render_spec/build-decision.json").read_text())
+        assert _verdict(v1) == "ok"
+    finally:
+        spec._loaded.cache_clear()
