@@ -99,6 +99,8 @@ def test_managed_skills_status_variants(running_server, monkeypatch):
     ("ok", (200, {"ok": True, "skill": {"id": "s1", "enabled": True}})),
     ("refused", (409, {"error": "not a managed skill"})),
     ("io", (500, {"error": "read-only"})),
+    # R155: a manifest that cannot be read is answered, as GET answers it.
+    ("manifest", (503, {"error": "Clarp skill manifest is unavailable"})),
 ])
 def test_managed_skills_update(running_server, monkeypatch, outcome, expected):
     from lib import managed_skills
@@ -109,6 +111,8 @@ def test_managed_skills_update(running_server, monkeypatch, outcome, expected):
             raise ValueError("not a managed skill")
         if outcome == "io":
             raise OSError("read-only")
+        if outcome == "manifest":
+            raise RuntimeError("Clarp skill manifest is unavailable")
         return {"id": skill_id, "enabled": enabled}
     monkeypatch.setattr(managed_skills, "set_enabled", set_enabled)
     assert _call(base, "POST", "/managed-skills", raw=b"{") == (400, {"error": "bad json"})
