@@ -10,7 +10,9 @@
 //   group_old  every settled turn but the newest folds
 //   hide_done  a running turn shows its work row; a settled turn's work is not shown at all
 // Never hidden: the user's messages, replies, decision cards, artifacts, errors, Host notices.
-// A tool call that failed or was cut short stays in its row.
+// A tool call that failed or was cut short stays in its row. Commentary (text between tool calls)
+// folds with the work, except commentary that was spoken (it held a <speak> block): it stays in
+// view above the work row in every mode. The label counts tool calls only.
 import { formatDuration } from './live-present.js';
 
 export const TOOL_ACTIVITY = ['grouped', 'always', 'group_old', 'hide_done'];
@@ -22,12 +24,34 @@ const KEPT = new Set(['error', 'failed', 'killed', 'interrupted', 'cancelled']);
 
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 
-/** A row's tool calls and cells that fold (sub-agent cells and failed work stay in the row). */
-function foldable(row) {
+const SPEAK = /<speak\b/i;
+
+function hasText(row) { return !!String(row.text || '').trim(); }
+
+/**
+ * Which of a turn's rows are commentary: text written between tool calls, not the reply. A row
+ * says its phase; without one (an older row) the turn's last text is the reply and earlier text
+ * is commentary. Only an ordinary agent row is: a note, a Host notice or a live row never is.
+ */
+function commentaryOf(members) {
+  const answer = members.findLastIndex(hasText);
+  return members.map((row, i) => hasText(row) && !row.kind && row.origin !== 'system'
+    && (row.phase === 'commentary' || (row.phase !== 'final' && i !== answer)));
+}
+
+/** Commentary that held a <speak> block was spoken to the user: it stays in view. */
+function spoken(row) { return SPEAK.test(String(row.text || '')); }
+
+/**
+ * A row's work that folds: its tool calls and cells (sub-agent cells and failed work stay in the
+ * row) and its commentary text (`text`, '' when its words stay: a reply, or spoken commentary).
+ */
+function foldable(row, commentary) {
   const tools = (row.tools || []).filter(t => t && !KEPT.has(String(t.status || '')));
   const cells = (row.display_cells || []).filter(c => c && c.kind !== 'subagents'
     && !KEPT.has(String(c.status || '')));
-  return { tools, cells };
+  const text = commentary && !spoken(row) ? String(row.text) : '';
+  return { tools, cells, text };
 }
 
 /** 'Worked for 11s · 3 tools', 'Worked for 11s' with none folded, '3 tools' without a worked
@@ -73,8 +97,9 @@ export function foldTurns(rows, { mode = 'grouped', busy = false } = {}) {
   for (const [prompt, indexes] of turns) {
     const members = indexes.map(i => rows[i]);
     if (!members.length) continue;
-    const calls = members.map(row => ({ rowId: row.id, ...foldable(row) }))
-      .filter(c => c.tools.length || c.cells.length);
+    const commentary = commentaryOf(members);
+    const calls = members.map((row, i) => ({ rowId: row.id, ...foldable(row, commentary[i]) }))
+      .filter(c => c.tools.length || c.cells.length || c.text);
     // The label counts what the fold opens to: a failed call stays in its row, so the turn
     // summary's tool_count (every call) is not used.
     const counted = calls.reduce((n, c) => n + c.tools.length + c.cells.length, 0);
@@ -94,7 +119,9 @@ export function foldTurns(rows, { mode = 'grouped', busy = false } = {}) {
                          tool_count: counted }),
       calls,
     };
-    const anchor = prompt >= 0 ? rows[prompt].id : null;
+    // After the turn's last spoken commentary, which stays above it; else after its prompt.
+    const said = members.findLast((row, i) => commentary[i] && spoken(row));
+    const anchor = said ? said.id : prompt >= 0 ? rows[prompt].id : null;
     if (settled) settledTurns.push({ fold, anchor, calls, firstRow: members[0].id });
     else place(out, fold, anchor, calls, members[0].id);
   }

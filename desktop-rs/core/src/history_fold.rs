@@ -111,6 +111,23 @@ pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> 
     folded
 }
 
+/// The fold's rows in the fold's order, in the places they hold among the
+/// chat's rows: `(places, rows)`, where the row now at `rows[i]` goes to
+/// `places[i]` (both indexes into the chat's rows as they are). `None` when
+/// they are in order already. The chat's own order can differ from the
+/// Host's (a row inserted before one whose revision rose meanwhile); a
+/// settled turn still reads as the Host wrote it, and no row moves past a
+/// row of another turn.
+pub fn turn_order(fold: &Fold, position: impl Fn(&str) -> Option<usize>) -> Option<(Vec<usize>, Vec<usize>)> {
+    let rows: Vec<usize> = fold.pieces.iter().filter_map(|piece| match piece {
+        Piece::Row(id) => position(id),
+        Piece::Entry(_) => None,
+    }).collect();
+    let mut places = rows.clone();
+    places.sort_unstable();
+    (places != rows).then_some((places, rows))
+}
+
 /// A new live turn can arrive before the previous reply's /log delta. Keep
 /// its already displayed completed messages until their exact durable ids
 /// arrive; no transcript row is created or changed by this projection.

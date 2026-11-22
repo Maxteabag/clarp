@@ -5,7 +5,7 @@
   import { cellRow } from '@core/live-present.js';
   import CellRow from './live/CellRow.svelte';
   import { isOpen, toggle } from './live/expanded.svelte.js';
-  import { renderTool } from './render.js';
+  import { renderText, renderTool } from './render.js';
 
   let { fold } = $props();
 
@@ -14,12 +14,18 @@
 </script>
 
 <div class="turn work-row" class:running={fold.running}>
-  <button class="lv-fold" type="button" aria-expanded={open} onclick={() => toggle(fold.key)}>
-    <span class="lv-caret" class:open aria-hidden="true">▸</span>{fold.label}
-  </button>
-  {#if open}
+  {#if calls.length}
+    <button class="lv-fold" type="button" aria-expanded={open} onclick={() => toggle(fold.key)}>
+      <span class="lv-caret" class:open aria-hidden="true">▸</span>{fold.label}
+    </button>
+  {:else}
+    <!-- Nothing to open (every call failed and stays in its row): the line alone. -->
+    <span class="lv-fold">{fold.label}</span>
+  {/if}
+  {#if open && calls.length}
     <div class="work-row-calls">
       {#each calls as call (call.rowId)}
+        {#if call.text}<div class="work-row-text">{@html renderText(call.text)}</div>{/if}
         {#each call.cells.map(cellRow).filter(Boolean) as cell (cell.id)}<CellRow row={cell} />{/each}
         {@html call.tools.map(renderTool).join('')}
       {/each}
