@@ -809,6 +809,12 @@ component FormLeafView inherits VerticalLayout {
 component FormBody inherits VerticalLayout {
     in property <ArtifactItem> artifact;
     in property <bool> measuring;
+    // The card's id, assigned once (no binding): the rows' repeater must
+    // depend on nothing that changes with the card's item, or a row changed
+    // while the item is replaced is dropped (Slint ignores a row change
+    // while the repeater's model binding is dirty and the model is the same).
+    property <string> card;
+    init => { self.card = root.artifact.id; }
     spacing: 6px;
     if root.artifact.spec-state == "loading": Text { text: "Loading the form…"; color: Palette.muted; font-size: ChatText.detail; }
     if root.artifact.spec-state == "newer": Text { text: "This form needs a newer version of Clarp."; color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
@@ -821,7 +827,7 @@ component FormBody inherits VerticalLayout {
     }
     if root.artifact.spec-state == "form": VerticalLayout {
         spacing: 0px;
-        for row in ArtifactBridge.form-rows(root.artifact.id): Rectangle {
+        for row in ArtifactBridge.form-rows(root.card): Rectangle {
             background: row.in-card ? Palette.raised : transparent;
             border-top-left-radius: row.card-top ? 8px : 0px;
             border-top-right-radius: row.card-top ? 8px : 0px;
