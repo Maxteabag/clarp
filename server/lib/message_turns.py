@@ -161,6 +161,37 @@ class TurnIndex:
             return "", None
         return str(row["trace_id"]), int(row["started_at"])
 
+    def prompt_turns(self, timestamp: Any) -> list[str]:
+        """Every turn that may be running when a prompt is written at ``timestamp``, earliest
+        start first: the turn already running then (begun by then, not ended, within its
+        reach) and each turn that began within the prompt slack after it. running_at names
+        the last of them. Held turns launched seconds apart, each failing at once, have their
+        prompts written two seconds apart, so the next turn falls within an earlier prompt's
+        slack, though that prompt is its own turn's: the provider writes prompts in the
+        order their turns start, one process at a time."""
+        trace, _began = self.running_at(timestamp)
+        ms = iso_ms(timestamp)
+        if not trace or ms is None:
+            return [trace] if trace else []
+        low = bisect.bisect_right(self._starts, ms)
+        high = bisect.bisect_right(self._starts, ms + _START_SLACK_MS)
+        if low == high:
+            return [trace]                  # no turn began within the slack: the one running
+        found: list[str] = []
+        if low > 0:
+            row = self._rows[low - 1]
+            current = str(row["trace_id"] or "")
+            ended = self.ended_at(current) if current else None
+            reach = (ended + _SETTLED_REACH_MS) if ended is not None else \
+                (int(row["started_at"]) + _UNSETTLED_REACH_MS)
+            if current and ms <= reach and not self.ended_before(current, timestamp):
+                found.append(current)
+        for row in self._rows[low:high]:
+            later = str(row["trace_id"] or "")
+            if later and later not in found:
+                found.append(later)
+        return found
+
 
 def settle_statuses(items: list, outcome: str | None) -> list:
     """Tools and cells an interrupted turn left unfinished read `interrupted`."""
