@@ -226,3 +226,11 @@ def test_answer_on_behalf_refuses_old_host_before_any_mutation(monkeypatch, caps
                      json.dumps({"choice": "accepted"})]) == 1
     assert calls == ["GET"]
     assert "does not support answering on the user's behalf" in capsys.readouterr().err
+
+
+def test_no_custom_offers_only_the_given_options(requests):
+    """#281 item 6: the Host takes allow_custom_text false; the helper can now ask for it."""
+    assert cli.main(["cli", "question", "theo", "Layout", "Which?", json.dumps(OPTIONS), "--no-custom"]) == 0
+    assert requests[-1][2]["allow_custom_text"] is False
+    assert cli.main(["cli", "question", "theo", "Layout", "Which?", json.dumps(OPTIONS)]) == 0
+    assert requests[-1][2]["allow_custom_text"] is True

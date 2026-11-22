@@ -58,6 +58,8 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
     else:
         parser.add_argument("options_json", help="JSON array containing two or three option objects")
         parser.add_argument("--recommend", dest="recommended_option_id")
+        parser.add_argument("--no-custom", dest="allow_custom_text", action="store_false",
+                            help="offer only the given options: no Write my own answer")
         parser.add_argument("--payload", dest="payload_json", default="{}")
     parser.add_argument("--context", default="")
     parser.add_argument("--reference", default="")
@@ -120,7 +122,7 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
             normalized.append(entry)
         if parsed.recommended_option_id is not None and parsed.recommended_option_id not in ids:
             raise ValueError("--recommend must identify an existing option")
-        body.update(response_type="single_choice", options=normalized, allow_custom_text=True,
+        body.update(response_type="single_choice", options=normalized, allow_custom_text=parsed.allow_custom_text,
                     recommended_option_id=parsed.recommended_option_id)
     if parsed.dry_run:
         return {"method": "POST", "path": "/decisions", "body": body}
