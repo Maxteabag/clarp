@@ -1196,17 +1196,21 @@ fn installed_host(env: impl Fn(&'static str) -> Option<OsString>) -> Option<(Str
 /// running, in the file the installer wrote for the agents of this Host. A tool that is
 /// called where neither says so does nothing and says why.
 pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome {
-    let unavailable = |why: String| ToolOutcome {
-        exit: 69,
-        stdout: String::new(),
-        stderr: format!("{why}\n"),
-    };
     let Some(name) = args.next() else {
         return ToolOutcome {
             exit: 2,
             stdout: String::new(),
             stderr: "usage: clarp-host tool NAME [ARGS...]\n".to_string(),
         };
+    };
+    let argv: Vec<String> = args.collect();
+    // Job monitors stop their workers on exit 1. Only a valid Host answer may name
+    // a terminal or superseded job. A failure to get that answer leaves it unknown.
+    let job_active = name == "clarp-agent-bg" && argv.get(1).is_some_and(|arg| arg == "job-active");
+    let unavailable = |why: String| ToolOutcome {
+        exit: if job_active { 2 } else { 69 },
+        stdout: String::new(),
+        stderr: format!("{why}\n"),
     };
     let (address, token) = match (
         std::env::var(crate::TOOL_ADDR_ENV),
@@ -1236,7 +1240,6 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     let started_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
-    let argv: Vec<String> = args.collect();
     if name == "clarp-admin" && argv.first().is_some_and(|arg| arg == "peers") {
         let result = peer_command(argv.into_iter().skip(1), token, "", address, true);
         return match result {
@@ -1378,11 +1381,12 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             std::thread::sleep(Duration::from_millis(again_ms.clamp(100, 60_000)));
             continue;
         }
+        let exit = answer["exit"].as_i64().and_then(|code| u8::try_from(code).ok());
+        if job_active && !matches!(exit, Some(0..=2)) {
+            return unavailable(format!("{name}: the Host at {address} sent no valid job state"));
+        }
         return ToolOutcome {
-            exit: answer["exit"]
-                .as_i64()
-                .and_then(|code| u8::try_from(code).ok())
-                .unwrap_or(1),
+            exit: exit.unwrap_or(1),
             stdout: answer["stdout"].as_str().unwrap_or("").to_string(),
             stderr: answer["stderr"].as_str().unwrap_or("").to_string(),
         };

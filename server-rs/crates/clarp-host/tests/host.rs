@@ -1010,6 +1010,37 @@ fn an_idle_agents_own_label_that_outlived_its_time_is_taken_back_and_the_apps_ar
 }
 
 #[test]
+fn job_active_reports_unknown_for_missing_jobs_and_unavailable_answers() {
+    let place = Place::new("job-active-unknown");
+    let host = place.start();
+    let session = host.new_agent("Builder");
+    let query = ["clarp-agent-bg", &session, "job-active", "bg1:1:unseen"];
+    let missing = tool(&host, &place.root, None, &query);
+    assert_eq!(missing.0, 2, "{}", missing.2);
+
+    let address = host.address.clone();
+    let token = host.token.clone();
+    host.kill();
+    let probe = |address: &str| {
+        place.command(env!("CARGO_BIN_EXE_clarp-host"))
+            .arg("tool")
+            .args(query)
+            .env("CLARP_HOST_ADDR", address)
+            .env("CLARP_HOST_TOKEN", &token)
+            .ended()
+    };
+    let unreachable = probe(&address);
+    assert_eq!(unreachable.status.code(), Some(2), "{unreachable:?}");
+    assert!(String::from_utf8_lossy(&unreachable.stderr).contains("does not answer"));
+
+    let (url, _) = speech_reply_stand_in("200 OK", "{}");
+    let address = url.strip_suffix("/v1/speech-to-text").unwrap();
+    let unreadable = probe(address);
+    assert_eq!(unreadable.status.code(), Some(2), "{unreadable:?}");
+    assert!(String::from_utf8_lossy(&unreadable.stderr).contains("no valid job state"));
+}
+
+#[test]
 fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see_it() {
     let place = Place::new("jobs");
     let fast = ["--jobs-checked-every-ms", "200"];
