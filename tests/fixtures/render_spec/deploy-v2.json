@@ -1,0 +1,143 @@
+{
+  "version": "deploy-7",
+  "catalog": "clarp.form",
+  "catalog_version": 2,
+  "answer_schema": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": [
+          "ship",
+          "hold"
+        ]
+      },
+      "note": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "action"
+    ]
+  },
+  "spec": {
+    "root": "root",
+    "state": {},
+    "elements": {
+      "root": {
+        "type": "stack",
+        "props": {},
+        "children": [
+          "lat",
+          "cmp",
+          "note",
+          "row"
+        ]
+      },
+      "lat": {
+        "type": "chart",
+        "props": {
+          "kind": "line",
+          "title": "p95 latency",
+          "unit": "ms",
+          "series": [
+            {
+              "name": "before",
+              "points": [
+                {
+                  "x": "Mon",
+                  "y": 120
+                },
+                {
+                  "x": "Tue",
+                  "y": 118
+                }
+              ]
+            },
+            {
+              "name": "after",
+              "points": [
+                {
+                  "x": "Mon",
+                  "y": 80
+                },
+                {
+                  "x": "Tue",
+                  "y": 77
+                }
+              ]
+            }
+          ]
+        },
+        "children": []
+      },
+      "cmp": {
+        "type": "table",
+        "props": {
+          "columns": [
+            {
+              "key": "host",
+              "label": "Host"
+            },
+            {
+              "key": "ok",
+              "label": "Healthy",
+              "align": "end"
+            }
+          ],
+          "rows": [
+            {
+              "host": "one",
+              "ok": true
+            },
+            {
+              "host": "two",
+              "ok": false
+            }
+          ]
+        },
+        "children": []
+      },
+      "note": {
+        "type": "text_field",
+        "props": {
+          "label": "Note",
+          "value": {
+            "$bindState": "/note"
+          }
+        },
+        "children": []
+      },
+      "row": {
+        "type": "stack",
+        "props": {
+          "axis": "horizontal"
+        },
+        "children": [
+          "ship",
+          "hold"
+        ]
+      },
+      "ship": {
+        "type": "button",
+        "props": {
+          "label": "Ship it",
+          "action": "ship",
+          "style": "primary"
+        },
+        "children": []
+      },
+      "hold": {
+        "type": "button",
+        "props": {
+          "label": "Hold",
+          "action": "hold",
+          "style": "destructive",
+          "confirm": "Hold the release?"
+        },
+        "children": []
+      }
+    }
+  }
+}

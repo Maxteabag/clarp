@@ -154,7 +154,7 @@ def scenarios():
     yield case("k-extra-state", publish(), submit(answer(choice="send", extra=True),
                http=400, error=refused("unknown_key", "/answers/state/extra")))
     yield case("l-catalog", publish({**form(), "catalog": "other"}, error=refused("unknown_catalog", "/catalog")))
-    yield case("l-version", publish({**form(), "catalog_version": 2}, error=refused("catalog_version", "/catalog_version")))
+    yield case("l-version", publish({**form(), "catalog_version": 3}, error=refused("catalog_version", "/catalog_version")))
 
 
     for name, minimum, text, accepted in (("empty", None, "", True), ("short", 1, "", False),
@@ -170,7 +170,7 @@ def scenarios():
 
     # Each proposed payload fails in two stages. Only the first verdict is public.
     invalid = form()
-    invalid["catalog_version"] = 2
+    invalid["catalog_version"] = 3
     invalid["answer_schema"]["properties"]["answer"]["pattern"] = "private-pattern"
     yield case("catalog-before-schema", publish(invalid, error=refused("catalog_version", "/catalog_version")))
     invalid = form()

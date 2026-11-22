@@ -1,0 +1,538 @@
+{
+  "catalog": "clarp.form",
+  "catalog_version": 2,
+  "schema_keywords": [
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "items",
+    "enum",
+    "const",
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "minimum",
+    "maximum",
+    "anyOf"
+  ],
+  "identifiers": {
+    "first": "abcdefghijklmnopqrstuvwxyz",
+    "rest": "abcdefghijklmnopqrstuvwxyz0123456789_",
+    "maxLength": 40,
+    "minLength": 1
+  },
+  "expression_shapes": {
+    "$state": {
+      "type": "object",
+      "properties": {
+        "$state": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 41
+        }
+      },
+      "required": [
+        "$state"
+      ],
+      "additionalProperties": false
+    },
+    "$bindState": {
+      "type": "object",
+      "properties": {
+        "$bindState": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 41
+        }
+      },
+      "required": [
+        "$bindState"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "components": {
+    "stack": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "axis": {
+            "enum": [
+              "vertical",
+              "horizontal"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "children": true,
+      "defaults": {
+        "axis": "vertical"
+      }
+    },
+    "card": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "children": true,
+      "forbid_descendants": [
+        "card"
+      ]
+    },
+    "heading": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "level": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              3
+            ]
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "defaults": {
+        "level": 2
+      }
+    },
+    "text": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "reads": {
+        "text": "$state"
+      }
+    },
+    "text_field": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1
+          },
+          "placeholder": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "multiline": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "object",
+            "properties": {
+              "$bindState": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 41
+              }
+            },
+            "required": [
+              "$bindState"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "bindings": {
+        "value": "string"
+      },
+      "defaults": {
+        "multiline": false
+      }
+    },
+    "toggle": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1
+          },
+          "value": {
+            "type": "object",
+            "properties": {
+              "$bindState": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 41
+              }
+            },
+            "required": [
+              "$bindState"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "bindings": {
+        "value": "boolean"
+      }
+    },
+    "choice": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1
+          },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 12,
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "maxLength": 120,
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 120,
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "value",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "value": {
+            "type": "object",
+            "properties": {
+              "$bindState": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 41
+              }
+            },
+            "required": [
+              "$bindState"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "label",
+          "options",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "bindings": {
+        "value": "string_enum_in_option_order"
+      }
+    },
+    "divider": {
+      "props": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "children": false
+    },
+    "chart": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "bar",
+              "line",
+              "pie"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "x_label": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "y_label": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 12
+          },
+          "decimals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "series": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                },
+                "points": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 200,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 60
+                          },
+                          {
+                            "type": "integer"
+                          }
+                        ]
+                      },
+                      "y": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "points"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "series"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "checks": [
+        "chart"
+      ],
+      "defaults": {
+        "decimals": 0
+      }
+    },
+    "table": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "columns": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                },
+                "align": {
+                  "enum": [
+                    "start",
+                    "end"
+                  ]
+                },
+                "decimals": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 6
+                }
+              },
+              "required": [
+                "key",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "rows": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "columns",
+          "rows"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "checks": [
+        "table"
+      ],
+      "item_defaults": {
+        "columns": {
+          "align": "start",
+          "decimals": 0
+        }
+      }
+    },
+    "button": {
+      "props": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "style": {
+            "enum": [
+              "primary",
+              "secondary",
+              "destructive"
+            ]
+          },
+          "confirm": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "label",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "children": false,
+      "checks": [
+        "button"
+      ],
+      "defaults": {
+        "style": "secondary"
+      }
+    }
+  },
+  "initial_ui": {
+    "text_field": "empty",
+    "toggle": false,
+    "choice": "unselected"
+  },
+  "submission": {
+    "control": "app_footer",
+    "label_source": "submit.label",
+    "omit_empty_text_field": true,
+    "omit_unselected_choice": true,
+    "always_include_toggle": true,
+    "require_values_before_submit": true,
+    "buttons": {
+      "control": "button_element",
+      "intent": "button",
+      "state_key": "action",
+      "footer_submit": false,
+      "enter_presses_button": false,
+      "confirm_before_submit": true,
+      "disable_all_after_submit": true
+    }
+  }
+}
