@@ -8787,6 +8787,9 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     };
     assert!(spec_of("ios/12 contract=74"), "iOS from 74, by default");
     assert!(spec_of("web/1 contract=1"), "web from 1, by default");
+    assert!(spec_of("android/1058 contract=41"));
+    assert!(!spec_of("android/1058 contract=40"));
+    assert!(!spec_of("Android/1058 contract=41"));
     assert!(!spec_of("web/1 contract=0"));
     assert!(!spec_of("Web/1 contract=1"));
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 0\n").unwrap();
@@ -8828,8 +8831,8 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     assert!(spec_of("ios/12 contract=74"));
     assert!(!spec_of("iOs/12 contract=74"), "only the name as written");
     assert!(
-        !spec_of("android/5 contract=99"),
-        "a value below 0 is refused"
+        spec_of("android/5 contract=41"),
+        "a value below 0 is ignored and the default stands"
     );
     assert!(
         spec_of("web/1 contract=1"),

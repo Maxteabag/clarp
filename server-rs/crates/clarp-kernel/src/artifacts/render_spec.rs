@@ -242,8 +242,8 @@ pub fn stored(catalog: &Catalog, payload: &J) -> Result<Map<String, Value>, Refu
 }
 
 /// The lowest client contracts that draw and answer a render spec. The client names itself
-/// exactly. iOS draws from 74 and the web app from 1 (Python Host PRs 474 and 676).
-pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74), ("web", 1)];
+/// exactly. iOS draws from 74, the web app from 1, and Android from 41.
+pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74), ("web", 1), ("android", 41)];
 
 /// Whether the client that sent this header can answer a render spec
 /// (`server_identity.render_spec_capable`): it says who it is as `<name>/<build> contract=<n>`
