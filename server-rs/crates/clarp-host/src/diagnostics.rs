@@ -323,9 +323,30 @@ pub async fn request(
         _ => "other",
     }
     .to_owned();
+    let mut fields = serde_json::Map::new();
+    if method == "GET"
+        && pattern == "/log"
+        && let Some(query) = req.uri().query()
+    {
+        for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            if matches!(key.as_ref(), "session" | "after_revision") {
+                fields
+                    .entry(key.into_owned())
+                    .or_insert_with(|| json!(value));
+            }
+        }
+    }
     let start = Instant::now();
     let reply = next.run(req).await;
-    capture.emit("requests",clock.now_ms(),||json!({"method":method,"route":pattern,"status":reply.status().as_u16(),"duration_ms":start.elapsed().as_millis()}));
+    capture.emit("requests", clock.now_ms(), || {
+        fields.extend([
+            ("method".into(), json!(method)),
+            ("route".into(), json!(pattern)),
+            ("status".into(), json!(reply.status().as_u16())),
+            ("duration_ms".into(), json!(start.elapsed().as_millis())),
+        ]);
+        Value::Object(fields)
+    });
     reply
 }
 /// Measure JSON without allocating a second copy of an oversized client detail.
@@ -449,7 +470,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn diagnostic_request_records_only_the_route_pattern() {
+    async fn diagnostic_request_captures_only_allowed_log_query_fields() {
         use axum::{Router, body::Body, middleware, routing::get};
         use clarp_ports::clock::ManualClock;
         use tower::ServiceExt;
@@ -474,31 +495,65 @@ mod tests {
         );
         let app = Router::new()
             .route("/agents/{id}", get(|| async { StatusCode::ACCEPTED }))
+            .route(
+                "/log",
+                get(|| async { StatusCode::ACCEPTED }).post(|| async { StatusCode::ACCEPTED }),
+            )
             .layer(middleware::from_fn_with_state(
                 (capture.clone(), clock),
                 request,
             ));
-        let reply = app
-            .oneshot(
-                Request::builder()
-                    .uri("/agents/private-path?secret=private-query")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(reply.status(), StatusCode::ACCEPTED);
-        let record = tokio::time::timeout(Duration::from_secs(3), records.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(record["at"], 123);
-        let event = &record["event"];
-        assert_eq!(event["route"], "/agents/{id}");
-        assert_eq!(event["status"], 202);
-        assert_eq!(event["method"], "GET");
-        assert!(event["duration_ms"].is_number());
-        assert!(!record.to_string().contains("private-"));
+        for (method, uri, pattern, log_fields) in [
+            (
+                "GET",
+                "/agents/private-path?session=private-other&secret=private-query",
+                "/agents/{id}",
+                None,
+            ),
+            (
+                "POST",
+                "/log?session=private-post&after_revision=99",
+                "/log",
+                None,
+            ),
+            (
+                "GET",
+                "/log?session=oak%2Dtwo&after_revision=00042&token=private-token&text=private-text",
+                "/log",
+                Some(("oak-two", "00042")),
+            ),
+        ] {
+            let reply = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::ACCEPTED);
+            let record = tokio::time::timeout(Duration::from_secs(3), records.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(record["at"], 123);
+            let event = &record["event"];
+            assert_eq!(event["route"], pattern);
+            assert_eq!(event["status"], 202);
+            assert_eq!(event["method"], method);
+            assert!(event["duration_ms"].is_number());
+            assert!(!record.to_string().contains("private-"));
+            if let Some((session, revision)) = log_fields {
+                assert_eq!(event["session"], session);
+                assert_eq!(event["after_revision"], revision);
+                assert_eq!(event.as_object().unwrap().len(), 6);
+            } else {
+                assert_eq!(event.as_object().unwrap().len(), 4);
+            }
+        }
         capture.transcription(3000, Some("transcription failed"), 99, Some(Instant::now()));
         let record = tokio::time::timeout(Duration::from_secs(3), records.recv())
             .await
