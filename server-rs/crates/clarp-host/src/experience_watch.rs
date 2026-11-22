@@ -67,7 +67,8 @@ impl Signals {
     pub(crate) fn launched(&self, device_id: &str, client: Option<&str>, now: i64) {
         let detail = client
             .and_then(|header| {
-                let (platform, contract) = clarp_kernel::client::named(header)?;
+                let header = crate::client_events::telemetry_header(header);
+                let (platform, contract) = clarp_kernel::client::named(&header)?;
                 let (_, tail) = header.split_once('/')?;
                 let (build, _) = tail.split_once(' ')?;
                 Some(Relaunches {
