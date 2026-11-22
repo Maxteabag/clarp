@@ -34,6 +34,7 @@ fn user(row: &Value) -> User<'_> {
         name: row["persona"].as_str().unwrap_or_else(|| text(row, "name")),
         stored: text(row, "voice_id"),
         builtin: row["builtin"] == true,
+        archived: !row["archived_at"].is_null(),
         agent_id: row["agent_id"].as_str(),
         created_at_ms: row["created_at"].as_i64().unwrap_or_default(),
     }
@@ -46,10 +47,12 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
     let picks = vectors["picks"].as_array().unwrap();
     for case in picks {
         let pool = words(&case["pool"]);
-        let taken = serde_json::from_value(case["taken"].clone()).unwrap();
+        let taken: std::collections::BTreeMap<String, usize> =
+            serde_json::from_value(case["taken"].clone()).unwrap();
         let keep = serde_json::from_value(case["keep"].clone()).unwrap();
+        let heard = taken.keys().cloned().collect();
         let read = std::cell::Cell::new(false);
-        let pick = voice_pool::pick(text(case, "name"), &pool, &taken, &keep, || {
+        let pick = voice_pool::pick(text(case, "name"), &pool, &taken, &heard, &keep, || {
             read.set(true);
             serde_json::from_value(case["used"].clone()).unwrap()
         });
@@ -104,8 +107,9 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
                 json!([
                     "voicePoolExhausted",
                     format!(
-                        "provider={} pool={} reused={} last_used_ms={} shared_by={}",
-                        note.provider, note.size, note.reused, note.last_used_ms, note.shared_by
+                        "provider={} pool={} reused={} archived_only={} last_used_ms={} shared_by={}",
+                        note.provider, note.size, note.reused, if note.archived_only { "True" } else { "False" },
+                        note.last_used_ms, note.shared_by
                     )
                 ])
             })
@@ -113,7 +117,7 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
         assert_eq!(actual.stored, case["result"], "{case}");
         assert_eq!(json!(logs), case["logs"], "{case}");
     }
-    assert_eq!((picks.len(), assignments.len()), (10, 21));
+    assert_eq!((picks.len(), assignments.len()), (10, 24));
 
     let view = HostView {
         voices: Voices {

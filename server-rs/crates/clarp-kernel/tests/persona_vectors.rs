@@ -144,6 +144,7 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
                     name: contact["name"].as_str().unwrap(),
                     stored: contact["voice_id"].as_str().unwrap(),
                     builtin: contact["builtin"] == true,
+                    archived: false,
                     agent_id: None,
                     created_at_ms: book.created_at(contact["id"].as_str().unwrap()),
                 })

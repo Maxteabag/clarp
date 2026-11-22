@@ -23,6 +23,7 @@ pub struct User<'a> {
     pub name: &'a str,
     pub stored: &'a str,
     pub builtin: bool,
+    pub archived: bool,
     pub agent_id: Option<&'a str>,
     pub created_at_ms: i64,
 }
@@ -32,6 +33,7 @@ pub struct Exhausted {
     pub size: usize,
     pub shared_by: usize,
     pub reused: String,
+    pub archived_only: bool,
     pub last_used_ms: i64,
 }
 
@@ -272,12 +274,16 @@ impl Pool<'_> {
             catalogue_miss = catalogue_miss.or(miss);
             let mut reserved = self.reserves(provider);
             let mut taken = BTreeMap::<String, usize>::new();
+            let mut heard = BTreeSet::new();
             let mut holders = Vec::new();
             for user in users {
                 if let Some(voice) = self.speaks(user.stored, user.name, provider) {
                     *taken.entry(voice.clone()).or_default() += 1;
                     if user.builtin {
                         reserved.insert(voice.clone());
+                    }
+                    if !user.archived {
+                        heard.insert(voice.clone());
                     }
                     holders.push((voice, user));
                 }
@@ -296,13 +302,14 @@ impl Pool<'_> {
                 }
                 used
             };
-            if let Some(picked) = pick(name, &candidates, &taken, &reserved, recency) {
+            if let Some(picked) = pick(name, &candidates, &taken, &heard, &reserved, recency) {
                 if let Some(last_used_ms) = picked.last_used_ms {
                     exhausted.push(Exhausted {
                         provider,
                         size: candidates.len(),
                         shared_by: taken.get(picked.id).copied().unwrap_or_default(),
                         reused: picked.id.to_owned(),
+                        archived_only: picked.archived_only,
                         last_used_ms,
                     });
                 }
@@ -332,6 +339,7 @@ impl Pool<'_> {
 
 pub struct Pick<'a> {
     pub id: &'a str,
+    pub archived_only: bool,
     /// Set when there was no free choice.
     pub last_used_ms: Option<i64>,
 }
@@ -340,6 +348,7 @@ pub fn pick<'a>(
     name: &str,
     candidates: &'a [String],
     taken: &BTreeMap<String, usize>,
+    heard: &BTreeSet<String>,
     reserved: &BTreeSet<String>,
     recency: impl FnOnce() -> BTreeMap<String, i64>,
 ) -> Option<Pick<'a>> {
@@ -360,14 +369,16 @@ pub fn pick<'a>(
     if let Some(id) = order.clone().find(|voice| count(voice) == 0) {
         return Some(Pick {
             id,
+            archived_only: false,
             last_used_ms: None,
         });
     }
     let used = recency();
     let at = |voice: &str| used.get(voice).copied().unwrap_or_default();
-    let id = order.min_by_key(|voice| (at(voice), count(voice)))?;
+    let id = order.min_by_key(|voice| (heard.contains(*voice), at(voice), count(voice)))?;
     Some(Pick {
         id,
+        archived_only: !heard.contains(id.as_str()),
         last_used_ms: Some(at(id)),
     })
 }

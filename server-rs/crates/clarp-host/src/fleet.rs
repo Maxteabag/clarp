@@ -2501,6 +2501,7 @@ impl Fleet {
                 name: &record.persona,
                 stored: &record.voice_id,
                 builtin: false,
+                archived: record.archived_at_ms.is_some(),
                 agent_id: Some(&record.agent_id),
                 created_at_ms: record.created_at_ms,
             }
@@ -2526,6 +2527,7 @@ impl Fleet {
                 name: contact["name"].as_str().unwrap_or(""),
                 stored: contact["voice_id"].as_str().unwrap_or(""),
                 builtin: contact["builtin"] == true,
+                archived: false,
                 agent_id: None,
                 created_at_ms: self.book.created_at(contact["id"].as_str().unwrap_or("")),
             });
@@ -2555,8 +2557,13 @@ impl Fleet {
         }
         for note in assigned.exhausted {
             eprintln!(
-                "voicePoolExhausted provider={} pool={} reused={} last_used_ms={} shared_by={}",
-                note.provider, note.size, note.reused, note.last_used_ms, note.shared_by
+                "voicePoolExhausted provider={} pool={} reused={} archived_only={} last_used_ms={} shared_by={}",
+                note.provider,
+                note.size,
+                note.reused,
+                if note.archived_only { "True" } else { "False" },
+                note.last_used_ms,
+                note.shared_by
             );
         }
         assigned.stored

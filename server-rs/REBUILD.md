@@ -3667,8 +3667,9 @@ filtered by the last fetched catalogue and the deleted-voice list. Other languag
 an empty curated selection use the background catalogue's public, non-owner, non-deleted
 voices in the recipient's speech language. The built-in list is the final fallback.
 Curated names supply labels until the saved catalogue or picker names the voice.
-Archived agents hold their voices. After the stable walk finds no free voice, reuse
-goes by the oldest last use, then the least shared voice, then walk order.
+Archived agents hold their voices. After the stable walk finds no free voice, prefer
+a voice held only by archived agents, then the oldest last use, then the least shared
+voice, then walk order. A voice shared with an active agent or contact is still in use.
 A helper inherits its parent's effective voice for each needed provider it lacks.
 A fork gets a pool voice, and a new agent's explicit voice is stored as a provider map.
 A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
