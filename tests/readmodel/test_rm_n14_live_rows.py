@@ -371,13 +371,16 @@ def test_a_delta_that_lands_while_the_tail_yields_refuses_its_publication(tmp_pa
         assert ("transcriptTailRetention", "checkpoint_foreign_commit_yield") in codes
         assert ("transcriptTailDecision", "tail_applied") in codes
         assert _rows(world, "message_id='live-reply'")[0][3] == "so far and more"
-        # The process holds no frontier now. One that looks in the store (a
-        # new process, or after an eviction) finds the frontier of before the
-        # refused tail, whose record does not know that tail's rows.
+        # The process holds no frontier now; it takes the one of before the
+        # refused tail from the store. While it still knows why that tail was
+        # refused (held), the tail's plan reproduces the refused tail's rows,
+        # the live row as the delta left it among them, and it tails. After an
+        # eviction or a Host start the reason is gone, and the record does not
+        # know those rows: full.
         world.published = False
         world.grow(_turn(backend, ordinal + 2))
         assert world.imported() == (
-            ("full_no_frontier", []) if world.state == "held" else
+            ("tail_applied", []) if world.state == "held" else
             ("full_carry_inputs_changed", ["row_transcript"]))
         world.published = True
         world.grow(_turn(backend, ordinal + 3))
@@ -419,14 +422,12 @@ def test_the_end_of_the_streamed_turn_is_still_a_full_import(tmp_path, backend, 
 @BACKENDS
 def test_a_rewritten_live_row_whose_trace_no_other_old_row_carries_and_a_new_turn_row(
         tmp_path, backend):
-    """Conservative, and pinned so that it is known. The traces whose turns
-    are asked about are those of the rows at or below the mark. A live row
-    that was rewritten is above it, so when it was the only old row with its
-    trace the set of traces differs from the recorded one, and ANY change
-    among the turn rows is then refused, here another turn that only
-    started. With the live row as it was the same turn row is a tail. On a
-    Host the running turn's trace is on its /send row as well, and then the
-    set stands."""
+    """The traces whose turns are asked about are those of the old rows. A
+    live row that was rewritten is above the mark, but it is put back at its
+    recorded revision first (lib.message_carry, ``restamp``), so even when it
+    was the only old row with its trace the set of traces stands, and a turn
+    that only started is a tail. (Before that, ANY change among the turn rows
+    was refused here: conservative, and pinned so that it was known.)"""
     with World(tmp_path, backend, _history(backend), settings=ON) as world:
         ordinal = world.started(6)
         world.turn_row("running", at=FAR)
@@ -439,7 +440,7 @@ def test_a_rewritten_live_row_whose_trace_no_other_old_row_carries_and_a_new_tur
         world.turn_row("a-third", at=FAR + 3000)
         world.live_change("reply", "text=?", ("so far, and further",))
         world.grow(_turn(backend, ordinal + 2))
-        assert world.imported() == ("full_carry_inputs_changed", ["turn_of_old_row"])
+        assert world.imported() == ("tail_applied", [])
         world.grow(_turn(backend, ordinal + 3))
         assert world.imported() == ("tail_applied", [])
 
