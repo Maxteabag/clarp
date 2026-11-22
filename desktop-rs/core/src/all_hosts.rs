@@ -14,6 +14,25 @@ use crate::protocol::Agent;
 /// The device preference (never a Host's): off unless set.
 pub const SETTING: &str = "connection/allHosts";
 
+/// "Show Host badges", a device preference: on unless set off. With more
+/// than one Host listed the badges always show; this hides them only while
+/// the list holds one Host's chats.
+pub const BADGES_SETTING: &str = "appearance/hostBadges";
+
+/// The Host badge a row shows: where the agent lives. That is its Host
+/// (`own_label`), unless the row moved to a Host not in the list (`listed`,
+/// server ids): then the Host it moved to (`moved.to.host`). Empty when the
+/// list holds one Host and badges are hidden.
+pub fn badge(agent: &Agent, own_label: &str, listed: &[&str], several: bool, show: bool) -> String {
+    if !several && !show {
+        return String::new();
+    }
+    if !agent.moved_to.is_empty() && !agent.moved_to_host.is_empty() && !listed.contains(&agent.moved_to.as_str()) {
+        return agent.moved_to_host.clone();
+    }
+    own_label.to_owned()
+}
+
 /// The address of `session` on the Host whose `server_id` is `server_id`.
 pub fn qualify(server_id: &str, session: &str) -> String {
     format!("@{server_id}/{session}")
@@ -45,13 +64,13 @@ pub struct HostRoster<'a> {
 
 /// The merged list: `hosts[0]` is the primary, whose sessions stay as they
 /// are; every other Host's sessions and agent ids are qualified by its server
-/// id. With more than one Host every row names its Host. A row that moved to
+/// id. With `badges` (`host_badges`) every row names its Host (`badge`). A row that moved to
 /// a Host in the list (`moved.to.id` equal to that Host's `server_id`) is
 /// left out: that Host lists the agent now. Ordered by last activity, ties
 /// to the primary (then to each Host's own order).
-pub fn merge(hosts: &[HostRoster]) -> Vec<Agent> {
+pub fn merge(hosts: &[HostRoster], badges: bool) -> Vec<Agent> {
     let listed: Vec<&str> = hosts.iter().map(|h| h.server_id).filter(|id| !id.is_empty()).collect();
-    let labelled = hosts.len() > 1;
+    let labelled = badges;
     let mut rows: Vec<(i64, usize, usize, Agent)> = Vec::new();
     for (index, host) in hosts.iter().enumerate() {
         for (position, agent) in host.agents.iter().enumerate() {
@@ -69,7 +88,7 @@ pub fn merge(hosts: &[HostRoster]) -> Vec<Agent> {
                 }
             }
             if labelled {
-                agent.host = host.label.to_owned();
+                agent.host = badge(&agent, host.label, &listed, true, true);
             }
             if !host.reachable {
                 agent.latest_state = "offline".into();
@@ -82,6 +101,22 @@ pub fn merge(hosts: &[HostRoster]) -> Vec<Agent> {
     }
     rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
     rows.into_iter().map(|(_, _, _, agent)| agent).collect()
+}
+
+/// Whether rows and headers name their Host (#651): "Show the Host on each
+/// chat" is on and this client holds pairings for more than one Host.
+pub fn host_badges(setting: bool, paired_hosts: usize) -> bool {
+    setting && paired_hosts > 1
+}
+
+/// A moved agent's quiet line (Host contract 125): "Moved to elitebook Rust",
+/// shown with any number of Hosts and either option; empty when not moved.
+pub fn moved_line(agent: &Agent) -> String {
+    match (agent.moved_to_host.as_str(), agent.moved_to.as_str()) {
+        ("", "") => String::new(),
+        ("", id) => format!("Moved to {id}"),
+        (host, _) => format!("Moved to {host}"),
+    }
 }
 
 /// The quiet line under the list for Hosts that cannot be reached:
@@ -131,25 +166,47 @@ mod tests {
         let merged = merge(&[
             HostRoster { server_id: "one", label: "elitebook", agents: &primary, reachable: true },
             HostRoster { server_id: "two", label: "laptopstudio", agents: &peer, reachable: true },
-        ]);
+        ], true);
         assert_eq!(sessions(&merged), ["rachel", "@two/nova", "mike", "@two/tia", "@two/old"]);
     }
 
     #[test]
-    fn every_row_names_its_host_only_when_there_are_several() {
+    fn rows_name_their_host_only_with_badges_on_and_several_paired_hosts() {
+        assert!(host_badges(true, 2));
+        assert!(!host_badges(true, 1), "one paired Host: never");
+        assert!(!host_badges(false, 3), "the setting hides it, also with several Hosts listed");
         let primary = [agent("rachel", 2)];
         let peer = [agent("nova", 1)];
-        let alone = merge(&[HostRoster { server_id: "one", label: "elitebook", agents: &primary, reachable: true }]);
-        assert_eq!(alone[0].host, "", "one Host: rows look as they always did");
-        assert_eq!(alone[0].session, "rachel");
-        let merged = merge(&[
+        let hosts = [
             HostRoster { server_id: "one", label: "elitebook", agents: &primary, reachable: true },
             HostRoster { server_id: "two", label: "elitebook Rust", agents: &peer, reachable: true },
-        ]);
-        let hosts: Vec<&str> = merged.iter().map(|a| a.host.as_str()).collect();
-        assert_eq!(hosts, ["elitebook", "elitebook Rust"]);
+        ];
+        let merged = merge(&hosts, true);
+        let labels: Vec<&str> = merged.iter().map(|a| a.host.as_str()).collect();
+        assert_eq!(labels, ["elitebook", "elitebook Rust"]);
+        let hidden = merge(&hosts, false);
+        assert!(hidden.iter().all(|a| a.host.is_empty()), "badges off: no row names its Host");
+        assert_eq!(hidden[1].session, "@two/nova", "but the chats are still each Host's");
         assert_eq!(titled("Nova", &merged[1].host), "Nova · elitebook Rust");
         assert_eq!(titled("Rachel", ""), "Rachel");
+    }
+
+    #[test]
+    fn a_moved_agent_says_where_it_lives_now() {
+        let mut mochi = agent("mochi", 1);
+        assert_eq!(moved_line(&mochi), "", "not moved: no line");
+        mochi.moved_to = "rust-1".into();
+        assert_eq!(moved_line(&mochi), "Moved to rust-1", "a destination without a name: its id");
+        mochi.moved_to_host = "elitebook Rust".into();
+        assert_eq!(moved_line(&mochi), "Moved to elitebook Rust");
+        let parsed = Agent::from_json(
+            serde_json::json!({"session": "mochi", "moved": {"to": {"host": "elitebook Rust", "id": "rust-1"}, "at": "2026-11-22T09:00:00Z"}})
+                .as_object()
+                .unwrap(),
+        );
+        assert_eq!((parsed.moved_to.as_str(), parsed.moved_to_host.as_str()), ("rust-1", "elitebook Rust"));
+        assert_eq!(moved_line(&parsed), "Moved to elitebook Rust");
+        assert_eq!(moved_line(&Agent::from_json(serde_json::json!({"session": "x", "moved": null}).as_object().unwrap())), "");
     }
 
     #[test]
@@ -162,7 +219,7 @@ mod tests {
         let merged = merge(&[
             HostRoster { server_id: "one", label: "a", agents: &primary, reachable: true },
             HostRoster { server_id: "two", label: "b", agents: &peer, reachable: true },
-        ]);
+        ], true);
         let helper = merged.iter().find(|a| a.session == "@two/helper").unwrap();
         assert_eq!(helper.parent_agent_id, "@two/lead-id");
         assert_eq!(merged.iter().find(|a| a.session == "@two/lead").unwrap().agent_id, "@two/lead-id");
@@ -183,10 +240,10 @@ mod tests {
         let merged = merge(&[
             HostRoster { server_id: "one", label: "elitebook", agents: &primary, reachable: true },
             HostRoster { server_id: "two", label: "laptopstudio", agents: &peer, reachable: true },
-        ]);
+        ], true);
         assert_eq!(sessions(&merged), ["@two/wanderer", "@two/named", "rachel"]);
         // The destination not in the list: the moved row shows, on one Host.
-        let alone = merge(&[HostRoster { server_id: "two", label: "laptopstudio", agents: &peer, reachable: true }]);
+        let alone = merge(&[HostRoster { server_id: "two", label: "laptopstudio", agents: &peer, reachable: true }], true);
         assert_eq!(alone.len(), 3);
     }
 
@@ -199,8 +256,34 @@ mod tests {
         let merged = merge(&[
             HostRoster { server_id: "one", label: "a", agents: &primary, reachable: true },
             HostRoster { server_id: "two", label: "b", agents: &peer, reachable: true },
-        ]);
+        ], true);
         assert_eq!(sessions(&merged), ["@two/theo", "rachel"]);
+    }
+
+    #[test]
+    fn a_badge_names_where_the_agent_lives() {
+        let rachel = agent("rachel", 1);
+        let mut mochi = agent("mochi", 1);
+        mochi.moved_to = "rust-1".into();
+        mochi.moved_to_host = "elitebook Rust".into();
+        // One Host listed: its name, or none with badges hidden.
+        assert_eq!(badge(&rachel, "elitebook", &["py-1"], false, true), "elitebook");
+        assert_eq!(badge(&rachel, "elitebook", &["py-1"], false, false), "");
+        // Moved to a Host not in the list: that Host is where it lives.
+        assert_eq!(badge(&mochi, "elitebook", &["py-1"], false, true), "elitebook Rust");
+        // Several Hosts: always shown, whatever the setting says.
+        assert_eq!(badge(&rachel, "elitebook", &["py-1", "two"], true, false), "elitebook");
+        let mut no_name = mochi.clone();
+        no_name.moved_to_host.clear();
+        assert_eq!(badge(&no_name, "elitebook", &["py-1"], false, true), "elitebook", "a destination without a name: its own Host");
+        // In a merged list, a row moved to an unlisted Host names that Host.
+        let primary = [rachel.clone()];
+        let peer = [mochi];
+        let merged = merge(&[
+            HostRoster { server_id: "py-1", label: "elitebook", agents: &primary, reachable: true },
+            HostRoster { server_id: "two", label: "laptopstudio", agents: &peer, reachable: true },
+        ], true);
+        assert_eq!(merged.iter().find(|a| a.session == "@two/mochi").unwrap().host, "elitebook Rust");
     }
 
     #[test]
@@ -215,7 +298,7 @@ mod tests {
         let merged = merge(&[
             HostRoster { server_id: "one", label: "a", agents: &primary, reachable: true },
             HostRoster { server_id: "two", label: "b", agents: &peer, reachable: false },
-        ]);
+        ], true);
         let nova = &merged[0];
         assert_eq!((nova.session.as_str(), nova.latest_state.as_str(), nova.busy, nova.alive), ("@two/nova", "offline", false, false));
         assert!(nova.status_text.is_empty());

@@ -57,9 +57,14 @@ fn sessions(app: &crate::App) -> Vec<String> {
     app.engine.borrow().roster().agents().iter().map(|a| a.session.clone()).collect()
 }
 
-/// The explorer's rows as drawn: (session, Host label).
+/// The explorer's rows as drawn: (session, Host badge).
 fn drawn(window: &crate::AppWindow) -> Vec<(String, String)> {
     window.get_chats().iter().map(|c| (c.session.to_string(), c.host.to_string())).collect()
+}
+
+/// A drawn row's "Moved to …" line.
+fn moved_of(window: &crate::AppWindow, session: &str) -> String {
+    window.get_chats().iter().find(|c| c.session == session).map(|c| c.moved.to_string()).unwrap_or_default()
 }
 
 fn texts(app: &crate::App, session: &str) -> Vec<String> {
@@ -78,6 +83,8 @@ pub fn all_hosts_check(out: String) {
             }
             check(!app.engine.borrow().all_hosts(), "the setting is off by default");
             check(sessions(app) == ["rachel", "mike"], &format!("off, the list is the primary's alone: {:?}", sessions(app)));
+            check(drawn(window).iter().all(|(_, host)| host.is_empty()), "paired with one Host, no row names its Host");
+            check(app.engine.borrow().host_badges_setting(), "\"Show the Host on each chat\" is on by default");
             let primary = app.engine.borrow().base_url().to_owned();
             app.engine
                 .borrow_mut()
@@ -104,9 +111,15 @@ pub fn all_hosts_check(out: String) {
             check(!order.iter().any(|s| s == "@fake-host-2/rachel"), "the peer's Rachel moved to the primary (by server id): left out");
             let rows = drawn(window);
             let host_of = |session: &str| rows.iter().find(|(s, _)| s == session).map(|(_, h)| h.clone()).unwrap_or_default();
-            check(host_of("rachel") == "Fake Host", &format!("a primary row names its Host: {:?}", host_of("rachel")));
-            check(host_of(NOVA) == "Peer Host", &format!("a peer row names its Host: {:?}", host_of(NOVA)));
-            check(host_of("@fake-host-2/wanderer") == "Peer Host", "a row that moved to a Host never paired shows on one Host");
+            check(host_of("rachel") == "Fake Host", &format!("a primary row's badge names its Host: {:?}", host_of("rachel")));
+            check(host_of(NOVA) == "Peer Host", &format!("a peer row's badge names its Host: {:?}", host_of(NOVA)));
+            check(
+                host_of("@fake-host-2/wanderer") == "Gone Host",
+                &format!("a row moved to a Host not listed badges where it lives: {:?}", host_of("@fake-host-2/wanderer")),
+            );
+            let moved = moved_of(window, "@fake-host-2/wanderer");
+            check(moved == "Moved to Gone Host", &format!("and says so on its own line: {moved:?}"));
+            check(moved_of(window, NOVA).is_empty(), "a chat that did not move has no such line");
             let saved = clarp_core::hosts::list(app.engine.borrow().settings());
             check(
                 saved.iter().any(|h| h.url == peer_url() && h.server_id == "fake-host-2"),
@@ -127,7 +140,8 @@ pub fn all_hosts_check(out: String) {
             check(app.engine.borrow().selected_session() == NOVA, "the peer's chat is open");
             check(peer_requests("POST", "/select").iter().any(|p| p["body"]["session"] == "nova"), "the peer is told which chat is open, by its own session");
             check(peer_requests("GET", "/log").iter().any(|p| p["query"]["session"] == "nova" || p["url"].as_str().unwrap_or("").contains("session=nova")), "and its log is read from the peer");
-            check(view().name == "Nova · Peer Host", &format!("the header names the chat's Host: {:?}", view().name));
+            check(view().name == "Nova", &format!("the header names the chat: {:?}", view().name));
+            check(view().host == "Peer Host", &format!("and its status line starts with the Host: {:?}", view().host));
             shot(&out_open, "all-hosts-02-peer-chat");
             app_now().focus_composer();
             headless::type_text("hello peer");
@@ -207,7 +221,20 @@ pub fn all_hosts_check(out: String) {
             check(engine.roster().find("rachel").is_some_and(|a| a.latest_state != "offline"), "and its rows are as they were");
             drop(engine);
             shot(&out_gone, "all-hosts-03-unreachable");
-            check(crate::look::step_setting(&app_now(), window, "all-hosts", 1), "the setting turns off");
+            // "Show the Host on each chat" off: no row and no header names
+            // a Host, also with several Hosts listed; the moved line stays.
+            check(crate::look::step_setting(&app_now(), window, "host-badges", 1), "the badge setting is on the settings page");
+            true
+        })),
+        ("badges off", Box::new(|app, window, _| {
+            if drawn(window).iter().any(|(_, host)| !host.is_empty()) {
+                return false;
+            }
+            check(!app.engine.borrow().host_badges(), "badges are off");
+            check(view().host.is_empty(), &format!("the header names no Host: {:?}", view().host));
+            check(moved_of(window, "@fake-host-2/wanderer") == "Moved to Gone Host", "a moved row still says where it lives");
+            check(crate::look::step_setting(&app_now(), window, "host-badges", 1), "badges on again");
+            check(crate::look::step_setting(&app_now(), window, "all-hosts", 1), "the all-Hosts setting turns off");
             true
         })),
         ("off", Box::new(|app, window, _| {
@@ -215,7 +242,12 @@ pub fn all_hosts_check(out: String) {
                 return false;
             }
             check(sessions(app) == ["rachel", "mike"], &format!("off, only the primary's chats: {:?}", sessions(app)));
-            check(drawn(window).iter().all(|(_, host)| host.is_empty()), "rows name no Host with one Host listed");
+            let rows = drawn(window);
+            check(
+                rows.iter().all(|(_, host)| host == "Fake Host"),
+                &format!("still paired with two Hosts, each row names its own: {rows:?}"),
+            );
+            check(view().host == "Fake Host", &format!("and so does the header: {:?}", view().host));
             check(!window.get_roster_note().contains("unreachable"), "and the quiet line is gone");
             true
         })),
