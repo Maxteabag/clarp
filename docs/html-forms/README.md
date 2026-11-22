@@ -24,6 +24,9 @@ receipt and pending delivery snapshot are committed in the same transaction.
 An identical ID/payload retry returns the existing receipt. Reusing an ID for
 different answers is rejected. The normal dispatch worker uses a stable
 `html-form-{submission_id}` request ID with durable queueing and no steering.
+That turn's prompt row (`u-html-form-{submission_id}`) is the agent's alone: the
+Host leaves it out of `/log`, the chat-list preview and `/turn-queue`, so the
+user's chat shows the form card, not the answers as a message (issue 428).
 Archiving hides the inbox entry without closing a ready or active form.
 Completed, cancelled, expired, or discarded forms reject new answers; an
 identical retry of an already accepted submission still returns its receipt.
