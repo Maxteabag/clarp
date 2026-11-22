@@ -503,6 +503,7 @@ pub(crate) mod at_the_port {
                 janitors: Arc::default(),
                 router: Arc::default(),
                 explain: Arc::default(),
+                experience: Arc::default(),
                 oracle: Arc::default(),
                 keeper: Arc::default(),
                 label_checker: Arc::default(),

@@ -565,6 +565,7 @@ pub(crate) async fn route(
     requested: &str,
     only: Option<&[String]>,
     made: &Made,
+    recipient: Option<&mut String>,
 ) -> Result<Routed, ApiError> {
     let desk = app.router.clone();
     let asked_for = request.orchestrator_fallback == Some(true);
@@ -662,6 +663,12 @@ pub(crate) async fn route(
     };
     if let Some(told) = &outcome.told {
         app.hub.publish(told.clone(), app.clock.now_ms());
+    }
+    if !outcome.ok
+        && let Some(recipient) = recipient
+        && let Some(member) = app.member(outcome.target.as_deref().unwrap_or(&outcome.session))
+    {
+        recipient.clone_from(&member.record.agent_id);
     }
     // Admission already supplied the mark of the recipient it refused.
     if let Some(refused) = moved {

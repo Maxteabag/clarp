@@ -300,6 +300,7 @@ async fn serve(config: Config) -> Result<(), String> {
         fallbacks: Arc::default(),
         router: Arc::default(),
         explain: Arc::default(),
+        experience: Arc::default(),
         oracle: Arc::default(),
         keeper: Arc::default(),
         quota_keeper: Arc::default(),
