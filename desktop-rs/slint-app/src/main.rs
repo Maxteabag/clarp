@@ -405,7 +405,9 @@ impl App {
             self.focus_composer();
         }
         let engine = self.engine.borrow();
-        window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
+        window.set_selected_name(
+            if selected.is_empty() { String::new() } else { clarp_core::all_hosts::titled(&engine.chat_name(&selected), &engine.chat_host(&selected)) }.into(),
+        );
         window.set_connection(engine.connection_state().into());
         window.set_base_url(engine.base_url().into());
         if changes.iter().any(|c| matches!(c, Change::Hosts | Change::ServerInfo | Change::Endpoint)) {

@@ -69,6 +69,23 @@ fn chats() -> Vec<Setting> {
             |app, _, on| preference(app, "conversation/timestampsVisible", on, true),
         )
         .default("off"),
+        // A device preference (Maxteabag/clarp#651), never a Host's.
+        Setting::toggle(
+            e(
+                "all-hosts",
+                "Chats from all paired Hosts",
+                "chats",
+                "Lists the chats of every Host this desktop is paired with, each naming its Host; opening one talks to its own Host. New chats and Host settings stay on the connected Host.",
+                &["hosts", "all hosts", "paired hosts", "other hosts", "every host", "merge hosts", "servers", "multiple hosts", "combined list"],
+            ),
+            "CHATS",
+            |app| app.engine.borrow().all_hosts(),
+            |app, _, on| {
+                app.engine.borrow_mut().set_all_hosts(on);
+                crate::pump_now(app);
+            },
+        )
+        .default("off"),
         Setting::toggle(
             e("show-when-ready", "Show when ready", "chats", "Shows a reply once it is complete instead of while it streams in.", &["stream", "streaming", "typing", "live text", "wait for answer", "toggle"]),
             "CHATS",

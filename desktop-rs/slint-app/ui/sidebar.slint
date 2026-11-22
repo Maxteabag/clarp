@@ -42,6 +42,8 @@ export struct ChatRow {
     folded: bool,
     // An archived agent: Restore instead of opening.
     archived: bool,
+    // Its Host, when the list shows several ("Chats from all paired Hosts").
+    host: string,
 }
 
 // A small labelled toggle, like the QML scope chips.
@@ -221,6 +223,16 @@ component Row inherits Rectangle {
                     count: root.chat.running-processes;
                     running: root.on-screen;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
+                }
+                if !root.compact && root.chat.host != "": Text {
+                    text: root.chat.host;
+                    color: Palette.faint;
+                    font-size: 11 * Look.unit;
+                    overflow: elide;
+                    max-width: 120px;
+                    accessible-role: text;
+                    accessible-id: "row-host";
+                    accessible-label: root.chat.host;
                 }
                 if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
             }

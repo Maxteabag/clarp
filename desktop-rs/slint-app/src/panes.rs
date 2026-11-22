@@ -467,7 +467,11 @@ impl App {
 
     fn header(&self, engine: &Engine, view: &mut PaneView, session: &str) {
         let agent = engine.roster().find(session);
-        view.name = if session.is_empty() { SharedString::new() } else { engine.chat_name(session).into() };
+        view.name = if session.is_empty() {
+            SharedString::new()
+        } else {
+            clarp_core::all_hosts::titled(&engine.chat_name(session), &engine.chat_host(session)).into()
+        };
         view.pair = session.starts_with("pair:");
         view.model = agent.map(|a| a.model.clone()).unwrap_or_default().into();
         view.effort = agent.map(|a| a.effort.clone()).unwrap_or_default().into();
