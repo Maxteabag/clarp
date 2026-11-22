@@ -337,6 +337,27 @@ impl Pool<'_> {
     }
 }
 
+/// Fill a contact's missing providers after merging the edit. Bare legacy values
+/// retain their read semantics until the reviewed migration can judge the sound.
+pub fn contact_voice_edit(
+    stored: &str,
+    requested: &str,
+    base: Option<&str>,
+    fill: impl FnOnce(&str) -> String,
+) -> String {
+    let edited = if requested.is_empty() {
+        stored.to_owned()
+    } else {
+        said::merge_provider_maps(stored, requested, base)
+    };
+    let trimmed = strip(stored);
+    if trimmed.is_empty() || trimmed.starts_with('{') {
+        fill(&edited)
+    } else {
+        edited
+    }
+}
+
 pub struct Pick<'a> {
     pub id: &'a str,
     pub archived_only: bool,

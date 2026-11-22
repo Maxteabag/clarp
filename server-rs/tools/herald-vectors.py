@@ -221,8 +221,22 @@ def run(root) -> dict:
                          'held': {sid: urls for sid, urls in held.items() if urls}})
         return {'name': script['name'], 'steps': rows}
 
+    class HeraldVoice:
+        def synthesize_herald(self, text, voice_id, *, session=None):
+            self.voice_id = voice_id
+            return pathlib.Path("/data/audio/herald-fixture.mp3")
+
+    tts = HeraldVoice()
+    manager = herald.HeraldManager(
+        stream=None, tts=tts, agents=lambda: {}, focus_session=lambda: "",
+        clock=lambda: 1000, settings=herald.HeraldSettings)
+    voice_inputs = []
+    for stored in ("", "{}", " {} ", '{"cartesia":""}', '{"cartesia":"c-1"}', " voice-id "):
+        manager._synthesize_herald("fixture", {"name": "Fixture", "voice_id": stored})
+        voice_inputs.append({"stored": stored, "engine": tts.voice_id})
+
     answered = {
-        'agents': AGENTS, 'words': herald.herald_text('Rachel'),
+        'agents': AGENTS, 'words': herald.herald_text('Rachel'), 'voice_inputs': voice_inputs,
         'defaults': herald.HeraldSettings().as_dict(), 'awaiting_s': herald.AWAITING_TTL_SEC,
         'most_short': herald.MAX_SPEAK_IF_SHORT_CHARS, 'residual': intent.MAX_RESIDUAL_WORDS,
         'said': [{'names': NAMES, 'rows': classified(NAMES, SAID)}, {'names': ONE, 'rows': classified(ONE, SAID_TO_ONE)},
@@ -244,7 +258,7 @@ def main() -> int:
         return 1
     said = json.loads(ran.stdout.splitlines()[-1])
     out = ['{']
-    for key in ('agents', 'words', 'defaults', 'awaiting_s', 'most_short', 'residual'):
+    for key in ('agents', 'words', 'voice_inputs', 'defaults', 'awaiting_s', 'most_short', 'residual'):
         out.append(f' "{key}": ' + json.dumps(said[key], ensure_ascii=True) + ',')
     out.append(' "said": [')
     for at, room in enumerate(said['said']):
