@@ -16390,6 +16390,44 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         );
     }
 
+    let forwarded = [("X-Forwarded-For", "203.0.113.7")];
+    let snapshot = fetch(
+        &host,
+        "fixture-alias-one",
+        "GET",
+        "/agents/snapshot",
+        &forwarded,
+        b"",
+    );
+    assert_eq!(snapshot.status, 200);
+    assert!(serde_json::from_slice::<Value>(&snapshot.body).unwrap()["agents"].is_array());
+    let cookie = [
+        forwarded[0],
+        ("Cookie", "claude_pwa_token=fixture-alias-two"),
+    ];
+    assert_eq!(
+        fetch(&host, "", "GET", "/agents/snapshot", &cookie, b"").status,
+        200
+    );
+    for blocked in [token, "wrong"] {
+        assert_eq!(
+            fetch(&host, blocked, "GET", "/agents/snapshot", &forwarded, b"").status,
+            401
+        );
+    }
+    assert_eq!(
+        fetch(
+            &host,
+            "",
+            "GET",
+            "/agents/snapshot?token=fixture-alias-one",
+            &forwarded,
+            b""
+        )
+        .status,
+        401
+    );
+
     // An agent that Claude Code runs: its turns are the stand-in above.
     let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
     let agent = made["session"].as_str().unwrap().to_string();
