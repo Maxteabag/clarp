@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
-use clarp_kernel::agent::{Command, Effect, Note, Refusal, Rest};
+use clarp_kernel::agent::{AgentEvent, Command, Effect, Note, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::control::Control;
 use clarp_kernel::conversation::{
@@ -239,6 +239,8 @@ pub struct Changed {
     pub status: bool,
     /// What waits in the mailbox changed, or whether it is held.
     pub queue: bool,
+    /// The Stop released waiting messages while the mailbox was paused.
+    pub stop_released_waiting: bool,
     /// One of the agent's background jobs changed.
     pub jobs: bool,
     /// One of the agent's goals or plans changed.
@@ -3660,9 +3662,41 @@ impl Actor {
     /// Ends the live turn and holds the mailbox: who asks it, and why. Returns how many turns
     /// were told to end.
     pub fn stop_as(&mut self, by: Control, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
+        self.stop_with(by, false, now_ms)
+    }
+
+    /// The user's non-deferred Stop also gives its already waiting messages their turn.
+    pub fn stop_and_start_waiting(
+        &mut self,
+        by: Control,
+        now_ms: i64,
+    ) -> Result<(u32, Outputs), ActorError> {
+        self.stop_with(by, true, now_ms)
+    }
+
+    fn stop_with(
+        &mut self,
+        by: Control,
+        start_waiting: bool,
+        now_ms: i64,
+    ) -> Result<(u32, Outputs), ActorError> {
         let silenced = by.is_the_users();
-        let command = Command::Stop { by };
-        let effects = self.recorder.handle(command, now_ms)?;
+        let command = if start_waiting {
+            Command::StopAndStartWaiting { by }
+        } else {
+            Command::Stop { by }
+        };
+        let conversation_before = self.recorder.conversation_seq();
+        let mut batch = self.recorder.batch();
+        batch
+            .command(command, now_ms)
+            .map_err(JournalError::Refused)?;
+        let committed = batch.commit()?;
+        let stop_released_waiting = committed
+            .events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::StopReleasedWaiting { .. }));
+        let effects = committed.effects;
         self.say_owed_compaction()?;
         let told = effects
             .iter()
@@ -3670,9 +3704,10 @@ impl Actor {
             .count();
         let mut out = Outputs {
             changed: Changed {
-                conversation: false,
+                conversation: self.recorder.conversation_seq() != conversation_before,
                 status: true,
                 queue: true,
+                stop_released_waiting,
                 ..Changed::default()
             },
             ..Outputs::default()

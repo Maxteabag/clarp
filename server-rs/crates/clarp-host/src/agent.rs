@@ -101,8 +101,6 @@ impl Drop for TerminalLease {
 pub struct Stopped {
     /// How many turns were told to end.
     pub told: u32,
-    /// Where the queue stands after.
-    pub queue: QueueState,
     /// How many goals that were being worked are paused now.
     pub goals_paused: usize,
 }
@@ -232,6 +230,7 @@ enum Ask {
     },
     Stop {
         by: Control,
+        start_waiting: bool,
         answer: Answer<Stopped>,
     },
     /// A turn nothing runs is looked for and given back, and a note of who and why is kept.
@@ -810,12 +809,22 @@ impl AgentHandle {
     }
 
     pub async fn stop(&self, by: String) -> Result<Stopped, Unavailable> {
-        self.stop_as(Control::by(by)).await
+        self.ask(|answer| Ask::Stop {
+            by: Control::by(by),
+            start_waiting: false,
+            answer,
+        })
+        .await
     }
 
-    /// Stops the agent: who asks it, whether the Host knows it is they, and why.
+    /// The non-deferred Stop requested through the API or admin tool.
     pub async fn stop_as(&self, by: Control) -> Result<Stopped, Unavailable> {
-        self.ask(|answer| Ask::Stop { by, answer }).await
+        self.ask(|answer| Ask::Stop {
+            by,
+            start_waiting: true,
+            answer,
+        })
+        .await
     }
 
     /// Gives back a turn of the agent that nothing runs, and keeps a note of who and why.
@@ -2994,7 +3003,11 @@ impl Worker {
                 }
                 answered(left, answer)?
             }
-            Ask::Stop { by, answer } => {
+            Ask::Stop {
+                by,
+                start_waiting,
+                answer,
+            } => {
                 // The turn is no longer the agent's to finish: the pool of its tool's
                 // accounts does not wait for it, and does not take it up.
                 if let (Some(pool), Some(_)) = (self.setup.pool(), self.pooled) {
@@ -3003,7 +3016,12 @@ impl Worker {
                 // A Stop holds the agent's goals too: each one that is being worked is paused
                 // until someone resumes it, so that none wakes the agent the user just stopped.
                 let reason = clarp_kernel::control::paused_by(&by);
-                let stopped = actor.stop_as(by, now).and_then(|(told, mut out)| {
+                let stopped = if start_waiting {
+                    actor.stop_and_start_waiting(by, now)
+                } else {
+                    actor.stop_as(by, now)
+                };
+                let stopped = stopped.and_then(|(told, mut out)| {
                     let paused = with_goals(actor, now, |book, world| book.stopped(&reason, world));
                     for change in &paused {
                         let kept = keep_goal(
@@ -3019,13 +3037,8 @@ impl Worker {
                     }
                     Ok(((told, paused.len()), out))
                 });
-                let queue = actor.queue_state();
                 let stopped = stopped.map(|((told, goals_paused), out)| {
-                    let stopped = Stopped {
-                        told,
-                        queue,
-                        goals_paused,
-                    };
+                    let stopped = Stopped { told, goals_paused };
                     (stopped, out)
                 });
                 answered(stopped, answer)?
@@ -4477,7 +4490,10 @@ impl Worker {
                 item,
                 sender_name: name(item.sender_agent_id.as_deref()),
             }),
-            None if (held_or_let_go && !told_with_its_turn) || taken_back => {
+            None if (held_or_let_go && !told_with_its_turn)
+                || taken_back
+                || changed.stop_released_waiting =>
+            {
                 Some(wire::QueueUpdate::Mailbox)
             }
             None => None,

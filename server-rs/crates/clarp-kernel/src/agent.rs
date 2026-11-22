@@ -76,6 +76,8 @@ pub enum Command {
     Reword { turn: TurnId, message_seq: u64 },
     /// End the live turn and hold the mailbox: who asks it, and why.
     Stop { by: Control },
+    /// A non-deferred Stop that lets the user's already waiting messages run.
+    StopAndStartWaiting { by: Control },
     /// Someone looked for a turn of the agent that nothing runs, and gives it back: nothing is
     /// ended and nothing is held or let go. What is kept is a note of who and why, on the state.
     Repair { by: Control },
@@ -210,6 +212,10 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         reason: String,
         at_ms: i64,
+    },
+    /// A Stop lets these waiting turns run while the rest of the mailbox stays paused.
+    StopReleasedWaiting {
+        turns: Vec<TurnId>,
     },
     Resumed {
         by: String,
@@ -788,6 +794,7 @@ impl Agent {
             agent: self.clone(),
             decision: Decision::default(),
         };
+        let start_waiting = matches!(&command, Command::StopAndStartWaiting { .. });
         match command {
             Command::SetMoved { to } => {
                 match (&work.agent.moved, &to) {
@@ -941,7 +948,8 @@ impl Agent {
                     at_ms: now_ms,
                 });
             }
-            Command::Stop { by } => {
+            Command::Stop { by } | Command::StopAndStartWaiting { by } => {
+                let release_waiting = start_waiting && by.actor == crate::control::USER;
                 work.stop_live(by.clone(), now_ms);
                 // A stop holds everything that waits, also what an earlier hold let through.
                 // Even an already held mailbox observes a newer Stop. Listen-first
@@ -952,6 +960,25 @@ impl Agent {
                     reason: by.reason,
                     at_ms: now_ms,
                 });
+                if release_waiting {
+                    let turns: Vec<_> = work
+                        .agent
+                        .waiting()
+                        .filter(|queued| {
+                            queued.origin.is_user_send()
+                                && !work.agent.joins.contains_key(&queued.id)
+                                && work
+                                    .agent
+                                    .selected_takeover
+                                    .as_ref()
+                                    .is_none_or(|selected| selected.into != queued.id)
+                        })
+                        .map(|queued| queued.id)
+                        .collect();
+                    if !turns.is_empty() {
+                        work.record(AgentEvent::StopReleasedWaiting { turns });
+                    }
+                }
             }
             Command::Repair { by } => {
                 // Nothing here holds a turn that nothing runs: there is nothing to give back.
@@ -1324,6 +1351,9 @@ impl Agent {
                     self.user_stop_floor = (by == crate::control::USER).then_some(self.next_turn);
                 }
                 self.unheld.clear();
+            }
+            AgentEvent::StopReleasedWaiting { turns } => {
+                self.unheld.extend(turns);
             }
             AgentEvent::Resumed { .. } => {
                 self.paused = false;

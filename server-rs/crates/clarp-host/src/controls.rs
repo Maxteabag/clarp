@@ -41,7 +41,7 @@ pub(crate) async fn control_of(
     })
 }
 
-/// `POST /stop`: the agent's turn is ended and what waits is held, with who asked it and why.
+/// `POST /stop`: end the turn and pause the queue. A user's Stop lets their waiting sends run.
 pub(crate) async fn stop(app: &App, session: &str, by: Control) -> Result<StopResponse, ApiError> {
     let answer = StopResponse {
         ok: true,
@@ -57,7 +57,8 @@ pub(crate) async fn stop(app: &App, session: &str, by: Control) -> Result<StopRe
     let stopped = member.agent.stop_as(by).await?;
     Ok(StopResponse {
         terminated: u64::from(stopped.told),
-        queue_paused: Some(stopped.queue.paused),
+        // The Stop's own pause, before dispatch can drain the queue and end it.
+        queue_paused: Some(true),
         goals_paused: Some(stopped.goals_paused as u64),
         ..answer
     })

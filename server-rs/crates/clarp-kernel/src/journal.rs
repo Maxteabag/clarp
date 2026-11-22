@@ -313,6 +313,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         }
         AgentEvent::MoveMarked { .. }
         | AgentEvent::Paused { .. }
+        | AgentEvent::StopReleasedWaiting { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }
         | AgentEvent::TookUp { .. }
