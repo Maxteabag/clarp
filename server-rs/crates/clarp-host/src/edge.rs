@@ -343,6 +343,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `delivery-updated` hint: in the in-process mode, the Host owning its turns itself.
     ("send_delivery_state", 81),
     ("chat_view", 145),
+    // In Conversation view, an agent the owner names (`[conversation_forks]`, the snapshot's
+    // `conversation_fork`) answers at once through a fork of its session while its own works
+    // for other agents (issue 718). `GET /log` rows say which session they came from
+    // (`session_id`) and the conversation, which a fork or a relaunch never changes.
+    ("conversation_fork", 153),
     ("helper_ended_unreported", 155),
     ("agent_api_status", 154),
     ("waited_send_order", 115),
@@ -1451,6 +1456,7 @@ pub(crate) fn agent_row(
     faces: &crate::faces::Faces,
     owners: &toml::Table,
     used_up: &crate::quota::UsedUp,
+    forks: &crate::conversation_forks::Named,
 ) -> Value {
     let view = member.agent.view();
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
@@ -1485,6 +1491,12 @@ pub(crate) fn agent_row(
     );
     row["coordination_visibility"] = json!(visibility);
     row["coordination_override"] = json!(choice);
+    // Whether the agent may answer through a conversation fork (issue 718, contract 153).
+    row["conversation_fork"] = json!(forks.allows(
+        &member.record.backend,
+        &member.record.agent_id,
+        &member.record.session
+    ));
     row["chat_view"] = json!(crate::chat_view::preference(
         directory,
         &member.record.agent_id
@@ -1603,6 +1615,7 @@ async fn snapshot(
     // Which agents the user calls live: by their profiles, as they are now.
     let (live_defaults, live_available) = app.calls.taking(&app).await;
     let owners = app.mouth.owners_from(&directory);
+    let forks = crate::conversation_forks::Named::read();
     let teams = app
         .teams
         .read(|teams, _| clarp_kernel::teams::memberships(teams));
@@ -1616,7 +1629,9 @@ async fn snapshot(
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
         .map(|member| {
-            let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
+            let mut row = agent_row(
+                &directory, &families, member, &app.faces, &owners, &used_up, &forks,
+            );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(live_available.contains(&member.record.session));
             if live_defaults.contains(&member.record.session) {
@@ -1633,7 +1648,9 @@ async fn snapshot(
         if without_archived && put_away(member) {
             continue;
         }
-        let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
+        let mut row = agent_row(
+            &directory, &families, member, &app.faces, &owners, &used_up, &forks,
+        );
         row["team_ids"] = json!(team_ids(member));
         row["live_call_available"] = json!(false);
         let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
@@ -2158,6 +2175,7 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
                 &app.faces,
                 &app.mouth.owners(),
                 &unasked,
+                &crate::conversation_forks::Named::read(),
             )
         })
         .unwrap_or_default();

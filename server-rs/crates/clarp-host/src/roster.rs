@@ -341,6 +341,7 @@ async fn archived(
     let families = edge::Families::of(&directory);
     let used_up = crate::quota::used_up(&app).await;
     let owners = app.mouth.owners();
+    let forks = crate::conversation_forks::Named::read();
     let agents: Vec<Value> = order[page.start..page.end]
         .iter()
         .filter_map(|(_, agent_id)| {
@@ -349,7 +350,7 @@ async fn archived(
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
             Some(edge::agent_row(
-                &directory, &families, member, &app.faces, &owners, &used_up,
+                &directory, &families, member, &app.faces, &owners, &used_up, &forks,
             ))
         })
         .collect();

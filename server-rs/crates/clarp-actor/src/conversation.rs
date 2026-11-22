@@ -188,6 +188,9 @@ pub struct Versioned {
     /// The turn it belongs to answers another agent: that agent's id, empty for an agent of a
     /// peer Host. `None`: the user's turn, or no turn.
     pub coordination: Option<String>,
+    /// The session of the agent's tool the row came from, where the Host knows it. Filled by
+    /// the actor that reads the page.
+    pub session: Option<String>,
 }
 
 impl Versioned {
@@ -204,6 +207,7 @@ impl Versioned {
             tools: Vec::new(),
             commentary: false,
             coordination: None,
+            session: None,
         }
     }
 }

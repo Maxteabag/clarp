@@ -5982,6 +5982,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             trace_id: trace.clone(),
             origin,
             tools: Vec::new(),
+            backend_session: None,
         });
         items.push(reply.to_item(at).unwrap());
         let end = Entry::TurnEnd(TurnEnd {
@@ -6155,4 +6156,40 @@ fn coordination_costs_the_same_in_a_conversation_of_300_000_rows_as_in_one_of_3_
         tail_marked[1],
         before_unmarked[1]
     );
+}
+
+#[test]
+fn every_row_says_which_session_of_the_tool_it_came_from() {
+    let mut world = World::new("row-sessions");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.says(
+        1,
+        r#"{"type":"system","subtype":"init","session_id":"tool-session-1"}"#,
+    );
+    claude_message(&mut world, 1, "a", "Done.", &[]);
+    world.says(
+        1,
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"Done."}"#,
+    );
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let page = actor.tail(10).unwrap();
+    let sessions: Vec<(String, Option<String>)> = page
+        .entries
+        .iter()
+        .map(|row| (row.entry.id().to_string(), row.session.clone()))
+        .collect();
+    assert_eq!(
+        sessions,
+        [
+            ("u-1".to_string(), Some("tool-session-1".to_string())),
+            ("r-a".to_string(), Some("tool-session-1".to_string())),
+        ]
+    );
+    let Entry::Reply(reply) = &page.entries[1].entry else {
+        panic!("the second row is the reply: {:?}", page.entries[1]);
+    };
+    assert_eq!(reply.backend_session.as_deref(), Some("tool-session-1"));
 }

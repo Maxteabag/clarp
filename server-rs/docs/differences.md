@@ -576,3 +576,12 @@ still settles the ring at 45 seconds.
 Issue 216 (feature contract 151) adds per-call mode selection to the Rust Host.
 The Python Host requires a Live default for user-started Live calls. The Rust Host
 advertises availability separately and accepts explicit Live through `/calls/live`.
+
+Every `/log` row carries `conversation_id` and `session_id` on the Rust Host (contract 153,
+feature `conversation_fork`), where the Python Host's rows have neither: `conversation_id` is
+the agent's and is never changed by a relaunch or a conversation fork, and `session_id` is the
+session of the agent's tool that produced the row (the journal's record of the session each turn
+ran in, or what a reply recorded of itself). An app that does not know them reads past them. The
+snapshot tells per agent whether it may fork (`conversation_fork`, from `[conversation_forks]
+agents` in the Host's `config.toml`); the fork itself is issue 718's next piece. The
+conformance run will show both row fields until they are registered there as intended.

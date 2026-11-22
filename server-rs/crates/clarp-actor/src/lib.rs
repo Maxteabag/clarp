@@ -2689,13 +2689,32 @@ impl Actor {
 
     /// The newest `limit` things a reader asks for.
     pub fn tail_of(&self, limit: usize, which: Which) -> Result<Page, ActorError> {
-        conversation::tail(
+        let page = conversation::tail(
             self.recorder.log(),
             self.drafts(),
             self.span(),
             limit,
             which,
-        )
+        )?;
+        Ok(self.with_sessions(page))
+    }
+
+    /// The session of the agent's tool each row of a page came from (`session_id` of
+    /// `GET /log`): what a reply recorded of itself, and else the session its turn ran in.
+    /// The conversation stays the agent's whatever session its tool runs in.
+    fn with_sessions(&self, mut page: Page) -> Page {
+        for row in &mut page.entries {
+            row.session = match &row.entry {
+                Entry::Reply(reply) if reply.backend_session.is_some() => {
+                    reply.backend_session.clone()
+                }
+                _ => row
+                    .turn_number
+                    .and_then(|turn| self.recorder.turn_session(turn))
+                    .map(str::to_owned),
+            };
+        }
+        page
     }
 
     /// The newest `limit` things the agent's log has of any of its conversations, also of
@@ -2770,14 +2789,15 @@ impl Actor {
 
     /// Up to `limit` things a reader asks for that are newer than `revision`.
     pub fn after_of(&self, revision: u64, limit: usize, which: Which) -> Result<Page, ActorError> {
-        conversation::after(
+        let page = conversation::after(
             self.recorder.log(),
             revision,
             self.drafts(),
             self.span(),
             limit,
             which,
-        )
+        )?;
+        Ok(self.with_sessions(page))
     }
 
     /// The agent's background jobs.
@@ -3265,15 +3285,15 @@ impl Actor {
         let Some(item) = self.recorder.log().find(id)? else {
             return Ok(None);
         };
-        conversation::older(
+        let page = conversation::older(
             self.recorder.log(),
             item.seq,
             &[],
             self.span(),
             limit,
             which,
-        )
-        .map(Some)
+        )?;
+        Ok(Some(self.with_sessions(page)))
     }
 
     /// Takes a message for the agent. When this returns, the message is in the log.
@@ -5558,6 +5578,9 @@ impl Actor {
                             live.drafts.retain(|draft| draft.id != reply.id);
                             reply.trace_id = live.trace_id.clone();
                             reply.origin = live.origin.clone();
+                            // Whose words these are: the agent's own session with its tool.
+                            reply.backend_session =
+                                batch.agent().backend_session().map(str::to_owned);
                             let speak = if let Some(separate) = &live.steering.separate {
                                 reply.turn = separate.turn.0;
                                 reply.trace_id.clone_from(&separate.message.trace_id);

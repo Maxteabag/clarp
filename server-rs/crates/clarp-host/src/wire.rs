@@ -1538,12 +1538,6 @@ pub fn row(version: &Versioned) -> Value {
             if let Origin::Agent { agent_id } = &reply.origin {
                 row["reply_to_agent_id"] = json!(agent_id);
             }
-            // Which session of the agent's tool said it: its own, or its conversation fork's
-            // (issue 718, contract 153). Absent where the Host did not know it when it wrote the
-            // row. The conversation's id is the same for both.
-            if let Some(session) = &reply.backend_session {
-                row["backend_session_id"] = json!(session);
-            }
             // The tools its message calls, a card each, in the message's order.
             row["tools"] = version
                 .tools
@@ -1668,6 +1662,13 @@ pub fn log_response(
                     View::Session
                 };
                 fields.insert("view".into(), json!(view));
+                // The session of the agent's tool the row came from, and the conversation,
+                // which stays the agent's whatever session its tool runs in (contract 153). A
+                // session the Host does not know is not said.
+                fields.insert("conversation_id".into(), json!(conversation));
+                if let Some(session) = &version.session {
+                    fields.insert("session_id".into(), json!(session));
+                }
                 if let Some(count) = version.session_rows {
                     fields.insert("session_rows".into(), json!(count));
                 }

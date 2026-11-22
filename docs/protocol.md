@@ -23,7 +23,7 @@ they drift.
 |---|---|
 | **agent** | One persona bound to one working directory and one backend CLI (Claude, Codex, or Antigravity). Durable identity is `agent_id`. |
 | **session** | The agent's user-facing name, e.g. `rachel`. Unique among live agents. Every core endpoint addresses agents by `session`. |
-| **conversation** | One backend CLI conversation. Identified by `backend_session_id`, also called `conversation_id`. An agent has exactly one live conversation; relaunch or fork starts a new one. |
+| **conversation** | The agent's chat as the user sees it. Identified by `conversation_id`, which stays the agent's for as long as the conversation lasts: a relaunch of its backend CLI or a conversation fork does not change it. It changes only for a genuinely new conversation (the agent is reset, or it is a new agent). The backend CLI's own session is `backend_session_id`; it can change under one conversation, and each `/log` row says which one produced it (`session_id`). |
 | **message** | One row of the conversation as the server stores it. Identified by `message_id`; ordered by `revision`. |
 | **turn** | The message shape `/log` returns. The word is historical; a turn is one message. |
 | **revision** | A per-conversation monotonic counter. Every insert or update of a message bumps it. It is the only ordering key a client should rely on. |
@@ -430,8 +430,40 @@ Rules:
   change as a delta (the conversation was rebuilt or rewritten). Discard the
   cached chat and load a tail snapshot.
 - **`conversation_id`** changing between two responses for the same session
-  means the agent started a new conversation (relaunch or fork). Discard the
-  cached chat.
+  means a genuinely new conversation: the agent was reset, or it is a new agent.
+  Discard the cached chat. A relaunch of the backend CLI or a conversation fork
+  never changes it (Rust Host contract 153; before that, and on the Python Host, a
+  relaunch could). A Host may keep the id across a reset and say so with
+  `replace_required` instead; either way, drop the cache and reload the tail.
+- **Every row carries `conversation_id` and `session_id` (Rust Host contract 153,
+  feature `conversation_fork`).** `conversation_id` is the agent's, the same value as
+  the response's. `session_id` is the backend session that produced the row: the agent's
+  own, or its conversation fork's (below). It is absent where the Host does not know it
+  (rows written before its tool named a session, rows brought from another Host).
+- **Conversation forks (feature `conversation_fork`, Rust Host contract 153, issue 718).**
+  In Conversation view, an agent the owner names in the Host's `[conversation_forks]
+  agents` setting answers a message of the user's at once while its own session works on
+  a turn whose audience is agents: the Host copies the agent's Claude Code session, and
+  that copy (the fork) answers in the same chat. Apps draw nothing new unless both the
+  feature is listed in `/server-info` and the agent's row in `/agents/snapshot` has
+  `conversation_fork: true` (the setting allows that agent to fork).
+  - `/log?session=X` returns the fork's rows in the main chat's order, as ordinary rows
+    with `audience: "user"`; their `session_id` is the fork's, for every row of a turn the
+    fork answered (the user's message included). The fork never appears as a chat or
+    roster entry of its own.
+  - `/live?session=X` while a fork's turn runs: `turn` and `items` are the fork's turn,
+    which is what the user talks to. The agent's own turn is told beside it in
+    `main_turn`: `{turn_id, audience, status, started_at_ms, tool_count, activity}`, where
+    `activity` has only `state` and, for a tool, `tool.name` (no headline). Without a fork's
+    turn, `main_turn` is absent.
+  - `POST /stop` for the session stops the fork's turn when one runs, and leaves the
+    agent's own turn and its queue as they are (`queue_paused: false`). To stop the agent's
+    own turn then, send `target: "main"` in the body.
+  - Further messages of the user's before the merge go to the same fork. The merge note,
+    which tells the agent's own session what the fork was asked, said and did when its next
+    turn begins, is the Host's alone: apps show nothing for it.
+  - A fork that cannot start, or fails before it answers, loses no row: the user's message
+    stays a normal queued message and runs as it would have without a fork.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
 - **A message that waits enters the conversation where its turn starts (feature
@@ -1141,7 +1173,8 @@ fetch delta(session):
     else: upsert r.turns by id; cursor = r.latest_revision; if r.has_more: fetch delta again
 
 on transcript-updated(session): debounce ~100 ms, then fetch delta(session)
-on agent-roster created/relaunched/forked for a cached session: drop cache, reload
+on agent-roster created or reset for a cached session: drop cache, reload
+    (a relaunch or a conversation fork keeps conversation_id: fetch delta)
 
 send(text):
     id = new uuid

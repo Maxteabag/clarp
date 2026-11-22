@@ -389,6 +389,7 @@ mod tests {
             tools,
             commentary: false,
             coordination: None,
+            session: None,
         }
     }
 
