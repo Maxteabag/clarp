@@ -4,7 +4,7 @@
 //! Host over the same door the apps use, with the administrator's token, from this machine.
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -24,10 +24,11 @@ the address a phone is paired with through it. The administrator's token is read
 CLARP_HOST_TOKEN.";
 
 pub const PEER_USAGE: &str =
-    "usage: clarp-host peer add NAME URL | peer list | peer remove NAME  [--host ADDR:PORT]
-Names another Host this one may write to: an agent here then writes to an agent there with
-`clarp-admin prompt --server NAME`. The other Host's token is read from CLARP_PEER_TOKEN, this
-Host's from CLARP_HOST_TOKEN.";
+    "usage: clarp-host peers add [NAME] URL --code CODE [--device-name NAME]
+       clarp-host peers add [NAME] URL --token-stdin
+       clarp-host peers list | peers remove NAME
+Use --host ADDR:PORT to name this Host on loopback. It takes the administrator's token from
+CLARP_HOST_TOKEN. A named peer can receive clarp-admin prompt --server NAME.";
 
 pub const IMPORT_USAGE: &str =
     "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT] [--files]
@@ -1098,6 +1099,21 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
     let argv: Vec<String> = args.collect();
+    if name == "clarp-admin" && argv.first().is_some_and(|arg| arg == "peers") {
+        let result = peer_command(argv.into_iter().skip(1), token, "", address, true);
+        return match result {
+            Ok(shown) => ToolOutcome {
+                exit: 0,
+                stdout: format!("{shown}\n"),
+                stderr: String::new(),
+            },
+            Err(why) => ToolOutcome {
+                exit: 2,
+                stdout: String::new(),
+                stderr: format!("clarp-admin peers: {why}\n"),
+            },
+        };
+    }
     let tell_user = name == "clarp-admin" && argv.first().is_some_and(|arg| arg == "tell-user");
     // Read the capability in the invoking tool's process. The server never
     // opens an arbitrary path supplied by an HTTP tool caller.
@@ -1238,31 +1254,130 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
 /// `clarp-host peer`: names another Host for the running Host, lists the ones it knows, or
 /// forgets one. Returns what to show.
 pub fn peer(
+    args: impl Iterator<Item = String>,
+    token: &str,
+    peer_token: &str,
+    json_output: bool,
+) -> Result<String, String> {
+    peer_command(
+        args,
+        token,
+        peer_token,
+        "127.0.0.1:7690".to_string(),
+        json_output,
+    )
+}
+
+fn peer_command(
     mut args: impl Iterator<Item = String>,
     token: &str,
     peer_token: &str,
+    mut host: String,
+    json_output: bool,
 ) -> Result<String, String> {
-    let mut words: Vec<String> = Vec::new();
-    let mut host = "127.0.0.1:7690".to_string();
+    let mut words = Vec::new();
+    let (mut code, mut explicit_token, mut device_name) = (None, None, None);
+    let mut token_stdin = false;
     while let Some(arg) = args.next() {
-        if arg == "--host" {
-            host = args.next().ok_or("--host needs an address")?;
-        } else {
-            words.push(arg);
+        let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--host" => host = value()?,
+            "--code" if code.is_none() => code = Some(value()?),
+            "--device-name" if device_name.is_none() => device_name = Some(value()?),
+            "--token" if explicit_token.is_none() => explicit_token = Some(value()?),
+            "--token-stdin" if !token_stdin => token_stdin = true,
+            flag if flag.starts_with('-') => {
+                return Err("unknown or repeated peer option".to_string());
+            }
+            _ => words.push(arg),
         }
     }
+    // A pairing token may go back to this Host only over loopback. Use the resolved
+    // address in every request so a later lookup cannot change the destination.
+    let host = host.trim_start_matches("http://").trim_end_matches('/');
+    let host = host
+        .to_socket_addrs()
+        .map_err(|_| "invalid local Host address")?
+        .find(|address| address.ip().is_loopback())
+        .ok_or("the local Host address must be on loopback")?
+        .to_string();
     let refused = |status: u16, answer: &Value| {
         let why = answer["error"].as_str().unwrap_or("no reason given");
         format!("the Host refused ({status}): {why}")
     };
-    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    let modes = usize::from(code.is_some())
+        + usize::from(explicit_token.is_some())
+        + usize::from(token_stdin);
+    let words: Vec<_> = words.iter().map(String::as_str).collect();
     match words.as_slice() {
-        ["add", name, url] => {
-            if peer_token.is_empty() {
-                return Err("the other Host's token is read from CLARP_PEER_TOKEN".to_string());
+        ["add", positions @ ..] if (1..=2).contains(&positions.len()) => {
+            let (alias, url) = match positions {
+                [name, url] => (name.trim(), *url),
+                [url] => ("", *url),
+                _ => return Err("say which peer URL to add".to_string()),
+            };
+            let url = crate::peers::normalize_url(url).ok_or("peer requires an HTTP(S) URL")?;
+            if modes > 1 || (modes == 0 && (json_output || peer_token.is_empty())) {
+                return Err("give exactly one of --code, --token-stdin or --token".to_string());
             }
-            let named = json!({ "name": name, "url": url, "token": peer_token });
+            if device_name.is_some() && code.is_none() {
+                return Err("--device-name requires --code".to_string());
+            }
+            // Check local authority before spending a code or reading the other Host.
+            let (status, answer) = request("GET", &host, "/peers", token, None)?;
+            if status != 200 {
+                return Err(refused(status, &answer));
+            }
+            crate::peers::warn_plain_http(url);
+            let paired = code.is_some();
+            let identity = if paired {
+                crate::peers::identity(url).map_err(|code| format!("peer identity: {code}"))?
+            } else if modes > 0 {
+                crate::peers::identity(url).unwrap_or_default()
+            } else {
+                serde_json::Map::new()
+            };
+            let learned_name = crate::peers::reported(&identity, "name");
+            let name = if alias.is_empty() {
+                learned_name
+                    .as_deref()
+                    .ok_or("could not learn the peer's name; give it: peers add NAME URL")?
+            } else {
+                alias
+            };
+            let server_id = crate::peers::reported(&identity, "server_id").unwrap_or_default();
+            let credential = if let Some(code) = code {
+                if code.trim().is_empty() {
+                    return Err("--code needs a pairing code".to_string());
+                }
+                let device_name = match device_name.filter(|name| !name.is_empty()) {
+                    Some(name) => name,
+                    None => {
+                        let info = get(&host, "/server-info", token)?;
+                        let name = info["name"]
+                            .as_str()
+                            .ok_or("the local Host did not report a name")?;
+                        format!("{name} (peer Host)")
+                    }
+                };
+                crate::peers::exchange_code(url, &code, &device_name)
+                    .map_err(|code| format!("peer pairing: {code}"))?
+            } else if token_stdin {
+                let mut credential = String::new();
+                std::io::stdin()
+                    .read_line(&mut credential)
+                    .map_err(|_| "could not read peer token")?;
+                credential
+            } else {
+                explicit_token.unwrap_or_else(|| peer_token.to_string())
+            };
+            let named = json!({
+                "name": name, "url": url, "token": credential.trim(), "server_id": server_id,
+            });
             match post(&host, "/peers", token, &named)? {
+                (200, answer) if json_output => {
+                    serde_json::to_string_pretty(&answer).map_err(|error| error.to_string())
+                }
                 (200, answer) => Ok(format!(
                     "{} is the Host at {}",
                     answer["name"].as_str().unwrap_or(name),
@@ -1271,8 +1386,11 @@ pub fn peer(
                 (status, answer) => Err(refused(status, &answer)),
             }
         }
-        ["list"] => {
+        ["list"] if modes == 0 && device_name.is_none() => {
             let peers = get(&host, "/peers", token)?;
+            if json_output {
+                return serde_json::to_string_pretty(&peers).map_err(|error| error.to_string());
+            }
             let lines: Vec<String> = peers
                 .as_array()
                 .map(Vec::as_slice)
@@ -1293,13 +1411,18 @@ pub fn peer(
                 .collect();
             Ok(lines.join("\n"))
         }
-        ["remove", name] => {
-            match request("DELETE", &host, &format!("/peers/{name}"), token, None)? {
+        ["remove", name] if modes == 0 && device_name.is_none() => {
+            let mut path =
+                url::Url::parse("http://localhost/peers").map_err(|error| error.to_string())?;
+            path.path_segments_mut()
+                .map_err(|()| "invalid peer route")?
+                .push(name);
+            match request("DELETE", &host, path.path(), token, None)? {
                 (200, _) => Ok(format!("removed peer: {name}")),
                 (status, answer) => Err(refused(status, &answer)),
             }
         }
-        _ => Err("say what to do: add NAME URL, list, or remove NAME".to_string()),
+        _ => Err("say what to do: add [NAME] URL, list, or remove NAME".to_string()),
     }
 }
 

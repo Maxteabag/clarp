@@ -365,7 +365,11 @@ app to sync, an agent's portrait in a push.
 **Agents write to each other, also across Hosts** (15 Nov 2026). The skill tells an agent to hand work to
 another with `clarp-admin prompt --to SESSION --from ME`; on this Host the same command is answered by the Host
 (`admin_tool.rs`). With `--server NAME` the message goes to an agent of another Host the owner named
-(`peers.rs`, `clarp-host peer add NAME URL`, the Python Host's scheme): that Host's own `POST /send`. This is
+(`peers.rs`, `clarp-admin peers add [NAME] URL --code CODE` or `clarp-host peers add`): that Host's own
+`POST /send`. Code pairing registers the peer in the Rust Host's config directory in `peers.json`. Full-scope
+clients may ask for `GET /peers/snapshot`, which reads the enabled peers' identities and agent snapshots
+with their stored device tokens and shares the result for ten seconds. Reads and sends use direct
+connections and refuse redirects. This is
 what lets agents move one by one: an agent that lives here still reaches the ones on the Python Host beside
 it, and they reach it once the Python Host has this one as a peer (`clarp-admin peers add`, the release
 owner's to do at an install). A request that comes back is there too (`clarp-admin request` and `reply`,

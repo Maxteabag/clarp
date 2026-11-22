@@ -81,6 +81,8 @@ mod move_janitors;
 mod native_agent_goal;
 #[path = "host/pairing_identity.rs"]
 mod pairing_identity;
+#[path = "host/peer_snapshot.rs"]
+mod peer_snapshot;
 #[path = "host/pictures.rs"]
 mod pictures;
 #[path = "host/provider_tasks.rs"]
@@ -5460,7 +5462,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     );
     assert_eq!(
         named,
-        json!({ "name": "work", "url": format!("http://{}", other.address), "enabled": true })
+        json!({ "name": "work", "url": format!("http://{}", other.address), "enabled": true, "server_id": "" })
     );
     assert_eq!(host.get("/peers"), json!([named]), "never its token");
     // The owner's own command for it reads the same.
