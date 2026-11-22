@@ -1,4 +1,4 @@
-// Draws a render_spec form (catalog clarp.form v1, issue 428) as plain DOM and collects its
+// Draws a render_spec form (catalog clarp.form v1 and v2, issues 428 and 673) as plain DOM and collects its
 // answers. It knows nothing of the network: RenderSpecCard.svelte gives it a reading and
 // receives the answers the form path takes.
 //
@@ -7,9 +7,11 @@
 // keeps focus and the caret where the user left them.
 //
 // Enter in a text field never presses a button: there is no <form> element, and a single-line
-// field swallows Enter; a multiline field keeps its newline.
+// field swallows Enter; a multiline field keeps its newline. A button is pressed only by a
+// click or a tap (or the keyboard on the button itself).
 
-import { footnote, held, submission, words } from '@core/render-spec.js';
+import { ACTION_KEY, footnote, formatScaled, held, submission, words } from '@core/render-spec.js';
+import { drawChart } from './render-spec-chart.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -140,6 +142,59 @@ const DRAW = {
     }
     return group;
   },
+
+  // ---- version 2 ----
+  chart(element) {
+    return drawChart(element.props);
+  },
+  table(element) {
+    const { title, columns, rows } = element.props;
+    const wrap = el('div', 'rs-table-wrap');
+    const table = el('table', 'rs-table');
+    if (title) table.append(el('caption', 'rs-table-title', title));
+    const head = el('tr');
+    for (const column of columns) {
+      const th = el('th', column.align === 'end' ? 'rs-end' : '', column.label);
+      th.scope = 'col';
+      head.append(th);
+    }
+    const thead = el('thead');
+    thead.append(head);
+    table.append(thead);
+    const body = el('tbody');
+    for (const row of rows) {
+      const tr = el('tr');
+      for (const column of columns) {
+        const value = row[column.key];
+        const td = el('td', column.align === 'end' ? 'rs-end' : '');
+        if (typeof value === 'boolean') {
+          td.textContent = value ? '✓' : '–';
+          td.setAttribute('aria-label', value ? 'Yes' : 'No');
+          td.classList.add('rs-bool');
+        } else if (typeof value === 'number') {
+          td.textContent = formatScaled(value, column.decimals);
+          td.classList.add('rs-num');
+        } else if (typeof value === 'string') {
+          td.textContent = value;
+        }
+        tr.append(td);
+      }
+      body.append(tr);
+    }
+    table.append(body);
+    wrap.append(table);
+    return wrap;
+  },
+  button(element, ctx) {
+    const { label, style, action } = element.props;
+    const button = el('button', `rs-action rs-${style}`);
+    button.type = 'button';
+    button.dataset.rsAction = action;
+    button.append(el('span', 'rs-action-mark'), el('span', 'rs-action-label', label));
+    button.addEventListener('click', () => ctx.press(element.props, button));
+    ctx.actions.push({ props: element.props, button });
+    return button;
+  },
 };
 
 /** Whether this build draws a component type. */
@@ -158,7 +213,10 @@ export function mountForm(host, { form, values, accepted = null, onSubmit, onVal
     syncs: [],
     captions: {},
     fieldNotes: {},
+    actions: [],
   };
+  const buttonForm = form.buttons && form.buttons.length > 0;
+  const chosen = accepted ? accepted.state[ACTION_KEY] : null;
   let sending = false;
   let closed = false;
   let note = '';
@@ -181,16 +239,63 @@ export function mountForm(host, { form, values, accepted = null, onSubmit, onVal
   const footer = el('div', 'rs-footer');
   const line = el('div', 'rs-footnote');
   line.setAttribute('aria-live', 'polite');
-  const submit = el('button', 'rs-submit start-btn primary', form.submitLabel);
+  // A button form has no footer submit (v2): its buttons are elements of the form.
+  const submit = el('button', 'rs-submit start-btn primary', form.submitLabel || '');
   submit.type = 'button';
-  submit.addEventListener('click', send);
-  footer.append(line, submit);
+  submit.addEventListener('click', () => send(null));
+  // A button with `confirm` asks it first, here: OK submits, Cancel or Escape does not.
+  const confirmBar = el('div', 'rs-confirm');
+  confirmBar.setAttribute('role', 'alertdialog');
+  confirmBar.hidden = true;
+  const confirmText = el('div', 'rs-confirm-text');
+  const confirmCancel = el('button', 'rs-action rs-secondary', 'Cancel');
+  confirmCancel.type = 'button';
+  const confirmOk = el('button', 'rs-action', 'OK');
+  confirmOk.type = 'button';
+  const confirmRow = el('div', 'rs-confirm-row');
+  confirmRow.append(confirmCancel, confirmOk);
+  confirmBar.append(confirmText, confirmRow);
+  let asking = null;
+  const closeConfirm = () => {
+    if (!asking) return;
+    const from = asking.button;
+    asking = null;
+    confirmBar.hidden = true;
+    refresh();
+    from?.focus?.();
+  };
+  confirmCancel.addEventListener('click', closeConfirm);
+  confirmOk.addEventListener('click', () => {
+    const action = asking && asking.props.action;
+    asking = null;
+    confirmBar.hidden = true;
+    if (action) send(action);
+  });
+  ctx.press = (props, button) => {
+    if (ctx.readOnly || sending || closed || asking) return;
+    if (!submission(form, ctx.values, props.action).ready) return;
+    if (props.confirm) {
+      asking = { props, button };
+      confirmText.textContent = props.confirm;
+      confirmOk.className = `rs-action rs-${props.style === 'secondary' ? 'primary' : props.style}`;
+      confirmBar.hidden = false;
+      refresh();
+      confirmOk.focus();
+      return;
+    }
+    send(props.action);
+  };
+  footer.append(confirmBar, line);
+  if (!buttonForm) footer.append(submit);
   host.replaceChildren(body, footer);
   host.classList.toggle('rs-answered', ctx.readOnly);
   // Keys typed in the form are the form's: the app's shortcuts (Enter opens the composer,
   // letters split panes outside insert mode) never see them. Escape leaves the field.
   host.onkeydown = e => {
-    if (e.key === 'Escape') document.activeElement?.blur?.();
+    if (e.key === 'Escape') {
+      if (asking) closeConfirm();
+      else document.activeElement?.blur?.();
+    }
     e.stopPropagation();
   };
 
@@ -206,14 +311,24 @@ export function mountForm(host, { form, values, accepted = null, onSubmit, onVal
     submit.hidden = ctx.readOnly;
     submit.disabled = !result.ready || sending || ctx.readOnly || closed;
     submit.classList.toggle('sending', sending);
-    submit.textContent = form.submitLabel;
+    submit.textContent = form.submitLabel || '';
+    // Every button is off until the values are complete, while one is being sent or asked,
+    // and for good after the one answer; the answered card marks the button that was chosen.
+    for (const { props, button } of ctx.actions) {
+      button.disabled = ctx.readOnly || !result.ready || sending || closed || !!asking;
+      const was = chosen === props.action;
+      button.classList.toggle('chosen', ctx.readOnly && was);
+      button.classList.toggle('not-chosen', ctx.readOnly && !was);
+      if (ctx.readOnly) button.setAttribute('aria-pressed', was ? 'true' : 'false');
+    }
     line.textContent = footnote({ form, values: ctx.values, accepted, note, closed, captions: ctx.captions });
     line.hidden = !line.textContent;
   }
 
-  function send() {
+  function send(action) {
     if (ctx.readOnly || sending || closed) return;
-    const result = submission(form, ctx.values);
+    if (buttonForm && !action) return;
+    const result = submission(form, ctx.values, action);
     if (!result.ready) return;
     onSubmit?.(result.answers);
   }
