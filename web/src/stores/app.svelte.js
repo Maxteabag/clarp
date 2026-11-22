@@ -13,6 +13,8 @@ import { AgentState } from '@core/protocol.js';
 import { countUnread, createJsonReader } from '@core/unread.js';
 import { clog } from '../lib/net.js';
 import { ensureLoaded, reconcileWithSnapshot } from './conversations.svelte.js';
+import { hostBadgeText } from '@core/host-badge.js';
+import { prefs } from './prefs.svelte.js';
 
 export const AVATAR_PALETTE = {
   Mike: '#7aa2f7', Rachel: '#f7768e', Domi: '#bb9af7', Bella: '#ff9e64',
@@ -44,6 +46,9 @@ export const app = $state({
   tick: 0,
   /** Computer preference: wear the portrait drawn for the model, when bundled. */
   modelAvatars: false,
+  /** The Hosts whose chats this app reads, [{id, name}] from /server-info. The web app is
+   *  served by one Host and reads only it, so the Host capsule never shows here yet. */
+  hosts: [],
 });
 
 export const isDesktop = document.documentElement.classList.contains('desktop');
@@ -292,4 +297,13 @@ export function setVersion(serverVer, adapterVersion) {
 export function logState(ev, machine) {
   clog('state', `${ev.from}->${ev.to}` +
     (machine.expectingFrom ? ` for=${machine.expectingFrom}` : ''));
+}
+
+
+/** The capsule naming the Host a chat is on, or '' (static/lib/host-badge.js). */
+export function hostBadgeFor(sid) {
+  const row = app.status[sid] || {};
+  return hostBadgeText({
+    setting: prefs.showHostBadge, hosts: app.hosts, rowHost: row.host_id || '', moved: row.moved,
+  });
 }

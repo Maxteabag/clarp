@@ -3408,3 +3408,18 @@ html:not(.desktop) .history:has(.status-line) .history-jump {
 .sl-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .lv-pulse { animation: lv-flash 900ms var(--ease) 1; }
 @keyframes lv-flash { 0%, 40% { background: rgba(125, 207, 255, .12); } 100% { background: transparent; } }
+
+/* The Host a chat is on (static/lib/host-badge.js): a small neutral capsule, no colour per
+   Host, never squeezed before the chat's name is. */
+.host-badge {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .07);
+  color: var(--washi-low);
+  font: 500 10px/16px var(--font-ui);
+  white-space: nowrap;
+  vertical-align: 1px;
+}
