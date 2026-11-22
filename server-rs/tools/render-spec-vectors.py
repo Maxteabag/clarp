@@ -770,6 +770,12 @@ def form_v2(rs, identity, refusal):
         ('decreasing numeric x', changed([*chart, 'series'], [{'name': 'One', 'points': [{'x': 3, 'y': 1}, {'x': 2, 'y': 2}]}])),
         ('negative pie point', changed([*chart], {'kind': 'pie', 'series': [{'name': 'One', 'points': [{'x': 1, 'y': -1}]}]})),
         ('a pie with two series', changed([*chart, 'kind'], 'pie')),
+        ('duplicate series names', changed([*chart, 'series', 1, 'name'], 'before')),
+        ('names before pie count', changed(chart, {'kind': 'pie', 'series': [
+            {'name': 'One', 'points': [{'x': 1, 'y': 2}]},
+            {'name': 'One', 'points': [{'x': 2, 'y': 1}]},
+        ]})),
+        ('series name equality is exact', changed([*chart, 'series', 1, 'name'], 'Before')),
         ('a bar with too many points', changed([*chart], {'kind': 'bar', 'series': [{'name': 'One', 'points': [{'x': i, 'y': 1} for i in range(61)]}]})),
         ('points above chart total', changed([*chart, 'series'], [
             {'name': str(j), 'points': [{'x': i, 'y': 1} for i in range(151)]} for j in range(4)])),
@@ -807,6 +813,7 @@ def form_v2(rs, identity, refusal):
             given['admitted'] = result
             given['message'] = rs.message_text(artifact, answer, base)
         out.append(given)
+    out.extend(answered_buttons(base))
     for header, v1, v2 in [
             ('ios/12 contract=74', None, None),
             ('ios/12 contract=74', None, {'ios': 74}),
@@ -825,6 +832,53 @@ def form_v2(rs, identity, refusal):
     ]:
         out.append({'kind': 'level', 'header': header, 'v1': v1, 'v2': v2,
                     'level': identity.render_spec_level(header, v1, v2)})
+    return out
+
+
+def answered_buttons(base):
+    from sqlite3 import connect, Row
+    from unittest.mock import patch
+
+    from lib import render_spec_store
+    from lib.persistence.schema_parts.html_forms import SCHEMA
+
+    def submission(id, created_at, action):
+        return dict(submission_id=id, created_at=created_at, version=base['version'],
+                    payload_hash='fixture', synthesize_audio=False,
+                    answers={'intent': 'button', 'state': {'action': action}})
+
+    hold = submission('a', 10, 'hold')
+    ship = submission('z', 20, 'ship')
+    plain = {**base, 'spec': {'elements': {}}}
+    cases = [
+        ('still ready', 'ready', base, [hold]),
+        ('no accepted submission', 'completed', base, []),
+        ('earliest timestamp wins', 'completed', base, [ship, hold]),
+        ('earliest id breaks a tie', 'completed', base, [{**ship, 'created_at': 10}, hold]),
+        ('earliest unknown action stays absent', 'completed', base, [hold, submission('b', 1, 'other')]),
+        ('v1 has no answered button', 'completed', BASE, [hold]),
+        ('no buttons', 'completed', plain, [hold]),
+    ]
+    out = []
+    with connect(':memory:') as conn:
+        conn.row_factory = Row
+        conn.executescript('CREATE TABLE artifacts (artifact_id TEXT PRIMARY KEY);' + SCHEMA)
+        with patch.object(render_spec_store.db, 'conn', return_value=conn):
+            for number, (name, status, payload, entries) in enumerate(cases):
+                id = f'form-{number}'
+                conn.execute('DELETE FROM form_submissions')
+                conn.execute('INSERT INTO artifacts VALUES (?)', (id,))
+                conn.executemany(
+                    'INSERT INTO form_submissions '
+                    '(submission_id, artifact_id, version, session, answers_json, payload_hash, prompt, created_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [(entry['submission_id'], id, entry['version'], 'fixture', dumps(entry['answers']),
+                      entry['payload_hash'], '', entry['created_at']) for entry in entries],
+                )
+                item = dict(artifact_id=id, status=status, type='render_spec')
+                out.append(dict(kind='answered_button', name=name, item=item,
+                                payload=payload, submissions=entries,
+                                fields=render_spec_store.answered_button(item, payload)))
     return out
 
 
