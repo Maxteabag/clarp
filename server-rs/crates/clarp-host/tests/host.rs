@@ -37002,6 +37002,25 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
         host.get("/judgments/settings")["settings"]["breaker_open_seconds"],
         0.0
     );
+
+    // The app sends an empty model. Use the Host setting and the selected engine's budget.
+    let saved = host.post(
+        "/transcription-providers",
+        json!({"engine":"cartesia:ink-whisper","turn_taking":"native"}),
+    );
+    assert_eq!(saved["ok"], true, "{saved}");
+    let preview = |model| host.get(&format!("/vocab/preview?session={session}&model={model}"));
+    let default = preview("");
+    assert_eq!(
+        (
+            &default["provider"],
+            &default["model"],
+            &default["capacity"]
+        ),
+        (&json!("cartesia"), &json!("ink-whisper"), &json!(0))
+    );
+    assert_eq!(preview("server-default"), default);
+    assert_eq!(preview("deepgram:nova-3")["provider"], "deepgram");
 }
 
 /// A stand-in for the voice of a live call, on this machine: it takes the key of the tests

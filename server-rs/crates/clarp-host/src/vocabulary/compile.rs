@@ -104,8 +104,17 @@ pub async fn compile(
     } else {
         Vec::new()
     };
-    let (provider, model) = match selected.trim() {
-        "" | "server-default" => ("faster-whisper", app.config.whisper_model.as_str()),
+    let selected = selected.trim();
+    // Live transcription already picked its engine. Only a default preview has no plan.
+    let configured;
+    let selected = if trace.is_none() && matches!(selected, "" | "server-default") {
+        configured = app.ears.default_engine(&dir);
+        configured.as_str()
+    } else {
+        selected
+    };
+    let (provider, model) = match selected {
+        "" | "local" | "server-default" => ("faster-whisper", app.config.whisper_model.as_str()),
         other => other.split_once(':').unwrap_or((other, "")),
     };
     let (book, recent) = app.ears.vocab.inputs(&app.fleet, session).await?;
