@@ -40,7 +40,8 @@ function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 export function countLine(value) {
   const count = normalizeCount(value);
   if (!count) return '';
-  if (count.capped) return `${count.messages}+ messages between agents`;
+  // Capped with no message counted (the run was cut before one): say it without a number.
+  if (count.capped) return count.messages ? `${count.messages}+ messages between agents` : 'Messages between agents';
   if (count.messages) return `${plural(count.messages, 'message')} between agents`;
   return `${plural(count.exchanges, 'exchange')} between agents`;
 }
