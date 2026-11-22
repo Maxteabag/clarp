@@ -5224,11 +5224,12 @@ fn r121_a_send_refused_every_time_is_tried_as_the_python_host_tries_it_and_its_s
             0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 124_000
         ]
     );
-    // The next is tried when it is over, on a count of its own: its first try is counted.
+    // The queued handoff is tried when it is over. R193 counts its first failure and ends at ten.
     assert_eq!(
         of(2),
         [
-            124_000, 125_000, 127_000, 131_000, 139_000, 155_000, 187_000, 247_000
+            124_000, 125_000, 127_000, 131_000, 139_000, 155_000, 187_000, 247_000, 307_000,
+            367_000
         ]
     );
     let status = actor.status();
@@ -5237,8 +5238,109 @@ fn r121_a_send_refused_every_time_is_tried_as_the_python_host_tries_it_and_its_s
         status.last.unwrap().outcome,
         Outcome::not_started("claude: not found".to_string())
     );
-    let never = r121_never_run("claude: not found");
-    assert_eq!(r121_told(&actor), [never.clone(), never]);
+    assert_eq!(
+        r121_told(&actor),
+        [
+            r121_never_run("claude: not found"),
+            clarp_kernel::launch_refused::notice(10, "claude: not found"),
+        ]
+    );
+}
+
+#[test]
+fn r193_a_queued_handoff_keeps_its_deadline_and_turn_across_restarts() {
+    let mut world = World::new("r193-handoff");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "first", Admission::Queue);
+    let queued = Message {
+        trace_id: Some("handoff-trace".into()),
+        ..message("u-2", "second")
+    };
+    let now = world.tick();
+    let (sent, _) = actor.send(&queued, Admission::Queue, now).unwrap();
+    assert!(sent.queued);
+    world.exits(1, Some(0), None);
+    let start = world.tick();
+    let out = actor.spool_changed(start).unwrap();
+    let mut order = r121_launch(&out).unwrap().clone();
+    let schedule = [
+        0, 1_000, 3_000, 7_000, 15_000, 31_000, 63_000, 123_000, 183_000, 243_000,
+    ];
+    for (attempt, elapsed) in schedule.into_iter().enumerate() {
+        assert_eq!(order.turn, TurnId(2));
+        assert_eq!(order.attempt, u32::try_from(attempt + 1).unwrap());
+        let at = start + elapsed;
+        world.now_ms = at;
+        let out = if attempt % 2 == 0 {
+            r121_no_shim(&mut actor, &order, at)
+        } else {
+            r121_no_tool(&mut actor, &order, at)
+        };
+        let Some(next) = schedule.get(attempt + 1) else {
+            assert_eq!(r121_launch(&out).unwrap().turn, TurnId(3));
+            break;
+        };
+        let due = start + next;
+        assert_eq!(actor.retry_at(), Some(due));
+        assert!(out.actions.is_empty());
+        if attempt == 0 {
+            drop(actor);
+            actor = world.open();
+            let (_, out) = actor
+                .send(&message("u-3", "third"), Admission::Queue, world.now_ms)
+                .unwrap();
+            assert!(
+                out.actions.is_empty(),
+                "a new send cannot wake the backing-off handoff"
+            );
+        }
+        assert_eq!(actor.retry_at(), Some(due));
+        assert!(actor.retry_due(due - 1).unwrap().actions.is_empty());
+        let out = actor.retry_due(due).unwrap();
+        order = r121_launch(&out).unwrap().clone();
+    }
+    let failed = actor.status().last.unwrap();
+    assert_eq!(failed.id, TurnId(2));
+    assert!(failed.never_ran);
+    assert_eq!(
+        failed.outcome,
+        Outcome::not_started("claude: not found".into())
+    );
+    assert_eq!(
+        r121_told(&actor),
+        [clarp_kernel::launch_refused::notice(
+            10,
+            "claude: not found"
+        )]
+    );
+    assert_eq!(
+        actor
+            .tail(100)
+            .unwrap()
+            .entries
+            .iter()
+            .filter(|row| row.entry.id() == "u-2")
+            .count(),
+        1
+    );
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let records = log
+        .read_after(0, Kinds::only(kind::AGENT_EVENT), 100)
+        .unwrap();
+    let started = records.iter().filter(|record| {
+        record.turn == Some(2)
+            && matches!(
+                serde_json::from_slice::<clarp_kernel::agent::AgentEvent>(&record.body).unwrap(),
+                clarp_kernel::agent::AgentEvent::Turn {
+                    change: clarp_kernel::turn::TurnEvent::Started { .. },
+                    ..
+                }
+            )
+    });
+    assert_eq!(started.count(), 1, "the handoff's retries reuse its turn");
 }
 
 #[test]
