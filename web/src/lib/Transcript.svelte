@@ -52,7 +52,9 @@
   let timeline = $derived(withLiveEntry(merged, liveAt));
   // The quiet chat: each settled /log turn's work behind one row (static/lib/history-fold.js).
   // The turn live items show is theirs, already left out of `turns`.
-  let fold = $derived(foldTurns(turns, { mode: prefs.toolActivity, busy: !!statusFor(session).busy }));
+  // busy is its own derived boolean: a status tick that leaves it unchanged does not refold.
+  let busy = $derived(!!statusFor(session).busy);
+  let fold = $derived(foldTurns(turns, { mode: prefs.toolActivity, busy }));
 
   // Keep this chat's live items coming while it is on screen.
   $effect(() => {
