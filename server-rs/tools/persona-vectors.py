@@ -90,6 +90,8 @@ OWN = [
         {'create': {'name': 'First'}},
         {'create': {'name': 'Second'}},
         {'create': {'name': 'Third', 'voice_id': '{}'}},
+        {'update': {'original_name': 'Third', 'name': 'Third',
+                    'voice_id': '{"cartesia":null,"gemini":"Kore"}'}},
         {'delete': 'First'},
         {'create': {'name': 'Fourth'}},
     ]},

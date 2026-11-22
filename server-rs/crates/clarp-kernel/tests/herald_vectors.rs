@@ -31,6 +31,17 @@ fn texts(list: &Value) -> Vec<String> {
 }
 
 #[test]
+fn the_herald_hands_an_empty_provider_map_to_the_voice_engine_as_no_voice() {
+    for row in vectors()["voice_inputs"].as_array().unwrap() {
+        assert_eq!(
+            clarp_kernel::herald::voice_input(row["stored"].as_str().unwrap()),
+            row["engine"],
+            "{row}"
+        );
+    }
+}
+
+#[test]
 fn the_heralds_words_and_settings_are_the_python_hosts() {
     let vectors = vectors();
     assert_eq!(words("Rachel", "rachel"), vectors["words"]);

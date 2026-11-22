@@ -1,6 +1,7 @@
 {
  "agents": {"rachel": "Rachel", "mike": "Mike", "bella": "Bella", "anna-maria": "Anna Maria", "nameless": ""},
  "words": "Rachel here, ready for an update.",
+ "voice_inputs": [{"stored": "", "engine": ""}, {"stored": "{}", "engine": ""}, {"stored": " {} ", "engine": ""}, {"stored": "{\"cartesia\":\"\"}", "engine": ""}, {"stored": "{\"cartesia\":\"c-1\"}", "engine": "{\"cartesia\":\"c-1\"}"}, {"stored": " voice-id ", "engine": "voice-id"}],
  "defaults": {"disabled": false, "speak_if_short_chars": 120, "short_reply_bypass_enabled": true},
  "awaiting_s": 60.0,
  "most_short": 2000,

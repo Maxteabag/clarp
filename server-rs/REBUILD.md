@@ -3675,6 +3675,11 @@ A fork gets a pool voice, and a new agent's explicit voice is stored as a provid
 A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
 At startup the fleet applies the existing migration plan before serving requests.
 It logs and leaves any voice whose sound would change under any provider.
+An empty provider map on creation uses the contact's voice where available.
+On relaunch it keeps the agent's existing voice. A contact edit fills missing
+provider voices when the contact was stored as a map. One-off announcements
+and ring openings skip synthesis when no stored voice is named (PR 688).
+The herald passes an empty map as no voice so the persona fallback can speak (PR 689).
 
 **Cartesia catalogue access (PR 562, 21 Nov 2026).** The names worker recognizes
 public access, public or all visibility, and the legacy boolean public marker. The

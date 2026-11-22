@@ -7,6 +7,9 @@ use serde_json::Value;
 fn voice_maps_and_the_audible_migration_match_the_reference() {
     let vectors: Value =
         serde_json::from_str(include_str!("fixtures/voice-map-vectors.json")).unwrap();
+    for row in vectors["present"].as_array().unwrap() {
+        assert_eq!(said::has_voice(row["input"].as_str()), row["has_voice"]);
+    }
     for row in vectors["canonical"].as_array().unwrap() {
         assert_eq!(
             said::canonical_voice(row["input"].as_str().unwrap()),

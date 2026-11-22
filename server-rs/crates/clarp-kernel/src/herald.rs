@@ -36,6 +36,16 @@ pub const DISABLED_KEY: &str = "herald.disabled";
 pub const SHORT_KEY: &str = "herald.speak_if_short_chars";
 pub const BYPASS_KEY: &str = "herald.short_reply_bypass_enabled";
 
+/// What the herald hands the voice resolver. A missing voice keeps persona fallback available.
+pub fn voice_input(stored: &str) -> &str {
+    let stored = crate::python::strip(stored);
+    if crate::said::has_voice(Some(stored)) {
+        stored
+    } else {
+        ""
+    }
+}
+
 /// What the herald says for an agent: its name, or its session when it has none.
 pub fn words(persona: &str, session: &str) -> String {
     let who = if persona.is_empty() { session } else { persona };
