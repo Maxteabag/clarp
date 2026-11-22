@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 137;
+pub const HOST_CONTRACT: u64 = 138;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -109,6 +109,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // negotiation and administrator export while retaining the original feature number.
     ("render_spec", 102),
     ("render_spec_v2", 133),
+    ("render_spec_answered_button", 138),
     ("flat_artifact_responses", 1),
     ("artifacts", 1),
     // What an agent publishes: `POST /media`, an agent's gallery, a file fetched whole and
