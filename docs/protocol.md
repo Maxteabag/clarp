@@ -104,6 +104,18 @@ local, so the token is a paired device's (`POST /pairing/exchange`), with that d
 Every other route and every write stays same-origin. With no list, nothing is allowed
 cross-origin.
 
+### Peers' chat lists (feature `peer_snapshot`)
+
+A Host can keep a device token for each of its owner's other Hosts (`clarp-admin peers add`,
+pairing by a one-time code made on the peer). `GET /peers/snapshot` (same access as
+`/agents/snapshot`) answers `{peers: {<server_id>: {name, url, server_id, reachable, error,
+snapshot}}, cache_seconds}`: the Host reads each peer's `GET /server-info` and `GET
+/agents/snapshot` server to server with that token and returns the peer's snapshot as the peer
+gave it. Unreachable: `reachable: false`, `snapshot: null`, an `error` code. Only the peers'
+own configured URLs are fetched, never one from the request; redirects are refused; tokens are
+never returned. The web app's all-Hosts list reads this, so the browser needs no other Host's
+token; opening a peer's chat opens `url` (that Host's own web app).
+
 ## Core conversation protocol
 
 ### 1. Bootstrap: `GET /agents/snapshot`

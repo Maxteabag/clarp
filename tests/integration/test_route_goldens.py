@@ -178,8 +178,8 @@ def build_dispatch_golden(server_module, monkeypatch, tmp_path) -> dict:
             "differs reaches instead (anonymous, local_no_token, limited, full, "
             "open_local, open_remote; open_* = host without an admin token). "
             "'error 401/403 ...' and 'send 429' are gate refusals; 'send 404' is the "
-            "fall-through. HEAD, OPTIONS and other methods have no do_ method and get "
-            "the stdlib 501."
+            "fall-through. HEAD and other methods have no do_ method and get "
+            "the stdlib 501; OPTIONS is the CORS preflight (lib.cross_origin)."
         ),
         "routes": routes,
     }
@@ -230,6 +230,9 @@ def test_known_issues_are_still_reproduced_by_the_golden():
 
 
 def test_unsupported_methods_get_the_stdlib_501(server_module):
+    """HEAD, TRACE and CONNECT have no do_ method and get the stdlib 501. OPTIONS has one since
+    contract 139: the CORS preflight of the cross-origin reads (lib.cross_origin), 403 for
+    everything else (tests/integration/test_cross_origin_read.py)."""
     handler = server_module.Handler
     assert {m for m in ("HEAD", "OPTIONS", "TRACE", "CONNECT")
-            if hasattr(handler, "do_" + m)} == set()
+            if hasattr(handler, "do_" + m)} == {"OPTIONS"}

@@ -531,6 +531,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/server-update": "_handle_server_update_status",
         "/turn-queue": "_handle_turn_queue",
         "/agents/snapshot": "_handle_snapshot",
+        "/peers/snapshot": "_handle_peers_snapshot",
         "/agents/archived": "_handle_archived_agents",
         "/agent-conversations": "_handle_agent_conversations",
         "/identity/prompt-history": "_handle_prompt_history",
@@ -1278,7 +1279,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     # carries the worker's folder and log path).
     _LIMITED_DEVICE_GET_EXACT = frozenset({
         "/server-info", "/events", "/live", "/status",
-        "/agents/snapshot", "/log", "/message-tool-details", "/turn-queue", "/location",
+        "/agents/snapshot", "/peers/snapshot", "/log", "/message-tool-details", "/turn-queue", "/location",
         "/attention", "/attention/inbox", "/artifacts", "/pinned-artifacts",
         "/task-plan", "/task-plans", "/task-plan/document", "/goal-ledger",
         "/clips/message", "/clips/recoverable", "/media",

@@ -2626,7 +2626,34 @@ def cmd_peers(args) -> int:
     if args.peers_command == "list":
         print(json.dumps(server_peers.list_public(), indent=2))
     elif args.peers_command == "add":
-        print(json.dumps(server_peers.add(args.name, args.url, args.token), indent=2))
+        # `peers add <url>` or `peers add <name> <url>`. The token comes from a one-time code made
+        # on the peer (--code), from stdin (--token-stdin), or (older form) --token. It is kept in
+        # peers.json (0600) and never printed.
+        if args.url is None:
+            name, url = "", args.name
+        else:
+            name, url = args.name, args.url
+        server_id = ""
+        if sum(bool(x) for x in (args.code, args.token_stdin, args.token)) != 1:
+            raise SystemExit("give exactly one of --code, --token-stdin or --token")
+        if args.code:
+            device_name = args.device_name
+            if not device_name:
+                from lib.server_identity import get_server_info
+                device_name = f"{get_server_info()['name']} (peer Host)"
+            paired = server_peers.pair(url, args.code, device_name)
+            token, server_id, name = paired["token"], paired["server_id"], name or paired["name"]
+        else:
+            token = sys.stdin.readline().strip() if args.token_stdin else args.token
+            try:
+                from lib.peer_reads import fetch_json
+                identity = fetch_json(server_peers.normalize_url(url), "/pairing/identity", timeout=10)
+                server_id, name = str(identity.get("server_id") or ""), name or str(identity.get("name") or "")
+            except Exception:  # noqa: BLE001 - the identity is a convenience; the snapshot learns it
+                pass
+        if not name:
+            raise SystemExit("could not learn the peer's name; give it: peers add <name> <url>")
+        print(json.dumps(server_peers.add(name, url, token, server_id=server_id), indent=2))
     elif args.peers_command == "remove":
         server_peers.remove(args.name)
         print(f"removed peer: {args.name}")
@@ -3594,10 +3621,15 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     peers = sub.add_parser("peers").add_subparsers(
         dest="peers_command", required=True)
     peers.add_parser("list").set_defaults(func=cmd_peers)
-    peer_add = peers.add_parser("add")
-    peer_add.add_argument("name")
-    peer_add.add_argument("url")
-    peer_add.add_argument("--token", required=True)
+    peer_add = peers.add_parser(
+        "add", help="keep another Host of yours: pair by a code made there (clarp-admin pair create "
+                    "--scope limited --json) or read its device token from stdin")
+    peer_add.add_argument("name", help="the peer's name, or its URL alone (the name is then the peer's own)")
+    peer_add.add_argument("url", nargs="?")
+    peer_add.add_argument("--code", help="a one-time pairing code made on the peer")
+    peer_add.add_argument("--token-stdin", action="store_true", help="read the peer's device token from stdin")
+    peer_add.add_argument("--token", help=argparse.SUPPRESS)  # older form; prefer --code or --token-stdin
+    peer_add.add_argument("--device-name", help="the device name the peer lists (default: this Host's name)")
     peer_add.set_defaults(func=cmd_peers)
     peer_remove = peers.add_parser("remove")
     peer_remove.add_argument("name")

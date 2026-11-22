@@ -10,6 +10,11 @@
 // Other Hosts are polled (every 15 s, and when the page comes back), not streamed: an
 // EventSource cannot carry an Authorization header, and the token never goes in a URL or a
 // cookie.
+//
+// The serving Host's own peers come first (feature peer_snapshot): it reads them server to
+// server with the device token it keeps for each, and this app reads only GET /peers/snapshot
+// from its own Host, so no other Host's token is in the browser at all. A pasted Host is read
+// directly only when the serving Host does not know it (no peer with its server_id).
 
 import { createAgentSnapshotStore } from '@core/agent-snapshot.js';
 import { normalizeMoved } from '@core/agent-moved.js';
@@ -39,9 +44,16 @@ export const hostsState = $state({
   saved,
   /** 'Show chats from all Hosts' (resolved once, with its one-time default). */
   allHosts: resolveAllHosts(localStorage, 1 + saved.length),
+  /** The serving Host's peers (GET /peers/snapshot): [{id: 'peer:<server_id>', url, name, serverId, via}]. */
+  peers: [],
   /** id -> {state: 'connecting'|'live'|'offline'|'refused', name, serverId, rows, at} */
   live: {},
 });
+
+// The user's own choice of the option, and whether the first peers have switched it on once.
+const CHOSEN_KEY = 'chats.allHosts.chosen.v1';
+const PEERS_KEY = 'chats.allHosts.peers.v1';
+let peersSupported = true;
 
 function persist() {
   try { localStorage.setItem(KEY, JSON.stringify(hostsState.saved)); } catch (_) {}
@@ -49,14 +61,68 @@ function persist() {
 
 export function setAllHosts(on) {
   hostsState.allHosts = !!on;
-  try { localStorage.setItem(PREFERENCE_KEY, on ? '1' : '0'); } catch (_) {}
+  try {
+    localStorage.setItem(PREFERENCE_KEY, on ? '1' : '0');
+    localStorage.setItem(CHOSEN_KEY, '1');
+  } catch (_) {}
   schedule(0);
 }
 
-/** The other Hosts read now (empty while the option is off), in saved order. */
+/** Every other Host this app knows: the serving Host's peers, then pasted Hosts it does not know. */
+export function knownHosts() {
+  const viaHost = new Set(hostsState.peers.map(p => p.serverId).filter(Boolean));
+  return [...hostsState.peers, ...hostsState.saved.filter(h => !(h.serverId && viaHost.has(h.serverId)))];
+}
+
+/** The other Hosts read now (empty while the option is off), in known order. */
 export function readHosts() {
-  const ids = readIds(hostsState.saved.map(h => h.id), hostsState.allHosts).slice(1);
-  return ids.map(id => hostsState.saved.find(h => h.id === id)).filter(Boolean);
+  const known = knownHosts();
+  const ids = readIds(known.map(h => h.id), hostsState.allHosts).slice(1);
+  return ids.map(id => known.find(h => h.id === id)).filter(Boolean);
+}
+
+/**
+ * The serving Host's peers, read through it (GET /peers/snapshot). A Host without the feature
+ * answers 404 and is not asked again. The first time it names any peer, the option is switched
+ * on once, unless the user has chosen it themselves (the shared one-time default ran before any
+ * peer could be counted).
+ */
+async function readPeers() {
+  if (!peersSupported) return;
+  let body;
+  try {
+    const r = await fetch('/peers/snapshot', { cache: 'no-store' });
+    if (r.status === 404) { peersSupported = false; return; }
+    if (!r.ok) return;
+    body = await r.json();
+  } catch (_) {
+    return;
+  }
+  const entries = Object.entries((body && body.peers) || {}).filter(([, p]) => p && typeof p === 'object');
+  hostsState.peers = entries.map(([key, p]) => ({
+    id: 'peer:' + key, url: String(p.url || ''), name: String(p.name || key),
+    serverId: String(p.server_id || ''), via: 'host',
+  }));
+  for (const [key, p] of entries) {
+    const id = 'peer:' + key;
+    const prior = hostsState.live[id];
+    hostsState.live[id] = {
+      state: p.reachable ? 'live' : p.error === 'refused' ? 'refused' : 'offline',
+      name: String(p.name || key), serverId: String(p.server_id || ''),
+      rows: p.reachable ? rowsFromSnapshot(p.snapshot) : (prior?.rows || []), at: Date.now(),
+    };
+  }
+  if (hostsState.peers.length) {
+    try {
+      if (localStorage.getItem(PEERS_KEY) !== '1') {
+        localStorage.setItem(PEERS_KEY, '1');
+        if (localStorage.getItem(CHOSEN_KEY) !== '1' && !hostsState.allHosts) {
+          hostsState.allHosts = true;
+          localStorage.setItem(PREFERENCE_KEY, '1');
+        }
+      }
+    } catch (_) {}
+  }
 }
 
 async function getJson(origin, path, token) {
@@ -128,19 +194,25 @@ export async function pollNow() {
   if (running) { schedule(1000); return; }
   running = true;
   try {
-    const hosts = readHosts();
-    await Promise.all(hosts.map(h => readOne(h).catch(() => {})));
+    if (hostsState.allHosts) await readPeers();
+    const pasted = readHosts().filter(h => h.via !== 'host');
+    await Promise.all(pasted.map(h => readOne(h).catch(() => {})));
   } finally {
     running = false;
-    if (readHosts().length) schedule();
+    if (reading()) schedule();
   }
 }
 
-/** Starts reading the saved Hosts; again whenever the page comes back. */
+function reading() {
+  return hostsState.allHosts && (peersSupported || readHosts().length > 0);
+}
+
+/** Starts reading: the serving Host's peers once (their names count for the badge even while
+ *  the option is off), then every Host read; again whenever the page comes back. */
 export function startHosts() {
-  if (readHosts().length) schedule(0);
+  readPeers().finally(() => { if (reading()) schedule(0); });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && readHosts().length) schedule(0);
+    if (document.visibilityState === 'visible' && reading()) schedule(0);
   });
 }
 
@@ -164,7 +236,8 @@ export async function addHost(url, token, primaryServerId = '') {
       + '[server] web_read_origins, and check the address.';
   }
   const serverId = String(info.body.server_id || '');
-  if (serverId && (serverId === primaryServerId || hostsState.saved.some(h => h.serverId === serverId))) {
+  if (serverId && (serverId === primaryServerId || knownHosts().some(h => h.serverId === serverId)
+      || hostsState.saved.some(h => h.serverId === serverId))) {
     return 'That Host is already in the list.';
   }
   const id = 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
