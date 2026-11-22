@@ -8,13 +8,13 @@ import pytest
 from lib import config, server_identity
 
 
-def test_the_default_is_ios_from_74_and_web_from_1_and_no_other_client():
-    assert server_identity.RENDER_SPEC_MIN_CONTRACT == {"ios": 74, "web": 1}
+def test_the_default_is_ios_from_74_web_from_1_android_from_41_and_no_other_client():
+    assert server_identity.RENDER_SPEC_MIN_CONTRACT == {"ios": 74, "web": 1, "android": 41}
 
 
 @pytest.mark.parametrize("header,capable", [
     ("ios/2981 contract=74", True), ("ios/2990 contract=75", True), ("ios/2980 contract=73", False),
-    ("android/500 contract=74", False), ("android/500 contract=9999", False),
+    ("android/500 contract=40", False), ("android/1058 contract=41", True), ("android/500 contract=9999", True),
     ("desktop/1 contract=200", False), ("watch/1 contract=200", False),
     ("web/0.5.3 contract=1", True), ("web/1 contract=200", True), ("web/0.5.3 contract=0", False),
     ("Web/0.5.3 contract=1", False), ("web/0.5.3 contract=1 ", False),
@@ -30,7 +30,8 @@ def test_a_host_overrides_per_client_in_both_directions():
     assert server_identity.render_spec_capable("android/500 contract=30", {"android": 30})  # on
     assert server_identity.render_spec_capable("ios/2981 contract=74", {"android": 30})     # the rest stays
     assert not server_identity.render_spec_capable("ios/2981 contract=74", 80)              # a number is iOS's
-    assert not server_identity.render_spec_capable("android/500 contract=99", 74)
+    assert not server_identity.render_spec_capable("android/500 contract=40", 74)           # android keeps 41
+    assert server_identity.render_spec_capable("android/500 contract=99", 74)
 
 
 def test_the_old_single_number_is_ios_only_and_said_so(monkeypatch):
@@ -70,7 +71,7 @@ def test_a_key_differing_from_a_built_in_name_only_in_case_is_another_client_and
     assert table == {"IOS": 1, "Android": 2}
     assert len(lines) == 1 and lines[0][0] == "config.render_spec_min_contract"
     assert "'IOS' is taken as its own client" in lines[0][1] and "the built-in 'ios' keeps its own number (74)" in lines[0][1]
-    assert "'Android' is taken as its own client" in lines[0][1] and "the built-in 'android' keeps its own setting" in lines[0][1]
+    assert "'Android' is taken as its own client" in lines[0][1] and "the built-in 'android' keeps its own number (41)" in lines[0][1]
     assert server_identity.render_spec_capable("IOS/1 contract=1", table)            # another client
     assert not server_identity.render_spec_capable("ios/2980 contract=73", table)    # ios keeps 74
     assert server_identity.render_spec_capable("ios/2981 contract=74", table)

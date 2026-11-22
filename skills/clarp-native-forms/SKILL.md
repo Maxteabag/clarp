@@ -145,7 +145,8 @@ Which apps draw forms (version 1):
 - iOS app: from client contract 74 (TestFlight 2981).
 - Web app (the browser app and the desktop shell that loads it): from its
   first contract (version 2: see above).
-- Android app and the native desktop app: not yet; they show the plain card.
+- Android app: from client contract 41 (release 0.1.0, build 1058).
+- Native desktop app: not yet; it shows the plain card.
 
 So say in your reply what you are asking, briefly, and do not wait for the form
 alone when the question is urgent. A form is
