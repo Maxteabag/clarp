@@ -12,10 +12,10 @@ use super::{Choice, Setting, e, keyed, shown};
 use crate::{App, AppWindow};
 
 const ACTIVITY: [(&str, &str); 4] = [
-    ("Grouped", "Tool calls fold into one row per turn."),
+    ("Grouped", "Each turn's tool calls and thinking fold into one work row that opens in place."),
     ("Always visible", "Every tool call shows as its own row."),
     ("Group old", "Recent tool calls show; older ones fold."),
-    ("Hidden", "Tool calls do not show in the chat."),
+    ("Hide when done", "The work row shows while the turn runs and goes when it has finished."),
 ];
 /// The double-press windows offered, in milliseconds.
 const DOUBLE_PRESS: [u64; 8] = [150, 200, 250, 300, 400, 500, 700, 1000];
@@ -83,12 +83,12 @@ fn chats() -> Vec<Setting> {
         ),
         Setting::choice(
             keyed(
-                e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped, always visible, old ones grouped, or hidden.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools"]),
+                e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped into one work row, always visible, old ones grouped, or hidden once the turn is done.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools", "hide when done", "quiet chat", "work row"]),
                 &["tools"],
             ),
             "CHATS",
             |_| ACTIVITY.iter().enumerate().map(|(i, (label, about))| Choice::new(i.to_string(), *label).about(*about)).collect(),
-            |app| app.engine.borrow().activity_mode().clamp(0, clarp_core::presentation::HIDDEN).to_string(),
+            |app| app.engine.borrow().activity_mode().clamp(0, clarp_core::presentation::HIDE_WHEN_DONE).to_string(),
             |app, _, value| {
                 if let Ok(mode) = value.parse() {
                     app.engine.borrow_mut().set_activity_mode(mode);

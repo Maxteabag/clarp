@@ -87,8 +87,12 @@ pub struct Options {
     pub expanded: HashSet<String>,
     /// Host time now (`LiveView::host_now_ms`), for running items.
     pub host_now_ms: i64,
-    /// The reader opted out of process rows: only messages show.
-    pub hide_activity: bool,
+    /// Fold the running turn's work into one `Working · N tools` row
+    /// (Tool activity Grouped and Hide when done, #653).
+    pub fold_running: bool,
+    /// Leave a settled turn's work row out (Hide when done): its messages,
+    /// and what failed or stopped, stay.
+    pub hide_settled: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -331,15 +335,45 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     presented.hidden_rows = rows.iter().filter(|m| m.kind == "live" && claimed.contains(m.id.as_str())).map(|m| m.id.clone()).collect();
 
     let rows_of = rows_of.into_iter().map(|(id, entry)| (id.to_owned(), entry)).collect();
-    let mut entries = arrange(&turn_id, turn.expect("a turn"), settled, &shown, rows_of, options);
-    if options.hide_activity {
-        entries.retain(|entry| entry.kind == Kind::Message);
-    }
-    presented.entries = entries;
+    // A settled turn's work row reads the Host's /log summary of it (the
+    // turn's last row), never /live's (#653); before it lands, the tools.
+    let live_turn = turn.expect("a turn");
+    let summary = if settled { Some(logged_summary(rows, &turn_id).cloned().unwrap_or_else(|| counted(live_turn, &shown))) } else { None };
+    presented.entries = arrange(&turn_id, summary.as_ref().unwrap_or(live_turn), settled, &shown, rows_of, options);
     presented.turn_id = turn_id;
     presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));
     presented.own_rows = presented.taken_over.values().chain(&presented.absorbed_rows).chain(&presented.hidden_rows).cloned().collect();
     presented
+}
+
+/// The Host's summary of turn `turn_id` (`log_turn_summary`): the `turn`
+/// of its last `/log` row.
+pub(crate) fn logged_summary<'a>(rows: &'a [Message], turn_id: &str) -> Option<&'a Object> {
+    rows.iter().rev().filter(|m| !turn_id.is_empty() && m.trace_id == turn_id).find_map(|m| m.turn.as_ref())
+}
+
+/// A summary without a worked time: the turn's status and its tools.
+fn counted(turn: &Object, shown: &[&Object]) -> Object {
+    let tools = shown.iter().filter(|i| text(i, "kind") == "tool").count();
+    let mut summary = Object::new();
+    summary.insert("turn_id".into(), Value::from(text(turn, "turn_id")));
+    summary.insert("status".into(), Value::from(text(turn, "status")));
+    summary.insert("tool_count".into(), Value::from(tools));
+    summary
+}
+
+/// The work row's title (#653): "Worked for 11s · 3 tools", "3 tools"
+/// when the turn has no worked time, "Working · 2 tools" while it runs.
+pub fn work_title(running: bool, worked_ms: Option<i64>, tools: usize) -> String {
+    let count = (tools > 0).then(|| plural(tools, "tool", "tools"));
+    match (running, worked_ms, count) {
+        (true, _, Some(count)) => format!("Working · {count}"),
+        (true, _, None) => "Working".to_owned(),
+        (false, Some(ms), Some(count)) => format!("Worked for {} · {count}", worked(ms)),
+        (false, Some(ms), None) => format!("Worked for {}", worked(ms)),
+        (false, None, Some(count)) => count,
+        (false, None, None) => "Worked".to_owned(),
+    }
 }
 
 /// A turn's item rows: one entry per item (an entry in `rows_of` stands
@@ -381,21 +415,24 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
 
     // A settled turn folds its work (§7.6): its reasoning and tools. What
     // failed or stopped and every message, commentary too, stay in view in
-    // their places; the fold sits where the folded work begins.
-    if settled {
-        let stays = |entry: &Entry| matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending") || entry.kind == Kind::Message;
+    // their places; the fold sits where the folded work begins. A running
+    // turn folds the same way when the reader groups it (#653): its tools
+    // and thinking, running ones too, under `Working · N tools`.
+    if settled || options.fold_running {
+        let stays = |entry: &Entry| {
+            entry.kind == Kind::Message || matches!(entry.status.as_str(), "failed" | "interrupted") || (settled && matches!(entry.status.as_str(), "running" | "pending"))
+        };
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
         if let Some(&first) = folded.first() {
             let key = format!("live:fold:{turn_id}");
-            let open = options.expanded.contains(&key);
-            let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?));
-            let tools = int(turn, "tool_count").unwrap_or(0).max(0) as usize;
-            // A turn whose worked time nobody recorded says what it used.
-            let title = match worked_ms {
-                Some(ms) if tools > 0 => format!("Worked for {} · {}", worked(ms), plural(tools, "tool", "tools")),
-                Some(ms) => format!("Worked for {}", worked(ms)),
-                None if tools > 0 => format!("Used {}", plural(tools, "tool", "tools")),
-                None => "Worked".to_owned(),
+            let open = options.expanded.contains(&key) && !(settled && options.hide_settled);
+            let title = if settled {
+                let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?));
+                work_title(false, worked_ms, int(turn, "tool_count").unwrap_or(0).max(0) as usize)
+            } else {
+                // The count so far: the turn's tool items, explore members each.
+                let tools = shown.iter().filter(|i| text(i, "kind") == "tool").count();
+                work_title(true, None, tools)
             };
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
@@ -403,18 +440,21 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
                 started_at_ms: folded.iter().filter_map(|i| entries[*i].started_at_ms).min(),
                 key,
                 kind: Kind::Fold,
-                status: text(turn, "status").to_owned(),
+                status: if settled { text(turn, "status").to_owned() } else { "running".to_owned() },
                 title,
                 expandable: true,
                 expanded: open,
                 ..Entry::default()
             };
+            // Hide when done: a finished turn's work row goes, and what it
+            // stood for with it.
+            let shows_fold = !(settled && options.hide_settled);
             if open {
                 entries.insert(first, fold);
             } else {
                 let mut kept = Vec::with_capacity(entries.len());
                 for (i, entry) in entries.into_iter().enumerate() {
-                    if i == first {
+                    if i == first && shows_fold {
                         kept.push(fold.clone());
                     }
                     if !folded.contains(&i) {

@@ -31,8 +31,9 @@ pub struct Options<'a> {
     pub held_rows: HashSet<String>,
     /// The agent works: the chat's last turn may not be over.
     pub busy: bool,
-    /// The reader opted out of activity: leave rows for presentation to hide.
-    pub hide_activity: bool,
+    /// Hide when done (#653): a settled turn's work row is left out; its
+    /// rows fold as ever, so its tools do not show either.
+    pub hide_settled: bool,
     /// A cached explanation of a `/log` tool call (never asks for one).
     pub explain: Option<&'a dyn Fn(&Object) -> String>,
 }
@@ -75,7 +76,7 @@ pub struct Folded {
 /// keeps its worked time, reasoning and keys; otherwise from `/log`.
 pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> Folded {
     let mut folded = Folded::default();
-    if !options.summaries || options.hide_activity {
+    if !options.summaries {
         retain_unfiled_messages(rows, live, options, &mut folded);
         return folded;
     }
@@ -118,7 +119,7 @@ fn retain_unfiled_messages(rows: &[Message], live: Option<&LiveView>, options: &
     let Some(live) = live else { return };
     let known: HashSet<&str> = rows.iter().filter(|row| row.kind != "live" && !row.pending)
         .map(|row| row.id.as_str()).collect();
-    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, hide_activity: options.hide_activity };
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled };
     for (turn, items) in live.retired_turns() {
         let trace = turn.get("turn_id").and_then(Value::as_str).unwrap_or_default();
         // A matching prompt admits this retained turn into this transcript.
@@ -302,7 +303,7 @@ fn turn(
     let mut rows_of: HashMap<String, Entry> = HashMap::new();
     let mut emitted = HashSet::new();
     let mut unexplained: Vec<(String, Object)> = Vec::new();
-    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, hide_activity: options.hide_activity };
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled };
     let mut message = |items: &mut Vec<Object>, row: &Message, phase: &str| {
         let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id});
         let item = item.as_object().cloned().unwrap_or_default();
@@ -354,9 +355,9 @@ fn turn(
     }
     flush(&mut items, &mut reasoning, None);
 
-    // The turn as the live view saw it, else as the Host summed it up;
-    // without either, no worked time.
-    let summary = match retired.map(|(turn, _)| turn).or(logged) {
+    // The turn as the Host summed it up in /log, never as /live saw it
+    // (#653); without it, no worked time.
+    let summary = match logged {
         Some(turn) => turn.clone(),
         None => json!({"turn_id": turn_id, "status": "completed", "tool_count": tool_count}).as_object().cloned().unwrap_or_default(),
     };

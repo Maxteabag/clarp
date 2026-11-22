@@ -45,6 +45,8 @@ mod observe_checks;
 mod a2a_checks;
 #[path = "row_overlap_checks.rs"]
 mod row_overlap_checks;
+#[path = "quiet_checks.rs"]
+mod quiet_checks;
 // ---- the keyboard after the window loses and regains it
 #[path = "refocus_checks.rs"]
 mod refocus_checks;
@@ -533,6 +535,7 @@ pub fn start_check(name: &str, out: String) {
             row_overlap_checks::watch();
             live_checks::live_check(out)
         }
+        "quiet-chat" => quiet_checks::quiet_chat_check(out),
         "observe" => observe_checks::observe_check(out),
         "message-search" => search_checks::message_search_check(out),
         "mention" => search_checks::mention_check(out),

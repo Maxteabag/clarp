@@ -146,6 +146,20 @@ fn spoken_replies_and_old_integer_choices_keep_their_stored_form() {
     assert_eq!(prefs::choice_of(&settings, "tooldetail"), "explained");
 }
 
+/// Tool activity's "Hidden" is "Hide when done" now (#653): a stored 3
+/// reads as it, and the old word still sets it.
+#[test]
+fn a_stored_hidden_tool_activity_is_hide_when_done() {
+    let mut settings = Settings::in_memory();
+    settings.set("conversation/activityDisplayMode", 3);
+    assert_eq!(prefs::choice_of(&settings, "toolactivity"), "hide-when-done");
+    prefs::set_text(&mut settings, "toolactivity", "grouped").unwrap();
+    prefs::set_text(&mut settings, "toolactivity", "hidden").unwrap();
+    assert_eq!(settings.get("conversation/activityDisplayMode"), Some(&json!(3)));
+    prefs::set_text(&mut settings, "toolactivity", "Hide when done").unwrap();
+    assert_eq!(settings.get("conversation/activityDisplayMode"), Some(&json!(3)));
+}
+
 #[test]
 fn invalid_values_in_the_file_are_reported_and_read_as_defaults() {
     let path = scratch("invalid");

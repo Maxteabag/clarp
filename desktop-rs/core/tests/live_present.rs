@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use clarp_core::live::LiveView;
-use clarp_core::live_present::{Kind, Options, Presented, present, status_line};
+use clarp_core::live_present::{Kind, Options, Presented, present, status_line, work_title};
 use clarp_core::protocol::Message;
 use serde_json::{Value, json};
 
@@ -40,7 +40,7 @@ fn row(value: Value) -> Message {
 }
 
 fn options(expanded: &[&str], host_now_ms: i64) -> Options {
-    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, hide_activity: false }
+    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, fold_running: false, hide_settled: false }
 }
 
 fn titles(presented: &Presented) -> Vec<String> {
@@ -89,17 +89,53 @@ fn items_read_as_rows_in_ordinal_order() {
     assert_eq!(tool.more, "+762 earlier lines");
 }
 
+/// Grouped (#653): the running turn's work folds into one row that counts
+/// its tools so far; messages stay; opened, every row shows in place.
 #[test]
-fn hidden_activity_keeps_only_live_messages() {
+fn a_running_turn_folds_into_one_working_row_when_grouped() {
     let view = turn_full(after(17));
     let mut opts = options(&[], 1759480008200);
-    opts.hide_activity = true;
+    opts.fold_running = true;
 
     let presented = present(&view, &[], &opts);
 
-    assert_eq!(presented.entries.len(), 1);
-    assert_eq!(presented.entries[0].kind, Kind::Message);
-    assert_eq!(presented.entries[0].text, "Let me look at the parser and its tests.");
+    let kinds: Vec<Kind> = presented.entries.iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, [Kind::Fold, Kind::Message, Kind::Tool], "{:?}", titles(&presented));
+    assert_eq!(presented.entries[0].title, "Working · 3 tools", "every tool so far, the failed one too");
+    assert_eq!(presented.entries[0].status, "running");
+    assert_eq!(presented.entries[1].text, "Let me look at the parser and its tests.");
+    assert_eq!(presented.entries[2].status, "failed", "a failed tool stays in view");
+    opts.expanded.insert("live:fold:tr-1".to_owned());
+    let open = present(&view, &[], &opts);
+    assert_eq!(open.entries.len(), 5, "the work row and every row again: {:?}", titles(&open));
+    assert!(open.entries[0].expanded);
+    // Always visible and Group old: the running turn's rows as they come.
+    opts.fold_running = false;
+    assert_eq!(present(&view, &[], &opts).entries.len(), 4);
+}
+
+/// Hide when done (#653): the work row shows while the turn runs and goes
+/// when it has finished; messages and what failed or stopped stay.
+#[test]
+fn hide_when_done_shows_the_work_row_only_while_the_turn_runs() {
+    let mut opts = options(&[], 1759480008200);
+    opts.fold_running = true;
+    opts.hide_settled = true;
+    let running = present(&turn_full(after(17)), &[], &opts);
+    assert_eq!(running.entries[0].title, "Working · 3 tools");
+    let settled = present(&turn_full(after(23)), &[], &opts);
+    assert!(settled.entries.iter().all(|e| e.kind != Kind::Fold), "{:?}", titles(&settled));
+    assert_eq!(titles(&settled), ["", "Ran npm test", "", "Stopped npm test"]);
+}
+
+#[test]
+fn the_work_row_says_worked_time_and_tools_in_the_spec_s_words() {
+    assert_eq!(work_title(false, Some(11_000), 3), "Worked for 11s · 3 tools");
+    assert_eq!(work_title(false, None, 3), "3 tools");
+    assert_eq!(work_title(false, None, 1), "1 tool");
+    assert_eq!(work_title(false, Some(11_000), 1), "Worked for 11s · 1 tool");
+    assert_eq!(work_title(true, None, 2), "Working · 2 tools");
+    assert_eq!(work_title(true, None, 1), "Working · 1 tool");
 }
 
 #[test]
@@ -150,7 +186,7 @@ fn without_explanations_the_second_line_is_the_command() {
 fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     let view = turn_full(after(23));
     let p = present(&view, &[], &options(&[], 1759480012000));
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(titles(&p), ["5 tools", "", "Ran npm test", "", "Stopped npm test"], "no /log summary yet: no worked time from /live");
     assert_eq!(p.entries[0].kind, Kind::Fold);
     assert_eq!(p.entries[0].key, "live:fold:tr-1");
     assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
@@ -199,7 +235,7 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
     // The row carries both messages: it shows once, where the first is.
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "Stopped npm test"]);
+    assert_eq!(titles(&p), ["5 tools", "", "Ran npm test", "Stopped npm test"]);
     assert_eq!(p.entries[1].row, "live-abc", "the row shows where its first message was");
     assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
@@ -237,10 +273,10 @@ fn commentary_between_tools_stays_visible() {
     let view = commentary_turn();
     let p = present(&view, &[], &options(&[], 0));
     let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
-    assert_eq!(read(&p), ["Building it first.", "Worked for 12s · 3 tools", "Built. Now the tests.", "All green."], "every message in its place, the fold where the work begins");
+    assert_eq!(read(&p), ["Building it first.", "3 tools", "Built. Now the tests.", "All green."], "every message in its place, the fold where the work begins");
     assert_eq!(p.entries[1].items, ["cl:c1", "cl:c2", "cl:c3"], "only the tools fold");
     let open = present(&view, &[], &options(&["live:fold:tr-c"], 0));
-    assert_eq!(read(&open), ["Building it first.", "Worked for 12s · 3 tools", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
+    assert_eq!(read(&open), ["Building it first.", "3 tools", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
 }
 
 /// The real Host's settled turn (tests/fixtures/live-real-settled-turn.json):

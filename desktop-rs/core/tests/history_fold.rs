@@ -95,17 +95,35 @@ fn a_chat_opened_cold_folds_its_settled_turn_from_log() {
     assert!(folded.stripped_calls.contains(FAILED_CALL));
 }
 
+/// Hide when done (#653): a finished turn's work row goes, and its tools
+/// with it; what failed and the answer stay where they were.
 #[test]
-fn hidden_activity_leaves_finished_turns_unfolded_for_presentation_to_hide() {
+fn hide_when_done_leaves_a_finished_turn_without_its_work_row() {
     let rows = real_rows(false);
 
-    let folded = present(&rows, None, &Options { hide_activity: true, ..options(&[]) });
+    let folded = present(&rows, None, &Options { hide_settled: true, ..options(&[]) });
 
-    assert!(folded.folds.is_empty());
-    assert!(folded.hidden_rows.is_empty());
-    assert!(folded.stripped_calls.is_empty());
-    assert!(folded.details_wanted.is_empty());
-    assert!(folded.unexplained.is_empty());
+    assert_eq!(folded.folds.len(), 1);
+    assert_eq!(read(&folded.folds[0]), ["Ran sleep 60", &format!("row {T1_ANSWER}")], "no work row; the failed tool and the reply stay");
+    assert_eq!(sorted(&folded.hidden_rows), T1_TOOLS, "the tool rows are not shown either");
+    // Opening it is not possible: a stored open key does not bring it back.
+    let open = present(&rows, None, &Options { hide_settled: true, ..options(&[&format!("live:fold:{T1}")]) });
+    assert_eq!(read(&open.folds[0]), ["Ran sleep 60", &format!("row {T1_ANSWER}")]);
+}
+
+/// The work row reads the Host's /log summary, never what /live saw (#653).
+#[test]
+fn the_work_row_reads_the_log_summary_not_the_live_turn() {
+    let view = retired_view();
+    let mut rows = real_rows(true);
+    // The /log summary says 11s and 2 tools; the retired live turn 16s.
+    let last = rows.iter_mut().find(|r| r.id == T1_ANSWER).unwrap();
+    if let Some(turn) = last.turn.as_mut() {
+        turn.insert("worked_ms".into(), json!(11_000));
+    }
+    let base = Options { open_turn: T3.to_owned(), busy: true, ..options(&[]) };
+    let folded = present(&rows, Some(&view), &base);
+    assert_eq!(read(&folded.folds[0])[0], "Worked for 11s · 2 tools");
 }
 
 #[test]
@@ -168,9 +186,9 @@ fn several_finished_turns_each_fold_and_the_open_turn_is_left_alone() {
     assert_eq!(second.key, format!("live:fold:{T2}"));
     assert_eq!(second.next.as_deref(), Some("u-clarp-admin-3c48398b85b08a09"));
     // It ended before the Host summed turns up: no worked time is guessed.
-    assert_eq!(read(second), ["Used 3 tools", "row live-567165763b2310817088"]);
+    assert_eq!(read(second), ["3 tools", "row live-567165763b2310817088"]);
     let open = present(&rows, None, &Options { open_turn: T3.to_owned(), busy: true, ..options(&[&format!("live:fold:{T2}")]) });
-    assert_eq!(read(&open.folds[1]), ["Used 3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date", "row live-567165763b2310817088"]);
+    assert_eq!(read(&open.folds[1]), ["3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date", "row live-567165763b2310817088"]);
     assert!(!folded.hidden_rows.contains("msg-e60c25b9161ac8b660ca"), "the open turn's running tool row is live's");
     // Without live items the chat's last turn, the agent still working,
     // is not over: it does not fold either.
@@ -272,10 +290,10 @@ fn a_reply_carrying_text_and_tools_shows_its_text_and_folds_its_tools() {
     first["text"] = json!("Building first.");
     let rows = turn(&[prompt("u1", "2026-10-03T10:00:00Z", "t1"), first, text_row("a2", "2026-10-03T10:00:06Z", "Done.")]);
     let folded = present(&rows, None, &options(&[]));
-    assert_eq!(read(&folded.folds[0]), ["row a1", "Used 1 tool", "row a2"]);
+    assert_eq!(read(&folded.folds[0]), ["row a1", "1 tool", "row a2"]);
     assert!(!folded.hidden_rows.contains("a1"), "the commentary stays in view");
     let open = present(&rows, None, &options(&["live:fold:t1"]));
-    assert_eq!(read(&open.folds[0]), ["row a1", "Used 1 tool", "Ran make build", "row a2"]);
+    assert_eq!(read(&open.folds[0]), ["row a1", "1 tool", "Ran make build", "row a2"]);
     assert!(open.stripped_calls.contains("c1") && !open.hidden_rows.contains("a1"), "its text shows, its tool as the tool row");
 }
 

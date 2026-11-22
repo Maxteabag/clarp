@@ -32,11 +32,20 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
         explanations: explanations(engine, session),
         expanded: expanded.clone(),
         host_now_ms: view.host_now_ms(now_ms()),
-        hide_activity: engine.activity_mode() == clarp_core::presentation::HIDDEN,
+        fold_running: folds_running(engine.activity_mode()),
+        hide_settled: engine.activity_mode() == clarp_core::presentation::HIDE_WHEN_DONE,
     };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
     pace(&mut presented);
     Some(presented)
+}
+
+/// Whether Tool activity folds the running turn into its `Working` row:
+/// Grouped and Hide when done do (#653); Always visible and Group old show
+/// the running turn's rows as they come.
+pub(crate) fn folds_running(mode: i32) -> bool {
+    use clarp_core::presentation::{GROUPED, HIDE_WHEN_DONE};
+    mode == GROUPED || mode == HIDE_WHEN_DONE
 }
 
 /// The chat's finished turns folded (`clarp_core::history_fold`): every
@@ -55,7 +64,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         open_turn: live.map(|l| l.turn_id.clone()).unwrap_or_default(),
         held_rows: live.map(|l| l.own_rows.clone()).unwrap_or_default(),
         busy,
-        hide_activity: engine.activity_mode() == clarp_core::presentation::HIDDEN,
+        hide_settled: engine.activity_mode() == clarp_core::presentation::HIDE_WHEN_DONE,
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
     };
     clarp_core::history_fold::present(rows, view, &options)
@@ -105,15 +114,16 @@ pub(crate) fn signature(entry: &Entry) -> String {
 /// The tone a live row's label shimmers in while it works: "accent" for
 /// what acts (a tool, an explore group, a plan, a diff), "muted" for what
 /// thinks (reasoning, compaction), "" once it settles. A streaming reply
-/// shows its text growing, and the fold is a settled turn: neither shimmers.
+/// shows its text growing: it never shimmers. The work row shimmers while
+/// its turn runs (`Working · 2 tools`) like the tools it stands for.
 pub(crate) fn shimmer(kind: Kind, status: &str) -> &'static str {
     if !matches!(status, "running" | "pending") {
         return "";
     }
     match kind {
-        Kind::Tool | Kind::Explore | Kind::Plan | Kind::Diff => "accent",
+        Kind::Tool | Kind::Explore | Kind::Plan | Kind::Diff | Kind::Fold => "accent",
         Kind::Reasoning | Kind::Compaction => "muted",
-        Kind::Message | Kind::Fold => "",
+        Kind::Message => "",
     }
 }
 
@@ -382,22 +392,22 @@ mod tests {
     }
 
     /// What works shimmers in its kind's tone; nothing settled does, nor a
-    /// streaming reply (its growing text is the motion) or the fold.
+    /// streaming reply (its growing text is the motion). The work row
+    /// shimmers while its turn runs (#653).
     #[test]
     fn only_a_working_row_shimmers_in_its_kind_s_tone() {
         use clarp_core::live_present::Kind;
         for status in ["running", "pending"] {
-            for kind in [Kind::Tool, Kind::Explore, Kind::Plan, Kind::Diff] {
+            for kind in [Kind::Tool, Kind::Explore, Kind::Plan, Kind::Diff, Kind::Fold] {
                 assert_eq!(shimmer(kind, status), "accent", "{kind:?} {status}");
             }
             for kind in [Kind::Reasoning, Kind::Compaction] {
                 assert_eq!(shimmer(kind, status), "muted", "{kind:?} {status}");
             }
             assert_eq!(shimmer(Kind::Message, status), "", "a streaming reply");
-            assert_eq!(shimmer(Kind::Fold, status), "");
         }
         for status in ["completed", "failed", "interrupted", ""] {
-            for kind in [Kind::Tool, Kind::Explore, Kind::Reasoning, Kind::Compaction, Kind::Plan, Kind::Diff] {
+            for kind in [Kind::Tool, Kind::Explore, Kind::Reasoning, Kind::Compaction, Kind::Plan, Kind::Diff, Kind::Fold] {
                 assert_eq!(shimmer(kind, status), "", "{kind:?} {status} has settled");
             }
         }

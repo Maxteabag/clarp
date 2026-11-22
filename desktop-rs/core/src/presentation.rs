@@ -17,11 +17,13 @@ use crate::json::Object;
 use crate::list_ops::ListOp;
 use crate::protocol::{Message, parse_iso_date};
 
-/// Chats → Tool activity: 0 grouped, 1 always visible, 2 group old, 3 hidden.
+/// Chats → Tool activity: 0 grouped, 1 always visible, 2 group old, 3 hide
+/// when done (stored as "Hidden" before #653: the same index, so a stored
+/// choice carries over as it is).
 pub const GROUPED: i32 = 0;
 pub const ALWAYS_VISIBLE: i32 = 1;
 pub const GROUP_OLD: i32 = 2;
-pub const HIDDEN: i32 = 3;
+pub const HIDE_WHEN_DONE: i32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -121,7 +123,7 @@ impl<'a> Pass<'a> {
             .iter()
             .zip(&inline)
             .map(|(message, &inline)| {
-                if inline || settings.activity_mode == HIDDEN {
+                if inline || settings.activity_mode == HIDE_WHEN_DONE {
                     return false;
                 }
                 if message.activity {
@@ -241,7 +243,7 @@ impl<'a> Pass<'a> {
         if self.settings.show_when_ready && !message.activity && message.role == "assistant" && message.kind == "live" {
             row.body = String::new();
         }
-        if self.settings.activity_mode == HIDDEN {
+        if self.settings.activity_mode == HIDE_WHEN_DONE {
             row.activity = false;
             row.tools.clear();
             row.display_cells.clear();
@@ -259,7 +261,7 @@ impl<'a> Pass<'a> {
         if repeated.contains(&index) || self.continues_group(index) {
             return false;
         }
-        if self.settings.activity_mode == HIDDEN {
+        if self.settings.activity_mode == HIDE_WHEN_DONE {
             let message = &self.rows[index];
             if message.activity {
                 return false;
