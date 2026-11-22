@@ -24,7 +24,7 @@ describe('reading clarp.form v1', () => {
   });
 
   it('says newer for a catalog version, component or property it does not know', () => {
-    expect(readRenderSpec({ ...fixture(), catalog_version: 2 }).kind).toBe('newer');
+    expect(readRenderSpec({ ...fixture(), catalog_version: 3 }).kind).toBe('newer');
     const unknownType = fixture();
     unknownType.spec.elements.topic.type = 'chart';
     expect(readRenderSpec(unknownType).kind).toBe('newer');
@@ -89,8 +89,8 @@ describe('the bytes the Host hashes', () => {
 
 describe('the rest of the form path', () => {
   it('names the client in the Host\'s strict header form', () => {
-    expect(clientHeader('0.5.3')).toBe('web/0.5.3 contract=1');
-    expect(clientHeader('a b/c')).toBe('web/abc contract=1');
+    expect(clientHeader('0.5.3')).toBe('web/0.5.3 contract=2');
+    expect(clientHeader('a b/c')).toBe('web/abc contract=2');
   });
 
   it('makes submission ids the Host takes', () => {

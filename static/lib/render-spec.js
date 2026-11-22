@@ -1,4 +1,4 @@
-// Native forms (render_spec, catalog clarp.form v1; issue 428): what this client makes of a
+// Native forms (render_spec, catalog clarp.form v1 and v2; issues 428, 673): what this client makes of a
 // payload, and the answers it sends. No DOM and no network here: the drawing is
 // web/src/lib/render-spec-draw.js, the loading and sending RenderSpecCard.svelte.
 //
@@ -8,9 +8,10 @@
 // or property it does not know) or 'unreadable' (broken against the catalog it knows).
 
 // The client contract this web build declares in X-Clarp-Client (`web/<build> contract=<n>`).
-// The web app's own series: 1 is the first build that draws and answers render_spec. The Host
-// admits it by this number (server_identity.RENDER_SPEC_MIN_CONTRACT["web"]).
-export const WEB_CLIENT_CONTRACT = 1;
+// The web app's own series: 1 is the first build that draws and answers render_spec (v1), 2 the
+// first that also draws v2 (chart, table, button). The Host admits it by these numbers
+// (server_identity.RENDER_SPEC_MIN_CONTRACT["web"], RENDER_SPEC_V2_MIN_CONTRACT["web"]).
+export const WEB_CLIENT_CONTRACT = 2;
 export const WEB_CLIENT_NAME = 'web';
 
 /** The X-Clarp-Client value: strict `<name>/<build> contract=<n>`, nothing after it. */
@@ -21,7 +22,7 @@ export function clientHeader(build) {
 
 export const CATALOG = Object.freeze({
   name: 'clarp.form',
-  version: 1,
+  versions: [1, 2],
   maxElements: 200,
   maxDepth: 12,
   maxSpecBytes: 32768,
@@ -41,7 +42,17 @@ export const COMPONENTS = Object.freeze({
   choice: ['label', 'options', 'value'],
   divider: [],
 });
+// Version 2 is version 1 plus three components (contract/catalogs/clarp.form.v2.json).
+export const COMPONENTS_V2 = Object.freeze({
+  ...COMPONENTS,
+  chart: ['kind', 'title', 'x_label', 'y_label', 'unit', 'decimals', 'series'],
+  table: ['title', 'columns', 'rows'],
+  button: ['label', 'action', 'style', 'confirm'],
+});
 const CONTAINERS = new Set(['stack', 'card']);
+// A button form's answer: every button submits with this intent and names itself under this key.
+export const BUTTON_INTENT = 'button';
+export const ACTION_KEY = 'action';
 
 const IDENT = /^[a-z][a-z0-9_]{0,39}$/;
 export function isIdentifier(text) { return typeof text === 'string' && IDENT.test(text); }
@@ -198,7 +209,116 @@ const READERS = {
     return { label, options, key };
   },
   divider() { return {}; },
+
+  // ---- version 2 ----
+  chart(props, base) {
+    const kind = props.kind;
+    if (!['bar', 'line', 'pie'].includes(kind)) throw broken(base + '/props/kind');
+    const opt = (key, max) => (key in props ? text(props[key], `${base}/props/${key}`, 0, max) : null);
+    const title = opt('title', 120), xLabel = opt('x_label', 60), yLabel = opt('y_label', 60), unit = opt('unit', 12);
+    const decimals = readDecimals(props, base + '/props/decimals');
+    const sp = base + '/props/series';
+    const raw = props.series;
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > 6) throw broken(sp);
+    const series = raw.map((one, i) => {
+      if (!isObject(one)) throw broken(`${sp}/${i}`);
+      closed(one, ['name', 'points'], `${sp}/${i}`);
+      const name = text(one.name, `${sp}/${i}/name`, 1, 60);
+      const pp = `${sp}/${i}/points`;
+      if (!Array.isArray(one.points) || one.points.length < 1 || one.points.length > 200) throw broken(pp);
+      const points = one.points.map((point, j) => {
+        if (!isObject(point) || !('x' in point) || !('y' in point)) throw broken(`${pp}/${j}`);
+        closed(point, ['x', 'y'], `${pp}/${j}`);
+        const x = point.x;
+        if (typeof x === 'string') text(x, `${pp}/${j}/x`, 1, 60);
+        else if (!isInt(x)) throw broken(`${pp}/${j}/x`);
+        if (!isInt(point.y)) throw broken(`${pp}/${j}/y`);
+        return { x, y: point.y };
+      });
+      return { name, points };
+    });
+    // What the schema cannot say, in the Host's order (render_spec._check_chart).
+    if (kind === 'pie' && series.length !== 1) throw broken(sp);
+    if (series.reduce((n, one) => n + one.points.length, 0) > 600) throw broken(sp);
+    let strings = null;
+    series.forEach((one, i) => {
+      const pp = `${sp}/${i}/points`;
+      if (kind === 'bar' && one.points.length > 60) throw broken(pp);
+      if (kind === 'pie' && one.points.length > 12) throw broken(pp);
+      const seen = new Set();
+      let last = null;
+      one.points.forEach(({ x, y }, j) => {
+        if (strings === null) strings = typeof x === 'string';
+        else if ((typeof x === 'string') !== strings) throw broken(`${pp}/${j}/x`);
+        if (seen.has(x)) throw broken(`${pp}/${j}/x`);
+        if (!strings && last !== null && x <= last) throw broken(`${pp}/${j}/x`);
+        seen.add(x);
+        last = x;
+        if (kind === 'pie' && y < 0) throw broken(`${pp}/${j}/y`);
+      });
+    });
+    return { kind, title, xLabel, yLabel, unit, decimals, series, numericX: strings === false };
+  },
+  table(props, base) {
+    const title = 'title' in props ? text(props.title, base + '/props/title', 0, 120) : null;
+    const cp = base + '/props/columns';
+    if (!Array.isArray(props.columns) || props.columns.length < 1 || props.columns.length > 8) throw broken(cp);
+    const keys = [];
+    const columns = props.columns.map((column, i) => {
+      if (!isObject(column)) throw broken(`${cp}/${i}`);
+      closed(column, ['key', 'label', 'align', 'decimals'], `${cp}/${i}`);
+      if (!isIdentifier(column.key) || keys.includes(column.key)) throw broken(`${cp}/${i}/key`);
+      keys.push(column.key);
+      const align = 'align' in column ? column.align : 'start';
+      if (align !== 'start' && align !== 'end') throw broken(`${cp}/${i}/align`);
+      return {
+        key: column.key, label: text(column.label, `${cp}/${i}/label`, 1, 60), align,
+        decimals: readDecimals(column, `${cp}/${i}/decimals`),
+      };
+    });
+    const rp = base + '/props/rows';
+    if (!Array.isArray(props.rows) || props.rows.length > 200) throw broken(rp);
+    if (props.rows.length * keys.length > 1000) throw broken(rp);
+    const rows = props.rows.map((row, i) => {
+      if (!isObject(row)) throw broken(`${rp}/${i}`);
+      closed(row, keys, `${rp}/${i}`);
+      for (const [key, value] of Object.entries(row)) {
+        const ok = value === null || typeof value === 'boolean' || isInt(value)
+          || (typeof value === 'string' && length(value) <= 200);
+        if (!ok) throw broken(`${rp}/${i}/${key}`);
+      }
+      return row;
+    });
+    return { title, columns, rows };
+  },
+  button(props, base, ctx) {
+    const label = text(props.label, base + '/props/label', 1, 40);
+    if (!isIdentifier(props.action) || ctx.buttons.some(b => b.action === props.action)) throw broken(base + '/props/action');
+    const style = 'style' in props ? props.style : 'secondary';
+    if (!['primary', 'secondary', 'destructive'].includes(style)) throw broken(base + '/props/style');
+    const confirm = 'confirm' in props ? text(props.confirm, base + '/props/confirm', 1, 200) : null;
+    const button = { action: props.action, label, style, confirm };
+    ctx.buttons.push(button);
+    return button;
+  },
 };
+
+function readDecimals(props, pointer) {
+  if (!('decimals' in props)) return 0;
+  const d = props.decimals;
+  if (!isInt(d) || d < 0 || d > 6) throw broken(pointer);
+  return d;
+}
+
+/**
+ * An integer drawn as the catalog's `decimals` say: divided by 10^decimals, in the device's
+ * locale, with exactly that many digits after the separator (125, 2 -> "1,25" in nb).
+ */
+export function formatScaled(value, decimals = 0, locale = undefined) {
+  if (!isInt(value)) return '';
+  return new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+    .format(value / 10 ** decimals);
+}
 
 function readElement(id, elements, ctx, depth, underCard) {
   const base = '/spec/elements/' + id;
@@ -208,8 +328,8 @@ function readElement(id, elements, ctx, depth, underCard) {
   closed(raw, ['type', 'props', 'children'], base);
   const type = raw.type;
   if (typeof type !== 'string') throw broken(base + '/type');
-  const allowed = COMPONENTS[type];
-  if (!Object.hasOwn(COMPONENTS, type)) throw newer();
+  const allowed = ctx.components[type];
+  if (!Object.hasOwn(ctx.components, type)) throw newer();
   const props = raw.props ?? {};
   if (!isObject(props)) throw broken(base + '/props');
   if (!Object.keys(props).every(k => allowed.includes(k))) throw newer();
@@ -247,24 +367,21 @@ export function readRenderSpec(payload) {
 }
 
 function readForm(payload) {
-  if (!isObject(payload) || payload.catalog !== CATALOG.name || payload.catalog_version !== CATALOG.version) throw newer();
+  if (!isObject(payload) || payload.catalog !== CATALOG.name || !CATALOG.versions.includes(payload.catalog_version)) throw newer();
+  const catalogVersion = payload.catalog_version;
   const version = text(payload.version, '/version', 1, 80);
   const spec = payload.spec;
   if (!isObject(spec)) throw broken('/spec');
   closed(spec, ['root', 'elements', 'state'], '/spec');
   if (canonical(spec).length > CATALOG.maxSpecBytes) throw broken('/spec');
   const { fields, required } = schemaFields(payload);
-  const submit = payload.submit;
-  if (!isObject(submit)) throw broken('/submit');
-  closed(submit, ['intent', 'label'], '/submit');
-  if (!isIdentifier(submit.intent)) throw broken('/submit/intent');
-  const submitLabel = text(submit.label, '/submit/label', 1, 40);
   const elements = spec.elements;
   if (!isObject(elements)) throw broken('/spec/elements');
   const count = Object.keys(elements).length;
   if (count < 1 || count > CATALOG.maxElements || !Object.keys(elements).every(isIdentifier)) throw broken('/spec/elements');
   if (typeof spec.root !== 'string' || !Object.hasOwn(elements, spec.root)) throw broken('/spec/root');
-  const ctx = { fields, visited: new Set(), bound: new Set(), toggles: [] };
+  const components = catalogVersion === 2 ? COMPONENTS_V2 : COMPONENTS;
+  const ctx = { fields, components, visited: new Set(), bound: new Set(), toggles: [], buttons: [] };
   const root = readElement(spec.root, elements, ctx, 1, false);
   // One rooted tree: nothing left over, nothing shared.
   if (ctx.visited.size !== count) throw broken('/spec/elements');
@@ -277,8 +394,31 @@ function readForm(payload) {
     initial[key] = value;
   }
   for (const key of ctx.toggles) if (!(key in initial)) initial[key] = false;
+  const buttons = ctx.buttons;
+  let submitIntent = BUTTON_INTENT, submitLabel = null;
+  if (buttons.length) {
+    // A button form (v2): no footer submit; the schema's action is a required string whose enum
+    // is exactly the button actions, and no element binds it.
+    const rule = payload.answer_schema.properties[ACTION_KEY];
+    const actions = buttons.map(b => b.action);
+    const at = '/answer_schema/properties/' + ACTION_KEY;
+    if (!isObject(rule) || !sameList(Object.keys(rule).sort(), ['enum', 'type']) || rule.type !== 'string'
+        || !fields[ACTION_KEY] || fields[ACTION_KEY].options.length !== actions.length
+        || !actions.every(a => fields[ACTION_KEY].options.includes(a)) || !required.has(ACTION_KEY)) {
+      throw broken(at);
+    }
+    if (ctx.bound.has(ACTION_KEY)) throw broken(at);
+    if ('submit' in payload) throw broken('/submit');
+  } else {
+    const submit = payload.submit;
+    if (!isObject(submit)) throw broken('/submit');
+    closed(submit, ['intent', 'label'], '/submit');
+    if (!isIdentifier(submit.intent)) throw broken('/submit/intent');
+    submitIntent = submit.intent;
+    submitLabel = text(submit.label, '/submit/label', 1, 40);
+  }
   return {
-    version, root, submitIntent: submit.intent, submitLabel, fields, required, initial,
+    version, catalogVersion, root, submitIntent, submitLabel, buttons, fields, required, initial,
     boundKeys: ctx.bound, spec,
   };
 }
@@ -305,10 +445,13 @@ function ok(field, value) {
  * `{ready: true, answers}` or `{ready: false, gaps}`; a gap is `{gap: 'missing'|'too_short'|
  * 'too_long'|'too_large', key?, limit?}`.
  */
-export function submission(form, values) {
+export function submission(form, values, action = null) {
   const state = {};
   const gaps = [];
+  const buttons = form.buttons && form.buttons.length > 0;
   for (const key of Object.keys(form.fields).sort()) {
+    // A button form's action is the button pressed, never a value typed.
+    if (buttons && key === ACTION_KEY) continue;
     const field = form.fields[key];
     const value = values[key];
     const needed = form.required.has(key);
@@ -328,6 +471,8 @@ export function submission(form, values) {
       gaps.push({ gap: 'missing', key });
     }
   }
+  // Sent with the pressed button's action; before a press, measured with the longest one.
+  if (buttons) state[ACTION_KEY] = action || form.buttons.map(b => b.action).sort((a, b) => b.length - a.length)[0];
   const answers = { intent: form.submitIntent, state };
   if (canonical(answers).length > CATALOG.maxAnswerBytes) gaps.push({ gap: 'too_large' });
   return gaps.length ? { ready: false, gaps } : { ready: true, answers };
