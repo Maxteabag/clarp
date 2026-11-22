@@ -81,6 +81,15 @@ function pathOf(input) {
   } catch (_) { return ''; }
 }
 
+function sameOrigin(input) {
+  try {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function installAuthFetch() {
   const nativeFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
@@ -88,7 +97,9 @@ export function installAuthFetch() {
     const token = getAuthToken();
     const opts = { ...(init || {}) };
     const h = new Headers(opts.headers || (input instanceof Request ? input.headers : {}));
-    if (token && !h.has('Authorization')) h.set('Authorization', 'Bearer ' + token);
+    // This Host's token goes to this Host only: another Host's request (the all-Hosts list)
+    // carries that Host's own token, set by its caller, and never this one.
+    if (token && !h.has('Authorization') && sameOrigin(input)) h.set('Authorization', 'Bearer ' + token);
     if (!h.has('X-Clarp-Client')) h.set('X-Clarp-Client', CLIENT_HEADER_VALUE);
     opts.headers = h;
     return nativeFetch(input, opts).then(

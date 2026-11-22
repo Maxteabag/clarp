@@ -37,8 +37,9 @@
   } from './stores/sse.svelte.js';
   import { composerRef } from './stores/composer.svelte.js';
   import {
-    applyQuickChoice, handleGlobalKey, initKeyboard, setOverlay,
+    applyQuickChoice, handleGlobalKey, initKeyboard, setTopOverlay,
   } from './stores/input.svelte.js';
+  import { startHosts } from './stores/hosts.svelte.js';
   import { clog, flushClog } from './lib/net.js';
 
   let playerEl = $state(null);
@@ -86,7 +87,11 @@
     const open = { switcher: switcherOpen, overview: overviewOpen, start: startOpen,
                    voice: voiceOpen, orchestrator: orchestratorOpen, quick: quickOpen,
                    chats: chatSettingsOpen };
-    for (const [name, isOpen] of Object.entries(open)) setOverlay(name, isOpen);
+    // One write, of the topmost open dialog (the last listed), and untracked: setting it once
+    // per dialog read input.overlay back, so two open at once (Chat settings over All agents)
+    // flipped it between them on every run until Svelte stopped the loop.
+    const top = Object.keys(open).filter(name => open[name]).pop() || '';
+    untrack(() => setTopOverlay(top));
   });
 
   // ---- boot ----
@@ -110,9 +115,23 @@
     // changes the chat many times a second).
     setBusyProbe(session => !!(app.status[session] && app.status[session].busy));
 
+    // ?session=<sid>: a chat opened from another Host's all-Hosts list. Taken before the first
+    // snapshot, which keeps it when this Host has that chat; the query is stripped at once.
+    try {
+      const url = new URL(location.href);
+      const wanted = url.searchParams.get('session');
+      if (wanted) {
+        app.session = wanted;
+        try { localStorage.setItem('session', wanted); } catch (_) {}
+        url.searchParams.delete('session');
+        window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+      }
+    } catch (_) {}
+
     // Bootstrap per docs/protocol.md: snapshot, then the open chat, then the
     // event stream (which itself refetches the snapshot on connect).
     refreshAgentSnapshot();
+    startHosts();
     ensureLoaded(app.session);
     connectSSE();
 

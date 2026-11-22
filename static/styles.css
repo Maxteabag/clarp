@@ -1661,6 +1661,9 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
   padding: 28px 22px 22px;
   color: var(--washi);
   box-shadow: var(--shadow-2);
+  /* A tall dialog scrolls inside the window instead of pushing its buttons off screen. */
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
 }
 .start-card::before {
   content: '';
