@@ -8,7 +8,20 @@
 //! [`Engine::pump`] on its own thread, which applies them and returns what
 //! changed. No toolkit type crosses into the engine.
 
+/// A method about one chat: a chat on a peer Host (`@<server_id>/<session>`,
+/// `clarp_core::all_hosts`) is that Host's engine's to answer, under its own
+/// session; one whose Host is not read (any more) gets the default.
+macro_rules! on_peer {
+    ($self:ident . $route:ident ($($arg:expr),*), |$engine:ident, $local:ident| $body:expr) => {
+        if let Some(peer) = $self.$route($($arg),*) {
+            #[allow(clippy::unit_arg)]
+            return peer.map(|($engine, $local)| $body).unwrap_or_default();
+        }
+    };
+}
+
 mod avatars;
+mod peers;
 pub mod blocks;
 mod composer;
 mod connection;
@@ -153,6 +166,10 @@ enum Message {
     SearchCache(Result<Vec<(String, Vec<clarp_core::protocol::Message>)>, String>),
     /// A form's queued events are due to be sent.
     FormEventsDue { key: String, token: u64 },
+    /// A saved Host's device token, looked up for reading it as a peer.
+    PeerCredential { base: String, token: String, generation: u64 },
+    /// Peers that could not be reached are tried again.
+    PeersDue(u64),
 }
 
 pub struct Config {
@@ -297,6 +314,15 @@ pub struct Engine {
     /// The Host's `server_id` from `/server-info`.
     server_id: String,
     search: search::SearchState,
+    /// The other paired Hosts read while "Chats from all paired Hosts" is
+    /// on (`peers.rs`); never on a peer itself.
+    peers: peers::Peers,
+    /// This engine reads a peer Host for the primary one: it never picks a
+    /// chat by itself and keeps no settings of its own.
+    peer: bool,
+    /// What the transcript cache files this Host's chats under: its URL,
+    /// or for a peer whose server id is known, that id.
+    cache_key: String,
 }
 
 impl Engine {
@@ -309,9 +335,14 @@ impl Engine {
             .enable_all()
             .build()
             .map_err(|e| format!("cannot start the network runtime: {e}"))?;
-        let runtime = Arc::new(runtime);
+        let engine = Self::build(config, Arc::new(runtime), Arc::new(wake));
+        Ok(engine)
+    }
+
+    /// An engine on `runtime`, waking the UI with `wake` (a peer shares the
+    /// primary's).
+    pub(crate) fn build(config: Config, runtime: Arc<tokio::runtime::Runtime>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         let (sender, receiver) = channel();
-        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
         let post = |sender: Sender<Message>, wake: Arc<dyn Fn() + Send + Sync>| {
             move |message: Message| {
                 if sender.send(message).is_ok() {
@@ -340,7 +371,10 @@ impl Engine {
         };
         // lifecycle
         let launch = lifecycle::Launch::new(&config.settings);
-        Ok(Self {
+        Self {
+            cache_key: normalized_base_url(&config.base_url),
+            peers: Default::default(),
+            peer: false,
             base_url: normalized_base_url(&config.base_url),
             token: config.token,
             settings: config.settings,
@@ -419,7 +453,7 @@ impl Engine {
             form_event_token: 0,
             server_id: String::new(),
             search: Default::default(),
-        })
+        }
     }
 
     fn after(&self, delay: Duration, message: Message) {
@@ -462,8 +496,11 @@ impl Engine {
                 Message::CacheSaveDue(session) => self.cache_save_due(&session),
                 Message::SearchCache(chats) => self.search_cache_read(chats),
                 Message::FormEventsDue { key, token } => self.form_events_due(&key, token),
+                Message::PeerCredential { base, token, generation } => self.peer_credential(&base, token, generation),
+                Message::PeersDue(generation) => self.peers_due(generation),
             }
         }
+        self.pump_peers();
         let mut changes = std::mem::take(&mut self.changes);
         let mut seen = HashSet::new();
         changes.retain(|change| matches!(change, Change::Notification { .. }) || seen.insert(format!("{change:?}")));
@@ -493,8 +530,14 @@ impl Engine {
     pub fn server_name(&self) -> &str {
         &self.server_name
     }
+    /// The chat list: this Host's agents, or with "Chats from all paired
+    /// Hosts" on and another Host read, every Host's (`peers.rs`).
     pub fn roster(&self) -> &Roster {
-        &self.roster
+        self.peers.merged.as_ref().unwrap_or(&self.roster)
+    }
+    /// The Host's `server_id` from `/server-info` (empty before it answered).
+    pub fn server_id(&self) -> &str {
+        &self.server_id
     }
     /// Whether the roster is current, being fetched, or stale since a
     /// failed snapshot (kept while the engine retries).
@@ -519,6 +562,7 @@ impl Engine {
     }
     /// The name a chat shows: an agent's, or a room's title.
     pub fn chat_name(&self, session: &str) -> String {
+        on_peer!(self.peer_ref(session), |engine, local| engine.chat_name(local));
         if session.starts_with("pair:") {
             let title = self.room(session).map(|r| json::string(r, "title")).unwrap_or_default();
             return if title.is_empty() { "Agent conversation".into() } else { title };
@@ -529,9 +573,10 @@ impl Engine {
         &self.selected
     }
     pub fn selected_agent(&self) -> Option<&Agent> {
-        self.roster.find(&self.selected)
+        self.roster().find(&self.selected)
     }
     pub fn conversation(&self, session: &str) -> Option<&Conversation> {
+        on_peer!(self.peer_ref(session), |engine, local| engine.conversation(local));
         self.conversations.get(session)
     }
     pub fn sending(&self) -> bool {
@@ -539,6 +584,7 @@ impl Engine {
     }
     /// Whether a `/log` request for this chat is still out (tests, benchmarks).
     pub fn log_pending(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.log_pending(local));
         self.log_in_flight.contains(session)
     }
     pub fn muted(&self) -> bool {
@@ -547,6 +593,7 @@ impl Engine {
     /// A conversation as the transcript shows it: tool activity grouped
     /// and collapsed per the activity mode (`clarp_core::presentation`).
     pub fn presented(&mut self, session: &str) -> Vec<clarp_core::presentation::PresentedRow> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.presented(local));
         self.present_with_explanations(session, &Default::default(), &Default::default())
     }
     /// The conversation without the rows in `hide` and without the tools
@@ -557,11 +604,13 @@ impl Engine {
         hide: &std::collections::HashSet<String>,
         strip: &std::collections::HashSet<String>,
     ) -> Vec<clarp_core::presentation::PresentedRow> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.presented_except(local, hide, strip));
         self.present_with_explanations(session, hide, strip)
     }
     /// Fetches the tool calls of a message the Host sent without them
     /// (`tool_details_available`), once per message at a time.
     pub fn load_tool_details(&mut self, session: &str, message_id: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_tool_details(local, message_id));
         if session.is_empty()
             || message_id.is_empty()
             || self.tool_detail_requests.values().any(|(s, m)| s == session && m == message_id)
@@ -574,6 +623,9 @@ impl Engine {
     }
     /// Opens or closes a group of old activity.
     pub fn toggle_group(&mut self, group_id: &str) {
+        for peer in &mut self.peers.list {
+            peer.engine.presentation.toggle_group(group_id);
+        }
         self.presentation.toggle_group(group_id);
         let selected = self.selected.clone();
         self.changes.push(Change::Conversation(selected));
@@ -677,6 +729,8 @@ impl Engine {
             self.set_narrator_detail_level(level);
         }
         self.changes.push(Change::Preferences);
+        self.share_preferences_with_peers();
+        self.apply_all_hosts();
     }
     pub fn settings(&self) -> &Settings {
         &self.settings
@@ -695,6 +749,7 @@ impl Engine {
     pub fn start(&mut self) {
         self.restored_session = self.panes.tree.active_session();
         self.restore_startup_cache();
+        self.apply_all_hosts();
         if !self.token.is_empty() {
             self.reconnect();
             return;
@@ -709,7 +764,7 @@ impl Engine {
             return;
         }
         let Some(cache) = self.transcript_cache.clone() else { return };
-        let snapshot = cache.load_roster(&self.base_url);
+        let snapshot = cache.load_roster(&self.cache_key);
         if !snapshot.is_empty() && self.roster.agents().is_empty() {
             self.mutate_roster(|r| r.apply_snapshot(&snapshot));
             self.changes.push(Change::Roster);
@@ -720,9 +775,9 @@ impl Engine {
             self.restored_from_cache = true;
             let restored = self.restored_session.clone();
             let first = Some(restored)
-                .filter(|s| !s.is_empty() && (self.roster.find(s).is_some() || s.starts_with("pair:")))
+                .filter(|s| !s.is_empty() && (self.roster.find(s).is_some() || s.starts_with("pair:") || self.reads_peer_session(s)))
                 .or_else(|| self.roster.first_session().map(str::to_owned));
-            if let Some(first) = first.filter(|_| !self.waiting_for_session_choice) {
+            if let Some(first) = first.filter(|_| !self.waiting_for_session_choice && !self.peer) {
                 self.selected = first.clone();
                 self.mutate_roster(|r| r.clear_unread(&first));
                 self.ensure_conversation(&first);
@@ -733,8 +788,8 @@ impl Engine {
                     self.changes.push(Change::Panes);
                 }
             }
-        } else if self.selected.is_empty() && !self.restored_session.is_empty() && !self.waiting_for_session_choice {
-            let cached = cache.load(&self.base_url, &self.restored_session);
+        } else if self.selected.is_empty() && !self.restored_session.is_empty() && !self.waiting_for_session_choice && !self.peer {
+            let cached = cache.load(&self.cache_key, &self.restored_session);
             if !cached.is_empty() {
                 let first = self.restored_session.clone();
                 self.restored_from_cache = true;
@@ -755,9 +810,9 @@ impl Engine {
         if !self.selected.is_empty() && !sessions.contains(&self.selected) {
             sessions.push(self.selected.clone());
         }
-        for session in sessions {
+        for session in sessions.into_iter().filter(|s| !clarp_core::all_hosts::is_peer_session(s)) {
             self.ensure_conversation(&session);
-            let cached = cache.load(&self.base_url, &session);
+            let cached = cache.load(&self.cache_key, &session);
             if !cached.is_empty() {
                 self.with_conversation(&session, |c| c.restore_cache_snapshot(&cached));
             }
@@ -801,7 +856,7 @@ impl Engine {
         self.set_connection_state("connecting");
         self.api.get("server-info", "/server-info", &[]);
         self.force_snapshot();
-        if self.restored_from_cache && !self.selected.is_empty() {
+        if self.restored_from_cache && !self.selected.is_empty() && !clarp_core::all_hosts::is_peer_session(&self.selected) {
             let selected = self.selected.clone();
             if !selected.starts_with("pair:") && !self.roster.find(&selected).is_some_and(|a| a.janitor) {
                 self.api.post_json(&format!("select:{selected}"), "/select", json!({"session": selected}), None);
@@ -867,6 +922,7 @@ impl Engine {
     pub fn dismiss_error(&mut self) {
         self.set_error("");
         let session = self.selected.clone();
+        on_peer!(self.peer_mut(&session), |engine, _local| engine.dismiss_error());
         self.with_conversation(&session, |c| {
             c.set_error("");
             c.set_voice_error("");
@@ -959,7 +1015,7 @@ impl Engine {
     fn apply_snapshot(&mut self, object: &Object) {
         self.restored_from_cache = false;
         if let Some(cache) = &self.transcript_cache {
-            if let Err(error) = cache.save_roster(&self.base_url, object) {
+            if let Err(error) = cache.save_roster(&self.cache_key, object) {
                 eprintln!("clarp-engine: roster cache: {error}");
             }
         }
@@ -977,12 +1033,13 @@ impl Engine {
         if self.lifecycle_snapshot(object) {
             return;
         }
-        let selected_known = self.roster.find(&self.selected).is_some() || self.selected.starts_with("pair:");
-        if self.selected.is_empty() || !selected_known {
+        let selected_known =
+            self.roster.find(&self.selected).is_some() || self.selected.starts_with("pair:") || self.reads_peer_session(&self.selected);
+        if (self.selected.is_empty() || !selected_known) && !self.peer {
             // A restored layout reopens its active chat when it still exists.
             let restored = std::mem::take(&mut self.restored_session);
             let first = Some(restored)
-                .filter(|s| self.roster.find(s).is_some() || s.starts_with("pair:"))
+                .filter(|s| self.roster.find(s).is_some() || s.starts_with("pair:") || self.reads_peer_session(s))
                 .or_else(|| self.roster.first_session().map(str::to_owned));
             match first {
                 Some(first) if !self.waiting_for_session_choice => self.select(&first),
@@ -1116,6 +1173,9 @@ impl Engine {
         if session.is_empty() {
             return;
         }
+        if self.select_on_peer(session) {
+            return;
+        }
         self.waiting_for_session_choice = false;
         let changed = self.selected != session;
         self.selected = session.to_owned();
@@ -1146,10 +1206,11 @@ impl Engine {
     /// Opening a chat: what this client holds (in memory, else its cached
     /// copy, shown at once) and the delta after it; the tail when nothing.
     pub(crate) fn open_log(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.open_log(local));
         self.ensure_conversation(session);
         let empty = self.conversations.get(session).is_none_or(|c| c.is_empty() && c.latest_revision() == 0);
         if empty && let Some(cache) = &self.transcript_cache {
-            let snapshot = cache.load(&self.base_url, session);
+            let snapshot = cache.load(&self.cache_key, session);
             if !snapshot.is_empty() && self.with_conversation(session, |c| c.restore_cache_snapshot(&snapshot)).unwrap_or(false) {
                 self.order_check.insert(session.to_owned());
             }
@@ -1187,7 +1248,7 @@ impl Engine {
         }
         let snapshot = conversation.cache_snapshot();
         self.cache_saved_at.insert(session.to_owned(), Instant::now());
-        let (base, session) = (self.base_url.clone(), session.to_owned());
+        let (base, session) = (self.cache_key.clone(), session.to_owned());
         self.runtime.spawn_blocking(move || {
             if let Err(error) = cache.save(&base, &session, &snapshot) {
                 eprintln!("clarp-engine: transcript cache: {error}");
@@ -1196,7 +1257,7 @@ impl Engine {
     }
 
     fn ensure_conversation(&mut self, session: &str) {
-        if session.is_empty() || self.conversations.contains_key(session) {
+        if session.is_empty() || self.conversations.contains_key(session) || clarp_core::all_hosts::is_peer_session(session) {
             return;
         }
         let mut conversation = Conversation::new();
@@ -1227,10 +1288,12 @@ impl Engine {
     }
 
     pub fn refresh_session(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.refresh_session(local));
         self.request_tail(session, false);
     }
 
     pub fn load_older(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_older(local));
         if session.is_empty() || self.log_in_flight.contains(session) {
             return;
         }
@@ -1274,6 +1337,7 @@ impl Engine {
 
     fn request_tail(&mut self, session: &str, replace: bool) {
         let session = if session.is_empty() { self.selected.clone() } else { session.to_owned() };
+        on_peer!(self.peer_mut(&session), |engine, local| engine.request_tail(local, replace));
         if session.is_empty() || !self.begin_log_request(&session, if replace { "replace" } else { "tail" }) {
             return;
         }
@@ -1285,6 +1349,7 @@ impl Engine {
 
     fn request_delta(&mut self, session: &str) {
         let session = if session.is_empty() { self.selected.clone() } else { session.to_owned() };
+        on_peer!(self.peer_mut(&session), |engine, local| engine.request_delta(local));
         if session.is_empty() || !self.begin_log_request(&session, "delta") {
             return;
         }
@@ -1336,12 +1401,14 @@ impl Engine {
     }
 
     pub fn send_to(&mut self, session: &str, text: &str, queue_if_busy: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.send_to(local, text, queue_if_busy));
         self.send_with_voice(session, text, queue_if_busy, "", "", false);
     }
 
     /// A send, carrying the dictation it came from (trace and
     /// transcription ids, hands-free) when there was one.
     pub(crate) fn send_with_voice(&mut self, session: &str, text: &str, queue_if_busy: bool, trace: &str, transcription: &str, hands_free: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.send_with_voice(local, text, queue_if_busy, trace, transcription, hands_free));
         let trimmed = text.trim();
         if trimmed.is_empty() || session.is_empty() {
             return;
@@ -1355,6 +1422,7 @@ impl Engine {
 
     /// Sends a failed message again under its own id (CLIENT-SEND-500).
     pub(crate) fn resend_failed(&mut self, session: &str, message_id: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.resend_failed(local, message_id));
         let Some((client_id, text)) = self.with_conversation(session, |c| c.resend_failed(message_id)).flatten() else { return };
         self.post_send(session, &client_id, &text, false, "", "", false);
     }
@@ -1419,6 +1487,7 @@ impl Engine {
     }
 
     pub fn stop_session(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.stop_session(local));
         if !session.is_empty() {
             self.stop_requested(session);
             self.api.post_json(&format!("stop:{session}"), "/stop", json!({"session": session}), None);
@@ -1485,6 +1554,7 @@ impl Engine {
             // A Host that answered is kept for switching back to it.
             let before = clarp_core::hosts::list(&self.settings);
             clarp_core::hosts::remember(&mut self.settings, &self.base_url, &self.server_name);
+            clarp_core::hosts::set_identity(&mut self.settings, &self.base_url, "", &json::string(object, "server_id"));
             if clarp_core::hosts::list(&self.settings) != before {
                 self.changes.push(Change::Hosts);
             }

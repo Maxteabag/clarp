@@ -24,6 +24,107 @@ fn ids_of(host: &Host) -> BTreeMap<String, String> {
 }
 
 #[test]
+fn an_owner_prompt_names_a_foreign_sender_but_a_local_turn_speaks_as_itself() {
+    let place = Place::new("foreign-sender");
+    let (tokens, _, _) = stand_in(&place);
+    let host = start_host_as(&place, &[], "fixture-owner-token");
+    for (name, session) in [("Oak", "oak"), ("Ivy", "ivy")] {
+        assert_eq!(
+            host.post(
+                "/agents",
+                json!({
+                    "name": name, "session": session, "backend": "claude",
+                })
+            )["session"],
+            session
+        );
+    }
+    let foreign = "remote-helper";
+    let (exit, printed, stderr) = tool(
+        &host,
+        &place.root,
+        None,
+        &[
+            "clarp-admin",
+            "prompt",
+            "--to",
+            "oak",
+            "--from",
+            foreign,
+            "--text",
+            "Check the build.",
+        ],
+    );
+    assert_eq!(exit, 0, "{stderr}");
+    let receipt: Value = serde_json::from_str(&printed).unwrap();
+    let trace = receipt["trace_id"].as_str().unwrap();
+    wait_for("the forwarded prompt in Oak's conversation", || {
+        !rows_of_trace(&host, "oak", trace).is_empty()
+    });
+    let forwarded = &rows_of_trace(&host, "oak", trace)[0];
+    assert_eq!(forwarded["role"], "user");
+    assert_eq!(forwarded["origin"], "agent");
+    assert_eq!(forwarded["audience"], "agents");
+    assert_eq!(forwarded["sender_name"], foreign);
+    assert_eq!(forwarded["sender_session"], foreign);
+    assert_eq!(forwarded["sender_agent_id"], "");
+
+    let (status, _) = asked(
+        &host,
+        "/send",
+        &[],
+        &json!({
+            "session": "oak", "text": "Owner forwarding again.", "client_msg_id": "foreign-http",
+            "sender": foreign, "origin": "user",
+        }),
+    );
+    assert_eq!(status, 200);
+    wait_for("the owner-token HTTP prompt", || {
+        rows_of(&host, "oak").contains_key("u-foreign-http")
+    });
+    let row = &rows_of(&host, "oak")["u-foreign-http"];
+    assert_eq!(row["origin"], "agent");
+    assert_eq!(row["audience"], "agents");
+    assert_eq!(row["sender_name"], foreign);
+
+    host.send("ivy", "Start a verified turn.", "ivy-source");
+    let mut token = String::new();
+    wait_for("Ivy's turn token", || {
+        token = std::fs::read_to_string(tokens.join("ivy")).unwrap_or_default();
+        !token.is_empty()
+    });
+    let (status, _) = asked(
+        &host,
+        "/send",
+        &[("X-Clarp-Turn", &token)],
+        &json!({
+            "session": "oak", "text": "The token decides.", "client_msg_id": "from-ivy",
+            "sender": foreign, "origin": "user",
+        }),
+    );
+    assert_eq!(status, 200);
+    wait_for("Ivy's prompt", || {
+        rows_of(&host, "oak").contains_key("u-from-ivy")
+    });
+    let row = &rows_of(&host, "oak")["u-from-ivy"];
+    assert_eq!(row["origin"], "agent");
+    assert_eq!(row["audience"], "agents");
+    assert_eq!(row["sender_name"], "Ivy");
+    assert_eq!(row["sender_session"], "ivy");
+    assert_eq!(row["sender_agent_id"], ids_of(&host)["ivy"]);
+
+    let (status, _) = asked(
+        &host,
+        "/send",
+        &[("X-Clarp-Turn", &token)],
+        &json!({
+            "session": "oak", "text": "Claim to be Oak.", "sender": "oak",
+        }),
+    );
+    assert_eq!(status, 403);
+}
+
+#[test]
 fn the_users_word_precedes_ordinary_work_across_a_hold_and_restart() {
     let place = Place::new("user-word-first");
     let (tokens, release, holds) = stand_in(&place);

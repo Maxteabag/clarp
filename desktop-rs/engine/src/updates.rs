@@ -109,6 +109,10 @@ pub(crate) struct Updates {
 }
 
 impl Updates {
+    pub(crate) fn attention(&self) -> &[Value] {
+        &self.attention_items
+    }
+
     pub(crate) fn artifacts(&self) -> &[Value] {
         &self.artifacts
     }
@@ -133,18 +137,19 @@ impl Updates {
 impl Engine {
     // ---- queries ---------------------------------------------------------
 
+    /// Every listed Host's, each naming its Host, with peers listed.
     pub fn attention_items(&self) -> &[Value] {
-        &self.updates.attention_items
+        self.merged_attention().unwrap_or(&self.updates.attention_items)
     }
     /// The nav rail's Updates badge.
     pub fn attention_count(&self) -> usize {
-        self.updates.attention_items.len()
+        self.attention_items().len()
     }
     pub fn background_jobs(&self) -> &[Value] {
         &self.updates.background_jobs
     }
     pub fn update_artifacts(&self) -> &[Value] {
-        &self.updates.artifacts
+        self.merged_artifacts().unwrap_or(&self.updates.artifacts)
     }
     /// One of the three lists is still loading.
     pub fn updates_loading(&self) -> bool {
@@ -167,32 +172,30 @@ impl Engine {
     /// waiting, or holding a pending attention item. Empty when none.
     pub fn next_attention_session(&self) -> String {
         let pending: Vec<String> = self
-            .updates
-            .attention_items
+            .attention_items()
             .iter()
             .filter_map(|item| item.get("session").and_then(Value::as_str))
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .collect();
-        self.roster.next_attention_session(&self.selected, &pending).unwrap_or_default()
+        self.roster().next_attention_session(&self.selected, &pending).unwrap_or_default()
     }
 
     /// The agents Ctrl+J will visit, in order (the explorer numbers them).
     pub fn attention_queue(&self) -> Vec<String> {
         let pending: Vec<String> = self
-            .updates
-            .attention_items
+            .attention_items()
             .iter()
             .filter_map(|item| item.get("session").and_then(Value::as_str))
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .collect();
-        self.roster.attention_queue(&self.selected, &pending)
+        self.roster().attention_queue(&self.selected, &pending)
     }
 
     /// The artifacts one agent produced (profile panel).
     pub fn artifacts_for_session(&self, session: &str) -> Vec<Value> {
-        self.updates.artifacts.iter().filter(|a| a.get("session").and_then(Value::as_str) == Some(session)).cloned().collect()
+        self.update_artifacts().iter().filter(|a| a.get("session").and_then(Value::as_str) == Some(session)).cloned().collect()
     }
 
     pub fn artifact_is_viewable_report(&self, artifact: &Object) -> bool {
@@ -201,6 +204,7 @@ impl Engine {
 
     /// The report view's model for an artifact; None when it has none.
     pub fn report_for_artifact(&self, artifact_id: &str) -> Option<Object> {
+        on_peer!(self.owner_ref(artifact_id), |engine, _local| engine.report_for_artifact(artifact_id));
         clarp_core::text::report_for_artifact(&self.updates.artifacts, artifact_id, &self.base_url)
     }
 
@@ -211,6 +215,7 @@ impl Engine {
 
     /// A resolve or cancel is in flight: `kind` is `decision` or `job`.
     pub fn update_action_pending(&self, kind: &str, id: &str) -> bool {
+        on_peer!(self.owner_ref(id), |engine, _local| engine.update_action_pending(kind, id));
         self.updates.pending_actions.contains(&format!("{kind}:{id}"))
     }
 
@@ -227,6 +232,7 @@ impl Engine {
 
     /// An agent's processes (jobs, sub-agents, helpers) for its popover.
     pub fn agent_processes(&self, session: &str) -> Option<Object> {
+        on_peer!(self.peer_ref(session), |engine, local| engine.agent_processes(local));
         let now = chrono::Utc::now().timestamp_millis();
         clarp_core::roster::describe_agent_processes(&self.roster, &self.updates.jobs, session, now)
     }
@@ -234,11 +240,13 @@ impl Engine {
     /// How the card's latest answer went: "Sending…", "Answers accepted"
     /// or "Not sent: …" ("" before any, and once a decision's is in).
     pub fn artifact_status(&self, artifact_id: &str) -> &str {
+        on_peer!(self.owner_ref(artifact_id), |engine, _local| engine.artifact_status(artifact_id));
         self.updates.artifact_status.get(artifact_id).map_or("", String::as_str)
     }
 
     /// A card the window could not open or send says why.
     pub fn set_artifact_status(&mut self, artifact_id: &str, status: &str) {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.set_artifact_status(artifact_id, status));
         self.updates.artifact_status.insert(artifact_id.to_owned(), status.to_owned());
         self.changes.push(Change::Updates);
     }
@@ -246,11 +254,13 @@ impl Engine {
     /// Fetches an artifact's bytes from the Host (a poster, a file to
     /// open); `take_artifact_bytes` hands them over once they arrive.
     pub fn fetch_artifact_bytes(&mut self, artifact_id: &str, purpose: &str, path: &str) {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.fetch_artifact_bytes(artifact_id, purpose, path));
         let tag = format!("artifact-bytes:{purpose}:{artifact_id}:{}", uuid::Uuid::new_v4().simple());
         self.api.get_bytes(&tag, path);
     }
 
     pub fn take_artifact_bytes(&mut self, artifact_id: &str, purpose: &str) -> Option<Result<Vec<u8>, String>> {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.take_artifact_bytes(artifact_id, purpose));
         self.updates.artifact_bytes.remove(&format!("{purpose}:{artifact_id}"))
     }
 
@@ -260,6 +270,12 @@ impl Engine {
     /// `resolve` with `{"choice"}` or `{"answer"}`, or `dismiss`; always
     /// against the revision the user saw. The artifacts reload after.
     pub fn send_decision(&mut self, artifact_id: &str, decision_id: &str, action: &str, mut body: Value, revision: i64) {
+        if let Some(peer) = self.owner_mut(artifact_id) {
+            if let Some((engine, _)) = peer {
+                engine.send_decision(artifact_id, decision_id, action, body, revision);
+            }
+            return;
+        }
         let key = format!("decision:{decision_id}");
         if decision_id.is_empty() || !matches!(action, "resolve" | "dismiss") || self.updates.pending_actions.contains(&key) {
             return;
@@ -277,6 +293,12 @@ impl Engine {
     /// Sends an HTML form's answers (iOS `HTMLFormView`): a fresh submission
     /// id with the form's version; the Host's receipt must echo both.
     pub fn submit_html_form(&mut self, artifact_id: &str, version: Value, answers: Value) {
+        if let Some(peer) = self.owner_mut(artifact_id) {
+            if let Some((engine, _)) = peer {
+                engine.submit_html_form(artifact_id, version, answers);
+            }
+            return;
+        }
         if artifact_id.is_empty() || !answers.is_object() {
             return;
         }
@@ -291,6 +313,7 @@ impl Engine {
     /// The user asked (opened Updates, Refresh, an action's reply): all
     /// three lists reload now, past any interval.
     pub fn load_updates(&mut self) {
+        self.peers_load_updates(true);
         self.updates.error.clear();
         for feed in Feed::ALL {
             self.request_list(feed, true);
@@ -300,6 +323,7 @@ impl Engine {
 
     /// The open surface's timer: each list reloads when its interval allows.
     pub fn poll_updates(&mut self) {
+        self.peers_load_updates(false);
         for feed in Feed::ALL {
             self.request_list(feed, false);
         }
@@ -318,6 +342,7 @@ impl Engine {
     /// Reads one artifact (`GET /artifacts/<id>`) into the list: an event
     /// named it, or (with a summary list) its content is needed to open it.
     pub fn fetch_artifact(&mut self, artifact_id: &str) {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.fetch_artifact(artifact_id));
         if artifact_id.is_empty() {
             return;
         }
@@ -389,6 +414,7 @@ impl Engine {
     /// Answers a decision: `yes`/`accepted` or `no`/`rejected`, against the
     /// revision the user saw.
     pub fn resolve_decision(&mut self, decision_id: &str, choice: &str, revision: i64) {
+        on_peer!(self.owner_mut(decision_id), |engine, _local| engine.resolve_decision(decision_id, choice, revision));
         let choice = match choice {
             "yes" | "accepted" => "accepted",
             "no" | "rejected" => "rejected",

@@ -39,13 +39,28 @@ fn the_list_is_capped_and_ignores_bad_rows() {
     assert_eq!(hosts::list(&settings).len(), MAX);
     assert_eq!(hosts::list(&settings)[0].url, format!("http://h{}:1", MAX + 4), "the newest is kept");
     settings.set(hosts::KEY, json!([{"url": ""}, {"name": "no url"}, 7, {"url": "http://x/"}, {"url": "http://x"}]));
-    assert_eq!(hosts::list(&settings), [SavedHost { url: "http://x".into(), name: String::new() }]);
+    assert_eq!(hosts::list(&settings), [SavedHost { url: "http://x".into(), name: String::new(), server_id: String::new() }]);
     hosts::remember(&mut settings, "  ", "nothing");
     assert_eq!(hosts::list(&settings).len(), 1, "an empty address is never saved");
 }
 
 #[test]
 fn a_row_shows_the_name_else_the_address() {
-    assert_eq!(SavedHost { url: "http://studio.tail:7682".into(), name: String::new() }.label(), "studio.tail:7682");
-    assert_eq!(SavedHost { url: "https://clarp.example".into(), name: "Home".into() }.label(), "Home");
+    assert_eq!(SavedHost { url: "http://studio.tail:7682".into(), name: String::new(), server_id: String::new() }.label(), "studio.tail:7682");
+    assert_eq!(SavedHost { url: "https://clarp.example".into(), name: "Home".into(), server_id: String::new() }.label(), "Home");
+}
+
+#[test]
+fn a_hosts_identity_is_kept_in_place() {
+    let mut settings = Settings::in_memory();
+    hosts::remember(&mut settings, "http://a:7682", "A");
+    hosts::remember(&mut settings, "http://b:7682", "B");
+    hosts::set_identity(&mut settings, "http://a:7682/", "Studio", "srv-a");
+    assert_eq!(urls(&settings), ["http://b:7682", "http://a:7682"], "reading a Host never reorders the list");
+    let a = hosts::list(&settings)[1].clone();
+    assert_eq!((a.name.as_str(), a.server_id.as_str()), ("Studio", "srv-a"));
+    hosts::remember(&mut settings, "http://a:7682", "");
+    assert_eq!(hosts::list(&settings)[0].server_id, "srv-a", "switching to it keeps its server id");
+    hosts::set_identity(&mut settings, "http://missing", "M", "srv-m");
+    assert_eq!(hosts::list(&settings).len(), 2, "a Host not saved is not added");
 }

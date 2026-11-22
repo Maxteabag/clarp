@@ -42,6 +42,10 @@ export struct ChatRow {
     folded: bool,
     // An archived agent: Restore instead of opening.
     archived: bool,
+    // Its Host badge ("Show the Host on each chat", #651), "" for none.
+    host: string,
+    // "Moved to <Host>" for an agent that moved (Host contract 125).
+    moved: string,
 }
 
 // A small labelled toggle, like the QML scope chips.
@@ -222,6 +226,25 @@ component Row inherits Rectangle {
                     running: root.on-screen;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
+                // The Host badge: a capsule in the time's colour on a faint
+                // fill of it, before the time; the name elides first.
+                if !root.compact && root.chat.host != "": Rectangle {
+                    horizontal-stretch: 0;
+                    min-width: badge-text.preferred-width + 12px;
+                    height: badge-text.preferred-height + 4px;
+                    y: 1px;
+                    border-radius: self.height / 2;
+                    background: Palette.faint.with-alpha(0.12);
+                    accessible-role: text;
+                    accessible-id: "row-host";
+                    accessible-label: root.chat.host;
+                    badge-text := Text {
+                        x: 6px;
+                        text: root.chat.host;
+                        color: Palette.faint;
+                        font-size: 11 * Look.unit;
+                    }
+                }
                 if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
             }
             if !root.compact: HorizontalLayout {
@@ -242,6 +265,15 @@ component Row inherits Rectangle {
                     border-radius: 4px;
                     background: Palette.accent;
                 }
+            }
+            if !root.compact && root.chat.moved != "": Text {
+                text: root.chat.moved;
+                color: Palette.faint;
+                font-size: 11 * Look.unit;
+                overflow: elide;
+                accessible-role: text;
+                accessible-id: "row-moved";
+                accessible-label: root.chat.moved;
             }
             if !root.compact && root.chat.activity != "": Text {
                 text: root.chat.activity;

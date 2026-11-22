@@ -367,7 +367,7 @@ impl Worker {
                         team::prompt(name, &normalized),
                     ];
                     let call = crate::tools::ToolCall::default();
-                    let result = crate::admin_tool::prompt(&self.app, &call, &args).await;
+                    let result = crate::admin_tool::prompt(&self.app, &call, &args, false).await;
                     let verdict = match result.exit {
                         0 => Prompt::Sent,
                         4 => Prompt::Refused(&result.stderr),

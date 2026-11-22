@@ -17,6 +17,7 @@ import {
   onSubscriptionsChanged, onTurnSettled, openLive, setConnectedLive, setServerFeatures,
   watchedSessions,
 } from './live.svelte.js';
+import { coordination, loadCoordinationSettings } from './coordination.svelte.js';
 import {
   audio, bumpLastAudioTs, lastAudioTs, PLAYER_ADAPTER_VERSION, scheduler,
   unlockAudio,
@@ -78,7 +79,12 @@ export async function refreshServerInfo() {
     const info = await r.json();
     const features = (info && info.capabilities && info.capabilities.features) || [];
     setServerFeatures(features);
+    // The one Host this app reads (several once it reads the all-Hosts list).
+    if (info && (info.server_id || info.name)) {
+      app.hosts = [{ id: String(info.server_id || ''), name: String(info.name || '') }];
+    }
     loadExplanationSettings();
+    loadCoordinationSettings();
   } catch (_) {}
 }
 
@@ -245,6 +251,10 @@ function handleEvent(ev) {
 
   } else if (ev.type === SSEType.AGENT_ROSTER) {
     clog('agentRoster', `${ev.kind}:${ev.session || ''}`);
+    // The Host's own coordination setting moved (on this device or another).
+    if (ev.kind === 'coordination-changed' && !ev.session && ev.coordination_visibility) {
+      coordination.visibility = String(ev.coordination_visibility);
+    }
     if (ev.kind === 'deleted' && ev.session) agentSnapshot.remove(ev.session);
     // Coalesced: a reconnect replays minutes of events, and a burst of
     // roster changes (helper agents coming and going) must cost one

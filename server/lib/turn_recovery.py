@@ -267,6 +267,10 @@ class RecoveryMixin:
             turn_queue.start_shown_attempted()
         except Exception as exc:  # noqa: BLE001 - recovery must still run
             log_exception("shownAttemptedStartPassFail", exc)
+        try:
+            self._end_unlaunched_shown()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("unlaunchedShownPassFail", exc)
         turn_queue.reconcile_receipts()
         self._rehydrate_once()
         from . import agent_rings
@@ -436,6 +440,40 @@ class RecoveryMixin:
                 f"retry_in={backoff.retry_at - self.now():.0f}s")
         return backoff
 
+    def _end_unlaunched_shown(self) -> None:
+        """A shown item left 'queued' whose launches all failed before a backend
+        started (turn_queue.unlaunched_shown) never reached the agent: it ends failed,
+        its sender told, its turn rows closed (R193). Not run again: its row stands in
+        the conversation from when it was sent, and running it now, maybe hours later,
+        would act on words the sender may no longer mean; they send it again if they
+        do. One this process still holds (its slot, its memory queue, a launch running)
+        is left to that."""
+        for row in turn_queue.unlaunched_shown():
+            agent_id, trace_id = str(row["agent_id"]), str(row["trace_id"])
+            if turn_queue.is_paused(agent_id):
+                continue  # a Stop's pause holds it, durably, for the user's Resume
+            held = (_SLOTS.owns(agent_id, trace_id)
+                    or _SLOTS.has_queued(agent_id, lambda spec, q=row["queue_id"]: spec.queue_id == q))
+            if held or _launch_running(agent_id):
+                continue
+            attempts = int(row.get("attempts") or 0)
+            if not turn_queue.fail_refused_launch(
+                    row, failures=attempts,
+                    error="its launch failed before the backend started"):
+                continue
+            try:
+                turn_lifecycle.close_turns_for_trace(agent_id, trace_id)
+            except Exception as exc:  # noqa: BLE001 - the row is settled already
+                log_exception("unlaunchedShownCloseFail", exc, detail=row["session"])
+            log("unlaunchedShownEnded", f"session={row['session']} queue={row['queue_id']} "
+                                        f"attempts={attempts}")
+            if getattr(self.ctx, "stream", None) is not None:
+                state = turn_queue.state(agent_id)
+                events.broadcast(self.ctx.stream, events.queue_updated(
+                    session=row["session"], agent_id=agent_id, client_msg_id=row["client_msg_id"],
+                    queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                    queue_revision=state["revision"]))
+
     def _end_refused_launch(self, row, backoff: recovery_backoff.Backoff) -> bool:
         agent_id = str(row["agent_id"])
         try:
@@ -564,6 +602,13 @@ class RecoveryMixin:
         self._start_ownerless_queues(only)
         return released
 
+    @staticmethod
+    def _handoff_backing_off(agent_id: str) -> bool:
+        """The agent's queue head failed its launch and its retry is not due yet."""
+        import time
+        waiting = _SLOTS.queued.get(agent_id) or []
+        return bool(waiting) and getattr(waiting[0], "handoff_retry_at", 0.0) > time.monotonic()
+
     def _start_ownerless_queues(self, only: str | None) -> None:
         """Hand a free slot to work queued in memory behind no owner.
 
@@ -578,6 +623,8 @@ class RecoveryMixin:
                 continue
             if _SLOTS.get(agent_id):
                 continue  # an owner (turn, terminal or Stop) drains it
+            if self._handoff_backing_off(agent_id):
+                continue  # its head waits for its own retry (R193)
             log("ownerlessQueueStarted",
                 f"agent={agent_id} depth={depth} — queued work with a free "
                 f"slot and no owner; starting its head")
@@ -625,7 +672,7 @@ class RecoveryMixin:
             "source": "slot_repair", "repair_actor": actor,
             "repair_actor_verified": actor_verified,
             "repair_reason": reason, "released_trace": trace})
-        self._retry_handoff(agent_id)
+        self._retry_handoff(agent_id, due=True)
         return {"released_trace": trace,
                 "queue_recovered": int(self.recover_queued() or 0)}
 

@@ -12,7 +12,8 @@ drives those functions as they are:
   differs;
 - the notice's words, for a count and a refusal;
 - whole stories on the dispatcher itself (`TurnDispatchService`, on a backend that refuses, a clock and timers of the
-  test's): when each try was made, and how the send ended, for one send and for two behind each other.
+  test's): when each try was made, and how the send ended, for one send and for two behind each other;
+- the R193 handoff of a queued send whose launch fails before the backend starts.
 
     "$(sed -n 1p ~/.local/share/clarp/current/SERVICE_PYTHON)" server-rs/tools/launch-refused-vectors.py
 
@@ -48,9 +49,10 @@ def run(root) -> dict:
     sys.path.insert(0, str(REPO / 'server'))
     import itertools
     from types import SimpleNamespace
+    from unittest.mock import patch
 
     from lib import agents as agents_db
-    from lib import db, recovery_backoff, turn_queue
+    from lib import db, recovery_backoff, turn_handoff, turn_queue
     from lib.backend.base import LaunchRefused
     import lib.turn_dispatch as dispatch
 
@@ -132,6 +134,7 @@ def run(root) -> dict:
 
         def __init__(self):
             self.tries = []
+            self.spawned = []
             self.broken = {}
             self.live = set()
 
@@ -151,6 +154,7 @@ def run(root) -> dict:
             if refused is not None:
                 raise refused
             self.live.add(kwargs['agent_id'])
+            self.spawned.append(kwargs)
 
     def run_until(timers, until):
         while True:
@@ -228,8 +232,54 @@ def run(root) -> dict:
         story('olga', 'a send refused by two kinds in turn ends at the twentieth counted refusal',
               [(0, 'olga-1', 'user')], alternating),
     ]
+    def handoff():
+        dispatch.reset_for_tests()
+        clock.t = 1000.0
+        backends, timers, ids = Backends(), [], itertools.count(1)
+        session = 'handoff'
+        ctx = SimpleNamespace(default_session=session, agents_path=root / 'handoff-unused.json',
+                              stream=SimpleNamespace(broadcast=lambda _e: None))
+        service = dispatch.TurnDispatchService(
+            ctx, backend_registry=backends, home=root,
+            uuid_factory=lambda: f'handoff-backend-{next(ids)}', now=clock,
+            retry_scheduler=lambda delay, fn: timers.append((clock.t + delay, fn)))
+        agent_id = agents_db.create_agent(persona='Handoff', voice_id='V', cwd=str(root),
+                                          session=session, backend='claude')
+        agents_db.start_runtime(agent_id, session)
+        trace, queue_id = 'handoff-queued', 'q-handoff'
+        error = "No such file or directory: '/gone'"
+        def refuse_handoff(t):
+            return FileNotFoundError(error) if t == trace else None
+
+        backends.broken[agent_id] = refuse_handoff
+        with patch('time.monotonic', clock):
+            service.dispatch(text='first', requested_session=session, forced_session=session,
+                             trace_id='handoff-first', synthesize_audio=False)
+            service.dispatch(text='queued', requested_session=session, forced_session=session,
+                             trace_id=trace, client_msg_id=queue_id, synthesize_audio=False, queue_if_busy=True)
+            backends.live.clear()
+            backends.spawned[0]['on_result']({'duration_ms': 1})
+            attempts = [item['at'] for item in backends.tries if item['trace'] == trace]
+            service._start_ownerless_queues(None)
+            ownerless_launched = len([item for item in backends.tries if item['trace'] == trace]) > len(attempts)
+            run_until(timers, clock.t + 3600)
+
+        turns = db.conn().execute(
+            'SELECT ended_at FROM turns WHERE agent_id=? AND trace_id=?', (agent_id, trace)).fetchall()
+        if len(turns) != 1 or turn_queue.status(queue_id) != 'failed':
+            rows = db.conn().execute(
+                'SELECT trace_id, outcome FROM turns WHERE agent_id=?', (agent_id,)).fetchall()
+            raise RuntimeError(f'{backends.tries!r}, turns={[tuple(row) for row in rows]!r}')
+        notice = db.conn().execute('SELECT text FROM messages WHERE message_id=?',
+                                   (f'notice:{turn_queue.REFUSED_LAUNCH}:{queue_id}',)).fetchone()
+        return {'attempts': [item['at'] for item in backends.tries if item['trace'] == trace],
+                'ownerless_launched': ownerless_launched, 'give_up': turn_handoff.HANDOFF_GIVE_UP,
+                'error': error, 'status': turn_queue.status(queue_id),
+                'turn_rows': len(turns), 'closed': all(row['ended_at'] is not None for row in turns),
+                'notice': notice['text'] if notice else None}
+
     return {'signatures': signatures, 'briefs': briefs, 'runs': runs, 'waits': waits, 'notices': notices,
-            'stories': stories, 'park_after': recovery_backoff.PARK_AFTER,
+            'stories': stories, 'handoff': handoff(), 'park_after': recovery_backoff.PARK_AFTER,
             'refused_in_all': recovery_backoff.REFUSED_IN_ALL}
 
 

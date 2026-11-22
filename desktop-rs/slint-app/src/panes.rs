@@ -468,6 +468,10 @@ impl App {
     fn header(&self, engine: &Engine, view: &mut PaneView, session: &str) {
         let agent = engine.roster().find(session);
         view.name = if session.is_empty() { SharedString::new() } else { engine.chat_name(session).into() };
+        // The status line starts with the Host badge, then a moved agent's
+        // "Moved to …" (#651, Host contract 125).
+        view.host = engine.host_badge(session).into();
+        view.moved = agent.map(clarp_core::all_hosts::moved_line).unwrap_or_default().into();
         view.pair = session.starts_with("pair:");
         view.model = agent.map(|a| a.model.clone()).unwrap_or_default().into();
         view.effort = agent.map(|a| a.effort.clone()).unwrap_or_default().into();

@@ -94,6 +94,18 @@ def test_send_to_a_moved_agent_answers_agent_moved_with_where(running_server):
     assert body["moved_to"] == {"host": "rust-host", "id": "r-1"} and body["moved_at"] > 0
 
 
+def test_a_send_the_host_routes_itself_answers_where_too(running_server):
+    """A hands-free send from one chat that names another agent goes where the Host routes it.
+    When that agent had moved, the refusal named no Host: the mark was looked up by the
+    requested session (this chat's agent, which did not move), not by the agent refused."""
+    base, _ctx, _srv = running_server
+    assert _call(base, "POST", "/agent-moved", MOVE)[0] == 200
+    status, body = _call(base, "POST", "/send", {"text": "Mike, check the build", "session": "rachel",
+                                                 "hands_free": True, "client_msg_id": "c-routed"})
+    assert status == 409 and body["error"] == "agent_moved"
+    assert body["moved_to"] == {"host": "rust-host", "id": "r-1"} and body["moved_at"] > 0
+
+
 def test_a_limited_device_may_not_and_a_full_device_may(running_server):
     from lib import device_pairing
     base, ctx, srv = running_server
@@ -157,3 +169,88 @@ def test_a_ready_runtime_accepts_and_taking_back_is_always_allowed(running_serve
     status, body = _call(base, "POST", "/agent-moved", {"session": "claude", "moved_to": None})
     assert status == 200 and body["changed"] is True and body["moved"] is None
     assert old.recovered == 1                              # the held items are released
+
+
+def test_a_routed_send_names_where_it_went_through_a_split_runtime(fake_ctx, tmp_path):
+    """On a Host whose admission runs in the agent runtime (clarp-runtime beside the HTTP Host)
+    the refusal crosses as JSON; the agent it is about has to cross with it, or the HTTP side
+    looks the mark up by the requested session again and names no Host."""
+    import threading
+    from types import SimpleNamespace
+    from lib import agent_moves, agents
+    from lib.runtime_bridge import RuntimeClient
+    from lib.runtime_events import RuntimeEventStream
+    from lib.runtime_rpc_server import RuntimeRPCServer
+    from lib.turn_dispatch import TurnDispatchService
+    from short_sockets import socket_path as short_socket
+    from tests.integration.test_server_di import _free_port, build_server
+
+    class Backends:
+        CLAUDE = "claude"
+
+        def normalize(self, backend):
+            return backend or "claude"
+
+        def active_handles(self, _backend, _agent_id):
+            return []
+
+        def interrupt(self, _backend, _agent_id):
+            return 0
+
+        def steer_turn(self, *_args, **_kwargs):
+            return False
+
+        def spawn_turn(self, _backend, **_kwargs):
+            raise AssertionError("no turn of a moved agent may start")
+
+    runtime_ctx = SimpleNamespace(default_session="claude", agents_path=fake_ctx.agents_path,
+                                  stream=RuntimeEventStream(), runtime_client=None)
+    dispatch = TurnDispatchService(runtime_ctx, backend_registry=Backends(), home=tmp_path,
+                                   uuid_factory=lambda: "runtime-conversation")
+    runtime_socket = short_socket("moved-runtime.sock")
+    runtime = RuntimeRPCServer(runtime_socket, dispatch_service=dispatch)
+    threading.Thread(target=runtime.serve_forever, daemon=True).start()
+    fake_ctx.replace_service("runtime_client", RuntimeClient(runtime_socket))
+    agent_moves.set_moved(agents.get_by_session("claude")["agent_id"], host="rust-host", remote_id="r-1")
+    port = _free_port()
+    server = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        status, body = _call(f"http://127.0.0.1:{port}", "POST", "/send",
+                             {"text": "Mike, check the build", "session": "rachel",
+                              "hands_free": True, "client_msg_id": "c-split"})
+    finally:
+        server.shutdown()
+        server.server_close()
+        runtime.shutdown()
+        runtime.server_close()
+    assert status == 409 and body["error"] == "agent_moved"
+    assert body["moved_to"] == {"host": "rust-host", "id": "r-1"}
+
+
+
+def test_a_send_the_model_orchestrator_routes_answers_where_too(fake_ctx, monkeypatch):
+    """With the model orchestrator on, a send it routes to a moved agent got the routing
+    envelope (409, error agent_moved) without where the agent went: the orchestrator caught
+    the refusal and its HTTP adapter never answered it as every door does."""
+    import threading
+    from lib import orchestrator, settings_store
+    from tests.integration.test_server_di import _free_port
+    settings_store.set_bool("orchestrator.enabled", True)       # before the server builds its delegator
+    settings_store.set_bool("orchestrator.fallback_only", False)
+    monkeypatch.setattr(orchestrator, "call_model", lambda _packet, _settings: {
+        "kind": "agent_message", "target_session": "rachel", "confidence": 0.99,
+        "addressing": True, "text_to_send": "check the build", "reason": "routed by the model"})
+    srv = server_module.build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        assert _call(base, "POST", "/agent-moved", {**MOVE, "session": "rachel"})[0] == 200
+        status, body = _call(base, "POST", "/send", {
+            "text": "please check the build", "session": "claude", "hands_free": True,
+            "client_msg_id": "c-model-routed"})
+        assert status == 409 and body["error"] == "agent_moved", body
+        assert body["moved_to"] == {"host": "rust-host", "id": "r-1"} and body["moved_at"] > 0, body
+    finally:
+        srv.shutdown()
+        srv.server_close()

@@ -15,7 +15,12 @@ use crate::{Change, Engine, Message};
 pub(crate) const DRAFT_FLUSH_DELAY: Duration = Duration::from_millis(1000);
 
 impl Engine {
+    /// A peer chat's draft is kept here, under its Host's server id and its
+    /// session (never under an address, which can change).
     fn draft_key(&self, session: &str) -> String {
+        if let Some((server_id, local)) = clarp_core::all_hosts::split(session) {
+            return format!("{}/text", clarp_core::settings::draft_scope_key(&format!("clarp-server:{server_id}"), local));
+        }
         format!("{}/text", clarp_core::settings::draft_scope_key(&self.base_url, session))
     }
 
@@ -61,6 +66,7 @@ impl Engine {
     }
 
     pub fn attachments(&self, session: &str) -> Vec<Value> {
+        on_peer!(self.peer_ref(session), |engine, local| engine.attachments(local));
         if session.is_empty() {
             return Vec::new();
         }
@@ -68,6 +74,7 @@ impl Engine {
     }
 
     fn store_attachments(&mut self, session: &str, attachments: Vec<Value>) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.store_attachments(local, attachments));
         if session.is_empty() {
             return;
         }
@@ -107,6 +114,7 @@ impl Engine {
     /// Attaches a local file to the chat's composer: referenced in place on
     /// a shared filesystem, else uploaded to `/upload`.
     pub fn attach_file(&mut self, session: &str, path: &std::path::Path) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.attach_file(local, path));
         let metadata = std::fs::metadata(path).ok();
         let valid = metadata.as_ref().is_some_and(|m| m.is_file() && m.len() > 0 && m.len() <= clarp_core::attachments::MAX_UPLOAD_BYTES);
         if !valid || session.is_empty() {
@@ -143,6 +151,7 @@ impl Engine {
     }
 
     pub fn remove_attachment(&mut self, session: &str, id: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.remove_attachment(local, id));
         self.pending_uploads.retain(|_, pending| !(json::string(pending, "session") == session && json::string(pending, "id") == id));
         let mut attachments = self.attachments(session);
         let before = attachments.len();
@@ -170,8 +179,7 @@ impl Engine {
             return false;
         }
         self.set_draft(session, "");
-        let key = self.attachments_key(session);
-        self.settings.remove(&key);
+        self.store_attachments(session, Vec::new());
         self.changes.push(Change::Composer(session.to_owned()));
         self.send_to(target, &outbound, queue_if_busy);
         true
@@ -179,19 +187,19 @@ impl Engine {
 
     /// Turns queued behind the running one.
     pub fn queue_count(&self, session: &str) -> i32 {
-        self.roster.find(session).map_or(0, |a| a.queued_turn_count)
+        self.roster().find(session).map_or(0, |a| a.queued_turn_count)
     }
 
     /// A Stop paused `session`'s queue (the snapshot's or `queue-updated`'s
     /// `queue_paused`).
     pub fn queue_paused(&self, session: &str) -> bool {
-        self.roster.find(session).is_some_and(|a| a.queue_paused)
+        self.roster().find(session).is_some_and(|a| a.queue_paused)
     }
 
     /// Said before the send, so an exhausted provider is not discovered
     /// through a failed reply.
     pub fn quota_notice(&self, session: &str) -> String {
-        self.roster.find(session).map_or_else(String::new, |a| a.quota_notice(chrono::Utc::now()))
+        self.roster().find(session).map_or_else(String::new, |a| a.quota_notice(chrono::Utc::now()))
     }
 
     /// An `/upload` answered (`object`) or failed (`None`).

@@ -516,6 +516,8 @@ pub struct LiveStatus {
     pub stopping: bool,
     /// It waits between two attempts: for what, since when, and on which failure.
     pub parked: Option<Parked>,
+    /// Confirmed launch failures if the turn is waiting on a queued handoff retry.
+    pub handoff_retry: Option<u32>,
     /// The launch of its attempt is held until an account serves it.
     pub held_for_an_account: bool,
     /// It waits for an account that serves its model, while the account now active serves
@@ -1011,16 +1013,28 @@ enum AfterRefusal {
 /// `recovery_backoff`): a send's own try (the first attempt of a turn that started when it was
 /// sent) is tried again a second later; every refusal from there on is counted, and the turn
 /// waits as [`launch_refused::Refusals`] says, or ends at the eighth of one refusal. `refused`
-/// is the live turn's count, begun anew for another turn.
+/// is the live turn's count, begun anew for another turn. R193 counts queued handoff failures
+/// from the journal, including the one about to be recorded.
 fn after_refusal(
     refused: &mut Option<(TurnId, launch_refused::Refusals)>,
-    live: Option<&Turn>,
+    agent: &clarp_kernel::agent::Agent,
     turn: TurnId,
     kind: &str,
     reason: &str,
     now_ms: i64,
 ) -> AfterRefusal {
-    let own = matches!(live, Some(Turn::Starting(start))
+    if let Some(failures) = agent.handoff_launch_failures() {
+        let failures = failures.saturating_add(1);
+        return match launch_refused::after_handoff_failure(failures) {
+            launch_refused::Next::Wait { ms } => AfterRefusal::Wait {
+                until_ms: now_ms.saturating_add(ms),
+            },
+            launch_refused::Next::End => AfterRefusal::End {
+                notice: handoff_notice(failures, reason, kind),
+            },
+        };
+    }
+    let own = matches!(agent.live(), Some(Turn::Starting(start))
         if start.id == turn && start.attempt == 1 && start.started_at_ms == start.accepted_at_ms);
     if own || refused.as_ref().is_none_or(|(counted, _)| *counted != turn) {
         *refused = Some((turn, launch_refused::Refusals::default()));
@@ -1041,6 +1055,12 @@ fn after_refusal(
             notice: launch_refused::notice(refusals.failures, &refusals.error),
         },
     }
+}
+
+fn handoff_notice(failures: u32, reason: &str, fallback: &str) -> String {
+    let reason = if reason.is_empty() { fallback } else { reason };
+    let brief = reason.chars().take(200).collect::<String>();
+    launch_refused::notice(failures, &brief)
 }
 
 /// The row that tells the sender a message was never run (R121): where the turn's failure is
@@ -1978,6 +1998,7 @@ impl Actor {
                 tools,
                 stopping,
                 parked: None,
+                handoff_retry: None,
                 held_for_an_account: self.held_for_an_account,
                 waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempt.saturating_sub(1),
@@ -1996,6 +2017,7 @@ impl Actor {
                 tools,
                 stopping,
                 parked: None,
+                handoff_retry: None,
                 held_for_an_account: false,
                 waits_for_its_model: None,
                 failed_attempts: turn.attempt.saturating_sub(1),
@@ -2015,6 +2037,9 @@ impl Actor {
                 tools: Vec::new(),
                 stopping,
                 parked: Some(turn.clone()),
+                handoff_retry: agent
+                    .handoff_launch_failures()
+                    .filter(|_| self.refused_launch(turn)),
                 held_for_an_account: false,
                 waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempts,
@@ -3398,7 +3423,7 @@ impl Actor {
         // `clear_recovery_backoff`). It is still the agent's turn: the send waits behind it.
         let asks_again = matches!(message.origin.name(), "user" | "agent" | "oracle");
         let waits_on_refusal = matches!(self.recorder.agent().live(),
-            Some(Turn::Parked(parked)) if self.refused_launch(parked));
+            Some(Turn::Parked(parked)) if self.r121_wait(parked));
         if asks_again && waits_on_refusal {
             self.refused = None;
             let again = self.retry(now_ms)?;
@@ -3852,10 +3877,9 @@ impl Actor {
             && self.recorder.agent().stopping().is_none()
             && matches!(self.recorder.agent().live(), Some(Turn::Starting(start)) if start.id == turn);
         if refusable {
-            let live = self.recorder.agent().live().cloned();
             let after = after_refusal(
                 &mut self.refused,
-                live.as_ref(),
+                self.recorder.agent(),
                 turn,
                 NO_SHIM,
                 reason,
@@ -4718,15 +4742,19 @@ impl Actor {
 
     /// Whether the turn waits on a refusal of its launch (R121) that this Host has not counted.
     fn refusal_uncounted(&self, parked: &Parked) -> bool {
-        self.refused_launch(parked)
+        self.r121_wait(parked)
             && self
                 .refused
                 .as_ref()
                 .is_none_or(|(counted, _)| *counted != parked.id)
     }
 
-    /// Whether the turn waits because its launch was refused before its tool was given
-    /// anything (R121), and not as an opening, which has a rule of its own.
+    /// Only R121 waits can be restarted early. A queued handoff keeps its recorded deadline.
+    fn r121_wait(&self, parked: &Parked) -> bool {
+        self.refused_launch(parked) && self.recorder.agent().handoff_launch_failures().is_none()
+    }
+
+    /// Whether the turn waits on a pre-spawn failure outside the call-opening policy.
     fn refused_launch(&self, parked: &Parked) -> bool {
         parked.kind == failures::NOT_STARTED
             && matches!(parked.wait, Wait::Retry { .. })
@@ -4817,7 +4845,6 @@ impl Actor {
     /// provider said: its plan does not offer the turn's model, and the owner's selector
     /// found no account whose plan does. A turn that waits for anything else waits on.
     pub fn end_waiting(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
-        let mut out = Outputs::default();
         let waits = match self.recorder.agent().live() {
             Some(Turn::Parked(parked)) if parked.wait.is_for_an_account() => {
                 Some((parked.id, parked.kind.clone(), parked.reason.clone()))
@@ -4825,13 +4852,12 @@ impl Actor {
             _ => None,
         };
         let Some((turn, kind, reason)) = waits else {
-            return Ok(out);
+            return Ok(Outputs::default());
         };
         let model = self.turn_model().unwrap_or_default();
-        let Some(live) = self.live.as_mut().filter(|live| live.turn == turn) else {
-            return Ok(out);
+        let Some(live) = self.live.as_ref().filter(|live| live.turn == turn) else {
+            return Ok(Outputs::default());
         };
-        let mut batch = self.recorder.batch();
         // What is said of the end, as of an attempt that failed and is not tried again.
         let told = failure_marker(Failure {
             turn,
@@ -4842,6 +4868,20 @@ impl Actor {
             model: &model,
             trace_id: live.trace_id.clone(),
         });
+        self.finish_waiting(turn, told, now_ms)
+    }
+
+    fn finish_waiting(
+        &mut self,
+        turn: TurnId,
+        told: Option<Entry>,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        let mut out = Outputs::default();
+        let Some(live) = self.live.as_mut().filter(|live| live.turn == turn) else {
+            return Ok(out);
+        };
+        let mut batch = self.recorder.batch();
         if batch.command(Command::WaitOver { turn }, now_ms).is_err() {
             return Ok(out);
         }
@@ -4898,6 +4938,17 @@ impl Actor {
             return Ok(out);
         };
         let turn = parked.id;
+        // An older Host could already have parked this handoff ten or more times under
+        // R121's alternating-refusal limit. Finish it on recovery without another launch.
+        if let Some(failures) = self.recorder.agent().handoff_launch_failures()
+            && failures >= launch_refused::HANDOFF_GIVE_UP
+            && self.refused_launch(parked)
+            && let Some(live) = self.live.as_ref()
+        {
+            let text = handoff_notice(failures, &parked.reason, failures::NOT_STARTED);
+            let told = never_run(turn, &live.message_id, text, live.trace_id.clone());
+            return self.finish_waiting(turn, Some(told), now_ms);
+        }
         let mut batch = self.recorder.batch();
         if batch
             .command(Command::TurnRetried { turn }, now_ms)
@@ -4990,10 +5041,9 @@ impl Actor {
                                     until_ms: t.saturating_add(1_000),
                                 }
                             } else {
-                                let starting = batch.agent().live().cloned();
                                 after_refusal(
                                     &mut self.refused,
-                                    starting.as_ref(),
+                                    batch.agent(),
                                     turn,
                                     NO_TOOL,
                                     &reason,

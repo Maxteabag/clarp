@@ -274,6 +274,8 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
         jobs: row.background_job_count,
         sub_agents: row.sub_agent_count,
         children: row.running_children,
+        host: row.host.clone().into(),
+        moved: row.moved.clone().into(),
         ..ChatRow::default()
     };
     (chat.running_helpers, chat.running_processes) = running_work(&chat, 0);
