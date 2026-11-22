@@ -507,3 +507,8 @@ Its `POST /clog` acknowledges successful storage regardless of the diagnostics
 setting and adds `kept` and `full_capture`. The Python Host's diagnostic capture
 still controls its `/clog` acknowledgement. `GET /client-log` is implemented on
 the Rust Host.
+
+On a Rust Host coordination turn that a user's message joins, the final reply
+retains its agents audience if the user received a note after their latest
+steer. The note, the steered message, and the other post-steer rows remain
+visible. If no note followed the steer, the final reply remains visible.

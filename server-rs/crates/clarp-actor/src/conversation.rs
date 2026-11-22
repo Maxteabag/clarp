@@ -18,7 +18,7 @@ use clarp_kernel::agent::AgentEvent;
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
 use clarp_kernel::journal::{Batch, coordination_key, kind, mixed_coordination_key, mixed_turn};
 use clarp_kernel::turn::{Origin, TurnEvent, TurnId, left_out_of_chats};
-use clarp_ports::log::{AgentLog, Item, NewItem, Seq};
+use clarp_ports::log::{AgentLog, Item, Kinds, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
 use crate::ActorError;
@@ -417,6 +417,74 @@ pub(super) fn loosen_from(
     Ok(items)
 }
 
+fn recorded_end(log: &dyn AgentLog, turn: u64) -> Result<Option<(TurnEnd, Seq)>, ActorError> {
+    if let Some(stored) = log.find(&format!("t-{turn}"))?
+        && let Some(Entry::TurnEnd(end)) =
+            Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
+    {
+        return Ok(Some((end, stored.seq)));
+    }
+    Ok(None)
+}
+
+/// The last reply belongs to the agents if the user already received a
+/// note after their latest steered message. Read only this split turn's
+/// suffix, and only when its end says a note exists.
+fn final_after_note(
+    log: &dyn AgentLog,
+    turn: u64,
+    split: Seq,
+) -> Result<Option<String>, ActorError> {
+    let Some((end, mut before)) = recorded_end(log, turn)? else {
+        return Ok(None);
+    };
+    if end.status != "completed"
+        || end.note_count == 0
+        || !log
+            .find(&end.closes)?
+            .is_some_and(|row| row.kind == kind::REPLY)
+    {
+        return Ok(None);
+    }
+    // The echo writes the joined message immediately before the split marker.
+    let first = split.saturating_sub(1);
+    let mut noted = false;
+    while before > first {
+        let rows = log.read_before(before, Kinds::range(kind::MESSAGE, kind::AGENT_NOTE), CHUNK)?;
+        let Some(oldest) = rows.first() else {
+            break;
+        };
+        before = oldest.seq;
+        for row in rows.iter().rev().take_while(|row| row.seq >= first) {
+            match row.kind {
+                kind::AGENT_NOTE if row.turn == Some(turn) => noted = true,
+                kind::MESSAGE if row.turn != Some(turn) => {
+                    let entry = Entry::from_item(row).map_err(|error| corrupt(row, error))?;
+                    if let Some(Entry::Message(message)) = entry
+                        && message.origin.is_user_send()
+                        && let Some(receipt) = log
+                            .read_before(row.seq, Kinds::only(kind::AGENT_EVENT), 1)?
+                            .pop()
+                        && receipt.turn == row.turn
+                        && matches!(
+                            serde_json::from_slice::<AgentEvent>(&receipt.body)
+                                .map_err(|error| corrupt(&receipt, error))?,
+                            AgentEvent::JoinRead { .. }
+                        )
+                    {
+                        return Ok(noted.then_some(end.closes));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if rows.len() < CHUNK {
+            break;
+        }
+    }
+    Ok(None)
+}
+
 enum TurnAudience {
     User {
         restamped: bool,
@@ -424,14 +492,19 @@ enum TurnAudience {
     Agents {
         sender: String,
         split: Option<(Seq, Split)>,
+        final_after_note: Option<String>,
     },
 }
 
 impl TurnAudience {
     fn sender(&self, id: &str, seq: Seq) -> Option<&str> {
         match self {
-            Self::Agents { sender, split }
-                if split
+            Self::Agents {
+                sender,
+                split,
+                final_after_note,
+            } if final_after_note.as_deref() == Some(id)
+                || split
                     .as_ref()
                     .is_none_or(|(at, split)| seq < *at || split.earlier.contains(id)) =>
             {
@@ -485,7 +558,15 @@ impl<'a> Reader<'a> {
                                     .map_err(|error| corrupt(item, error))
                             })
                             .transpose()?;
-                        TurnAudience::Agents { sender, split }
+                        let final_after_note = match &split {
+                            Some((at, _)) => final_after_note(self.log, turn, *at)?,
+                            None => None,
+                        };
+                        TurnAudience::Agents {
+                            sender,
+                            split,
+                            final_after_note,
+                        }
                     }
                     None => TurnAudience::User { restamped: false },
                 },
@@ -505,14 +586,7 @@ impl<'a> Reader<'a> {
     /// How this turn ended, when it has.
     fn end(&mut self, turn: u64) -> Result<Option<&(TurnEnd, Seq)>, ActorError> {
         if !self.ends.contains_key(&turn) {
-            let mut found = None;
-            if let Some(stored) = self.log.find(&format!("t-{turn}"))?
-                && let Some(Entry::TurnEnd(end)) =
-                    Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
-            {
-                found = Some((end, stored.seq));
-            }
-            self.ends.insert(turn, found);
+            self.ends.insert(turn, recorded_end(self.log, turn)?);
         }
         Ok(self.ends.get(&turn).and_then(Option::as_ref))
     }
@@ -1451,6 +1525,140 @@ pub(crate) fn delegation_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[allow(clippy::unwrap_used)]
+    fn split_turn_with_note(note_after_steer: bool) -> clarp_kernel::journal::Recorder {
+        use clarp_kernel::agent::Command;
+        use clarp_kernel::conversation::{Message, Note};
+        use clarp_kernel::journal::{Incoming, Recorder};
+        use clarp_kernel::steering::Join;
+        use clarp_kernel::turn::{Admission, RunOutcome};
+        use clarp_ports::log::LogEngine;
+        use std::path::Path;
+
+        let log = clarp_store_mem::MemEngine::new()
+            .open(
+                Path::new("/agents/steer-note"),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
+            .unwrap();
+        let mut recorder = Recorder::open(log).unwrap();
+        let accept = |recorder: &mut Recorder, id: &str, origin: Origin, coordination, now| {
+            let message = Message {
+                id: id.into(),
+                text: id.into(),
+                origin: origin.clone(),
+                ..Message::default()
+            };
+            recorder
+                .accept_message(
+                    Incoming {
+                        key: Some(message.id.clone()),
+                        body: serde_json::to_vec(&message).unwrap(),
+                        origin,
+                        admission: Admission::Queue,
+                        coordination,
+                        user_word: false,
+                    },
+                    now,
+                )
+                .unwrap()
+                .turn
+                .unwrap()
+        };
+        let into = accept(
+            &mut recorder,
+            "u-peer",
+            Origin::Agent {
+                agent_id: "peer".into(),
+            },
+            Some("peer".into()),
+            100,
+        );
+        recorder
+            .handle(Command::TurnStarted { turn: into }, 110)
+            .unwrap();
+        let followup = accept(&mut recorder, "u-steer", Origin::User, None, 120);
+        let mut batch = recorder.batch();
+        let note = Entry::Note(Note {
+            id: "note-user".into(),
+            turn: into.0,
+            text: "An answer for the user.".into(),
+            trace_id: None,
+        });
+        if !note_after_steer {
+            batch.item(note.to_item(125).unwrap());
+        }
+        batch
+            .command(
+                Command::Join {
+                    turn: followup,
+                    join: Join {
+                        into,
+                        uuid: "steer".into(),
+                        recovery: None,
+                    },
+                },
+                130,
+            )
+            .unwrap();
+        batch
+            .command(Command::JoinRead { turn: followup }, 140)
+            .unwrap();
+        assert!(split(&mut batch, into, OpenRows::default(), 140).unwrap());
+        if note_after_steer {
+            batch.item(note.to_item(145).unwrap());
+        }
+        for id in ["post-steer", "final-reply"] {
+            let reply = Entry::Reply(Reply {
+                id: id.into(),
+                turn: into.0,
+                text: id.into(),
+                ..Reply::default()
+            });
+            batch.item(reply.to_item(150).unwrap());
+        }
+        batch
+            .command(
+                Command::TurnEnded {
+                    turn: into,
+                    outcome: RunOutcome::Completed,
+                },
+                160,
+            )
+            .unwrap();
+        let mut end = TurnEnd::of(batch.agent().last().unwrap(), "final-reply").unwrap();
+        end.note_count = 1;
+        batch.item(Entry::TurnEnd(end).to_item(160).unwrap());
+        batch.commit().unwrap();
+        recorder
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_final_reply_after_steer_stays_hidden_when_a_user_note_followed_the_steer() {
+        let recorder = split_turn_with_note(true);
+        let log = recorder.log();
+        let final_reply = one(log, "final-reply").unwrap().unwrap();
+        assert_eq!(final_reply.coordination.as_deref(), Some("peer"));
+        let page = tail(log, &[], Span::default(), 20, Which::WithoutCoordination).unwrap();
+        let ids: Vec<_> = page.entries.iter().map(|row| row.entry.id()).collect();
+        assert_eq!(ids, ["u-steer", "note-user", "post-steer"]);
+        assert_eq!(page.hidden_after.unwrap().messages, 1);
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_final_reply_after_steer_is_shown_when_no_user_note_followed_the_steer() {
+        let recorder = split_turn_with_note(false);
+        let log = recorder.log();
+        let final_reply = one(log, "final-reply").unwrap().unwrap();
+        assert!(final_reply.coordination.is_none());
+        let page = tail(log, &[], Span::default(), 20, Which::WithoutCoordination).unwrap();
+        let ids: Vec<_> = page.entries.iter().map(|row| row.entry.id()).collect();
+        assert_eq!(ids, ["note-user", "u-steer", "post-steer", "final-reply"]);
+        assert!(page.hidden_after.is_none());
+    }
 
     #[test]
     #[allow(clippy::unwrap_used)]
