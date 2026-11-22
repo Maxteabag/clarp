@@ -39,7 +39,9 @@ pub struct Agent {
     pub latest_state_timestamp: i64,
     pub last_activity: i64,
     pub head_revision: i64,
-    pub context_tokens: i64,
+    /// What the conversation's context holds, in tokens; None while the
+    /// Host knows no real usage (it sends null), never a guessed 0 (#403).
+    pub context_tokens: Option<i64>,
     pub context_window: i64,
     pub queue_revision: i64,
     pub queued_turn_count: i32,
@@ -109,7 +111,7 @@ impl Default for Agent {
             latest_state_timestamp: 0,
             last_activity: 0,
             head_revision: 0,
-            context_tokens: 0,
+            context_tokens: None,
             context_window: 0,
             queue_revision: 0,
             queued_turn_count: 0,
@@ -183,7 +185,7 @@ impl Agent {
             latest_state_timestamp: i("latest_state_ts"),
             last_activity: i("last_activity"),
             head_revision: i("head_revision"),
-            context_tokens: i("context_tokens"),
+            context_tokens: object.get("context_tokens").and_then(Value::as_i64),
             context_window: i("context_window"),
             queued_turn_count: i("queued_turn_count") as i32,
             queue_paused: b("queue_paused"),

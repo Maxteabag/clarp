@@ -90,7 +90,7 @@ pub struct AgentRow {
     pub last_activity: i64,
     pub conversation_id: String,
     pub head_revision: i64,
-    pub context_tokens: i64,
+    pub context_tokens: Option<i64>,
     pub context_window: i64,
     pub queue_count: i32,
     pub queue_paused: bool,

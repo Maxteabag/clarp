@@ -64,7 +64,11 @@ fn fill(app: &App, window: &AppWindow) {
                 folder: row.working_directory.as_str().into(),
                 queued: crate::view::queued_shown(&row.session, row.queue_count),
                 queue_paused: row.queue_paused,
-                context: if row.context_window > 0 { row.context_tokens as f32 / row.context_window as f32 } else { -1.0 },
+                context: match row.context_tokens {
+                    // Unknown usage draws no gauge (#403), not an empty one.
+                    Some(tokens) if row.context_window > 0 => tokens as f32 / row.context_window as f32,
+                    _ => -1.0,
+                },
                 busy: row.busy,
                 muted: row.muted,
                 heartbeat: row.heartbeat_enabled,
