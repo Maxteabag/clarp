@@ -78,7 +78,16 @@ the path in your request that caused it, sometimes a sentence (an unknown sessio
 and publish again; nothing was created.
 
 Not every app can draw the form. One that cannot shows a plain card with the
-title and cannot answer it. So say in your reply what you are asking, briefly,
-and do not wait for the form alone when the question is urgent. A form is
+title and cannot answer it.
+
+Which apps draw forms:
+
+- iOS app: from client contract 74 (TestFlight 2981).
+- Web app (the browser app and the desktop shell that loads it): yes, from its
+  first contract.
+- Android app and the native desktop app: not yet; they show the plain card.
+
+So say in your reply what you are asking, briefly, and do not wait for the form
+alone when the question is urgent. A form is
 answered once; its answer arrives as a message from the user that names the
 form and gives each value.

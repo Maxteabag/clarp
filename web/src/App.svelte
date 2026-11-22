@@ -138,9 +138,10 @@
 
   // Desktop only: clicking anywhere parks the caret back in the composer, so
   // typing after scrolling or clicking a transcript row just works. On a
-  // phone this would pop the soft keyboard on every tap.
+  // phone this would pop the soft keyboard on every tap. A native form card
+  // keeps the focus a click gave it (its option buttons are not inputs).
   const FOCUS_KEEPERS =
-    'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
+    'input, textarea, select, [contenteditable=""], [contenteditable="true"], .rs-artifact';
 
   function refocusComposer(e) {
     if (!isDesktop) return;
