@@ -15,10 +15,12 @@
   let coordination = $derived((app.tick, chatCoordinationChoice(session)));
   let tools = $derived(chatToolActivity(session));
 
-  async function pickCoordination(choice) {
+  async function pickCoordination(select) {
     busy = true;
-    await setChatCoordinationChoice(session, choice);
+    const answer = await setChatCoordinationChoice(session, select.value);
     busy = false;
+    // Not saved: the select goes back to the chat's choice (the derived value did not move).
+    if (!answer) select.value = chatCoordinationChoice(session);
   }
 </script>
 
@@ -26,7 +28,7 @@
   {#if live.hiddenCoordination}
     <label>
       <span>Messages between agents</span>
-      <select value={coordination} disabled={busy} onchange={e => pickCoordination(e.currentTarget.value)}>
+      <select value={coordination} disabled={busy} onchange={e => pickCoordination(e.currentTarget)}>
         {#each OVERRIDES as value (value)}<option {value}>{OVERRIDE_LABELS[value]}</option>{/each}
       </select>
     </label>
