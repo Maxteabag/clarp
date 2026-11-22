@@ -238,6 +238,9 @@ const READERS = {
       return { name, points };
     });
     // What the schema cannot say, in the Host's order (render_spec._check_chart).
+    series.forEach((one, i) => {
+      if (series.findIndex(other => other.name === one.name) < i) throw broken(`${sp}/${i}/name`);
+    });
     if (kind === 'pie' && series.length !== 1) throw broken(sp);
     if (series.reduce((n, one) => n + one.points.length, 0) > 600) throw broken(sp);
     let strings = null;
