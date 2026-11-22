@@ -1887,6 +1887,30 @@ pub(crate) fn send_file(path: PathBuf, range: &str) -> Response {
     }
 }
 
+/// Serve a file already opened under a confined directory, using the same
+/// range and chunked response as a path-based file.
+pub(crate) fn send_open_file(file: std::fs::File, kind: &str, range: &str) -> Response {
+    use std::os::unix::fs::FileExt;
+
+    let Ok(found) = file.metadata() else {
+        return plain(StatusCode::NOT_FOUND, "not found");
+    };
+    let total = found.len();
+    let part = media::byte_range(range, total);
+    if part == Part::Missing {
+        return no_such_part(&total.to_string(), true);
+    }
+    let file = Arc::new(file);
+    part_of(kind, part, total, &total.to_string(), |first, length| {
+        chunked_body(first, length, move |at, most| {
+            let mut bytes = vec![0; most];
+            let read = file.read_at(&mut bytes, at)?;
+            bytes.truncate(read);
+            Ok(bytes)
+        })
+    })
+}
+
 /// A clip that is whole, as the Python Host serves one by its number: all of it, or the
 /// part a player asks for, read the way that Host reads it for a clip.
 fn send_clip(path: PathBuf, range: Option<(u64, Option<u64>)>) -> Response {

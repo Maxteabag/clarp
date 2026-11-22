@@ -15,22 +15,8 @@ use std::path::{Path as FilePath, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
-use axum::Router;
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
 use clarp_kernel::portraits;
 use sha2::{Digest, Sha256};
-
-use crate::edge::{ApiError, App};
-
-/// What a picture that is asked for under the address of its content may be kept as.
-const FOR_GOOD: &str = "public, max-age=31536000, immutable";
-/// What one that is asked for otherwise is kept as: checked each time.
-const CHECKED: &str = "no-cache";
-/// The directories under the Host's static files that are handed out: the pictures.
-const HANDED_OUT: [&str; 2] = ["avatars", "janitor-avatars"];
 
 pub struct Faces {
     /// The directory that holds `avatars/`. `None`: this Host ships no pictures.
@@ -121,91 +107,6 @@ impl Faces {
     }
 }
 
-/// What a file is, by the end of its name.
-fn kind_of(path: &FilePath) -> &'static str {
-    match path.extension().and_then(|end| end.to_str()) {
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("webp") => "image/webp",
-        Some("gif") => "image/gif",
-        Some("svg") => "image/svg+xml",
-        Some("json") => "application/json",
-        Some("md") => "text/markdown",
-        _ => "application/octet-stream",
-    }
-}
-
-fn plain(status: StatusCode, text: &'static str) -> Response {
-    ApiError::plain(status, text).into_response()
-}
-
-/// Whether what a client says it has (`If-None-Match`) is this.
-fn has_it(said: &str, etag: &str) -> bool {
-    said.split(',')
-        .map(|tag| tag.trim().trim_start_matches("W/"))
-        .any(|tag| tag == "*" || tag == etag)
-}
-
-/// `GET /static/<path>`: one of the pictures this Host ships. Needs no token: an address of a
-/// picture is put where no token goes, as on the Python Host.
-async fn picture(
-    State(app): State<App>,
-    Path(path): Path<String>,
-    Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Response {
-    // Nothing outside the pictures, and nothing by a way that leaves them.
-    let parts: Vec<&str> = path.split('/').collect();
-    if parts
-        .iter()
-        .any(|part| part.is_empty() || matches!(*part, "." | ".."))
-    {
-        return plain(StatusCode::FORBIDDEN, "forbidden");
-    }
-    let Some(root) = app
-        .faces
-        .root
-        .as_ref()
-        .filter(|_| HANDED_OUT.contains(&parts[0]))
-    else {
-        return plain(StatusCode::NOT_FOUND, "not found");
-    };
-    let file = root.join(&path);
-    let faces = app.faces.clone();
-    let named = file.clone();
-    let version = tokio::task::spawn_blocking(move || faces.version(&named)).await;
-    let Ok(Some(version)) = version else {
-        return plain(StatusCode::NOT_FOUND, "not found");
-    };
-    let etag = format!("\"{version}\"");
-    let for_good = query.get("v").is_some_and(|asked| *asked == version);
-    let said = |name: header::HeaderName| headers.get(name).and_then(|value| value.to_str().ok());
-    let mut response =
-        if !for_good && said(header::IF_NONE_MATCH).is_some_and(|tags| has_it(tags, &etag)) {
-            StatusCode::NOT_MODIFIED.into_response()
-        } else {
-            let range = said(header::RANGE).unwrap_or("").to_string();
-            let kind = kind_of(&file);
-            let mut sent = crate::voice::send_file(file, &range);
-            if sent.status().is_success() {
-                sent.headers_mut()
-                    .insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
-            }
-            sent
-        };
-    let kept = if for_good { FOR_GOOD } else { CHECKED };
-    let told = response.headers_mut();
-    told.insert(header::CACHE_CONTROL, HeaderValue::from_static(kept));
-    if let Ok(etag) = HeaderValue::from_str(&etag) {
-        told.insert(header::ETAG, etag);
-    }
-    response
-}
-
-pub fn routes() -> Router<App> {
-    Router::new().route("/static/{*path}", get(picture))
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -271,11 +172,6 @@ mod tests {
                 none.on_model("Claire", "claude", "opus", "")
             ),
             (String::new(), String::new())
-        );
-        assert!(
-            has_it("W/\"abc\", \"def\"", "\"abc\"")
-                && has_it("*", "\"x\"")
-                && !has_it("\"abc\"", "\"abd\"")
         );
         let _ = std::fs::remove_dir_all(&root);
     }

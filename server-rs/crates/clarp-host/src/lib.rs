@@ -115,6 +115,7 @@ mod usage_provider;
 pub mod voice;
 pub(crate) mod voice_timeline;
 pub mod voices;
+mod web_app;
 pub mod wire;
 
 /// The version this Host reports.
