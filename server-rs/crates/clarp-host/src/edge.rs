@@ -411,6 +411,7 @@ pub struct App {
     pub router: Arc<crate::router::Desk>,
     /// The explainer of the use of tools: what it learned, and what waits for its model.
     pub explain: Arc<crate::explain::Desk>,
+    pub experience: Arc<crate::experience_watch::Signals>,
     /// The Oracle's desk: its contact and the voice it speaks with are read and written in turn.
     pub oracle: Arc<crate::oracle::Desk>,
     /// The Goal keeper: its own state of the goals it keeps, and its receipts.
@@ -1224,6 +1225,13 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
             }
             Some((principal, presented)) => {
                 if let Principal::Device { device_id, .. } = &principal {
+                    if (read && path == "/server-info")
+                        || (request.method() == Method::POST && path == "/devices")
+                    {
+                        let client = crate::render_spec::client(request.headers());
+                        app.experience
+                            .launched(device_id, client, app.clock.now_ms());
+                    }
                     device = Some(device_id.clone());
                 }
                 request.extensions_mut().insert(Asker { source });
@@ -2760,7 +2768,38 @@ async fn send(
         Ok(made) => made,
         Err(why) => return why.into_response(),
     };
-    sent_from(&app, &principal, request, &made).await
+    let user_send = !made.peer
+        && made.turn.is_none()
+        && sender_named(request.sender.as_ref()).is_none_or(|name| python::strip(name).is_empty())
+        && coordination::origin(
+            request.origin.as_deref(),
+            &coordination::Principal::default(),
+            false,
+        ) == "user";
+    let mut agent_id = String::new();
+    if user_send {
+        let asked = python::strip(&request.session);
+        let asked = if asked.is_empty() {
+            addressed::DEFAULT_SESSION
+        } else {
+            asked
+        };
+        if let Some(member) = app.member(asked) {
+            agent_id.clone_from(&member.record.agent_id);
+        }
+    }
+    let response = sent_from(
+        &app,
+        &principal,
+        request,
+        &made,
+        user_send.then_some(&mut agent_id),
+    )
+    .await;
+    if user_send && response.status().is_client_error() {
+        app.experience.refused(&agent_id, app.clock.now_ms());
+    }
+    response
 }
 
 /// Who made a send beyond what its body says: the turn whose token it presents, a peer Host
@@ -2791,7 +2830,7 @@ async fn route_delegation(
         Ok(made) => made,
         Err(why) => return why.into_response(),
     };
-    sent_from(&app, &principal, request, &made).await
+    sent_from(&app, &principal, request, &made, None).await
 }
 
 /// A message from an app: one that carries its call goes to the agent of the call that can
@@ -2801,6 +2840,7 @@ async fn sent_from(
     principal: &Principal,
     mut request: SendRequest,
     made: &crate::coordination::Made,
+    mut recipient: Option<&mut String>,
 ) -> Response {
     let voice = crate::voice_timeline::Sent::read(&request);
     let call_id: String = python::strip(request.call_id.as_deref().unwrap_or(""))
@@ -2858,7 +2898,7 @@ async fn sent_from(
                 result["opening"]["epoch"].as_u64().unwrap_or(1),
             )
         });
-        let sent = send_as(app, request, false, binding, made).await;
+        let sent = send_as(app, request, false, binding, made, recipient).await;
         if result["route"] == "greeting"
             && let Some(id) = result["opening"]["ring_id"].as_str()
         {
@@ -2923,7 +2963,17 @@ async fn sent_from(
         };
         // In a call, nobody but those of the call who can take speech can be meant.
         let only = in_call.as_ref().map(|(_, reachable)| reachable.as_slice());
-        match crate::router::route(app, &request, &trace, &asked, only, made).await {
+        match crate::router::route(
+            app,
+            &request,
+            &trace,
+            &asked,
+            only,
+            made,
+            recipient.as_deref_mut(),
+        )
+        .await
+        {
             Ok(crate::router::Routed::NotMine) => {}
             Ok(crate::router::Routed::Answered(status, answer)) => {
                 if let (Some((caller, _)), true) = (&in_call, answer.ok) {
@@ -2942,7 +2992,7 @@ async fn sent_from(
             Err(refused) => return refused.into_response(),
         }
     }
-    match send_as(app, request, false, None, made).await {
+    match send_as(app, request, false, None, made, recipient).await {
         Ok(sent) => {
             if let Some(voice) = &voice {
                 voice.posted(app, &sent);
@@ -2965,6 +3015,7 @@ pub(crate) async fn send_message(
         false,
         None,
         &crate::coordination::Made::default(),
+        None,
     )
     .await
 }
@@ -2976,7 +3027,7 @@ pub(crate) async fn send_from(
     request: SendRequest,
     made: &crate::coordination::Made,
 ) -> Result<SendResponse, ApiError> {
-    send_as(app, request, false, None, made).await
+    send_as(app, request, false, None, made, None).await
 }
 
 /// Takes a message the Host sends by itself: a heartbeat, a prompt at a set time, the task
@@ -2989,6 +3040,7 @@ pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResp
         true,
         None,
         &crate::coordination::Made::default(),
+        None,
     )
     .await
 }
@@ -2999,6 +3051,7 @@ async fn send_as(
     own: bool,
     binding: Option<(&str, &str, u64)>,
     made: &crate::coordination::Made,
+    recipient: Option<&mut String>,
 ) -> Result<SendResponse, ApiError> {
     // What the Python Host refuses a send with, in its order and its words (plain text).
     let text = python::strip(&request.text).to_string();
@@ -3063,6 +3116,9 @@ async fn send_as(
         };
         (member, target.text, target.by_name)
     };
+    if let Some(recipient) = recipient {
+        recipient.clone_from(&member.record.agent_id);
+    }
     member.agent.accepting_work()?;
     member.agent.require_here()?;
     // A tool that takes its message on its command line takes no more than fits there:
@@ -4235,6 +4291,101 @@ mod tests {
     use axum::http::HeaderValue;
 
     use super::*;
+
+    #[tokio::test]
+    async fn experience_watch_signals_follow_device_identity_and_the_refused_agent() {
+        use clarp_kernel::agent_moves::Target;
+        use clarp_kernel::conversation::Entry;
+
+        let place = crate::unkept::at_the_port::place("experience-signals");
+        let app = place.app().await;
+        let now = app.clock.now_ms();
+        for n in 0..27 {
+            app.experience
+                .launched("device-a", Some("ios/130 contract=125"), now - n * 4_000);
+        }
+        app.experience
+            .launched("device-b", Some("android/42 contract=121"), now);
+        let launches = app.experience.relaunches(now - 120_000, now);
+        assert_eq!(launches["device-a"].count, 27);
+        assert_eq!(launches["device-a"].build, "130");
+        assert_eq!(launches["device-a"].contract, Some(125));
+        assert_eq!(launches["device-b"].count, 1);
+        assert!(app.experience.relaunches(now + 1, now + 60_000).is_empty());
+
+        for name in ["Speaker", "Mover"] {
+            app.fleet
+                .create(CreateAgentRequest {
+                    name: name.into(),
+                    backend: Some("scripted".into()),
+                    ..CreateAgentRequest::default()
+                })
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let mover = app.member("mover").unwrap();
+        mover
+            .agent
+            .set_move(Some(Target {
+                host: "another-host".into(),
+                id: "another-agent".into(),
+            }))
+            .await
+            .unwrap();
+        let request = SendRequest {
+            session: "speaker".into(),
+            text: "Mover, check the build".into(),
+            hands_free: Some(true),
+            ..SendRequest::default()
+        };
+        let answer = send(
+            State(app.clone()),
+            Extension(Principal::Administrator),
+            HeaderMap::new(),
+            Json(request.clone()),
+        )
+        .await;
+        assert_eq!(answer.status(), StatusCode::CONFLICT);
+        let other = SendRequest {
+            origin: Some("agent".into()),
+            ..request
+        };
+        let answer = send(
+            State(app.clone()),
+            Extension(Principal::Administrator),
+            HeaderMap::new(),
+            Json(other),
+        )
+        .await;
+        assert_eq!(answer.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            app.experience.refusals(now, now),
+            std::collections::BTreeMap::from([(mover.record.agent_id.clone(), 1)])
+        );
+
+        crate::experience_watch::tell(
+            &app,
+            "speaker",
+            "watch-notice".into(),
+            "Queue stalled.".into(),
+        )
+        .await
+        .unwrap();
+        let owner = app.member("speaker").unwrap();
+        let row = owner
+            .agent
+            .row("u-watch-notice".into())
+            .await
+            .unwrap()
+            .unwrap();
+        let Entry::Message(message) = row.entry else {
+            panic!("the watcher sends a message")
+        };
+        assert_eq!(message.origin.name(), "agent");
+        assert_eq!(message.sender.unwrap().name, "experience-watch");
+        assert!(!message.speak);
+    }
 
     #[tokio::test]
     async fn a_row_committed_after_a_log_page_is_in_the_next_delta() {

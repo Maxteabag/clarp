@@ -38,6 +38,7 @@ mod cross_origin;
 pub mod diagnostics;
 pub mod direct;
 pub mod edge;
+pub mod experience_watch;
 pub mod explain;
 pub mod faces;
 pub mod fcm;
