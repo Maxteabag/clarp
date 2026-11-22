@@ -10,6 +10,7 @@
   import WorkRow from './WorkRow.svelte';
   import { foldTurns } from '@core/history-fold.js';
   import { statusFor } from '../stores/app.svelte.js';
+  import { toolActivityFor } from '../stores/chat-choices.svelte.js';
   import LiveTurn from './live/LiveTurn.svelte';
   import HiddenRun from './HiddenRun.svelte';
   import { hidesLiveTurn } from '@core/coordination.js';
@@ -62,7 +63,9 @@
   // The turn live items show is theirs, already left out of `turns`.
   // busy is its own derived boolean: a status tick that leaves it unchanged does not refold.
   let busy = $derived(!!statusFor(session).busy);
-  let fold = $derived(foldTurns(turns, { mode: prefs.toolActivity, busy }));
+  // The chat's own Tool activity, else the device's (stores/chat-choices.svelte.js).
+  let toolMode = $derived(toolActivityFor(session));
+  let fold = $derived(foldTurns(turns, { mode: toolMode, busy }));
 
   // A chat's own Show lasts for this visit: leaving the chat reads it under its setting again.
   $effect(() => {

@@ -17,9 +17,31 @@ export const prefs = $state({
   // 'Show the Host on each chat': on unless turned off. Kept on this device, never on the Host.
   showHostBadge: localStorage.getItem('chatShowHostBadge') !== '0',
   // 'Show a line where agent messages were' ('3 messages between agents' with its Show): on unless
-  // turned off. Off draws no such line; the chat's own setting (⇄) still shows them.
+  // turned off. Off draws no such line; the chat's own setting (its … menu) still shows them.
   showCoordinationLine: localStorage.getItem('chatShowCoordinationLine') !== '0',
+  // Each chat's own Tool activity, keyed by the Host's server id and the session
+  // (static/lib/history-fold.js chatKey). A chat that is not listed follows toolActivity.
+  chatToolActivity: savedChatToolActivity(),
 });
+
+function savedChatToolActivity() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('chatToolActivityByChat') || '{}');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+/** One chat's own Tool activity ('follow' removes it). `key` is chatKey(serverId, session). */
+export function setChatToolActivityByKey(key, mode) {
+  if (!key) return;
+  const next = { ...prefs.chatToolActivity };
+  if (TOOL_ACTIVITY.includes(mode)) next[key] = mode;
+  else delete next[key];
+  prefs.chatToolActivity = next;
+  try { localStorage.setItem('chatToolActivityByChat', JSON.stringify(next)); } catch (_) {}
+}
 
 export function setShowCoordinationLine(on) {
   prefs.showCoordinationLine = !!on;
