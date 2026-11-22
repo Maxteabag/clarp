@@ -27,6 +27,7 @@ def _handler(scope="limited"):
 
 ALLOWED = sorted(host.Handler._LIMITED_DEVICE_GET_EXACT) + [
     "/artifacts/a1", "/artifacts/a1/html", "/artifacts/a1/revisions", "/artifact-catalogs/clarp.form/1",
+    "/artifact-catalogs/clarp.form/2",
     "/clips/c1/stream", "/clips/c1/playlist.m3u8", "/media/m1", "/audio/clip.mp3", "/avatars/a1",
     "/stt/stream", "/controller-actions/mappings", "/controller-actions/a1",
 ]

@@ -344,3 +344,5 @@ janitor_autonomy_reads = false
 # Development only. Leave unset in production until a client ships.
 # [artifacts]
 # render_spec_min_client = 74
+# render_spec_min_contract = {ios = 74}
+# render_spec_v2_min_contract = {ios = 0, android = 0, desktop = 0, web = 0}  # 0 or unnamed: off
