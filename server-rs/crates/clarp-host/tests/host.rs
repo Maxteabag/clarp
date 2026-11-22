@@ -37,6 +37,8 @@ mod contacts;
 mod controller_actions;
 #[path = "host/coordination.rs"]
 mod coordination;
+#[path = "host/cross_origin_read.rs"]
+mod cross_origin_read;
 #[path = "host/delivery.rs"]
 mod delivery;
 #[path = "host/diagnostics.rs"]
