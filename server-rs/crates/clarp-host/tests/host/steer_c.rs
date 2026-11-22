@@ -428,6 +428,109 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
 }
 
 #[test]
+fn r7_plain_automatic_sends_wait_and_a_joined_oracle_keeps_the_user_notification() {
+    let place = Place::new("r7");
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE);
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let session = "r7";
+    host.post(
+        "/agents",
+        json!({"name":session, "session":session,"backend":"claude"}),
+    );
+    let events = host.listen();
+    wait_for("the event stream", || {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
+    });
+    let sent = host.send(session, "case-r7", "first");
+    assert_eq!(sent["queued"], false);
+    wait_for("the user's active tool", || {
+        place.root.join("tool-r7").exists() && host.state(session) == "tool"
+    });
+
+    let background = ["automation", "schedule", "watcher", "heartbeat", "dreaming"];
+    for origin in background.into_iter().chain(["oracle"]) {
+        let id = format!("add-{origin}");
+        let sent = host.post(
+            "/send",
+            json!({
+                "session":session, "text":id, "client_msg_id":id, "origin":origin,
+                "synthesize_audio":false,
+            }),
+        );
+        assert_eq!(sent["queued"], true, "{origin}: {sent}");
+    }
+    wait_for("the Oracle follow-up to reach the running process", || {
+        place.root.join("received-add-oracle").exists()
+    });
+    let launches = place.root.join("launches");
+    assert_eq!(std::fs::read_to_string(&launches).unwrap(), "case-r7\n");
+    let queue_path = format!("/turn-queue?session={session}");
+    let queue = host.get(&queue_path);
+    let waiting = queue["items"].as_array().unwrap();
+    for origin in background {
+        let id = format!("add-{origin}");
+        assert!(
+            waiting
+                .iter()
+                .any(|row| row["id"] == id && row["status"] == "queued"),
+            "{queue}"
+        );
+    }
+    assert!(
+        waiting
+            .iter()
+            .any(|row| row["id"] == "add-oracle" && row["status"] == "started"),
+        "{queue}"
+    );
+
+    std::fs::write(place.root.join("release-r7"), "").unwrap();
+    wait_for("the Oracle echo in the original turn", || {
+        host.turns(session)
+            .iter()
+            .any(|row| row["id"] == "u-add-oracle")
+    });
+    assert_eq!(std::fs::read_to_string(&launches).unwrap(), "case-r7\n");
+    std::fs::write(place.root.join("answer-r7"), "").unwrap();
+    wait_for("the original user's notification", || {
+        events.lock().unwrap().iter().any(|event| {
+            event["type"] == "user-notification"
+                && event["session"] == session
+                && event["cause_message_id"] == "u-first"
+                && event["origin"] == "user"
+                && event["preview"] == "joined-r7"
+        })
+    });
+    wait_for("the waiting messages to finish", || {
+        let turns = host.turns(session);
+        turns
+            .iter()
+            .any(|row| row["role"] == "assistant" && row["text"] == "separate-add-dreaming")
+            && host.get(&queue_path)["items"] == json!([])
+    });
+    let launched = std::fs::read_to_string(&launches).unwrap();
+    assert_eq!(
+        launched.lines().collect::<Vec<_>>(),
+        [
+            "case-r7",
+            "add-automation",
+            "add-schedule",
+            "add-watcher",
+            "add-heartbeat",
+            "add-dreaming"
+        ]
+    );
+}
+
+#[test]
 fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
     let place = Place::new("queue-item-status");
     let claude = place.root.join("claude");
