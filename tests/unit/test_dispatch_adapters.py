@@ -255,3 +255,13 @@ def test_ticks_skip_a_stopped_or_queued_agent(adapters, tick):
         origin="user", sender_agent_id="")
     getattr(adapters, tick)("mike", "tick")
     assert adapters.journal == []
+
+
+def test_form_answer_is_delivered_under_the_id_the_chat_leaves_out(adapters, monkeypatch):
+    """Issue 428: the agent gets the answer as the user's turn; the row it writes
+    carries the id /log and the preview leave out."""
+    monkeypatch.setattr(html_forms, "mark_delivered", lambda sid: None)
+    adapters.deliver_html_form({"submission_id": "f-1", "session": "mike", "prompt": "p"})
+    sent = adapters.journal[-1]
+    assert sent["text"] == "p" and sent["origin"] == "user" and sent["queue_if_busy"] is True
+    assert ("u-" + sent["client_msg_id"]).startswith(html_forms.ANSWER_ROW_PREFIX)

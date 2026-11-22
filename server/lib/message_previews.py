@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from . import db as _db
 from .clock import iso_from_ms
 from .db import change_stamp, conn
-from . import coordination, origins, team_leader
+from . import coordination, html_forms, origins, team_leader
 from . import log as cache_log
 from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
@@ -48,7 +48,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   limit: int = 100,
                   include_automated: bool = True,
                   extra_backend_session_id: str = "",
-                  hide_coordination: bool = False) -> list[dict[str, Any]]:
+                  hide_coordination: bool = False,
+                  hide_form_answers: bool = False) -> list[dict[str, Any]]:
     params: list[Any] = [agent_id]
     where = "m.agent_id = ?"
     sessions = list(dict.fromkeys(v for v in (backend_session_id, extra_backend_session_id) if v))
@@ -90,6 +91,12 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             )
         )"""
         params.append(team_leader.TICK_PROMPT)
+    if hide_form_answers:
+        # The user's chat (/log): a form answer's prompt reaches the agent, and the user's record
+        # of it is the answered card (issue 428). The Host's own readers (a Janitor's recent
+        # context, a dream's snapshot, a label's evidence) keep it: it is the user's word.
+        # Before LIMIT, as the filters below.
+        where += " AND NOT " + html_forms.ANSWER_ROW_SQL
     if hide_coordination and coordination.can_leave_note(agent_id):
         # Before LIMIT, as the automated filter: a page of N is N rows the user sees.
         where += " AND NOT " + coordination.HIDDEN_ROW_SQL
@@ -231,7 +238,7 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
         " AND m.backend_session_id IN (" + ",".join("?" for _ in sessions) + ")" if sessions else "")
     scope_params: list[Any] = [agent_id, *sessions]
     hidden_sql = coordination.HIDDEN_ROW_SQL
-    visible = "NOT " + hidden_sql
+    visible = "NOT " + hidden_sql + " AND NOT " + html_forms.ANSWER_ROW_SQL
     counted_sql = f"({hidden_sql} AND {coordination.COUNTED_SQL})"
     visible_params: list[Any] = []
     if not include_automated:
@@ -416,10 +423,11 @@ def last_message_head(*, agent_id: str, max_len: int = 80) -> dict[str, Any]:
     rows = conn().execute(
         f"""SELECT message_id, backend_session_id, revision, role, text, origin,
                      {_message_activity_sql()} AS message_activity
-              FROM messages
+              FROM messages m
              WHERE agent_id = ?
                AND COALESCE(text, '') != ''
                AND COALESCE(tool_name, '') = ''
+               AND NOT {html_forms.ANSWER_ROW_SQL}
                AND COALESCE(origin, 'user') NOT IN (
                    {routine_placeholders}
                )
@@ -515,6 +523,7 @@ def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...],
               FROM messages m
              WHERE m.agent_id = ?
                AND COALESCE(m.text, '') != '' AND COALESCE(m.tool_name, '') = ''
+               AND NOT {html_forms.ANSWER_ROW_SQL}
                {completed_filter}
                AND COALESCE(m.origin, 'user') NOT IN ({marks})
              ORDER BY {_message_activity_sql()} DESC, m.seq DESC, m.updated_at DESC
