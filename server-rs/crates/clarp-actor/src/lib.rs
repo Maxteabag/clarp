@@ -4251,7 +4251,12 @@ impl Actor {
             .agent()
             .stopping()
             .is_none()
-            .then(|| live.last_output_ms.unwrap_or(running.started_at_ms))
+            .then(|| {
+                live.last_output_ms
+                    .filter(|at| *at > 0)
+                    .unwrap_or(running.started_at_ms)
+            })
+            .filter(|at| *at > 0)
     }
 
     /// The live turn's spool may have grown.

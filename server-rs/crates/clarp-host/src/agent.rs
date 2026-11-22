@@ -4280,7 +4280,7 @@ impl Worker {
         let Some(actor) = &self.actor else {
             return false;
         };
-        let at = actor.running_silence_since().and_then(|quiet| {
+        let stall = actor.running_silence_since().and_then(|quiet| {
             let queue = actor.queue_state();
             if self.stall.queue_revision != Some(queue.revision) {
                 let waiting = actor.queue().ok()?;
@@ -4299,10 +4299,11 @@ impl Worker {
                 self.stall.queue_revision = Some(queue.revision);
             }
             let oldest = self.stall.oldest_user?;
-            Some(quiet.saturating_add(self.setup.stalled_turn_ms).max(oldest))
+            let at = quiet.saturating_add(self.setup.stalled_turn_ms).max(oldest);
+            Some((quiet, at))
         });
-        self.stall.due = at.filter(|at| *at > now);
-        let since = at.filter(|at| *at <= now);
+        self.stall.due = stall.map(|(_, at)| at).filter(|at| *at > now);
+        let since = stall.filter(|(_, at)| *at <= now).map(|(quiet, _)| quiet);
         std::mem::replace(&mut self.stall.since, since) != since
     }
 

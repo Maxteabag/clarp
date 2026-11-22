@@ -678,6 +678,14 @@ rows. Sending into a pair conversation is not supported.
 
 ### 3. Stay in sync: `GET /events` (SSE)
 
+With `stalled_turn`, the agent row, `activity` and `live_activity` in the
+snapshot and the entering and clearing `agent-activity` events expose
+`stalled_since` and `stalled_action`. From Rust Host contract 157,
+`stalled_since` is the positive Unix millisecond timestamp of the tool's
+last output, or of its start if it has never printed. A stall is still detected
+only after the silence threshold while a user or Oracle message waits.
+The fields are null when the tool is unstalled.
+
 One `text/event-stream` per client. Every event is a JSON object with a
 `type` field and, when the server recorded it durably, an SSE `id:` line.
 

@@ -275,7 +275,7 @@ pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64
         }
         if let Some(since) = view.stalled_since {
             seen.add("stall", id, format!(
-                "The running tool has gone silent with a user message queued. Stalled since {}. Use Stop to release the turn.",
+                "The running tool has gone silent with a user message queued. No output since {}. Use Stop to release the turn.",
                 super::clock(since, &jiff::tz::TimeZone::system()),
             ));
         }
@@ -685,14 +685,22 @@ mod tests {
             loop {
                 let event: Value =
                     serde_json::from_str(&events.recv().await.unwrap().json).unwrap();
-                if event["type"] == "agent-activity" && event["stalled_since"] == due {
+                if event["type"] == "agent-activity"
+                    && event["agent_id"] == worker.agent_id
+                    && event["stalled_action"] == "stop"
+                {
                     break event;
                 }
             }
         })
         .await
         .unwrap();
-        assert_eq!(entered["stalled_action"], "stop");
+        assert!(started_at > 0);
+        let records = SpoolReader::new(&spool).read_window(0, u64::MAX, 4096).unwrap();
+        assert!(!records.records.iter().any(|record| {
+            matches!(&record.entry, Entry::Out(text) | Entry::Err(text) if !text.is_empty())
+        }), "the tool was silent from launch");
+        assert_eq!(entered["stalled_since"], started_at);
         let request = Request::builder()
             .uri("/agents/snapshot")
             .extension(ConnectInfo(
@@ -718,7 +726,7 @@ mod tests {
             .find(|row| row["agent_id"] == worker.agent_id)
             .unwrap();
         for shown in [row, &row["activity"], &row["live_activity"]] {
-            assert_eq!(shown["stalled_since"], due);
+            assert_eq!(shown["stalled_since"], started_at);
             assert_eq!(shown["stalled_action"], "stop");
         }
         let settings = Settings::from_section(Some(

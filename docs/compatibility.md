@@ -22,6 +22,7 @@ listed below.
 
 | Host contract | Min iOS contract | Host release | What changed |
 |---|---|---|---|
+| `157` (Rust only) | 1 | Stalled turn silence timestamp (issue 249) | `stalled_since` records the tool's last output, or its start if it has never printed, as positive Unix milliseconds. The field is shown only while stalled. The threshold still determines when the Host first reports the stall. |
 | `155` (Rust only) | 1 | Unreported helper turns (issue 399) | Feature `helper_ended_unreported`. A helper whose turn settled without reporting and which has no queued or background work is marked `ended-unreported` and emits a `helper-state` roster event. The maker can inspect the result, accept it, or give the helper more work. |
 | `154` (Rust only) | 1 | Agent API feedback (issue 281) | Feature `agent_api_status`. An explicit `cwd` that is missing or isn't a directory makes `POST /agents` answer 400 `cwd_not_found`. Archive and mute changes publish `agent-roster` with `archive-changed` or `mute-changed`. The snapshot gives `created_at` in milliseconds. Model options include the known `authenticated` state from `/backend-auth`. |
 | `152` (Rust only) | 1 | Backend in the helper state | Feature `helper_state_backend`. `GET /agent-helper-state` includes the named agent's `backend`, which `clarp-sub-agent` uses to check a reused helper's effort. |
