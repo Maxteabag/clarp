@@ -25,7 +25,7 @@ futures-util.workspace = true
 h2.workspace = true
 url.workspace = true
 http.workspace = true
-jiff.workspace = true
+jiff = { workspace = true, features = ["tz-system"] }
 nix = { workspace = true, features = ["fs"] }
 pty-process.workspace = true
 regex.workspace = true

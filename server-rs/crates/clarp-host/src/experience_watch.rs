@@ -9,9 +9,11 @@ pub(crate) use checks::AgentFacts;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 
+use crate::fleet::Directory;
 use crate::kept::{Found, Key, Kind};
 use crate::tools::ToolAnswer;
-use book::Book;
+use book::{Book, Row};
+use jiff::{Zoned, tz::TimeZone};
 use settings::Settings;
 
 use clarp_protocol::requests::SendRequest;
@@ -186,7 +188,8 @@ async fn save(app: &App, book: &Book) -> Result<(), String> {
 async fn pass(app: &App, settings: &Settings, now: i64) -> Result<(), String> {
     let mut book = load(app).await?;
     let seen = checks::collect(app, settings, now).await;
-    book.reconcile(seen, settings, now);
+    let directory = app.fleet.directory();
+    book.reconcile(seen, settings, &directory, &TimeZone::system(), now);
     // Record pending notices before sending, with stable IDs across a restart.
     save(app, &book).await?;
     if book.owed.is_empty() {
@@ -242,13 +245,14 @@ fn duration_ms(raw: &str) -> Option<i64> {
     (value >= 0).then_some(value.saturating_mul(scale))
 }
 
-fn clock(ms: i64, format: &str) -> String {
-    jiff::Timestamp::from_millisecond(ms)
-        .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::system())
-                .strftime(format)
-                .to_string()
-        })
+fn local(ms: i64, zone: &TimeZone) -> Option<Zoned> {
+    let ts = jiff::Timestamp::from_millisecond(ms).ok()?;
+    Some(ts.to_zoned(zone.clone()))
+}
+
+fn clock(ms: i64, zone: &TimeZone) -> String {
+    local(ms, zone)
+        .map(|time| time.strftime("%Y-%m-%d %H:%M %:z").to_string())
         .unwrap_or_default()
 }
 
@@ -278,13 +282,48 @@ pub(crate) async fn command(app: &App, args: &[String]) -> ToolAnswer {
         .collect::<Vec<_>>();
     rows.sort_unstable_by_key(|row| std::cmp::Reverse((row.last_seen, row.id)));
     rows.truncate(500);
-    if parsed.flags.contains("--json") {
-        return match serde_json::to_string_pretty(&rows) {
+    render(
+        rows,
+        &Settings::read(),
+        &app.fleet.directory(),
+        &TimeZone::system(),
+        parsed.flags.contains("--json"),
+    )
+}
+
+fn render(
+    mut rows: Vec<Row>,
+    settings: &Settings,
+    directory: &Directory,
+    zone: &TimeZone,
+    json_output: bool,
+) -> ToolAnswer {
+    for row in &mut rows {
+        row.refresh_device_name(directory);
+    }
+    if json_output {
+        #[derive(serde::Serialize)]
+        struct LocalRow<'a> {
+            #[serde(flatten)]
+            row: &'a Row,
+            first_seen_local: String,
+            last_seen_local: String,
+            cleared_at_local: Option<String>,
+        }
+        let shown: Vec<_> = rows
+            .iter()
+            .map(|row| LocalRow {
+                row,
+                first_seen_local: clock(row.first_seen, zone),
+                last_seen_local: clock(row.last_seen, zone),
+                cleared_at_local: row.cleared_at.map(|at| clock(at, zone)),
+            })
+            .collect();
+        return match serde_json::to_string_pretty(&shown) {
             Ok(text) => ToolAnswer::printed(0, text),
             Err(why) => ToolAnswer::said(1, format!("clarp-admin experience: {why}")),
         };
     }
-    let settings = Settings::read();
     let enabled = if settings.enabled { "on" } else { "off" };
     let mut lines = vec![format!(
         "experience watch: {enabled}, every {}s; {} finding(s)",
@@ -304,9 +343,13 @@ pub(crate) async fn command(app: &App, args: &[String]) -> ToolAnswer {
                 to.join(", ")
             }
         };
+        let cleared = row
+            .cleared_at
+            .map(|at| format!(", cleared {}", clock(at, zone)))
+            .unwrap_or_default();
         lines.push(format!(
-            "  {state:<7} {:<18} {:<28} since {}, last {}, seen {}x, told on open {}, on clear {}\n          {}",
-            row.kind, row.subject, clock(row.first_seen, "%H:%M"), clock(row.last_seen, "%Y-%m-%d %H:%M"),
+            "  {state:<7} {:<18} {:<28} since {}, last {}{cleared}, seen {}x, told on open {}, on clear {}\n          {}",
+            row.kind, row.subject_label(), clock(row.first_seen, zone), clock(row.last_seen, zone),
             row.count, told(&row.notified_open), told(&row.notified_clear), row.detail,
         ));
     }
