@@ -521,7 +521,7 @@ async fn control(app: &App, call: &ToolCall, command: &str, args: &[String]) -> 
         let by =
             crate::controls::control_of(app, false, token, body.get("actor"), body.get("reason"));
         match by.await {
-            Ok(by) => crate::controls::stop(app, session, by)
+            Ok(by) => crate::controls::stop(app, session, by, true)
                 .await
                 .map(|stopped| {
                     json!({

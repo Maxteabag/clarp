@@ -278,3 +278,37 @@ fn two_texts_differ_as_pythons_difflib_says() {
         "{long} pairs are long enough for common lines to be set apart"
     );
 }
+
+/// An agent's clients are shown another hub's turn (its conversation fork, issue 718): the
+/// next event is numbered past what they hold, so they ask for the snapshot, and an operation
+/// a reducer does not know (`main_turn`) changes nothing it holds.
+#[test]
+fn a_hub_continued_past_another_sends_its_clients_to_the_snapshot() {
+    let mut main = Hub::new("e1", "a1", "s1");
+    let mut client = View::new();
+    let begun = main.begin_turn("s1", "c1", "t-main", Some(5), "agents", 10);
+    let (snapshot, _) = main.snapshot(10).unwrap();
+    client.apply_snapshot(&snapshot);
+    for event in &begun {
+        assert!(client.apply_event(event).is_empty());
+    }
+    let mut fork = Hub::new("e1", "a1", "s1");
+    let _ = fork.begin_turn("s1", "c1", "t-fork", Some(20), "user", 20);
+    fork.continue_after(main.lseq());
+    let told = fork.tell(
+        json!({"op": "main_turn", "conv": "c1", "main_turn": null}),
+        21,
+    );
+    assert_eq!(told.len(), 1);
+    assert_eq!(client.apply_event(&told[0]), vec!["fetch_live"]);
+    let (snapshot, _) = fork.snapshot(22).unwrap();
+    client.apply_snapshot(&snapshot);
+    assert_eq!(client.turn().unwrap()["turn_id"], json!("t-fork"));
+    let more = fork.tell(
+        json!({"op": "main_turn", "conv": "c1", "main_turn": {"turn_id": "t-main"}}),
+        23,
+    );
+    assert!(client.apply_event(&more[0]).is_empty());
+    assert_eq!(client.turn().unwrap()["turn_id"], json!("t-fork"));
+    assert_eq!(client.lseq(), Some(fork.lseq()));
+}

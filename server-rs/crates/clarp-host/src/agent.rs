@@ -103,6 +103,9 @@ pub struct Stopped {
     pub told: u32,
     /// How many goals that were being worked are paused now.
     pub goals_paused: usize,
+    /// The turn told to end was the conversation fork's: the agent's own and its queue are
+    /// as they were.
+    pub fork: bool,
 }
 
 /// Caller identity established by the Host before the goal command reaches its owner.
@@ -231,11 +234,9 @@ enum Ask {
     Stop {
         by: Control,
         start_waiting: bool,
+        /// A turn of the agent's conversation fork that runs is stopped instead, alone.
+        fork_first: bool,
         answer: Answer<Stopped>,
-    },
-    /// Stop the turn of the agent's conversation fork, where one runs: whether one did.
-    StopFork {
-        answer: Answer<bool>,
     },
     /// A turn nothing runs is looked for and given back, and a note of who and why is kept.
     Repair {
@@ -829,25 +830,23 @@ impl AgentHandle {
         self.ask(|answer| Ask::Stop {
             by: Control::by(by),
             start_waiting: false,
+            fork_first: false,
             answer,
         })
         .await
     }
 
-    /// The non-deferred Stop requested through the API or admin tool.
-    pub async fn stop_as(&self, by: Control) -> Result<Stopped, Unavailable> {
+    /// The non-deferred Stop requested through the API or admin tool. `fork_first`: while the
+    /// agent's conversation fork runs a turn, that turn is what is stopped, alone, in the same
+    /// step (clarp-ios#139); `false` stops the agent's own turn.
+    pub async fn stop_as(&self, by: Control, fork_first: bool) -> Result<Stopped, Unavailable> {
         self.ask(|answer| Ask::Stop {
             by,
             start_waiting: true,
+            fork_first,
             answer,
         })
         .await
-    }
-
-    /// Stops the turn of the agent's conversation fork, where one runs (issue 718). Answers
-    /// whether one did; the agent's own turn and its queue are left as they are.
-    pub async fn stop_fork(&self) -> Result<bool, Unavailable> {
-        self.ask(|answer| Ask::StopFork { answer }).await
     }
 
     /// Gives back a turn of the agent that nothing runs, and keeps a note of who and why.
@@ -2781,7 +2780,17 @@ impl Worker {
             }
             other => other,
         };
+        // A Stop of the fork's turn touches nothing of the agent's own: its goals, its
+        // takeover, its pool.
+        let fork_stop = matches!(
+            &ask,
+            Ask::Stop {
+                fork_first: true,
+                ..
+            }
+        ) && self.actor.as_ref().is_some_and(Actor::fork_runs);
         if matches!(&ask, Ask::Stop { .. })
+            && !fork_stop
             && self
                 .actor
                 .as_ref()
@@ -2792,22 +2801,24 @@ impl Worker {
         if matches!(&ask, Ask::AccountStop) {
             self.hold_native_for_account()?;
         }
-        if matches!(
-            &ask,
-            Ask::Stop { .. }
-                | Ask::Hold { .. }
-                | Ask::SetMove { to: Some(_), .. }
-                | Ask::Withdraw { .. }
-                | Ask::Reword { .. }
-                | Ask::SendNow { .. }
-                | Ask::Send {
-                    admission: Admission::Direct,
-                    ..
-                }
-        ) && let Some((from, socket)) = self
-            .actor
-            .as_ref()
-            .and_then(Actor::selected_takeover_socket)
+        if !fork_stop
+            && matches!(
+                &ask,
+                Ask::Stop { .. }
+                    | Ask::Hold { .. }
+                    | Ask::SetMove { to: Some(_), .. }
+                    | Ask::Withdraw { .. }
+                    | Ask::Reword { .. }
+                    | Ask::SendNow { .. }
+                    | Ask::Send {
+                        admission: Admission::Direct,
+                        ..
+                    }
+            )
+            && let Some((from, socket)) = self
+                .actor
+                .as_ref()
+                .and_then(Actor::selected_takeover_socket)
         {
             // Release is ordered against the consume in the shim. Once it replies, a
             // missing marker means the old tool was never committed for takeover. If
@@ -3196,10 +3207,27 @@ impl Worker {
                 }
                 answered(left, answer)?
             }
+            // While the agent's conversation fork runs a turn, a Stop is the fork's: the user
+            // stops what they talk to, never the agent's own turn by mistake. That one takes a
+            // Stop that names it (`target: main`). One step, so the fork cannot end in between.
+            Ask::Stop {
+                fork_first: true,
+                answer,
+                ..
+            } if actor.fork_runs() => {
+                let (_, out) = actor.fork_halt();
+                let stopped = Stopped {
+                    told: 1,
+                    goals_paused: 0,
+                    fork: true,
+                };
+                answered(Ok((stopped, out)), answer)?
+            }
             Ask::Stop {
                 by,
                 start_waiting,
                 answer,
+                ..
             } => {
                 // The turn is no longer the agent's to finish: the pool of its tool's
                 // accounts does not wait for it, and does not take it up.
@@ -3231,7 +3259,11 @@ impl Worker {
                     Ok(((told, paused.len()), out))
                 });
                 let stopped = stopped.map(|((told, goals_paused), out)| {
-                    let stopped = Stopped { told, goals_paused };
+                    let stopped = Stopped {
+                        told,
+                        goals_paused,
+                        fork: false,
+                    };
                     (stopped, out)
                 });
                 answered(stopped, answer)?
@@ -3239,7 +3271,6 @@ impl Worker {
             Ask::Repair { by, answer } => {
                 answered(actor.repair(by, now).map(|out| ((), out)), answer)?
             }
-            Ask::StopFork { answer } => answered(Ok(actor.fork_halt()), answer)?,
             // The mailbox alone: the agent's goals stay as they are, and wait with it.
             Ask::Hold { by, answer } => {
                 if let Err(why) = actor.require_here() {
@@ -5248,7 +5279,6 @@ fn refuse_for(
             Ok(Ask::LeaveNote { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Repair { answer, .. }) => drop(answer.send(Err(refusal()))),
-            Ok(Ask::StopFork { answer }) => drop(answer.send(Ok(false))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),

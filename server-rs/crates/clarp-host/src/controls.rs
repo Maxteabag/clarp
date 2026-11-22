@@ -42,7 +42,15 @@ pub(crate) async fn control_of(
 }
 
 /// `POST /stop`: end the turn and pause the queue. A user's Stop lets their waiting sends run.
-pub(crate) async fn stop(app: &App, session: &str, by: Control) -> Result<StopResponse, ApiError> {
+/// `main`: the agent's own turn whatever runs. Otherwise, while the agent's conversation fork
+/// runs a turn (issue 718), that turn is stopped instead, alone: the agent's own turn and its
+/// queue go on.
+pub(crate) async fn stop(
+    app: &App,
+    session: &str,
+    by: Control,
+    main: bool,
+) -> Result<StopResponse, ApiError> {
     let answer = StopResponse {
         ok: true,
         stop_actor: Some(by.actor.clone()),
@@ -54,40 +62,15 @@ pub(crate) async fn stop(app: &App, session: &str, by: Control) -> Result<StopRe
         // Nothing runs under a name the Host does not have: nothing was ended, and that is all.
         return Ok(answer);
     };
-    let stopped = member.agent.stop_as(by).await?;
+    let stopped = member.agent.stop_as(by, !main).await?;
     Ok(StopResponse {
         terminated: u64::from(stopped.told),
-        // The Stop's own pause, before dispatch can drain the queue and end it.
-        queue_paused: Some(true),
+        // The Stop's own pause, before dispatch can drain the queue and end it. A fork's
+        // Stop holds nothing.
+        queue_paused: Some(!stopped.fork),
         goals_paused: Some(stopped.goals_paused as u64),
         ..answer
     })
-}
-
-/// `POST /stop` while the agent's conversation fork answers (issue 718, contract 153): the
-/// fork's turn is the one the user talks to, and it is the one stopped. The agent's own turn
-/// and its queue are left as they are; a Stop with `target: "main"` is for those. `None`: no
-/// fork's turn ran.
-pub(crate) async fn stop_fork(
-    app: &App,
-    session: &str,
-    by: &Control,
-) -> Result<Option<StopResponse>, ApiError> {
-    let Some(member) = app.member(session) else {
-        return Ok(None);
-    };
-    if !member.agent.stop_fork().await? {
-        return Ok(None);
-    }
-    Ok(Some(StopResponse {
-        ok: true,
-        stop_actor: Some(by.actor.clone()),
-        stop_actor_verified: Some(by.verified),
-        stop_reason: Some(by.reason.clone()),
-        terminated: 1,
-        queue_paused: Some(false),
-        ..StopResponse::default()
-    }))
 }
 
 /// `POST /repair-slot {session, reason, actor?}`: gives back a turn of an agent that nothing

@@ -489,6 +489,38 @@ impl Hub {
         self.begun.then_some(&self.view.activity)
     }
 
+    /// The turn that is shown, open or the last one. `None` before the first turn.
+    pub fn turn(&self) -> Option<&Fields> {
+        self.view.turn.as_ref().filter(|_| self.begun)
+    }
+
+    /// The number of the last event sent.
+    pub fn lseq(&self) -> i64 {
+        self.view.lseq.unwrap_or(0)
+    }
+
+    /// Numbers the next event so that a client that holds `lseq` or anything below it sees a
+    /// gap and asks for the snapshot. For an agent whose clients are shown another hub's turn
+    /// from now on (its conversation fork, issue 718): the events of the two never interleave
+    /// as if they were one stream.
+    pub fn continue_after(&mut self, lseq: i64) {
+        let next = self.lseq().max(lseq.saturating_add(1));
+        self.view.lseq = Some(next);
+    }
+
+    /// Sends one operation of a kind the reducer leaves alone (`View::apply_op`): for what a
+    /// client that knows it draws beside the turn, in order with the turn's own events.
+    /// Nothing before the first turn.
+    pub fn tell(&mut self, op: Value, now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
+        if !self.begun {
+            return out;
+        }
+        self.flush(now, &mut out);
+        self.emit(vec![op], (false, ""), now, &mut out);
+        out
+    }
+
     /// Everything held, as `GET /live` answers it, and the events that sending what was held
     /// back made. `None` before the first turn: there is no conversation to show.
     pub fn snapshot(&mut self, now: i64) -> Option<(Value, Vec<Value>)> {

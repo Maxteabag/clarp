@@ -1625,24 +1625,32 @@ impl Actor {
     /// has taken yet, each a `live` event as `docs/live-items.md` has it.
     pub fn take_shown(&mut self, now_ms: i64) -> Vec<serde_json::Value> {
         self.show_turn(now_ms);
-        std::mem::take(&mut self.shown_events)
+        self.fork_show(now_ms);
+        self.shown_taken()
     }
 
     /// When growth that is held back for a moment is to be sent at the latest: say
     /// [`Actor::shown_due`] then.
     pub fn shown_due_ms(&self) -> Option<i64> {
-        self.shown.due_ms()
+        match (self.shown.due_ms(), self.fork_due_ms()) {
+            (Some(own), Some(fork)) => Some(own.min(fork)),
+            (own, fork) => own.or(fork),
+        }
     }
 
     /// The moment [`Actor::shown_due_ms`] named has come.
     pub fn shown_due(&mut self, now_ms: i64) {
         let events = self.shown.fire(now_ms);
         self.shown_events.extend(events);
+        self.fork_due(now_ms);
     }
 
     /// Puts fields on an item of what is shown: the explanation of a tool's use on its row.
     /// An item that is shown no longer is left alone.
     pub fn shown_patch(&mut self, item: &str, fields: &serde_json::Value, now_ms: i64) {
+        if self.fork_patch(item, fields, now_ms) {
+            return;
+        }
         let events = self.shown.patch(item, fields, None, now_ms);
         self.shown_events.extend(events);
     }
@@ -1651,12 +1659,15 @@ impl Actor {
     /// that has run no turn since the Host started shows an idle, empty view.
     pub fn shown_whole(&mut self, now_ms: i64) -> serde_json::Value {
         self.show_turn(now_ms);
+        self.fork_show(now_ms);
+        // While the agent's conversation fork answers, the user is shown the fork's turn,
+        // with the agent's own beside it (`main_turn`).
+        if let Some(whole) = self.fork_whole(now_ms) {
+            return whole;
+        }
         match self.shown.snapshot(now_ms) {
-            Some((mut snapshot, events)) => {
+            Some((snapshot, events)) => {
                 self.shown_events.extend(events);
-                if let Some(main) = self.main_turn_beside_fork() {
-                    snapshot["main_turn"] = main;
-                }
                 snapshot
             }
             None => {
@@ -1726,11 +1737,7 @@ impl Actor {
     /// holds the agent is begun for those who watch, one that holds it no longer is ended as
     /// it ended, and a turn that waits for an account says so.
     fn show_turn(&mut self, now_ms: i64) {
-        // While the agent's fork answers, its turn is the one shown: it is what the user talks
-        // to. The agent's own turn is told beside it ([`Actor::shown_whole`]).
-        let forked = self.fork_held();
         let held = match self.recorder.agent().live() {
-            _ if forked.is_some() => forked.as_ref().map(|(turn, at, _)| (*turn, *at)),
             Some(Turn::Starting(turn)) => Some((turn.id, turn.started_at_ms)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.started_at_ms)),
             Some(Turn::Parked(turn)) => Some((turn.id, turn.started_at_ms)),
@@ -1739,28 +1746,13 @@ impl Actor {
         let shown = self.shown_turn.as_ref().map(|(turn, _)| *turn);
         if shown != held.map(|(turn, _)| turn) {
             if let Some(turn) = shown {
-                let (status, error) = match self.fork_ended_as(turn) {
-                    Some(status) => (status, None),
-                    None => self.ended_as(turn),
-                };
+                let (status, error) = self.ended_as(turn);
                 let events = self.shown.end_turn(status, error.as_ref(), now_ms);
                 self.shown_events.extend(events);
                 self.shown_turn = None;
             }
             let followed = self.live.as_ref();
-            if let Some((turn, started_at_ms, name)) = forked {
-                let conversation = self.shown_conversation();
-                let events = self.shown.begin_turn(
-                    &self.profile.session,
-                    &conversation,
-                    &name,
-                    Some(started_at_ms),
-                    clarp_kernel::coordination::USER,
-                    now_ms,
-                );
-                self.shown_events.extend(events);
-                self.shown_turn = Some((turn, name));
-            } else if let Some((turn, started_at_ms)) = held
+            if let Some((turn, started_at_ms)) = held
                 && let Some(live) = followed.filter(|live| live.turn == turn)
             {
                 let name = shown_name(live.trace_id.as_deref(), &live.message_id);

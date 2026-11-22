@@ -523,3 +523,89 @@ fn while_the_fork_answers_live_shows_its_turn_with_the_agents_beside_and_stop_en
     assert!(shown.get("main_turn").is_none(), "{shown:#}");
     assert!(!actor.fork_halt().0, "nothing of the fork runs any more");
 }
+
+/// The ops of live events, each with the event's number.
+fn ops(events: &[serde_json::Value]) -> Vec<(i64, serde_json::Value)> {
+    events
+        .iter()
+        .flat_map(|event| {
+            let lseq = event["lseq"].as_i64().unwrap_or(0);
+            event["ops"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |op| (lseq, op))
+        })
+        .collect()
+}
+
+#[test]
+fn the_live_events_hand_over_to_the_fork_and_back_and_tell_the_agents_turn_beside_it() {
+    let mut world = World::new("live-events");
+    let mut actor = world.open();
+    busy_for_an_agent(&mut world, &mut actor);
+    let now = world.tick();
+    let before = actor.take_shown(now);
+    let main_lseq = before
+        .iter()
+        .filter_map(|event| event["lseq"].as_i64())
+        .max()
+        .unwrap_or(0);
+
+    assert!(world.user(&mut actor, "u-1", "Where are we?"));
+    let fork = world.fork(2);
+    world.answers(&fork, "half", "Halfway.");
+    world.hint(&mut actor);
+    let now = world.tick();
+    let during = ops(&actor.take_shown(now));
+    // Nothing says the agent's own turn ended: it runs on, beside the fork's.
+    assert!(
+        during
+            .iter()
+            .all(|(_, op)| !(op["op"] == "turn" && op["turn"]["status"] == "interrupted")),
+        "{during:#?}"
+    );
+    let (told_at, told) = during
+        .iter()
+        .find(|(_, op)| op["op"] == "main_turn")
+        .cloned()
+        .expect("the agent's own turn is told beside the fork's");
+    assert_eq!(told["main_turn"]["audience"], "agents", "{told:#}");
+    assert_eq!(told["main_turn"]["status"], "running");
+    assert!(
+        told_at > main_lseq + 1,
+        "numbered past the agent's own hub, so a client asks for the snapshot"
+    );
+
+    // The fork is stopped by the user: its turn ends as interrupted, and the agent's own turn
+    // is no longer beside it.
+    let (stopped, out) = actor.fork_halt();
+    assert!(stopped);
+    world.carry_out(&mut actor, out);
+    world.write(
+        &fork,
+        Line::Shim(ShimEvent::Exited {
+            code: None,
+            signal: Some(15),
+        }),
+    );
+    world.shims.remove(&fork);
+    world.hint(&mut actor);
+    let now = world.tick();
+    let after = ops(&actor.take_shown(now));
+    let ended = after
+        .iter()
+        .position(|(_, op)| op["op"] == "turn" && op["turn"]["status"] == "interrupted")
+        .expect("the fork's turn ends, as interrupted");
+    let gone = after
+        .iter()
+        .position(|(_, op)| op["op"] == "main_turn" && op["main_turn"].is_null())
+        .expect("and the agent's own turn is told to be no longer beside it");
+    assert!(ended < gone, "{after:#?}");
+    let now = world.tick();
+    let whole = actor.shown_whole(now);
+    assert_eq!(whole["turn"]["audience"], "agents", "{whole:#}");
+    assert_eq!(whole["turn"]["status"], "running");
+    assert!(whole.get("main_turn").is_none());
+}

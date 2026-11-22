@@ -454,11 +454,18 @@ Rules:
   - `/live?session=X` while a fork's turn runs: `turn` and `items` are the fork's turn,
     which is what the user talks to. The agent's own turn is told beside it in
     `main_turn`: `{turn_id, audience, status, started_at_ms, tool_count, activity}`, where
-    `activity` has only `state` and, for a tool, `tool.name` (no headline). Without a fork's
-    turn, `main_turn` is absent.
-  - `POST /stop` for the session stops the fork's turn when one runs, and leaves the
-    agent's own turn and its queue as they are (`queue_paused: false`). To stop the agent's
-    own turn then, send `target: "main"` in the body.
+    `activity` has only `state` and, for a tool, `tool.name` (no headline); `null` when the
+    agent's own turn is not running. Without a fork's turn, `main_turn` is absent.
+  - On the live event stream, changes of the agent's own turn go out as the op
+    `{op: "main_turn", conv, main_turn}` (the same object, or `null` when it is no longer
+    running or the fork's turn has ended); a reducer that does not know the op leaves it
+    alone. The fork's turn and the agent's own are shown from two numberings of events: when
+    one takes over from the other, the next event is numbered past what a client holds, so
+    it fetches `/live` again. Neither turn is ended for the other.
+  - `POST /stop` for the session stops the fork's turn when one runs, in one step, and
+    leaves the agent's own turn and its queue as they are (`queue_paused: false`). To stop
+    the agent's own turn then, send `target: "main"` in the body. A fork's turn the user
+    stopped ends as `interrupted`. `clarp-admin stop` always stops the agent's own turn.
   - Further messages of the user's before the merge go to the same fork. The merge note,
     which tells the agent's own session what the fork was asked, said and did when its next
     turn begins, is the Host's alone: apps show nothing for it.

@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use clarp_backend::{Interpreter, Signal, TurnSpec};
 use clarp_kernel::agent::Command;
 use clarp_kernel::conversation::{Entry, Message, ToolCall, ToolStatus, TurnEnd};
+use clarp_kernel::failures;
 use clarp_kernel::journal::{Batch, kind};
 use clarp_kernel::spoken::lines_of;
 use clarp_kernel::steering::{Join, Stage as JoinStage};
@@ -151,9 +152,33 @@ struct Running {
 pub(super) struct Lane {
     record: Option<Record>,
     running: Option<Running>,
-    /// How the fork's last turn ended, for what is shown of it.
-    ended: Option<(TurnId, &'static str)>,
+    /// How the fork's last turn ended, for what is shown of it: the status of its end row and
+    /// the reason of a failure.
+    ended: Option<(TurnId, &'static str, Option<String>)>,
+    /// What is shown of the fork's turn while it runs ([`Shown`]).
+    shown: Option<Shown>,
+    /// Events that go out whatever is shown: those of the moment what is shown changed.
+    ready: Vec<serde_json::Value>,
 }
+
+/// The fork's turn as those who watch the agent see it (`GET /live` and its events), in a hub
+/// of its own: the agent's own turn goes on in its hub meanwhile, and is told beside the
+/// fork's as `main_turn`. Neither turn is ended for the other. When one hub takes over from
+/// the other, its events are numbered past the other's, so that a client asks for the
+/// snapshot instead of mixing the two.
+struct Shown {
+    turn: TurnId,
+    name: String,
+    hub: clarp_kernel::live::Hub,
+    /// Its events that nobody has taken yet.
+    events: Vec<serde_json::Value>,
+    /// The `main_turn` last told, `Null` once told that none runs.
+    told: Option<serde_json::Value>,
+}
+
+/// The operation that tells the agent's own turn beside the fork's (clarp-ios#139): a client
+/// that knows it draws it beside the turn; the reducer leaves it alone.
+pub const MAIN_TURN_OP: &str = "main_turn";
 
 fn shortened(text: &str) -> String {
     let text = text.trim();
@@ -486,7 +511,7 @@ impl Actor {
     /// Reads on in the spool of the fork's turn that runs.
     pub(super) fn pump_fork(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
         loop {
-            self.show_turn(now_ms);
+            self.fork_show(now_ms);
             let Some(running) = self.fork.running.as_ref() else {
                 return Ok(());
             };
@@ -594,11 +619,11 @@ impl Actor {
                         Signal::Notice(notice) if asked.read => Entry::Notice(notice),
                         // What the fork does as it runs is shown as the turn the user talks to.
                         Signal::Glimpse(glimpse) => {
-                            if let Some((_, name)) =
-                                self.shown_turn.as_ref().filter(|(held, _)| *held == turn)
+                            if let Some(shown) =
+                                self.fork.shown.as_mut().filter(|shown| shown.turn == turn)
                             {
-                                let events = self.shown.show(&glimpse, Some(name), t);
-                                self.shown_events.extend(events);
+                                let events = shown.hub.show(&glimpse, Some(&shown.name), t);
+                                shown.events.extend(events);
                             }
                             continue;
                         }
@@ -689,11 +714,11 @@ impl Actor {
                         note_count: 0,
                     };
                     batch.item(written(&Entry::TurnEnd(end), now_ms)?);
-                    self.fork.ended = Some((turn, status));
+                    self.fork.ended = Some((turn, status, failed.map(str::to_owned)));
                     // The agent's own turn may have settled it already, when it ended first.
                     let _ = batch.command(Command::JoinSettled { turn }, now_ms);
                 } else {
-                    self.fork.ended = Some((turn, "interrupted"));
+                    self.fork.ended = Some((turn, "interrupted", None));
                     // Nothing of it reached the user: its message stays the agent's own, and
                     // runs when the agent's turn ends. The fork takes nothing more.
                     eprintln!(
@@ -850,6 +875,11 @@ impl Actor {
         Ok(told)
     }
 
+    /// Whether a turn of the agent's conversation fork runs now.
+    pub fn fork_runs(&self) -> bool {
+        self.fork.running.is_some()
+    }
+
     /// `POST /stop` while the fork answers stops the fork's turn, and only that: it is the
     /// turn the user talks to. Answers whether one ran.
     pub fn fork_halt(&mut self) -> (bool, Outputs) {
@@ -875,12 +905,167 @@ impl Actor {
         Some((running.turn, running.started_at_ms, name))
     }
 
-    /// How the fork's turn `turn` ended, when it was the fork's.
-    pub(super) fn fork_ended_as(&self, turn: TurnId) -> Option<&'static str> {
-        self.fork
+    /// How the fork's turn `turn` ended, in the words of those who watch (`completed`,
+    /// `failed` with what went wrong, or `interrupted`; one the user stopped is interrupted,
+    /// as a stopped turn of the agent's own is).
+    fn fork_ended_as(&self, turn: TurnId) -> (&'static str, Option<serde_json::Value>) {
+        match self
+            .fork
             .ended
-            .filter(|(ended, _)| *ended == turn)
-            .map(|(_, status)| status)
+            .as_ref()
+            .filter(|(ended, _, _)| *ended == turn)
+        {
+            Some((_, "completed", _)) => ("completed", None),
+            Some((_, "failed", Some(reason))) => {
+                let kind = failures::classify_error(reason);
+                let model = self.turn_model().unwrap_or_default();
+                let told = failures::told(kind, reason, &model, failures::Known::default());
+                let error = json!({
+                    "reason": kind,
+                    "message": clarp_kernel::python::first(&told.message, 300),
+                    "detail": clarp_kernel::python::first(&told.provider_message, 500),
+                });
+                ("failed", Some(error))
+            }
+            _ => ("interrupted", None),
+        }
+    }
+
+    /// Brings what is shown in step with the fork: its turn is begun in a hub of its own when
+    /// it starts to run, the agent's own turn is told beside it as it changes, and when the
+    /// fork's turn is over it is ended there and the agent's own hub takes over again.
+    pub(super) fn fork_show(&mut self, now_ms: i64) {
+        let held = self.fork_held();
+        let shown_turn = self.fork.shown.as_ref().map(|shown| shown.turn);
+        if shown_turn.is_some() && shown_turn != held.as_ref().map(|(turn, _, _)| *turn) {
+            self.fork_unshow(now_ms);
+        }
+        if self.fork.shown.is_none()
+            && let Some((turn, started_at_ms, name)) = held
+        {
+            let conversation = self.shown_conversation();
+            let mut hub = clarp_kernel::live::Hub::new(
+                &self.profile.epoch,
+                &self.profile.agent_id,
+                &self.profile.session,
+            );
+            // Its first events are numbered from one: nobody is sent them. The first event a
+            // client is sent is numbered past the agent's own hub, and sends it to the snapshot.
+            let _ = hub.begin_turn(
+                &self.profile.session,
+                &conversation,
+                &name,
+                Some(started_at_ms),
+                clarp_kernel::coordination::USER,
+                now_ms,
+            );
+            hub.continue_after(self.shown.lseq());
+            // What the agent's own hub said before goes out first.
+            self.fork.ready.append(&mut self.shown_events);
+            self.fork.shown = Some(Shown {
+                turn,
+                name,
+                hub,
+                events: Vec::new(),
+                told: None,
+            });
+        }
+        let Some(main) = self
+            .fork
+            .shown
+            .as_ref()
+            .map(|_| self.main_turn_beside_fork())
+        else {
+            return;
+        };
+        let conversation = self.shown_conversation();
+        if let Some(shown) = self.fork.shown.as_mut() {
+            let now = main.unwrap_or(serde_json::Value::Null);
+            if shown.told.as_ref() != Some(&now) {
+                let op = json!({"op": MAIN_TURN_OP, "conv": conversation, MAIN_TURN_OP: now});
+                let events = shown.hub.tell(op, now_ms);
+                shown.events.extend(events);
+                shown.told = Some(now);
+            }
+        }
+    }
+
+    /// The fork's turn is over: it is ended in its hub, the agent's own turn is told to be no
+    /// longer beside it, and the agent's own hub takes over, numbered past the fork's.
+    fn fork_unshow(&mut self, now_ms: i64) {
+        let Some(mut shown) = self.fork.shown.take() else {
+            return;
+        };
+        let (status, error) = self.fork_ended_as(shown.turn);
+        let ended = shown.hub.end_turn(status, error.as_ref(), now_ms);
+        shown.events.extend(ended);
+        if shown.told.as_ref() != Some(&serde_json::Value::Null) {
+            let conversation = self.shown_conversation();
+            let op = json!({"op": MAIN_TURN_OP, "conv": conversation, MAIN_TURN_OP: null});
+            shown.events.extend(shown.hub.tell(op, now_ms));
+        }
+        self.fork.ready.append(&mut shown.events);
+        // What the agent's own hub said meanwhile was not sent: its snapshot has it.
+        self.shown_events.clear();
+        self.shown.continue_after(shown.hub.lseq());
+    }
+
+    /// The events to send now, in order: those of a hand-over, and then the hub that is shown.
+    pub(super) fn shown_taken(&mut self) -> Vec<serde_json::Value> {
+        let mut out = std::mem::take(&mut self.fork.ready);
+        match self.fork.shown.as_mut() {
+            Some(shown) => {
+                out.append(&mut shown.events);
+                // The agent's own turn is told beside the fork's, as `main_turn`.
+                self.shown_events.clear();
+            }
+            None => out.append(&mut self.shown_events),
+        }
+        out
+    }
+
+    /// `GET /live` while the fork's turn is shown: that turn, and the agent's own beside it.
+    pub(super) fn fork_whole(&mut self, now_ms: i64) -> Option<serde_json::Value> {
+        let main = self.main_turn_beside_fork();
+        let shown = self.fork.shown.as_mut()?;
+        let (mut snapshot, events) = shown.hub.snapshot(now_ms)?;
+        shown.events.extend(events);
+        snapshot[MAIN_TURN_OP] = main.unwrap_or(serde_json::Value::Null);
+        Some(snapshot)
+    }
+
+    pub(super) fn fork_due_ms(&self) -> Option<i64> {
+        self.fork
+            .shown
+            .as_ref()
+            .and_then(|shown| shown.hub.due_ms())
+    }
+
+    pub(super) fn fork_due(&mut self, now_ms: i64) {
+        if let Some(shown) = self.fork.shown.as_mut() {
+            let events = shown.hub.fire(now_ms);
+            shown.events.extend(events);
+        }
+    }
+
+    /// Puts fields on an item of the fork's turn, when the item is the fork's.
+    pub(super) fn fork_patch(
+        &mut self,
+        item: &str,
+        fields: &serde_json::Value,
+        now_ms: i64,
+    ) -> bool {
+        let Some(shown) = self
+            .fork
+            .shown
+            .as_mut()
+            .filter(|shown| shown.hub.has_item(item))
+        else {
+            return false;
+        };
+        let events = shown.hub.patch(item, fields, None, now_ms);
+        shown.events.extend(events);
+        true
     }
 
     /// The agent's own turn, while its fork's is the one shown (`main_turn` of `GET /live`):
