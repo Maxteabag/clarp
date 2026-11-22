@@ -627,8 +627,7 @@ fn move_request(way: &Way<'_>, target: &Value) -> Result<Value, String> {
 fn manual_handoff(way: &Way<'_>) -> String {
     format!(
         "It is still on the Host at {} too. Archive it there, so that only one of the two takes its turns.\n\
-         Here it is held until then: it answers what you say to it, and what would start by itself \
-         (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, \
+         Here it is held until then: all messages and automatic work wait. Resume it here when it is archived there: the app's Resume, \
          or POST /turn-queue/resume.",
         way.from
     )

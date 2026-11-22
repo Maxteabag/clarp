@@ -611,11 +611,12 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 145);
+    assert_eq!(info["contract"]["host"], 146);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["voice_pool"], 123);
+    assert_eq!(info["contract"]["features"]["client_events_kept"], 146);
     assert_eq!(info["contract"]["features"]["voice_for_helpers"], 135);
     assert_eq!(info["contract"]["features"]["cross_origin_read"], 139);
     assert_eq!(info["contract"]["features"]["previous_server_ids"], 144);
@@ -9047,9 +9048,11 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (status, made) = ask("POST", "/artifacts", ios_v2, Some(&v2));
     assert_eq!(status, 201, "{made}");
     let path = "/artifacts/desktop-v2?representation=flat-v1";
-    let (status, page) = ask("GET", path, ios_v2, None);
-    assert_eq!(status, 200, "{page}");
-    assert_eq!(page["artifact"]["spec"], form["spec"]);
+    for client in [ios_v2, Some("desktop/0.1.0 contract=2")] {
+        let (status, page) = ask("GET", path, client, None);
+        assert_eq!(status, 200, "{client:?}: {page}");
+        assert_eq!(page["artifact"]["spec"], form["spec"], "{client:?}");
+    }
     for client in [desktop, Some("ios/3028 contract=86")] {
         let (status, page) = ask("GET", path, client, None);
         assert_eq!(status, 200, "{client:?}: {page}");
@@ -9271,7 +9274,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 145);
+    assert_eq!(info["contract"]["host"], 146);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
     assert_eq!(info["contract"]["features"]["render_spec_v2"], 133);
     assert_eq!(
@@ -16389,6 +16392,44 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         );
     }
 
+    let forwarded = [("X-Forwarded-For", "203.0.113.7")];
+    let snapshot = fetch(
+        &host,
+        "fixture-alias-one",
+        "GET",
+        "/agents/snapshot",
+        &forwarded,
+        b"",
+    );
+    assert_eq!(snapshot.status, 200);
+    assert!(serde_json::from_slice::<Value>(&snapshot.body).unwrap()["agents"].is_array());
+    let cookie = [
+        forwarded[0],
+        ("Cookie", "claude_pwa_token=fixture-alias-two"),
+    ];
+    assert_eq!(
+        fetch(&host, "", "GET", "/agents/snapshot", &cookie, b"").status,
+        200
+    );
+    for blocked in [token, "wrong"] {
+        assert_eq!(
+            fetch(&host, blocked, "GET", "/agents/snapshot", &forwarded, b"").status,
+            401
+        );
+    }
+    assert_eq!(
+        fetch(
+            &host,
+            "",
+            "GET",
+            "/agents/snapshot?token=fixture-alias-one",
+            &forwarded,
+            b""
+        )
+        .status,
+        401
+    );
+
     // An agent that Claude Code runs: its turns are the stand-in above.
     let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
     let agent = made["session"].as_str().unwrap().to_string();
@@ -19939,7 +19980,13 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
 
     // A client can submit diagnostics without enabling capture.
     let (status, said) = host.ask_as(&limited, "POST", "/clog", Some(&json!({"event":"fixture"})));
-    assert_eq!((status, said), (200, json!({"ok":true,"captured":false})));
+    assert_eq!(
+        (status, said),
+        (
+            200,
+            json!({"ok":true,"captured":true,"kept":1,"full_capture":false})
+        )
+    );
     assert_eq!(
         fetch(&host, token, "POST", "/clog", &[], b"[1]").status,
         400

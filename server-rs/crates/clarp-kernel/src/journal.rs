@@ -569,8 +569,29 @@ impl Recorder {
     }
 
     /// The log, for reading. Only a [`Batch`] writes to it.
-    pub fn experience_window(&self, since: i64, now: i64) -> crate::experience::Window {
-        self.experience.window(since, now)
+    pub fn experience_window(
+        &self,
+        since: i64,
+        now: i64,
+    ) -> Result<crate::experience::Window, JournalError> {
+        self.experience.window(since, now, |seq| {
+            let items = self.log.read_after(seq.saturating_sub(1), Kinds::ALL, 1)?;
+            let Some(item) = items.first().filter(|item| {
+                item.seq == seq && matches!(item.kind, kind::MESSAGE | kind::WAITING)
+            }) else {
+                return Ok(false);
+            };
+            let message: Message =
+                serde_json::from_slice(&item.body).map_err(|why| JournalError::Corrupt {
+                    seq,
+                    why: why.to_string(),
+                })?;
+            Ok(crate::experience::is_user_wait(
+                &message.origin,
+                message.client_id(),
+                message.sender.is_some(),
+            ))
+        })
     }
 
     pub fn log(&self) -> &dyn AgentLog {

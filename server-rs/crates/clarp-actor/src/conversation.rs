@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::ActorError;
 
+mod imported_anchors;
+pub(crate) use imported_anchors::ImportedAnchors;
+
 /// The room between the revisions of two neighbouring log items, for what changes without
 /// being stored.
 pub const REVISION_STEP: u64 = 1 << 20;
@@ -152,7 +155,9 @@ pub fn is_conversation(entry: &Entry, session_rows: Option<usize>) -> bool {
                 | clarp_kernel::conversation::Notice::TURN_FAILED
         ),
         Entry::Reply(_) => session_rows.is_some(),
-        Entry::Imported(import) => clarp_kernel::chat_view::imported_is_conversation(&import.row),
+        Entry::Imported(import) => {
+            session_rows.is_some() || clarp_kernel::chat_view::imported_is_conversation(&import.row)
+        }
         _ => false,
     }
 }
@@ -440,6 +445,7 @@ impl TurnAudience {
 /// Reads rows as they are now: each with the parts that name it.
 struct Reader<'a> {
     log: &'a dyn AgentLog,
+    imported_anchors: Option<&'a ImportedAnchors>,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
     anchors: HashMap<u64, Option<Anchor>>,
@@ -451,10 +457,16 @@ impl<'a> Reader<'a> {
     fn new(log: &'a dyn AgentLog) -> Self {
         Self {
             log,
+            imported_anchors: None,
             ends: HashMap::new(),
             anchors: HashMap::new(),
             marks: HashMap::new(),
         }
+    }
+
+    fn with_imported_anchors(mut self, anchors: Option<&'a ImportedAnchors>) -> Self {
+        self.imported_anchors = anchors;
+        self
     }
 
     /// Read the turn's durable audience boundary once per page.
@@ -521,6 +533,11 @@ impl<'a> Reader<'a> {
 
     fn chat_row(&mut self, row: &mut Versioned, which: Which) -> Result<(), ActorError> {
         if matches!(which, Which::Chat { .. })
+            && let Entry::Imported(imported) = &row.entry
+        {
+            row.session_rows = self.imported_count(imported)?;
+        }
+        if matches!(which, Which::Chat { .. })
             && let Some(turn) = row.turn_number
             && let Some((end, seq)) = self.end(turn)?
             && end.status != "replaced"
@@ -534,6 +551,16 @@ impl<'a> Reader<'a> {
             }
         }
         Ok(())
+    }
+
+    fn imported_count(
+        &self,
+        imported: &clarp_kernel::conversation::Imported,
+    ) -> Result<Option<usize>, ActorError> {
+        match self.imported_anchors {
+            Some(anchors) => anchors.count(self.log, imported),
+            None => Ok(None),
+        }
     }
 
     fn hidden(&mut self, item: &Item, entry: &Entry) -> Result<Option<String>, ActorError> {
@@ -579,6 +606,9 @@ impl<'a> Reader<'a> {
         }
         if is_conversation(entry, None) {
             return Ok(true);
+        }
+        if let Entry::Imported(imported) = entry {
+            return Ok(self.imported_count(imported)?.is_some());
         }
         Ok(match item.turn.or(entry.turn()) {
             Some(turn) => self
@@ -804,8 +834,9 @@ fn rows(
     items: &[Item],
     place: Place,
     which: Which,
+    imported_anchors: Option<&ImportedAnchors>,
 ) -> Result<Vec<Versioned>, ActorError> {
-    let mut reader = Reader::new(log);
+    let mut reader = Reader::new(log).with_imported_anchors(imported_anchors);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
         if item.kind == kind::AUDIENCE_ROW {
@@ -931,10 +962,11 @@ pub(crate) fn one(log: &dyn AgentLog, id: &str) -> Result<Option<Versioned>, Act
 /// Where a conversation begins and how far it has got: what was written up to `floor` is
 /// of a conversation that ended when the agent was started again, and is no part of what a
 /// chat shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct Span {
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Span<'a> {
     pub floor: Seq,
     pub head_revision: u64,
+    pub imported_anchors: Option<&'a ImportedAnchors>,
 }
 
 const COUNT_CAP: usize = 100;
@@ -1086,7 +1118,7 @@ fn gaps(
     log: &dyn AgentLog,
     entries: &[Versioned],
     drafts: &[Draft],
-    span: Span,
+    span: Span<'_>,
     which: Which,
     tail: bool,
     contiguous: bool,
@@ -1094,7 +1126,7 @@ fn gaps(
     if !which.hides() {
         return Ok((HashMap::new(), None));
     }
-    let mut reader = Reader::new(log);
+    let mut reader = Reader::new(log).with_imported_anchors(span.imported_anchors);
     let mut before = HashMap::new();
     let mut saw_draft = false;
     let mut last_stored = None;
@@ -1147,7 +1179,7 @@ fn gaps(
 pub(crate) fn tail(
     log: &dyn AgentLog,
     drafts: &[Draft],
-    span: Span,
+    span: Span<'_>,
     limit: usize,
     which: Which,
 ) -> Result<Page, ActorError> {
@@ -1161,6 +1193,7 @@ fn items_before(
     (before, floor): (Seq, Seq),
     limit: usize,
     which: Which,
+    imported_anchors: Option<&ImportedAnchors>,
 ) -> Result<(Vec<Item>, bool), ActorError> {
     if which == Which::All {
         let mut items = log.read_before(before, kind::ROWS, limit.saturating_add(1))?;
@@ -1174,7 +1207,7 @@ fn items_before(
     // Some are left out: read back until the page is full, or there is nothing older.
     let mut kept: Vec<Item> = Vec::new(); // the newest first
     let mut cursor = before;
-    let mut judge = Reader::new(log);
+    let mut judge = Reader::new(log).with_imported_anchors(imported_anchors);
     loop {
         let chunk = log.read_before(cursor, kind::ROWS, CHUNK)?;
         let Some(oldest) = chunk.first() else {
@@ -1203,7 +1236,7 @@ pub(crate) fn older(
     log: &dyn AgentLog,
     before: Seq,
     drafts: &[Draft],
-    span: Span,
+    span: Span<'_>,
     limit: usize,
     which: Which,
 ) -> Result<Page, ActorError> {
@@ -1225,8 +1258,14 @@ pub(crate) fn older(
     } else {
         limit
     };
-    let (items, mut has_more) = items_before(log, (before, span.floor), stored_limit, which)?;
-    let mut entries = rows(log, &items, Place::First, which)?;
+    let (items, mut has_more) = items_before(
+        log,
+        (before, span.floor),
+        stored_limit,
+        which,
+        span.imported_anchors,
+    )?;
+    let mut entries = rows(log, &items, Place::First, which, span.imported_anchors)?;
     live.retain(|shown| {
         !entries
             .iter()
@@ -1255,7 +1294,11 @@ pub(crate) fn older(
 /// newer. What is newer than this revision ([`after`]) is what was written after that time.
 /// A log is in the order it was written, so the times in it do not go back, and the place
 /// is searched for and not read up to: a few items, however long the conversation.
-pub(crate) fn revision_at(log: &dyn AgentLog, span: Span, ts_ms: i64) -> Result<u64, ActorError> {
+pub(crate) fn revision_at(
+    log: &dyn AgentLog,
+    span: Span<'_>,
+    ts_ms: i64,
+) -> Result<u64, ActorError> {
     // Everything up to `low` was written by then; everything from `high` on, after.
     let (mut low, mut high) = (span.floor, log.last_seq()?.saturating_add(1));
     while high - low > 1 {
@@ -1276,10 +1319,11 @@ fn items_after(
     mut from: Seq,
     limit: usize,
     which: Which,
+    imported_anchors: Option<&ImportedAnchors>,
 ) -> Result<(Vec<Item>, bool, Option<u64>), ActorError> {
     let mut items: Vec<Item> = Vec::new();
     let mut cursor = None;
-    let mut judge = Reader::new(log);
+    let mut judge = Reader::new(log).with_imported_anchors(imported_anchors);
     let at_a_time = if which == Which::All {
         limit.saturating_add(1)
     } else {
@@ -1309,7 +1353,7 @@ pub(crate) fn after(
     log: &dyn AgentLog,
     revision: u64,
     drafts: &[Draft],
-    span: Span,
+    span: Span<'_>,
     limit: usize,
     which: Which,
 ) -> Result<Page, ActorError> {
@@ -1317,8 +1361,9 @@ pub(crate) fn after(
     let mut reader = Reader::new(log);
     let mut from = (revision / REVISION_STEP).max(span.floor);
     let (mut entries, latest_revision, has_more) = loop {
-        let (items, has_more, cursor) = items_after(log, from, limit, which)?;
-        let mut entries = rows(log, &items, Place::Newest, which)?;
+        let (items, has_more, cursor) =
+            items_after(log, from, limit, which, span.imported_anchors)?;
+        let mut entries = rows(log, &items, Place::Newest, which, span.imported_anchors)?;
         if !has_more {
             for draft in drafts {
                 let mut shown = draft.versioned();
@@ -1385,7 +1430,7 @@ pub(crate) fn delegation_baseline(
             return Ok(0);
         };
         before = first.seq;
-        for row in rows(log, &part, Place::Newest, Which::All)? {
+        for row in rows(log, &part, Place::Newest, Which::All, None)? {
             let rev = revisions.entry(row.entry.id().to_owned()).or_insert(0);
             *rev = (*rev).max(row.revision);
         }
@@ -1406,6 +1451,110 @@ pub(crate) fn delegation_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn imported_settled_anchors_survive_a_filtered_page_boundary() {
+        use clarp_kernel::conversation::Imported;
+        use clarp_ports::log::LogEngine;
+        use serde_json::json;
+        use std::path::Path;
+
+        let mut log = clarp_store_mem::MemEngine::new()
+            .open(
+                Path::new("/agents/moved"),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
+            .unwrap();
+        let rows = [
+            (
+                "prompt",
+                json!({"role":"user","origin":"user","trace_id":"old"}),
+            ),
+            (
+                "work",
+                json!({"role":"assistant","text":"Looking","phase":"commentary","trace_id":"old"}),
+            ),
+            (
+                "answer",
+                json!({"role":"assistant","text":"Found it","phase":"final","trace_id":"old"}),
+            ),
+            (
+                "marker",
+                json!({"role":"assistant","origin":"system","text":"Stopped",
+                "trace_id":"old","turn":{"status":"interrupted"}}),
+            ),
+            (
+                "peer",
+                json!({"role":"assistant","audience":"agents","text":"For an agent",
+                "trace_id":"peer","turn":{"status":"completed"}}),
+            ),
+            (
+                "empty-prompt",
+                json!({"role":"user","origin":"oracle","trace_id":"empty"}),
+            ),
+            (
+                "note",
+                json!({"role":"assistant","kind":"note","text":"Posted","trace_id":"empty"}),
+            ),
+            (
+                "tool",
+                json!({"role":"assistant","tool_name":"Read","text":"Tool",
+                "trace_id":"empty","turn":{"status":"completed"}}),
+            ),
+            (
+                "replaced",
+                json!({"role":"assistant","text":"Replaced","phase":"final",
+                "trace_id":"replaced","turn":{"status":"replaced"}}),
+            ),
+            (
+                "running",
+                json!({"role":"assistant","text":"Still working","phase":"final",
+                "trace_id":"running"}),
+            ),
+        ];
+        let items: Vec<_> = rows
+            .into_iter()
+            .map(|(id, mut row)| {
+                row["id"] = json!(id);
+                Entry::Imported(Imported {
+                    id: id.to_owned(),
+                    row,
+                })
+                .to_item(0)
+                .unwrap()
+            })
+            .collect();
+        let head_revision = log.append(&items).unwrap() * REVISION_STEP;
+        let anchors = ImportedAnchors::default();
+        let span = Span {
+            floor: 0,
+            head_revision,
+            imported_anchors: Some(&anchors),
+        };
+        let chat = Which::chat(true).conversation_view(true);
+        let newest = tail(log.as_ref(), &[], span, 1, chat).unwrap();
+        assert_eq!(newest.entries[0].entry.id(), "note");
+        assert_eq!(newest.entries[0].session_rows, Some(1));
+        assert!(newest.has_more);
+
+        let page = after(log.as_ref(), 2 * REVISION_STEP, &[], span, 1, chat).unwrap();
+        assert_eq!(page.entries[0].entry.id(), "answer");
+        assert_eq!(page.entries[0].session_rows, Some(1));
+        assert!(is_conversation(
+            &page.entries[0].entry,
+            page.entries[0].session_rows
+        ));
+        assert_eq!(page.latest_revision, 3 * REVISION_STEP);
+        let session = tail(log.as_ref(), &[], span, 20, Which::chat(true)).unwrap();
+        for row in session
+            .entries
+            .iter()
+            .filter(|row| matches!(row.entry.id(), "work" | "running" | "replaced"))
+        {
+            assert!(!is_conversation(&row.entry, row.session_rows));
+        }
+    }
 
     #[test]
     #[allow(clippy::unwrap_used)]
@@ -1458,6 +1607,7 @@ mod tests {
         let span = Span {
             floor: 0,
             head_revision: head,
+            ..Span::default()
         };
         let show = tail(log.as_ref(), &[], span, 4, Which::chat(true)).unwrap();
         assert_eq!(show.entries.len(), 4);
@@ -1537,6 +1687,7 @@ mod tests {
         let span = Span {
             floor: 0,
             head_revision: recorder.conversation_seq() * REVISION_STEP,
+            ..Span::default()
         };
         let first = after(recorder.log(), cursor, &[], span, 1, Which::All).unwrap();
         assert!(first.has_more);

@@ -9,6 +9,7 @@ enum Source {
     Legacy,
     Rejects,
     Marks,
+    Retries,
 }
 
 fn exercise(source_kind: Source, take_back: bool) {
@@ -23,6 +24,7 @@ fn exercise(source_kind: Source, take_back: bool) {
     let cwd = place.root.join("work");
     let moved = Arc::new(Mutex::new(Value::Null));
     let source_mark = Arc::clone(&moved);
+    let first_mark = std::sync::atomic::AtomicBool::new(true);
     let (source, requests) = answers_using(move |path, request| {
         let json = match path.split('?').next().unwrap() {
             "/server-info" => {
@@ -67,7 +69,17 @@ fn exercise(source_kind: Source, take_back: bool) {
                         Source::Rejects => {
                             return ("409 Conflict", json!({"error":"already_moved"}).to_string());
                         }
-                        Source::Marks => *mark = json!({"to":expected_target,"at":123}),
+                        Source::Retries
+                            if first_mark.swap(false, std::sync::atomic::Ordering::Relaxed) =>
+                        {
+                            return (
+                                "503 Service Unavailable",
+                                json!({"error": "try again"}).to_string(),
+                            );
+                        }
+                        Source::Marks | Source::Retries => {
+                            *mark = json!({"to":expected_target,"at":123});
+                        }
                     }
                 }
                 json!({"ok":true,"session":"mover","changed":true,"moved":*mark})
@@ -113,7 +125,7 @@ fn exercise(source_kind: Source, take_back: bool) {
     match source_kind {
         Source::Legacy => {
             assert!(report.contains(&format!(
-                "It is still on the Host at {source} too. Archive it there, so that only one of the two takes its turns.\nHere it is held until then: it answers what you say to it, and what would start by itself (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, or POST /turn-queue/resume."
+                "It is still on the Host at {source} too. Archive it there, so that only one of the two takes its turns.\nHere it is held until then: all messages and automatic work wait. Resume it here when it is archived there: the app's Resume, or POST /turn-queue/resume."
             )), "{report}");
         }
         Source::Rejects => {
@@ -128,12 +140,65 @@ fn exercise(source_kind: Source, take_back: bool) {
                 "{report}"
             );
         }
+        Source::Retries => {
+            assert!(report.contains("The move is incomplete"), "{report}");
+            assert!(moved.lock().unwrap().is_null());
+            let sender = host.new_agent("Sender");
+            let mut traces = Vec::new();
+            for (id, text, by) in [
+                ("peer-before-move", "first message", "agent"),
+                ("user-before-move", "second message", "user"),
+            ] {
+                let mut message = json!({
+                    "session": "mover", "text": text, "client_msg_id": id, "origin": by,
+                });
+                if by == "agent" {
+                    message["sender"] = json!(sender);
+                }
+                let sent = host.post("/send", message);
+                assert_eq!(sent["queued"], true, "{sent}");
+                traces.push(sent["trace_id"].as_str().unwrap().to_string());
+            }
+            let queue = host.get(QUEUE);
+            assert_eq!(queue["paused"], true);
+            let items = queue["items"].as_array().unwrap();
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0]["text"], "second message");
+            assert_eq!(items[1]["text"], "first message");
+            assert_eq!(
+                host.conversation("mover"),
+                [said("assistant", "Moved history")]
+            );
+            let report = run(&["--files"]);
+            assert!(report.contains("It is resumed here."), "{report}");
+            assert_eq!(moved.lock().unwrap()["to"], target);
+            wait_for("the two held messages to finish", || {
+                host.conversation("mover").len() == 5 && host.state("mover") == "done"
+            });
+            let rows = host.turns("mover");
+            assert_eq!(rows.len(), 5, "{rows:?}");
+            assert_eq!(rows[0]["text"], "Moved history");
+            // Scripted echoes the first prompt line, which can be the team context header.
+            // Match each completed reply to its own send rather than the prompt text.
+            let expected = [("second message", &traces[1]), ("first message", &traces[0])];
+            for (pair, (text, trace)) in rows[1..].chunks_exact(2).zip(expected) {
+                assert_eq!(pair[0]["role"], "user");
+                assert_eq!(pair[0]["text"], text);
+                assert_eq!(pair[0]["trace_id"], trace.as_str());
+                assert_eq!(pair[1]["role"], "assistant");
+                assert_eq!(pair[1]["trace_id"], trace.as_str());
+                assert_eq!(pair[1]["turn"]["status"], "completed");
+            }
+        }
         Source::Marks => {
             assert!(report.contains(&format!("It is marked moved on the Host at {source}. Its turn-start doors there now refuse it. It is resumed here.")), "{report}");
             assert_eq!(moved.lock().unwrap()["to"], target);
         }
     }
-    assert_eq!(host.get(QUEUE)["paused"], source_kind != Source::Marks);
+    assert_eq!(
+        host.get(QUEUE)["paused"],
+        matches!(source_kind, Source::Legacy | Source::Rejects)
+    );
     if take_back {
         let report = run(&["--back"]);
         assert!(
@@ -161,7 +226,9 @@ fn exercise(source_kind: Source, take_back: bool) {
         .count();
     assert_eq!(
         posts,
-        usize::from(source_kind != Source::Legacy) + usize::from(take_back)
+        usize::from(source_kind != Source::Legacy)
+            + usize::from(source_kind == Source::Retries)
+            + usize::from(take_back)
     );
 }
 
@@ -183,4 +250,9 @@ fn an_older_source_keeps_the_manual_archive_and_resume_instructions() {
 #[test]
 fn taking_a_move_back_holds_the_import_before_clearing_the_source() {
     exercise(Source::Marks, true);
+}
+
+#[test]
+fn an_import_holds_messages_until_the_files_retry_finishes_the_move() {
+    exercise(Source::Retries, false);
 }

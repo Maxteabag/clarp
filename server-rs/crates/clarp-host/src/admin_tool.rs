@@ -1983,6 +1983,30 @@ async fn voice_migrate(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+async fn client_log(app: &App, args: &[String]) -> ToolAnswer {
+    let args = match parse(
+        args,
+        &["--device", "--since", "--level", "--event", "--limit"],
+        &[],
+        &[],
+    ) {
+        Ok(args) => args,
+        Err(why) => return ToolAnswer::said(2, why),
+    };
+    let options = |name: &str| args.option(&format!("--{name}"));
+    match crate::client_events::events(app.clone(), options).await {
+        Ok(events) => {
+            let mut answer = ToolAnswer::code(0);
+            for row in events {
+                answer.stdout.push_str(&row.to_string());
+                answer.stdout.push('\n');
+            }
+            answer
+        }
+        Err(why) => ToolAnswer::said(1, why.message()),
+    }
+}
+
 pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
     match call.argv.split_first() {
         Some((command, rest)) if command == "leader-decision" => {
@@ -1992,6 +2016,7 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
             crate::controller_action_tool::run(app, call, rest).await
         }
         Some((command, rest)) if command == "voice" => voice_migrate(app, rest).await,
+        Some((command, rest)) if command == "client-log" => client_log(app, rest).await,
         Some((command, rest)) if command == "bookkeeping" => bookkeeping(app, rest).await,
         Some((command, rest)) if command == "experience" => {
             crate::experience_watch::command(app, rest).await

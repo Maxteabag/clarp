@@ -12,6 +12,8 @@ use clarp_ports::kv::{KeyValue, KeyValueEngine, StoreError, Write};
 use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
 use rusqlite::{Connection, OpenFlags, Params, params};
 
+pub mod client_events;
+
 /// The name of the log file inside an agent's directory.
 pub const LOG_FILE: &str = "log.db";
 

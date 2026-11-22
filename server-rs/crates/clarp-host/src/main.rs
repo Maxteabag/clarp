@@ -269,7 +269,11 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let ears = Arc::new(clarp_host::heard::Ears::new(&config, &fleet).await?);
+    let client_events =
+        clarp_host::client_events::Desk::new(config.data_dir.join("client-events.sqlite"));
+    client_events.age_out(clock.clone());
     let app = App {
+        client_events,
         teams,
         capture,
         turns,

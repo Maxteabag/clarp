@@ -36,10 +36,10 @@
 #                  Host runs the owner's selector itself (the commands the owner's file names,
 #                  `--speech-keys`, under [agents]), for a machine on which it is the only
 #                  Host: it then keeps the machine's tools, their logins, their providers'
-#                  settings and their skills. Never chosen by itself, and refused while the
-#                  Python Host of this machine runs (its unit is anything but stopped), with or
-#                  without a selector: those are the machine's, one Host keeps them, and that
-#                  Host links the skills at every update of its own
+#                  settings and their skills, and verifies logins and reads provider usage.
+#                  Never chosen by itself, and refused while the Python Host of this machine
+#                  runs (its unit is anything but stopped), with or without a selector.
+#                  One Host keeps the machine's tools and links the skills at every update
 #   --seats-tool   the owner's tool that knows the seats of the machine's accounts (Hotseat), which
 #                  the Host runs when an app asks for a reading of the desk of seats, and at no
 #                  other time. Default: `hotseat` where it is found on the path the agents' tools
@@ -198,11 +198,15 @@ python_runs() {
     done
     return 1
 }
-if [ "$accounts" = select ] && python_runs; then
-    echo "install-host: --accounts select: the Python Host of this machine runs." >&2
-    echo "  The tools' logins, the providers' settings and the skills are the machine's, and one Host" >&2
-    echo "  keeps them. Stop that Host first, or use --accounts follow beside it." >&2
-    exit 2
+ask_usage=""
+if [ "$accounts" = select ]; then
+    if python_runs; then
+        echo "install-host: --accounts select: the Python Host of this machine runs." >&2
+        echo "  The tools' logins, the providers' settings and the skills are the machine's, and one Host" >&2
+        echo "  keeps them. Stop that Host first, or use --accounts follow beside it." >&2
+        exit 2
+    fi
+    ask_usage=" --ask-usage"
 fi
 # Speech in. The Host's own engine is a worker run by a Python that has faster-whisper: the
 # Python Host's own interpreter on this machine, where it is, unless another is named. Which
@@ -297,7 +301,7 @@ own_config="$config/config.toml"
 relay_switch="${chosen[relay]:-off}"
 case "$relay_switch" in on|off) ;; *) echo "install-host: --relay $relay_switch: on or off" >&2; exit 2 ;; esac
 # This Host's own file is written below, at every run. Its relay switch is the installation's;
-# the allow-list of web origins belongs to its owner.
+# the web origin allow-list and experience watcher settings belong to its owner.
 relay_config="${chosen[relay-config]:-$own_config}"
 [ "$relay_config" = off ] && relay_config=""
 relayed=""; relay_as=""
@@ -388,8 +392,10 @@ done
 mark_ends='# The mark of another Host'"'"'s hand-over ends here: what this tool starts may call a tool again.
 unset CLARP_WRAPPER_HANDOVER'
 tools=0
-for tool in $( { printf '%s\n' clarp-agent-bg clarp-admin clarp-goal clarp-agent-artifacts; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
-    case "$tool" in clarp-sub-agent|clarp-media-publish) continue ;; esac
+# The Rust dispatcher answers these. Other generated tools are refusal stubs.
+rust_tools=(clarp-agent-bg clarp-admin clarp-goal clarp-agent-tasks clarp-agent-artifacts)
+for tool in $( { printf '%s\n' "${rust_tools[@]}"; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
+    case "$tool" in clarp-sub-agent|clarp-media-publish|clarp-status-fork) continue ;; esac
     cat > "$share/tools/.$tool.new" <<EOF
 #!/bin/sh
 # Written by install-host: one of an agent's own tools on the Rust Host.
@@ -432,6 +438,7 @@ unset _clarp_tools _clarp_rest
 FIRST
 mv -f "$share/libexec/.tools-first.sh.new" "$share/libexec/tools-first.sh"
 if [ -f "$sub_agent" ]; then
+    rust_tools+=(clarp-sub-agent)
     install -m 644 "$sub_agent" "$share/libexec/.sub_agent.py.new"
     mv -f "$share/libexec/.sub_agent.py.new" "$share/libexec/sub_agent.py"
     cat > "$share/tools/.clarp-sub-agent.new" <<EOF
@@ -463,6 +470,7 @@ tools=$((tools + 1))
 # only: the name is never an action on another Host.
 media_publish="$here/../scripts/clarp-media-publish.py"
 if [ -f "$media_publish" ]; then
+    rust_tools+=(clarp-media-publish)
     install -m 644 "$media_publish" "$share/libexec/.clarp-media-publish.py.new"
     mv -f "$share/libexec/.clarp-media-publish.py.new" "$share/libexec/clarp-media-publish.py"
     cat > "$share/tools/.clarp-media-publish.new" <<EOF
@@ -535,6 +543,23 @@ if [ -f "$skills_from/manifest.json" ]; then
     [ -d "$python_share/releases" ] && skills="$skills --skills-other-releases $python_share/releases"
     python_chosen="$(dirname "$python_config")/install.json"
     [ -f "$python_chosen" ] && skills="$skills --skills-chosen-before $python_chosen"
+
+    status_fork="$release/skills/clarp-status-fork/scripts/status_fork.py"
+    if [ -f "$status_fork" ]; then
+        cat > "$share/tools/.clarp-status-fork.new" <<EOF
+#!/bin/sh
+# Written by install-host: run this release's status-fork skill.
+$mark_ends
+if [ -z "\${CLARP_HOST_ADDR:-}" ]; then
+    export CLAUDE_PWA_CONFIG="$own_config"
+fi
+exec python3 "$status_fork" "\$@"
+EOF
+        chmod 755 "$share/tools/.clarp-status-fork.new"
+        mv -f "$share/tools/.clarp-status-fork.new" "$share/tools/clarp-status-fork"
+        rust_tools+=(clarp-status-fork)
+        tools=$((tools + 1))
+    fi
 fi
 
 # The administrator's token: made once, kept. The Host reads it from its environment.
@@ -542,22 +567,54 @@ if [ ! -s "$config/env" ]; then
     (umask 077; printf 'CLARP_HOST_TOKEN=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-48)" > "$config/env")
 fi
 token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
-# The installation rewrites the generated server settings. Carry the owner's read-origin
-# allow-list as data, without carrying any other setting from the old file.
-web_read_origins="$(python3 - "$own_config" <<'PYTHON'
+# Keep only the owner's web read origins and experience watcher settings.
+carried_config="$(python3 - "$own_config" <<'PYTHON'
+from datetime import date, time
 import json
-from pathlib import Path
+import re
 import sys
 import tomllib
 
+def quoted(text):
+    return json.dumps(text, ensure_ascii=False).replace("\x7f", r"\u007f")
+
+def key(name):
+    return name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else quoted(name)
+
+def value(item):
+    if isinstance(item, str):
+        return quoted(item)
+    if isinstance(item, bool):
+        return "true" if item else "false"
+    if isinstance(item, (date, time)):
+        return item.isoformat()
+    if isinstance(item, list):
+        return "[" + ", ".join(map(value, item)) + "]"
+    if isinstance(item, dict):
+        return "{ " + ", ".join(f"{key(k)} = {value(v)}" for k, v in item.items()) + " }"
+    return repr(item)
+
+def table(path, entries):
+    print(f"\n[{path}]")
+    for name, item in entries.items():
+        if not isinstance(item, dict):
+            print(f"{key(name)} = {value(item)}")
+    for name, item in entries.items():
+        if isinstance(item, dict):
+            table(f"{path}.{key(name)}", item)
+
 try:
-    config = tomllib.loads(Path(sys.argv[1]).read_text())
-    origins = config.get("server", {}).get("web_read_origins")
-except (AttributeError, OSError, UnicodeError, ValueError):
-    origins = None
+    with open(sys.argv[1], "rb") as source:
+        config = tomllib.load(source)
+except (OSError, UnicodeError, ValueError):
+    config = {}
+server = config.get("server")
+origins = server.get("web_read_origins") if isinstance(server, dict) else None
 if isinstance(origins, list):
-    print("web_read_origins = " + json.dumps(
-        [value for value in origins if isinstance(value, str)], ensure_ascii=False))
+    print("web_read_origins = " + value([item for item in origins if isinstance(item, str)]))
+watch = config.get("experience_watch")
+if isinstance(watch, dict):
+    table("experience_watch", watch)
 PYTHON
 )"
 # What the agents' Clarp tools read to find their Host: this one.
@@ -570,8 +627,8 @@ bind_addr = "$address"
 port = $port
 auth_token = "$token"
 EOF
-    if [ -n "$web_read_origins" ]; then
-        printf '%s\n' "$web_read_origins" >> "$config/config.toml"
+    if [ -n "$carried_config" ]; then
+        printf '%s\n' "$carried_config" >> "$config/config.toml"
     fi
     # Whether phones reach this Host through the connection relay: the Host reads it here.
     if [ "$relay_config" = "$own_config" ] && [ "$relay_switch" = on ]; then
@@ -610,13 +667,70 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts$ask_usage${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
 Restart=on-failure
 RestartSec=2
 
 [Install]
 WantedBy=default.target
 EOF
+
+# Only a cut-over machine changes the Python installer's managed shell commands.
+# A Python reinstall writes these same marked wrappers back.
+if [ "$(systemctl --user is-active clarp-runtime.service 2>/dev/null || true)" = inactive ] &&
+   [ "$(systemctl --user is-enabled clarp-runtime.service 2>/dev/null || true)" = disabled ]; then
+    for bin_dir in "$HOME/.local/bin" "$python_share/bin"; do
+        python3 - "$bin_dir" "$share/tools" "$own_config" "${rust_tools[@]}" <<'PYTHON'
+from pathlib import Path
+import os
+import shlex
+import sys
+import tempfile
+
+bin_dir, tools = map(Path, sys.argv[1:3])
+config = shlex.quote(sys.argv[3])
+for name in sys.argv[4:]:
+    path = bin_dir / name
+    target = tools / name
+    if path.is_symlink() or not path.is_file() or not target.is_file() or not os.access(target, os.X_OK):
+        continue
+    with path.open("rb") as old:
+        old.readline()
+        if old.readline().rstrip(b"\n") != b"# managed-by-clarp":
+            continue
+    wrong_host = shlex.quote(f"{name}: this turn belongs to another Clarp Host")
+    with tempfile.NamedTemporaryFile(mode="w", dir=bin_dir, prefix=f".{name}.", delete=False) as temporary:
+        temporary.write(f"""#!/bin/sh
+# managed-by-clarp
+if [ -n "${{CLARP_HOST_ADDR:-}}" ]; then
+    if [ "${{CLARP_WRAPPER_HANDOVER+x}}" != x ]; then
+        case "${{CLARP_SHARE_DIR:-}}" in
+            /*)
+                tool="$CLARP_SHARE_DIR/tools/{name}"
+                if [ -f "$tool" ] && [ -x "$tool" ]; then
+                    if {{ [ "$tool" -ef "$0" ]; [ "$?" -eq 1 ]; }} 2>/dev/null; then
+                        export CLARP_WRAPPER_HANDOVER=1
+                        exec "$tool" "$@"
+                    fi
+                fi
+                ;;
+        esac
+    fi
+    printf '%s\\n' {wrong_host} >&2
+    exit 69
+fi
+export CLAUDE_PWA_CONFIG={config}
+exec {shlex.quote(str(target))} "$@"
+""")
+    replacement = Path(temporary.name)
+    try:
+        replacement.chmod(0o700)
+        replacement.replace(path)
+    finally:
+        replacement.unlink(missing_ok=True)
+PYTHON
+    done
+fi
 
 echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
 if [ -n "$push_keys" ]; then

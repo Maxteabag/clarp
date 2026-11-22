@@ -57,6 +57,7 @@ fn most_ms() -> i64 {
 #[derive(Default)]
 pub struct Desk {
     orders: OnceLock<mpsc::UnboundedSender<Order>>,
+    agy_status: tokio::sync::Mutex<super::status::AgyCache>,
 }
 
 enum Order {
@@ -417,29 +418,28 @@ pub async fn read(
     Ok(Json(told))
 }
 
-/// The rows of the tools, as `GET /backend-auth` answers them. `verified`: a login whose
-/// usage was asked of its provider within the minute is called valid.
-async fn rows(app: &App, every: bool, verified: bool) -> Result<Value, ApiError> {
+/// The rows of the tools, as `GET /backend-auth` answers them.
+async fn rows(app: &App, every: bool, verify: bool) -> Result<Value, ApiError> {
     let now = app.clock.now_ms();
     let keeps = keeps(app);
     let limits = app.limits.clone();
-    let ask_usage = app.config.ask_usage && verified;
+    let verify = app.config.ask_usage && verify;
+    let passive_verification = verify && !keeps;
     let read = move || {
         let home = crate::config::home();
         let mut told = crate::logins::told(&home, every, now);
-        if let Some(rows) = told["backends"].as_array_mut() {
-            for row in rows.iter_mut() {
-                if ask_usage
-                    && row["state"] == "unverified"
-                    && row["id"]
-                        .as_str()
-                        .is_some_and(|tool| limits.login_verified(tool, &home, now))
-                {
+        if passive_verification && let Some(rows) = told["backends"].as_array_mut() {
+            for row in rows.iter_mut().filter(|row| row["state"] == "unverified") {
+                let verified = row["id"].as_str().is_some_and(|tool| {
+                    clarp_backend::by_id(tool)
+                        .and_then(|backend| backend.login_file(&home))
+                        .and_then(|file| crate::logins::digest(&file))
+                        .and_then(|stamp| limits.login_result(tool, stamp, now))
+                        == Some(true)
+                });
+                if verified {
                     row["state"] = json!("valid");
                     row["logged_in"] = json!(true);
-                }
-                if keeps {
-                    signs_in_here(row, every);
                 }
             }
         }
@@ -452,13 +452,18 @@ async fn rows(app: &App, every: bool, verified: bool) -> Result<Value, ApiError>
             "the logins could not be read",
         )
     })?;
-    if let Some(row) = told["backends"].as_array_mut().and_then(|rows| {
-        rows.iter_mut()
-            .find(|row| row["id"] == "grok" && row["installed"] == true)
-    }) {
-        crate::logins::probe_grok(row).await;
-        if keeps {
-            signs_in_here(row, every);
+    if let Some(rows) = told["backends"].as_array_mut() {
+        for row in rows {
+            if row["installed"] == true {
+                if row["id"] == "grok" {
+                    crate::logins::probe_grok(row).await;
+                } else if keeps && verify {
+                    super::status::observe(app, &app.sign_ins.agy_status, row).await;
+                }
+            }
+            if keeps {
+                signs_in_here(row, every);
+            }
         }
     }
     Ok(told)

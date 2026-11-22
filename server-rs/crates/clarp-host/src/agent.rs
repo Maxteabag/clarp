@@ -3095,19 +3095,25 @@ impl Worker {
                 return read(waiting, answer);
             }
             Ask::Experience { since, now, answer } => {
-                let facts = actor.queue().map(|queue| {
+                let facts = actor.queue().and_then(|queue| {
                     let status = actor.status();
-                    let parked = status
-                        .live
-                        .and_then(|live| live.parked)
-                        .filter(|turn| turn.origin == clarp_kernel::turn::Origin::User)
-                        .map(|turn| turn.accepted_at_ms);
-                    crate::experience_watch::AgentFacts {
+                    let parked = status.live.and_then(|live| {
+                        live.parked
+                            .filter(|turn| {
+                                clarp_kernel::experience::is_user_wait(
+                                    &turn.origin,
+                                    &live.client_id,
+                                    actor.live_sender_agent_id(turn.id).is_some(),
+                                )
+                            })
+                            .map(|turn| turn.accepted_at_ms)
+                    });
+                    Ok(crate::experience_watch::AgentFacts {
                         queue,
                         parked,
                         paused: status.paused,
-                        window: actor.experience_window(since, now),
-                    }
+                        window: actor.experience_window(since, now)?,
+                    })
                 });
                 return read(facts, answer);
             }
