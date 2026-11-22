@@ -1850,7 +1850,7 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
 /// The Host's prompt for a resolved decision, as
 /// `artifacts.format_delivery_prompt` writes it.
 fn resolved_prompt(decision: &str, artifact: &str, question: &str, outcome: &str) -> String {
-    format!("[Clarp decision resolved]\nDecision ID: {decision}\nArtifact ID: {artifact}\nQuestion: {question}\nContext: Two reviews are in.\nReference: \nPayload: {{\"ticket\": \"OPS-12\"}}\n{outcome}")
+    format!("[Clarp decision resolved]\nDecision ID: {decision}\nArtifact ID: {artifact}\nResolved by: user\nQuestion: {question}\nContext: Two reviews are in.\nReference: \nPayload: {{\"ticket\": \"OPS-12\"}}\n{outcome}")
 }
 
 /// A resolved decision shows as a receipt in the user's column: the
@@ -1862,8 +1862,8 @@ fn receipt_stages(out: &str) -> Vec<Stage> {
     // Its cards' ids are its own (`-r`): the question chat before it has a
     // q-click too, and the keyboard's card there must not be one here.
     let receipts = [
-        ("dec-approved-r", "Upgrade to Postgres 17?", "The user chose: accepted. Approval applies only to the described action. Revalidate it before acting.", "Approved", "success", "DECISION"),
-        ("dec-declined-r", "Delete staging data?", "The user chose: rejected. Do not perform the protected action.", "Declined", "danger", "DECISION"),
+        ("dec-approved-r", "Upgrade to Postgres 17?", "The user approved this exact action: Upgrade to Postgres 17? Approved scope/context: Two reviews are in. Proceed with exactly that action and scope after revalidating the target and payload. This does not approve any broader, additional, or repeated action.", "Approved", "success", "DECISION"),
+        ("dec-declined-r", "Delete staging data?", "The user, through agent koko-8255 rejected this exact action: Delete staging data? Do not perform it or a broader version of it.", "Declined", "danger", "DECISION"),
         ("q-picked-r", "Which database?", "The user answered this clarification: {\"option_id\": \"lite\", \"label\": \"SQLite\"}. Continue using this answer. This does not grant approval for unrelated protected actions.", "SQLite", "answer", "QUESTION"),
         ("dec-discard-r", "Archive the 40 merged branches?", "The user discarded this request. This is not an answer or approval. Do not guess permission or repeat the unchanged request. Continue independent work only.", "Discarded", "muted", "DECISION"),
         ("dec-expired-r", "Book it before Friday?", "The request expired without an answer or approval. Do not infer a choice or perform the protected action. Continue independent work only.", "Expired", "muted", "DECISION"),

@@ -138,7 +138,7 @@ fn wheel(delta: f32) {
 }
 
 fn resolved_prompt(i: usize, question: &str, outcome: &str) -> String {
-    format!("[Clarp decision resolved]\nDecision ID: d-steady-{i}\nArtifact ID: steady-{i}\nQuestion: {question}\nContext: Two reviews are in.\nReference: \nPayload: {{\"ticket\": \"OPS-{i}\"}}\n{outcome}")
+    format!("[Clarp decision resolved]\nDecision ID: d-steady-{i}\nArtifact ID: steady-{i}\nResolved by: user\nQuestion: {question}\nContext: Two reviews are in.\nReference: \nPayload: {{\"ticket\": \"OPS-{i}\"}}\n{outcome}")
 }
 
 const LOREM: &str = "The build runs the unit tests first, then the integration suite against a scratch database, and only then packages the desktop app. ";
