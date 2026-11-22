@@ -40,3 +40,17 @@ def test_a_command_only_under_input_cmd_after_a_cd_is_answered():
         answers = settle(service, [item(activity, "1"), item(bash("ls -la /var/tmp"), "2")])
     assert [answer["id"] for answer in answers] == ["1", "2"]
     assert all(answer["status"] == "ready" for answer in answers)
+
+
+def test_an_exact_part_carrying_the_whole_call_gets_its_cd_once():
+    """The cd a part ran in is put in front of its command for the template lookup; a part that
+    carries the whole call already has it, and had it twice."""
+    for activity in (bash("cd /var/tmp/work && ls -la"),
+                     {"name": "Bash", "input": {"cmd": "cd /var/tmp/work && ls -la"}},
+                     bash("cd '/var/tmp/my work' ; ls -la")):
+        [part] = shapes.split(normalize_activity(activity))
+        part.activity = normalize_activity(activity)
+        command = part.template_activity()["command"]
+        assert command.count("cd ") == 1, command
+    [part] = shapes.split(normalize_activity(bash("cd /var/tmp/work && ls -la")))
+    assert part.template_activity()["command"] == "cd /var/tmp/work && ls -la"   # a shaped part: as before
