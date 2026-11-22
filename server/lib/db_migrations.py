@@ -313,6 +313,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v136(con)
         if version < 137:
             _migrate_to_v137(con)
+        if version < 138:
+            _migrate_to_v138(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1135,6 +1137,16 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v138(con: sqlite3.Connection) -> None:
+    """An artifact's form submissions by the index (issue 673): every row of an answered
+    render_spec button form names its button from its earliest submission, and the get and
+    the export read the same; without the index each read scanned the whole table and sorted.
+    Created if missing and a no-op on rerun; older code ignores the index, so a rollback needs
+    no down-step."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_form_submission_artifact"
+                " ON form_submissions(artifact_id, created_at, submission_id)")
 
 
 def _migrate_to_v137(con: sqlite3.Connection) -> None:
