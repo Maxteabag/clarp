@@ -343,7 +343,7 @@ fn not_a_tool(provider: &str) -> String {
 /// Gives a message to the agent the router found for it: a send like any other, said to be
 /// for that agent, as the message came in. A held message goes as it came in then, under
 /// its own id.
-async fn give(app: &App, give: &Give) -> Done {
+async fn give(app: &App, give: &Give) -> (Done, Option<ApiError>) {
     let came = give.came.as_ref();
     let kept = came.and_then(|came| serde_json::from_str::<SendRequest>(&came.kept).ok());
     let mut request = kept.unwrap_or_default();
@@ -361,14 +361,22 @@ async fn give(app: &App, give: &Give) -> Done {
         ..request
     };
     match edge::send_message(app, request).await {
-        Ok(sent) => Done::Given {
-            session: sent.session,
-            backend: sent.dispatch,
-        },
-        Err(refused) => Done::NotGiven {
-            status: refused.status().as_u16(),
-            error: refused.message().to_string(),
-        },
+        Ok(sent) => (
+            Done::Given {
+                session: sent.session,
+                backend: sent.dispatch,
+            },
+            None,
+        ),
+        Err(refused) => {
+            let done = Done::NotGiven {
+                status: refused.status().as_u16(),
+                error: refused.message().to_string(),
+            };
+            let moved = refused.status() == StatusCode::CONFLICT
+                && refused.message() == clarp_kernel::agent_moves::MOVED;
+            (done, moved.then_some(refused))
+        }
     }
 }
 
@@ -440,11 +448,11 @@ async fn start(app: &App, start: &Start) -> Done {
 
 /// Does what a decision asks of the Host, in its order. Answers what came of the one thing
 /// that can fail in a way the router keeps: a message given, or an agent started.
-async fn carry_out(app: &App, effects: &[Effect]) -> Done {
-    let mut done = Done::Fine;
+async fn carry_out(app: &App, effects: &[Effect]) -> (Done, Option<ApiError>) {
+    let mut result = (Done::Fine, None);
     for effect in effects {
         match effect {
-            Effect::Give(message) => done = give(app, message).await,
+            Effect::Give(message) => result = give(app, message).await,
             Effect::Say(words) => say(app, words).await,
             Effect::Repeat { session, or } => {
                 let directory = app.fleet.directory();
@@ -468,10 +476,10 @@ async fn carry_out(app: &App, effects: &[Effect]) -> Done {
                     let _ = agent.agent.stop("user".to_string()).await;
                 }
             }
-            Effect::Start(agent) => done = start(app, agent).await,
+            Effect::Start(agent) => result = (start(app, agent).await, None),
         }
     }
-    done
+    result
 }
 
 // ---- a message's way ---------------------------------------------------------------------------
@@ -564,15 +572,15 @@ pub(crate) async fn route(
     };
     let began = Instant::now();
     let begun = desk.step(app, &agents, |book, around| book.begin(&message, around));
-    let outcome = match begun.await? {
+    let (outcome, moved) = match begun.await? {
         Begun::NotMine => return Ok(not_mine()),
-        Begun::Answered(outcome) => outcome,
+        Begun::Answered(outcome) => (outcome, None),
         Begun::Again(again) => {
-            let done = give(app, &again.give).await;
+            let (done, moved) = give(app, &again.give).await;
             let kept = desk.step(app, &agents, |book, around| {
                 book.given_again(&again, done, around)
             });
-            kept.await?
+            (kept.await?, moved)
         }
         Begun::Ask(mut routing) => {
             let first = ask(app, &routing, "initial").await;
@@ -598,7 +606,7 @@ pub(crate) async fn route(
                 next = answered.await?;
             }
             match next {
-                Next::Answered(outcome) => *outcome,
+                Next::Answered(outcome) => (*outcome, None),
                 Next::AskAgain | Next::Decided => {
                     let latency = i64::try_from(began.elapsed().as_millis()).unwrap_or(i64::MAX);
                     let hold_as = ids::uuid();
@@ -606,7 +614,7 @@ pub(crate) async fn route(
                         book.apply(&routing, &hold_as, around)
                     });
                     let plan = planned.await?;
-                    let done = carry_out(app, &plan.effects).await;
+                    let (done, moved) = carry_out(app, &plan.effects).await;
                     let finished = desk.step(app, &agents, |book, around| {
                         book.finish(&routing, plan, done, latency, around)
                     });
@@ -616,13 +624,17 @@ pub(crate) async fn route(
                     if let Some(words) = &outcome.say {
                         say(app, words).await;
                     }
-                    outcome
+                    (outcome, moved)
                 }
             }
         }
     };
     if let Some(told) = &outcome.told {
         app.hub.publish(told.clone(), app.clock.now_ms());
+    }
+    // Admission already supplied the mark of the recipient it refused.
+    if let Some(refused) = moved {
+        return Err(refused);
     }
     if outcome.action == flow::FALLBACK && !asked_for {
         // The router had nothing to say: the message goes where it was said to.

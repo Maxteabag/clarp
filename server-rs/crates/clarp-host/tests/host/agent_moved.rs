@@ -34,6 +34,52 @@ fn refused(mark: &Value) -> (u16, Value) {
 }
 
 #[test]
+fn the_model_router_returns_the_moved_recipients_mark() {
+    let place = Place::new("orchestrator-moved");
+    let (codex, _, asked) = routing_model(
+        &place,
+        &json!([["verify", {
+            "kind": "agent_message", "target_session": "mover",
+            "confidence": 0.95, "addressing": true,
+        }]]),
+    );
+    let host = place.start_in(
+        ADMIN,
+        &[],
+        &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())],
+    );
+    let speaker = host.new_agent("Speaker");
+    let mover = host.new_agent("Mover");
+    let (status, mark) = change(&host, &mover, target());
+    assert_eq!(status, 200);
+    let expected = refused(&mark["moved"]);
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/orchestrator/settings",
+            Some(&json!({
+                "enabled": true, "provider": "codex", "fallback_only": false,
+            }))
+        )
+        .0,
+        200
+    );
+    let answer = host.ask(
+        "POST",
+        "/send",
+        Some(&json!({
+            "session": speaker, "text": "Ask Mover to verify the build",
+            "hands_free": true, "client_msg_id": "routed-moved",
+        })),
+    );
+    assert!(!std::fs::read_to_string(asked).unwrap().is_empty());
+    assert_eq!(answer, expected);
+    assert!(host.conversation(&mover).is_empty());
+    let settings = host.get("/orchestrator/settings");
+    assert_eq!(settings["recent_decisions"][0]["final_action"], "error");
+}
+
+#[test]
 fn agent_moved_fences_turn_entry_and_releases_the_waiting_queue_in_order_on_return() {
     let place = Place::new("moved-queue");
     let host = place.start_with_token(ADMIN);
