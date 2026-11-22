@@ -83,7 +83,11 @@ function pathOf(input) {
 
 function sameOrigin(input) {
   try {
-    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    // A string, a URL object or a Request; anything else is not known to be this Host's.
+    const url = typeof input === 'string' ? input
+      : input instanceof URL ? input.href
+      : input && typeof input.url === 'string' ? input.url : null;
+    if (url === null) return false;
     return new URL(url, window.location.href).origin === window.location.origin;
   } catch (_) {
     return false;
