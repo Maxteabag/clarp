@@ -1519,6 +1519,11 @@
   {"kind": "level", "header": "desktop/1 contract=2", "v1": null, "v2": {"desktop": 2}, "level": 0},
   {"kind": "level", "header": "android/1058 contract=40", "v1": null, "v2": null, "level": 0},
   {"kind": "level", "header": "android/1058 contract=41", "v1": null, "v2": null, "level": 1},
-  {"kind": "level", "header": "android/1058 contract=41", "v1": null, "v2": {"android": 41}, "level": 2}
+  {"kind": "level", "header": "android/1058 contract=41", "v1": null, "v2": {"android": 41}, "level": 2},
+  {"kind": "level", "header": "android/1058 contract=42", "v1": null, "v2": null, "level": 2},
+  {"kind": "level", "header": "android/1058 contract=42", "v1": null, "v2": {"android": 43}, "level": 1},
+  {"kind": "level", "header": "android/1058 contract=42", "v1": null, "v2": {"android": 0}, "level": 1},
+  {"kind": "level", "header": "android/1058 contract=42", "v1": {"android": 0}, "v2": null, "level": 0},
+  {"kind": "level", "header": "Android/1058 contract=42", "v1": null, "v2": null, "level": 0}
  ]
 }

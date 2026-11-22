@@ -829,6 +829,11 @@ def form_v2(rs, identity, refusal):
             ('android/1058 contract=40', None, None),
             ('android/1058 contract=41', None, None),
             ('android/1058 contract=41', None, {'android': 41}),
+            ('android/1058 contract=42', None, None),
+            ('android/1058 contract=42', None, {'android': 43}),
+            ('android/1058 contract=42', None, {'android': 0}),
+            ('android/1058 contract=42', {'android': 0}, None),
+            ('Android/1058 contract=42', None, None),
     ]:
         out.append({'kind': 'level', 'header': header, 'v1': v1, 'v2': v2,
                     'level': identity.render_spec_level(header, v1, v2)})
