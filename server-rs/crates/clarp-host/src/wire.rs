@@ -175,6 +175,11 @@ pub fn dispatched(
         "audience": coordination::USER,
     });
     with.tell(&mut told);
+    if with.audience() == coordination::AGENTS {
+        // A live dispatch names the prompt's place before the client reads the log row.
+        told["view"] = json!(clarp_kernel::chat_view::View::Session);
+        told["origin"] = json!(live.origin.name());
+    }
     told
 }
 

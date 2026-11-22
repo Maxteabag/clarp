@@ -328,6 +328,136 @@ fn answered(host: &Host, session: &str, trace: &Value) -> bool {
     replied && host.state(session) == "done"
 }
 
+#[test]
+fn conversation_view_hides_self_prompts_and_replies_but_shows_user_notes() {
+    let place = Place::new("self-prompt-view");
+    let (tokens, release, holds) = stand_in(&place);
+    let host = start_host(&place, &[]);
+    host.post(
+        "/agents",
+        json!({"name":"Oak", "session":"oak", "backend":"claude"}),
+    );
+    let ids = ids_of(&host);
+    let oak_id = ids["oak"].as_str();
+    let heard = host.listen();
+    wait_for("the event stream to subscribe", || {
+        !heard.lock().unwrap().is_empty()
+    });
+    let path = "/log?session=oak&view=conversation";
+    let token = || std::fs::read_to_string(tokens.join("oak")).unwrap_or_default();
+    for (prompt, from, note) in [
+        ("Check my work", Some("oak"), None),
+        (
+            "Check the reminder",
+            None,
+            Some("The check needs your attention."),
+        ),
+    ] {
+        std::fs::write(holds.join("oak"), "").unwrap();
+        let before = token();
+        // The timer fires this command without the turn token that scheduled it.
+        let mut args = vec!["clarp-admin", "prompt", "--to", "oak", "--text", prompt];
+        if let Some(from) = from {
+            args.extend(["--from", from]);
+        } else {
+            args.push("--scheduled-prompt");
+        }
+        let (code, text, error) = tool(&host, &place.root, None, &args);
+        assert_eq!(code, 0, "{error}");
+        let sent: Value = serde_json::from_str(&text).unwrap();
+        let trace = &sent["trace_id"];
+        let origin = if from.is_some() {
+            "agent"
+        } else {
+            "automation"
+        };
+        let mut dispatch = None;
+        wait_for("the housekeeping dispatch on the stream", || {
+            dispatch = heard
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|event| {
+                    event["type"] == "agent-state"
+                        && event["kind"] == "thinking"
+                        && event["session"] == "oak"
+                        && event["trace_id"] == *trace
+                })
+                .cloned();
+            dispatch.is_some()
+        });
+        wait_for("the housekeeping turn to begin", || {
+            let now = token();
+            !now.is_empty() && now != before
+        });
+        if let Some(text) = note {
+            let turn = token();
+            let (status, answer) = asked(
+                &host,
+                "/agent-notes",
+                &[("X-Clarp-Turn", &turn)],
+                &json!({"session":"oak", "text":text, "note_id":"reminder-note"}),
+            );
+            assert_eq!(status, 200, "{answer}");
+        }
+        std::fs::write(release.join("oak"), "").unwrap();
+        wait_for("the housekeeping turn to settle", || {
+            answered(&host, "oak", &sent["trace_id"])
+        });
+        let dispatch = dispatch.unwrap();
+        assert_eq!(dispatch["view"], "session", "{dispatch}");
+        assert_eq!(dispatch["origin"], origin, "{dispatch}");
+        assert_eq!(dispatch["audience"], "agents", "{dispatch}");
+        if from.is_some() {
+            assert_eq!(dispatch["sender_agent_id"], oak_id, "{dispatch}");
+        } else {
+            assert!(dispatch.get("sender_agent_id").is_none(), "{dispatch}");
+        }
+        let session = host.get("/log?session=oak&view=session");
+        let rows = session["turns"].as_array().unwrap();
+        let prompt_row = rows
+            .iter()
+            .find(|row| row["trace_id"] == *trace && row["role"] == "user" && row["text"] == prompt)
+            .unwrap();
+        let reply = rows
+            .iter()
+            .find(|row| {
+                row["trace_id"] == *trace
+                    && row["role"] == "assistant"
+                    && row["kind"] != "note"
+                    && row.get("turn").is_some()
+            })
+            .unwrap();
+        assert_eq!(prompt_row["origin"], origin, "{prompt_row}");
+        assert_eq!(
+            prompt_row["sender_session"],
+            from.unwrap_or(""),
+            "{prompt_row}"
+        );
+        if from.is_some() {
+            assert_eq!(prompt_row["sender_agent_id"], oak_id, "{prompt_row}");
+        } else {
+            assert_eq!(prompt_row["sender_agent_id"], "", "{prompt_row}");
+        }
+        for row in [prompt_row, reply] {
+            assert_eq!(row["audience"], "agents", "{row}");
+            assert_eq!(row["view"], "session", "{row}");
+        }
+        let conversation = host.get(path);
+        let shown = conversation["turns"].as_array().unwrap();
+        match note {
+            Some(text) => {
+                assert_eq!(shown.len(), 1, "{shown:?}");
+                assert_eq!(shown[0]["text"], text);
+                assert_eq!(shown[0]["kind"], "note");
+                assert_eq!(shown[0]["audience"], "user");
+                assert_eq!(shown[0]["view"], "conversation");
+            }
+            None => assert!(shown.is_empty(), "{shown:?}"),
+        }
+    }
+}
+
 fn dispatched(heard: &Mutex<Vec<Value>>, session: &str, client_msg_id: &str) -> Value {
     let mut dispatched = None;
     wait_for("the send's dispatch on the event stream", || {

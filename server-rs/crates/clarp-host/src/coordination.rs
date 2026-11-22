@@ -32,6 +32,9 @@ pub struct Made {
     /// A fixed sender authorized by the Host itself. Never accepted from an HTTP request.
     #[serde(skip)]
     pub internal_sender: Option<&'static str>,
+    /// The local prompt tool or scheduler is delivering housekeeping.
+    #[serde(skip)]
+    pub housekeeping: bool,
     /// The caller named the send's trace itself (else the Host names one).
     pub trace_named: bool,
 }
@@ -85,6 +88,7 @@ pub(crate) async fn made(
         trace_named,
         owner_token,
         internal_sender: None,
+        housekeeping: false,
     })
 }
 

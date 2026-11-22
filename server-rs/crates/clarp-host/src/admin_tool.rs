@@ -68,6 +68,8 @@ fn not_here(what: &str) -> ToolAnswer {
     )
 }
 
+const PROMPT_TIMER: &str = "--scheduled-prompt";
+
 /// `clarp-admin prompt`: a message to an agent of this Host, from an agent (`--from`) or
 /// from something that runs by itself (`--origin`).
 pub(crate) async fn prompt(
@@ -79,7 +81,7 @@ pub(crate) async fn prompt(
     let valued = [
         "--to", "--from", "--text", "--delay", "--origin", "--server",
     ];
-    let parsed = match parse(args, &valued, &[], &[]) {
+    let parsed = match parse(args, &valued, &[PROMPT_TIMER], &[]) {
         Ok(parsed) => parsed,
         Err(why) => return usage(&why),
     };
@@ -211,7 +213,14 @@ pub(crate) async fn prompt(
         .get(crate::turn_identity::TURN_ENV)
         .map(String::as_str);
     let sent = match crate::coordination::made(app, token, false, false, owner_token).await {
-        Ok(made) => edge::send_from(app, request, &made).await,
+        Ok(mut made) => {
+            made.housekeeping = if from.is_some() {
+                waits_for_resume
+            } else {
+                parsed.flags.contains(PROMPT_TIMER)
+            };
+            edge::send_from(app, request, &made).await
+        }
         Err(failed) => Err(failed),
     };
     match sent {
@@ -290,6 +299,13 @@ async fn schedule_prompt(
         args.push("--".into());
         args.push(executable.into());
         args.extend(["prompt", "--to", to, "--text", text].map(OsString::from));
+        if ["--from", "--server"]
+            .into_iter()
+            .all(|name| parsed.option(name).is_none_or(str::is_empty))
+        {
+            // The timer re-enters the tool without the original call's provenance.
+            args.push(PROMPT_TIMER.into());
+        }
         for name in ["--from", "--origin", "--server"] {
             if let Some(value) = parsed.option(name).filter(|value| !value.is_empty()) {
                 args.extend([name, value].map(OsString::from));

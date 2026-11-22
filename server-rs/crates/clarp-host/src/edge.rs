@@ -3075,6 +3075,18 @@ pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResp
     .await
 }
 
+/// Delivers a due schedule, keeping the prompt and reply in Session view.
+pub(crate) async fn send_scheduled_prompt(
+    app: &App,
+    request: SendRequest,
+) -> Result<SendResponse, ApiError> {
+    let made = crate::coordination::Made {
+        housekeeping: true,
+        ..Default::default()
+    };
+    send_as(app, request, true, None, &made, None).await
+}
+
 async fn send_as(
     app: &App,
     request: SendRequest,
@@ -3255,16 +3267,14 @@ async fn send_as(
     } else {
         coordination::origin(request.origin.as_deref(), &principal, made.peer)
     };
-    // Another agent addressing this one: its turn is marked so, with that agent (none for an
-    // agent of a peer Host). Decided from the origin as it was claimed and who made it, before
-    // this Host maps the origin to its own kinds: the user's word never is, whatever sender it
-    // names (`coordination::is_coordination`).
-    let coordination = coordination::is_coordination(
+    // The local prompt tool and scheduler mark their housekeeping before it gets here.
+    // A shared origin name or sender identity alone does not identify a reminder.
+    let coordination = (coordination::is_coordination(
         &member.record.agent_id,
         Some(&named),
         Some(&principal.sender_agent_id),
-    )
-    .then(|| principal.sender_agent_id.clone());
+    ) || made.housekeeping)
+        .then(|| principal.sender_agent_id.clone());
     if named == "heartbeat" && app.config.heartbeats_disabled {
         // A Host whose heartbeats are off takes none from outside either: the Python Host's
         // words for it.

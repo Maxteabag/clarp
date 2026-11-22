@@ -146,7 +146,7 @@ impl Desk {
                 origin: Some("automation".to_string()),
                 ..SendRequest::default()
             };
-            if let Err(refused) = edge::send_own(app, request).await {
+            if let Err(refused) = edge::send_scheduled_prompt(app, request).await {
                 eprintln!(
                     "clarp-host: a scheduled prompt for {} was not sent: {}",
                     member.record.session,

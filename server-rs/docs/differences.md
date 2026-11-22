@@ -133,6 +133,16 @@ after the event that starts golf, repeating the paused state, depth 2 and
 revision 6. Rust emits the start event with that state once. The ten observed
 differences are registered in `conformance/intended.txt` from run 45051582445.
 
+**Self-prompts and reminders in Conversation view.** The Rust Host gives
+the agents' audience to a local `clarp-admin prompt` from an agent to itself
+and to reminders delivered by its scheduler or local prompt timer. These
+prompts and their final replies stay in Session view. A dispatch for the
+agents sends the prompt's origin and Session tag on the event stream. A
+tell-user note is visible in Conversation, and a user's steer opens the
+existing audience split. Python's issue 702 implementation already made the prompt itself
+Session-only. It excluded an agent addressing itself from coordination, so
+the final reply of that turn could still appear in Conversation.
+
 Each has its id in `../conformance/intended.txt`. The id is a hash of the place and both values:
 it covers that exact difference and nothing else.
 
