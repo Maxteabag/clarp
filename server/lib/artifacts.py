@@ -27,7 +27,7 @@ _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 # minimum needed for the native client to offer the type's defining interaction.
 # Existing rows created before this validation remain readable.
 _REQUIRED_FIELDS = {
-    "render_spec": ("catalog", "catalog_version", "version", "spec", "submit", "answer_schema"),
+    "render_spec": ("catalog", "catalog_version", "version", "spec", "answer_schema"),  # submit: v1 only
     "document": ("content",),
     "countdown": ("target_at", "time_zone"),
     "html_form": ("content", "version", "answer_schema"),

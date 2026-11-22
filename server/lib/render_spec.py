@@ -293,8 +293,9 @@ def _object(value, path, allowed, required=(), *, unknown="unknown_key"):
         raise Refusal("missing_key", _path(path, key))
 
 
-def _id(name):
-    return isinstance(name, str) and _named(name)
+def _id(name, ident):
+    """An identifier by the form's own catalog rule (``ident``, that catalog's compiled pattern)."""
+    return isinstance(name, str) and ident.fullmatch(name) is not None
 
 
 def _fits(value, rule):
@@ -307,18 +308,18 @@ def _fits(value, rule):
     return not isinstance(value, str) or rule.get("minLength", 0) <= len(value) <= rule.get("maxLength", len(value))
 
 
-def _schema(schema):
+def _schema(schema, ident):
     path = "/answer_schema"
     _object(schema, path, ("type", "properties", "required"), ("type", "properties"), unknown="schema_keyword")
     props, required = schema["properties"], schema.get("required", [])
     if schema["type"] != "object" or not isinstance(props, dict):
         raise Refusal("schema_shape", path)
-    if (not isinstance(required, list) or any(not _id(k) or k not in props for k in required)
+    if (not isinstance(required, list) or any(not _id(k, ident) or k not in props for k in required)
             or len(set(required)) != len(required)):
         raise Refusal("schema_shape", path + "/required")
     for key in sorted(props, key=_order):
         p = _path(path + "/properties", key)
-        if not _id(key) or key == "on":
+        if not _id(key, ident) or key == "on":
             raise Refusal("schema_shape", p)
         rule = props[key]
         _object(rule, p, ("type", "enum", "minLength", "maxLength"), unknown="schema_keyword")
@@ -411,7 +412,7 @@ def _binds(match, rule):
     return rule.get("type") == match
 
 
-def _check_chart(props, pp, buttons):
+def _check_chart(props, pp, buttons, ident):
     """What a chart's schema cannot say, in this order: a pie's one series, the total, then per
     series in order the bar and pie point counts, then per point in order the x kind (one kind for
     the whole chart), x unique within the series, numeric x strictly increasing, a pie's y >= 0."""
@@ -444,11 +445,11 @@ def _check_chart(props, pp, buttons):
                 raise Refusal("chart_pie", f"{ptp}/{j}/y")
 
 
-def _check_table(props, pp, buttons):
+def _check_table(props, pp, buttons, ident):
     """Column keys are identifiers, unique; at most 1000 cells; a row names column keys only."""
     keys = []
     for i, column in enumerate(props["columns"]):
-        if not _id(column["key"]) or column["key"] in keys:
+        if not _id(column["key"], ident) or column["key"] in keys:
             raise Refusal("prop", f"{pp}/columns/{i}/key")
         keys.append(column["key"])
     rows = props["rows"]
@@ -460,10 +461,10 @@ def _check_table(props, pp, buttons):
                 raise Refusal("unknown_key", _path(f"{pp}/rows/{i}", key))
 
 
-def _check_button(props, pp, buttons):
+def _check_button(props, pp, buttons, ident):
     """A button's action is an identifier, unique among the form's buttons (in element order)."""
     action = props["action"]
-    if not _id(action):
+    if not _id(action, ident):
         raise Refusal("prop", pp + "/action")
     if action in buttons:
         raise Refusal("button_action_duplicate", pp + "/action")
@@ -474,20 +475,20 @@ def _check_button(props, pp, buttons):
 _CHECKS = {"chart": _check_chart, "table": _check_table, "button": _check_button}
 
 
-def _elements(spec, schema, known):
-    """Every element against the catalog ``known``; the button actions in element order and the
-    state keys bound, each with its binding's pointer."""
+def _elements(spec, schema, known, id_rule):
+    """Every element against the catalog ``known`` (identifiers by its pattern ``id_rule``); the
+    button actions in element order and the state keys bound, each with its binding's pointer."""
     nodes, root = spec["elements"], spec["root"]
     path = "/spec/elements"
     components, shapes = known["components"], known["expression_shapes"]
     if not isinstance(nodes, dict) or not 1 <= len(nodes) <= 200:
         raise Refusal("element_count", path)
-    if not _id(root) or root not in nodes:
+    if not _id(root, id_rule) or root not in nodes:
         raise Refusal("element_id", "/spec/root")
     bound, fields, buttons = {}, schema["properties"], []
     for ident in sorted(nodes, key=_order):
         p = _path(path, ident)
-        if not _id(ident):          # "on" is refused by reject_on() first (R74)
+        if not _id(ident, id_rule):  # "on" is refused by reject_on() first (R74)
             raise Refusal("element_id", p)
         node = nodes[ident]
         _object(node, p, ("type", "props", "children"), ("type", "props"))
@@ -499,7 +500,7 @@ def _elements(spec, schema, known):
         if not isinstance(children, list) or (children and not component["children"]):
             raise Refusal("element_tree", p + "/children")
         for i, child in enumerate(children):
-            if not _id(child) or child not in nodes:
+            if not _id(child, id_rule) or child not in nodes:
                 raise Refusal("element_id", _path(p + "/children", i))
         props, rules, pp = node["props"], component["props"], p + "/props"
         declared = rules.get("properties", {})
@@ -529,7 +530,7 @@ def _elements(spec, schema, known):
                                                      for o in options] != expected:
                     raise Refusal("expression", pp + "/options")
         for check in component.get("checks", ()):
-            _CHECKS[check](props, pp, buttons)
+            _CHECKS[check](props, pp, buttons, id_rule)
     seen = set()
     pending = [(root, 1, frozenset())]
     while pending:
@@ -579,7 +580,8 @@ def validate(payload):
     order; its submit is optional at the start and settled last: refused beside a button, missing
     without one."""
     version = version_of(payload)
-    known = catalog(version).data
+    form_catalog = catalog(version)
+    known = form_catalog.data
     fields = ("version", "catalog", "catalog_version", "spec", "submit", "answer_schema")
     _object(payload, "", fields, fields if version == 1 else [f for f in fields if f != "submit"])
     if len(canonical(payload)) > 131072:
@@ -599,8 +601,8 @@ def validate(payload):
     if len(canonical(spec["state"])) > 4096:
         raise Refusal("state_size", "/spec/state")
     schema = payload["answer_schema"]
-    _schema(schema)
-    buttons, bound = _elements(spec, schema, known)
+    _schema(schema, form_catalog.ident)
+    buttons, bound = _elements(spec, schema, known, form_catalog.ident)
     if buttons:
         _button_rules(schema, buttons, bound)
     _state(spec["state"], schema, "/spec/state", submitted=False)
@@ -612,7 +614,7 @@ def validate(payload):
         raise Refusal("missing_key", "/submit")
     submit = payload["submit"]
     _object(submit, "/submit", ("intent", "label"), ("intent", "label"))
-    if not _id(submit["intent"]):
+    if not _id(submit["intent"], form_catalog.ident):
         raise Refusal("submit_intent", "/submit/intent")
     if not isinstance(submit["label"], str) or not 1 <= len(submit["label"]) <= 40:
         raise Refusal("submit_label", "/submit/label")
