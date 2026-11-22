@@ -1549,8 +1549,14 @@ impl Actor {
         if let Some((turn, message_seq)) = noting {
             actor.turn_notes = (turn.0, actor.notes_since(turn, message_seq)?);
         }
+        // The fork is taken up before the agent's own turn is rejoined: a turn of the user's
+        // that was held for the fork's turn (never launched) is held again, not started
+        // beside it.
+        actor.fork_take_up(&mut out, now_ms)?;
         if let Some(mut recovered) = actor.recover_takeover(now_ms)? {
             recovered.changed.speech |= out.changed.speech;
+            recovered.actions.splice(0..0, out.actions);
+            actor.fork_restore(&mut recovered, now_ms)?;
             return Ok((actor, recovered));
         }
         let live = match actor.recorder.agent().live() {
@@ -1616,7 +1622,7 @@ impl Actor {
             out.changed.queue |= settled.changed.queue;
             out.changed.conversation |= settled.changed.conversation;
         }
-        // A fork that ran on while the Host was away is followed again.
+        // What the fork had waiting goes on, now that the agent's own turn is where it was.
         actor.fork_restore(&mut out, now_ms)?;
         Ok((actor, out))
     }

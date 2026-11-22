@@ -56,10 +56,31 @@ const SHORT: usize = 600;
 pub const BRIEF: &str = "<system-reminder>\nYou are a short-lived fork of your own session. \
 Your main session is busy with a turn for other agents; the user wrote to you meanwhile, and \
 you answer them now, here, as yourself. Keep it short. You may read files and state, tell the \
-user with clarp-admin tell-user, and relay work to other agents with clarp-admin prompt. Do not \
-start helpers, background jobs, builds, installs or long work, and do not edit files: the Host \
-refuses those tools in a fork. If something needs them, say so: your main session is told what \
-was said and done here before its next turn, and takes it up then.\n</system-reminder>";
+user with clarp-admin tell-user, and relay work to other agents with clarp-admin prompt. The \
+Host refuses you file edits, helpers, background jobs and new agents. Do not start builds, \
+installs or other long work either. If something needs them, say so: your main session is told \
+what was said and done here before its next turn, and takes it up then.\n</system-reminder>";
+
+/// The tools of Claude Code that change files. A fork's are refused by a hook of its own: two
+/// sessions editing one working tree is what a fork must never do. A hook, and not a list of
+/// tools the tool is not given (`--disallowedTools`): that list changes the request, and the
+/// fork would read its whole conversation again without the provider's cache, the opposite of
+/// answering at once (`skills/clarp-status-fork`).
+pub const EDIT_TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit";
+
+/// The settings a fork's tool is started with on top of the agent's own: a hook that refuses
+/// every tool of [`EDIT_TOOLS`] (exit 2 tells Claude Code why, and the tool does not run). The
+/// Host merges its own hooks into the same settings.
+pub fn edit_guard() -> serde_json::Value {
+    json!({"hooks": {"PreToolUse": [{
+        "matcher": EDIT_TOOLS,
+        "hooks": [{
+            "type": "command",
+            "command": "echo 'A conversation fork may not edit files. Say what is to change: the main session is told.' >&2; exit 2",
+            "timeout": 3,
+        }],
+    }]}})
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -312,11 +333,16 @@ impl Actor {
             let Some(turn) = row.turn_number else {
                 continue;
             };
+            // A turn the fork answered has its key only where the agent ever had a fork: its
+            // record is written before any such key and never taken away. An agent without
+            // one is asked nothing.
             if let std::collections::hash_map::Entry::Vacant(slot) = forked.entry(turn) {
-                let session = match self.recorder.log().find(&turn_key(turn))? {
-                    Some(item) => serde_json::from_slice::<String>(&item.body).ok(),
+                let session = match self.fork.record.as_ref() {
+                    Some(_) => self.recorder.log().find(&turn_key(turn))?,
                     None => None,
                 };
+                let session =
+                    session.and_then(|item| serde_json::from_slice::<String>(&item.body).ok());
                 slot.insert(session);
             }
             row.session = match &forked[&turn] {
@@ -505,6 +531,9 @@ impl Actor {
                 record.session.clone(),
             ]);
         }
+        launch
+            .args
+            .extend(["--settings".to_owned(), edit_guard().to_string()]);
         let stdin_file = self.profile.stdin_path_of(turn, FORK_ATTEMPT);
         write_whole(&stdin_file, &launch.stdin)?;
         record.asked[index].stage = Stage::Running;
@@ -1209,7 +1238,7 @@ impl Actor {
 
     /// Takes the fork up as the log has it, when the actor is opened: a turn of it that ran
     /// on is read up to where the log is and followed again.
-    pub(super) fn fork_restore(
+    pub(super) fn fork_take_up(
         &mut self,
         out: &mut Outputs,
         now_ms: i64,
@@ -1286,7 +1315,19 @@ impl Actor {
                 socket: self.fork_socket(turn),
             });
         }
+        Ok(())
+    }
+
+    /// Once the agent's own turn is where it was: what the agent's turn gave back while the
+    /// Host was away is the fork's no more, and the fork's next message, or the turn of the
+    /// user's that waited for it, goes on.
+    pub(super) fn fork_restore(
+        &mut self,
+        out: &mut Outputs,
+        now_ms: i64,
+    ) -> Result<(), ActorError> {
         self.fork_reconcile(out, now_ms)?;
-        self.fork_next(out, now_ms)
+        self.fork_next(out, now_ms)?;
+        self.fork_resume(out, now_ms)
     }
 }

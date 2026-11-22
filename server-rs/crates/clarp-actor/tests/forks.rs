@@ -39,6 +39,8 @@ struct World {
     hold_next: bool,
     /// The launches that were held.
     held: Vec<u64>,
+    /// The arguments of each launch of the agent's own turns, in order.
+    launched: Vec<Vec<String>>,
 }
 
 impl World {
@@ -76,6 +78,7 @@ impl World {
             stopped: Vec::new(),
             hold_next: false,
             held: Vec::new(),
+            launched: Vec::new(),
         }
     }
 
@@ -105,6 +108,7 @@ impl World {
                         self.held.push(order.turn.0);
                     }
                     Action::Launch(order) => {
+                        self.launched.push(order.args.clone());
                         self.launch(&order);
                         let now = self.tick();
                         asked.push(actor.spool_changed(now).unwrap());
@@ -799,4 +803,82 @@ fn a_fork_followed_again_after_a_restart_still_closes_its_open_call() {
         clarp_kernel::conversation::ToolStatus::Interrupted
     );
     assert!(reopened > began);
+}
+
+#[test]
+fn a_turn_held_for_the_fork_stays_held_across_a_restart_and_opens_with_the_note() {
+    let mut world = World::new("held-restart");
+    let mut actor = world.open();
+    busy_for_an_agent(&mut world, &mut actor);
+    assert!(world.user(&mut actor, "u-1", "Are you there?"));
+    let fork = world.fork(2);
+    world.answers(&fork, "f1", "Looking.");
+    world.hint(&mut actor);
+    let main = world.main(1);
+    world.answers(&main, "m1", "Done.");
+    world.ends(&main, "Done.");
+    world.hint(&mut actor);
+    let now = world.tick();
+    let (_, out) = actor
+        .send(&message("u-2", "And the plan?"), Admission::Queue, now)
+        .unwrap();
+    world.carry_out(&mut actor, out);
+    assert!(!world.took.contains(&world.main(3)));
+
+    // The Host starts again while the fork still answers: the held turn is held again.
+    drop(actor);
+    let mut actor = world.open();
+    assert!(world.followed.contains(&(2, FORK_ATTEMPT)));
+    assert!(!world.took.contains(&world.main(3)), "{:?}", world.took);
+
+    world.answers(&fork, "f2", "Here now.");
+    world.ends(&fork, "Here now.");
+    world.hint(&mut actor);
+    assert!(world.took.contains(&world.main(3)));
+    let opened = world.stdin(3, 1);
+    assert!(opened.contains("While you were busy"), "{opened}");
+    assert!(opened.contains("Here now.") && opened.contains("And the plan?"));
+}
+
+#[test]
+fn only_the_forks_tool_is_refused_file_edits() {
+    let mut world = World::new("edit-guard");
+    let mut actor = world.open();
+    busy_for_an_agent(&mut world, &mut actor);
+    assert!(world.user(&mut actor, "u-1", "Fix the typo"));
+    let settings = arg_after(&world.forks[0], "--settings").expect("the fork's settings");
+    let guard: serde_json::Value = serde_json::from_str(settings).unwrap();
+    let entry = &guard["hooks"]["PreToolUse"][0];
+    assert_eq!(entry["matcher"], clarp_actor::fork::EDIT_TOOLS);
+    for tool in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
+        assert!(
+            clarp_actor::fork::EDIT_TOOLS
+                .split('|')
+                .any(|named| named == tool)
+        );
+    }
+    assert!(
+        entry["hooks"][0]["command"]
+            .as_str()
+            .is_some_and(|command| command.ends_with("exit 2"))
+    );
+    let stdin = world.stdin(2, FORK_ATTEMPT);
+    assert!(stdin.contains("refuses you file edits"), "{stdin}");
+
+    // The agent's own turn is started as ever.
+    let main = world.main(1);
+    world.answers(&main, "m1", "Done.");
+    world.ends(&main, "Done.");
+    world.hint(&mut actor);
+    world.agent_writes(&mut actor, "u-a2");
+    let own = world
+        .launched
+        .last()
+        .expect("the agent's own turn was launched")
+        .clone();
+    assert!(
+        !own.iter()
+            .any(|arg| arg.contains(clarp_actor::fork::EDIT_TOOLS)),
+        "{own:?}"
+    );
 }

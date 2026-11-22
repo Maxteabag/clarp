@@ -615,7 +615,8 @@ conversation; the next message goes to the same fork, and the agent's own next t
 a note of what the fork was asked, said and did. `/live` shows the fork's turn, with the agent's
 own as `main_turn`; `POST /stop` stops the fork's turn first (`target: "main"` for the agent's
 own). A fork's tools run with `CLARP_FORK=1`: `clarp-agent-bg job-upsert|job-restart`,
-`clarp-admin agent create|fork` and `clarp-sub-agent start|fork` refuse it (exit 77). Known limit, accepted
+`clarp-admin agent create|fork` and `clarp-sub-agent start|fork` refuse it (exit 77), and
+a hook of its own refuses Claude Code's file edits (`Edit`, `Write`, `MultiEdit`, `NotebookEdit`). Known limit, accepted
 for issue 718: a fork's first action can repeat in the window between that action and the
 read of it, when the agent's own turn ends in that window or the Host is away; the message is
 then answered once, by the agent's own session.

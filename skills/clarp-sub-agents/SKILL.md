@@ -266,7 +266,8 @@ running turn. Decision cards and artifacts are shown as always.
   through a short-lived fork of its session while its own session works for
   other agents. Such a turn runs with `CLARP_FORK=1`, and `start` and `fork`
   refuse it (exit 77), as do `clarp-agent-bg job-upsert` and `clarp-admin
-  agent create|fork`. Answer, read, relay with `clarp-admin prompt`, and say
+  agent create|fork`; file edits (Edit, Write, MultiEdit, NotebookEdit) are
+  refused by a hook. Answer, read, relay with `clarp-admin prompt`, and say
   what needs a helper: the agent's own session is told before its next turn.
 - Systemd mode is Linux only. On macOS `start` exits with status 3; use
   `launchctl submit` with the same command until a launchd path exists.

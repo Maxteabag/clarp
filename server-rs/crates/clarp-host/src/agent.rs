@@ -4237,7 +4237,8 @@ impl Worker {
             .launcher
             .claude_settings(&self.setup.record.agent_id)
         {
-            order.args.extend(["--settings".into(), settings]);
+            // Into the fork's own settings, which carry its edit guard: one `--settings`.
+            crate::conversation_forks::add_settings(&mut order.args, &settings);
         }
         if let Some(token) = self
             .setup
