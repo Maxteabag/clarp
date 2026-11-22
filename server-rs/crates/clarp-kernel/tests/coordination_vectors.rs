@@ -174,7 +174,7 @@ fn a_sends_origin_and_sender_are_the_python_hosts_from_what_it_claims_and_who_ma
             });
         match ours {
             Ok(principal) => {
-                let origin = coordination::origin(text(&case["origin"]), &principal, peer, &target);
+                let origin = coordination::origin(text(&case["origin"]), &principal, peer);
                 let coordination =
                     is_coordination(&target, Some(&origin), Some(&principal.sender_agent_id));
                 let ours = json!({
@@ -194,7 +194,7 @@ fn a_sends_origin_and_sender_are_the_python_hosts_from_what_it_claims_and_who_ma
             }
         }
     }
-    assert_eq!((cases.len(), made, refused, marked), (2240, 1536, 704, 948));
+    assert_eq!((cases.len(), made, refused, marked), (2240, 1536, 704, 932));
 }
 
 #[test]

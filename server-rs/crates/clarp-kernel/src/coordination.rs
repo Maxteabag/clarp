@@ -191,14 +191,9 @@ pub fn principal(
 
 /// A send's origin from the one it claims and who made it. A word no client may name is the
 /// user's, or an agent's when there is a sender. Neither an agent's own turn nor a peer Host
-/// speaks the user's word, and a resolved sender cannot speak as the user without a token
-/// either. A sender naming itself as the target under a user origin wakes itself.
-pub fn origin(
-    claimed: Option<&str>,
-    principal: &Principal,
-    peer: bool,
-    target_agent_id: &str,
-) -> String {
+/// speaks the user's word: its message is an agent's. An agent waking itself from its own
+/// turn with the user's word is automation (and not coordination).
+pub fn origin(claimed: Option<&str>, principal: &Principal, peer: bool) -> String {
     let claimed = python::strip(claimed.unwrap_or("")).to_lowercase();
     let origin = if CLIENT_SETTABLE_ORIGINS.contains(&claimed.as_str()) {
         claimed
@@ -212,12 +207,6 @@ pub fn origin(
         "agent".to_string()
     } else if user_word && principal.self_prompt {
         "automation".to_string()
-    } else if user_word && !principal.sender_agent_id.is_empty() {
-        if principal.sender_agent_id == target_agent_id {
-            "automation".to_string()
-        } else {
-            "agent".to_string()
-        }
     } else {
         origin
     }

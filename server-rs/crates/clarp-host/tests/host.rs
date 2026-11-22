@@ -5245,8 +5245,7 @@ fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
         let mine = format!("u-{id}");
         let mut row = Value::Null;
         wait_for("the answer", || {
-            let log = host.get(&format!("/log?session={second}&coordination=show"));
-            let rows = log["turns"].as_array().unwrap();
+            let rows = host.turns(&second);
             let Some(at) = rows.iter().position(|row| row["id"] == mine) else {
                 return false;
             };
@@ -5272,14 +5271,8 @@ fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
             (&json!("agent"), &json!(first)),
             "{claimed}"
         );
-        assert_eq!(row["audience"], "agents", "{claimed}");
         assert_eq!(focus(), first_id, "{claimed}");
     }
-    let row = send(json!({ "origin": "user", "sender": second }), "self-wake");
-    assert_eq!(row["origin"], "automation");
-    assert_eq!(row["sender_session"], second);
-    assert_eq!(row["audience"], "user");
-    assert_eq!(focus(), first_id);
     // What runs by itself does not move it either.
     let row = send(json!({ "origin": "schedule" }), "by-itself");
     assert_eq!(row["origin"], "schedule");
