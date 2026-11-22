@@ -12,6 +12,9 @@
   import { statusFor } from '../stores/app.svelte.js';
   import { toolActivityFor } from '../stores/chat-choices.svelte.js';
   import LiveTurn from './live/LiveTurn.svelte';
+  import RenderSpecCard from './RenderSpecCard.svelte';
+  import { withArtifacts } from '@core/render-spec.js';
+  import { renderSpecsFor } from '../stores/artifacts.svelte.js';
   import HiddenRun from './HiddenRun.svelte';
   import { hidesLiveTurn } from '@core/coordination.js';
   import {
@@ -58,7 +61,16 @@
     ? liveInsertIndex(merged.map(e => e.item), liveState.turn) : -1);
   // These deriveds are composeTimeline (@core/live-timeline.js) in steps,
   // split so a live event that changes nothing structural rebuilds nothing.
-  let timeline = $derived(withLiveEntry(merged, liveAt));
+  let liveTimeline = $derived(withLiveEntry(merged, liveAt));
+  // Native forms (render_spec, issue 428) sit where they were published; always drawn, whatever
+  // the coordination setting (docs/protocol.md). A form older than the loaded page waits for it.
+  let forms = $derived(renderSpecsFor(session));
+  let timeline = $derived(forms.length
+    ? withArtifacts(liveTimeline, forms, {
+        complete: !conv.hasMore,
+        liveStartMs: liveAt >= 0 ? Number(liveState.turn && liveState.turn.started_at_ms) || null : null,
+      })
+    : liveTimeline);
   // The quiet chat: each settled /log turn's work behind one row (static/lib/history-fold.js).
   // The turn live items show is theirs, already left out of `turns`.
   // busy is its own derived boolean: a status tick that leaves it unchanged does not refold.
@@ -220,6 +232,8 @@
       {#if fold.byRow.has(entry.item.id)}<WorkRow fold={fold.byRow.get(entry.item.id)} />{/if}
     {:else if entry.type === 'live'}
       <LiveTurn {liveState} items={liveItems} explanations={live.explanations.enabled} />
+    {:else if entry.type === 'artifact'}
+      <RenderSpecCard row={entry.item} />
     {:else}
       <div class="turn activity {entry.item.cls}" class:thinking-live={entry.item.thinkingLive}>
         <span class="activity-log-dot"></span>
