@@ -1,0 +1,262 @@
+{
+  "full": [
+    {
+      "id": "interleaved-cells",
+      "tools": [],
+      "display_cells": [
+        {
+          "id": "bad-before",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "lines": []
+        },
+        {
+          "id": "representative",
+          "kind": "command",
+          "title": "Bash",
+          "status": "ok",
+          "lines": [
+            {
+              "text": "0"
+            },
+            {
+              "text": "1"
+            }
+          ]
+        },
+        {
+          "id": "bad-after",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "lines": [
+            {
+              "text": "0"
+            },
+            {
+              "text": "1"
+            },
+            {
+              "text": "2"
+            },
+            {
+              "text": "3"
+            }
+          ]
+        },
+        {
+          "id": "folded-empty",
+          "kind": "command",
+          "title": "Bash",
+          "status": "ok",
+          "lines": []
+        },
+        {
+          "id": "folded-detail",
+          "kind": "command",
+          "title": "Bash",
+          "status": "ok",
+          "lines": [
+            {
+              "text": "0"
+            },
+            {
+              "text": "1"
+            },
+            {
+              "text": "2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "all-cells-failed",
+      "tools": [],
+      "display_cells": [
+        {
+          "id": "bad-1",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "lines": []
+        },
+        {
+          "id": "bad-2",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "lines": [
+            {
+              "text": "0"
+            },
+            {
+              "text": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interleaved-tools",
+      "tools": [
+        {
+          "id": "ok-tool",
+          "name": "Bash",
+          "summary": "ok-tool",
+          "status": "ok",
+          "result": "full"
+        },
+        {
+          "id": "bad-tool-1",
+          "name": "Bash",
+          "summary": "bad-tool-1",
+          "status": "error",
+          "result": "full"
+        },
+        {
+          "id": "later-tool",
+          "name": "Bash",
+          "summary": "later-tool",
+          "status": "ok",
+          "result": "full"
+        },
+        {
+          "id": "bad-tool-2",
+          "name": "Bash",
+          "summary": "bad-tool-2",
+          "status": "error",
+          "result": "full"
+        }
+      ],
+      "display_cells": []
+    },
+    {
+      "id": "first-tool-failed",
+      "tools": [
+        {
+          "id": "bad-first",
+          "name": "Bash",
+          "summary": "bad-first",
+          "status": "error",
+          "result": "full"
+        },
+        {
+          "id": "ok-after",
+          "name": "Bash",
+          "summary": "ok-after",
+          "status": "ok",
+          "result": "full"
+        },
+        {
+          "id": "bad-last",
+          "name": "Bash",
+          "summary": "bad-last",
+          "status": "error",
+          "result": "full"
+        }
+      ],
+      "display_cells": []
+    }
+  ],
+  "compact": [
+    {
+      "id": "interleaved-cells",
+      "tools": [],
+      "display_cells": [
+        {
+          "id": "bad-before",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "detail_count": 0
+        },
+        {
+          "id": "representative",
+          "kind": "command",
+          "title": "Bash",
+          "status": "ok",
+          "detail_count": 6
+        },
+        {
+          "id": "bad-after",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "detail_count": 4
+        }
+      ],
+      "tool_details_available": true,
+      "activity_count": 5
+    },
+    {
+      "id": "all-cells-failed",
+      "tools": [],
+      "display_cells": [
+        {
+          "id": "bad-1",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "detail_count": 0
+        },
+        {
+          "id": "bad-2",
+          "kind": "command",
+          "title": "Bash",
+          "status": "error",
+          "detail_count": 2
+        }
+      ],
+      "tool_details_available": true,
+      "activity_count": 2
+    },
+    {
+      "id": "interleaved-tools",
+      "tools": [
+        {
+          "id": "ok-tool",
+          "name": "Bash",
+          "summary": "ok-tool",
+          "status": "ok"
+        },
+        {
+          "id": "bad-tool-1",
+          "name": "Bash",
+          "summary": "bad-tool-1",
+          "status": "error"
+        },
+        {
+          "id": "bad-tool-2",
+          "name": "Bash",
+          "summary": "bad-tool-2",
+          "status": "error"
+        }
+      ],
+      "display_cells": [],
+      "tool_details_available": true,
+      "activity_count": 4
+    },
+    {
+      "id": "first-tool-failed",
+      "tools": [
+        {
+          "id": "bad-first",
+          "name": "Bash",
+          "summary": "bad-first",
+          "status": "error"
+        },
+        {
+          "id": "bad-last",
+          "name": "Bash",
+          "summary": "bad-last",
+          "status": "error"
+        }
+      ],
+      "display_cells": [],
+      "tool_details_available": true,
+      "activity_count": 3
+    }
+  ]
+}
