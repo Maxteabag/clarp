@@ -7,6 +7,9 @@
   import { currentTurnItems, liveInsertIndex, takenOverTurns } from '@core/live-present.js';
   import { withLiveEntry } from '@core/live-timeline.js';
   import Turn from './Turn.svelte';
+  import WorkRow from './WorkRow.svelte';
+  import { foldTurns } from '@core/history-fold.js';
+  import { statusFor } from '../stores/app.svelte.js';
   import LiveTurn from './live/LiveTurn.svelte';
   import { conversation, loadOlder, placeholderFor } from '../stores/conversations.svelte.js';
   import { live, liveFor, liveRequested, openLive, watchSession } from '../stores/live.svelte.js';
@@ -47,6 +50,9 @@
   // These deriveds are composeTimeline (@core/live-timeline.js) in steps,
   // split so a live event that changes nothing structural rebuilds nothing.
   let timeline = $derived(withLiveEntry(merged, liveAt));
+  // The quiet chat: each settled /log turn's work behind one row (static/lib/history-fold.js).
+  // The turn live items show is theirs, already left out of `turns`.
+  let fold = $derived(foldTurns(turns, { mode: prefs.toolActivity, busy: !!statusFor(session).busy }));
 
   // Keep this chat's live items coming while it is on screen.
   $effect(() => {
@@ -173,7 +179,6 @@
 <div
   id={active ? 'historyBody' : undefined}
   class="history-body"
-  class:hide-tools={prefs.hideTools}
   bind:this={bodyEl}
   onscroll={onScroll}
   onwheel={releaseAnchor}
@@ -189,7 +194,9 @@
        patches only rows whose revision moved. -->
   {#each timeline as entry (entry.key)}
     {#if entry.type === 'turn'}
-      <Turn turn={entry.item} />
+      {#if fold.byRow.has('before:' + entry.item.id)}<WorkRow fold={fold.byRow.get('before:' + entry.item.id)} />{/if}
+      <Turn turn={entry.item} strip={fold.stripped.get(entry.item.id)} />
+      {#if fold.byRow.has(entry.item.id)}<WorkRow fold={fold.byRow.get(entry.item.id)} />{/if}
     {:else if entry.type === 'live'}
       <LiveTurn {liveState} items={liveItems} explanations={live.explanations.enabled} />
     {:else}
