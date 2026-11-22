@@ -1492,7 +1492,7 @@ struct Worker {
     passed: Vec<Status>,
     /// The launch of an attempt that waits for an account: carried out when the pool of the
     /// tool's accounts takes the turn up.
-    held: Option<ShimOrder>,
+    held: Option<Box<ShimOrder>>,
     /// Socket requests from this agent are written in the order it accepted them.
     followups: Option<mpsc::Sender<(PathBuf, String)>>,
     /// The turn the pool was last told of.
@@ -1500,7 +1500,7 @@ struct Worker {
     /// How many terminals are open on the agent's own tool.
     terminals: usize,
     /// The launch of an attempt that waits for those terminals to be closed.
-    behind_terminal: Option<ShimOrder>,
+    behind_terminal: Option<Box<ShimOrder>>,
     /// Its user let the mailbox go a moment ago: the clients are told so in a word of its
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
@@ -2104,6 +2104,7 @@ impl Worker {
             .engine
             .open(&self.setup.profile.dir, self.setup.codecs.clone())
             .map_err(|error| error.to_string())?;
+        let telling = self.setup.telling.clone();
         let (mut actor, mut out) = Actor::open_with_teams(
             self.setup.profile.clone(),
             self.setup.backend.clone(),
@@ -2113,6 +2114,7 @@ impl Worker {
                 .teams
                 .clone()
                 .map(|teams| teams as Arc<dyn clarp_actor::teams::Runtime>),
+            Some(Box::new(move |backend| telling.launch_defaults(backend))),
         )
         .map_err(|error| error.to_string())?;
         self.setup

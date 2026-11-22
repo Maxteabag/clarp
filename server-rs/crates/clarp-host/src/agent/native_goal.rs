@@ -31,7 +31,7 @@ pub(super) struct Native {
     /// Set only by a lane snapshot after the previous provider claim ended.
     idle_lane: bool,
     observed_lane: Option<(u32, u64)>,
-    after_retire: Option<ShimOrder>,
+    after_retire: Option<Box<ShimOrder>>,
 }
 
 impl Native {
@@ -207,7 +207,7 @@ impl Worker {
         Ok(())
     }
 
-    pub(super) fn launch_on_native_lane(&mut self, order: ShimOrder) {
+    pub(super) fn launch_on_native_lane(&mut self, order: Box<ShimOrder>) {
         self.native.idle_lane = false;
         if self.native.retiring {
             self.native.after_retire = Some(order);
@@ -249,8 +249,8 @@ impl Worker {
             None if private => (Submission::Recover, None),
             None => (
                 Submission::Prompt {
-                    model: self.setup.profile.model.clone(),
-                    effort: self.setup.profile.effort.clone(),
+                    model: order.model.clone(),
+                    effort: order.effort.clone(),
                 },
                 None,
             ),
@@ -276,7 +276,7 @@ impl Worker {
                 if !launch_permitted(&tx, turn, attempt) {
                     return Err(std::io::Error::other("the actor stopped this attempt"));
                 }
-                lane.submit(order, submission)
+                lane.submit(*order, submission)
             })();
             // An absent reply cannot prove that Codex did not take the attempt.
             // The supervisor creates the spool before handing the request over.

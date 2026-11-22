@@ -184,6 +184,15 @@ fn opening_message(message: &Message) -> bool {
             .is_some_and(|t| t.starts_with("callopen-"))
 }
 
+/// The model and effort defaults available at the moment an attempt is built.
+#[derive(Default)]
+pub struct LaunchPreferences {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+pub type LaunchDefaults = Box<dyn Fn(&str) -> LaunchPreferences + Send + Sync>;
+
 /// Everything a shim needs to take a turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShimOrder {
@@ -199,6 +208,8 @@ pub struct ShimOrder {
     pub stdin_file: PathBuf,
     pub prompt_as_file: bool,
     pub named_session: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
     pub cwd: PathBuf,
     pub program: String,
     pub args: Vec<String>,
@@ -212,7 +223,7 @@ pub enum Action {
     /// Start a shim for this turn, and then follow it. If the shim cannot be started, say
     /// [`Actor::launch_failed`]. Starting a shim for a turn that already has one is harmless:
     /// the second finds the spool there and leaves.
-    Launch(ShimOrder),
+    Launch(Box<ShimOrder>),
     /// Follow the shim that has this turn: say [`Actor::spool_changed`] whenever it hints that
     /// its spool has grown, and [`Actor::shim_gone`] when nothing answers at its socket any more.
     Follow {
@@ -600,8 +611,8 @@ struct Written {
 struct LiveTurn {
     steering: steering::State,
     opening: bool,
-    /// Managed primary pinned to this admission, including after recovery.
-    managed_model: Option<String>,
+    /// The model chosen for this attempt, including a pinned managed primary.
+    launch_model: Option<String>,
     turn: TurnId,
     /// The message this turn answers, and the id its app gave it.
     message_id: String,
@@ -721,6 +732,7 @@ const STOPPED_FOR_AN_ACCOUNT: &str =
     "usage limit reached: the account was out, and the turn was stopped to wait for another";
 
 pub struct Actor {
+    launch_defaults: Option<LaunchDefaults>,
     teams: Option<Arc<dyn teams::Runtime>>,
     team_effect_through: Seq,
     profile: Profile,
@@ -1355,7 +1367,7 @@ impl Actor {
         log: Box<dyn AgentLog>,
         now_ms: i64,
     ) -> Result<(Self, Outputs), ActorError> {
-        Self::open_with_teams(profile, backend, log, now_ms, None)
+        Self::open_with_teams(profile, backend, log, now_ms, None, None)
     }
 
     pub fn open_with_teams(
@@ -1364,6 +1376,7 @@ impl Actor {
         log: Box<dyn AgentLog>,
         now_ms: i64,
         teams: Option<Arc<dyn teams::Runtime>>,
+        launch_defaults: Option<LaunchDefaults>,
     ) -> Result<(Self, Outputs), ActorError> {
         let recorder = Recorder::open(log)?;
         let mut jobs = JobBook::new();
@@ -1440,6 +1453,7 @@ impl Actor {
         let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session);
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
+            launch_defaults,
             teams,
             team_effect_through: 0,
             delegation,
@@ -1525,7 +1539,7 @@ impl Actor {
             actor.live = Some(LiveTurn {
                 steering: steering::State::default(),
                 opening: opening_message(&message),
-                managed_model: message.managed_model.clone(),
+                launch_model: actor.launch_preferences(&message).model,
                 turn,
                 last_row: message.id.clone(),
                 // The attempt that comes reads from the log what the turn has said.
@@ -1730,10 +1744,35 @@ impl Actor {
     }
 
     pub fn turn_model(&self) -> Option<String> {
-        self.live
+        self.live.as_ref().map_or_else(
+            || self.profile.model.clone(),
+            |live| live.launch_model.clone(),
+        )
+    }
+
+    fn launch_preferences(&self, message: &Message) -> LaunchPreferences {
+        let model = message
+            .managed_model
             .as_ref()
-            .and_then(|live| live.managed_model.clone())
-            .or_else(|| self.profile.model.clone())
+            .or(self.profile.model.as_ref());
+        let effort = self.profile.effort.as_ref();
+        // A managed primary is already pinned and takes the agent's own effort.
+        let defaults = if message.managed_model.is_none() && (model.is_none() || effort.is_none()) {
+            self.launch_defaults
+                .as_ref()
+                .map_or_else(LaunchPreferences::default, |read| read(self.backend.id()))
+        } else {
+            LaunchPreferences::default()
+        };
+        let effort = effort
+            .cloned()
+            .or(defaults.effort)
+            .map(|effort| clarp_kernel::python::strip(&effort).to_lowercase())
+            .filter(|effort| self.backend.efforts().contains(&effort.as_str()));
+        LaunchPreferences {
+            model: model.cloned().or(defaults.model),
+            effort,
+        }
     }
 
     /// Sets which model the agent's next turn runs with, and how much effort. A turn that
@@ -4326,6 +4365,7 @@ impl Actor {
         // bare too: the lane sends no prompt, so it cannot deliver a team brief.
         let bare = message.origin == Origin::NativeGoal
             || matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION);
+        let preferences = self.launch_preferences(&message);
         let prompt = match recovering.filter(|_| !bare) {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
             None => message.text,
@@ -4414,11 +4454,8 @@ impl Actor {
             new_session: Some(new_session)
                 .filter(|name| backend_session.is_none() && !name.is_empty()),
             backend_session,
-            model: message
-                .managed_model
-                .clone()
-                .or_else(|| self.profile.model.clone()),
-            effort: self.profile.effort.clone(),
+            model: preferences.model.clone(),
+            effort: preferences.effort.clone(),
             identity: told.and_then(|told| told.identity.clone()),
             // How to speak is told to a turn whose answer is read aloud, and to no other.
             told: told.map(|told| told::Turn {
@@ -4471,7 +4508,7 @@ impl Actor {
                 message.trace_id.as_deref(),
             ),
             opening: opening.is_some(),
-            managed_model: message.managed_model.clone(),
+            launch_model: preferences.model.clone(),
             turn,
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
@@ -4507,7 +4544,7 @@ impl Actor {
             attempt,
             for_account: false,
         });
-        out.actions.push(Action::Launch(ShimOrder {
+        out.actions.push(Action::Launch(Box::new(ShimOrder {
             opening,
             turn,
             attempt,
@@ -4516,6 +4553,8 @@ impl Actor {
             stdin_file,
             prompt_as_file: launch.prompt_as_file,
             named_session,
+            model: preferences.model,
+            effort: preferences.effort,
             cwd: self.profile.cwd.clone(),
             before_stop: launch.before_stop,
             program: launch.program,
@@ -4525,7 +4564,7 @@ impl Actor {
                 .into_iter()
                 .chain(self.profile.tool_env.iter().cloned())
                 .collect(),
-        }));
+        })));
         Ok(())
     }
 
@@ -4734,7 +4773,12 @@ impl Actor {
         self.live = Some(LiveTurn {
             steering,
             opening: opening_message(&message),
-            managed_model: message.managed_model.clone(),
+            launch_model: message
+                .managed_model
+                .clone()
+                .or_else(|| self.profile.model.clone())
+                .or_else(|| model.clone())
+                .or_else(|| self.launch_preferences(&message).model),
             turn,
             client_id: message.told_id().to_string(),
             message_id: message.id,
@@ -5100,11 +5144,7 @@ impl Actor {
                 return Ok(());
             };
 
-            let model = live
-                .managed_model
-                .clone()
-                .or_else(|| self.profile.model.clone())
-                .unwrap_or_default();
+            let model = live.launch_model.clone().unwrap_or_default();
             let accounts = self.profile.accounts;
             let already_refused = self.recorder.agent().refused_live_binding();
             let mut batch = self.recorder.batch();

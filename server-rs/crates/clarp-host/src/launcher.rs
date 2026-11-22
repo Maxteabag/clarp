@@ -325,6 +325,8 @@ mod tests {
         ShimOrder {
             opening: None,
             named_session: None,
+            model: None,
+            effort: None,
             prompt_as_file: false,
             before_stop: None,
             turn: TurnId(7),
