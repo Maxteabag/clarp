@@ -138,13 +138,18 @@ def test_a_tail_that_wrote_rows_then_yielded_is_followed_by_a_tail(tmp_path, bac
     """The foreign commit touched nothing an import reads. The store holds the
     previous pair; the refused tail's rows stand above its mark. The next
     import restores the pair, its plan writes each of those rows again exactly
-    as it stands, and it tails, with both lanes' products equal."""
+    as it stands, and it tails, with both lanes' products equal. Only while the
+    process still knows why that tail was refused: after an eviction or a Host
+    start the reason is gone, and the import is full, as before."""
     with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
         ordinal = world.started(6)
         _refused_by(world, backend, ordinal, "settings_on_yield")
         world.grow(_turn(backend, ordinal + 1))
         code, changed = world.imported()
-        assert code == "tail_applied", (code, changed)
+        if world.state == "held":
+            assert code == "tail_applied", (code, changed)
+        else:
+            assert (code, changed) == ("full_carry_inputs_changed", ["row_transcript"])
 
 
 @SWITCH
@@ -152,13 +157,19 @@ def test_a_tail_that_wrote_rows_then_yielded_is_followed_by_a_tail(tmp_path, bac
 def test_a_row_the_plan_does_not_reproduce_still_forces_a_full_import(tmp_path, backend, switch):
     """Another writer edited a row the refused tail wrote: the transcript does
     not say it, so the tail's plan would write it again and it is not passed.
-    The import is full, as before this change."""
+    The import is full, as before this change. With the switch off the tail
+    gives the writer away before its first row, so the edit lands on a row the
+    tail then writes anyway: nothing stands that the plan does not reproduce,
+    and the next import tails (the lanes' products are compared first)."""
     with World(tmp_path, backend, _history(backend), settings=_settings(switch)) as world:
         ordinal = world.started(6)
         _refused_by(world, backend, ordinal, "tail_row_on_yield")
         world.grow(_turn(backend, ordinal + 1))
         code, changed = world.imported()
-        assert code.startswith("full"), (code, changed)
+        if switch or world.state != "held":
+            assert code.startswith("full"), (code, changed)
+        else:
+            assert code == "tail_applied", (code, changed)
 
 
 @SWITCH

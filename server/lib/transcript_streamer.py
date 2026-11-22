@@ -272,7 +272,29 @@ class TranscriptStreamer:
             self._dirty[agent_id] = intent
         return intent
 
-    def _submit(self, agent: dict, intent: Intent) -> bool:
+    def turn_ended(self, agent_id: str) -> bool:
+        """The agent's turn ended (its DONE row): import its transcript now.
+
+        A change seen while the turn ran waits out the agent's import window
+        (transcript_import_cache._BACKGROUND_MIN_INTERVAL), so a turn that ended
+        within that window of the last import kept the rows written while it ran:
+        its reply had no phase and no tools, and the agent's last completed
+        message was still the user's (R6, R12). The end of a turn is when its
+        transcript is whole, so that import goes first: urgent skips the window,
+        and takes the place of a change already waiting. False when the agent is
+        not bound or the import was refused (the change stays pending)."""
+        with self._dirty_lock:
+            backend_session_id = self._bound.get(agent_id)
+            generation = self._bind_generation.get(agent_id)
+        if not backend_session_id or generation is None:
+            return False
+        agent = agents_db.get_by_agent_id(agent_id)
+        if agent is None:
+            return False
+        intent = self._note_change(agent, backend_session_id, generation)
+        return intent is not None and self._submit(agent, intent, urgent=True)
+
+    def _submit(self, agent: dict, intent: Intent, *, urgent: bool = False) -> bool:
         """Queue the import and its post-import step on the import worker.
         False when refused; the intent stays pending either way."""
         agent_id = agent["agent_id"]
@@ -295,7 +317,8 @@ class TranscriptStreamer:
                 agent_id=agent_id, backend_session_id=intent.bsid)
             return transcript_import_cache.schedule_import(
                 latest, importer, owner=agent_id,
-                after=lambda: self._after_import(agent_id, intent.bsid, intent.gen, intent.seq))
+                after=lambda: self._after_import(agent_id, intent.bsid, intent.gen, intent.seq),
+                urgent=urgent)
         except Exception as e:
             log_exception("transcriptStreamerImportFail", e, detail=agent_id)
             return False

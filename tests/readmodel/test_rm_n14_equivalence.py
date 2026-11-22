@@ -843,7 +843,10 @@ def test_yield_fence_rejects_only_dirty_or_unverifiable_windows(tmp_path, backen
             with transcript.open("ab") as output:
                 output.write(harness.append_bytes(backend, 21))
             full.tick(2)
-            assert actual.tick(2)["apply_mode"] == ("full" if expected else "tail")
+            # After a yield whose connection changed, the frontier of before it is
+            # restored and the next tail passes that tail's rows, its plan writing
+            # each again as it stands; a failed fence read stays a full import.
+            assert actual.tick(2)["apply_mode"] == ("full" if expected and fault != "connection" else "tail")
             harness.assert_product_equal(reference, candidate)
             with transcript.open("ab") as output:
                 output.write(harness.append_bytes(backend, 22))

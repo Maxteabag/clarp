@@ -30,6 +30,11 @@ SAY = "say"
 LISTEN_FIRST = "listen_first"
 OPENING_MODES = (SAY, LISTEN_FIRST)
 OPENING_KEY = "agent_ring.opening."
+# One row per clip binding (R77): "<agent_id>:<trace_id>" -> ring_id, written at admission
+# and never overwritten, so a clip finds its opening with one keyed read (R78).
+CLIP_KEY = "agent_ring.opening_clip."
+# A retired opening is removed this long after it retired, once its call has ended (R78).
+RETIRED_KEEP_MS = 24 * 3_600_000
 CALL_OPEN = "call-open:"
 SILENCE_MS = 1250
 OPEN_STATES = frozenset({"pending", "listening", "speech_latched"})
@@ -669,6 +674,7 @@ def greeting(principal: str, *, token: Any, epoch: Any, client_msg_id: str, trac
                     op["state"] = "greeting"
                     op["greeting"] = {"client_msg_id": client_msg_id, "trace_id": trace_id,
                                       "admission": "pending", "at": now_ms()}
+                    _bind_clip(op, "greeting_reply", trace_id)   # admitted as the greeting (R77)
                     box["result"] = ("greeting", True)
                 box["dirty"] = True
     route, changed = box["result"]
@@ -759,6 +765,7 @@ def admit_initiative(ring_id: str) -> str:
             return "fenced"
         intent["state"] = "admitted"
         box["dirty"] = True
+        _bind_clip(op, "initiative", intent["trace_id"])
         if existing is not None:
             box["result"] = "adopted"
         else:
@@ -1084,22 +1091,42 @@ def _announce_opening(ring_id: str) -> None:
         log_exception("agentRingEmitFail", exc, f"ring={ring_id}")
 
 
-def _opening_for_trace(trace_id: str) -> tuple[dict, str] | None:
+def _clip_key(agent_id: str, trace_id: str) -> str:
+    return f"{CLIP_KEY}{agent_id}:{trace_id}"
+
+
+def _bind_clip(op: dict, kind: str, trace_id: str) -> None:
+    """Bind the clips of this opening's admitted turn to it (R77), in the caller's
+    transaction: by the admitted agent and its turn, kept in the opening's record, with
+    one index row for the keyed lookup. The first binding of an agent's trace keeps it: a
+    later message reusing the trace neither takes it nor takes it away."""
     if not trace_id:
+        return
+    op.setdefault("clip_bindings", {})[kind] = {"agent_id": op["agent_id"], "trace_id": trace_id}
+    key = _clip_key(op["agent_id"], trace_id)
+    if settings_store.get(key) is None:
+        settings_store.set_text(key, op["ring_id"])
+
+
+def _opening_for_clip(agent_id: str, trace_id: str) -> tuple[dict, str] | None:
+    """The opening a clip of ``agent_id``'s turn ``trace_id`` was bound to at admission,
+    and as what, with one keyed read; None for an ordinary clip (no binding)."""
+    if not agent_id or not trace_id:
         return None
-    for op in _openings():
-        intent = op.get("intent") or {}
-        if intent.get("trace_id") == trace_id:
-            return op, "initiative"
-        if (op.get("greeting") or {}).get("trace_id") == trace_id:
-            return op, "greeting_reply"
+    ring_id = settings_store.get(_clip_key(agent_id, trace_id))
+    op = opening_state(ring_id) if ring_id else None
+    if op is None:
+        return None
+    for kind, bound in (op.get("clip_bindings") or {}).items():
+        if bound == {"agent_id": agent_id, "trace_id": trace_id}:
+            return op, kind
     return None
 
 
-def opening_audio(trace_id: str) -> dict | None:
+def opening_audio(trace_id: str, agent_id: str = "") -> dict | None:
     """``{call_id, opening}`` for a clip of an opening turn, else None
-    (ordinary follow-ups are never tagged)."""
-    found = _opening_for_trace(str(trace_id or ""))
+    (ordinary follow-ups are never tagged). Bound by agent and turn (R77)."""
+    found = _opening_for_clip(str(agent_id or ""), str(trace_id or ""))
     if found is None:
         return None
     op, kind = found
@@ -1109,14 +1136,49 @@ def opening_audio(trace_id: str) -> dict | None:
                                                   "admission_id": admission_id}}
 
 
-def skip_opening_synthesis(trace_id: str) -> bool:
+def skip_opening_synthesis(trace_id: str, agent_id: str = "") -> bool:
     """Best effort: do not voice an opening clip whose output authority is
     gone (retired), or an initiative that was cancelled or that a greeting
-    overtook after it started. The phone's fence stays authoritative."""
-    found = _opening_for_trace(str(trace_id or ""))
+    overtook after it started. The phone's fence stays authoritative. A clip with
+    no binding (R77) is ordinary and never fenced."""
+    found = _opening_for_clip(str(agent_id or ""), str(trace_id or ""))
     if found is None:
         return False
     op, kind = found
     if op.get("retired"):
         return True
     return kind == "initiative" and (op["intent"]["state"] in ("cancelled", "unknown") or bool(op.get("late_greeting")))
+
+
+def purge_retired_openings(now: int | None = None) -> int:
+    """Remove retired openings whose call has ended, RETIRED_KEEP_MS after they retired,
+    with their clip index rows (R78). The owner of these rows; run with the recovery pass.
+    Returns how many were removed."""
+    from .group_calls import KEY as CALLS_KEY
+    now = now_ms() if now is None else now
+    removed = 0
+    for op in _openings():
+        retired = op.get("retired") or {}
+        if not retired or int(retired.get("at") or 0) > now - RETIRED_KEEP_MS:
+            continue
+        raw = settings_store.get(CALLS_KEY + str(op.get("principal") or ""))
+        calls = json.loads(raw).get("calls", []) if raw else []
+        if any(c.get("call_id") == op.get("call_id") and c.get("state") == "live" for c in calls):
+            continue                            # its call is still live: kept
+        with _opening_lock:
+            con = db.conn()
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                for bound in (op.get("clip_bindings") or {}).values():
+                    key = _clip_key(bound.get("agent_id") or "", bound.get("trace_id") or "")
+                    if settings_store.get(key) == op["ring_id"]:
+                        settings_store.delete(key)
+                settings_store.delete(OPENING_KEY + op["ring_id"])
+                con.execute("COMMIT")
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+        removed += 1
+    if removed:
+        log("agentRingOpeningsPurged", f"count={removed}")
+    return removed
