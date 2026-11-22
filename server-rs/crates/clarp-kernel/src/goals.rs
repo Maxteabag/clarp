@@ -487,12 +487,27 @@ pub fn item_key(
     format!("{plan_id}:{}", bounded_key(&clean))
 }
 
+fn starting_status(raw: &Map<String, Value>) -> Result<&str, Refused> {
+    let status = match raw.get("status") {
+        None | Some(Value::Null) => "pending",
+        Some(Value::String(status)) if ITEM_STATUSES.contains(&status.as_str()) => status,
+        Some(_) => return refuse("invalid task status"),
+    };
+    if matches!(status, "skipped" | "deferred" | "removed")
+        && stripped(raw.get("detail")).is_empty()
+    {
+        return refuse("omitted work requires a reason");
+    }
+    Ok(status)
+}
+
 fn new_item(
     plan_id: &str,
     item_id: String,
     parent_id: Option<String>,
     position: usize,
     raw: &Map<String, Value>,
+    status: &str,
     now: i64,
 ) -> Result<Item, Refused> {
     let title = stripped(raw.get("title"));
@@ -517,10 +532,10 @@ fn new_item(
         position: position as i64,
         title: clip(&title, 500),
         detail: clip(&plain(raw.get("detail")), 2_000),
-        status: "pending".to_string(),
+        status: status.to_string(),
         created_at: now,
-        started_at: None,
-        completed_at: None,
+        started_at: (status == "in_progress").then_some(now),
+        completed_at: TERMINAL_ITEM_STATUSES.contains(&status).then_some(now),
         active_ms: 0,
     })
 }
@@ -1277,6 +1292,7 @@ impl GoalBook {
                 None,
                 position,
                 raw,
+                starting_status(raw)?,
                 now,
             )?);
             let subtasks = raw.get("subtasks").filter(|given| is_true(given));
@@ -1303,6 +1319,7 @@ impl GoalBook {
                     parent,
                     child_position,
                     child,
+                    starting_status(child)?,
                     now,
                 )?);
             }
@@ -2112,7 +2129,7 @@ impl GoalBook {
                     let Some(existing) = plan.items.iter_mut().find(|item| item.item_id == key)
                     else {
                         plan.items
-                            .push(new_item(plan_id, key, None, position, raw, now)?);
+                            .push(new_item(plan_id, key, None, position, raw, "pending", now)?);
                         continue;
                     };
                     let title = clip(&stripped(raw.get("title")), 500);
@@ -2219,7 +2236,7 @@ impl GoalBook {
                 let empty = Map::new();
                 let raw = data.as_object().unwrap_or(&empty);
                 plan.items
-                    .push(new_item(plan_id, key, None, position, raw, now)?);
+                    .push(new_item(plan_id, key, None, position, raw, "pending", now)?);
             }
             _ => {
                 return Err(Refused(format!(
@@ -2632,6 +2649,64 @@ mod tests {
         Grown::By(vec![json!(4), json!(5)]).onto(&mut entries, &mut offset, 4);
         assert_eq!(entries, vec![json!(2), json!(3), json!(4), json!(5)]);
         assert_eq!(offset, 1);
+    }
+
+    #[test]
+    fn a_new_plan_keeps_the_given_statuses_of_steps_and_subtasks() {
+        let book = GoalBook::new();
+        let mut ids = counter();
+        let items = json!([
+            { "title": "Build", "status": "in_progress", "subtasks": [
+                { "title": "Prepare", "status": "completed" },
+                { "title": "Compile" }
+            ] },
+            { "title": "Release", "status": "blocked" }
+        ]);
+        let plan = book
+            .create(
+                VERA,
+                "build",
+                "Build",
+                &items,
+                None,
+                &mut world(1_000, &mut ids),
+            )
+            .unwrap()
+            .plan;
+        let state: Vec<_> = plan
+            .items
+            .iter()
+            .map(|item| (item.status.as_str(), item.started_at, item.completed_at))
+            .collect();
+        assert_eq!(
+            state,
+            [
+                ("in_progress", Some(1_000), None),
+                ("completed", None, Some(1_000)),
+                ("pending", None, None),
+                ("blocked", None, None),
+            ]
+        );
+        for (item, error) in [
+            (
+                json!({"title": "Step", "status": "unknown"}),
+                "invalid task status",
+            ),
+            (
+                json!({"title": "Step", "status": "skipped"}),
+                "omitted work requires a reason",
+            ),
+        ] {
+            let refused = book.create(
+                VERA,
+                "bad",
+                "Bad",
+                &json!([item]),
+                None,
+                &mut world(2_000, &mut ids),
+            );
+            assert_eq!(refused.unwrap_err().to_string(), error);
+        }
     }
 
     #[test]
