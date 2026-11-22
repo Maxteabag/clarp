@@ -1,4 +1,5 @@
 import { Palette, Focus, Look, ChatText } from "theme.slint";
+import { Modal } from "dialogs.slint";
 
 // One answer a decision or question offers.
 export struct ArtifactOption {
@@ -17,10 +18,69 @@ export struct CardHint {
     chosen: bool,
 }
 
-// One element of a native form (render_spec, catalog clarp.form v1) as the
-// card draws it. `kind` is the element's type as drawn: heading, text,
-// field, toggle, choice, divider or card (a card's title row). A type the
-// catalog adds later (a chart, a table, a button) is one more kind here and
+// A clarp.form v2 chart as the card draws it (form_chart.rs): each mark is
+// SVG path data in a fixed view box (a plot's 1000 by 200, a pie's 200
+// square) stretched to the plot; ticks, dots and legend colours are
+// fractions of it and palette indices.
+export struct FormChartMark {
+    commands: string,
+    color: int,
+    fill: bool,
+}
+export struct FormChartTick {
+    at: float,
+    text: string,
+}
+export struct FormChartDot {
+    x: float,
+    y: float,
+    color: int,
+}
+export struct FormChartKey {
+    label: string,
+    color: int,
+}
+export struct FormChart {
+    kind: string,
+    title: string,
+    marks: [FormChartMark],
+    dots: [FormChartDot],
+    x-ticks: [FormChartTick],
+    y-ticks: [FormChartTick],
+    keys: [FormChartKey],
+    x-label: string,
+    y-label: string,
+    summary: string,
+}
+
+// A clarp.form v2 table: columns (label, end-aligned, width in characters)
+// and rows of cells (flag: -1 none, 0 a dash for false, 1 a check for true).
+export struct FormTableColumn {
+    label: string,
+    end: bool,
+    chars: int,
+}
+export struct FormTableCell {
+    text: string,
+    flag: int,
+}
+export struct FormTableRow {
+    cells: [FormTableCell],
+    // What a screen reader says for the row.
+    words: string,
+}
+export struct FormTable {
+    title: string,
+    columns: [FormTableColumn],
+    rows: [FormTableRow],
+    // Every column's width in characters, added up.
+    chars: int,
+}
+
+// One element of a native form (render_spec, catalog clarp.form v1 and v2)
+// as the card draws it. `kind` is the element's type as drawn: heading,
+// text, field, toggle, choice, divider, card (a card's title row), chart,
+// table or button. A type a later catalog adds is one more kind here and
 // one more arm in FormLeafView; until then its form reads as needing a newer
 // app and the card stays plain.
 export struct FormLeaf {
@@ -42,6 +102,16 @@ export struct FormLeaf {
     required: bool,
     // Why a text cannot be sent yet ("At least 10 characters.").
     note: string,
+    chart: FormChart,
+    table: FormTable,
+    // A button: its style (primary, secondary or destructive), its question
+    // before sending ("" for none), whether it can be pressed now, and
+    // whether its answer is being sent. `key` is its action; `on` marks the
+    // button the answer chose.
+    style: string,
+    confirm: string,
+    enabled: bool,
+    busy: bool,
 }
 
 // One row of a form: an element, or a horizontal stack's elements side by
@@ -151,8 +221,9 @@ export struct ArtifactItem {
     // Its keys, shown as hints (the selected card's emphasised).
     hints: [CardHint],
     // render_spec: loading, form, newer, unreadable or failed ("" for
-    // another kind); the form's rows; Send's label, whether it may be sent
-    // now and is being sent; read-only once answered; the line above Send.
+    // another kind); the form's rows; Send's label ("" for a form whose
+    // buttons send it), whether it may be sent now and is being sent;
+    // read-only once answered; the line above Send.
     spec-state: string,
     spec-rows: [FormRow],
     spec-send: string,
@@ -205,6 +276,15 @@ export global ArtifactBridge {
     callback form-choose(string, string, string);
     callback form-send(string);
     callback form-retry(string);
+    // A form's button pressed: (card, action). One with a question asks it
+    // first (the window's form-confirm dialog, OK or Cancel; Escape and a
+    // click outside cancel): its words, OK's label and whether OK is
+    // destructive, and the answer.
+    callback form-press(string, string);
+    in property <string> confirm-text;
+    in property <string> confirm-ok;
+    in property <bool> confirm-destructive;
+    callback form-confirm-answer(bool);
     // A form card's rows by its id: one model for the card's life, read
     // through here so the rows' repeater depends on the id alone (a row
     // changed while the card's item is being replaced is still applied).
@@ -213,6 +293,23 @@ export global ArtifactBridge {
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
 export global ArtifactLook {
+    // A chart's colours in series order (a pie's in point order), as the
+    // iOS app's: blue, green, orange, purple, red, teal, yellow, pink,
+    // indigo, brown, mint, cyan.
+    public pure function chart-color(index: int) -> color {
+        if (index == 0) { return #0a84ff; }
+        if (index == 1) { return #30d158; }
+        if (index == 2) { return #ff9f0a; }
+        if (index == 3) { return #bf5af2; }
+        if (index == 4) { return #ff453a; }
+        if (index == 5) { return #40c8e0; }
+        if (index == 6) { return #ffd60a; }
+        if (index == 7) { return #ff375f; }
+        if (index == 8) { return #5e5ce6; }
+        if (index == 9) { return #ac8e68; }
+        if (index == 10) { return #66d4cf; }
+        return #64d2ff;
+    }
     public pure function tint(kind: string, failed: bool) -> color {
         if (failed) { return Palette.danger; }
         if (kind == "countdown" || kind == "plan" || kind == "release") { return Palette.success; }
@@ -675,6 +772,242 @@ component ProgressBody inherits VerticalLayout {
     }
 }
 
+// A clarp.form v2 chart (iOS RenderSpecChartView): its title, the plot
+// about 200px high with the y axis's labels beside it and x's under it,
+// and a legend for more than one series (a pie's names its points).
+component FormChartView inherits Rectangle {
+    in property <FormChart> chart;
+    property <length> axis: 52px * ChatText.scale;
+    property <length> plot-height: 200px;
+    accessible-role: image;
+    accessible-label: root.chart.summary;
+    VerticalLayout {
+        spacing: 6px;
+        if root.chart.title != "": Text {
+            text: root.chart.title;
+            color: Palette.text;
+            font-size: ChatText.label;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+        if root.chart.y-label != "" && root.chart.kind != "pie": Text { text: root.chart.y-label; color: Palette.muted; font-size: ChatText.note; }
+        if root.chart.kind != "pie": HorizontalLayout {
+            spacing: 4px;
+            Rectangle {
+                width: root.axis;
+                height: root.plot-height;
+                for tick in root.chart.y-ticks: Text {
+                    x: 0px;
+                    width: parent.width;
+                    y: tick.at * parent.height - self.height / 2;
+                    text: tick.text;
+                    color: Palette.muted;
+                    font-size: ChatText.caption;
+                    horizontal-alignment: right;
+                    overflow: elide;
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                height: root.plot-height;
+                for tick in root.chart.y-ticks: Rectangle {
+                    x: 0px;
+                    y: Math.min(tick.at * parent.height, parent.height - 1px);
+                    width: parent.width;
+                    height: 1px;
+                    background: Palette.rule;
+                }
+                for mark in root.chart.marks: Path {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 1000;
+                    viewbox-height: 200;
+                    fit: fill;
+                    commands: mark.commands;
+                    fill: mark.fill ? ArtifactLook.chart-color(mark.color) : transparent;
+                    stroke: mark.fill ? transparent : ArtifactLook.chart-color(mark.color);
+                    stroke-width: mark.fill ? 0px : 2px;
+                }
+                for dot in root.chart.dots: Rectangle {
+                    x: dot.x * parent.width - 3px;
+                    y: dot.y * parent.height - 3px;
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: ArtifactLook.chart-color(dot.color);
+                }
+            }
+        }
+        if root.chart.kind != "pie": Rectangle {
+            height: 16px * ChatText.scale;
+            for tick in root.chart.x-ticks: Text {
+                property <length> plot: parent.width - root.axis - 4px;
+                x: Math.max(0px, Math.min(parent.width - self.width, root.axis + 4px + tick.at * self.plot - self.width / 2));
+                y: 0px;
+                text: tick.text;
+                color: Palette.muted;
+                font-size: ChatText.caption;
+            }
+        }
+        if root.chart.x-label != "" && root.chart.kind != "pie": Text {
+            text: root.chart.x-label;
+            color: Palette.muted;
+            font-size: ChatText.note;
+            horizontal-alignment: center;
+        }
+        if root.chart.kind == "pie": HorizontalLayout {
+            spacing: 16px;
+            alignment: start;
+            Rectangle {
+                width: root.plot-height;
+                height: root.plot-height;
+                for mark in root.chart.marks: Path {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 200;
+                    viewbox-height: 200;
+                    fit: fill;
+                    commands: mark.commands;
+                    fill: ArtifactLook.chart-color(mark.color);
+                    stroke: Palette.window;
+                    stroke-width: 1px;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                for key in root.chart.keys: HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle { width: 10px; height: 10px; y: (parent.height - self.height) / 2; border-radius: 2px; background: ArtifactLook.chart-color(key.color); }
+                    Text { text: key.label; color: Palette.text; font-size: ChatText.note; overflow: elide; }
+                }
+            }
+        }
+        if root.chart.kind != "pie" && root.chart.keys.length > 0: HorizontalLayout {
+            spacing: 14px;
+            alignment: start;
+            for key in root.chart.keys: HorizontalLayout {
+                spacing: 6px;
+                Rectangle { width: 10px; height: 10px; y: (parent.height - self.height) / 2; border-radius: 2px; background: ArtifactLook.chart-color(key.color); }
+                Text { text: key.label; color: Palette.text; font-size: ChatText.note; overflow: elide; min-width: 0px; }
+            }
+        }
+    }
+}
+
+// A clarp.form v2 table: a header and one line per row, each column as wide
+// as its words (up to a limit) and sharing what is left over; a table wider
+// than the card scrolls sideways inside it.
+component FormTableView inherits VerticalLayout {
+    in property <FormTable> table;
+    property <length> char: 7px * ChatText.scale;
+    property <length> line: 22px * ChatText.scale;
+    property <length> gap: 12px;
+    property <length> wide: root.table.chars * root.char + (root.table.columns.length - 1) * root.gap;
+    spacing: 4px;
+    if root.table.title != "": Text {
+        text: root.table.title;
+        color: Palette.text;
+        font-size: ChatText.label;
+        font-weight: 600;
+        wrap: word-wrap;
+    }
+    flick := Flickable {
+        height: (root.table.rows.length + 1) * root.line;
+        viewport-width: Math.max(self.width, root.wide);
+        viewport-height: self.height;
+        accessible-role: table;
+        accessible-label: root.table.title;
+        VerticalLayout {
+            width: flick.viewport-width;
+            spacing: 0px;
+            HorizontalLayout {
+                height: root.line;
+                spacing: root.gap;
+                for column in root.table.columns: Text {
+                    min-width: column.chars * root.char;
+                    horizontal-stretch: column.chars;
+                    text: column.label;
+                    color: Palette.chrome-text;
+                    font-size: ChatText.note;
+                    font-weight: 600;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-alignment: column.end ? right : left;
+                }
+            }
+            for row[index] in root.table.rows: Rectangle {
+                height: root.line;
+                background: Math.mod(index, 2) == 0 ? Palette.rule.with-alpha(0.35) : transparent;
+                accessible-role: list-item;
+                accessible-label: row.words;
+                HorizontalLayout {
+                    spacing: root.gap;
+                    for cell[column] in row.cells: Text {
+                        min-width: root.table.columns[column].chars * root.char;
+                        horizontal-stretch: root.table.columns[column].chars;
+                        text: cell.text;
+                        color: cell.flag == 1 ? Palette.success : cell.flag == 0 ? Palette.faint : Palette.text;
+                        font-size: ChatText.note;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-alignment: root.table.columns[column].end ? right : left;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A clarp.form v2 button: pressed only by a click (never by Enter). It
+// waits for the required values; after one answer every button is off and
+// the chosen one keeps its colour with a check.
+component FormButtonView inherits Rectangle {
+    in property <string> card;
+    in property <FormLeaf> leaf;
+    property <bool> live: root.leaf.enabled && !root.leaf.on && !root.leaf.busy;
+    property <color> tone: root.leaf.style == "primary" ? Palette.accent : root.leaf.style == "destructive" ? Palette.danger : Palette.control;
+    property <bool> lit: root.leaf.enabled || root.leaf.on;
+    height: 28px * ChatText.scale;
+    min-width: label.preferred-width + 28px;
+    preferred-width: label.preferred-width + 28px;
+    border-radius: 6px;
+    background: !root.lit ? Palette.control.with-alpha(0.5)
+        : root.leaf.style == "secondary" ? (area.has-hover && root.live ? Palette.control.brighter(0.15) : Palette.control)
+        : (area.has-hover && root.live ? root.tone.brighter(0.15) : root.tone);
+    border-width: root.leaf.on ? 2px : 0px;
+    border-color: Palette.text;
+    accessible-role: button;
+    accessible-label: root.leaf.text;
+    accessible-description: root.leaf.on ? "Chosen" : "";
+    accessible-enabled: root.live;
+    accessible-action-default => { if (root.live) { ArtifactBridge.form-press(root.card, root.leaf.key); } }
+    label := Text {
+        width: parent.width;
+        height: parent.height;
+        text: (root.leaf.on ? "✓ " : "") + (root.leaf.busy ? "Sending…" : root.leaf.text);
+        color: !root.lit ? Palette.faint : root.leaf.style == "secondary" ? Palette.text : Palette.window;
+        font-size: ChatText.detail;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    area := TouchArea {
+        enabled: root.live;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { ArtifactBridge.form-press(root.card, root.leaf.key); }
+    }
+}
+
 // One element of a native form (iOS RenderSpecFormController's views), by
 // its kind.
 component FormLeafView inherits VerticalLayout {
@@ -682,6 +1015,8 @@ component FormLeafView inherits VerticalLayout {
     in property <FormLeaf> leaf;
     in property <bool> read-only;
     in property <bool> measuring;
+    // One of a row's cells (a horizontal stack's elements side by side).
+    in property <bool> side-by-side;
     spacing: 4px;
     if root.leaf.kind == "heading": Text {
         text: root.leaf.text;
@@ -802,6 +1137,56 @@ component FormLeafView inherits VerticalLayout {
             }
         }
     }
+    if root.leaf.kind == "chart": FormChartView { chart: root.leaf.chart; }
+    if root.leaf.kind == "table": FormTableView { table: root.leaf.table; }
+    // On its own a button is as wide as its label; side by side (cells)
+    // the buttons share the row.
+    if root.leaf.kind == "button" && !root.side-by-side: HorizontalLayout {
+        alignment: start;
+        FormButtonView { card: root.card; leaf: root.leaf; }
+    }
+    if root.leaf.kind == "button" && root.side-by-side: FormButtonView { card: root.card; leaf: root.leaf; }
+}
+
+// A button's question before its answer is sent (OK or Cancel). Escape and
+// a click outside cancel; Enter does nothing, as a button is pressed only by
+// a click.
+export component FormConfirmDialog inherits Modal {
+    card-width: 420px;
+    card-height: 150px;
+    dismissed => { ArtifactBridge.form-confirm-answer(false); }
+    VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+        Text { text: ArtifactBridge.confirm-text; color: Palette.text; font-size: 14px; wrap: word-wrap; vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Rectangle {
+                height: 28px;
+                width: cancel-label.preferred-width + 28px;
+                border-radius: 6px;
+                background: cancel-area.has-hover ? Palette.control.brighter(0.15) : Palette.sunken;
+                accessible-role: button;
+                accessible-label: "Cancel";
+                accessible-action-default => { ArtifactBridge.form-confirm-answer(false); }
+                cancel-label := Text { text: "Cancel"; color: Palette.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                cancel-area := TouchArea { mouse-cursor: pointer; clicked => { ArtifactBridge.form-confirm-answer(false); } }
+            }
+            Rectangle {
+                height: 28px;
+                width: ok-label.preferred-width + 28px;
+                border-radius: 6px;
+                property <color> tone: ArtifactBridge.confirm-destructive ? Palette.danger : Palette.accent;
+                background: ok-area.has-hover ? self.tone.brighter(0.15) : self.tone;
+                accessible-role: button;
+                accessible-label: ArtifactBridge.confirm-ok;
+                accessible-action-default => { ArtifactBridge.form-confirm-answer(true); }
+                ok-label := Text { text: ArtifactBridge.confirm-ok; color: Palette.window; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                ok-area := TouchArea { mouse-cursor: pointer; clicked => { ArtifactBridge.form-confirm-answer(true); } }
+            }
+        }
+    }
 }
 
 // A native form in its card (iOS RenderSpecFormController): its rows, then
@@ -847,6 +1232,7 @@ component FormBody inherits VerticalLayout {
                 }
                 for cell in row.cells: FormLeafView {
                     horizontal-stretch: 1;
+                    side-by-side: true;
                     card: root.artifact.id;
                     leaf: cell;
                     read-only: root.artifact.spec-read-only;
@@ -865,7 +1251,8 @@ component FormBody inherits VerticalLayout {
             wrap: word-wrap;
             vertical-alignment: center;
         }
-        if !root.artifact.spec-read-only: Rectangle {
+        // A form with buttons has no footer submit: each button sends it.
+        if !root.artifact.spec-read-only && root.artifact.spec-send != "": Rectangle {
             height: 28px * ChatText.scale;
             width: send-label.preferred-width + 28px;
             border-radius: 6px;

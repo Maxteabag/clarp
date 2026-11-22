@@ -46,6 +46,7 @@ mod agent_dialogs_view;
 mod launch_view;
 // ---- profile and overview
 mod artifacts_view;
+mod form_chart;
 mod form_view;
 mod form_server;
 mod cells_view;
