@@ -160,7 +160,7 @@ mod tests {
         rows[1].message.trace_id = "turn-1".into();
         rows[3].message.trace_id = "turn-2".into();
         // Made late (after both replies), but by the first turn.
-        let late = 1_759_140_200_000_i64;
+        let late = 1_790_676_300_000_i64; // 2026-09-29T10:05:00Z
         let traced = json!({"artifact_id": "f", "created_at": late, "source_trace_id": "turn-1"});
         let untraced = json!({"artifact_id": "g", "created_at": late});
         let placed = artifacts_by_row(&rows, &[traced, untraced]);
