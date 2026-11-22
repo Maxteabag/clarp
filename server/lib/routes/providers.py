@@ -179,6 +179,9 @@ class ProviderRoutes:
             skill = set_enabled(skill_id, enabled)
         except ValueError as exc:
             return self._json_error(409, str(exc))
+        except RuntimeError as exc:         # the manifest is unavailable (R155), as for GET
+            log_exception("managedSkillsUpdateFail", exc, detail=skill_id)
+            return self._json_error(503, str(exc))
         except OSError as exc:
             log_exception("managedSkillsUpdateFail", exc, detail=skill_id)
             return self._json_error(500, str(exc))
