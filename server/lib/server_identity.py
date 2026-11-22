@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 140  # GET /peers/snapshot: this Host reads its peers' chat lists server to server with the device token it keeps for each, so a web app needs no other Host's token (feature peer_snapshot, issue 651). 139: Cross-origin reads for the web app's all-Hosts list: GET /server-info and /agents/snapshot answer CORS for the origins on [server] web_read_origins, bearer header only, no credentials (feature cross_origin_read, issue 651). 138: An answered render_spec button form's row and summary carry answered_action and answered_label (issue 673). 137: A compact /log turn keeps its failed tool calls as their own cells and counts only the folded ones (the quiet chat, #653). Every earlier number is a row in docs/compatibility.md.
+HOST_CONTRACT = 141  # The user's Stop starts his waiting messages at once; other waiting work stays paused until his next message (contract 127 narrowed). Every earlier number is a row in docs/compatibility.md.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.

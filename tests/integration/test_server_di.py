@@ -3469,7 +3469,7 @@ def test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop(running_serv
     turn_queue.enqueue(
         queue_id="queue-http", agent_id=agent["agent_id"], session="claude",
         text="original", trace_id="trace-http", client_msg_id="queue-http",
-        synthesize_audio=False, origin="user", sender_agent_id="")
+        synthesize_audio=False, origin="agent", sender_agent_id="")  # held by the Stop
 
     status, body = _get(base + "/turn-queue?session=claude")
     assert status == 200
@@ -3487,6 +3487,49 @@ def test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop(running_serv
     status, _ = _delete(base + "/turn-queue/queue-http")
     assert status == 200
     assert turn_queue.get("queue-http") is None
+
+
+def test_the_users_stop_starts_his_waiting_message_and_keeps_agents_paused(running_server, monkeypatch):
+    """Stop means "stop and take my waiting message now": the user's waiting
+    message is released past the pause and recovery runs at once, with no further
+    send; an agent's stays held."""
+    from lib import agents as agents_db, turn_queue
+    from lib.turn_dispatch import TurnDispatchService
+    base, ctx, _srv = running_server
+    recovered = []
+    monkeypatch.setattr(TurnDispatchService, "recover_queued", lambda self, *a, **k: recovered.append(1))
+    runtime_client = getattr(ctx, "runtime_client", None)
+    if runtime_client is not None:
+        monkeypatch.setattr(runtime_client, "recover_queued", lambda *a, **k: recovered.append(1))
+    agent = agents_db.get_by_session("claude")
+    turn_queue.enqueue(
+        queue_id="queue-agent-held", agent_id=agent["agent_id"], session="claude",
+        text="from an agent", trace_id="trace-agent-held", client_msg_id="queue-agent-held",
+        synthesize_audio=False, origin="agent", sender_agent_id="")
+    turn_queue.enqueue(
+        queue_id="queue-user-now", agent_id=agent["agent_id"], session="claude",
+        text="take this now", trace_id="trace-user-now", client_msg_id="queue-user-now",
+        synthesize_audio=False, origin="user", sender_agent_id="")
+
+    status, _ = _post(base + "/stop", {"session": "claude"})
+    assert status == 200
+    assert turn_queue.is_paused(agent["agent_id"]) is True       # the pause holds the rest
+    assert turn_queue.get("queue-user-now")["allow_paused"] == 1  # the user's runs past it
+    assert turn_queue.get("queue-agent-held")["allow_paused"] == 0
+    assert recovered                                              # and it runs now
+
+
+def test_a_stop_by_an_agent_starts_nothing(running_server, monkeypatch):
+    from lib import agents as agents_db, turn_queue
+    base, _ctx, _srv = running_server
+    agent = agents_db.get_by_session("claude")
+    turn_queue.enqueue(
+        queue_id="queue-user-wait", agent_id=agent["agent_id"], session="claude",
+        text="wait", trace_id="trace-user-wait", client_msg_id="queue-user-wait",
+        synthesize_audio=False, origin="user", sender_agent_id="")
+    status, _ = _post(base + "/stop", {"session": "claude", "actor": "agent:mike-0000", "reason": "test"})
+    assert status == 200
+    assert turn_queue.get("queue-user-wait")["allow_paused"] == 0
 
 
 def test_stop_records_its_actor_and_reason_and_still_pauses(running_server):
