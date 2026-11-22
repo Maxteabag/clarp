@@ -32,6 +32,8 @@ use crate::turn::{
 
 /// Who let a mailbox go that held nothing any more: the last thing that waited left to run.
 pub const DRAINED: &str = "nothing waits";
+/// The actor recorded on the mailbox hold in an agent import.
+pub const IMPORT: &str = "move";
 
 /// Who stopped a turn that a direct message replaced.
 pub fn preempted_by(turn: TurnId) -> String {
@@ -353,6 +355,8 @@ pub struct Agent {
     /// Who last repaired the agent, why, and when: while nothing about its state changed since.
     note: Option<Note>,
     paused: bool,
+    /// The destination of a move starts no turn until the handoff resumes it.
+    import_held: bool,
     /// First turn number after the most recent explicit user Stop.
     user_stop_floor: Option<u64>,
     moved: Option<crate::agent_moves::Mark>,
@@ -441,6 +445,7 @@ impl Default for Agent {
             stopping_since_ms: None,
             note: None,
             paused: false,
+            import_held: false,
             user_stop_floor: None,
             moved: None,
             settled: 0,
@@ -505,6 +510,10 @@ impl Agent {
 
     pub fn waiting(&self) -> impl Iterator<Item = &Queued> {
         self.mailbox.iter()
+    }
+
+    pub fn import_held(&self) -> bool {
+        self.import_held
     }
 
     pub fn is_paused(&self) -> bool {
@@ -772,6 +781,7 @@ impl Agent {
     /// that starts its turn (D14).
     pub fn starts_at_once(&self, admission: Admission) -> bool {
         self.moved.is_none()
+            && !self.import_held
             && self.live.is_none()
             && !(self.paused && admission == Admission::Background)
     }
@@ -781,8 +791,8 @@ impl Agent {
         self.paused
             && self.mailbox.iter().any(|queued| {
                 queued.id == turn
-                    && queued.admission != Admission::Direct
-                    && !self.unheld.contains(&turn)
+                    && (self.import_held
+                        || (queued.admission != Admission::Direct && !self.unheld.contains(&turn)))
             })
     }
 
@@ -834,6 +844,12 @@ impl Agent {
                 user_word,
             } => {
                 work.agent.require_here()?;
+                // While the source still owns the runtime, all messages keep their place.
+                let (admission, user_word) = if work.agent.import_held {
+                    (Admission::Background, false)
+                } else {
+                    (admission, user_word)
+                };
                 let turn = TurnId(work.agent.next_turn);
                 let (queued, mut accepted) =
                     Queued::accept(turn, message_seq, origin, admission, now_ms);
@@ -936,7 +952,9 @@ impl Agent {
             }
             Command::SendNow { turn, by } => {
                 work.agent.require_here()?;
-                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                if work.agent.import_held
+                    || !work.agent.mailbox.iter().any(|queued| queued.id == turn)
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 if work.agent.live.is_some() {
@@ -960,7 +978,7 @@ impl Agent {
                     reason: by.reason,
                     at_ms: now_ms,
                 });
-                if release_waiting {
+                if release_waiting && !work.agent.import_held {
                     let turns: Vec<_> = work
                         .agent
                         .waiting()
@@ -992,7 +1010,7 @@ impl Agent {
             }
             Command::Resume { by } => {
                 work.agent.require_here()?;
-                if !work.agent.paused {
+                if !work.agent.paused || (work.agent.import_held && by != crate::control::USER) {
                     return Err(Refusal::NotPaused);
                 }
                 work.record(AgentEvent::Resumed { by, at_ms: now_ms });
@@ -1347,6 +1365,8 @@ impl Agent {
                     self.queue_revision += 1;
                 }
                 self.paused = true;
+                // The old importer recorded this same hold after writing the history.
+                self.import_held |= self.arrived && by == IMPORT && !verified && reason.is_empty();
                 if !relaunch {
                     self.user_stop_floor = (by == crate::control::USER).then_some(self.next_turn);
                 }
@@ -1357,6 +1377,7 @@ impl Agent {
             }
             AgentEvent::Resumed { .. } => {
                 self.paused = false;
+                self.import_held = false;
                 self.user_stop_floor = None;
                 self.unheld.clear();
                 self.queue_revision += 1;
@@ -1836,7 +1857,9 @@ impl Work {
     }
 
     fn start_next_with(&mut self, now_ms: i64, takeover: Option<crate::takeover::Start>) {
-        if self.agent.live.is_some() {
+        // Keep the replay's ordering check compatible with historical turns that started under
+        // an import pause. New decisions must never start one before the handoff.
+        if self.agent.live.is_some() || self.agent.import_held {
             return;
         }
         let Some(next) = self.agent.next_to_run() else {
@@ -1872,7 +1895,7 @@ impl Work {
     /// to run, the hold is over: the next thing that is left for the agent is not held by
     /// a stop that held something else. So the Python Host ends a pause (`turn_queue`).
     fn let_go_of_nothing(&mut self, by: &str, now_ms: i64) {
-        if self.agent.paused && self.agent.mailbox.is_empty() {
+        if self.agent.paused && !self.agent.import_held && self.agent.mailbox.is_empty() {
             self.record(AgentEvent::Resumed {
                 by: by.to_string(),
                 at_ms: now_ms,

@@ -2096,7 +2096,9 @@ fn an_agent_that_arrives_from_another_host_brings_its_conversation_and_goes_on_i
         Some("sess-from-before")
     );
 
-    // The next message goes on in the tool's own session, and its rows follow the old ones.
+    // The next message goes on in the tool's own session after the handoff.
+    let (resumed, out) = actor.resume("user", world.tick()).unwrap();
+    assert!(resumed && out.actions.is_empty());
     let now = world.tick();
     let (_, out) = actor
         .send(&message("u-new", "and now?"), Admission::Queue, now)
@@ -3891,6 +3893,10 @@ mod follow_by_revision {
             let actor = self.actor.as_mut().unwrap();
             let (taken, out) = actor.import("elsewhere", None, rows, now).unwrap();
             self.world.carry_out(actor, out);
+            if taken.is_ok() {
+                let (_, out) = actor.resume("user", now).unwrap();
+                self.world.carry_out(actor, out);
+            }
             taken.is_ok()
         }
 
