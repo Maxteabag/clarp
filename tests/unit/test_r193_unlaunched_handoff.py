@@ -115,3 +115,24 @@ def test_recovery_leaves_a_row_that_reached_a_backend_or_is_recent(tmp_path):
     service._end_unlaunched_shown()
     assert turn_queue.status("q-ran") == "queued", "a backend started for it: not ours to fail"
     assert turn_queue.status("q-new") == "queued", "a launch a minute old may still be going"
+
+
+def test_recovery_leaves_a_row_a_stop_holds(tmp_path):
+    """A Stop's pause holds the row durably (out of memory): the user's Resume decides."""
+    service, _backends, agent_id = _make_service(tmp_path)
+    _stuck_shown_row(agent_id)
+    turn_queue.set_paused(agent_id, True)
+    service._end_unlaunched_shown()
+    assert turn_queue.status("q-stuck") == "queued"
+    turn_queue.set_paused(agent_id, False)
+    service._end_unlaunched_shown()
+    assert turn_queue.status("q-stuck") == "failed"
+
+
+def test_the_ownerless_start_says_nothing_while_the_head_backs_off(tmp_path, monkeypatch):
+    from lib import turn_recovery
+    service, backends, agent_id, scheduled = _queued_behind_a_turn(tmp_path)
+    said = []
+    monkeypatch.setattr(turn_recovery, "log", lambda event, detail="": said.append(event))
+    service._start_ownerless_queues(None)
+    assert "ownerlessQueueStarted" not in said

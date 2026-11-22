@@ -450,6 +450,8 @@ class RecoveryMixin:
         is left to that."""
         for row in turn_queue.unlaunched_shown():
             agent_id, trace_id = str(row["agent_id"]), str(row["trace_id"])
+            if turn_queue.is_paused(agent_id):
+                continue  # a Stop's pause holds it, durably, for the user's Resume
             held = (_SLOTS.owns(agent_id, trace_id)
                     or _SLOTS.has_queued(agent_id, lambda spec, q=row["queue_id"]: spec.queue_id == q))
             if held or _launch_running(agent_id):
@@ -600,6 +602,13 @@ class RecoveryMixin:
         self._start_ownerless_queues(only)
         return released
 
+    @staticmethod
+    def _handoff_backing_off(agent_id: str) -> bool:
+        """The agent's queue head failed its launch and its retry is not due yet."""
+        import time
+        waiting = _SLOTS.queued.get(agent_id) or []
+        return bool(waiting) and getattr(waiting[0], "handoff_retry_at", 0.0) > time.monotonic()
+
     def _start_ownerless_queues(self, only: str | None) -> None:
         """Hand a free slot to work queued in memory behind no owner.
 
@@ -614,6 +623,8 @@ class RecoveryMixin:
                 continue
             if _SLOTS.get(agent_id):
                 continue  # an owner (turn, terminal or Stop) drains it
+            if self._handoff_backing_off(agent_id):
+                continue  # its head waits for its own retry (R193)
             log("ownerlessQueueStarted",
                 f"agent={agent_id} depth={depth} — queued work with a free "
                 f"slot and no owner; starting its head")
