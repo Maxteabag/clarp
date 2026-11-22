@@ -24,6 +24,7 @@ use clarp_actor::{ByHand, ImportedRow};
 use clarp_kernel::activity::Leases;
 use clarp_kernel::addressed;
 use clarp_kernel::contacts::{self, Launch};
+use clarp_kernel::control::Control;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::coordination;
 use clarp_kernel::helpers;
@@ -1766,7 +1767,11 @@ async fn started_again(
     let give_up = tokio::time::Instant::now() + ENDS_WITHIN;
     while !started && tokio::time::Instant::now() < give_up {
         if !held {
-            member.agent.hold().await.map_err(unavailable)?;
+            member
+                .agent
+                .hold(Control::for_relaunch())
+                .await
+                .map_err(unavailable)?;
             held = true;
         }
         tokio::time::sleep(LOOKED_EVERY).await;
@@ -2439,7 +2444,7 @@ async fn import_agent(
     // It is here, and until its owner says it lives here it is on the other Host too. So it
     // takes no turn of its own yet: a goal that is due, or anything else that would start by
     // itself, waits for a resume. What its user says to it runs.
-    let held = member.agent.hold().await.is_ok();
+    let held = member.agent.hold(Control::by("move")).await.is_ok();
     Ok(Json(json!({
         "ok": true,
         "session": member.record.session,

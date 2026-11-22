@@ -384,9 +384,9 @@ enum Ask {
         artifacts: Vec<(Value, Vec<Value>)>,
         answer: Answer<Result<usize, String>>,
     },
-    /// Holds the agent's mailbox without ending or pausing anything: what would start by
-    /// itself waits for a resume. For an agent that has just arrived from another Host.
+    /// Holds the mailbox during a move or relaunch and stops a live turn.
     Hold {
+        by: Control,
         answer: Answer<()>,
     },
     /// The plans the agent had on the Host it comes from, each as that Host showed it, with
@@ -1172,8 +1172,8 @@ impl AgentHandle {
     }
 
     /// Holds the agent's mailbox: nothing starts by itself until it is resumed.
-    pub async fn hold(&self) -> Result<(), Unavailable> {
-        self.ask(|answer| Ask::Hold { answer }).await
+    pub async fn hold(&self, by: Control) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Hold { by, answer }).await
     }
 
     /// Gives the agent the plans it had where it comes from. The inner error is a plan
@@ -3034,12 +3034,12 @@ impl Worker {
                 answered(actor.repair(by, now).map(|out| ((), out)), answer)?
             }
             // The mailbox alone: the agent's goals stay as they are, and wait with it.
-            Ask::Hold { answer } => {
+            Ask::Hold { by, answer } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
                     return Ok(());
                 }
-                answered(actor.stop("move", now).map(|(_, out)| ((), out)), answer)?
+                answered(actor.stop_as(by, now).map(|(_, out)| ((), out)), answer)?
             }
             Ask::Resume { by, answer } => {
                 if let Err(why) = actor.require_here() {
@@ -4854,7 +4854,7 @@ fn refuse_for(
             Ok(Ask::Publish { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakePlans { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakeLibrary { answer, .. }) => drop(answer.send(Err(refusal()))),
-            Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Hold { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::OpenTerminal { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobRecord { answer, .. }) => drop(answer.send(Err(refusal()))),

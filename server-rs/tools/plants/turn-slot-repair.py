@@ -52,8 +52,8 @@ PLANTS = [
     (K, 'vectors', "the goals' pause leaves the reason out", '        "" => by,', '        _ if true => by,\n        "" => by,'),
     (K, 'host', 'a state says no Stop is known to be so', '            "stop_actor_verified": control.verified,', '            "stop_actor_verified": false,'),
     (K, 'host', "a repair's note names no turn it gave back", '            "released_trace",\n        ],', '        ],'),
-    (K, 'vectors', "a claim to be an agent makes a Stop no user's", '        !(self.verified && self.actor.starts_with("agent:"))', '        !self.actor.starts_with("agent:")'),
-    (K, 'vectors', "an agent's own Stop is the user's", '        !(self.verified && self.actor.starts_with("agent:"))', '        !(self.verified && self.actor.starts_with("user"))'),
+    (K, 'vectors', "a claim to be an agent makes a Stop no user's", '        !(self.is_relaunch() || (self.verified && self.actor.starts_with("agent:")))', '        !(self.is_relaunch() || self.actor.starts_with("agent:"))'),
+    (K, 'vectors', "an agent's own Stop is the user's", '        !(self.is_relaunch() || (self.verified && self.actor.starts_with("agent:")))', '        !(self.is_relaunch() || (self.verified && self.actor.starts_with("user")))'),
     # The log.
     (T, 'lines', "a Stop that is the user's claim is written with more than before", '        #[serde(default, skip_serializing_if = "is_false")]\n        verified: bool,', '        #[serde(default)]\n        verified: bool,'),
     (A, 'host', 'who asked a running turn to stop is no longer known when it has gone', '                self.stopping = Some(Control {\n                    actor: by.clone(),\n                    verified: *verified,', '                self.stopping = Some(Control {\n                    actor: by.clone(),\n                    verified: false && *verified,'),

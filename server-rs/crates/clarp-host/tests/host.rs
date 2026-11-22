@@ -14790,7 +14790,9 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
         "{before}"
     );
     assert_eq!(before["turns"].as_array().unwrap().len(), 2);
-    let agent_id = row(&nova)["agent_id"].clone();
+    let original = row(&nova);
+    let agent_id = original["agent_id"].clone();
+    let queue_revision = original["queued_turn_revision"].as_u64().unwrap();
 
     // What is refused, in the Python Host's words, and changes nothing.
     let (status, why) = again(json!({ "replace_sid": "nobody-there", "name": "Nobody" }));
@@ -14831,6 +14833,7 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
     );
     assert_eq!(log("")["turns"].as_array().unwrap().len(), 2);
     assert!(relaunched().is_empty());
+    assert_eq!(row(&nova)["queued_turn_revision"], queue_revision);
 
     // Started again in place: the same agent under the same name, and the apps are told.
     let (status, started) = again(json!({ "replace_sid": nova, "name": "Nova" }));
@@ -14882,6 +14885,7 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
         "{as_row}"
     );
     assert_eq!(as_row["last_message"], "the first conversation");
+    assert_eq!(as_row["queued_turn_revision"], queue_revision + 2);
 
     // A message after it begins the new conversation: nothing of the old one is in it, and
     // it goes by another name.

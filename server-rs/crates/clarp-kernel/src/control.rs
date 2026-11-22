@@ -44,13 +44,27 @@ impl Control {
         }
     }
 
-    /// Whether it is the user's: anything but an agent's that the Host knows to be that agent's.
+    /// The Host stops the turn to relaunch its agent.
+    pub fn for_relaunch() -> Self {
+        Self {
+            actor: "relaunch".to_string(),
+            verified: true,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn is_relaunch(&self) -> bool {
+        self.verified && self.actor == "relaunch"
+    }
+
+    /// Whether it is the user's: a claim counts as the user's unless the Host knows
+    /// that an agent or the relaunch itself requested the Stop.
     /// Only the user's Stop does what is the user's to do: it drops what the agent had yet to say
     /// aloud (here, as on the Python Host), and on the Python Host it withdraws the user's sends
     /// not yet launched (`_stop_agent_session`'s `fence_user_receipts`). The one answer to the
     /// question for every reader of a Stop.
     pub fn is_the_users(&self) -> bool {
-        !(self.verified && self.actor.starts_with("agent:"))
+        !(self.is_relaunch() || (self.verified && self.actor.starts_with("agent:")))
     }
 }
 
