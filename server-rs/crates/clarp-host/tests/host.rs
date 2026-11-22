@@ -37,6 +37,8 @@ mod contacts;
 mod controller_actions;
 #[path = "host/coordination.rs"]
 mod coordination;
+#[path = "host/cross_origin_read.rs"]
+mod cross_origin_read;
 #[path = "host/delivery.rs"]
 mod delivery;
 #[path = "host/diagnostics.rs"]
@@ -603,12 +605,13 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 135);
+    assert_eq!(info["contract"]["host"], 139);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["voice_pool"], 123);
     assert_eq!(info["contract"]["features"]["voice_for_helpers"], 135);
+    assert_eq!(info["contract"]["features"]["cross_origin_read"], 139);
     assert_eq!(info["contract"]["features"]["voice_provider_maps"], 122);
     assert_eq!(info["contract"]["features"]["speech_outcome"], 109);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
@@ -8787,6 +8790,9 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     };
     assert!(spec_of("ios/12 contract=74"), "iOS from 74, by default");
     assert!(spec_of("web/1 contract=1"), "web from 1, by default");
+    assert!(spec_of("android/1058 contract=41"));
+    assert!(!spec_of("android/1058 contract=40"));
+    assert!(!spec_of("Android/1058 contract=41"));
     assert!(!spec_of("web/1 contract=0"));
     assert!(!spec_of("Web/1 contract=1"));
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 0\n").unwrap();
@@ -8828,8 +8834,8 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     assert!(spec_of("ios/12 contract=74"));
     assert!(!spec_of("iOs/12 contract=74"), "only the name as written");
     assert!(
-        !spec_of("android/5 contract=99"),
-        "a value below 0 is refused"
+        spec_of("android/5 contract=41"),
+        "a value below 0 is ignored and the default stands"
     );
     assert!(
         spec_of("web/1 contract=1"),
@@ -9227,9 +9233,13 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 135);
+    assert_eq!(info["contract"]["host"], 139);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
     assert_eq!(info["contract"]["features"]["render_spec_v2"], 133);
+    assert_eq!(
+        info["contract"]["features"]["render_spec_answered_button"],
+        138
+    );
 
     // What the envelope says is read as the reference reads it: without its blanks and its
     // hidden blocks, in small letters, a value that is no text as Python writes it.
@@ -11278,7 +11288,10 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     };
     let lineage = |session: &str| host.get(&format!("/agent-helper-state?session={session}"));
     let refused = |path: &str, body: Value| -> (u16, Value) { host.ask("POST", path, Some(&body)) };
-    let maker_id = row(&maker)["agent_id"].as_str().unwrap().to_string();
+    let maker_row = row(&maker);
+    let maker_id = maker_row["agent_id"].as_str().unwrap().to_string();
+    let maker_voice = &maker_row["voice_id"];
+    assert!(!clarp_kernel::said::voice_map(maker_voice.as_str()).is_empty());
 
     // Who makes it, and as what.
     let told = |status: u16, code: &str, message: &str| {
@@ -11509,7 +11522,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
             &about[0]["backend"],
             &about[0]["voice_id"]
         ),
-        (&json!("Slice Helper"), &json!("scripted"), &json!("{}"))
+        (&json!("Slice Helper"), &json!("scripted"), maker_voice)
     );
     assert_eq!(about[1]["detail"], json!({ "session": "slice-1" }));
 
@@ -21834,15 +21847,15 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
             "name":"Stranger","backend":"scripted","role":"helper","parent":maximus["session"],
         }),
     );
-    let silent = speech_of(&stranger["agent"]["voice_profile"]);
+    let inherited = speech_of(&stranger["agent"]["voice_profile"]);
     assert_eq!(
         (
-            &silent["voice_id"],
-            &silent["origin"],
-            &silent["silent_reason"],
-            &silent["shared_with"]
+            &inherited["voice_id"],
+            &inherited["origin"],
+            &inherited["silent_reason"],
+            &inherited["shared_with"]
         ),
-        (&Value::Null, &Value::Null, &json!("no_voice"), &json!(0))
+        (&shown["voice_id"], &json!("own"), &Value::Null, &json!(2))
     );
     let [maximus, theo, stranger] =
         [maximus, theo, stranger].map(|made| made["session"].as_str().unwrap().to_string());
@@ -21874,11 +21887,11 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     let mine = row_of(&first, &maximus)["voice_profile"].clone();
     assert_eq!(
         (&mine["speech"]["voice_id"], &mine["speech"]["shared_with"]),
-        (&json!("v-shared"), &json!(1))
+        (&json!("v-shared"), &json!(2))
     );
     assert_eq!(
-        row_of(&first, &stranger)["voice_profile"]["speech"]["silent_reason"],
-        "no_voice"
+        row_of(&first, &stranger)["voice_profile"]["speech"]["voice_id"],
+        mine["speech"]["voice_id"]
     );
     wait_for("Relaunch test agent is ready", || {
         host.state(&theo) == "spawned"
@@ -21938,24 +21951,17 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     };
     wait_for("the clip", || spoken().is_some());
     assert_eq!(spoken().unwrap()["voice"]["id"], mine["speech"]["voice_id"]);
-    host.send(&stranger, "<speak>Nobody hears this.</speak>", "s1");
-    wait_for("the silence told", || {
-        heard
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| e["type"] == "tts-error")
-    });
-    let told = heard
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|e| e["type"] == "tts-error")
-        .cloned()
-        .unwrap();
+    host.send(&stranger, "<speak>The helper can speak.</speak>", "s1");
+    let helper_clip = || {
+        voice
+            .asked()
+            .into_iter()
+            .find(|asked| asked["transcript"] == "The helper can speak.")
+    };
+    wait_for("the helper's clip", || helper_clip().is_some());
     assert_eq!(
-        (&told["session"], &told["reason"]),
-        (&json!(stranger), &json!("no_voice"))
+        helper_clip().unwrap()["voice"]["id"],
+        mine["speech"]["voice_id"]
     );
 
     // The speech providers: the apps are told to re-read the agents, and the version moves;
@@ -22019,8 +22025,8 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     );
     let v1 = version(&moved);
 
-    // The owner's file is read when a snapshot is made: one asked after it changed shows the
-    // new voice and a new version at once (no event tells of it: docs/differences.md).
+    // A changed persona default moves the version. The helper still has its inherited
+    // voice stored, so changing that default cannot change what it says.
     file("Stranger = \"v-stranger\"\n");
     let moved = snapshot();
     assert_ne!(version(&moved), v1);
@@ -22031,7 +22037,7 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
             &found["origin"],
             &found["silent_reason"]
         ),
-        (&json!("v-stranger"), &json!("own"), &Value::Null)
+        (&json!("v-shared"), &json!("own"), &Value::Null)
     );
 
     // A voice given from an app: told with the profile it makes.

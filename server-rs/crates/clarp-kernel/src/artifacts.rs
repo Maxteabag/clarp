@@ -928,6 +928,10 @@ impl Artifact {
         if self.kind == render_spec::KIND {
             if let Some(fields) = item.as_object_mut() {
                 fields.remove("payload");
+                if let Some((action, label)) = render_spec::answered_button(self) {
+                    fields.insert("answered_action".to_string(), json!(action));
+                    fields.insert("answered_label".to_string(), json!(label));
+                }
             }
             return item;
         }

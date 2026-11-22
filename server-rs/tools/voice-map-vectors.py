@@ -31,6 +31,10 @@ def reference(root):
         "", "{}", "{}", "  unknown  ", uuid, "en-US-Chirp3-HD-Kore", "0123456789abcdefghij",
         '{"gemini":"Kore","cartesia":"x","google":null,"empty":""}', '{"x":1}', "{invalid",
     )]
+    present = [{"input": raw, "has_voice": voice.has_voice(raw)} for raw in (
+        None, "", "{}", "  {} ", '{"cartesia":""}', '{"cartesia":null}',
+        '{"cartesia":"c-1"}', "21m00Tcm4TlvDq8ikWAM",
+    )]
     cart, eleven = "cartesia", "elevenlabs"
     current = '{"cartesia":"new","elevenlabs":"later","gemini":"Kore"}'
     base = '{"cartesia":"old","elevenlabs":"original"}'
@@ -61,7 +65,7 @@ def reference(root):
               "transcription":voice_migration._transcription_plan(host, agents),
               "provider":cart,"fallback":eleven}
     report["digest"] = voice_migration.digest(report)
-    return {"canonical":canonical,"merges":merges,"agents":agents,"contacts":contacts,"report":report}
+    return {"present":present,"canonical":canonical,"merges":merges,"agents":agents,"contacts":contacts,"report":report}
 
 
 def main():

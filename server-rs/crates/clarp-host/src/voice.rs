@@ -893,8 +893,8 @@ pub(crate) fn speaker(record: &AgentRecord) -> voice_profile::Agent<'_> {
 /// Which engines say an agent's line, and in which voices: what the one resolver hands
 /// each engine the owner chose for it and the one he chose to be tried after it, each that
 /// can say it. A voice of Gemini's goes through the door the owner's file names for it.
-fn chosen(view: &voice_profile::HostView, file: &Table, record: &AgentRecord) -> Chosen {
-    match voice_profile::speaking_order(view, speaker(record)) {
+fn chosen(view: &voice_profile::HostView, file: &Table, agent: voice_profile::Agent<'_>) -> Chosen {
+    match voice_profile::speaking_order(view, agent) {
         Ok(by) => {
             let vertex = owner::gemini(file).vertex;
             let at_door = |(provider, voice): (String, String)| {
@@ -913,7 +913,7 @@ fn chosen(view: &voice_profile::HostView, file: &Table, record: &AgentRecord) ->
             Chosen::Silent
         }
         Err(unheard) => {
-            let persona = python::text(&record.persona);
+            let persona = python::text(agent.who.persona);
             let provider = unheard.provider;
             let why = match unheard.reason {
                 voice_profile::PROVIDER_OFF => SPEECH_OFF.to_string(),
@@ -1278,7 +1278,7 @@ impl Mouth {
         };
         let owners = self.owners();
         let view = self.speech_view(&owners);
-        let (by, unavailable) = match chosen(&view, &owners, record) {
+        let (by, unavailable) = match chosen(&view, &owners, speaker(record)) {
             Chosen::Silent => return self.unsaid(member, &line, None, SPEECH_OFF, None).await,
             Chosen::Nobody {
                 why,
@@ -1576,6 +1576,9 @@ impl Mouth {
     /// is voiced when the ring is placed, so that answering plays it at once. `None`:
     /// nothing on this Host can say it now.
     pub async fn said_outside_a_turn(&self, record: &AgentRecord, text: &str) -> Option<String> {
+        if !said::has_voice(Some(&record.voice_id)) {
+            return None;
+        }
         let made = self.clip_of(record, text.to_string(), "").await;
         made.map(|(name, _)| name)
     }
@@ -1585,6 +1588,9 @@ impl Mouth {
     /// asks as an agent, or a word of its own (a speaker with no session). Where nothing on
     /// this Host can say it, nothing is said. Answers whether it was.
     pub(crate) async fn announce(&self, speaker: &AgentRecord, text: &str) -> bool {
+        if !said::has_voice(Some(&speaker.voice_id)) {
+            return false;
+        }
         let Some((name, _)) = self.clip_of(speaker, text.to_string(), "").await else {
             return false;
         };
@@ -1621,7 +1627,11 @@ impl Mouth {
     ) -> Option<(String, PathBuf)> {
         let owners = self.owners();
         let view = self.speech_view(&owners);
-        let Chosen::By(by) = chosen(&view, &owners, record) else {
+        let mut agent = speaker(record);
+        if prefix == HERALD_FILE {
+            agent.stored = Some(herald::voice_input(&record.voice_id));
+        }
+        let Chosen::By(by) = chosen(&view, &owners, agent) else {
             return None;
         };
         let directory = self.fleet.directory();
@@ -1650,6 +1660,9 @@ impl Mouth {
         primary: bool,
         cartesia: Option<Language>,
     ) -> Result<Option<(String, Option<Vec<u8>>)>, Mute> {
+        if !said::has_voice(Some(&record.voice_id)) {
+            return Ok(None);
+        }
         let engine = self
             .has_key(&voice.provider, owners)
             .then(|| self.engine(owners, &voice.provider, SpeechUse::Turn, cartesia))
@@ -2285,7 +2298,7 @@ mod tests {
 
     /// Who says an agent's line, with these keys.
     fn pick(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) -> Chosen {
-        chosen(&speech_view(file, has_key, None), file, record)
+        chosen(&speech_view(file, has_key, None), file, speaker(record))
     }
 
     fn by(engines: &[(&str, &str)]) -> Chosen {

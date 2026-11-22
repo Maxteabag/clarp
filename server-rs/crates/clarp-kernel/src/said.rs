@@ -56,6 +56,11 @@ pub fn voice_map(stored: Option<&str>) -> Vec<(String, String)> {
     vec![(ELEVENLABS.to_string(), stored.to_string())]
 }
 
+/// Whether a stored voice names any provider voice. An empty map names none.
+pub fn has_voice(stored: Option<&str>) -> bool {
+    !voice_map(stored).is_empty()
+}
+
 /// The voice an agent has stored for this provider, when it has one.
 pub fn resolve_voice(stored: Option<&str>, provider: &str) -> Option<String> {
     let found = voice_map(stored)

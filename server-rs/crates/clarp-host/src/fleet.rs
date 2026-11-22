@@ -446,6 +446,21 @@ pub fn shelf(kind: &str) -> String {
     format!("kept.{kind}")
 }
 
+fn voice_or_contact(requested: String, contact: Option<&serde_json::Value>) -> String {
+    if clarp_kernel::said::has_voice(Some(&requested)) {
+        return requested;
+    }
+    let stored = contact.and_then(|row| row["voice_id"].as_str());
+    if clarp_kernel::said::has_voice(stored) {
+        return stored.unwrap_or_default().to_owned();
+    }
+    if requested.is_empty() {
+        "{}".into()
+    } else {
+        requested
+    }
+}
+
 fn creation_picture(base64: &str) -> Result<Option<(Vec<u8>, String)>, NotMade> {
     personas::picture(base64).map_err(|why| {
         let why = match why {
@@ -2586,30 +2601,21 @@ impl Fleet {
             gemini: &gemini,
         };
         let name = personas::named(&said.name).unwrap_or_else(|| said.name.clone());
-        let voice_id = if original.is_none() {
-            let stored = if said.voice_id.is_empty() {
-                "{}"
-            } else {
-                &said.voice_id
-            };
-            clarp_kernel::said::canonical_voice(
-                &self.assigned_voice(&file, &owner, &name, stored, fetched, None),
-            )
-        } else if said.voice_id.is_empty() {
-            String::new()
-        } else if let Some(original) = original {
-            let current = self.book.named(&owner, original);
-            let stored = current
-                .as_ref()
-                .and_then(|row| row["voice_id"].as_str())
-                .unwrap_or("");
-            clarp_kernel::said::merge_provider_maps(
-                stored,
-                &said.voice_id,
-                said.base_voice_id.as_deref(),
-            )
+        let fill = |voice: &str| self.assigned_voice(&file, &owner, &name, voice, fetched, None);
+        let voice_id = if let Some(original) = original {
+            self.book
+                .named(&owner, original)
+                .filter(|row| row["builtin"] != true)
+                .map_or_else(String::new, |current| {
+                    clarp_kernel::voice_pool::contact_voice_edit(
+                        current["voice_id"].as_str().unwrap_or(""),
+                        &said.voice_id,
+                        said.base_voice_id.as_deref(),
+                        fill,
+                    )
+                })
         } else {
-            clarp_kernel::said::canonical_voice(&said.voice_id)
+            fill(&said.voice_id)
         };
         let wanted = Wanted {
             name: &said.name,
@@ -2618,19 +2624,13 @@ impl Fleet {
             personality: &said.personality,
             picture: &said.picture,
         };
-        let voice = original
-            .filter(|_| voice_id.is_empty())
-            .and_then(|original| self.book.named(&owner, original))
-            .filter(|current| current["voice_id"].as_str().is_none_or(str::is_empty))
-            .map(|_| self.assigned_voice(&file, &owner, &name, "{}", fetched, None))
-            .unwrap_or_default();
         let mut book = (*self.book).clone();
         let changed = match original {
             None => {
                 let id = format!("persona-{}", ids::hex(8));
-                book.create(&owner, &wanted, (&id, &voice), self.now_ms())
+                book.create(&owner, &wanted, (&id, ""), self.now_ms())
             }
-            Some(original) => book.update(&owner, original, &wanted, &voice),
+            Some(original) => book.update(&owner, original, &wanted, ""),
         };
         let change = match changed {
             Ok(change) => change,
@@ -3263,7 +3263,13 @@ impl Fleet {
         } else {
             before.avatar.clone()
         };
-        let voice_id = or_kept(said(&request.voice_id), &before.voice_id);
+        let voice_id = said(&request.voice_id);
+        let voice_id = if clarp_kernel::said::has_voice(Some(&voice_id)) {
+            voice_id
+        } else {
+            or_kept(before.voice_id.clone(), &voice_id)
+        };
+        let voice_id = voice_or_contact(voice_id, definition.as_ref());
         self.check_creation_voice(
             &file,
             &persona,
@@ -3588,10 +3594,7 @@ impl Fleet {
             "avatar_symbol",
             personas::SYMBOL_MOST,
         );
-        let voice_id = match asked(&request.voice_id) {
-            voice if voice.is_empty() => of_persona("voice_id").to_string(),
-            voice => voice,
-        };
+        let voice_id = voice_or_contact(asked(&request.voice_id), definition.as_ref());
         self.check_creation_voice(&file, &persona, &voice_id, definition.as_ref(), None)?;
         Self::check_creation_effort(
             &backend,
