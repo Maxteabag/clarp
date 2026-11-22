@@ -312,11 +312,12 @@ function readDecimals(props, pointer) {
 
 /**
  * An integer drawn as the catalog's `decimals` say: divided by 10^decimals, in the device's
- * locale, with exactly that many digits after the separator (125, 2 -> "1,25" in nb).
+ * locale, with exactly that many digits after the separator (125, 2 -> "1,25" in nb), and
+ * never grouped in thousands (12500 stays "12500"), as every client draws it (issue 673).
  */
 export function formatScaled(value, decimals = 0, locale = undefined) {
   if (!isInt(value)) return '';
-  return new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+  return new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: false })
     .format(value / 10 ** decimals);
 }
 
@@ -513,6 +514,16 @@ export function acceptedSubmission(value) {
     submissionId: value.submission_id, version: value.version, intent: answers.intent, state,
     acceptedAt: value.accepted_at, deliveryStatus: value.delivery_status,
   };
+}
+
+/**
+ * The answered card's line (issue 673): 'Answered · <button label>' for a button form, naming
+ * the button that was chosen; 'Answered' for any other answered form; '' while it is open.
+ */
+export function answeredLine(form, accepted) {
+  if (!accepted) return '';
+  const chosen = form && form.buttons && form.buttons.find(b => b.action === accepted.state[ACTION_KEY]);
+  return chosen ? `Answered · ${chosen.label}` : 'Answered';
 }
 
 /** The words a state-bound text shows for a value. */
