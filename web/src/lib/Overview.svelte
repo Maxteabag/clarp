@@ -1,6 +1,7 @@
 <script>
   // Responsive mission control for live Chats and saved Contacts. The server's
   // session identity remains authoritative; display names are presentation.
+  import ChatChoices from './ChatChoices.svelte';
   import {
     AVATAR_PALETTE, agentSnapshot, app, avatarUrl, DEFAULT_ROSTER, flash, isDesktop,
     isUserNotificationUnread, refreshSessions, setSession,
@@ -306,6 +307,7 @@
                         <div><dt>Workspace</dt><dd title={row.cwd}>{row.cwd || '—'}</dd></div>
                         <div><dt>MCP</dt><dd>{row.mcp_servers?.length ? row.mcp_servers.join(', ') : 'None requested'}</dd></div>
                       </dl>
+                      <ChatChoices session={row.session} />
                       <div class="agent-toggle-row" aria-label="Quick agent settings">
                         <button class:on={row.heartbeat_enabled} disabled={!!mutationKey} aria-pressed={row.heartbeat_enabled}
                                 onclick={() => postAgentSetting(row, '/agent-heartbeat', { heartbeat_enabled: !row.heartbeat_enabled }, row.heartbeat_enabled ? 'Heartbeat off' : 'Heartbeat on')}>
