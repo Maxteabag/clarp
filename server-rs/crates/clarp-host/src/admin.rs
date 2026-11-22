@@ -3,6 +3,7 @@
 //! The Host is the one writer of its own tables, so a command never touches them: it asks the
 //! Host over the same door the apps use, with the administrator's token, from this machine.
 
+use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -1121,21 +1122,25 @@ fn host_in(config: &str) -> Option<(String, String)> {
         .then(|| (format!("{address}:{port}"), token.to_string()))
 }
 
-/// The Host this installation runs, for a tool that no turn told where its Host is: a worker
-/// an agent left running, which carries the agent's world but not the turn's own words. It is
-/// in the file the installer wrote, which that world names.
-fn installed_host() -> Option<(String, String)> {
-    let named = |variable: &str| std::env::var_os(variable).filter(|value| !value.is_empty());
-    let path = named("CLAUDE_PWA_CONFIG")
+/// Find the first configuration that names this Rust Host. A tool forwarded from the
+/// Python Host may inherit settings that point to the Python installation.
+fn installed_host(env: impl Fn(&'static str) -> Option<OsString>) -> Option<(String, String)> {
+    let named = |variable| env(variable).filter(|value| !value.is_empty());
+    let read = |path: PathBuf| host_in(&std::fs::read_to_string(path).ok()?);
+    named("CLAUDE_PWA_CONFIG")
         .map(PathBuf::from)
-        .or_else(|| named("CLARP_CONFIG_DIR").map(|dir| PathBuf::from(dir).join("config.toml")))
+        .and_then(read)
+        .or_else(|| {
+            named("CLARP_CONFIG_DIR")
+                .map(|dir| PathBuf::from(dir).join("config.toml"))
+                .and_then(read)
+        })
         .or_else(|| {
             let config = named("XDG_CONFIG_HOME")
                 .map(PathBuf::from)
                 .or_else(|| named("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-            Some(config.join("clarp-host").join("config.toml"))
-        })?;
-    host_in(&std::fs::read_to_string(path).ok()?)
+            read(config.join("clarp-host").join("config.toml"))
+        })
 }
 
 /// `clarp-host tool NAME [ARGS...]`: one of an agent's own tools. It is a pipe: what it was
@@ -1156,7 +1161,10 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             stderr: "usage: clarp-host tool NAME [ARGS...]\n".to_string(),
         };
     };
-    let (address, token) = match (std::env::var(crate::TOOL_ADDR_ENV), installed_host()) {
+    let (address, token) = match (
+        std::env::var(crate::TOOL_ADDR_ENV),
+        installed_host(std::env::var_os),
+    ) {
         (Ok(address), _) => (address, token.to_string()),
         // The token the caller has, when it has one; else the one in the file.
         (Err(_), Some((address, kept))) if token.is_empty() => (address, kept),
@@ -1593,6 +1601,48 @@ mod tests {
         let elsewhere = "[server]\nkind = \"clarp-host\"\n[tts]\nbind_addr = \"x\"\nport = 1\n";
         assert_eq!(host_in(elsewhere), None);
         assert_eq!(host_in(""), None);
+    }
+
+    #[test]
+    fn a_tool_falls_through_python_configs_to_the_installed_rust_host() {
+        let root = crate::once::a_place("tool-host-test").unwrap();
+        let explicit = root.join("explicit.toml");
+        let config_dir = root.join("config-dir");
+        let default_dir = root.join(".config/clarp-host");
+        std::fs::create_dir(&config_dir).unwrap();
+        std::fs::create_dir_all(&default_dir).unwrap();
+
+        let python = "[server]\nbind_addr = \"127.0.0.1\"\nport = 7682\nauth_token = \"python\"\n";
+        let rust = |port| {
+            format!(
+                "[server]\nkind = \"clarp-host\"\nbind_addr = \"127.0.0.1\"\nport = {port}\nauth_token = \"rust\"\n"
+            )
+        };
+        std::fs::write(&explicit, python).unwrap();
+        std::fs::write(config_dir.join("config.toml"), python).unwrap();
+        std::fs::write(default_dir.join("config.toml"), rust(7690)).unwrap();
+        let find = || {
+            installed_host(|name| {
+                let path = match name {
+                    "CLAUDE_PWA_CONFIG" => &explicit,
+                    "CLARP_CONFIG_DIR" => &config_dir,
+                    "HOME" => &root,
+                    _ => return None,
+                };
+                Some(path.as_os_str().to_owned())
+            })
+        };
+        let fallback = find();
+        std::fs::write(config_dir.join("config.toml"), rust(7691)).unwrap();
+        let directory = find();
+        std::fs::write(&explicit, rust(7692)).unwrap();
+        let named = find();
+        std::fs::remove_dir_all(root).unwrap();
+
+        let expected = |port| Some((format!("127.0.0.1:{port}"), "rust".to_string()));
+        assert_eq!(fallback, expected(7690));
+        assert_eq!(directory, expected(7691));
+        assert_eq!(named, expected(7692));
     }
 
     fn words(text: &str) -> impl Iterator<Item = String> + use<> {
