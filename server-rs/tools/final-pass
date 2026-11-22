@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # The one final pass before the Rust Host is installed (issue 704; Peter's rule of 22 Nov 2026: "skip long checks in
-# iOS and all other things"). A fixed list of focused tests of what Peter touches, each run once, under one hard time
-# budget. The list is here and nowhere else, so nothing an agent adds can extend the pass.
+# iOS and all other things", a few minutes at most). The focused tests of what Peter touches all the time (sending,
+# Stop, the queue: stop, paused, delivery), each run once after one compile of the tests, under one hard time budget
+# of five minutes. The list is here and nowhere else, so nothing an agent adds can extend the pass. The test compile
+# cannot be shared with the release build: the two use different profiles and share no compiled artifacts, and the
+# build machine runs one build at a time.
 #
 # A failing check blocks the install. A pass that runs over its budget blocks it too, and names the check that ran
 # over, to be moved to the post-release job. The release build and the install are outside the budget: they are the
@@ -15,8 +18,8 @@
 # passed within the budget. Exit 1: a check failed. Exit 2: the pass ran over its budget.
 set -u
 here="$(cd "$(dirname "$0")/.." && pwd)"
-checks=(stop paused delivery snapshot render_spec pair)
-budget_seconds=600
+checks=(compile stop paused delivery)
+budget_seconds=300
 
 start=$(date +%s)
 deadline=$((start + budget_seconds))
@@ -28,7 +31,11 @@ for check in "${checks[@]}"; do
         exit 2
     fi
     began=$(date +%s)
-    timeout --kill-after=30 "$left" "$here/tools/build" test "$check"
+    if [ "$check" = compile ]; then
+        timeout --kill-after=30 "$left" "$here/tools/build" test --no-run
+    else
+        timeout --kill-after=30 "$left" "$here/tools/build" test "$check"
+    fi
     code=$?
     took=$(($(date +%s) - began))
     echo "check=$check exit=$code seconds=$took"
