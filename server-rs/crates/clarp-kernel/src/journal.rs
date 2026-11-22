@@ -802,9 +802,8 @@ impl Batch<'_> {
         Ok(())
     }
 
-    /// A turn starts: if its message waited outside the conversation, it enters it now, in the
-    /// same write that starts the turn, and stands where the turn starts. Its row keeps when it
-    /// was sent: when its turn was accepted, which a new wording does not move.
+    /// Enter a queued message at its own turn's start or at Claude's read of a follow-up.
+    /// A message that waited for its own turn keeps its original send time.
     fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64) {
         if matches!(self.work.live(), Some(Turn::Starting(started)) if started.id == turn && started.origin == Origin::NativeGoal)
         {
@@ -833,13 +832,18 @@ impl Batch<'_> {
         match waiting {
             Ok(found) => {
                 if let Some(stored) = found.into_iter().find(|item| item.seq == message_seq) {
-                    let sent_at = self
-                        .recorder
-                        .agent
-                        .waiting()
-                        .find(|queued| queued.id == turn);
-                    let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);
-                    let body = sent(stored.body, sent_at);
+                    let body = if self.work.joins().contains_key(&turn) {
+                        // The queue record keeps the send time. A steer enters at its read.
+                        stored.body
+                    } else {
+                        let sent_at = self
+                            .recorder
+                            .agent
+                            .waiting()
+                            .find(|queued| queued.id == turn);
+                        let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);
+                        sent(stored.body, sent_at)
+                    };
                     let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);
                     item.key = stored.key;
                     self.queue_shown(turn, now_ms);
@@ -2261,9 +2265,9 @@ mod tests {
             .handle(Command::TurnStarted { turn: TurnId(1) }, 2)
             .unwrap();
         for (key, uuid) in [("u-two", "read"), ("u-three", "unread")] {
-            let accepted = recorder
-                .accept_message(message(key, Admission::Queue), 3)
-                .unwrap();
+            let mut incoming = message(key, Admission::Queue);
+            incoming.body = serde_json::to_vec(&serde_json::json!({"id": key})).unwrap();
+            let accepted = recorder.accept_message(incoming, 3).unwrap();
             assert!(!accepted.entered);
             let turn = accepted.turn.unwrap();
             recorder
@@ -2326,6 +2330,8 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1].turn, Some(2));
         assert_eq!(rows[1].ts_ms, 6);
+        let steered: serde_json::Value = serde_json::from_slice(&rows[1].body).unwrap();
+        assert_eq!(steered, serde_json::json!({"id": "u-two"}));
 
         recorder
             .handle(
@@ -2366,6 +2372,11 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[2].turn, Some(3));
+        let waited: serde_json::Value = serde_json::from_slice(&rows[2].body).unwrap();
+        assert_eq!(
+            waited,
+            serde_json::json!({"id": "u-three", "sent_at_ms": 3})
+        );
     }
 
     /// A user's send admitted behind a turn that runs, and the user's Stop, in one write: each
