@@ -197,9 +197,11 @@ def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: path
     try:
         helper = _live_helper(a.name)
         if helper:
-            _admin("agent", "helper-state", helper, "running", "--from", parent)
+            # The effort first: a refusal must leave the reused helper as it was, not 'running'.
             if a.effort:
+                _check_effort(_backend_of(helper), a.effort)
                 _admin("model", "--effort", a.effort, "--session", helper)
+            _admin("agent", "helper-state", helper, "running", "--from", parent)
         else:
             create = ["agent", "create", a.name, "--parent", parent, "--role", "helper",
                       "--cwd", str(workdir), "--backend", a.backend]
@@ -253,7 +255,8 @@ def fork(a: argparse.Namespace) -> int:
         args += ["--task", a.task]
     else:
         sys.exit("fork needs --task or --task-file")
-    _check_effort(a.backend or "", a.effort)
+    # Without --backend the children take the parent's backend, so that is the one to check.
+    _check_effort(a.backend or (_backend_of(parent) if a.effort else ""), a.effort)
     for flag, value in (("--count", a.count), ("--worktree", a.worktree), ("--cwd", a.cwd),
                         ("--backend", a.backend), ("--model", a.model), ("--effort", a.effort)):
         if value:
@@ -362,6 +365,15 @@ def run(name: str, backend: str, model: str, parent: str) -> int:
             _bg(parent, "job-fail", handle, f"sub-agent exited {rc}")
     (DIR / f"{name}.exit").write_text(f"{rc}\n")
     return rc
+
+
+def _backend_of(session: str) -> str:
+    """An agent's backend, from `clarp-admin model --session` (its show form); '' when it
+    cannot be read, and then the Host's own refusal of a separate effort still applies."""
+    try:
+        return str(_admin("model", "--session", session).get("backend") or "")
+    except AdminError:
+        return ""
 
 
 def _check_effort(backend: str, effort) -> None:
