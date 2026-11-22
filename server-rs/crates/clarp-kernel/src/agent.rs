@@ -862,8 +862,9 @@ impl Agent {
                 } = &mut accepted
                 {
                     *mark = coordination;
-                    if user_word {
-                        *priority = Some(true);
+                    // Queued::accept grants priority to user messages by default.
+                    if user_word || work.agent.import_held {
+                        *priority = Some(user_word);
                     }
                 }
                 work.record(AgentEvent::Turn {
