@@ -2157,12 +2157,22 @@ SCENARIOS.append({
     ],
 })
 
+RING_SPEECH = (
+    '[tts]\nprovider = "cartesia"\nfallback = "none"\n'
+    '[network]\nadvertise_lan = false\n'
+    '[cartesia]\napi_key = "replay-ring-key"\n'
+    '[cartesia.voices]\nClaire = "replay-ring-claire"\nNova = "replay-ring-nova"\n'
+)
+RING_VOICES = {AGENT: "replay-ring-claire", NOVA: "replay-ring-nova"}
+
+
 def rings(agent, number):
     return {'agent': agent, 'reason': f'  synthetic   reason {number} ', 'opening_line': f'synthetic opening {number}'}
 
 
 SCENARIOS.append({
     'id': 'rings',
+    'config': RING_SPEECH,
     'what': 'a ring: an agent calls its owner. The owner\'s tools ring for an agent by its name, with why and '
             'with the line it opens with; while it rings nobody else does; the answer starts a call with '
             'the agent on the floor and hands back the line to play first, the same again for who answered '
@@ -2188,7 +2198,8 @@ SCENARIOS.append({
         post('/calls/ring/cancel', {}, 'no ring is taken back'),
         get('/calls/ring?ring_id=rng_nothing', 'a ring that is none'),
         # Both agents have a conversation before they ring: a notice is written where one is.
-        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make a second agent'),
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA,
+                         'voice_id': json.dumps({'cartesia': RING_VOICES[NOVA]})}, 'make a second agent'),
         send('synthetic word before the ring', 'ringzero'),
         {'op': 'wait_reply', 'after': 'u-ringzero'},
         {'op': 'quiesce'},

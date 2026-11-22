@@ -26,13 +26,23 @@ fn voice_edits_merge_and_migration_requires_the_current_review() {
     );
     drop(host);
     // Supply the legacy shapes a Host before 135 could store.
-    for (session, legacy) in [(session, "old-voice"), (risky_session, uuid)] {
-        let (id, mut record) = kept_records(&place, "agent")
-            .into_iter()
-            .find(|(_, row)| row["session"] == session)
+    {
+        use clarp_ports::kv::KeyValueEngine as _;
+        let mut store = clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
             .unwrap();
-        record["voice_id"] = json!(legacy);
-        keep_record(&place, "agent", &id, &record);
+        let records = store.list("agent").unwrap();
+        for (session, legacy) in [(session, "old-voice"), (risky_session, uuid)] {
+            let (id, mut record) = records
+                .iter()
+                .map(|(id, bytes)| (id, serde_json::from_slice::<Value>(bytes).unwrap()))
+                .find(|(_, row)| row["session"] == session)
+                .unwrap();
+            record["voice_id"] = json!(legacy);
+            store
+                .put("agent", id, &serde_json::to_vec(&record).unwrap())
+                .unwrap();
+        }
     }
     let host = start();
     let run = |argv| host.post("/tools/run", json!({"tool":"clarp-admin","argv":argv}));
