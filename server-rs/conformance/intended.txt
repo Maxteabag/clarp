@@ -2,55 +2,6 @@
 # One per line: the difference's id from the report, then why. The register with the reasoning
 # is server-rs/docs/differences.md; an id is added here only once it is written there.
 
-# The reply that closes a completed turn is `final` (the Python Host says null when the turn
-# before had settled: reference defect R6).
-dfcb5143ebc3  two-turns: the second reply
-15b27f8ead44  log-pages: the second reply, in the newest page
-9c9b8bbc7447  log-pages: the second reply, in the page a client with nothing gets
-00f5d90896a6  log-pages: the second reply, to a client that catches up
-cdeb37c253ec  turn-timer: the second reply, which answered a message that had waited
-86eb79e858d9  the-apps-own-ids: the third reply, which answered a message that had waited
-1b6ac302cb55  the-queue-reworded: the second reply, which answered a message whose words were changed while a hold held it (the defect shows there or does not, from run to run: runs 43967274378 and 43968610236)
-34052692aaba  who-is-told: the last reply
-f2243c3156c0  routine-turns: the last reply, in a page without automation
-80e273b5bd0a  routine-turns: the reply to a watcher's event
-c9827f59a66a  roster-edits: the last reply
-df2b41e383ab  retried-turns: the reply of the turn after one that was tried twice
-5b59f0fbe603  agent-is-told: the third reply of the agent with a way of speaking of its own
-32c484ab1cb3  agent-is-told: its second reply (computed: the defect shows at a later turn or does not, from run to run)
-5eeb25bb406d  agent-is-told: the second reply of the agent named as a persona (computed)
-fe87cf73356b  agent-is-told: its third reply (computed)
-6fea64081dc4  spoken-names: the fifth reply of the agent that was named
-846151482d24  spoken-names: its second reply (computed: the defect shows at a later turn or does not, from run to run)
-303d269e2fc9  spoken-names: its third reply (computed)
-fac440df5e13  spoken-names: its fourth reply (computed)
-260663bc767f  spoken-names: the second reply of the scenario's own agent (computed)
-e06c199220a6  router: the second reply of the scenario's own agent
-5187a75b8f02  router: the second reply of the second agent (computed: the defect shows at a later turn or does not, from run to run)
-d7bd0121d397  router: its third reply (computed)
-
-# After a later turn of an agent, the last completed message is the agent's answer (the Python
-# Host still shows the user's message there, after a turn that had waited in the queue and
-# after plain turns that were not the agent's first: reference defect R12).
-d4b9221921eb  turn-timer: last_completed_message at rest, after the second turn
-0e41e546dac6  the-apps-own-ids: last_completed_message at rest, after the third turn
-9ebb2875bf28  the-queue-reworded: last_completed_message at rest, after the second turn (shows or does not, with the reply above)
-1e31cfb83338  who-is-told: last_completed_message at rest, after turns nobody waited for
-3c21eb549be7  routine-turns: last_completed_message at rest, after routine turns
-631b42b31474  roster-edits: last_completed_message at rest, after the turn of the agent put away
-6b801a35e263  roster-edits: the same, in the snapshot with nobody put away
-ecd38a2b9306  roster-edits: the same, in the snapshot of the tuned agent
-cbaf110bc254  roster-edits: last_completed_message at rest, after the turn of the tuned agent
-713b6d78996c  roster-edits: the same, in the last snapshot
-e5de879ae9b8  retried-turns: last_completed_message at rest, after the turn that followed a retried one
-25f3ea0bd60d  agent-is-told: last_completed_message at rest, after the third turn of the agent with a way of speaking of its own
-61b7ecd94462  agent-is-told: the same of the agent named as a persona (computed)
-f632d0f86f1d  spoken-names: last_completed_message at rest, after the fifth turn of the agent that was named
-219fb876c501  spoken-names: the same in the snapshot after its second turn (computed)
-5935024d3eb3  spoken-names: the same of the scenario's own agent, after its second turn (computed)
-9916a186a9b4  router: last_completed_message at rest, after the second turn of the scenario's own agent
-cce40563260b  router: the same of the second agent, after its third turn (computed)
-
 # The model that answered is shown after a turn that completed (the Python Host shows none
 # after some: reference defect R13). It answers in two ways at the same place, by its clock:
 # its reader remembers for the rest of a minute where an agent's transcript is, and asked once
@@ -88,39 +39,6 @@ d7c35cb7c0f7  failed-turns: the same, of the tool that died after a turn that wo
 # `GET /status` without a session names the agent the Python Host falls back to; this Host has
 # none it falls back to, and names none.
 522a5dba49c5  app-asks: session of the status nobody named a session for
-
-# The conversation has the tool work of every turn: a message that only calls tools is a row,
-# each row has a card for each tool its message calls, and what was said before tool work is
-# commentary. (Of a turn that follows a settled one the Python Host shows only what it wrote
-# while the turn ran: the rows with text, without cards and without a phase. Reference defect
-# R6, seen with tools.) Three rows more after the second turn, and what follows from them.
-7c531f9849ee  tool-turns: the rows after the second turn, in the short form (14, where the Python Host has 11)
-d146349e26ed  tool-turns: the first row of the second turn, in the short form: how many cards it has
-bdae038a8002  tool-turns: the first row of the second turn, in the short form: its phase
-8f39b82fdf10  tool-turns: the first row of the second turn, in the short form: that there are details to open
-27cb426174af  tool-turns: the first row of the second turn, in the short form: its cards
-8442dcb0e36e  tool-turns: its second row, in the short form: how many cards it has
-61dc3760dcc8  tool-turns: its second row, in the short form: what it says (the Python Host has the next text row here)
-bb1f82a28a3c  tool-turns: its second row, in the short form: that there are details to open
-d1a282c67bbb  tool-turns: its second row, in the short form: its cards
-449dd70f2674  tool-turns: its third row, in the short form: how many cards it has
-d42002ac5baf  tool-turns: its third row, in the short form: its phase
-c264fcea9d05  tool-turns: its third row, in the short form: what it says (the Python Host has the next text row here)
-1ef1950e766a  tool-turns: its third row, in the short form: that there are details to open
-377ee05006ad  tool-turns: its third row, in the short form: its cards
-c4ca02fd6920  tool-turns: its third row, in the short form: the turn's end (it is on the row that closed the turn, three rows further down)
-8ddceb2c4381  tool-turns: the rows after the second turn, whole (14, where the Python Host has 11)
-378c27fda6a9  tool-turns: the first row of the second turn, whole: its phase
-67f6127add17  tool-turns: the first row of the second turn, whole: its cards
-43849afd46e1  tool-turns: its second row, whole: what it says (the Python Host has the next text row here)
-71fdebbe6947  tool-turns: its second row, whole: its cards
-5aea2a4c366d  tool-turns: its third row, whole: its phase
-b31fe1910bca  tool-turns: its third row, whole: what it says (the Python Host has the next text row here)
-8bc4e90966b5  tool-turns: its third row, whole: its cards
-c7d989724caf  tool-turns: its third row, whole: the turn's end (it is on the row that closed the turn, three rows further down)
-0d0be4c3201f  tool-turns: the id of the first notification (ids are numbered as they come: six tool ids, and the traces a send's delivery names, came before)
-af17d14b52fe  tool-turns: the id of the second notification
-39ab584a295e  tool-turns: the row the second notification is about (three rows further down)
 
 # What a Host listens with (`GET /transcription-capabilities`): the Rust Host says which engine
 # hears a clip nobody named one for, where a turn of speech ends, and what could be installed,
