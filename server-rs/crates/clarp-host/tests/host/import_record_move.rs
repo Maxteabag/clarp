@@ -317,3 +317,16 @@ fn an_oversized_avatar_does_not_prevent_an_agent_import() {
     assert_eq!(answer["avatar_not_carried"], "too large");
     assert_eq!(host.conversation("older-mover"), [said("assistant", "Older history")]);
 }
+
+#[test]
+fn an_import_creates_its_missing_working_directory() {
+    let place = Place::new("import-missing-cwd");
+    let host = place.start_with_token(DESTINATION_TOKEN);
+    let cwd = place.root.join("absent").join("workspace");
+    assert!(!cwd.exists());
+    let report = import_with_optional_avatar(&place, &host, cwd.clone(), None);
+    assert!(report.contains(&format!("created working directory: {}", cwd.display())), "{report}");
+    assert!(cwd.is_dir());
+    assert!(std::fs::read_dir(&cwd).unwrap().next().is_none());
+    assert_eq!(host.conversation("mover"), [said("assistant", "Moved history")]);
+}

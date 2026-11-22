@@ -2441,7 +2441,7 @@ async fn import_agent(
             Some(ImportedRow { id, ts_ms, row })
         })
         .collect();
-    let member = app
+    let crate::fleet::Adopted { member, cwd_created } = app
         .fleet
         .adopt(record)
         .await?
@@ -2522,6 +2522,9 @@ async fn import_agent(
     });
     if let Some(why) = avatar_not_carried {
         answer["avatar_not_carried"] = json!(why);
+    }
+    if cwd_created {
+        answer["cwd_created"] = json!(member.record.cwd);
     }
     Ok(Json(answer))
 }
