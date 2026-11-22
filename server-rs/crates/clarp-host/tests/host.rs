@@ -6580,7 +6580,8 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
     std::fs::write(
         &owners,
         "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"a-key\"\n\n[cartesia.voices]\n\
-         Theo = \"voice-of-theo\"\n",
+         Theo = \"voice-of-theo\"\n\n[tts.agents.Theo]\nprovider = \"cartesia\"\n\
+         cartesia_voice = \"theo-call-voice\"\n",
     )
     .unwrap();
     // A stand-in for Claude Code that writes down what it was handed, and answers.
@@ -6589,7 +6590,7 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
     let script = [
         "#!/bin/sh\nread -r message\n",
         &format!("printf '%s\\n' \"$message\" >> \"{}\"\n", lines.display()),
-        STAND_IN_ANSWERS,
+        &STAND_IN_ANSWERS.replace("on it", "<speak>Reply from the call.</speak>"),
     ]
     .concat();
     program(&claude, &script);
@@ -6610,7 +6611,7 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
         ("ELEVEN_API_KEY", ""),
     ];
     let host = place.start_in("secret", &args, &world);
-    let make = |name: &str| -> (String, String) {
+    let make = |host: &Host, name: &str| -> (String, String) {
         let made = host.post("/agents", json!({ "name": name, "backend": "claude" }));
         let session = made["session"].as_str().unwrap().to_string();
         let snapshot = host.get("/agents/snapshot");
@@ -6620,7 +6621,22 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
             .unwrap();
         (session, row["agent_id"].as_str().unwrap().to_string())
     };
-    let ((theo, theo_id), (mike, _)) = (make("Theo"), make("Mike"));
+    let ((theo, theo_id), (mike, _)) = (make(&host, "Theo"), make(&host, "Mike"));
+    host.kill();
+    // Model an existing agent whose configured call voice has no stored provider entry.
+    {
+        use clarp_ports::kv::KeyValueEngine as _;
+        let mut store = clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap();
+        let mut record: Value =
+            serde_json::from_slice(&store.get("agent", &theo_id).unwrap().unwrap()).unwrap();
+        record["voice_id"] = json!("{}");
+        store
+            .put("agent", &theo_id, &serde_json::to_vec(&record).unwrap())
+            .unwrap();
+    }
+    let host = place.start_in("secret", &args, &world);
     let (phone, phone_id) = pair(&host, "Phone", "full");
     let grant = format!(
         "pg1.{}.{}.{}",
@@ -6772,7 +6788,9 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
     assert_eq!(payload["opening_audio_url"], clip);
     let asked = voice.asked();
     assert!(
-        asked.iter().any(|request| request["transcript"] == line),
+        asked.iter().any(|request| {
+            request["transcript"] == line && request["voice"]["id"] == "theo-call-voice"
+        }),
         "{asked:?}"
     );
     let fetched = fetch(&host, &phone, "GET", clip, &[], b"");
@@ -6948,7 +6966,7 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
         "/send",
         Some(json!({
             "session": theo, "text": "Yes, have a look.", "client_msg_id": "r1", "call_id": call_id,
-            "hands_free": true, "force_session": true, "synthesize_audio": false,
+            "hands_free": true, "force_session": true, "synthesize_audio": true,
         })),
     );
     assert_eq!((status, &sent["session"]), (200, &json!(theo)));
@@ -6970,6 +6988,12 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
          line: \"{line}\""
     );
     assert!(told.contains(&why), "{told}");
+    wait_for("the call reply used the same route", || {
+        voice.asked().iter().any(|request| {
+            request["transcript"] == "Reply from the call."
+                && request["voice"]["id"] == "theo-call-voice"
+        })
+    });
     as_phone("POST", "/calls/end", Some(json!({})));
 
     // An agent rings as itself with its own tool, and waits to hear how the call went. The
@@ -7156,7 +7180,7 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
         ),
         (200, off)
     );
-    make("Nadia");
+    make(&host, "Nadia");
     let told_before = relay.taken().len();
     let asked = json!({ "agent": "nadia", "reason": "A third thing", "opening_line": "Hello." });
     let (status, rung) = host.ask("POST", "/calls/ring", Some(&asked));

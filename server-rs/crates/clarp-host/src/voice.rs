@@ -197,6 +197,12 @@ struct HeldClip {
 /// Host's name for them).
 const HERALD_FILE: &str = "herald-internal-";
 
+enum OutsideClip {
+    Herald,
+    RingOpening,
+    Announcement,
+}
+
 /// The one that speaks, and where its clips are.
 pub struct Mouth {
     counts: QueueCounts,
@@ -1568,7 +1574,7 @@ impl Mouth {
     /// can say it now.
     async fn herald_clip(&self, record: &AgentRecord) -> Option<(String, PathBuf)> {
         let text = herald::words(&record.persona, &record.session);
-        self.clip_of(record, text, HERALD_FILE).await
+        self.clip_of(record, text, OutsideClip::Herald).await
     }
 
     /// A line an agent says outside any turn, in its own voice, as a clip of its own: the
@@ -1576,10 +1582,9 @@ impl Mouth {
     /// is voiced when the ring is placed, so that answering plays it at once. `None`:
     /// nothing on this Host can say it now.
     pub async fn said_outside_a_turn(&self, record: &AgentRecord, text: &str) -> Option<String> {
-        if !said::has_voice(Some(&record.voice_id)) {
-            return None;
-        }
-        let made = self.clip_of(record, text.to_string(), "").await;
+        let made = self
+            .clip_of(record, text.to_string(), OutsideClip::RingOpening)
+            .await;
         made.map(|(name, _)| name)
     }
 
@@ -1588,10 +1593,10 @@ impl Mouth {
     /// asks as an agent, or a word of its own (a speaker with no session). Where nothing on
     /// this Host can say it, nothing is said. Answers whether it was.
     pub(crate) async fn announce(&self, speaker: &AgentRecord, text: &str) -> bool {
-        if !said::has_voice(Some(&speaker.voice_id)) {
-            return false;
-        }
-        let Some((name, _)) = self.clip_of(speaker, text.to_string(), "").await else {
+        let Some((name, _)) = self
+            .clip_of(speaker, text.to_string(), OutsideClip::Announcement)
+            .await
+        else {
             return false;
         };
         let session = Some(speaker.session.as_str()).filter(|session| !session.is_empty());
@@ -1617,20 +1622,32 @@ impl Mouth {
         true
     }
 
-    /// A clip of `text` in an agent's voice, under a name that begins with `prefix`: its
-    /// name and its file.
+    /// A clip of `text` in an agent's voice: its name and its file.
     async fn clip_of(
         &self,
         record: &AgentRecord,
         text: String,
-        prefix: &'static str,
+        purpose: OutsideClip,
     ) -> Option<(String, PathBuf)> {
         let owners = self.owners();
         let view = self.speech_view(&owners);
         let mut agent = speaker(record);
-        if prefix == HERALD_FILE {
-            agent.stored = Some(herald::voice_input(&record.voice_id));
-        }
+        let prefix = match purpose {
+            OutsideClip::Herald => {
+                agent.stored = Some(herald::voice_input(&record.voice_id));
+                HERALD_FILE
+            }
+            OutsideClip::RingOpening if !said::has_voice(agent.stored) => {
+                // A voice named by the agent's route speaks even when its stored map is empty.
+                view.voices
+                    .route(agent.who)
+                    .voice
+                    .filter(|voice| !voice.is_empty())?;
+                ""
+            }
+            OutsideClip::Announcement if !said::has_voice(agent.stored) => return None,
+            OutsideClip::RingOpening | OutsideClip::Announcement => "",
+        };
         let Chosen::By(by) = chosen(&view, &owners, agent) else {
             return None;
         };
