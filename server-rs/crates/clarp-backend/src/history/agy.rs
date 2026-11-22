@@ -13,10 +13,7 @@
 //! The rule is the Python Host's (`server/lib/agy_transcript.py`, `parse_turns`), held by
 //! `tests/fixtures/agy-history-vectors.json`: also where it surprises. Tools of steps that
 //! never said anything are shown with the next thing the agent says, and with nothing when
-//! the user speaks first; a step of agy 1.1 is a tool by its kind. Two things are not
-//! copied, and the vectors say so (`turns_mended`): the names agy gives its file tools
-//! today are the tools they are (`crate::agy`), and what a command printed is cut at the
-//! words agy writes before it today as well as at the ones it wrote.
+//! the user speaks first. A step of agy 1.1 is a tool by its kind.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -27,7 +24,7 @@ use regex::Regex;
 use serde_json::{Map, Value, json};
 
 use super::rollout::without_preamble;
-use crate::agy::tool_name;
+use crate::agy::{FILE_ARGUMENTS, printed_output, redact_input, tool_name};
 
 fn pattern(text: &str) -> Regex {
     #[allow(clippy::expect_used)]
@@ -46,13 +43,6 @@ static EXIT: LazyLock<Regex> = LazyLock::new(|| pattern(r"exited with code (-?\d
 static TASK: LazyLock<Regex> = LazyLock::new(|| pattern(r"tasks/(task-\d+)\.log"));
 static TASK_END: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"(?i)\b(finished|was canceled) with result:"));
-/// What looks like a secret in what a tool was given.
-static SECRET: LazyLock<Regex> = LazyLock::new(|| {
-    pattern(
-        r"(?i)(authorization|token|password|passwd|secret|api[_-]?key)[\s\x1c-\x1f]*[:=][\s\x1c-\x1f]*[^\s\x1c-\x1f]+",
-    )
-});
-
 /// The kinds of step agy 1.1 wrote for its tools, by the names a conversation knows tools by.
 const STEP_TOOLS: [(&str, &str); 11] = [
     ("RUN_COMMAND", "Bash"),
@@ -74,9 +64,6 @@ const NO_TOOL: [&str; 4] = [
     "GENERIC",
     "ERROR_MESSAGE",
 ];
-/// The words before what a command printed: the ones agy wrote, and the ones it writes.
-const PRINTED_AFTER: [&str; 2] = ["Output:\n", "Command output:\n"];
-
 /// The use of a tool, while the transcript is read: its card, and what only the reading
 /// needs of it.
 struct Used {
@@ -178,25 +165,14 @@ fn given(name: &str, raw: &Map<String, Value>) -> Value {
     let clean = |keys: &[&str], most: usize| -> String {
         let named: Vec<Option<&Value>> = keys.iter().map(|key| raw.get(*key)).collect();
         let said = cells::text_of(&named);
-        let shown = SECRET.replace_all(python::first(&said, most), "${1}=[redacted]");
-        shown.into_owned()
+        redact_input(python::first(&said, most)).into_owned()
     };
     match name {
         "Bash" => json!({
             "command": clean(&["command", "CommandLine"], 180),
             "description": clean(&["description"], 120),
         }),
-        "Read" | "Write" | "Edit" => {
-            let places = [
-                "file_path",
-                "FilePath",
-                "AbsolutePath",
-                "TargetFile",
-                "path",
-                "Path",
-            ];
-            json!({ "file_path": clean(&places, 240) })
-        }
+        "Read" | "Write" | "Edit" => json!({ "file_path": clean(&FILE_ARGUMENTS, 240) }),
         "Grep" | "Glob" => json!({
             "pattern": clean(&["pattern", "Query"], 100),
             "path": clean(&["path", "SearchPath"], 240),
@@ -280,18 +256,12 @@ fn stepped(row: &Map<String, Value>, kind: &str) -> Used {
 /// whether it is still at work (`_settle`, cut at either of the words agy writes).
 fn settle(used: &mut Used, content: &str, status: &str) {
     let body = RESULT_HEAD.replace(content, "");
-    let mut body: &str = &body;
     let code = EXIT
-        .captures(python::first(body, 300))
+        .captures(python::first(&body, 300))
         .and_then(|found| python::int(&found[1]))
         .and_then(|code| i64::try_from(code).ok());
     used.set("exit_code", json!(code));
-    let marks = PRINTED_AFTER
-        .iter()
-        .filter_map(|mark| body.find(mark).map(|at| (at, mark.len())));
-    if let Some((at, size)) = marks.min() {
-        body = &body[at + size..];
-    }
+    let body = printed_output(&body);
     used.set("result", json!(cells::clip(python::strip(body), 300)));
     used.output = Some(body.to_string());
     let status = if status.to_uppercase() == "RUNNING" {

@@ -16,8 +16,7 @@ fn vectors() -> Value {
 fn a_transcript_of_antigravity_is_read_as_the_python_host_reads_it() {
     let vectors = vectors();
     let transcripts = vectors["transcripts"].as_array().unwrap();
-    let (mut lines_read, mut turns, mut tools, mut shown, mut mended, mut named) =
-        (0, 0, 0, 0, 0, 0);
+    let (mut lines_read, mut turns, mut tools, mut shown, mut named) = (0, 0, 0, 0, 0);
     for transcript in transcripts {
         let what = format!("{}: {}", transcript["name"], transcript["what"]);
         let lines: Vec<&str> = transcript["lines"]
@@ -27,15 +26,7 @@ fn a_transcript_of_antigravity_is_read_as_the_python_host_reads_it() {
             .map(|line| line.as_str().unwrap())
             .collect();
         let read = history::agy(&(lines.join("\n") + "\n"));
-        // Two things are read otherwise, on purpose: the names agy gives its file tools
-        // today are the tools they are, and what a command printed is cut at the words agy
-        // writes before it today. `turns_mended` is the Python Host's own function's reading
-        // with those two mended, and is what holds here.
-        mended += usize::from(transcript.get("turns_mended").is_some());
-        let theirs = transcript
-            .get("turns_mended")
-            .unwrap_or(&transcript["turns"]);
-        let theirs = theirs.as_array().unwrap();
+        let theirs = transcript["turns"].as_array().unwrap();
         for (number, (ours, theirs)) in read.iter().zip(theirs).enumerate() {
             let none = Vec::new();
             let cards = |turn: &Value| turn["tools"].as_array().unwrap().clone();
@@ -69,10 +60,6 @@ fn a_transcript_of_antigravity_is_read_as_the_python_host_reads_it() {
     assert_eq!(
         (transcripts.len(), lines_read, turns, tools, shown, named),
         (13, 169, 55, 73, 55, 27)
-    );
-    assert_eq!(
-        mended, 2,
-        "two transcripts are read otherwise than the Python Host reads them"
     );
 }
 
