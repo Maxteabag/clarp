@@ -362,6 +362,7 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 #[derive(Clone)]
 pub struct App {
     pub capture: Arc<crate::diagnostics::Capture>,
+    pub client_events: Arc<crate::client_events::Desk>,
     pub controller_actions: Arc<crate::controller_actions::Desk>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
     /// Held by a change to the skills this Host keeps installed, from its reading of the
