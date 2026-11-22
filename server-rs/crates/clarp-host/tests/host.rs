@@ -10383,7 +10383,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         "with the 4 rows of its conversation, the 5 things in its library, its plan and the 3 \
          files it published or shows.\nOne file that it names is not on the Host at {old} either: \
          there was nothing to bring. If another Host has it, `clarp-host import --files --from \
-         {old} --session {session} --files-from ADDR:PORT` brings it from there.\nIt is heard \
+         {old} --session {session} --files-from ADDR:PORT` can bring it before the move finishes.\nIt is heard \
          here as it was there: in no,en, by elevenlabs:scribe_v2, then google:chirp_3.\nIt is \
          marked moved on the Host at {old}. Its turn-start doors there now refuse it. It is resumed here.",
         old = old_host.address
@@ -10586,7 +10586,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
             .contains("media asset not found for this session"),
         "{refused}"
     );
-    // Asked for again, the files are the same files: nothing arrives twice.
+    // A files-only retry leaves a completed move alone.
     let again = new_place
         .host_command()
         .args(["import", "--files", "--from", &old_host.address])
@@ -10596,10 +10596,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .ended();
     let told = String::from_utf8_lossy(&again.stdout).into_owned();
     assert!(
-        again.status.success()
-            && told.contains(&format!(
-                "{session} has the 3 files it published or shows here."
-            )),
+        again.status.success() && told.trim_end() == "The move is already finished.",
         "{told}"
     );
     let gallery = new_host.get(&format!("/media?session={session}"));
@@ -10623,6 +10620,23 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     ];
     let kept = fetch(&third_host, "", "POST", "/media", &under_its_id, &long_ago);
     assert_eq!(kept.status, 200, "{}", kept.text());
+    // Put the agent back into the state of a move whose file transfer left the copy held.
+    assert_eq!(
+        new_host
+            .ask("POST", "/stop", Some(&json!({"session": session})))
+            .0,
+        200
+    );
+    assert_eq!(
+        old_host
+            .ask(
+                "POST",
+                "/agent-moved",
+                Some(&json!({"session": session, "moved_to": null}))
+            )
+            .0,
+        200
+    );
     let again = third_place
         .host_command()
         .args(["import", "--files", "--from", &old_host.address])
@@ -10637,8 +10651,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     assert_eq!(
         told.trim_end(),
         format!(
-            "{session} has the 4 files it published or shows (one of them from the Host at {}) here.",
-            third_host.address
+            "{session} has the 4 files it published or shows (one of them from the Host at {}) here.\nIt is marked moved on the Host at {}. Its turn-start doors there now refuse it. It is resumed here.",
+            third_host.address, old_host.address
         )
     );
     let came = fetch(&new_host, "", "GET", "/media/asset_gone_long_ago", &[], b"");

@@ -307,7 +307,7 @@ impl Followed {
             // A conversation that came from another Host names files that stayed there.
             (_, None) => more.push_str(&format!(
                 "{} not on the Host at {from} either: there was nothing to bring. If another \
-                 Host has {}, {again} --files-from ADDR:PORT` brings {} from there.\n",
+                 Host has {}, {again} --files-from ADDR:PORT` can bring {} before the move finishes.\n",
                 if one {
                     "One file that it names is".to_string()
                 } else {
@@ -643,6 +643,9 @@ fn source_idle(way: &Way<'_>, agent_id: &Value, target: Option<&Value>) -> Resul
     Ok(())
 }
 
+const HOLD_UNCONFIRMED: &str =
+    "The move is incomplete: this Host did not confirm the hold. The source was not marked moved.";
+
 fn finish_handoff(way: &Way<'_>, agent_id: &Value, held: bool, files: &Followed) -> String {
     let unfinished = |why: &str| {
         format!(
@@ -652,7 +655,13 @@ fn finish_handoff(way: &Way<'_>, agent_id: &Value, held: bool, files: &Followed)
         )
     };
     if !held {
-        return "The move is incomplete: this Host did not confirm the hold. The source was not marked moved.".into();
+        return HOLD_UNCONFIRMED.into();
+    }
+    if files.failed != 0 {
+        return unfinished(&format!(
+            "{} file(s) could not be transferred ({})",
+            files.failed, files.why
+        ));
     }
     let info = match get(way.from, "/server-info", way.source_token) {
         Ok(info) => info,
@@ -661,16 +670,13 @@ fn finish_handoff(way: &Way<'_>, agent_id: &Value, held: bool, files: &Followed)
     if !has_move_mark(&info) {
         return manual_handoff(way);
     }
-    if files.failed != 0 {
-        return unfinished(&format!(
-            "{} file(s) could not be transferred ({})",
-            files.failed, files.why
-        ));
-    }
     let target = match move_target(way) {
         Ok(target) => target,
         Err(why) => return unfinished(&why),
     };
+    if info["server_id"] == target["id"] {
+        return unfinished("the source and destination are the same Host");
+    }
     if let Err(why) = source_idle(way, agent_id, None) {
         return unfinished(&why);
     }
@@ -715,6 +721,37 @@ fn finish_handoff(way: &Way<'_>, agent_id: &Value, held: bool, files: &Followed)
         }
         _ => format!("{marked} The queue state here could not be confirmed: {resumed}."),
     }
+}
+
+/// An explanation when a files-only retry must leave the two Hosts alone. Otherwise
+/// the destination has confirmed a held copy of the same agent.
+fn files_handoff_status(way: &Way<'_>, there: &Value) -> Result<Option<String>, String> {
+    let local = get(way.host, "/agents/snapshot", way.token)?;
+    let here = snapshot_agent(&local, way.session, way.host)?;
+    if !there["agent_id"].is_string() || here["agent_id"] != there["agent_id"] {
+        return Err("this Host has a different agent under that session".into());
+    }
+    if !there["moved"].is_null() {
+        let target = move_target(way)?;
+        if there["moved"]["to"]["id"] != target["id"] {
+            return Err("the source is marked moved to a different Host".into());
+        }
+        // A hold after the source was marked may be a later Stop. Leave it in place.
+        let reported = match here["queue_paused"].as_bool() {
+            Some(false) => "The move is already finished.",
+            Some(true) => {
+                "The source is already marked moved to this Host. The copy here stays held."
+            }
+            None => {
+                "The source is already marked moved to this Host. The queue state here could not be confirmed."
+            }
+        };
+        return Ok(Some(reported.into()));
+    }
+    if here["queue_paused"] != true || !here["moved"].is_null() {
+        return Ok(Some(HOLD_UNCONFIRMED.into()));
+    }
+    Ok(None)
 }
 
 fn take_move_back(way: &Way<'_>) -> Result<String, String> {
@@ -808,6 +845,9 @@ pub fn import(
     let snapshot = get(&from, "/agents/snapshot", source_token)?;
     let agent = snapshot_agent(&snapshot, &session, &from)?.clone();
     movable(&agent)?;
+    if only_files && let Some(status) = files_handoff_status(&way, &agent)? {
+        return Ok(status);
+    }
     if agent["busy"] == true && !only_files {
         return Err(format!(
             "{session} is in the middle of a turn on the Host at {from}: let it end first"
@@ -944,9 +984,22 @@ pub fn import(
     if only_files {
         let followed = files(&way, &wants);
         let (came, more) = followed.told(&way);
-        return Ok(format!("{session} has {came} here.\n{skipped}{more}")
-            .trim_end()
-            .to_string());
+        let handoff = if followed.failed == 0 {
+            let source = get(&from, "/agents/snapshot", source_token)?;
+            let there = snapshot_agent(&source, &session, &from)?;
+            if there["agent_id"] != agent["agent_id"] {
+                return Err("the source agent's identity changed during the move".into());
+            }
+            match files_handoff_status(&way, there)? {
+                Some(status) => status,
+                None => finish_handoff(&way, &agent["agent_id"], true, &followed),
+            }
+        } else {
+            finish_handoff(&way, &agent["agent_id"], true, &followed)
+        };
+        return Ok(format!(
+            "{session} has {came} here.\n{skipped}{more}{handoff}"
+        ));
     }
     let made = match library.len() {
         0 => String::new(),
@@ -1664,7 +1717,7 @@ mod tests {
             more,
             "155 files that it names are not on the Host at old:1 either: there was nothing to \
              bring. If another Host has them, `clarp-host import --files --from old:1 --session \
-             koko --files-from ADDR:PORT` brings them from there.\n\
+             koko --files-from ADDR:PORT` can bring them before the move finishes.\n\
              2 files did not arrive (the first: this Host answered 400: bad size): \
              `clarp-host import --files --from old:1 --session koko` tries them again.\n"
         );
@@ -1679,7 +1732,7 @@ mod tests {
             "One file that it names is not on the Host at old:1 either: there was nothing to \
              bring. If another Host has it, `clarp-host import"
         ));
-        assert!(more.contains("--files-from ADDR:PORT` brings it from there.\n"));
+        assert!(more.contains("--files-from ADDR:PORT` can bring it before the move finishes.\n"));
         assert!(more.contains("One file did not arrive (why): `clarp-host import --files"));
         assert!(more.ends_with("tries it again.\n"));
         // With another Host to ask: what it had is said, and what neither has.
@@ -1802,6 +1855,170 @@ mod tests {
         assert!(more.contains(&format!("2 files were removed on the Host at {from}.\n")));
         assert!(more.contains("One file that it names is not on the Host"));
         assert!(!more.contains("did not arrive"));
+    }
+
+    #[test]
+    fn a_files_only_retry_finishes_a_held_move() {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+
+        let serve = |script: Vec<(&str, u16, Value)>| {
+            let script: Vec<_> = script
+                .into_iter()
+                .map(|(request, status, body)| (request.to_string(), status, body))
+                .collect();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let worker = std::thread::spawn(move || {
+                for (expected, status, response) in script {
+                    let (stream, _) = listener.accept().unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
+                    let mut request = BufReader::new(stream);
+                    let mut line = String::new();
+                    request.read_line(&mut line).unwrap();
+                    assert_eq!(line, format!("{expected} HTTP/1.1\r\n"));
+                    let mut length = 0;
+                    loop {
+                        line.clear();
+                        if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                            break;
+                        }
+                        if let Some(count) = line.strip_prefix("Content-Length: ") {
+                            length = count.trim().parse().unwrap();
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    request.read_exact(&mut body).unwrap();
+                    match expected.as_str() {
+                        "POST /agent-moved" => assert_eq!(
+                            serde_json::from_slice::<Value>(&body).unwrap(),
+                            json!({"session": "chat", "moved_to": {"host": "new", "id": "destination"}}),
+                        ),
+                        "POST /turn-queue/resume" => assert_eq!(
+                            serde_json::from_slice::<Value>(&body).unwrap(),
+                            json!({"session": "chat"}),
+                        ),
+                        _ => assert!(body.is_empty()),
+                    }
+                    let response = response.to_string();
+                    write!(
+                        request.get_mut(),
+                        "HTTP/1.1 {status} Reply\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                        response.len()
+                    )
+                    .unwrap();
+                }
+            });
+            (address, worker)
+        };
+
+        let at = |paused, moved: Value| {
+            json!({"agents": [{
+                "session": "chat", "agent_id": "a-chat", "busy": false,
+                "queue_paused": paused, "moved": moved,
+            }]})
+        };
+        let held = at(true, Value::Null);
+        let moved = json!({"to": {"host": "new", "id": "destination"}, "at": 100});
+        let marked = at(false, moved);
+        let identity = json!({"name": "new", "server_id": "destination"});
+        let before_files = || {
+            vec![
+                ("GET /agents/snapshot", 200, at(false, Value::Null)),
+                (
+                    "GET /log?session=chat&limit=1000",
+                    200,
+                    json!({"turns": []}),
+                ),
+                ("GET /task-plans?session=chat", 200, json!({})),
+                (
+                    "GET /artifacts?session=chat&order=created&limit=500&offset=0",
+                    200,
+                    json!({}),
+                ),
+                (
+                    "GET /media?session=chat&limit=500",
+                    200,
+                    json!({"assets": [{"asset_id": "gone"}]}),
+                ),
+            ]
+        };
+        let run = |from: &str, host: &str| {
+            import(
+                [
+                    "--files",
+                    "--from",
+                    from,
+                    "--host",
+                    host,
+                    "--session",
+                    "chat",
+                ]
+                .map(str::to_string)
+                .into_iter(),
+                "",
+                "",
+                "",
+            )
+        };
+
+        let mut source = before_files();
+        source.extend([
+            ("GET /media/gone", 410, json!({})),
+            ("GET /agents/snapshot", 200, at(false, Value::Null)),
+            (
+                "GET /server-info",
+                200,
+                json!({"server_id": "source", "capabilities": {"features": ["agent_moved"]}}),
+            ),
+            ("GET /agents/snapshot", 200, at(false, Value::Null)),
+            (
+                "POST /agent-moved",
+                200,
+                json!({"ok": true, "session": "chat", "moved": marked["agents"][0]["moved"]}),
+            ),
+            ("GET /agents/snapshot", 200, marked.clone()),
+            // Repeating the command for the now-finished move only reads the two snapshots.
+            ("GET /agents/snapshot", 200, marked),
+        ]);
+        let (from, old) = serve(source);
+        let (host, new) = serve(vec![
+            ("GET /agents/snapshot", 200, held.clone()),
+            ("GET /agents/snapshot", 200, held.clone()),
+            ("GET /pairing/identity", 200, identity.clone()),
+            (
+                "POST /turn-queue/resume",
+                200,
+                json!({"session": "chat", "paused": false}),
+            ),
+            ("GET /agents/snapshot", 200, at(false, Value::Null)),
+            ("GET /pairing/identity", 200, identity),
+        ]);
+        let report = run(&from, &host).unwrap();
+        assert!(
+            report.contains(&format!("One file was removed on the Host at {from}.")),
+            "{report}"
+        );
+        assert!(
+            report.ends_with("Its turn-start doors there now refuse it. It is resumed here."),
+            "{report}"
+        );
+        assert_eq!(run(&from, &host).unwrap(), "The move is already finished.");
+        old.join().unwrap();
+        new.join().unwrap();
+
+        let mut source = before_files();
+        source.push(("GET /media/gone", 503, json!({})));
+        let (from, old) = serve(source);
+        let (host, new) = serve(vec![("GET /agents/snapshot", 200, held)]);
+        let report = run(&from, &host).unwrap();
+        assert!(report.contains("One file did not arrive"), "{report}");
+        assert!(report.contains("The move is incomplete"), "{report}");
+        assert!(report.contains("The copy here stays held"), "{report}");
+        old.join().unwrap();
+        new.join().unwrap();
     }
 
     #[test]
