@@ -59,8 +59,11 @@ clarp-agent-artifacts question "$CLAUDE_PWA_SESSION" \
 
 Provide two or three distinct options with stable, unique IDs and concise,
 readable labels. Descriptions are optional. A recommendation is optional and
-must identify an existing option. The native card always allows **Write my own
-answer**. `--payload JSON_OBJECT` can attach relevant identifiers and context.
+must identify an existing option. By default the card also offers **Write my own
+answer**. When you need exactly one of the given options (for example to choose a branch
+in code), add `--no-custom`: the card then offers only your options. `--no-custom` works on
+the Python Host's helper. The Rust Host's `clarp-agent-artifacts` does not take it yet;
+there, ask without it and treat a custom answer as a clarification. `--payload JSON_OBJECT` can attach relevant identifiers and context.
 Use `--dry-run` to inspect a request before posting if needed.
 
 After creation, verify the returned artifact has `type: question`, a decision
