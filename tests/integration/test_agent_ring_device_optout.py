@@ -65,7 +65,7 @@ def test_a_phone_switches_its_own_rings_off_and_on_over_http(running_server):
     assert _call(base, camera["token"], "POST", {"receive_rings": True})[1]["state"] == "on"
 
 
-def test_post_devices_binds_to_the_authenticated_phone_and_refuses_another_phone_or_the_administrator(
+def test_post_devices_binds_to_the_authenticated_phone_lets_another_phone_take_it_and_refuses_the_administrator(
         running_server):
     from lib import apns, db
     base, ctx, srv = running_server
@@ -75,11 +75,16 @@ def test_post_devices_binds_to_the_authenticated_phone_and_refuses_another_phone
     owners = {r["token"]: (r["owner"], r["disabled_at"]) for r in
               db.conn().execute("SELECT token, principal AS owner, disabled_at FROM device_tokens")}
     assert owners["a1" * 32] == (camera["device_id"], None) and owners["b2" * 32] == (other["device_id"], None)
-    for token in (other["token"], "local-administrator"):
-        assert _register(base, token, "a1" * 32) == (409, {"ok": False, "error": "device_token_owned_elsewhere"})
+    assert _register(base, "local-administrator", "a1" * 32) == (
+        409, {"ok": False, "error": "device_token_owned_elsewhere"})
     assert apns.owned_active_tokens() and owners == {
         r["token"]: (r["owner"], r["disabled_at"]) for r in
         db.conn().execute("SELECT token, principal AS owner, disabled_at FROM device_tokens")}
+    # Another full-scope phone takes the token over (R26: the same phone paired again).
+    assert _register(base, other["token"], "a1" * 32)[0] == 200
+    moved = {r["token"]: (r["owner"], r["disabled_at"]) for r in
+             db.conn().execute("SELECT token, principal AS owner, disabled_at FROM device_tokens")}
+    assert moved["a1" * 32] == (other["device_id"], None)
 
 
 def test_the_administrator_cannot_switch_rings_and_a_malformed_body_is_refused(running_server):
