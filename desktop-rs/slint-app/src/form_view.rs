@@ -440,7 +440,13 @@ fn press(id: &str, action: &str) {
     let Some(app) = crate::app() else { return };
     let confirm = {
         let engine = app.engine.borrow();
-        let Some(FormView { state: FormState::Form(form), .. }) = engine.render_spec(id) else { return };
+        let Some(view) = engine.render_spec(id) else { return };
+        let FormState::Form(form) = &view.state else { return };
+        // Only an open form's button asks or sends: once answered, while
+        // one is sent, or with a required value missing, a press is nothing.
+        if view.accepted.is_some() || view.sending || view.closed || !form.gaps(&view.values).is_empty() {
+            return;
+        }
         let Some(button) = form.buttons.iter().find(|b| b.action == action) else { return };
         button.confirm.clone().map(|question| (question, button.style == ButtonStyle::Destructive))
     };
