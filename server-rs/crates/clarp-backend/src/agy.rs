@@ -444,7 +444,10 @@ fn came_back(output: &str) -> (String, Option<i64>) {
             .parse::<i64>()
             .ok()
     });
-    (clarp_kernel::python::strip(printed_output(body)).to_string(), code)
+    (
+        clarp_kernel::python::strip(printed_output(body)).to_string(),
+        code,
+    )
 }
 
 /// The figure that says only how much in all: no usage of a step's own.
@@ -1110,7 +1113,10 @@ mod tests {
             json!({ "file_path": "/work/a.txt" })
         );
         assert_eq!(
-            tool_input("Edit", &json!({ "Path": "/preferred", "path": "/fallback" })),
+            tool_input(
+                "Edit",
+                &json!({ "Path": "/preferred", "path": "/fallback" })
+            ),
             json!({ "file_path": "/preferred" })
         );
         assert_eq!(
