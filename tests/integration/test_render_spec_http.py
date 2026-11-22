@@ -305,6 +305,27 @@ def test_shadowed_payload_key_has_same_refusal_from_tool_publish_and_pure_valida
     assert db.conn().execute("SELECT count(*) FROM artifacts").fetchone()[0] == 0
 
 
+def test_tool_shows_the_refusal_body_when_the_payload_is_published_without_its_request(host, envelope, tmp_path):
+    # The fixture alone is the payload, not the request: the Host refuses it, and
+    # the tool must print why instead of a bare "HTTP Error 409: Conflict".
+    import os
+    import subprocess
+    import sys
+    from urllib.parse import urlparse
+    from tests.integration.test_attention_questions_http import TOKEN
+
+    config_path = tmp_path / "client.toml"
+    config_path.write_text(f'[server]\nbind_addr="127.0.0.1"\nport={urlparse(host.base).port}\nauth_token="{TOKEN}"\n')
+    request_file = tmp_path / "payload-only.json"
+    request_file.write_text(json.dumps(envelope["payload"]))
+    failed = subprocess.run(
+        [sys.executable, str(Path(__file__).parents[2] / "scripts/agent_artifacts.py"),
+         "publish-render-spec", str(request_file), "--validate-only"],
+        env={**os.environ, "CLAUDE_PWA_CONFIG": str(config_path)}, capture_output=True, timeout=10)
+    refusal = json.loads(failed.stderr)
+    assert failed.returncode == 1 and refusal["error"] and "HTTP Error" not in failed.stderr.decode()
+
+
 @pytest.mark.parametrize("field,value,code,status", [
     ("session", "unknown-session", "not_open", 409),
     ("title", "", "missing_key", 400),

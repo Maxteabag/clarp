@@ -1,6 +1,6 @@
 """render_spec is drawn per client (issue 428): each client's contract numbers are its own series.
-iOS from 74; every other client name, an unknown or absent one included, never, until its owner
-names its number. The name is matched exactly."""
+iOS from 74, the web app from 1; every other client name, an unknown or absent one included, never,
+until its owner names its number. The name is matched exactly."""
 from __future__ import annotations
 
 import pytest
@@ -8,14 +8,16 @@ import pytest
 from lib import config, server_identity
 
 
-def test_the_default_is_ios_from_74_and_no_other_client():
-    assert server_identity.RENDER_SPEC_MIN_CONTRACT == {"ios": 74}
+def test_the_default_is_ios_from_74_and_web_from_1_and_no_other_client():
+    assert server_identity.RENDER_SPEC_MIN_CONTRACT == {"ios": 74, "web": 1}
 
 
 @pytest.mark.parametrize("header,capable", [
     ("ios/2981 contract=74", True), ("ios/2990 contract=75", True), ("ios/2980 contract=73", False),
     ("android/500 contract=74", False), ("android/500 contract=9999", False),
-    ("desktop/1 contract=200", False), ("web/1 contract=200", False), ("watch/1 contract=200", False),
+    ("desktop/1 contract=200", False), ("watch/1 contract=200", False),
+    ("web/0.5.3 contract=1", True), ("web/1 contract=200", True), ("web/0.5.3 contract=0", False),
+    ("Web/0.5.3 contract=1", False), ("web/0.5.3 contract=1 ", False),
     ("iosx/1 contract=74", False), ("ios-beta/1 contract=74", False), ("IOS/1 contract=74", False),
     ("/1 contract=74", False), ("ios/1", False), (None, False), ("", False),
 ])

@@ -3456,3 +3456,166 @@ html:not(.desktop) .history:has(.status-line) .history-jump {
 .work-row-calls { margin: 4px 0 2px 14px; }
 .work-row-text { margin: 4px 0; color: var(--washi-dim); }
 span.lv-fold { cursor: default; }
+
+/* ============================================================
+   Native forms (render_spec, catalog clarp.form v1; issue 428)
+   ------------------------------------------------------------
+   A form in the chat is a card in the agent-card's surface; its
+   captions are the start dialog's field labels and Submit is its
+   primary button. The answered card shows every value as plain text.
+   ============================================================ */
+.turn.rs-artifact {
+  max-width: min(65ch, 100%);
+  margin: 10px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--ink-edge);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--ink-soft) 88%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .08);
+  font: 400 14px/1.45 var(--font-body);
+  color: var(--washi);
+  content-visibility: visible;
+}
+.rs-head { margin-bottom: 12px; }
+.rs-kind {
+  display: block;
+  font: 600 10px/1 var(--font-body);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--washi-low);
+  margin-bottom: 6px;
+}
+.rs-title { margin: 0; font: 600 16px/1.3 var(--font-body); color: var(--washi); }
+.rs-summary { margin: 4px 0 0; color: var(--washi-dim); font-size: 13px; }
+.rs-notice { color: var(--washi-dim); font-size: 13px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rs-form[hidden] { display: none; }
+.rs-body, .rs-stack { display: flex; flex-direction: column; gap: 14px; }
+.rs-stack.rs-horizontal { flex-direction: row; align-items: flex-start; gap: 12px; }
+.rs-stack.rs-horizontal > * { flex: 1 1 0; min-width: 0; }
+@media (max-width: 520px) { .rs-stack.rs-horizontal { flex-direction: column; align-items: stretch; } }
+.rs-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--ink-edge);
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+.rs-card-title { margin: 0; font: 600 14px/1.3 var(--font-body); color: var(--washi); }
+.rs-heading { margin: 0; color: var(--washi); font-family: var(--font-body); font-weight: 600; line-height: 1.3; }
+.rs-heading-1 { font-size: 19px; }
+.rs-heading-2 { font-size: 16px; }
+.rs-heading-3 { font-size: 14px; }
+.rs-text { margin: 0; color: var(--washi); white-space: pre-wrap; }
+.rs-divider { border: 0; border-top: 1px solid var(--ink-edge); margin: 2px 0; width: 100%; }
+.rs-field { display: flex; flex-direction: column; gap: 6px; }
+.rs-caption {
+  font: 600 10px/1.3 var(--font-body);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--washi-low);
+}
+.rs-required { margin-left: 8px; letter-spacing: .08em; color: color-mix(in srgb, var(--washi-low) 70%, transparent); font-weight: 500; }
+.rs-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--ink-edge);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 70%, transparent);
+  color: var(--washi);
+  padding: 9px 11px;
+  font: 400 14px/1.4 var(--font-body);
+  outline: none;
+  caret-color: var(--vermillion);
+}
+.rs-input.rs-multiline { min-height: 88px; resize: vertical; }
+.rs-input:focus { border-color: var(--ink-edge-hi); box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 30%, transparent); }
+.rs-input::placeholder { color: var(--washi-low); }
+.rs-field-note { font-size: 12px; color: var(--ochre); }
+.rs-field-note[hidden] { display: none; }
+.rs-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+.rs-toggle-label { color: var(--washi); }
+.rs-switch {
+  appearance: none;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 11px;
+  background: var(--ink-edge);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--t-snap) var(--ease);
+}
+.rs-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--washi);
+  transition: transform var(--t-snap) var(--ease);
+}
+.rs-switch:checked { background: var(--moss); }
+.rs-switch:checked::after { transform: translateX(16px); background: var(--ink); }
+.rs-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.rs-options {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ink-edge);
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 70%, transparent);
+}
+.rs-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 0;
+  border-top: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi);
+  font: 400 14px/1.35 var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.rs-option:first-child { border-top: 0; }
+.rs-option:hover:not(:disabled) { background: color-mix(in srgb, var(--ink-soft) 70%, transparent); }
+.rs-option:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.rs-option-mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--washi-low);
+  box-sizing: border-box;
+}
+.rs-option.chosen .rs-option-mark { border: 5px solid var(--accent-blue); }
+.rs-option:disabled { cursor: default; }
+.rs-answer .rs-option:not(.chosen) { color: var(--washi-low); }
+.rs-answer .rs-option.chosen { color: var(--washi); font-weight: 600; }
+.rs-value {
+  color: var(--washi);
+  font: 500 14px/1.45 var(--font-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px 11px;
+  border-left: 2px solid var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 7%, transparent);
+  border-radius: 0 6px 6px 0;
+}
+.rs-value.rs-empty { color: var(--washi-low); font-style: italic; font-weight: 400; border-left-color: var(--ink-edge); background: transparent; }
+.rs-footer { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 16px; }
+.rs-footnote { font-size: 12px; color: var(--washi-dim); text-align: center; }
+.rs-footnote[hidden] { display: none; }
+.rs-answered .rs-footnote { text-align: left; color: var(--moss); }
+.rs-submit { align-self: flex-end; min-width: 120px; }
+.rs-submit[hidden] { display: none; }
+.rs-submit:disabled { opacity: .45; cursor: default; }
+.rs-submit.sending { opacity: .7; cursor: progress; }
+.rs-retry { height: 32px; padding: 0 14px; }

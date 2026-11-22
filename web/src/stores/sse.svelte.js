@@ -24,6 +24,7 @@ import {
   addConditionSource,
 } from './audio.svelte.js';
 import { noteQueuedSendDeleted } from './delivery.svelte.js';
+import { noteArtifactUpdated, refreshRenderSpecs } from './artifacts.svelte.js';
 
 let es = null;
 let lastMsgAt = 0;
@@ -137,7 +138,7 @@ export function connectSSE() {
     refreshAgentSnapshot().catch(() => {});
     // Last-Event-ID replays what we missed, but a long gap can outlive the
     // replay window; a delta per loaded chat is cheap and closes it for sure.
-    if (everOpened) refreshAll();
+    if (everOpened) { refreshAll(); refreshRenderSpecs(); }
     everOpened = true;
   };
 
@@ -280,6 +281,10 @@ function handleEvent(ev) {
     if (liveTurnRunning(ev.session)) snapshotOwed.add(ev.session);
     else snapshotRefresh.schedule();
     handleSseEvent(ev);
+
+  } else if (ev.type === SSEType.ARTIFACT_UPDATED) {
+    // A native form was published, changed or answered: its chat's cards read again.
+    noteArtifactUpdated(ev);
 
   } else if (ev.type === SSEType.USER_NOTIFICATION) {
     rememberUserNotification(ev);

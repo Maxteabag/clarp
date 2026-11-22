@@ -369,7 +369,7 @@ PLANTS = [
     (L, 'host', 'what is done with a spec is answered as to a client that cannot see', '    let artifact = shown(app, done.artifact, "", capable).await;', '    let artifact = shown(app, done.artifact, "", false).await;'),
     (L, 'host', 'Updates are answered as to a client that cannot see', '        "artifacts": all_shown(&app, page.artifacts, representation, render_spec::capable(&app, &headers)).await,', '        "artifacts": all_shown(&app, page.artifacts, representation, false).await,'),
     (L, 'host', 'the catalog is at another address', '        .route("/artifact-catalogs/clarp.form/1", get(render_spec::catalog))', '        .route("/artifact-catalogs/clarp.form/2", get(render_spec::catalog))'),
-    (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 129;', 'pub const HOST_CONTRACT: u64 = 128;'),
+    (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 130;', 'pub const HOST_CONTRACT: u64 = 129;'),
     (E, 'host', 'the feature came with the contract before', '    ("render_spec", 102),', '    ("render_spec", 101),'),
     # The texts besides a payload (the reference's PR 438: R71, R72).
     (R, 'vectors', 'a text of the envelope with half a pair is text', '            && !matches!(value, J::Text(Text::Valid(_)))', '            && !matches!(value, J::Text(_))'),
@@ -392,8 +392,8 @@ PLANTS = [
     (L, 'host', 'a request to a render spec that is there is no render spec\'s', '    spec_of(app, id).is_some_and(|spec| spec.deleted_at.is_none())', '    spec_of(app, id).is_some_and(|_| false)'),
     (L, 'host', 'a body that is no object is refused with the sentence', '        matches!(&data, Some(J::Object(_))) && data.as_ref().is_some_and(spec::json::holds_lone);', '        data.as_ref().is_some_and(spec::json::holds_lone);'),
     # The agent's tool.
-    (T, 'host', 'a conflict is printed as a failure', '            let told = matches!(error.status().as_u16(), 400 | 403 | 409);', '            let told = matches!(error.status().as_u16(), 400 | 403);'),
-    (T, 'host', 'a refusal is printed as it is not given', '                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),', '                Some(detail) => ToolAnswer::said(1, detail.to_string()),'),
+    (T, 'host', 'a conflict is printed without its structured error', '        && body.get("error").is_some()', '        && body.get("error").is_some() && status != StatusCode::CONFLICT'),
+    (T, 'host', 'a refusal is printed without its outer error', '        return body;\n    }\n    let text = clarp_kernel::python::strip(&text);', '        return body["error"].clone();\n    }\n    let text = clarp_kernel::python::strip(&text);'),
     (T, 'host', 'the tool is an app that can see', '    match library::posted(app, &bytes, validate_only, false, turn(call)).await {', '    match library::posted(app, &bytes, validate_only, true, turn(call)).await {'),
     (T, 'host', 'the tool never only checks', '    let validate_only = parsed.flags.contains("--validate-only");', '    let validate_only = parsed.flags.contains("--validate");'),
     # Per client, by its name as sent (the Python Host's PR 474), and the export (R137).

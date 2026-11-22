@@ -5,12 +5,12 @@
 //! answers it from the same functions its routes call ([`crate::library`]), so the tool and
 //! the routes cannot disagree.
 //!
-//! One thing it says more than the Python tool: when the Host refuses, the Python tool
-//! prints the status alone ("HTTP Error 409: Conflict"); this one adds why.
+//! Publish-render-spec prints the refusal body as the Python tool does.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use clarp_kernel::artifacts::reports;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -579,13 +579,32 @@ async fn publish_render_spec(app: &App, call: &ToolCall, rest: &[String]) -> Too
     match library::posted(app, &bytes, validate_only, false, turn(call)).await {
         Ok((_, answer)) => ToolAnswer::printed(0, answer.to_string()),
         Err(error) => {
-            let told = matches!(error.status().as_u16(), 400 | 403 | 409);
-            match error.detail().filter(|_| told) {
-                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),
-                None => failed(refusal(&error)),
-            }
+            let response = error.into_response();
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            ToolAnswer::said(1, publish_refusal(status, &body).to_string())
         }
     }
+}
+
+/// Keep the HTTP JSON object when it has an error; otherwise report its raw body.
+fn publish_refusal(status: StatusCode, body: &[u8]) -> Value {
+    let text = String::from_utf8_lossy(body);
+    if let Ok(body @ Value::Object(_)) = serde_json::from_str::<Value>(&text)
+        && body.get("error").is_some()
+    {
+        return body;
+    }
+    let text = clarp_kernel::python::strip(&text);
+    let message = if text.is_empty() {
+        let phrase = status.canonical_reason().unwrap_or("");
+        format!("HTTP Error {}: {phrase}", status.as_u16())
+    } else {
+        text.to_string()
+    };
+    json!({"error": {"status": status.as_u16(), "message": message}})
 }
 
 async fn form_events(app: &App, call: &ToolCall, args: &[String]) -> Result<Value, String> {
@@ -839,6 +858,27 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn publish_refusals_keep_error_objects_and_wrap_other_bodies() {
+        let error = json!({"error": "unknown session", "retryable": true});
+        assert_eq!(
+            publish_refusal(StatusCode::CONFLICT, error.to_string().as_bytes()),
+            error
+        );
+        assert_eq!(
+            publish_refusal(StatusCode::SERVICE_UNAVAILABLE, b"  unavailable \n"),
+            json!({"error": {"status": 503, "message": "unavailable"}})
+        );
+        assert_eq!(
+            publish_refusal(StatusCode::BAD_REQUEST, br#"{"other":true}"#),
+            json!({"error": {"status": 400, "message": r#"{"other":true}"#}})
+        );
+        assert_eq!(
+            publish_refusal(StatusCode::CONFLICT, b""),
+            json!({"error": {"status": 409, "message": "HTTP Error 409: Conflict"}})
+        );
+    }
 
     fn args(given: &[&str]) -> Vec<String> {
         given.iter().map(|arg| (*arg).to_string()).collect()

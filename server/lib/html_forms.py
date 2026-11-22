@@ -29,6 +29,29 @@ FORM_SUBMISSION = Lifecycle(
 READ_ONLY_SCHEMA = {'type': 'object', 'properties': {}, 'additionalProperties': False}
 
 
+# A submission reaches its agent as a turn whose prompt row is keyed by this id
+# (``u-`` + DELIVERY_ID_PREFIX + submission_id, message_import_common). The agent
+# reads the answers in that prompt; the user does not see it in the chat (issue
+# 428): the answered form card is their record of what they submitted. The
+# Host leaves the row out of every chat read the apps get (/log, the chat-list
+# preview, /turn-queue), so no client needs to know about it.
+DELIVERY_ID_PREFIX = "html-form-"
+ANSWER_ROW_PREFIX = "u-" + DELIVERY_ID_PREFIX
+# A form answer's prompt row (alias m: messages). The prefix holds no LIKE wildcard.
+ANSWER_ROW_SQL = f"m.message_id LIKE '{ANSWER_ROW_PREFIX}%'"
+
+
+def delivery_id(submission_id: str) -> str:
+    """The client message id a submission is delivered under."""
+    return DELIVERY_ID_PREFIX + submission_id
+
+
+def is_answer_delivery(client_msg_id: str | None) -> bool:
+    """A queued or stored prompt that carries a form answer to its agent."""
+    cid = str(client_msg_id or "")
+    return cid.startswith(DELIVERY_ID_PREFIX) or cid.startswith(ANSWER_ROW_PREFIX)
+
+
 class ReadOnlyForm(ValueError):
     """A submission addressed a read-only report."""
 
