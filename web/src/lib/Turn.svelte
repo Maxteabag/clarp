@@ -6,10 +6,12 @@
   import CellRow from './live/CellRow.svelte';
   import TurnNotice from './live/TurnNotice.svelte';
 
-  // `strip`: the tool calls and cells the turn's work row took (static/lib/history-fold.js).
+  // `strip`: the tool calls, cells and commentary the turn's work row took
+  // (static/lib/history-fold.js).
   let { turn: row, strip = null } = $props();
   let turn = $derived(strip ? {
     ...row,
+    text: strip.text ? '' : row.text,
     tools: (row.tools || []).filter(t => !strip.tools.includes(t)),
     display_cells: (row.display_cells || []).filter(c => !strip.cells.includes(c)),
   } : row);
