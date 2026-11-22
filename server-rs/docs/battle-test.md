@@ -53,6 +53,13 @@ lead's own agent on the Python Host (`rust-host-soak-1`), so that the owner sees
 does not come back by itself after the machine is started again: the lead looks after it, and a run that is
 started again goes on counting where the evidence ends.
 
+The soak stopped for good at 09:37 on 22 Nov 2026 and must never be scheduled again. Peter's
+21 Nov rule in [AGENTS.md](../../AGENTS.md) forbids tests that start automatically or on a schedule.
+The record ends at 285 rounds over 159.5 hours (15 Nov 17:15 to 22 Nov 08:47), with no messages lost
+or doubled and 107 Host restarts between rounds, zero during a round. The week of real use is measured
+on agents using the Rust Host, starting with Mochi (since 21 Nov at 18:49) and including any agent
+Peter moves, with one audit of their conversations at the end.
+
 Since 16 Nov 2026, 18:23, the agents of this test are Codex agents, by the owner's word that day: "if he's
 going to test live agents on the host use codex. Use Claude only if testing Claude. But use sonnet." The
 soak writes to `Soak Codex` (session `soak-codex`, Codex on its own model, the same directory, muted) from
