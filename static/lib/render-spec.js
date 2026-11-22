@@ -1,0 +1,488 @@
+// Native forms (render_spec, catalog clarp.form v1; issue 428): what this client makes of a
+// payload, and the answers it sends. No DOM and no network here: the drawing is
+// web/src/lib/render-spec-draw.js, the loading and sending RenderSpecCard.svelte.
+//
+// The Host's contract/catalogs/clarp.form.v1.json is the authority; this reader checks every
+// rule of it again, independently of the Host that published the form, the same rules the iOS
+// app's reader checks. A form this build cannot draw is 'newer' (a catalog, version, component
+// or property it does not know) or 'unreadable' (broken against the catalog it knows).
+
+// The client contract this web build declares in X-Clarp-Client (`web/<build> contract=<n>`).
+// The web app's own series: 1 is the first build that draws and answers render_spec. The Host
+// admits it by this number (server_identity.RENDER_SPEC_MIN_CONTRACT["web"]).
+export const WEB_CLIENT_CONTRACT = 1;
+export const WEB_CLIENT_NAME = 'web';
+
+/** The X-Clarp-Client value: strict `<name>/<build> contract=<n>`, nothing after it. */
+export function clientHeader(build) {
+  const safe = String(build || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 80) || '0';
+  return `${WEB_CLIENT_NAME}/${safe} contract=${WEB_CLIENT_CONTRACT}`;
+}
+
+export const CATALOG = Object.freeze({
+  name: 'clarp.form',
+  version: 1,
+  maxElements: 200,
+  maxDepth: 12,
+  maxSpecBytes: 32768,
+  maxStateBytes: 4096,
+  maxAnswerBytes: 16384,
+});
+
+// Component name to its allowed property names (the catalog's `components`). A type is one
+// entry here and one reader in READERS below; its drawing is one function in render-spec-draw.js.
+export const COMPONENTS = Object.freeze({
+  stack: ['axis'],
+  card: ['title'],
+  heading: ['text', 'level'],
+  text: ['text'],
+  text_field: ['label', 'placeholder', 'multiline', 'value'],
+  toggle: ['label', 'value'],
+  choice: ['label', 'options', 'value'],
+  divider: [],
+});
+const CONTAINERS = new Set(['stack', 'card']);
+
+const IDENT = /^[a-z][a-z0-9_]{0,39}$/;
+export function isIdentifier(text) { return typeof text === 'string' && IDENT.test(text); }
+
+/** Length as the Host counts it: Unicode code points. */
+export function length(text) { return [...String(text)].length; }
+
+const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isInt = v => typeof v === 'number' && Number.isSafeInteger(v);
+
+// ---- canonical JSON (RFC 8785 for the contract's subset: no fractions) ----------------------
+
+function canonicalText(value) {
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(canonicalText).join(',') + ']';
+  // Keys in UTF-16 code unit order, which is what the default sort compares.
+  const keys = Object.keys(value).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalText(value[k])).join(',') + '}';
+}
+
+/** The canonical UTF-8 bytes the Host hashes and measures. */
+export function canonical(value) {
+  return new TextEncoder().encode(canonicalText(value));
+}
+
+// ---- reading ---------------------------------------------------------------------------------
+
+class Stop extends Error {
+  constructor(kind, pointer = '') { super(kind); this.kind = kind; this.pointer = pointer; }
+}
+const broken = pointer => new Stop('unreadable', pointer);
+const newer = () => new Stop('newer');
+
+function text(value, pointer, min, max) {
+  if (typeof value !== 'string') throw broken(pointer);
+  const n = length(value);
+  if (n < min || n > max) throw broken(pointer);
+  return value;
+}
+
+function closed(object, allowed, pointer) {
+  const extra = Object.keys(object).sort().find(k => !allowed.includes(k));
+  if (extra !== undefined) throw broken(pointer + '/' + (isIdentifier(extra) ? extra : ''));
+}
+
+function schemaFields(payload) {
+  const base = '/answer_schema';
+  const schema = payload.answer_schema;
+  if (!isObject(schema)) throw broken(base);
+  closed(schema, ['type', 'properties', 'required', 'additionalProperties'], base);
+  if (schema.type !== 'object') throw broken(base + '/type');
+  if ('additionalProperties' in schema && schema.additionalProperties !== false) {
+    throw broken(base + '/additionalProperties');
+  }
+  const properties = schema.properties ?? {};
+  if (!isObject(properties) || !Object.keys(properties).every(isIdentifier)) throw broken(base + '/properties');
+  const fields = {};
+  for (const [key, property] of Object.entries(properties)) {
+    const pointer = `${base}/properties/${key}`;
+    if (!isObject(property)) throw broken(pointer);
+    closed(property, ['type', 'enum', 'minLength', 'maxLength'], pointer);
+    const type = property.type;
+    if ('enum' in property) {
+      const options = property.enum;
+      if ((type !== undefined && type !== 'string') || 'minLength' in property || 'maxLength' in property
+          || !Array.isArray(options) || !options.length || !options.every(v => typeof v === 'string')
+          || new Set(options).size !== options.length) {
+        throw broken(pointer + '/enum');
+      }
+      fields[key] = { kind: 'choice', options: [...options] };
+      continue;
+    }
+    if (type === 'string') {
+      const minimum = 'minLength' in property ? (isInt(property.minLength) ? property.minLength : -1) : 0;
+      const maximum = 'maxLength' in property ? (isInt(property.maxLength) ? property.maxLength : -1) : null;
+      if (minimum < 0 || (maximum !== null && maximum < minimum)) throw broken(pointer);
+      fields[key] = { kind: 'string', minLength: minimum, maxLength: maximum };
+    } else if (type === 'boolean' || type === 'integer') {
+      if ('minLength' in property || 'maxLength' in property) throw broken(pointer);
+      fields[key] = { kind: type };
+    } else {
+      throw broken(pointer + '/type');
+    }
+  }
+  const names = schema.required ?? [];
+  if (!Array.isArray(names) || !names.every(n => typeof n === 'string' && fields[n])
+      || new Set(names).size !== names.length) {
+    throw broken(base + '/required');
+  }
+  return { fields, required: new Set(names) };
+}
+
+function stateKey(value, operator, pointer) {
+  if (!isObject(value) || Object.keys(value).length !== 1) throw broken(pointer);
+  const path = value[operator];
+  if (typeof path !== 'string' || !path.startsWith('/') || !isIdentifier(path.slice(1))) throw broken(pointer);
+  return path.slice(1);
+}
+
+const sameList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+// One reader per component type: the catalog's props in, the props the drawing uses out.
+// `ctx.bind(test)` takes the element's `value` binding and checks the key's field.
+const READERS = {
+  stack(props, base) {
+    const axis = 'axis' in props ? props.axis : 'vertical';
+    if (axis !== 'vertical' && axis !== 'horizontal') throw broken(base + '/props/axis');
+    return { horizontal: axis === 'horizontal' };
+  },
+  card(props, base) {
+    return { title: 'title' in props ? text(props.title, base + '/props/title', 0, 120) : null };
+  },
+  heading(props, base) {
+    const level = 'level' in props ? props.level : 2;
+    if (!isInt(level) || level < 1 || level > 3) throw broken(base + '/props/level');
+    return { text: text(props.text, base + '/props/text', 0, 200), level };
+  },
+  text(props, base, ctx) {
+    if (typeof props.text === 'string') return { text: text(props.text, base + '/props/text', 0, 4000) };
+    const key = stateKey(props.text, '$state', base + '/props/text');
+    if (!ctx.fields[key]) throw broken(base + '/props/text');
+    return { stateKey: key };
+  },
+  text_field(props, base, ctx) {
+    const label = text(props.label, base + '/props/label', 1, 120);
+    const placeholder = 'placeholder' in props ? text(props.placeholder, base + '/props/placeholder', 0, 120) : null;
+    const multiline = 'multiline' in props ? props.multiline : false;
+    if (typeof multiline !== 'boolean') throw broken(base + '/props/multiline');
+    const key = ctx.bind(f => f.kind === 'string');
+    return { label, placeholder, multiline, key };
+  },
+  toggle(props, base, ctx) {
+    const label = text(props.label, base + '/props/label', 1, 120);
+    const key = ctx.bind(f => f.kind === 'boolean');
+    ctx.toggles.push(key);
+    return { label, key };
+  },
+  choice(props, base, ctx) {
+    const label = text(props.label, base + '/props/label', 1, 120);
+    const raw = props.options;
+    if (!Array.isArray(raw) || raw.length < 2 || raw.length > 12) throw broken(base + '/props/options');
+    const options = raw.map(item => {
+      if (!isObject(item) || !sameList(Object.keys(item).sort(), ['label', 'value'])) throw broken(base + '/props/options');
+      return {
+        value: text(item.value, base + '/props/options', 1, 120),
+        label: text(item.label, base + '/props/options', 1, 120),
+      };
+    });
+    // The answer key's enum equals the option values, in order.
+    const key = ctx.bind(f => f.kind === 'choice' && sameList(f.options, options.map(o => o.value)));
+    return { label, options, key };
+  },
+  divider() { return {}; },
+};
+
+function readElement(id, elements, ctx, depth, underCard) {
+  const base = '/spec/elements/' + id;
+  const raw = elements[id];
+  if (depth > CATALOG.maxDepth || ctx.visited.has(id) || !isObject(raw)) throw broken(base);
+  ctx.visited.add(id);
+  closed(raw, ['type', 'props', 'children'], base);
+  const type = raw.type;
+  if (typeof type !== 'string') throw broken(base + '/type');
+  const allowed = COMPONENTS[type];
+  if (!Object.hasOwn(COMPONENTS, type)) throw newer();
+  const props = raw.props ?? {};
+  if (!isObject(props)) throw broken(base + '/props');
+  if (!Object.keys(props).every(k => allowed.includes(k))) throw newer();
+  const childIds = raw.children ?? [];
+  if (!Array.isArray(childIds) || !childIds.every(c => typeof c === 'string')
+      || (childIds.length && !CONTAINERS.has(type))) {
+    throw broken(base + '/children');
+  }
+  if (type === 'card' && underCard) throw broken(base);
+  const bind = test => {
+    const pointer = base + '/props/value';
+    const key = stateKey(props.value, '$bindState', pointer);
+    const field = ctx.fields[key];
+    if (!field || !test(field) || ctx.bound.has(key)) throw broken(pointer);
+    ctx.bound.add(key);
+    return key;
+  };
+  const read = READERS[type](props, base, { ...ctx, bind });
+  const children = childIds.map(c => readElement(c, elements, ctx, depth + 1, underCard || type === 'card'));
+  return { id, type, props: read, children };
+}
+
+/**
+ * What this build makes of a render_spec: `{kind: 'form', form}`, `{kind: 'newer'}` or
+ * `{kind: 'unreadable', pointer}`. `payload` is the flat artifact of the single read
+ * (GET /artifacts/<id>) or a bare payload.
+ */
+export function readRenderSpec(payload) {
+  try {
+    return { kind: 'form', form: readForm(payload) };
+  } catch (stop) {
+    if (stop instanceof Stop) return stop.kind === 'newer' ? { kind: 'newer' } : { kind: 'unreadable', pointer: stop.pointer };
+    return { kind: 'unreadable', pointer: '' };
+  }
+}
+
+function readForm(payload) {
+  if (!isObject(payload) || payload.catalog !== CATALOG.name || payload.catalog_version !== CATALOG.version) throw newer();
+  const version = text(payload.version, '/version', 1, 80);
+  const spec = payload.spec;
+  if (!isObject(spec)) throw broken('/spec');
+  closed(spec, ['root', 'elements', 'state'], '/spec');
+  if (canonical(spec).length > CATALOG.maxSpecBytes) throw broken('/spec');
+  const { fields, required } = schemaFields(payload);
+  const submit = payload.submit;
+  if (!isObject(submit)) throw broken('/submit');
+  closed(submit, ['intent', 'label'], '/submit');
+  if (!isIdentifier(submit.intent)) throw broken('/submit/intent');
+  const submitLabel = text(submit.label, '/submit/label', 1, 40);
+  const elements = spec.elements;
+  if (!isObject(elements)) throw broken('/spec/elements');
+  const count = Object.keys(elements).length;
+  if (count < 1 || count > CATALOG.maxElements || !Object.keys(elements).every(isIdentifier)) throw broken('/spec/elements');
+  if (typeof spec.root !== 'string' || !Object.hasOwn(elements, spec.root)) throw broken('/spec/root');
+  const ctx = { fields, visited: new Set(), bound: new Set(), toggles: [] };
+  const root = readElement(spec.root, elements, ctx, 1, false);
+  // One rooted tree: nothing left over, nothing shared.
+  if (ctx.visited.size !== count) throw broken('/spec/elements');
+  const state = spec.state ?? {};
+  if (!isObject(state) || canonical(state).length > CATALOG.maxStateBytes) throw broken('/spec/state');
+  const initial = {};
+  for (const [key, value] of Object.entries(state)) {
+    const pointer = '/spec/state/' + (isIdentifier(key) ? key : '');
+    if (!ok(fields[key], value)) throw broken(pointer);
+    initial[key] = value;
+  }
+  for (const key of ctx.toggles) if (!(key in initial)) initial[key] = false;
+  return {
+    version, root, submitIntent: submit.intent, submitLabel, fields, required, initial,
+    boundKeys: ctx.bound, spec,
+  };
+}
+
+/** Whether `value` is one the field takes (a declared initial value, a carried draft). */
+function ok(field, value) {
+  if (!field) return false;
+  switch (field.kind) {
+    case 'string': {
+      if (typeof value !== 'string') return false;
+      const n = length(value);
+      return n >= field.minLength && (field.maxLength === null || n <= field.maxLength);
+    }
+    case 'choice': return typeof value === 'string' && field.options.includes(value);
+    case 'boolean': return typeof value === 'boolean';
+    case 'integer': return isInt(value);
+    default: return false;
+  }
+}
+
+/**
+ * The answers exactly as the form path takes them: `{intent, state}`, with only keys that have a
+ * value. An empty text field and an unselected choice are left out; a toggle is always there.
+ * `{ready: true, answers}` or `{ready: false, gaps}`; a gap is `{gap: 'missing'|'too_short'|
+ * 'too_long'|'too_large', key?, limit?}`.
+ */
+export function submission(form, values) {
+  const state = {};
+  const gaps = [];
+  for (const key of Object.keys(form.fields).sort()) {
+    const field = form.fields[key];
+    const value = values[key];
+    const needed = form.required.has(key);
+    if (field.kind === 'string' && typeof value === 'string') {
+      const n = length(value);
+      if (n === 0) { if (needed) gaps.push({ gap: 'missing', key }); }
+      else if (n < field.minLength) gaps.push({ gap: 'too_short', key, limit: field.minLength });
+      else if (field.maxLength !== null && n > field.maxLength) gaps.push({ gap: 'too_long', key, limit: field.maxLength });
+      else state[key] = value;
+    } else if (field.kind === 'choice' && typeof value === 'string' && field.options.includes(value)) {
+      state[key] = value;
+    } else if (field.kind === 'boolean' && typeof value === 'boolean') {
+      state[key] = value;
+    } else if (field.kind === 'integer' && isInt(value)) {
+      state[key] = value;
+    } else if (needed) {
+      gaps.push({ gap: 'missing', key });
+    }
+  }
+  const answers = { intent: form.submitIntent, state };
+  if (canonical(answers).length > CATALOG.maxAnswerBytes) gaps.push({ gap: 'too_large' });
+  return gaps.length ? { ready: false, gaps } : { ready: true, answers };
+}
+
+/** Typed values survive a reload when their key still exists with a value the new field takes. */
+export function carrying(form, old) {
+  const values = { ...form.initial };
+  for (const [key, value] of Object.entries(old || {})) {
+    if (!form.boundKeys.has(key)) continue;
+    const field = form.fields[key];
+    if (field && field.kind !== 'integer' && (field.kind === 'string' ? typeof value === 'string' : ok(field, value))) {
+      values[key] = value;
+    }
+  }
+  return values;
+}
+
+/** Keeps a text within the key's maxLength, counted as the Host counts it. */
+export function held(form, key, value) {
+  const field = form.fields[key];
+  if (!field || field.kind !== 'string' || field.maxLength === null || length(value) <= field.maxLength) return value;
+  return [...value].slice(0, field.maxLength).join('');
+}
+
+/** The one accepted submission as the single read returns it, or null. */
+export function acceptedSubmission(value) {
+  if (!isObject(value) || typeof value.submission_id !== 'string' || typeof value.version !== 'string') return null;
+  const answers = value.answers;
+  if (!isObject(answers) || typeof answers.intent !== 'string' || !isObject(answers.state)) return null;
+  if (!isInt(value.accepted_at) || typeof value.delivery_status !== 'string') return null;
+  const state = {};
+  for (const [key, v] of Object.entries(answers.state)) {
+    if (typeof v !== 'string' && typeof v !== 'boolean' && !isInt(v)) return null;
+    state[key] = v;
+  }
+  return {
+    submissionId: value.submission_id, version: value.version, intent: answers.intent, state,
+    acceptedAt: value.accepted_at, deliveryStatus: value.delivery_status,
+  };
+}
+
+/** The words a state-bound text shows for a value. */
+export function words(value) {
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (value === undefined || value === null) return '';
+  return String(value);
+}
+
+/**
+ * The line above Submit: the answered note, a note from the owner, or why Submit is off.
+ * `captions` maps a key to its control's label.
+ */
+export function footnote({ form, values, accepted = null, note = '', closed = false, captions = {} }) {
+  if (accepted) {
+    const when = new Date(accepted.acceptedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    return `Answered ${when}. ` + (accepted.deliveryStatus === 'delivered'
+      ? 'The agent has it.' : 'The agent gets it when it is next awake.');
+  }
+  if (note) return note;
+  if (closed) return '';
+  const result = submission(form, values);
+  if (result.ready) return '';
+  if (result.gaps.some(g => g.gap === 'too_large')) return 'The answers are too long to send. Shorten the text.';
+  const missing = result.gaps.filter(g => g.gap === 'missing').length;
+  if (missing) return missing === 1 ? 'One required answer is missing.' : `${missing} required answers are missing.`;
+  const short = result.gaps.filter(g => g.gap === 'too_short').sort((a, b) => (a.key < b.key ? -1 : 1))[0];
+  if (short) return `${captions[short.key] || 'A text'} needs at least ${short.limit} characters.`;
+  return '';
+}
+
+/**
+ * What a refusal of the form path means to this client (the code, never the Host's words):
+ * reopen | answered | closed | too_old | answer | host_fault | reused | other.
+ */
+export function refusalMeaning(code) {
+  switch (code) {
+    case 'version_mismatch': return 'reopen';
+    case 'already_answered': return 'answered';
+    case 'not_open': return 'closed';
+    case 'client_contract': return 'too_old';
+    case 'state_value': case 'missing_key': case 'answer_size': return 'answer';
+    case 'catalog_unavailable': return 'host_fault';
+    case 'reused_id': return 'reused';
+    default: return 'other';
+  }
+}
+
+/** A submission id the Host takes (`[A-Za-z0-9-]{16,80}`), fresh per attempt. */
+export function newSubmissionId() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Whether the spec read is the one the Host's witness names (`content_identity`:
+ * version, canonical byte count, `c1:` + SHA-256 hex). `digest` maps bytes to lowercase hex;
+ * null when hashing is unavailable (a page outside a secure context), then only the version
+ * and byte count are compared.
+ */
+export async function matchesIdentity(form, identity, digest) {
+  if (!isObject(identity)) return false;
+  const raw = canonical(form.spec);
+  if (identity.version !== form.version || identity.bytes !== raw.length) return false;
+  if (!digest) return true;
+  return identity.sha256 === 'c1:' + await digest(raw);
+}
+
+// ---- placing cards in the transcript --------------------------------------------------------
+
+function entryTime(entry, liveStartMs) {
+  if (entry.type === 'live') return Number.isFinite(liveStartMs) ? liveStartMs : Infinity;
+  const item = entry.item || {};
+  const raw = entry.type === 'turn' ? item.timestamp : item.ts;
+  if (raw == null) return null;
+  const ms = typeof raw === 'number' ? raw : Date.parse(raw);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * The transcript's entries with one keyed `artifact` entry per render_spec row, each before
+ * the first entry written after it was published. A row older than the first loaded entry is
+ * left for an older page unless the chat has no older page (`complete`).
+ */
+export function withArtifacts(entries, rows, { complete = false, liveStartMs = null } = {}) {
+  if (!rows || !rows.length) return entries;
+  const cards = rows
+    .filter(r => r && r.artifact_id && Number.isFinite(r.created_at))
+    .slice()
+    .sort((a, b) => a.created_at - b.created_at || (a.artifact_id < b.artifact_id ? -1 : 1));
+  if (!cards.length) return entries;
+  const out = [];
+  let next = 0;
+  let first = true;
+  let carried = null;
+  for (const entry of entries) {
+    const at = entryTime(entry, liveStartMs);
+    if (at !== null) carried = at;
+    if (carried !== null) {
+      while (next < cards.length && cards[next].created_at < carried) {
+        if (!first || complete) out.push(card(cards[next]));
+        next += 1;
+      }
+      first = false;
+    }
+    out.push(entry);
+  }
+  while (next < cards.length) {
+    if (!first || complete || !entries.length) out.push(card(cards[next]));
+    next += 1;
+  }
+  return out;
+}
+
+function card(row) {
+  return { type: 'artifact', key: 'r:' + row.artifact_id, item: row };
+}
