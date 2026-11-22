@@ -26,6 +26,8 @@ describe('the count lines', () => {
     expect(countLine({ messages: 0, exchanges: 2, agents: [], capped: false })).toBe('2 exchanges between agents');
     expect(countLine({ messages: 0, exchanges: 0, agents: [], capped: false })).toBe('');
     expect(countLine(null)).toBe('');
+    expect(countLine({ messages: 0, exchanges: 0, agents: [], capped: true })).toBe('Messages between agents');
+    expect(countLine(run(40, { capped: true }))).toBe('40+ messages between agents');
   });
 
   it('name the agents of the run', () => {
