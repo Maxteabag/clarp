@@ -13,7 +13,7 @@
 //
 // The serving Host's own peers come first (feature peer_snapshot): it reads them server to
 // server with the device token it keeps for each, and this app reads only GET /peers/snapshot
-// from its own Host, so no other Host's token is in the browser at all. A pasted Host is read
+// from its own Host (full scope only), so no other Host's token is in the browser at all. A pasted Host is read
 // directly only when the serving Host does not know it (no peer with its server_id).
 
 import { createAgentSnapshotStore } from '@core/agent-snapshot.js';
@@ -83,7 +83,7 @@ export function readHosts() {
 
 /**
  * The serving Host's peers, read through it (GET /peers/snapshot). A Host without the feature
- * answers 404 and is not asked again. The first time it names any peer, the option is switched
+ * (404) or a limited device (403) is not asked again. The first time it names any peer, the option is switched
  * on once, unless the user has chosen it themselves (the shared one-time default ran before any
  * peer could be counted).
  */
@@ -92,7 +92,9 @@ async function readPeers() {
   let body;
   try {
     const r = await fetch('/peers/snapshot', { cache: 'no-store' });
-    if (r.status === 404) { peersSupported = false; return; }
+    // 404: a Host without the feature; 403: a limited device (peers are full scope). Neither is
+    // asked again, and neither is said: the list is this Host's and any pasted ones.
+    if (r.status === 404 || r.status === 403) { peersSupported = false; return; }
     if (!r.ok) return;
     body = await r.json();
   } catch (_) {

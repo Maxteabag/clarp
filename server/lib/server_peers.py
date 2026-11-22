@@ -1,13 +1,37 @@
 """Explicit trusted Clarp peers for cross-server agent delivery."""
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
+import os
 import pathlib
+import tempfile
+import threading
 import urllib.request
 
 from .deployment import LAYOUT
 
 PATH = LAYOUT.config_dir / "peers.json"
+
+# server_ids peers reported to this process's reads (lib.peer_reads), by peer name. Kept in
+# memory only: the read path never writes peers.json.
+_learned: dict[str, str] = {}
+_learned_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _locked():
+    """An exclusive lock (peers.json.lock) around every read-modify-write of peers.json, across
+    processes: the Host, `clarp-admin peers add` and `peers remove`."""
+    PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(PATH) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def _read() -> dict:
@@ -19,11 +43,21 @@ def _read() -> dict:
 
 
 def _write(value: dict) -> None:
+    """Replaces peers.json atomically with a file created 0600 (mkstemp: a unique name, never
+    readable by anyone else, whatever the umask). Call it under _locked()."""
     PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary = PATH.with_suffix(".next")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
-    temporary.chmod(0o600)
-    temporary.replace(PATH)
+    fd, temporary = tempfile.mkstemp(prefix=".peers.", suffix=".next", dir=str(PATH.parent))
+    try:
+        with os.fdopen(fd, "w") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            handle.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, PATH)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
 
 
 def normalize_url(url: str) -> str:
@@ -48,10 +82,11 @@ def add(name: str, url: str, token: str, *, server_id: str = "") -> dict:
     url = normalize_url(url)
     if not name or not url or not token.strip():
         raise ValueError("peer requires name, HTTP(S) URL, and token")
-    peers = _read()
-    peers[name] = {"url": url, "token": token.strip(), "enabled": True,
-                   **({"server_id": server_id.strip()} if server_id.strip() else {})}
-    _write(peers)
+    with _locked():
+        peers = _read()
+        peers[name] = {"url": url, "token": token.strip(), "enabled": True,
+                       **({"server_id": server_id.strip()} if server_id.strip() else {})}
+        _write(peers)
     return {"name": name, "url": url, "enabled": True, "server_id": server_id.strip()}
 
 
@@ -63,16 +98,19 @@ def enabled() -> list[dict]:
             continue
         url, token = normalize_url(value.get("url", "")), str(value.get("token") or "").strip()
         if url and token:
-            out.append({"name": name, "url": url, "token": token, "server_id": str(value.get("server_id") or "")})
+            with _learned_lock:
+                learned = _learned.get(name, "")
+            out.append({"name": name, "url": url, "token": token,
+                        "server_id": str(value.get("server_id") or "") or learned})
     return out
 
 
 def remember_server_id(name: str, server_id: str) -> None:
-    """Keeps the server_id a peer reported, so it is keyed the same while it is unreachable."""
-    peers = _read()
-    if isinstance(peers.get(name), dict) and server_id and peers[name].get("server_id") != server_id:
-        peers[name]["server_id"] = server_id
-        _write(peers)
+    """Keeps, in memory, the server_id a peer reported, so it is keyed the same while it is
+    unreachable. Never writes peers.json (the read path runs in parallel threads)."""
+    if server_id:
+        with _learned_lock:
+            _learned[name] = server_id
 
 
 def pair(url: str, code: str, device_name: str) -> dict:
@@ -94,9 +132,34 @@ def pair(url: str, code: str, device_name: str) -> dict:
 
 
 def remove(name: str) -> None:
-    peers = _read()
-    peers.pop(name, None)
-    _write(peers)
+    with _locked():
+        peers = _read()
+        peers.pop(name, None)
+        _write(peers)
+    with _learned_lock:
+        _learned.pop(name, None)
+
+
+def plain_http_warning(url: str) -> str:
+    """A warning for an http:// peer outside loopback and Tailscale (a token sent in the clear),
+    else ''."""
+    import ipaddress
+    from urllib.parse import urlsplit
+    parts = urlsplit(normalize_url(url))
+    if parts.scheme != "http":
+        return ""
+    host = (parts.hostname or "").lower()
+    if host == "localhost" or host.endswith(".ts.net"):
+        return ""
+    try:
+        address = ipaddress.ip_address(host)
+        if address.is_loopback or address in ipaddress.ip_network("100.64.0.0/10") \
+                or address in ipaddress.ip_network("fd7a:115c:a1e0::/48"):
+            return ""
+    except ValueError:
+        pass
+    return (f"warning: {url} is plain http outside loopback and Tailscale; this peer's token "
+            "would cross the network unencrypted. Prefer its https:// address.")
 
 
 def list_public() -> list[dict]:
