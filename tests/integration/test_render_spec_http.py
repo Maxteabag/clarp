@@ -628,6 +628,7 @@ def test_a_v2_button_form_is_published_drawn_and_answered_once(host, monkeypatch
         _, rows = _request(host, "/artifacts?representation=summary-v1", headers=plain)
         [row] = [x for x in rows["artifacts"] if x["artifact_id"] == "artifact-deploy"]
         assert "content_omitted" not in row
+        assert "answered_action" not in row and "answered_label" not in row   # not answered yet
     answer = {"submission_id": "deploy-answer-0001", "version": "deploy-7",
               "answers": {"intent": "button", "state": {"action": "hold", "note": "after lunch"}}}
     status, refused = _request(host, path + "/submit", answer, headers=v1_only)
@@ -644,6 +645,12 @@ def test_a_v2_button_form_is_published_drawn_and_answered_once(host, monkeypatch
     assert status == 409 and refused["error"]["code"] == "already_answered"
     opened = _request(host, path, headers=v2)[1]["artifact"]
     assert opened["status"] == "completed" and opened["submission"]["answers"] == answer["answers"]
+    assert (opened["answered_action"], opened["answered_label"]) == ("hold", "Hold")
+    for client in (v2, v1_only, android):        # every row and summary names the chosen button
+        for rep in ("", "?representation=summary-v1"):
+            _, rows = _request(host, "/artifacts" + rep, headers=client)
+            [row] = [x for x in rows["artifacts"] if x["artifact_id"] == "artifact-deploy"]
+            assert (row["answered_action"], row["answered_label"]) == ("hold", "Hold")
     server_module._deliver_decision_rows(host.ctx)
     assert html_forms.pending() == []
     [delivered] = host.deliveries
