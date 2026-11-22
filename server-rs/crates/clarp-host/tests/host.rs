@@ -41,6 +41,8 @@ mod compaction_outcome;
 mod contacts;
 #[path = "host/controller_actions.rs"]
 mod controller_actions;
+#[path = "host/conversation_fork.rs"]
+mod conversation_fork;
 #[path = "host/coordination.rs"]
 mod coordination;
 #[path = "host/cross_origin_read.rs"]
