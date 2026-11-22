@@ -1,5 +1,6 @@
 //! Admission and redaction for the always-kept client log.
 use std::{
+    borrow::Cow,
     path::PathBuf,
     sync::{Arc, LazyLock},
     time::Duration,
@@ -11,7 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use clarp_ports::clock::Clock;
-use clarp_store_sqlite::client_events::{Event, Query as Filters, Store};
+use clarp_store_sqlite::client_events::{CrashCandidate, Event, Query as Filters, Store};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
@@ -126,6 +127,16 @@ fn text(value: &Value, field: &str, fallback: &str) -> String {
     }
 }
 
+/// Telemetry also accepts the legacy semicolon separator. Capability
+/// negotiation still uses its own strict header validation.
+pub(crate) fn telemetry_header(header: &str) -> Cow<'_, str> {
+    if let Some((client, contract)) = header.split_once(';') {
+        Cow::Owned(format!("{} {}", client.trim_end(), contract.trim_start()))
+    } else {
+        Cow::Borrowed(header)
+    }
+}
+
 struct Source {
     device: String,
     client: String,
@@ -142,11 +153,8 @@ impl Source {
             Principal::Device { device_id, .. } => device_id,
             Principal::Tools => "unknown",
         };
-        let mut words = headers
-            .get("x-clarp-client")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .split_whitespace();
+        let header = telemetry_header(crate::render_spec::client(headers).unwrap_or_default());
+        let mut words = header.split_whitespace();
         let first = words.next().unwrap_or_default();
         let (client, build) = first.split_once('/').unwrap_or((first, ""));
         let contract = (!client.is_empty()).then(|| {
@@ -251,6 +259,20 @@ impl Desk {
             }
         });
     }
+}
+
+pub(crate) async fn crash_candidates(
+    app: &App,
+    since: i64,
+    now: i64,
+) -> Result<Vec<CrashCandidate>, String> {
+    app.client_events
+        .call(move |store| {
+            store
+                .crash_candidates(since, now)
+                .map_err(|why| why.to_string())
+        })
+        .await
 }
 
 pub(crate) async fn record(
