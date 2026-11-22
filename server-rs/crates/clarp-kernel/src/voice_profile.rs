@@ -615,7 +615,9 @@ pub fn clip_failure(view: &HostView, agent: Agent<'_>, google_code: Option<&str>
 
 /// The names of voices the Host ships with: ElevenLabs', Deepgram's and Google's.
 pub fn shipped_labels() -> BTreeMap<String, BTreeMap<String, String>> {
-    voices::shipped_labels()
+    let mut labels = voices::shipped_labels();
+    labels.insert(CARTESIA.into(), crate::voice_pool::curated_names());
+    labels
 }
 
 /// How long a turn is told once of a reason it was not spoken for.

@@ -4,13 +4,13 @@ use clarp_kernel::{languages, python, voice_migration, voice_profile::HostView};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use super::{AGENTS, Fleet, Member, Owner, PERSONAS, SETTINGS, Unavailable};
+use super::{AGENTS, Fleet, Member, Owner, PERSONAS, SETTINGS, Unavailable, VoiceMigration};
 
 impl Fleet {
     pub(super) fn migrate_voices(
         &mut self,
         mut view: HostView,
-        reviewed: Option<&str>,
+        mode: VoiceMigration,
     ) -> Result<Result<Value, String>, Unavailable> {
         let [roster, cartesia, gemini] = self.works.telling.owner_tables();
         let owner = Owner {
@@ -64,10 +64,12 @@ impl Fleet {
             .collect();
         let contacts = self.book.listed(&owner);
         let plan = voice_migration::plan(&view, &agents, &contacts);
-        let Some(reviewed) = reviewed else {
+        if matches!(mode, VoiceMigration::Plan) {
             return Ok(Ok(plan));
-        };
-        if plan["digest"] != reviewed {
+        }
+        if let VoiceMigration::Reviewed(reviewed) = mode
+            && plan["digest"] != reviewed
+        {
             return Ok(Err(format!(
                 "nothing written: the plan is {}, the dry run read was {}; run the dry run again and read it",
                 plan["digest"].as_str().unwrap_or(""),

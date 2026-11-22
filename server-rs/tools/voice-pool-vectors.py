@@ -32,20 +32,26 @@ def reference(root):
     from lib.policies.agent_spec import AgentSpec, RosterView, SpecError
 
     picks = []
-    for name, candidates, taken, reserved in (
-        ('no pool', [], {}, []),
-        ('Case name', ['a', 'b', 'c', 'd'], {}, []),
-        ('  CASE NAME  ', ['a', 'b', 'c', 'd'], {}, []),
-        ('name sharp ' + chr(0xdf), ['a', 'b', 'c', 'd', 'e'], {}, []),
-        ('skip occupied', ['a', 'b', 'c', 'd'], {'a': 1, 'c': 1}, []),
-        ('least shared', ['a', 'b', 'c'], {'a': 4, 'b': 3, 'c': 1}, []),
-        ('reserve even a free voice', ['a', 'b', 'c'], {'b': 2, 'c': 5}, ['a']),
-        ('all reserved use the walk', ['a', 'b'], {}, ['a','b']),
-        ('a tie keeps walk order', ['a', 'b', 'c'], {'a': 1, 'b': 1, 'c': 1}, []),
+    for name, candidates, taken, reserved, used in (
+        ('no pool', [], {}, [], {}),
+        ('Case name', ['a', 'b', 'c', 'd'], {}, [], {}),
+        ('  CASE NAME  ', ['a', 'b', 'c', 'd'], {}, [], {}),
+        ('name sharp ' + chr(0xdf), ['a', 'b', 'c', 'd', 'e'], {}, [], {}),
+        ('skip occupied', ['a', 'b', 'c', 'd'], {'a': 1, 'c': 1}, [], {'a': 1}),
+        ('least recently used', ['a', 'b', 'c'], {'a': 4, 'b': 3, 'c': 1}, [], {'a': 7, 'b': 8, 'c': 9}),
+        ('least shared among equals', ['a', 'b', 'c'], {'a': 4, 'b': 3, 'c': 1}, [], {'a': 8, 'b': 7, 'c': 7}),
+        ('reserve even a free voice', ['a', 'b', 'c'], {'b': 2, 'c': 5}, ['a'], {}),
+        ('all reserved use the walk', ['a', 'b'], {}, ['a','b'], {}),
+        ('a tie keeps walk order', ['a', 'b', 'c'], {'a': 1, 'b': 1, 'c': 1}, [], {}),
     ):
+        reads = []
+        def recency():
+            reads.append(True)
+            return used
         with patch.object(voice_pool, 'pool', lambda *_: candidates), patch.object(log, 'log', lambda *a: None):
-            result = voice_pool.pick(config.Config(), CART, name, Counter(taken), keep=set(reserved))
-        picks.append({'name': name, 'pool': candidates, 'taken': taken, 'keep': reserved, 'result': result})
+            result = voice_pool.pick(config.Config(), CART, name, Counter(taken), keep=set(reserved), recency=recency)
+        picks.append({'name': name, 'pool': candidates, 'taken': taken, 'keep': reserved,
+                      'used': used, 'read_recency': bool(reads), 'result': result})
 
     def stored(provider, id):
         return json.dumps({provider:id}, separators=(',',':'))
@@ -64,10 +70,11 @@ def reference(root):
         creation_collisions[picked] = {'status': refusal.status, 'body': refusal.response()}
 
     builtin = {'name':'Built In', 'voice_id':stored(CART,'reserved'), 'builtin':True}
-    active = {'persona':'Has Voice', 'voice_id':stored(CART,'c1')}
+    active = {'agent_id':'fixture-active', 'persona':'Has Voice', 'voice_id':stored(CART,'c1'), 'created_at':30}
     retired = {**active, 'archived_at':1}
     janitor = {**active, 'is_janitor':1}
-    custom = {'name':'Custom','voice_id':stored(CART,'c1')}
+    custom = {'name':'Custom','voice_id':stored(CART,'c1'),'created_at':20}
+    spoke = {'fixture-active': 70, 'fixture-other': 50, 'fixture-quieter': 10}
     assignments = []
     assignment_names = root / "assignment-voice-names.json"
     for name, raw, extra, known, agents, contacts in (
@@ -75,10 +82,16 @@ def reference(root):
         ('Free', '{}', {}, [], [active], [custom, builtin]),
         ('Free', '{}', {}, [], [retired, janitor], [builtin]),
         ('Free', '{}', {}, [], [], [builtin]),
+        ('Curated on first boot', '{}', {'cartesia_pool': ()}, None, [], []),
+        ('Curated filters current catalogue and gone', '{}', {'cartesia_pool': ()},
+         [row['id'] for row in voice_pool._curated_rows()[:2]] + ['c1'], [], []),
         ('Catalogue', '{}', {'cartesia_pool': ()}, ['c2','c1','reserved'], [], [builtin]),
         ('Catalogue', '{}', {'cartesia_pool': ('c2','c1','c2')}, ['not-used'], [], []),
         ('Exhausted', '{}', {'cartesia_pool':('c1','c2')}, [],
-         [active,active,{'persona':'Other','voice_id':stored(CART,'c2')}], []),
+         [active,{**active, 'agent_id':'fixture-quieter'},
+          {'agent_id':'fixture-other', 'persona':'Other','voice_id':stored(CART,'c2'), 'created_at':60}], [custom]),
+        ('Timestamped contact', '{}', {'cartesia_pool':('c1','c2')}, [],
+         [active], [{'name':'Older contact', 'voice_id':stored(CART,'c2'), 'created_at':35}]),
         ('Ada', 'e-stored', {'cartesia_voices':{'Ada':'c1'}}, [], [], []),
         ('Other', stored(CART,'auto-123'), {}, [], [], []),
         ('Other', 'c0000000-0000-4000-8000-0000000000ad', {}, [], [], []),
@@ -96,14 +109,30 @@ def reference(root):
                         **{k:v for k,v in extra.items() if k not in ('tts_provider','tts_fallback','cartesia_pool','cartesia_voices','gemini_voices','roster')})
         settings.update(extra)
         cfg = config.Config(**settings)
-        catalogue = {voice: {'language': 'en', 'public': True, 'owner': False} for voice in known}
-        assignment_names.write_text(json.dumps({'_catalogue': {CART: catalogue}}), encoding='utf-8')
+        catalogue = {voice: {'language': 'en', 'public': True, 'owner': False} for voice in known or []}
+        names = {'_catalogue': {CART: catalogue}} if known is not None else {}
+        if name.startswith('Curated filters'):
+            names['_gone'] = {CART: [known[0]]}
+        assignment_names.write_text(json.dumps(names), encoding='utf-8')
         logs = []
         with patch.object(voice_names, 'names_path', lambda: assignment_names), \
-                patch.object(log, 'log', lambda kind, msg: logs.append([kind, msg])):
+                patch.object(log, 'log', lambda kind, msg: logs.append([kind, msg])), \
+                patch.object(voice_pool, '_last_clips', return_value=spoke):
             assigned = voice_pool.assign(cfg,name,raw,agents=agents,contacts=contacts)
-        assignments.append({'name':name,'stored':raw,'settings':settings,'catalogue':known,
+        assignments.append({'name':name,'stored':raw,'settings':settings,'names':names,'spoke':spoke,
                             'agents':agents,'contacts':contacts,'result':assigned,'logs':logs})
+    inheritance = []
+    cfg = config.Config(tts_provider=CART, tts_fallback='elevenlabs', cartesia_pool=('c1','c2'),
+                        cartesia_voices={'Parent':'parent-contact'}, roster={})
+    for raw, parent in (
+        ('{}', {'persona':'Parent', 'voice_id':stored('elevenlabs','parent-eleven')}),
+        (stored(CART,'explicit'), {'persona':'Parent', 'voice_id':stored('elevenlabs','parent-eleven')}),
+        (stored(CART,'auto-helper'), {'persona':'Parent', 'voice_id':stored(CART,'pinned-parent')}),
+        ('{}', {'persona':'Unknown parent', 'voice_id':stored('elevenlabs','parent-eleven')}),
+    ):
+        inherited = voice_pool.inherited(cfg,'Helper',raw,parent)
+        assigned = voice_pool.assign(cfg,'Helper',inherited,agents=[],contacts=[])
+        inheritance.append({'stored':raw,'parent':parent,'inherited':inherited,'assigned':assigned})
     cfg = config.Config(tts_provider='cartesia', cartesia_voices={'Ada':'c1'})
     pinned = voice_pool.pinned_before_rename(cfg,{'persona':'Ada','voice_id':'{}'})
     janitor = voice_profile.speech(voice_profile.HostView.build(cfg, stored={}),
@@ -145,7 +174,7 @@ def reference(root):
             quiet.append({'file':quiet_file, **selection('en')})
     catalogue = {'file':file,'languages':languages,'ola':ola,'quiet':quiet}
     return {'picks':picks,'assignments':assignments,'pinned':pinned,
-            'janitor':janitor,'default_assignment':default['speech']['assignment'],
+            'inheritance':inheritance,'janitor':janitor,'default_assignment':default['speech']['assignment'],
             'catalogue':catalogue,'creation_collisions':creation_collisions}
 
 

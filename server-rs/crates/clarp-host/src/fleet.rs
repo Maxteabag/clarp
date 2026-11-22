@@ -42,6 +42,13 @@ use crate::wire;
 pub(crate) mod computer_jobs;
 pub(crate) mod portrait_jobs;
 mod voice_migration;
+
+pub(crate) enum VoiceMigration {
+    Plan,
+    Reviewed(String),
+    AtStart,
+}
+
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
 pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
 
@@ -814,7 +821,7 @@ enum Ask {
     },
     VoiceMigration {
         view: Box<clarp_kernel::voice_profile::HostView>,
-        reviewed: Option<String>,
+        mode: VoiceMigration,
         answer: Answer<Result<Result<serde_json::Value, String>, Unavailable>>,
     },
     SetCoordination {
@@ -1329,11 +1336,11 @@ impl FleetHandle {
     pub(crate) async fn migrate_voices(
         &self,
         view: clarp_kernel::voice_profile::HostView,
-        reviewed: Option<String>,
+        mode: VoiceMigration,
     ) -> Result<Result<serde_json::Value, String>, Unavailable> {
         self.ask(|answer| Ask::VoiceMigration {
             view: Box::new(view),
-            reviewed,
+            mode,
             answer,
         })
         .await?
@@ -2255,12 +2262,8 @@ impl Fleet {
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));
                 }
-                Ask::VoiceMigration {
-                    view,
-                    reviewed,
-                    answer,
-                } => {
-                    let result = self.migrate_voices(*view, reviewed.as_deref());
+                Ask::VoiceMigration { view, mode, answer } => {
+                    let result = self.migrate_voices(*view, mode);
                     let _ = answer.send(Ok(result));
                 }
                 Ask::Set { settings, answer } => {
@@ -2469,6 +2472,7 @@ impl Fleet {
         name: &str,
         stored: &str,
         catalogue: &VoiceCatalogue,
+        parent: Option<&AgentRecord>,
     ) -> String {
         let host = clarp_kernel::voice_profile::HostView {
             voices: crate::owner::voices(file),
@@ -2492,26 +2496,57 @@ impl Fleet {
             catalogue,
             roster: owner.roster,
         };
+        fn voice_of(record: &AgentRecord) -> clarp_kernel::voice_pool::User<'_> {
+            clarp_kernel::voice_pool::User {
+                name: &record.persona,
+                stored: &record.voice_id,
+                builtin: false,
+                agent_id: Some(&record.agent_id),
+                created_at_ms: record.created_at_ms,
+            }
+        }
+        let inherited = parent.map(|parent| pool.inherited(name, stored, &voice_of(parent)));
         let contacts = self.book.listed(owner);
+        let resting: Vec<_> = self
+            .held
+            .iter()
+            .filter_map(|held| self.stored_agent(&held.agent_id).ok().flatten())
+            .filter(|record| record.deleted_at_ms.is_none())
+            .collect();
         let agents = self
             .members
             .iter()
             .map(|member| &member.record)
-            .filter(|record| !record.is_janitor && record.archived_at_ms.is_none())
-            .map(|record| clarp_kernel::voice_pool::User {
-                name: &record.persona,
-                stored: &record.voice_id,
-                builtin: false,
-            });
+            .chain(&resting)
+            .filter(|record| !record.is_janitor)
+            .map(voice_of);
         let contacts = contacts
             .iter()
             .map(|contact| clarp_kernel::voice_pool::User {
                 name: contact["name"].as_str().unwrap_or(""),
                 stored: contact["voice_id"].as_str().unwrap_or(""),
                 builtin: contact["builtin"] == true,
+                agent_id: None,
+                created_at_ms: self.book.created_at(contact["id"].as_str().unwrap_or("")),
             });
         let users: Vec<_> = agents.chain(contacts).collect();
-        let assigned = pool.assign(name, stored, &users);
+        let assigned = pool.assign(name, inherited.as_deref().unwrap_or(stored), &users, || {
+            self.members
+                .iter()
+                .filter(|member| !member.record.is_janitor)
+                .filter_map(|member| {
+                    let view = member.agent.view();
+                    let newest = view
+                        .speech
+                        .lines()
+                        .iter()
+                        .filter_map(|line| line.clip_id)
+                        .max()
+                        .and_then(|id| i64::try_from(id).ok())?;
+                    Some((member.record.agent_id.clone(), newest))
+                })
+                .collect()
+        });
         if let Some(note) = assigned.catalogue_miss {
             eprintln!(
                 "voicePoolNoCatalogueVoice provider=cartesia language={} eligible=0 total={}",
@@ -2520,8 +2555,8 @@ impl Fleet {
         }
         for note in assigned.exhausted {
             eprintln!(
-                "voicePoolExhausted provider={} pool={} shared_by={}",
-                note.provider, note.size, note.shared_by
+                "voicePoolExhausted provider={} pool={} reused={} last_used_ms={} shared_by={}",
+                note.provider, note.size, note.reused, note.last_used_ms, note.shared_by
             );
         }
         assigned.stored
@@ -2551,7 +2586,7 @@ impl Fleet {
                 &said.voice_id
             };
             clarp_kernel::said::canonical_voice(
-                &self.assigned_voice(&file, &owner, &name, stored, fetched),
+                &self.assigned_voice(&file, &owner, &name, stored, fetched, None),
             )
         } else if said.voice_id.is_empty() {
             String::new()
@@ -2580,7 +2615,7 @@ impl Fleet {
             .filter(|_| voice_id.is_empty())
             .and_then(|original| self.book.named(&owner, original))
             .filter(|current| current["voice_id"].as_str().is_none_or(str::is_empty))
-            .map(|_| self.assigned_voice(&file, &owner, &name, "{}", fetched))
+            .map(|_| self.assigned_voice(&file, &owner, &name, "{}", fetched, None))
             .unwrap_or_default();
         let mut book = (*self.book).clone();
         let changed = match original {
@@ -3504,7 +3539,7 @@ impl Fleet {
         let said_parent = request.parent.as_deref().unwrap_or("").trim();
         let parent = match (said_parent, self.place_of(said_parent)) {
             ("", _) => None,
-            (_, Some(at)) => Some(self.members[at].record.agent_id.clone()),
+            (_, Some(at)) => Some(&self.members[at].record),
             (_, None) => {
                 let why = format!("No live agent matches parent '{said_parent}'.");
                 return Err(Told::new(404, "parent_not_found", why).into());
@@ -3557,11 +3592,14 @@ impl Fleet {
             &effort,
             &file,
         )?;
-        let voice_id = if role == "agent" && !was_forked {
-            self.assigned_voice(&file, &owner, &persona, &voice_id, catalogue)
-        } else {
-            voice_id
-        };
+        let voice_id = self.assigned_voice(
+            &file,
+            &owner,
+            &persona,
+            &voice_id,
+            catalogue,
+            parent.filter(|_| role == "helper"),
+        );
         // Its picture: the one it is given, else the one its persona has of its own.
         let given = creation_picture(&asked(&request.avatar_base64))?;
         let avatar = match &given {
@@ -3582,7 +3620,7 @@ impl Fleet {
             mcp_servers: request.mcp_servers,
             conversation_id: forked.unwrap_or_else(ids::uuid),
             created_at_ms: self.now_ms(),
-            parent_agent_id: parent,
+            parent_agent_id: parent.map(|parent| parent.agent_id.clone()),
             role: if role == "helper" {
                 role.to_string()
             } else {
@@ -3808,7 +3846,7 @@ impl Fleet {
                 let voice = of_persona("voice_id");
                 let voice = if voice.is_empty() { "{}" } else { &voice };
                 record.voice_id =
-                    self.assigned_voice(&file, &owner, &record.persona, voice, &catalogue);
+                    self.assigned_voice(&file, &owner, &record.persona, voice, &catalogue, None);
                 record.personality = of_persona("personality");
                 record.avatar_symbol = of_persona("avatar_symbol");
                 record.avatar = persona["id"]

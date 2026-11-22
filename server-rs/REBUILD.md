@@ -3662,11 +3662,18 @@ its messages and inbox. The feature is advertised after the runtime integration.
 
 **Voices for new agents and contacts (PR 553, contract 123).** The fleet assigns voices
 as it creates new agents and contacts. The choice and the write run in the same turn.
-The configured Cartesia pool takes precedence. Otherwise, the pool uses the background
-catalogue's public, non-owner, non-deleted voices in the recipient's speech language,
-with the built-in pool as a fallback. A stable walk reserves built-in contacts' voices
-while other voices are free and chooses the least shared voice when the pool is exhausted.
+The configured Cartesia pool takes precedence. PR 683 ships the curated English pool,
+filtered by the last fetched catalogue and the deleted-voice list. Other languages and
+an empty curated selection use the background catalogue's public, non-owner, non-deleted
+voices in the recipient's speech language. The built-in list is the final fallback.
+Curated names supply labels until the saved catalogue or picker names the voice.
+Archived agents hold their voices. After the stable walk finds no free voice, reuse
+goes by the oldest last use, then the least shared voice, then walk order.
+A helper inherits its parent's effective voice for each needed provider it lacks.
+A fork gets a pool voice, and a new agent's explicit voice is stored as a provider map.
 A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
+At startup the fleet applies the existing migration plan before serving requests.
+It logs and leaves any voice whose sound would change under any provider.
 
 **Cartesia catalogue access (PR 562, 21 Nov 2026).** The names worker recognizes
 public access, public or all visibility, and the legacy boolean public marker. The

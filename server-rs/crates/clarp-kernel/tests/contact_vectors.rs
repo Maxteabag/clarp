@@ -230,6 +230,8 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
         name: contact.name,
         stored: contact.voice_id,
         builtin: at < builtins,
+        agent_id: None,
+        created_at_ms: 0,
     });
     for case in assigns {
         let roster = rosters
@@ -261,17 +263,19 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|agent| agent["is_janitor"] != 1 && agent["archived_at"].is_null())
+            .filter(|agent| agent["is_janitor"] != 1)
             .map(|agent| User {
                 name: agent["persona"].as_str().unwrap(),
                 stored: agent["voice_id"].as_str().unwrap(),
                 builtin: false,
+                agent_id: agent["agent_id"].as_str(),
+                created_at_ms: agent["created_at"].as_i64().unwrap_or_default(),
             })
             .chain(contacts_in_use.clone())
             .collect();
         let written_voice = |name, voice| {
             assert_eq!(
-                pool.assign(name, voice, &users).stored,
+                pool.assign(name, voice, &users, Default::default).stored,
                 case["written"][0]["voice_id"],
                 "{case}"
             );

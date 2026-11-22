@@ -2,10 +2,14 @@
   "assignments": [
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Free",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c2\"}",
       "settings": {
         "cartesia_pool": [
@@ -21,18 +25,25 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [
         {
+          "agent_id": "fixture-active",
+          "created_at": 30,
           "persona": "Has Voice",
           "voice_id": "{\"cartesia\":\"c1\"}"
         }
       ],
-      "catalogue": [],
       "contacts": [
         {
+          "created_at": 20,
           "name": "Custom",
           "voice_id": "{\"cartesia\":\"c1\"}"
         },
@@ -44,6 +55,11 @@
       ],
       "logs": [],
       "name": "Free",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c2\"}",
       "settings": {
         "cartesia_pool": [
@@ -58,23 +74,31 @@
         "roster": {},
         "tts_fallback": "none",
         "tts_provider": "cartesia"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
       },
       "stored": "{}"
     },
     {
       "agents": [
         {
+          "agent_id": "fixture-active",
           "archived_at": 1,
+          "created_at": 30,
           "persona": "Has Voice",
           "voice_id": "{\"cartesia\":\"c1\"}"
         },
         {
+          "agent_id": "fixture-active",
+          "created_at": 30,
           "is_janitor": 1,
           "persona": "Has Voice",
           "voice_id": "{\"cartesia\":\"c1\"}"
         }
       ],
-      "catalogue": [],
       "contacts": [
         {
           "builtin": true,
@@ -84,6 +108,11 @@
       ],
       "logs": [],
       "name": "Free",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c2\"}",
       "settings": {
         "cartesia_pool": [
@@ -99,11 +128,15 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [
         {
           "builtin": true,
@@ -113,6 +146,11 @@
       ],
       "logs": [],
       "name": "Free",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c2\"}",
       "settings": {
         "cartesia_pool": [
@@ -128,15 +166,88 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [
-        "c2",
-        "c1",
-        "reserved"
-      ],
+      "contacts": [],
+      "logs": [],
+      "name": "Curated on first boot",
+      "names": {},
+      "result": "{\"cartesia\":\"c58bda25-abd5-4c72-97a2-4dbe049b368d\"}",
+      "settings": {
+        "cartesia_pool": [],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
+      "contacts": [],
+      "logs": [],
+      "name": "Curated filters current catalogue and gone",
+      "names": {
+        "_catalogue": {
+          "cartesia": {
+            "83ae58a1-7e97-4b94-b03f-e4cc0a10d8af": {
+              "language": "en",
+              "owner": false,
+              "public": true
+            },
+            "a0e8430e-1267-4a4d-baa5-a5d5e53122a9": {
+              "language": "en",
+              "owner": false,
+              "public": true
+            },
+            "c1": {
+              "language": "en",
+              "owner": false,
+              "public": true
+            }
+          }
+        },
+        "_gone": {
+          "cartesia": [
+            "a0e8430e-1267-4a4d-baa5-a5d5e53122a9"
+          ]
+        }
+      },
+      "result": "{\"cartesia\":\"83ae58a1-7e97-4b94-b03f-e4cc0a10d8af\"}",
+      "settings": {
+        "cartesia_pool": [],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [],
       "contacts": [
         {
           "builtin": true,
@@ -146,6 +257,27 @@
       ],
       "logs": [],
       "name": "Catalogue",
+      "names": {
+        "_catalogue": {
+          "cartesia": {
+            "c1": {
+              "language": "en",
+              "owner": false,
+              "public": true
+            },
+            "c2": {
+              "language": "en",
+              "owner": false,
+              "public": true
+            },
+            "reserved": {
+              "language": "en",
+              "owner": false,
+              "public": true
+            }
+          }
+        }
+      },
       "result": "{\"cartesia\":\"c1\"}",
       "settings": {
         "cartesia_pool": [],
@@ -157,16 +289,29 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [
-        "not-used"
-      ],
       "contacts": [],
       "logs": [],
       "name": "Catalogue",
+      "names": {
+        "_catalogue": {
+          "cartesia": {
+            "not-used": {
+              "language": "en",
+              "owner": false,
+              "public": true
+            }
+          }
+        }
+      },
       "result": "{\"cartesia\":\"c2\"}",
       "settings": {
         "cartesia_pool": [
@@ -182,32 +327,53 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [
         {
+          "agent_id": "fixture-active",
+          "created_at": 30,
           "persona": "Has Voice",
           "voice_id": "{\"cartesia\":\"c1\"}"
         },
         {
+          "agent_id": "fixture-quieter",
+          "created_at": 30,
           "persona": "Has Voice",
           "voice_id": "{\"cartesia\":\"c1\"}"
         },
         {
+          "agent_id": "fixture-other",
+          "created_at": 60,
           "persona": "Other",
           "voice_id": "{\"cartesia\":\"c2\"}"
         }
       ],
-      "catalogue": [],
-      "contacts": [],
+      "contacts": [
+        {
+          "created_at": 20,
+          "name": "Custom",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        }
+      ],
       "logs": [
         [
           "voicePoolExhausted",
-          "provider=cartesia pool=2 shared_by=1"
+          "provider=cartesia pool=2 reused=c2 last_used_ms=50 shared_by=1"
         ]
       ],
       "name": "Exhausted",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c2\"}",
       "settings": {
         "cartesia_pool": [
@@ -222,15 +388,73 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [
+        {
+          "agent_id": "fixture-active",
+          "created_at": 30,
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        }
+      ],
+      "contacts": [
+        {
+          "created_at": 35,
+          "name": "Older contact",
+          "voice_id": "{\"cartesia\":\"c2\"}"
+        }
+      ],
+      "logs": [
+        [
+          "voicePoolExhausted",
+          "provider=cartesia pool=2 reused=c2 last_used_ms=35 shared_by=1"
+        ]
+      ],
+      "name": "Timestamped contact",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "c1",
+          "c2"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Ada",
-      "result": "e-stored",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
+      "result": "{\"elevenlabs\":\"e-stored\"}",
       "settings": {
         "cartesia_pool": [
           "reserved",
@@ -245,14 +469,23 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "e-stored"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Other",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c1\"}",
       "settings": {
         "cartesia_pool": [
@@ -268,15 +501,24 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{\"cartesia\":\"auto-123\"}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Other",
-      "result": "c0000000-0000-4000-8000-0000000000ad",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
+      "result": "{\"cartesia\":\"c0000000-0000-4000-8000-0000000000ad\"}",
       "settings": {
         "cartesia_pool": [
           "reserved",
@@ -291,14 +533,23 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "c0000000-0000-4000-8000-0000000000ad"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Other",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c1\",\"google\":\"nb-NO-Chirp3-HD-Kore\"}",
       "settings": {
         "cartesia_pool": [
@@ -314,14 +565,23 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "nb-NO-Chirp3-HD-Kore"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Gemini Override",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c1\",\"gemini\":\"Zubenelgenubi\"}",
       "settings": {
         "cartesia_pool": [
@@ -342,14 +602,23 @@
         "tts_fallback": "none",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Fallback",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c1\",\"elevenlabs\":\"cjVigY5qzO86Huf0OWal\"}",
       "settings": {
         "cartesia_pool": [
@@ -365,14 +634,23 @@
         "tts_fallback": "elevenlabs",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Fallback",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c1\",\"elevenlabs\":\"some-valid-id\"}",
       "settings": {
         "cartesia_pool": [
@@ -388,14 +666,23 @@
         "tts_fallback": "elevenlabs",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{\"elevenlabs\":\"some-valid-id\"}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Fallback",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c1\",\"elevenlabs\":\"cjVigY5qzO86Huf0OWal\"}",
       "settings": {
         "cartesia_pool": [
@@ -411,14 +698,23 @@
         "tts_fallback": "elevenlabs",
         "tts_provider": "cartesia"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{\"elevenlabs\":\"some invalid id\"}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Silent Host",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{}",
       "settings": {
         "cartesia_pool": [
@@ -434,14 +730,23 @@
         "tts_fallback": "none",
         "tts_provider": "none"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Deepgram",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{}",
       "settings": {
         "cartesia_pool": [
@@ -457,14 +762,23 @@
         "tts_fallback": "none",
         "tts_provider": "deepgram"
       },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
+      },
       "stored": "{}"
     },
     {
       "agents": [],
-      "catalogue": [],
       "contacts": [],
       "logs": [],
       "name": "Google",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
       "result": "{\"cartesia\":\"c2\"}",
       "settings": {
         "cartesia_pool": [
@@ -479,6 +793,11 @@
         "roster": {},
         "tts_fallback": "cartesia",
         "tts_provider": "google"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-other": 50,
+        "fixture-quieter": 10
       },
       "stored": "{}"
     }
@@ -643,6 +962,44 @@
     }
   },
   "default_assignment": "pool",
+  "inheritance": [
+    {
+      "assigned": "{\"cartesia\":\"parent-contact\",\"elevenlabs\":\"parent-eleven\"}",
+      "inherited": "{\"cartesia\":\"parent-contact\",\"elevenlabs\":\"parent-eleven\"}",
+      "parent": {
+        "persona": "Parent",
+        "voice_id": "{\"elevenlabs\":\"parent-eleven\"}"
+      },
+      "stored": "{}"
+    },
+    {
+      "assigned": "{\"cartesia\":\"explicit\",\"elevenlabs\":\"parent-eleven\"}",
+      "inherited": "{\"cartesia\":\"explicit\",\"elevenlabs\":\"parent-eleven\"}",
+      "parent": {
+        "persona": "Parent",
+        "voice_id": "{\"elevenlabs\":\"parent-eleven\"}"
+      },
+      "stored": "{\"cartesia\":\"explicit\"}"
+    },
+    {
+      "assigned": "{\"cartesia\":\"pinned-parent\",\"elevenlabs\":\"GBv7mTt0atIp3Br8iCZE\"}",
+      "inherited": "{\"cartesia\":\"pinned-parent\"}",
+      "parent": {
+        "persona": "Parent",
+        "voice_id": "{\"cartesia\":\"pinned-parent\"}"
+      },
+      "stored": "{\"cartesia\":\"auto-helper\"}"
+    },
+    {
+      "assigned": "{\"cartesia\":\"c1\",\"elevenlabs\":\"parent-eleven\"}",
+      "inherited": "{\"elevenlabs\":\"parent-eleven\"}",
+      "parent": {
+        "persona": "Unknown parent",
+        "voice_id": "{\"elevenlabs\":\"parent-eleven\"}"
+      },
+      "stored": "{}"
+    }
+  ],
   "janitor": {
     "origin": null,
     "provider": "cartesia",
@@ -657,8 +1014,10 @@
       "keep": [],
       "name": "no pool",
       "pool": [],
+      "read_recency": false,
       "result": null,
-      "taken": {}
+      "taken": {},
+      "used": {}
     },
     {
       "keep": [],
@@ -669,8 +1028,10 @@
         "c",
         "d"
       ],
+      "read_recency": false,
       "result": "c",
-      "taken": {}
+      "taken": {},
+      "used": {}
     },
     {
       "keep": [],
@@ -681,8 +1042,10 @@
         "c",
         "d"
       ],
+      "read_recency": false,
       "result": "c",
-      "taken": {}
+      "taken": {},
+      "used": {}
     },
     {
       "keep": [],
@@ -694,8 +1057,10 @@
         "d",
         "e"
       ],
+      "read_recency": false,
       "result": "d",
-      "taken": {}
+      "taken": {},
+      "used": {}
     },
     {
       "keep": [],
@@ -706,25 +1071,56 @@
         "c",
         "d"
       ],
+      "read_recency": false,
       "result": "b",
       "taken": {
         "a": 1,
         "c": 1
+      },
+      "used": {
+        "a": 1
       }
     },
     {
       "keep": [],
-      "name": "least shared",
+      "name": "least recently used",
       "pool": [
         "a",
         "b",
         "c"
       ],
+      "read_recency": true,
+      "result": "a",
+      "taken": {
+        "a": 4,
+        "b": 3,
+        "c": 1
+      },
+      "used": {
+        "a": 7,
+        "b": 8,
+        "c": 9
+      }
+    },
+    {
+      "keep": [],
+      "name": "least shared among equals",
+      "pool": [
+        "a",
+        "b",
+        "c"
+      ],
+      "read_recency": true,
       "result": "c",
       "taken": {
         "a": 4,
         "b": 3,
         "c": 1
+      },
+      "used": {
+        "a": 8,
+        "b": 7,
+        "c": 7
       }
     },
     {
@@ -737,11 +1133,13 @@
         "b",
         "c"
       ],
+      "read_recency": true,
       "result": "b",
       "taken": {
         "b": 2,
         "c": 5
-      }
+      },
+      "used": {}
     },
     {
       "keep": [
@@ -753,8 +1151,10 @@
         "a",
         "b"
       ],
+      "read_recency": false,
       "result": "b",
-      "taken": {}
+      "taken": {},
+      "used": {}
     },
     {
       "keep": [],
@@ -764,12 +1164,14 @@
         "b",
         "c"
       ],
+      "read_recency": true,
       "result": "b",
       "taken": {
         "a": 1,
         "b": 1,
         "c": 1
-      }
+      },
+      "used": {}
     }
   ],
   "pinned": "{\"cartesia\":\"c1\"}"

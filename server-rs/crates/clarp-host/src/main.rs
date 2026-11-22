@@ -354,6 +354,8 @@ async fn serve(config: Config) -> Result<(), String> {
     {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
+    app.mouth.start_voice_names().await;
+    clarp_host::profile::migrate_at_start(&app).await;
     clarp_host::media_manage::import_history(&app)
         .await
         .map_err(|e| e.words().to_owned())?;
@@ -373,7 +375,6 @@ async fn serve(config: Config) -> Result<(), String> {
     app.mouth.held.recovered_by(Arc::new(recovering));
     app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
     app.mouth.bindings_ready.notify_one();
-    app.mouth.start_voice_names().await;
     clarp_host::calls::resume(&app);
     let staging = app.clone();
     tokio::spawn(async move {
