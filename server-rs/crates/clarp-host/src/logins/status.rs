@@ -1,14 +1,76 @@
 //! Account observations for the Host that keeps the tools and is allowed to ask about usage.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use clarp_ports::clock::Clock;
+use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
 use crate::edge::App;
 use crate::quota::LoginAccount;
 use crate::usage_provider::status_command;
+
+#[derive(Default)]
+pub(super) struct GrokCache {
+    changed: AtomicU64,
+    last: Mutex<Option<GrokObservation>>,
+}
+
+struct GrokObservation {
+    at: i64,
+    generation: u64,
+    fields: Map<String, Value>,
+}
+
+impl GrokCache {
+    pub(super) fn invalidate(&self) {
+        self.changed.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(super) fn changing(&self) -> GrokChange<'_> {
+        self.invalidate();
+        GrokChange(self)
+    }
+
+    pub(super) async fn tell(&self, clock: &dyn Clock, row: &mut Value) {
+        let Some(row) = row.as_object_mut() else {
+            return;
+        };
+        let mut last = self.last.lock().await;
+        let generation = self.changed.load(Ordering::Acquire);
+        if let Some(kept) = last.as_ref()
+            && kept.generation == generation
+            && (0..60_000).contains(&clock.now_ms().saturating_sub(kept.at))
+        {
+            row.extend(kept.fields.clone());
+            return;
+        }
+
+        let mut observed = Value::Object(Map::new());
+        super::probe_grok(&mut observed).await;
+        if self.changed.load(Ordering::Acquire) == generation
+            && let Value::Object(fields) = observed
+        {
+            row.extend(fields.clone());
+            *last = Some(GrokObservation {
+                at: clock.now_ms(),
+                generation,
+                fields,
+            });
+        }
+    }
+}
+
+/// Signing out may change the login even when the command fails or the request ends early.
+pub(super) struct GrokChange<'a>(&'a GrokCache);
+
+impl Drop for GrokChange<'_> {
+    fn drop(&mut self) {
+        self.0.invalidate();
+    }
+}
 
 #[derive(Default)]
 pub(super) struct AgyCache {

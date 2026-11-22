@@ -30459,6 +30459,8 @@ if "--session-id" not in args and "--resume" not in args:
 flag = "--resume" if "--resume" in args else "--session-id"
 sid = args[args.index(flag)+1]
 prompt = open(args[args.index("--prompt-file")+1]).read() if "--prompt-file" in args else args[-1]
+with open(os.path.join(os.environ["HOME"], "turn-shims"), "a") as shims:
+    shims.write(str(os.getppid())+"\n")
 with open(os.path.join(os.environ["HOME"], "calls"), "a") as calls:
     calls.write(json.dumps([flag, sid, prompt[-20:]])+"\n")
 if prompt.endswith("locked"):
@@ -30495,7 +30497,13 @@ else:
         let absent = place.root.join("missing-program");
         let absent = absent.to_str().unwrap();
         let binary = binary.to_str().unwrap();
-        let world = [
+        let clock_offset = place.root.join("clock-offset");
+        let set_clock_offset = |millis: i64| {
+            let staged = clock_offset.with_extension("next");
+            std::fs::write(&staged, millis.to_string()).unwrap();
+            std::fs::rename(staged, &clock_offset).unwrap();
+        };
+        let mut world = vec![
             ("HOME", place.root.to_str().unwrap()),
             ("CLARP_CLAUDE_PROGRAM", absent),
             ("CLARP_CODEX_PROGRAM", absent),
@@ -30509,6 +30517,13 @@ else:
                 if tool == "muse" { binary } else { absent },
             ),
         ];
+        if tool == "grok" {
+            set_clock_offset(0);
+            world.push((
+                "CLARP_TEST_CLOCK_OFFSET_FILE",
+                clock_offset.to_str().unwrap(),
+            ));
+        }
         let native = place.root.join(if tool == "muse" {
             ".local/share/muse"
         } else {
@@ -30556,13 +30571,19 @@ else:
             }
         );
         if tool == "grok" {
+            // These changes happen outside the Host. Advance its clock across each
+            // one-minute cache window without sending a login or logout request.
             assert_eq!(auth()["credential_present"], true);
             std::fs::write(place.root.join("signed-out"), "").unwrap();
+            set_clock_offset(60_001);
+            let signed_out = auth();
+            assert_eq!(signed_out["state"], "signed_out");
+            assert_eq!(signed_out["credential_present"], false);
             assert_eq!(auth()["state"], "signed_out");
             std::fs::remove_file(place.root.join("signed-out")).unwrap();
-        }
-        if tool == "grok" {
+
             std::fs::write(place.root.join("probe-failed"), "").unwrap();
+            set_clock_offset(120_002);
             let failed = auth();
             assert_eq!(failed["state"], "error");
             assert_eq!(failed["credential_present"], false);
@@ -30735,6 +30756,13 @@ else:
             argv.windows(2)
                 .any(|pair| pair == ["--reasoning-effort", "high"])
         );
+        // Finished rows can reach the Host while their shims are still reaping
+        // the tools, including the turn we stopped after restarting the Host.
+        let shims = std::fs::read_to_string(place.root.join("turn-shims")).unwrap();
+        assert_eq!(shims.lines().count(), seen.len());
+        wait_for("the Grok or Muse turn shims to finish", || {
+            shims.lines().all(is_gone)
+        });
     }
 }
 

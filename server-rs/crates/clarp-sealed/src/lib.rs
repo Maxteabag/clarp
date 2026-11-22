@@ -192,6 +192,7 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_IMAGE_VERSION", "switch"),
     ("CLARP_SIGN_IN_MOST_MS", "switch"),
     ("CLARP_SIGN_IN_TIMEOUT_MS", "switch"),
+    ("CLARP_TEST_CLOCK_OFFSET_FILE", "switch"),
     ("OPENCODE_PERMISSION", "switch"),
     ("LC_ALL", "switch"),
     ("TERM", "switch"),

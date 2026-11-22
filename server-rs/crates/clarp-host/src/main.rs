@@ -49,11 +49,35 @@ fn blob_engine(name: &str) -> Option<Box<dyn BlobEngine>> {
     }
 }
 
+fn host_clock() -> Arc<dyn Clock + Send + Sync> {
+    #[cfg(debug_assertions)]
+    if let Some(file) = std::env::var_os("CLARP_TEST_CLOCK_OFFSET_FILE") {
+        return Arc::new(FixtureClock(file.into()));
+    }
+    Arc::new(SystemClock)
+}
+
+/// The integration tests start the real Host in a child process and advance its clock
+/// through a fixture file, so a minute of cache expiry takes no wall time.
+#[cfg(debug_assertions)]
+struct FixtureClock(std::path::PathBuf);
+
+#[cfg(debug_assertions)]
+impl Clock for FixtureClock {
+    fn now_ms(&self) -> i64 {
+        let offset = std::fs::read_to_string(&self.0)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+            .unwrap_or_default();
+        SystemClock.now_ms().saturating_add(offset)
+    }
+}
+
 async fn serve(config: Config) -> Result<(), String> {
     // Capture the configured store paths before any child can be launched.
     clarp_host::child_environment();
     let config = Arc::new(config);
-    let clock: Arc<dyn Clock + Send + Sync> = Arc::new(SystemClock);
+    let clock = host_clock();
     let (engine, tables) = engines(&config.engine)
         .ok_or_else(|| format!("there is no engine named `{}`", config.engine))?;
     let codecs = clarp_codec::standard_set(&config.codec)

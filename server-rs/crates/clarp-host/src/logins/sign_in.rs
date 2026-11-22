@@ -58,6 +58,7 @@ fn most_ms() -> i64 {
 pub struct Desk {
     orders: OnceLock<mpsc::UnboundedSender<Order>>,
     agy_status: tokio::sync::Mutex<super::status::AgyCache>,
+    grok_status: Arc<super::status::GrokCache>,
 }
 
 enum Order {
@@ -123,7 +124,12 @@ impl Desk {
     fn orders(&self, clock: &Arc<dyn Clock + Send + Sync>) -> &mpsc::UnboundedSender<Order> {
         self.orders.get_or_init(|| {
             let (orders, inbox) = mpsc::unbounded_channel();
-            tokio::spawn(own(inbox, orders.clone(), clock.clone()));
+            tokio::spawn(own(
+                inbox,
+                orders.clone(),
+                clock.clone(),
+                self.grok_status.clone(),
+            ));
             orders
         })
     }
@@ -154,6 +160,7 @@ async fn own(
     mut inbox: mpsc::UnboundedReceiver<Order>,
     orders: mpsc::UnboundedSender<Order>,
     clock: Arc<dyn Clock + Send + Sync>,
+    grok_status: Arc<super::status::GrokCache>,
 ) {
     let mut entries: BTreeMap<String, Entry> = BTreeMap::new();
     let mut runs = 0_u64;
@@ -174,6 +181,9 @@ async fn own(
                     });
                     let _ = reply.send(told.clone());
                     continue;
+                }
+                if tool == "grok" {
+                    grok_status.invalidate();
                 }
                 runs += 1;
                 let told = sign_in::task(&tool, Stage::Running, "", now, now, "", "");
@@ -222,6 +232,9 @@ async fn own(
             }
             Order::Ended { tool, run, ended } => {
                 if let Some(entry) = entries.get_mut(&tool).filter(|entry| entry.run == run) {
+                    if tool == "grok" {
+                        grok_status.invalidate();
+                    }
                     entry.input = None;
                     entry.answered.clear();
                     let (stage, error) = match ended {
@@ -456,7 +469,7 @@ pub(crate) async fn rows(app: &App, every: bool, verify: bool) -> Result<Value, 
         for row in rows {
             if row["installed"] == true {
                 if row["id"] == "grok" {
-                    crate::logins::probe_grok(row).await;
+                    app.sign_ins.grok_status.tell(app.clock.as_ref(), row).await;
                 } else if keeps && verify {
                     super::status::observe(app, &app.sign_ins.agy_status, row).await;
                 }
@@ -571,7 +584,10 @@ async fn sign_out(app: &App, tool: &str) -> Result<Value, ApiError> {
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
     let most = Duration::from_millis(sign_in::SIGN_OUT_MOST_MS);
-    let ran = tokio::time::timeout(most, command.output()).await;
+    let ran = {
+        let _change = (tool == "grok").then(|| app.sign_ins.grok_status.changing());
+        tokio::time::timeout(most, command.output()).await
+    };
     let conflict = |why: &str| ApiError::new(StatusCode::CONFLICT, sign_in::failure(why));
     let done = match ran {
         Ok(Ok(done)) => done,

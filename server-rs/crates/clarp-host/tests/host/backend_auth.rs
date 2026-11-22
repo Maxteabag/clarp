@@ -737,3 +737,78 @@ fn account_metadata_names_the_shared_harness_and_installed_hotseat_providers() {
     let without = place.start_in("", &[], &world);
     assert_eq!(without.get("/server-info")["capabilities"]["hotseat_providers"], json!([]));
 }
+
+#[test]
+fn grok_status_is_reused_until_the_login_changes() {
+    let place = Place::new("grok-status-cache");
+    let home = place.root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let grok = place.root.join("grok");
+    program(
+        &grok,
+        r#"#!/bin/sh
+case "$1" in
+models)
+  echo check >> "$HOME/grok-probes"
+  if [ -f "$HOME/grok-signed-in" ]; then
+    echo grok-fixture-model
+  else
+    echo 'You are not authenticated.' >&2
+  fi
+  ;;
+login) touch "$HOME/grok-signed-in" ;;
+logout) rm -f "$HOME/grok-signed-in" ;;
+*) exit 2 ;;
+esac
+"#,
+    );
+    let host = place.start_without(
+        "",
+        &["--accounts", "select"],
+        &[
+            ("CLARP_GROK_PROGRAM", grok.to_str().unwrap()),
+            ("HOME", home.to_str().unwrap()),
+        ],
+        &NOT_THE_MACHINES,
+    );
+    let checks = || {
+        std::fs::read_to_string(home.join("grok-probes"))
+            .unwrap()
+            .lines()
+            .count()
+    };
+    let read = || host.get("/backend-auth?harnesses=all");
+    let status = || row(&read(), "grok");
+    assert_eq!(status()["state"], "signed_out");
+    assert_eq!(status()["state"], "signed_out");
+    assert_eq!(checks(), 1, "a cached read must not start Grok");
+
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/backend-auth/login",
+            Some(&json!({"backend":"grok"}))
+        )
+        .0,
+        202
+    );
+    wait_for("Grok login to finish and publish its new status", || {
+        let reading = read();
+        reading["tasks"]["grok"]["status"] == "complete"
+            && row(&reading, "grok")["state"] == "valid"
+    });
+    let before = checks();
+    assert!(before > 1);
+    assert_eq!(status()["logged_in"], true);
+    assert_eq!(checks(), before);
+
+    let (code, signed_out) = host.ask(
+        "POST",
+        "/backend-auth/logout",
+        Some(&json!({"backend":"grok"})),
+    );
+    assert_eq!(code, 200, "{signed_out}");
+    assert_eq!(signed_out["state"], "signed_out");
+    assert_eq!(status()["logged_in"], false);
+    assert_eq!(checks(), before + 1, "the post-logout read is reused");
+}
