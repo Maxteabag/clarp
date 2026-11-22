@@ -227,7 +227,7 @@ def _adapters(providers: set[str]) -> dict[str, dict]:
 def _labels(cfg) -> dict[str, dict[str, str]]:
     """Names of voices from code tables, configuration, the names file (voice_names) and
     what the pickers fetched; never a fetch, never a query."""
-    from . import cartesia_voices, elevenlabs_voices, google_tts, voice_names
+    from . import cartesia_voices, elevenlabs_voices, google_tts, voice_names, voice_pool
     from .voice_catalog import AURA2_VOICES, FLUX_VOICES, gemini_voices
     from .voices import VOICE_CATALOG
     eleven = {row["id"]: row["label"].split(" — ", 1)[0] for row in VOICE_CATALOG}
@@ -242,7 +242,10 @@ def _labels(cfg) -> dict[str, dict[str, str]]:
         if vertex_id and vertex_id not in gemini:
             gemini[vertex_id] = gemini.get(api_of.get(persona, ""), f"{persona} (designed)")
     return {
-        CARTESIA: {**voice_names.names(CARTESIA), **cartesia_voices.cached_names()},
+        # The curated pool names its voices, so a new agent's voice has a name before the
+        # names file is first filled.
+        CARTESIA: {**voice_pool.curated_names(), **voice_names.names(CARTESIA),
+                   **cartesia_voices.cached_names()},
         ELEVENLABS: eleven,
         GEMINI: gemini,
         GOOGLE: {v: v.rsplit("-", 1)[1] for v in google_tts.VOICES},

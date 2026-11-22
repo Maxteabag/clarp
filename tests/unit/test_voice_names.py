@@ -204,7 +204,8 @@ def test_a_start_with_a_fresh_file_calls_no_provider_and_a_stale_one_refreshes_o
     calls = []
     worker = voice_names.VoiceNamesWorker(first_after=0, refresh_fn=lambda: calls.append(1))
     assert worker.start_pass() is True and calls == [1]            # no file yet: due
-    names_file.write_text(json.dumps({"cartesia": {ADA_CARTESIA: "Brooke"}}))
+    # A file of today's format (an older format is refreshed at the next start).
+    names_file.write_text(json.dumps({"cartesia": {ADA_CARTESIA: "Brooke"}, "_format": voice_names.FORMAT}))
     assert worker.start_pass() is False and calls == [1]           # fresh: no provider call
     old = time.time() - voice_names.REFRESH_SECONDS - 60
     os.utime(names_file, (old, old))
