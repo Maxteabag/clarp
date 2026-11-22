@@ -748,7 +748,7 @@ pub fn live_check(out: String) {
             check(fold.live.title == "Worked for 16s · 2 tools" && !fold.live.expanded, &format!("the turn seen live stays folded in history, with the Host's worked time: {:?}", fold.live.title));
             check(live_row(&format!("live:{REAL_FAILED}")).is_some_and(|r| r.live.status == "failed"), "its failed tool stays in view");
             let between = live_row(BETWEEN_FOLD).unwrap_or_default();
-            check(between.live.title == "Used 3 tools" && !between.live.expanded, &format!("the turn in between, only ever in /log and ended before the Host summed turns up, folds the same without a worked time: {:?}", between.live.title));
+            check(between.live.title == "3 tools" && !between.live.expanded, &format!("the turn in between, only ever in /log and ended before the Host summed turns up, folds the same without a worked time: {:?}", between.live.title));
             check(activity_rows().is_empty(), &format!("no finished turn shows its tools as 'Show · 1 tool call' rows: {:?}", activity_rows()));
             *running_at1.borrow_mut() = at(REAL_RUNNING).unwrap_or(usize::MAX);
             *before3.borrow_mut() = crate::view::sync_stats();
@@ -786,7 +786,7 @@ pub fn live_check(out: String) {
             let from = shown.iter().position(|r| r.live.key == BETWEEN_FOLD).unwrap_or(0);
             let turn: Vec<String> = shown[from..].iter().take_while(|r| r.id != REAL_PREVIOUS_ANSWER).map(|r| r.live.title.to_string()).collect();
             check(
-                turn == ["Used 3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date"],
+                turn == ["3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date"],
                 &format!("O opens it to one row per tool, as the live fold opens: {turn:?}"),
             );
             check(activity_rows().is_empty(), "and no activity rows");

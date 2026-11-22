@@ -69,7 +69,9 @@ pub fn quiet_chat_check(out: String) {
             true
         })),
         ("subscribed", Box::new(|app, _window, _| {
-            if !(app.engine.borrow().live_items() && lseq() == Some(0)) {
+            // The event stream carries rachel's live events before any is sent.
+            let subscribed = requests("GET", "/events").iter().any(|r| r["query"].get("live").and_then(|l| l.as_str()).is_some_and(|l| l.split(',').any(|s| s == "rachel")));
+            if !(app.engine.borrow().live_items() && lseq() == Some(0) && subscribed) {
                 return false;
             }
             replay(AFTER_TAIL)
