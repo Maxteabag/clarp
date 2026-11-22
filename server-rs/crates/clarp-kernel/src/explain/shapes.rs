@@ -199,12 +199,56 @@ impl Part {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let own = shell_command(&activity, python::strip(kind));
-            let command = format!("cd {} && {own}", shell_quote(&self.cwd));
+            let command = if starts_in(own, &self.cwd) {
+                own.to_owned()
+            } else {
+                format!("cd {} && {own}", shell_quote(&self.cwd))
+            };
             activity.insert("command".to_string(), text(&command));
             activity.insert("input".to_string(), json!({"command": command}));
         }
         activity
     }
+}
+
+/// Read the leading directory change without parsing the command that follows it.
+fn starts_in(command: &str, cwd: &str) -> bool {
+    let punctuation = |sign: char| "();<>|&".contains(sign);
+    let mut signs = command.chars().peekable();
+    let mut prefix = String::new();
+    let mut quote = None;
+
+    while let Some(sign) = signs.next() {
+        match (quote, sign) {
+            (open, '\\') if open != Some('\'') => {
+                let Some(escaped) = signs.next() else {
+                    return false;
+                };
+                prefix.push(sign);
+                prefix.push(escaped);
+            }
+            (Some(open), close) if open == close => {
+                quote = None;
+                prefix.push(close);
+            }
+            (None, '\'' | '"') => {
+                quote = Some(sign);
+                prefix.push(sign);
+            }
+            (None, '#') => {
+                while signs.next_if(|&next| next != '\n').is_some() {}
+                prefix.push(' ');
+            }
+            (None, sign) if punctuation(sign) => {
+                let separator = sign == ';' || (sign == '&' && signs.next_if_eq(&'&').is_some());
+                return separator
+                    && !signs.peek().is_some_and(|&next| punctuation(next))
+                    && tools::shell_split(&prefix).is_some_and(|words| words == ["cd", cwd]);
+            }
+            _ => prefix.push(sign),
+        }
+    }
+    false
 }
 
 /// A part known by its whole text. `previous`: the program an earlier version named it by.
