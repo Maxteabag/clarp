@@ -698,7 +698,11 @@ Rules:
   on retry, and paint the optimistic bubble with id `u-<client_msg_id>`. The
   server files the durable user row under that id and ignores a repeated
   request with the same id. Omit it only if you accept the server minting one
-  from `trace_id`, in which case you cannot confirm delivery.
+  from `trace_id`, in which case you cannot confirm delivery. The id is one per
+  Host, not per agent: a send under an id another agent already holds is
+  refused with 409 and the text body `client_msg_id is held by another
+  agent`, with nothing written (Host contract 129). Mint a new id once and
+  send again.
 - If the agent is busy, a user's send is steered into the running turn when
   its backend can take it. A Codex turn takes it at once, and its `/log` row
   follows at once. A Claude turn (Claude Code 2.1.321 or later) takes it while
