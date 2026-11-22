@@ -3370,21 +3370,30 @@ html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
   text-decoration: underline; text-underline-offset: 2px;
 }
 .hidden-run-show:hover { color: var(--washi); }
-.coordination-menu-wrap { position: relative; display: inline-flex; }
-.history-btn.coordination-btn::before { -webkit-mask-image: url('/static/img/icons/chat.png'); mask-image: url('/static/img/icons/chat.png'); }
-.coordination-menu {
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 180px; padding: 4px;
+.chat-menu-wrap { position: relative; display: inline-flex; }
+/* The chat's '…' menu (ChatChoicesMenu.svelte): its glyph is the icon. */
+.history-btn.chat-menu-btn { font-size: 18px; line-height: 1; padding-bottom: 6px; }
+.history-btn.chat-menu-btn::before { display: none; }
+.chat-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 250px; padding: 4px;
   background: var(--ink-soft-2); border: 1px solid var(--ink-edge); border-radius: 8px;
   display: flex; flex-direction: column;
 }
-.coordination-menu button {
-  text-align: left; background: none; border: 0; border-radius: 5px; padding: 6px 10px;
-  color: var(--washi-dim); font: 13px var(--font-ui); cursor: pointer;
+.chat-menu button {
+  display: flex; align-items: center; gap: 8px; text-align: left; background: none; border: 0;
+  border-radius: 5px; padding: 6px 10px; color: var(--washi-dim); font: 13px var(--font-ui); cursor: pointer;
 }
-.coordination-menu button:hover { background: var(--ink-edge); color: var(--washi); }
-.coordination-menu button.checked { color: var(--washi); }
-.coordination-menu button.checked::before { content: '✓ '; }
-.coordination-menu-hint { color: var(--washi-low); }
+.chat-menu button:hover:not(:disabled) { background: var(--ink-edge); color: var(--washi); }
+.chat-menu button:disabled { opacity: .5; cursor: default; }
+.chat-menu-row > span:first-child { flex: 1; }
+.chat-menu-value { color: var(--washi-low); }
+.chat-menu-caret { display: inline-block; transition: transform var(--t-snap) var(--ease); }
+.chat-menu-caret.open { transform: rotate(90deg); }
+.chat-submenu { display: flex; flex-direction: column; margin: 0 0 4px 12px; }
+.chat-submenu button.checked { color: var(--washi); }
+.chat-submenu button.checked::before { content: '✓'; }
+.chat-choices { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0; }
+.chat-choices label { display: flex; flex-direction: column; gap: 4px; font: 12px var(--font-ui); color: var(--washi-low); }
 .lv-divider { margin: 6px 12px; color: var(--washi-low); font: 12px var(--font-ui); text-align: center; }
 
 .status-line {

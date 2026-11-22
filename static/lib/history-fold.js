@@ -20,6 +20,29 @@ export const TOOL_ACTIVITY_LABELS = {
   grouped: 'Grouped', always: 'Always visible', group_old: 'Group old', hide_done: 'Hide when done',
 };
 
+// One chat's own choice (kept on the device, keyed by the Host's server id and the session):
+// 'follow' follows the device's Tool activity setting.
+export const FOLLOW = 'follow';
+export const CHAT_TOOL_ACTIVITY = [FOLLOW, ...TOOL_ACTIVITY];
+export const CHAT_TOOL_ACTIVITY_LABELS = { [FOLLOW]: 'Follow Settings', ...TOOL_ACTIVITY_LABELS };
+
+/** The device key of one chat's choice: the Host's server id and the session ('' without either). */
+export function chatKey(serverId, session) {
+  return serverId && session ? `${serverId}|${session}` : '';
+}
+
+/** A chat's own Tool activity, or FOLLOW. */
+export function chatToolChoice(byChat, key) {
+  const mode = key && byChat && typeof byChat === 'object' ? byChat[key] : '';
+  return TOOL_ACTIVITY.includes(mode) ? mode : FOLLOW;
+}
+
+/** The Tool activity a chat folds by: its own choice, else the device's setting. */
+export function effectiveToolActivity(global, byChat, key) {
+  const own = chatToolChoice(byChat, key);
+  return own !== FOLLOW ? own : TOOL_ACTIVITY.includes(global) ? global : 'grouped';
+}
+
 const KEPT = new Set(['error', 'failed', 'killed', 'interrupted', 'cancelled']);
 
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }

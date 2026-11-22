@@ -3,13 +3,13 @@
   // so it stays shared; the shells differ in what surrounds it, not in this.
   import AgentBanner from './AgentBanner.svelte';
   import AgentIdentity from './AgentIdentity.svelte';
-  import ChatCoordinationMenu from './ChatCoordinationMenu.svelte';
+  import ChatChoicesMenu from './ChatChoicesMenu.svelte';
   import ConnDot from './ConnDot.svelte';
   import Transcript from './Transcript.svelte';
   import StatusLine from './live/StatusLine.svelte';
   import { reload } from '../stores/conversations.svelte.js';
   import { live, setExplanationsEnabled } from '../stores/live.svelte.js';
-  import { prefs, toggleTools } from '../stores/prefs.svelte.js';
+  import { toggleToolsFor, toolActivityFor } from '../stores/chat-choices.svelte.js';
 
   // `active` is false for a chat kept mounted behind the open one: it keeps
   // its DOM and scroll position but is hidden and gives up the element ids.
@@ -25,11 +25,11 @@
       <button
         id={active ? 'historyToolsToggle' : undefined}
         class="history-btn"
-        class:active={prefs.toolActivity === 'always'}
+        class:active={toolActivityFor(session) === 'always'}
         aria-label="Toggle tools"
-        title={prefs.toolActivity === 'always' ? 'Every tool call in view (Tool activity in Chat settings)'
-          : 'Tool calls grouped (Tool activity in Chat settings)'}
-        onclick={toggleTools}
+        title={toolActivityFor(session) === 'always' ? 'Every tool call in view (Tool activity in Chat settings or the chat\'s … menu)'
+          : 'Tool calls grouped (Tool activity in Chat settings or the chat\'s … menu)'}
+        onclick={() => toggleToolsFor(session)}
       >⚙</button>
       {#if live.explanationSetting}
         <!-- Host setting (docs/live-items.md §6): tool rows show a plain-language
@@ -44,7 +44,7 @@
           onclick={() => setExplanationsEnabled(!live.explanations.enabled)}
         >ⓘ</button>
       {/if}
-      {#if live.hiddenCoordination}<ChatCoordinationMenu {session} {active} />{/if}
+      <ChatChoicesMenu {session} {active} />
       <button id={active ? 'historyRefresh' : undefined} class="history-btn" aria-label="Refresh"
               onclick={() => reload(session)}>↻</button>
     </div>
