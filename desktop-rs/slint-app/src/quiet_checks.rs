@@ -162,7 +162,7 @@ pub fn agent_messages_check(out: String) {
             app.engine.borrow_mut().reconnect();
             true
         })),
-        ("feature", Box::new(|app, _window, _| {
+        ("feature", Box::new(move |app, _window, _| {
             let ready = app.engine.borrow().hidden_coordination() && app.engine.borrow().coordination_visibility() == "hide";
             if !ready || count_line().is_none() {
                 return false;
