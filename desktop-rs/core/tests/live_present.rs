@@ -671,3 +671,27 @@ fn a_spoken_acknowledgment_stays_above_the_work_and_the_answer_while_live_holds_
     let hidden = present(&view, &rows, &Options { hide_activity: true, ..options(&[], 0) });
     assert_eq!(shown_order(&hidden, &rows), ["u-voice", "live:oc:ack", "live-answer"]);
 }
+
+/// A settled turn of thinking and its answer, no tool: the fold stays above
+/// the answer (the answer is never taken for an acknowledgment).
+#[test]
+fn a_turn_of_thinking_and_its_answer_keeps_the_fold_above_the_answer() {
+    let s = SPOKEN_STARTED;
+    let snapshot = json!({"conv": "c-think", "session": "rachel", "agent_id": "agent-1", "epoch": "boot-t", "lseq": 12, "server_now_ms": s + 10_000,
+        "activity": {"state": "idle", "turn_id": "tr-think", "tool": null, "running_tools": 0, "headline": null, "item_id": null, "since_ms": s + 5_000, "turn_started_ms": null},
+        "turn": {"turn_id": "tr-think", "status": "completed", "started_at_ms": s, "ended_at_ms": s + 5_000, "worked_ms": 5_000, "tool_count": 0},
+        "items": [
+            {"id": "oc:think", "kind": "reasoning", "rev": 2, "conv": "c-think", "turn_id": "tr-think", "status": "completed", "ordinal": 1,
+             "started_at_ms": s + 200, "ended_at_ms": s + 3_000, "title": "Weigh it", "text": "Weigh it"},
+            {"id": "oc:answer", "kind": "message", "rev": 3, "conv": "c-think", "turn_id": "tr-think", "status": "completed", "ordinal": 2,
+             "started_at_ms": s + 3_100, "ended_at_ms": s + 5_000, "phase": "final", "text": "Yes, that works."},
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    for expanded in [&[][..], &["live:fold:tr-think"][..]] {
+        let p = present(&view, &[], &options(expanded, 0));
+        let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
+        assert_eq!(kinds.first(), Some(&Kind::Fold), "the fold first: {:?}", titles(&p));
+        assert_eq!(kinds.last(), Some(&Kind::Message), "the answer last: {:?}", titles(&p));
+    }
+}

@@ -408,11 +408,13 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
         let first_message = entries.iter().position(|e| e.kind == Kind::Message);
         // The thinking folded above the first message, when that is all that is.
         let leading: Vec<usize> = match first_message {
-            Some(m) => {
+            // Only an acknowledgment, never the answer itself: a turn of
+            // thinking and its answer keeps the fold above the answer.
+            Some(m) if entries[m].phase != "final" => {
                 let before: Vec<usize> = folded.iter().copied().filter(|&i| i < m).collect();
                 if before.iter().all(|&i| entries[i].kind == Kind::Reasoning) { before } else { Vec::new() }
             }
-            None => Vec::new(),
+            _ => Vec::new(),
         };
         // Where the fold goes, as an index among the entries as they are (it
         // may be one past the last): after the first message when only
