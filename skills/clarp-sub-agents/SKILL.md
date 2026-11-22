@@ -203,6 +203,9 @@ start, and the command exits 1.
    name and prompt. It reads its own WIP commits and continues. A Clarp
    helper survives restarts on its own; starting it again with the same name
    reuses the same helper agent and re-sends the prompt.
+   On the Rust Host, if you stopped a Clarp helper, let its held queue go with
+   `clarp-admin resume --session HELPER --from YOUR_SESSION`. Resume any
+   separately paused goal through `clarp-goal`.
 6. **Collect.** Read the report file and `git log` in the worktree, merge
    into your branch, then close out the worktree. For a Clarp helper, mark
    it done when you have taken its result, and it archives itself after the
