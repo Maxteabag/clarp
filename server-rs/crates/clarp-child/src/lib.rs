@@ -13,6 +13,7 @@ pub const MANAGED_AGY_ENV: &str = "CLARP_AGY_MANAGED_TURN";
 /// its conversation.
 pub const OWN_SECRETS: &[&str] = &[
     "CLARP_HOST_TOKEN",
+    "CLARP_HOST_TOKEN_ALIASES",
     "CLARP_PUSH_CREDENTIAL",
     "CLARP_SOURCE_TOKEN",
     "CLARP_PEER_TOKEN",

@@ -1130,7 +1130,13 @@ fn who(
         // The administrator's token opens the Host only from the machine it runs on, and so
         // does what a turn was given for its agent's tools. From anywhere else a device
         // presents a token of its own, which can be taken away again.
-        if same_token(token, expected) {
+        if same_token(token, expected)
+            || app
+                .config
+                .administrator_aliases()
+                .iter()
+                .any(|alias| same_token(token, alias))
+        {
             return local.then_some(Principal::Administrator);
         }
         if local && same_token(token, &crate::tool_token(expected)) {
