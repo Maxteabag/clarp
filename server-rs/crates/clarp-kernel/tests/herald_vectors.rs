@@ -180,14 +180,6 @@ fn heard_there(events: &Value) -> Vec<Heard> {
     each.collect()
 }
 
-/// By session, each session's own order kept: for a step in which two agents were let speak.
-fn by_session(mut heard: Vec<Heard>) -> Vec<Heard> {
-    heard.sort_by_key(|one| match one {
-        Heard::Made(session) | Heard::Clip(session, _, _) => session.clone(),
-    });
-    heard
-}
-
 struct Room {
     herald: Herald<u64>,
     open: String,
@@ -232,9 +224,7 @@ impl Room {
             "say" => {
                 let names = self.names.clone();
                 let name_of = move |session: &str| names.get(session).cloned().unwrap_or_default();
-                let (mut granted, mut declined, plays) = self.herald.said(&said("text"), &name_of);
-                granted.sort();
-                declined.sort();
+                let (granted, declined, plays) = self.herald.said(&said("text"), &name_of);
                 (
                     heard_here(plays),
                     json!({ "granted": granted, "declined": declined }),
@@ -328,29 +318,16 @@ fn the_herald_does_what_the_python_hosts_does_step_by_step() {
                     assert_eq!(event["text"], words(&names[session], session), "{name}");
                 }
             }
-            let two_at_once =
-                step["do"] == "say" && row["result"]["granted"].as_array().unwrap().len() > 1;
-            if two_at_once {
-                assert_eq!(
-                    by_session(heard),
-                    by_session(there),
-                    "{name}, step {place}: {step}"
-                );
-            } else {
-                assert_eq!(heard, there, "{name}, step {place}: {step}");
-            }
-            let mut theirs = row["result"].clone();
+            assert_eq!(heard, there, "{name}, step {place}: {step}");
             if step["do"] == "say" {
-                for key in ["granted", "declined"] {
-                    let mut list = texts(&theirs[key]);
-                    let_speak += usize::from(key == "granted" && !list.is_empty());
-                    list.sort();
-                    theirs[key] = json!(list);
-                }
+                let_speak += usize::from(!texts(&row["result"]["granted"]).is_empty());
             }
-            assert_eq!(result, theirs, "{name}, step {place}: {step}");
+            assert_eq!(result, row["result"], "{name}, step {place}: {step}");
+            // Python reports pending membership as a set. Grant and playback order are above.
+            let mut pending = room.herald.pending();
+            pending.sort_unstable();
             assert_eq!(
-                json!(room.herald.pending()),
+                json!(pending),
                 row["pending"],
                 "{name}, step {place}: whose hand is up"
             );

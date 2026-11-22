@@ -135,15 +135,16 @@ def a_phone_registers_and_its_token_rotates(w: World) -> None:
 
 def tokens_have_owners(w: World) -> None:
     w.register(A, session='vera', owner=PHONE)
-    w.register(A, session='vera', owner=TABLET, note='refused: the phone owns it')
-    w.register(A, session='vera', note='refused: nobody takes an owned token')
-    w.register(A.upper(), session='vera', owner=TABLET, note='refused in capitals too')
+    w.register(C, environment='sandbox', owner=PHONE, note='another token of the first pairing')
     w.register(B, session='vera', owner=TABLET)
-    w.disable(token=A, only_owner=TABLET, note='the tablet cannot unregister the phone')
-    w.disable(owner=TABLET, reason='unregistered-by-administrator')
-    w.revoke(PHONE)
-    w.register(A, session='vera', note='still refused for nobody after the phone was revoked')
-    w.register(A, session='vera', owner=TABLET, note='a device takes over what a revoked device owned')
+    w.register(A.upper(), session='vera', owner=TABLET,
+               note='a full-scope device takes the token from a still-valid pairing')
+    w.register(A, session='vera', note='refused: nobody takes an owned token')
+    w.disable(token=A, only_owner=PHONE, note='the first pairing can no longer unregister it')
+    w.disable(owner=TABLET, reason='revoked')
+    w.revoke(TABLET)
+    w.register(A, session='vera', note='still refused for nobody after the tablet was revoked')
+    w.register(A, session='vera', owner=PHONE, note='a full-scope device takes over from a revoked pairing')
     w.disable(note='refused: a token or an owner is needed')
     w.disable(token=A)
 
@@ -173,7 +174,9 @@ def what_is_refused(w: World) -> None:
     w.register(B, owner=PHONE, platform='android', note='hex digits are a well-formed FCM token too')
     w.register(B, owner=PHONE, platform='ios', note='refused: it is an FCM row now')
     w.register(FCM, owner=PHONE, platform='android', conversation_modes=['agent_live_v1', 'agent_live_v1'])
-    w.register(FCM, owner=PHONE, platform='android', provider='apns', note='a token stays with its service')
+    w.register(FCM, owner=TABLET, platform='android', provider='apns',
+               note='a different provider refuses before changing the owner')
+    w.register(FCM, owner=TABLET, platform='android', note='FCM also passes to another full-scope pairing')
     w.register(FCM, owner=PHONE, platform='android', note='registered again without modes: none are kept')
     w.register(A, owner=PHONE, base_url='http://8.8.8.8:7682', note='a public address without TLS is not kept')
     w.register(A, owner=PHONE, base_url='https://user:secret@host.example/', push_grant='pg1.short',

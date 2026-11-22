@@ -155,8 +155,12 @@ def register_token(token: str, session: str | None = None,
     for every other registrant. Provenance is token possession by an authenticated device, not proof of
     which physical phone holds it.
 
-    - A token owned by another device is refused (TokenOwnedElsewhere) before any write: never stolen,
-      and a non-device registrant never overwrites an owned row.
+    - A full-scope device takes over a token another pairing holds: the same phone paired again (a new
+      device id) gets its pushes on its first registration (issue 372, issue 360 R26). The token's rows
+      move to it, with one log line naming both pairings; the other pairing is not revoked and keeps
+      its other tokens, it only stops getting pushes for this one. A non-device registrant (a limited
+      device, the administrator, a desktop) never takes or overwrites an owned row (TokenOwnedElsewhere,
+      before any write).
     - A device's rotation retires only that device's other active rows on the same platform and
       environment; another phone's rows are never touched, even under the same client-supplied session.
     - A non-device registration keeps the legacy retirement (same session+platform, same push grant),
@@ -215,17 +219,20 @@ def register_token(token: str, session: str | None = None,
         variants = database.execute(
             "SELECT token, principal, provider FROM device_tokens WHERE " + match, (token,)).fetchall()
         if owner_key:
-            # A token whose owner was revoked (or is no longer a full-scope device) passes to the
-            # authenticated device that registers it now: the same phone, paired again. Revoking
-            # disabled its rows (device_pairing.revoke); this registration re-enables them under the new
-            # owner. Only a device takes a token over, never an unbound registrant.
+            # A token another pairing holds passes to the authenticated full-scope device that registers
+            # it now: the same phone, paired again, whether its earlier pairing was revoked or is still
+            # valid (R26). Revoking disabled its rows (device_pairing.revoke); this registration
+            # re-enables them under the new owner. The earlier pairing is never revoked here. Only a
+            # device takes a token over, never an unbound registrant.
             stale = {v["principal"] for v in variants
-                     if v["principal"] and v["principal"] != owner_key and not owner_can_receive(v["principal"])}
+                     if v["principal"] and v["principal"] != owner_key}
             for previous in sorted(stale):
                 database.execute(
                     "UPDATE device_tokens SET principal = ? WHERE principal = ? AND " + match,
                     (owner_key, previous, token))
-                log("deviceTokenOwnerTransferred", f"from={previous} to={owner_key} token={token[:12]}…")
+                log("deviceTokenOwnerTransferred",
+                    f"from={previous} to={owner_key} previous_valid="
+                    f"{str(bool(owner_can_receive(previous))).lower()} token={token[:12]}…")
             if stale:
                 variants = database.execute(
                     "SELECT token, principal, provider FROM device_tokens WHERE " + match, (token,)).fetchall()
