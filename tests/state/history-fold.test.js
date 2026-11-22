@@ -19,6 +19,7 @@ describe('the quiet chat: one work row per settled turn', () => {
     expect(workLabel({ tool_count: 3 })).toBe('3 tools');
     expect(workLabel({ tool_count: 1 })).toBe('1 tool');
     expect(workLabel({ running: true, tool_count: 2 })).toBe('Working · 2 tools');
+    expect(workLabel({ worked_ms: 11000, tool_count: 0 })).toBe('Worked for 11s');
   });
 
   it('folds every settled turn behind its summary, after its prompt (grouped)', () => {
@@ -55,7 +56,8 @@ describe('the quiet chat: one work row per settled turn', () => {
       prompt('u3', 't3'), row('a3', 't3', { kind: 'live', tools: [tool('c3')] })];
     const out = foldTurns(rows, { busy: true });
     expect(out.stripped.has('a1')).toBe(false);                 // the failed call stays in its row
-    expect(out.byRow.has('u1')).toBe(false);                    // and no fold opens to nothing
+    expect(out.byRow.get('u1').label).toBe('Worked for 0s');    // only its worked time
+    expect(out.byRow.get('u1').calls).toEqual([]);
     expect(out.byRow.has('u2')).toBe(false);                    // nothing to fold
     expect(out.byRow.get('u3').label).toBe('Working · 1 tool'); // running: its count so far
   });
@@ -86,5 +88,15 @@ describe('the quiet chat: one work row per settled turn', () => {
     expect(out.folds.length).toBe(4000);
     expect(out.byRow.get('u7').calls.map(c => c.rowId)).toEqual(['a7', 'late']);
     expect(out.byRow.get('u3999').running).toBe(false);
+  });
+
+  it('gives a settled turn with every call failed a row with its worked time, and none without one', () => {
+    const failed = { tools: [tool('c1', 'error')] };
+    const rows = [prompt('u1', 't1'), row('a1', 't1', { ...failed, turn: { worked_ms: 11000, tool_count: 1 } }),
+      prompt('u2', 't2'), row('a2', 't2', { ...failed, turn: { tool_count: 1 } })];
+    const out = foldTurns(rows);
+    expect(out.byRow.get('u1').label).toBe('Worked for 11s');
+    expect(out.byRow.has('u2')).toBe(false);
+    expect(out.stripped.has('a1')).toBe(false);                 // the failed call stays in its row
   });
 });
