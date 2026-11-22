@@ -51,7 +51,7 @@ class Peer:
                     return self._answer(200, b'{"x":"' + b"a" * (peer_reads.MAX_BYTES + 10) + b'"}')
                 if self.path == "/server-info":
                     return self._answer(200, {"server_id": peer.server_id, "name": peer.name})
-                if self.path == "/agents/snapshot":
+                if self.path.split("?")[0] == "/agents/snapshot":
                     return self._answer(200, {"agents": [{"session": "ada", "name": "Ada", "agent_id": "a1"}]})
                 return self._answer(404, {"error": "not found"})
 
@@ -136,7 +136,7 @@ def test_a_peer_is_read_with_its_token_in_the_header_only(peer):
     assert entry["url"] == peer.url and entry["snapshot"]["agents"][0]["session"] == "ada"
     assert TOKEN not in json.dumps(result)
     paths = sorted(path for method, path, _ in peer.requests)
-    assert paths == ["/agents/snapshot", "/server-info"]
+    assert paths == ["/agents/snapshot?include_archived=0", "/server-info"]
     for method, path, headers in peer.requests:
         assert method == "GET" and TOKEN not in path
         assert headers["Authorization"] == "Bearer " + TOKEN
@@ -244,7 +244,7 @@ def test_the_route_answers_like_the_snapshot_and_takes_no_url(host, peer):
     data = json.loads(body)
     assert list(data["peers"]) == ["peer-sid"] and data["cache_seconds"] == 10
     assert TOKEN.encode() not in body
-    assert all(path in ("/server-info", "/agents/snapshot") for _, path, _ in peer.requests)
+    assert all(path in peer_reads.PATHS for _, path, _ in peer.requests)
     # Full scope only: a full device reads it, a limited device gets 403, no token 401.
     full = device_pairing.exchange(device_pairing.issue(device_name="Mac", scope="full")["code"])["token"]
     assert _get(host, "/peers/snapshot", full)[0] == 200
