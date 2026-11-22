@@ -604,3 +604,10 @@ pub fn report_for_artifact(artifacts: &[Value], artifact_id: &str, host_origin: 
     });
     report.as_object().cloned()
 }
+
+
+/// Whether a message's text as written carried speech: it holds a `<speak>` block,
+/// in any letter case (the Host's markup is matched that way), so the user heard it.
+pub fn carries_speech(text: &str) -> bool {
+    text.to_ascii_lowercase().contains("<speak")
+}
