@@ -9761,6 +9761,16 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     assert_eq!(code, 1, "{out}");
     let printed: Value = serde_json::from_str(err.trim()).unwrap();
     assert_eq!(printed, refusal("not_open", "/session"));
+    // A metadata refusal is a JSON error string, rather than a render-spec triple.
+    std::fs::write(
+        work.join("metadata.json"),
+        json!({"type": "data", "session": "nobody"}).to_string(),
+    )
+    .unwrap();
+    let (code, out, err) = artifacts(&["publish-render-spec", "metadata.json"]);
+    assert_eq!(code, 1, "{out}");
+    let printed: Value = serde_json::from_str(err.trim()).unwrap();
+    assert_eq!(printed, json!({"error": "unknown agent session"}));
     let payload = form.to_string();
     let (code, out, err) = artifacts(&[
         "create",

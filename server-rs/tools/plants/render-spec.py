@@ -392,8 +392,8 @@ PLANTS = [
     (L, 'host', 'a request to a render spec that is there is no render spec\'s', '    spec_of(app, id).is_some_and(|spec| spec.deleted_at.is_none())', '    spec_of(app, id).is_some_and(|_| false)'),
     (L, 'host', 'a body that is no object is refused with the sentence', '        matches!(&data, Some(J::Object(_))) && data.as_ref().is_some_and(spec::json::holds_lone);', '        data.as_ref().is_some_and(spec::json::holds_lone);'),
     # The agent's tool.
-    (T, 'host', 'a conflict is printed as a failure', '            let told = matches!(error.status().as_u16(), 400 | 403 | 409);', '            let told = matches!(error.status().as_u16(), 400 | 403);'),
-    (T, 'host', 'a refusal is printed as it is not given', '                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),', '                Some(detail) => ToolAnswer::said(1, detail.to_string()),'),
+    (T, 'host', 'a conflict is printed without its structured error', '        && body.get("error").is_some()', '        && body.get("error").is_some() && status != StatusCode::CONFLICT'),
+    (T, 'host', 'a refusal is printed without its outer error', '        return body;\n    }\n    let text = clarp_kernel::python::strip(&text);', '        return body["error"].clone();\n    }\n    let text = clarp_kernel::python::strip(&text);'),
     (T, 'host', 'the tool is an app that can see', '    match library::posted(app, &bytes, validate_only, false, turn(call)).await {', '    match library::posted(app, &bytes, validate_only, true, turn(call)).await {'),
     (T, 'host', 'the tool never only checks', '    let validate_only = parsed.flags.contains("--validate-only");', '    let validate_only = parsed.flags.contains("--validate");'),
     # Per client, by its name as sent (the Python Host's PR 474), and the export (R137).
