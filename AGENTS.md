@@ -183,8 +183,17 @@ GitHub issuene? Hvorfor var de ute?" Found it, filed it, moved on is not allowed
   desktop) and you tell them in the same turn.
 - An issue that won't be done is closed at once, with a one-line reason; not left open.
 - A missed target date is moved, with a comment that says why, or the issue is closed.
-- A daily check messages the owner and the front desk about any open issue without an owner
-  label, or past its target date, for more than 3 days.
+- A daily check messages about any open issue without an owner label, or past its target
+  date, for more than 3 days: the owner, or for an unowned issue its area owner (below). The
+  front desk hears only about issues no area owns. It is the `clarp-issue-owners` timer
+  in the owner's dotfiles, running on the EliteBook at 09:30.
+- Area owners, when no one else takes it: the Rust Host `owner:maximus-6c37`; iOS
+  `owner:arnie-85ef`; Android `owner:ethan`; the Rust desktop `owner:jasper-050b`; everything
+  else in this repository, and issues filed by a person rather than an agent, `owner:arnold`
+  (the release owner), who triages them.
+- Create the label if it doesn't exist yet (`gh label create owner:<session>`). An owner whose
+  session is archived or gone hands the issue to the area owner; the release owner moves such
+  labels when he finds them.
 
 ## The web app is deprecated
 
