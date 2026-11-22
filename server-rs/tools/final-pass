@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The one final pass before the Rust Host is installed (issue 704; Peter's rule of 22 Nov 2026: "skip long checks in
 # iOS and all other things", a few minutes at most). The focused tests of what Peter touches all the time (sending,
-# Stop, the queue: stop, paused, delivery), each run once after one compile of the tests, under one hard time budget
-# of five minutes. The list is here and nowhere else, so nothing an agent adds can extend the pass. The test compile
+# Stop, the queue: stop, paused, delivery), run once in one call of the build tool (the test compile included, one
+# slot of the build machine's queue), under one hard time budget of five minutes. The list is here and nowhere else, so nothing an agent adds can extend the pass. The test compile
 # cannot be shared with the release build: the two use different profiles and share no compiled artifacts, and the
 # build machine runs one build at a time.
 #
-# A failing check blocks the install. A pass that runs over its budget blocks it too, and names the check that ran
-# over, to be moved to the post-release job. The release build and the install are outside the budget: they are the
+# A failing check blocks the install. A pass that runs over its budget blocks it too, and names the test binary that
+# was running when the budget ran out, to be moved to the post-release job. The release build and the install are outside the budget: they are the
 # build, not checks. The conformance run, the planted rules, the whole Rust suite and the Python Host's critical tests
 # and guards run after the release, as a job someone starts by hand that the install never waits for; what they find
 # ships as a follow-up.
@@ -18,34 +18,24 @@
 # passed within the budget. Exit 1: a check failed. Exit 2: the pass ran over its budget.
 set -u
 here="$(cd "$(dirname "$0")/.." && pwd)"
-checks=(compile stop paused delivery)
+checks=(stop paused delivery)
 budget_seconds=300
 
+log="$(mktemp)"
+trap 'rm -f "$log"' EXIT
 start=$(date +%s)
-deadline=$((start + budget_seconds))
-echo "final pass on $(git -C "$here" rev-parse HEAD) from $(date +%H:%M:%S): ${checks[*]}; budget ${budget_seconds} s"
-for check in "${checks[@]}"; do
-    left=$((deadline - $(date +%s)))
-    if [ "$left" -le 0 ]; then
-        echo "over budget before '$check': move a check to the post-release job; the install is blocked"
-        exit 2
-    fi
-    began=$(date +%s)
-    if [ "$check" = compile ]; then
-        timeout --kill-after=30 "$left" "$here/tools/build" test --no-run
-    else
-        timeout --kill-after=30 "$left" "$here/tools/build" test "$check"
-    fi
-    code=$?
-    took=$(($(date +%s) - began))
-    echo "check=$check exit=$code seconds=$took"
-    if [ "$code" = 124 ] || [ "$code" = 137 ]; then
-        echo "over budget in '$check' after ${took} s: move it to the post-release job; the install is blocked"
-        exit 2
-    fi
-    if [ "$code" != 0 ]; then
-        echo "'$check' failed: the install is blocked"
-        exit 1
-    fi
-done
-echo "final pass green in $(($(date +%s) - start)) s"
+echo "final pass on $(git -C "$here" rev-parse HEAD) from $(date +%H:%M:%S): ${checks[*]} in one run; budget ${budget_seconds} s"
+timeout --kill-after=30 "$budget_seconds" "$here/tools/build" test -- "${checks[@]}" 2>&1 | tee "$log"
+code=${PIPESTATUS[0]}
+took=$(($(date +%s) - start))
+echo "checks=${checks[*]} exit=$code seconds=$took"
+if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+    running=$(grep -E '^[[:space:]]*Running ' "$log" | tail -1 | sed -E 's/^[[:space:]]*Running //')
+    echo "over budget after ${took} s, in ${running:-the compile}: move it to the post-release job; the install is blocked"
+    exit 2
+fi
+if [ "$code" != 0 ]; then
+    echo "a check failed: the install is blocked"
+    exit 1
+fi
+echo "final pass green in ${took} s"

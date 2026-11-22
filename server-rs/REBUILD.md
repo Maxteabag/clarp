@@ -52,9 +52,9 @@ That one pass was run; for every install since, the pass before it is one short 
 Peter will touch, run once. Anything that would hold a build or an install for more than a few minutes, any second
 round, and the broad sweeps (the conformance run, the planted rules, the Python Host's critical tests and guards)
 run after the build is installed; what they find ships as a follow-up. The round is `server-rs/tools/final-pass`
-(issue 704): one compile of the tests, then the focused tests stop, paused and delivery; the list is fixed in the script and its budget is a hard timeout of five minutes, so nothing
+(issue 704): the focused tests stop, paused and delivery in one run of the build tool, the test compile included; the list is fixed in the script and its budget is a hard timeout of five minutes, so nothing
 an agent adds can extend it; a failing check blocks the install, and so does a pass over budget, which names the
-check to move to the post-release job. An install is built from the commit it names:
+test binary to move to the post-release job. An install is built from the commit it names:
 `server-rs/tools/install-host` installs whatever `server-rs/dist` holds and compiles nothing, so build the release
 of that commit first and check `dist/COMMIT`.
 
