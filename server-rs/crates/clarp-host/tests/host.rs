@@ -51,6 +51,8 @@ mod goal_ledger;
 mod harness;
 #[path = "host/harness_providers.rs"]
 mod harness_providers;
+#[path = "host/import_devices.rs"]
+mod import_devices;
 #[path = "host/import_record_move.rs"]
 mod import_record_move;
 #[path = "host/import_render_specs.rs"]

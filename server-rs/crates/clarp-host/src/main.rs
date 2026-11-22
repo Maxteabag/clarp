@@ -14,6 +14,7 @@ use clarp_host::hub::Hub;
 use clarp_host::ids;
 use clarp_host::launcher::Launcher;
 use clarp_host::owner::OwnerFile;
+use clarp_host::pairing::{self, SERVER_ID};
 use clarp_host::pusher;
 use clarp_host::relay::Relay;
 use clarp_host::revisions::Revisions;
@@ -26,8 +27,6 @@ use clarp_ports::log::LogEngine;
 use clarp_store_files::FileBlobs;
 use clarp_store_mem::{MemBlobs, MemEngine, MemKeyValue};
 use clarp_store_sqlite::{SqliteEngine, SqliteKeyValue};
-
-const SERVER_ID: &str = "server_id";
 
 /// The engines with this name in configuration: one for the agents' logs, one for the fleet.
 fn engines(name: &str) -> Option<(Arc<dyn LogEngine>, Box<dyn KeyValueEngine>)> {
@@ -91,6 +90,8 @@ async fn serve(config: Config) -> Result<(), String> {
             minted
         }
     };
+    let previous_server_ids =
+        pairing::previous_server_ids(store.as_ref()).map_err(|error| error.to_string())?;
     // What signs the token every turn is given: the Host's own key, kept before any turn starts.
     let turns = Arc::new(clarp_host::turn_identity::Signer::open(store.as_mut()));
 
@@ -285,6 +286,7 @@ async fn serve(config: Config) -> Result<(), String> {
         faces,
         gallery,
         server_id,
+        previous_server_ids,
         revisions,
         pusher,
         desks,

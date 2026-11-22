@@ -222,6 +222,7 @@ dependencies = [
  "pty-process",
  "regex",
  "ring",
+ "rusqlite",
  "rustls",
  "serde",
  "serde_json",

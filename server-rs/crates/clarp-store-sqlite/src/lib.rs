@@ -8,9 +8,9 @@
 use std::path::Path;
 
 use clarp_ports::codec::{CodecSet, CodecTag};
-use clarp_ports::kv::{KeyValue, KeyValueEngine, StoreError};
+use clarp_ports::kv::{KeyValue, KeyValueEngine, StoreError, Write};
 use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
-use rusqlite::{Connection, Params, params};
+use rusqlite::{Connection, OpenFlags, Params, params};
 
 /// The name of the log file inside an agent's directory.
 pub const LOG_FILE: &str = "log.db";
@@ -235,6 +235,35 @@ impl SqliteKeyValue {
     pub fn new() -> Self {
         Self
     }
+
+    /// Reads and updates an existing fleet store under the same write transaction.
+    /// The update is prepared from the store's current rows and is kept all at once.
+    pub fn update_existing<T>(
+        path: &Path,
+        update: impl FnOnce(&dyn KeyValue) -> Result<(Vec<Write>, T), StoreError>,
+    ) -> Result<T, StoreError> {
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(failed)?;
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(failed)?;
+        if version != KV_SCHEMA_VERSION {
+            return Err(StoreError("unexpected fleet store schema".into()));
+        }
+        let tables = SqliteTables { conn };
+        // On any error, closing this connection rolls the transaction back.
+        tables
+            .conn
+            .execute_batch("PRAGMA synchronous=FULL; BEGIN IMMEDIATE;")
+            .map_err(failed)?;
+        let (writes, result) = update(&tables)?;
+        apply_writes(&tables.conn, &writes)?;
+        tables.conn.execute_batch("COMMIT;").map_err(failed)?;
+        Ok(result)
+    }
 }
 
 fn failed(error: rusqlite::Error) -> StoreError {
@@ -301,22 +330,9 @@ impl KeyValue for SqliteTables {
         Ok(())
     }
 
-    fn put_together(&mut self, writes: &[clarp_ports::kv::Write]) -> Result<(), StoreError> {
+    fn put_together(&mut self, writes: &[Write]) -> Result<(), StoreError> {
         let tx = self.conn.transaction().map_err(failed)?;
-        {
-            let mut put=tx.prepare_cached("INSERT INTO kv(tbl,key,value) VALUES (?1,?2,?3) ON CONFLICT(tbl,key) DO UPDATE SET value=excluded.value").map_err(failed)?;
-            for (table, key, value) in writes {
-                if let Some(value) = value {
-                    put.execute(params![table, key, value]).map_err(failed)?;
-                } else {
-                    tx.execute(
-                        "DELETE FROM kv WHERE tbl=?1 AND key=?2",
-                        params![table, key],
-                    )
-                    .map_err(failed)?;
-                }
-            }
-        }
+        apply_writes(&tx, writes)?;
         tx.commit().map_err(failed)
     }
 
@@ -344,4 +360,21 @@ impl KeyValue for SqliteTables {
         }
         Ok(found)
     }
+}
+
+fn apply_writes(conn: &Connection, writes: &[Write]) -> Result<(), StoreError> {
+    let mut put = conn
+        .prepare_cached("INSERT INTO kv(tbl,key,value) VALUES (?1,?2,?3) ON CONFLICT(tbl,key) DO UPDATE SET value=excluded.value")
+        .map_err(failed)?;
+    let mut delete = conn
+        .prepare_cached("DELETE FROM kv WHERE tbl=?1 AND key=?2")
+        .map_err(failed)?;
+    for (table, key, value) in writes {
+        if let Some(value) = value {
+            put.execute(params![table, key, value]).map_err(failed)?;
+        } else {
+            delete.execute(params![table, key]).map_err(failed)?;
+        }
+    }
+    Ok(())
 }

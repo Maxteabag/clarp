@@ -25,6 +25,7 @@ fn pairing_identity_has_its_own_budget_and_limited_devices_may_revoke_only_thems
     .unwrap();
     let mut identity = vectors["identity"][0].clone();
     identity["server_id"] = info["server_id"].clone();
+    identity["previous_server_ids"] = json!([]);
     identity["contract"]["host"] = info["contract"]["host"].clone();
     assert_eq!(info["contract"]["features"]["pairing_identity"], 114);
     assert!(

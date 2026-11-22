@@ -373,6 +373,7 @@ pub struct App {
     pub clock: Arc<dyn Clock + Send + Sync>,
     /// Which Host this is, for an app that knows several.
     pub server_id: String,
+    pub previous_server_ids: Vec<String>,
     /// The numbers for changes the whole Host counts in one row.
     pub revisions: Arc<Revisions>,
     /// The way to the phones that are not listening.
@@ -1292,6 +1293,7 @@ async fn host_start(
 pub(crate) fn identity(app: &App) -> ServerInfo {
     ServerInfo {
         server_id: app.server_id.clone(),
+        previous_server_ids: app.previous_server_ids.clone(),
         name: app.config.name.clone(),
         deployment_mode: "native".to_string(),
         // What an installer stamped this installation with; a Host run from a build has none.
@@ -3860,6 +3862,7 @@ async fn pairing_identity(State(app): State<App>, Extension(asker): Extension<As
     }
     Json(json!({
         "server_id": app.server_id,
+        "previous_server_ids": app.previous_server_ids,
         "name": app.config.name,
         "contract": { "host": HOST_CONTRACT },
     }))

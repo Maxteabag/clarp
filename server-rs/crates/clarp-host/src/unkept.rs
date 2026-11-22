@@ -490,6 +490,7 @@ pub(crate) mod at_the_port {
                 skill_links: Arc::default(),
                 turns: Arc::default(),
                 server_id: "test-host".into(),
+                previous_server_ids: Vec::new(),
                 revisions: Arc::default(),
                 android_chip: Arc::default(),
                 desks: Arc::default(),

@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServerInfo {
     pub server_id: String,
+    #[serde(default)]
+    pub previous_server_ids: Vec<String>,
     pub name: String,
     pub deployment_mode: String,
     pub version: String,
