@@ -3,8 +3,11 @@
 
 import { buildSendBody, newClientMsgId } from '@core/send-request.js';
 import { serverIdFor } from '@core/delivery.js';
+import { movedRefusal, movedSendText } from '@core/agent-moved.js';
 import { clog, trace } from '../lib/net.js';
-import { app, flash, setSession } from './app.svelte.js';
+import {
+  app, chipLabel, flash, refreshAgentSnapshot, setSession, statusFor,
+} from './app.svelte.js';
 import {
   audio, chime, machine, playerAdapter, scheduler,
 } from './audio.svelte.js';
@@ -25,6 +28,12 @@ export async function sendText(text, opts = {}) {
   if (!text) return;
   const target = send.captureTarget || app.session;
   send.captureTarget = '';
+  const moved = statusFor(target).moved;
+  if (moved) {
+    // It takes no turn on this Host (contract 125): said, never sent (also a voice capture).
+    flash(movedSendText(chipLabel(target), moved), 5000);
+    return;
+  }
 
   // One id for the whole life of this message: the request's idempotency key,
   // the bubble's id, and the id the server files the durable row under. That
@@ -48,8 +57,15 @@ export async function sendText(text, opts = {}) {
     });
     if (!r.ok) {
       chime(false);
-      noteSendResult(clientMsgId, false, `send failed (${r.status})`);
-      flash(`send failed (${r.status})`, 4000);
+      let refused = '';
+      if (r.status === 409) {
+        // The agent moved to another Host since the list was read: final, never sent again.
+        try { refused = movedRefusal(r.status, await r.json(), chipLabel(target)); } catch (_) {}
+      }
+      if (refused) refreshAgentSnapshot();          // the row and composer show the move now
+      const why = refused || `send failed (${r.status})`;
+      noteSendResult(clientMsgId, false, why);
+      flash(why, refused ? 6000 : 4000);
       return;
     }
     chime(true);
