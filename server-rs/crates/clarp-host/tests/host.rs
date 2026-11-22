@@ -22913,8 +22913,148 @@ fn an_agent_is_shown_with_a_face_and_anybody_may_fetch_the_picture() {
         b"Echo on Opus",
     )
     .unwrap();
-    std::fs::write(pictures.join("app/bundle.js"), b"not a picture").unwrap();
+    let bundle = "const asset = true;\n".repeat(100);
+    let bundle_path = pictures.join("app/bundle.js");
+    std::fs::write(&bundle_path, &bundle).unwrap();
+    let index = r#"<script src="/static/app/bundle.js"></script><link href='/styles.css'>"#;
+    std::fs::write(pictures.join("index.html"), index).unwrap();
+    std::fs::write(
+        pictures.join("sw.js"),
+        "const version = 'claude-pwa-v1'; 'claude-pwa-v1'",
+    )
+    .unwrap();
+    std::fs::write(pictures.join("viz.html"), "<html>fleet</html>").unwrap();
+    let assets = [
+        ("/manifest.json", "manifest.json", "application/json"),
+        ("/styles.css", "styles.css", "text/css"),
+        ("/icon.png", "icon.png", "image/png"),
+        ("/static/app/index.css", "app/index.css", "text/css"),
+        (
+            "/static/app/chunk.mjs",
+            "app/chunk.mjs",
+            "application/javascript",
+        ),
+        (
+            "/static/app/chunk.js.map",
+            "app/chunk.js.map",
+            "application/octet-stream",
+        ),
+        ("/static/app/icon.svg", "app/icon.svg", "image/svg+xml"),
+        ("/static/app/icon.jpg", "app/icon.jpg", "image/jpeg"),
+        ("/static/app/icon.webp", "app/icon.webp", "image/webp"),
+        (
+            "/static/app/icon.ico",
+            "app/icon.ico",
+            "image/vnd.microsoft.icon",
+        ),
+        ("/static/app/font.woff", "app/font.woff", "font/woff"),
+        ("/static/app/font.woff2", "app/font.woff2", "font/woff2"),
+        ("/static/app/font.ttf", "app/font.ttf", "font/ttf"),
+        (
+            "/static/app/app.webmanifest",
+            "app/app.webmanifest",
+            "application/manifest+json",
+        ),
+        ("/static/index.html", "index.html", "text/html"),
+    ];
+    for (_, file, _) in assets {
+        if file != "index.html" {
+            std::fs::write(pictures.join(file), b"asset").unwrap();
+        }
+    }
+    let outside = place.root.join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::write(outside.join("external.js"), b"outside").unwrap();
+    std::os::unix::fs::symlink(&outside, pictures.join("outside")).unwrap();
+    std::os::unix::fs::symlink(outside.join("external.js"), pictures.join("linked.js")).unwrap();
+    std::os::unix::fs::symlink("bundle.js", pictures.join("app/same.js")).unwrap();
+    let modified = |seconds| {
+        let at = std::time::UNIX_EPOCH + Duration::from_secs(seconds);
+        std::fs::File::open(&bundle_path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(at))
+            .unwrap();
+    };
+    modified(2_000_000_000);
     let host = place.start_with("secret", &["--static", pictures.to_str().unwrap()]);
+    let shell = fetch(&host, "", "GET", "/?token=fixture", &[], b"");
+    assert_eq!(shell.status, 200);
+    assert_eq!(shell.header("content-type"), "text/html");
+    assert_eq!(shell.header("cache-control"), "no-cache");
+    let shell_etag = shell.header("etag").to_owned();
+    let revalidate = [("If-None-Match", shell_etag.as_str())];
+    let unchanged = fetch(&host, "", "GET", "/", &revalidate, b"");
+    assert_eq!((unchanged.status, unchanged.body.len()), (304, 0));
+    for (address, file, mime) in assets {
+        let got = fetch(&host, "", "GET", address, &[], b"");
+        assert_eq!(
+            (got.status, got.header("content-type")),
+            (200, mime),
+            "{address}"
+        );
+        assert_eq!(got.header("cache-control"), "no-cache");
+        assert_eq!(got.body, std::fs::read(pictures.join(file)).unwrap());
+    }
+    let asset = fetch(&host, "", "GET", "/static/app/bundle.js", &[], b"");
+    assert_eq!(asset.body, bundle.as_bytes());
+    assert_eq!(asset.header("content-type"), "application/javascript");
+    let version = asset.header("etag").trim_matches('"');
+    assert!(
+        shell
+            .text()
+            .contains(&format!("/static/app/bundle.js?v={version}"))
+    );
+    assert!(shell.text().contains("/styles.css?v="));
+    let alias = fetch(&host, "", "GET", "/static/app/same.js", &[], b"");
+    assert_eq!(alias.header("etag"), asset.header("etag"));
+    let revalidate = [("If-None-Match", asset.header("etag"))];
+    let unchanged = fetch(&host, "", "GET", "/static/app/bundle.js", &revalidate, b"");
+    assert_eq!((unchanged.status, unchanged.body.len()), (304, 0));
+    let pinned = format!("/static/app/bundle.js?v={version}");
+    let cache = fetch(&host, "", "GET", &pinned, &revalidate, b"");
+    assert_eq!(cache.status, 200);
+    assert_eq!(
+        cache.header("cache-control"),
+        "public, max-age=31536000, immutable"
+    );
+    let gzipped = fetch(
+        &host,
+        "",
+        "GET",
+        &pinned,
+        &[("Accept-Encoding", "gzip")],
+        b"",
+    );
+    assert_eq!(gzipped.header("content-encoding"), "gzip");
+    assert_eq!(gzipped.header("vary"), "Accept-Encoding");
+    let mut decoded = Vec::new();
+    flate2::read::GzDecoder::new(gzipped.body.as_slice())
+        .read_to_end(&mut decoded)
+        .unwrap();
+    assert_eq!(decoded, bundle.as_bytes());
+
+    for seconds in [2_000_000_000, 2_000_000_001] {
+        modified(seconds);
+        let sw = fetch(&host, "", "GET", "/sw.js", &[("If-None-Match", "*")], b"");
+        assert_eq!(sw.status, 200);
+        assert_eq!(sw.header("content-type"), "application/javascript");
+        assert_eq!(sw.header("cache-control"), "no-store");
+        assert_eq!(
+            sw.text(),
+            format!("const version = 'claude-pwa-{seconds}'; 'claude-pwa-v1'")
+        );
+    }
+    assert_eq!(fetch(&host, "", "GET", "/viz", &[], b"").status, 401);
+    let viz = fetch(&host, "secret", "GET", "/viz", &[], b"");
+    assert_eq!(
+        (viz.status, viz.text().as_str()),
+        (200, "<html>fleet</html>")
+    );
+    assert_eq!(viz.header("cache-control"), "no-store");
+    for path in ["/favicon.ico", "/app/bundle.js"] {
+        assert_eq!(fetch(&host, "secret", "GET", path, &[], b"").status, 404);
+    }
+
     let echo = host.new_agent("Echo");
     let other = host.new_agent("Somebody Else");
     let row = |session: &str| -> Value {
@@ -22991,10 +23131,13 @@ fn an_agent_is_shown_with_a_face_and_anybody_may_fetch_the_picture() {
     let part = fetch(&host, "", "GET", &face, &[("Range", "bytes=2-8")], b"");
     assert_eq!((part.status, part.text().as_str()), (206, "picture"));
     assert_eq!(part.header("content-range"), "bytes 2-8/17");
-    // What is not there, what is no picture, and what leaves the pictures.
+    // Missing, escaping and invalid paths stay outside the static response.
     for (path, status, said) in [
         ("/static/avatars/nobody.png", 404, "not found"),
-        ("/static/app/bundle.js", 404, "not found"),
+        ("/static/app/missing.js", 404, "not found"),
+        ("/static/linked.js", 403, "forbidden"),
+        ("/static/outside/external.js", 403, "forbidden"),
+        ("/static/%2e%2e/outside/external.js", 403, "forbidden"),
         ("/static/avatars/../app/bundle.js", 403, "forbidden"),
         ("/static/avatars//echo.png", 403, "forbidden"),
         ("/static/avatars", 404, "not found"),

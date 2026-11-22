@@ -731,7 +731,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::listening::routes())
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
-        .merge(crate::faces::routes())
+        .merge(crate::web_app::routes())
         // What is no route of this Host, by its path or by its method, is answered as the
         // Python Host answers it: to whoever may ask at all.
         .fallback(no_route)
@@ -1171,7 +1171,8 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
     }
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
     let read = request.method() == Method::GET;
-    let open = path == EXCHANGE || (read && (path == PAIRING_IDENTITY || picture));
+    let open = path == EXCHANGE
+        || (read && (path == PAIRING_IDENTITY || picture || crate::web_app::public_root(&path)));
     let (local, source) = asked(&request);
     let listed = crate::cross_origin::from_listed_origin(request.headers(), origins);
     let origin = if read && crate::cross_origin::read_path(&path) {
