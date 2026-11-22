@@ -407,6 +407,15 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             refresh_switcher(app, window);
         }
         // ---- profile and overview
+        // The chat's "⋯" menu: Esc steps out of a submenu, then closes it.
+        "escape" if !window.global::<crate::ChatMenu>().get_open().is_empty() => {
+            let menu = window.global::<crate::ChatMenu>();
+            if menu.get_submenu().is_empty() {
+                crate::chat_menu::close(window);
+            } else {
+                menu.set_submenu(slint::SharedString::new());
+            }
+        }
         "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
         "overview" => crate::overview_view::open(app, window),
         // The selected agent's background work, or every job on Updates.

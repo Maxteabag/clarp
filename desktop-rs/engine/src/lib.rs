@@ -607,8 +607,47 @@ impl Engine {
         hide: &std::collections::HashSet<String>,
         strip: &std::collections::HashSet<String>,
     ) -> Vec<clarp_core::presentation::PresentedRow> {
-        on_peer!(self.peer_mut(session), |engine, local| engine.presented_except(local, hide, strip));
-        self.present_with_explanations(session, hide, strip)
+        // The chat's own Tool activity (this device's), else the global one.
+        let mode = self.chat_activity_mode(session);
+        self.presented_as(session, hide, strip, mode)
+    }
+    fn presented_as(
+        &mut self,
+        session: &str,
+        hide: &std::collections::HashSet<String>,
+        strip: &std::collections::HashSet<String>,
+        mode: i32,
+    ) -> Vec<clarp_core::presentation::PresentedRow> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.presented_as(local, hide, strip, mode));
+        let global = self.presentation.activity_mode;
+        self.presentation.activity_mode = mode;
+        let rows = self.present_with_explanations(session, hide, strip);
+        self.presentation.activity_mode = global;
+        rows
+    }
+    /// The settings key of a chat's own choices on this device (#653):
+    /// `@<server_id>/<session>`.
+    fn chat_key(&self, session: &str) -> String {
+        clarp_core::presentation::chat_key(&self.server_id, session)
+    }
+    /// A chat's own Tool activity on this device, if it has one (None:
+    /// Follow Settings).
+    pub fn chat_activity_choice(&self, session: &str) -> Option<i32> {
+        clarp_core::presentation::chat_activity(&self.settings, &self.chat_key(session))
+    }
+    /// The Tool activity a chat shows: its own choice, else the global one.
+    pub fn chat_activity_mode(&self, session: &str) -> i32 {
+        self.chat_activity_choice(session).unwrap_or(self.presentation.activity_mode)
+    }
+    /// Sets a chat's own Tool activity (None: it follows the global one).
+    pub fn set_chat_activity(&mut self, session: &str, mode: Option<i32>) {
+        let key = self.chat_key(session);
+        if key.is_empty() || self.chat_activity_choice(session) == mode {
+            return;
+        }
+        clarp_core::presentation::set_chat_activity(&mut self.settings, &key, mode);
+        self.changes.push(Change::Preferences);
+        self.changes.push(Change::Conversation(session.to_owned()));
     }
     /// Fetches the tool calls of a message the Host sent without them
     /// (`tool_details_available`), once per message at a time.

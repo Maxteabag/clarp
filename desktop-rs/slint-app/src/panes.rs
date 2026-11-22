@@ -557,7 +557,7 @@ impl App {
         if let Some(live) = &live {
             presented.retain(|row| !live.hidden_rows.contains(&row.message.id));
         }
-        let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
+        let always = self.engine.borrow().chat_activity_mode(&pane.session) == clarp_core::presentation::ALWAYS_VISIBLE;
         let expanded = self.expanded.borrow();
         let stamps = self.prefs.borrow().timestamps;
         let session_artifacts = self.engine.borrow().artifacts_for_session(&pane.session);
@@ -584,7 +584,7 @@ impl App {
         }
         let seen_pending = self.artifact_seen_pending.borrow().clone();
         let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
-        pane.presented_with = Some(self.presentation_key());
+        pane.presented_with = Some(self.presentation_key(&pane.session));
         let built = pane.rows.rows(&presented, always, &expanded);
         let now = std::time::Instant::now();
         let mut unsent = std::collections::HashMap::new();
@@ -731,11 +731,12 @@ impl App {
     }
 
     /// What a transcript's rows depend on among the preferences.
-    fn presentation_key(&self) -> (i32, bool, bool, bool) {
+    fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool) {
         let engine = self.engine.borrow();
         // The quiet line where agent messages were (#653) is drawn or not.
-        let line = engine.hidden_coordination() && engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true);
-        (engine.activity_mode(), engine.show_when_ready(), self.prefs.borrow().timestamps, line)
+        let line = engine.chat_hidden_coordination(session) && engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true);
+        // The chat's own Tool activity (#653), else the global one.
+        (engine.chat_activity_mode(session), engine.show_when_ready(), self.prefs.borrow().timestamps, line)
     }
 
     /// Puts the live rows where the turn happened (`Presented::anchors`):
@@ -795,7 +796,7 @@ impl App {
     fn splice_coordination(&self, pane: &mut PaneState, fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>, kept: &mut std::collections::HashSet<String>) {
         let after = {
             let engine = self.engine.borrow();
-            if !engine.hidden_coordination() || engine.coordination_visit(&pane.session) || !engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true) {
+            if !engine.chat_hidden_coordination(&pane.session) || engine.coordination_visit(&pane.session) || !engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true) {
                 return;
             }
             engine.conversation(&pane.session).and_then(|c| c.hidden_after().cloned())
@@ -1001,10 +1002,10 @@ impl App {
             window.set_save_warning(engine.panes().workspace_save_warning().into());
         }
         let everything = changes.iter().any(|c| matches!(c, Change::Preferences | Change::Roster | Change::Selection | Change::Panes));
-        let presentation = self.presentation_key();
         let mut panes = std::mem::take(&mut *self.pane_state.borrow_mut());
         for pane in &mut panes {
             let session = pane.session.clone();
+            let presentation = self.presentation_key(&session);
             let fresh = rebound.contains(&pane.id);
             // A preference re-presents a transcript only when one its rows
             // depend on changed (the theme, voice and the rest do not).

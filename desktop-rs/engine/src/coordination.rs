@@ -32,6 +32,22 @@ impl Engine {
         self.coordination.feature
     }
 
+    /// The chat's own Host can leave coordination between agents out of it.
+    pub fn chat_hidden_coordination(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, _local| engine.hidden_coordination());
+        self.coordination.feature
+    }
+
+    /// A chat's own choice for messages between agents: "show", "hide", or
+    /// "default" (it follows its Host), as the snapshot says.
+    pub fn chat_coordination_choice(&self, session: &str) -> String {
+        let over = self.roster().find(session).map(|a| a.coordination_override.trim().to_ascii_lowercase()).unwrap_or_default();
+        match over.as_str() {
+            "show" | "hide" => over,
+            _ => "default".to_owned(),
+        }
+    }
+
     /// The Host's setting as it said (empty before it did).
     pub fn coordination_visibility(&self) -> &str {
         &self.coordination.visibility
@@ -56,6 +72,7 @@ impl Engine {
 
     /// A chat's own choice (`show`, `hide`, or `default` to follow the Host).
     pub fn set_chat_coordination(&mut self, session: &str, visibility: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_chat_coordination(local, visibility));
         if !self.coordination.feature || session.is_empty() {
             return;
         }
@@ -64,12 +81,14 @@ impl Engine {
 
     /// The chat is read with every run shown for this visit.
     pub fn coordination_visit(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.coordination_visit(local));
         self.coordination.shown.contains(session)
     }
 
     /// The quiet line was opened: read the chat again with every run shown,
     /// for this visit only (never cached).
     pub fn show_coordination(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.show_coordination(local));
         if !self.coordination.feature || session.is_empty() || !self.coordination.shown.insert(session.to_owned()) {
             return;
         }

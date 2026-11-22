@@ -8,6 +8,7 @@
 //! `--pair URL CODE` pairs with a Host and exits (see `pair.rs`).
 
 mod catalogue;
+mod chat_menu;
 mod commands;
 mod driver;
 mod headless;
@@ -1042,6 +1043,7 @@ fn main() {
     window.on_team_deleted(|| with_window(|app, window| teams_view::deleted(app, window)));
     // ---- profile and overview
     profile_view::wire(&window);
+    chat_menu::wire(&window);
     overview_view::wire(&window);
     voice_view::wire(&window);
     font_view::wire(&window);

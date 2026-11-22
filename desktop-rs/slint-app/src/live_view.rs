@@ -32,9 +32,9 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
         explanations: explanations(engine, session),
         expanded: expanded.clone(),
         host_now_ms: view.host_now_ms(now_ms()),
-        fold_running: folds_running(engine.activity_mode()),
-        hide_settled: engine.activity_mode() == clarp_core::presentation::HIDE_WHEN_DONE,
-        show_commentary: engine.activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE,
+        fold_running: folds_running(engine.chat_activity_mode(session)),
+        hide_settled: engine.chat_activity_mode(session) == clarp_core::presentation::HIDE_WHEN_DONE,
+        show_commentary: engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
     };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
     pace(&mut presented);
@@ -65,8 +65,8 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         open_turn: live.map(|l| l.turn_id.clone()).unwrap_or_default(),
         held_rows: live.map(|l| l.own_rows.clone()).unwrap_or_default(),
         busy,
-        hide_settled: engine.activity_mode() == clarp_core::presentation::HIDE_WHEN_DONE,
-        show_commentary: engine.activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE,
+        hide_settled: engine.chat_activity_mode(session) == clarp_core::presentation::HIDE_WHEN_DONE,
+        show_commentary: engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
     };
     clarp_core::history_fold::present(rows, view, &options)

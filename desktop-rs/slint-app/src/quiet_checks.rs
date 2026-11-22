@@ -9,6 +9,7 @@
 use std::time::Duration;
 
 use serde_json::json;
+use slint::{ComponentHandle, Model};
 
 use super::{Stage, app_now, check, control, posts, requests, rows, run_stages, shot};
 
@@ -45,7 +46,7 @@ fn setting(app: &crate::App, id: &str) -> Option<crate::SettingRow> {
 }
 
 pub fn quiet_chat_check(out: String) {
-    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out.clone());
+    let (out1, out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("open", Box::new(|app, _window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -167,6 +168,61 @@ pub fn quiet_chat_check(out: String) {
             let at = |id: &str| ids.iter().position(|i| i == id);
             check(at("h-ack").is_some() && at("h-ack") < at("h-final"), &format!("Hide when done keeps the acknowledgment and the reply: {ids:?}"));
             check(at("h-note").is_none(), "and leaves the plain commentary folded away");
+            // The global choice back to Grouped; Mike's chat gets its own
+            // Hide when done from its "⋯" menu (#653).
+            let app = app_now();
+            let window = crate::window().expect("window");
+            app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::GROUPED);
+            let pane = app.active_id().to_string();
+            crate::chat_menu::open(&app, &window, &pane);
+            let menu = window.global::<crate::ChatMenu>();
+            check(menu.get_open() == pane.as_str(), "the chat's ⋯ menu opens on its pane");
+            check(menu.get_activity_label() == "Follow Settings", &format!("its Tool activity submenu shows Follow Settings: {:?}", menu.get_activity_label()));
+            let choices: Vec<String> = menu.get_activity_choices().iter().map(|c| c.label.to_string()).collect();
+            check(choices == ["Follow Settings", "Grouped", "Always visible", "Group old", "Hide when done"], &format!("five choices: {choices:?}"));
+            menu.set_submenu("activity".into());
+            crate::chat_menu::pick(&app, &window, "activity", "3");
+            true
+        })),
+        ("per chat", Box::new(move |app, window, elapsed| {
+            if live_row("live:fold:t-heard").is_some() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let engine = app.engine.borrow();
+            check(engine.activity_mode() == clarp_core::presentation::GROUPED, "the global choice stays Grouped");
+            check(engine.chat_activity_mode("mike") == clarp_core::presentation::HIDE_WHEN_DONE, "Mike's chat is Hide when done");
+            check(engine.chat_activity_mode("rachel") == clarp_core::presentation::GROUPED, "Rachel's follows the global choice");
+            let key = clarp_core::presentation::chat_key(engine.server_id(), "mike");
+            check(!key.is_empty() && engine.settings().get(clarp_core::presentation::CHAT_ACTIVITY_KEY).and_then(|m| m.get(&key)) == Some(&json!(3)),
+                &format!("kept on this device under the Host's server id and the session: {key:?}"));
+            drop(engine);
+            check(window.global::<crate::ChatMenu>().get_open().is_empty(), "the menu closed");
+            let ids = shown_ids();
+            check(ids.iter().any(|id| id == "h-ack") && ids.iter().any(|id| id == "h-final"), &format!("the work row is gone, the words heard and the reply stay: {ids:?}"));
+            shot(&out5, "quiet-05-per-chat");
+            let app = app_now();
+            crate::chat_menu::open(&app, window, &app.active_id());
+            check(window.global::<crate::ChatMenu>().get_activity_label() == "Hide when done", "the menu shows the chat's own choice");
+            check(window.global::<crate::ChatMenu>().get_activity_choices().iter().any(|c| c.current && c.value == "3"), "marked in its submenu");
+            crate::profile_view::open(&app, window, "mike");
+            true
+        })),
+        ("per chat in the profile", Box::new(move |app, window, _| {
+            let info = window.global::<crate::ProfileBridge>().get_info();
+            if info.session != "mike" {
+                return false;
+            }
+            check(info.tool_activity_index == 4, &format!("the profile shows Mike's Tool activity Hide when done: {}", info.tool_activity_index));
+            crate::profile_view::close(app, window);
+            crate::chat_menu::pick(&app_now(), window, "activity", "follow");
+            true
+        })),
+        ("follow settings", Box::new(move |app, _window, elapsed| {
+            if live_row("live:fold:t-heard").is_none() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(app.engine.borrow().chat_activity_choice("mike").is_none(), "Follow Settings clears Mike's own choice");
+            check(app.engine.borrow().settings().get(clarp_core::presentation::CHAT_ACTIVITY_KEY).is_none(), "nothing left stored");
             true
         })),
     ];
@@ -294,6 +350,45 @@ pub fn agent_messages_check(out: String) {
             check(written.iter().any(|p| p["body"]["coordination_visibility"] == "show"), &format!("flipping the switch writes the Host's value: {written:?}"));
             check(setting(app, "agent-messages").is_some_and(|r| r.on), "the switch shows it on");
             check(setting(app, "agent-messages-line").is_some_and(|r| r.on), "the line setting stays listed, on: a chat's own hide still draws the line");
+            // Leaving the chat ends the visit that showed the run.
+            app.engine.borrow_mut().select("mike");
+            true
+        })),
+        ("back to rachel", Box::new(|app, _window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            app.engine.borrow_mut().select("rachel");
+            true
+        })),
+        ("chat menu", Box::new(|app, window, elapsed| {
+            let ids = shown_ids();
+            if app.engine.borrow().selected_session() != "rachel" || !ids.iter().any(|id| id == "a2a-ask") || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(count_line().is_none(), "under the Host's show the run shows and no line is drawn");
+            // Rachel's own hide, from the chat's ⋯ menu (#653).
+            let app = app_now();
+            crate::chat_menu::open(&app, window, &app.active_id());
+            let menu = window.global::<crate::ChatMenu>();
+            check(menu.get_coordination_shown(), "the menu offers Messages between agents");
+            check(menu.get_coordination_label() == "Follow Settings", &format!("showing the chat's choice: {:?}", menu.get_coordination_label()));
+            let choices: Vec<String> = menu.get_coordination_choices().iter().map(|c| c.label.to_string()).collect();
+            check(choices == ["Follow Settings", "Show", "Hide"], &format!("three choices: {choices:?}"));
+            menu.set_submenu("coordination".into());
+            crate::chat_menu::pick(&app, window, "coordination", "hide");
+            true
+        })),
+        ("chat hides", Box::new(|_, window, _| {
+            let Some(line) = count_line() else { return false };
+            let written = posts("/agent-coordination");
+            check(written.iter().any(|p| p["body"]["session"] == "rachel" && p["body"]["visibility"] == "hide"), &format!("the chat's own hide goes to its Host: {written:?}"));
+            check(line.live.title == "2 messages between agents, with Arnold", &format!("a chat's own hide under a Host set to show still draws the line: {:?}", line.live.title));
+            check(!shown_ids().iter().any(|id| id.starts_with("a2a-")), "and leaves the run out");
+            let app = app_now();
+            crate::chat_menu::open(&app, window, &app.active_id());
+            check(window.global::<crate::ChatMenu>().get_coordination_label() == "Hide", "the menu shows the chat's choice: Hide");
+            crate::chat_menu::close(window);
             true
         })),
     ];

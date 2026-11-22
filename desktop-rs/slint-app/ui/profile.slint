@@ -33,9 +33,13 @@ export struct ProfileInfo {
     prompts-loading: bool,
     prompts-more: bool,
     mcp-shown: bool,
-    // Coordination between agents in this chat (`hidden_coordination`).
+    // This chat's own choices (#653): messages between agents (the Host's,
+    // on a Host with `hidden_coordination`; 0 Follow Settings, 1 Show, 2
+    // Hide) and Tool activity (this device's; 0 Follow Settings, then the
+    // four modes).
     agent-messages-shown: bool,
-    agent-messages: bool,
+    agent-messages-index: int,
+    tool-activity-index: int,
     error: string,
 }
 
@@ -96,7 +100,10 @@ export global ProfileBridge {
     callback set-heartbeat(bool);
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
-    callback set-agent-messages(bool);
+    callback set-agent-messages(int);
+    callback set-tool-activity(int);
+    in property <[string]> agent-message-choices: ["Follow Settings", "Show", "Hide"];
+    in property <[string]> tool-activity-choices: ["Follow Settings", "Grouped", "Always visible", "Group old", "Hide when done"];
     callback set-mcp(string, bool);
     callback set-schedule(string, bool);
     callback compact();
@@ -308,7 +315,31 @@ export component AgentProfile inherits Modal {
                     ToggleRow { label: "Heartbeat"; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } }
                     ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } }
                     ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
-                    if root.info.agent-messages-shown: ToggleRow { label: "Show messages between agents"; checked: root.info.agent-messages; toggled(on) => { ProfileBridge.set-agent-messages(on); } }
+                }
+                Card {
+                    title: "THIS CHAT";
+                    if root.info.agent-messages-shown: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.agent-message-choices;
+                            current-index: root.info.agent-messages-index;
+                            accessible-label: "Messages between agents";
+                            selected => { ProfileBridge.set-agent-messages(self.current-index); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Tool activity"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.tool-activity-choices;
+                            current-index: root.info.tool-activity-index;
+                            accessible-label: "Tool activity";
+                            selected => { ProfileBridge.set-tool-activity(self.current-index); }
+                        }
+                    }
                 }
                 Card {
                     title: "HEARTBEAT";
