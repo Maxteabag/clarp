@@ -43,6 +43,7 @@ import re
 import shlex
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -213,18 +214,16 @@ class RustHost(replay.Host):
         # the same agents and then started again, so that making them is not part of what a client
         # sees of the scenario. The scenarios are about the first; the other two are the reference
         # Host's codex agents, which no scenario runs: they are there to be other agents.
-        # The reference Host's agents are written into its table without a voice. An agent that is
-        # made as a persona takes that persona's voices, on both Hosts, and the other two are
-        # named as personas: they are made with the word for no voice, which is what they have
-        # there.
+        seeded = ((scenarios.AGENT, 'claude'), *((other, 'codex') for other in OTHER_AGENTS))
         self._launch()
-        for session, backend in ((scenarios.AGENT, 'claude'), *((other, 'codex') for other in OTHER_AGENTS)):
+        for session, backend in seeded:
             status, _, made = self.request('POST', '/agents', {
                 'name': session.title(), 'backend': backend, 'cwd': str(self.root / 'workspace'),
-                **({'voice_id': '{}'} if session in OTHER_AGENTS else {})})
+            })
             if status != 200 or (made or {}).get('session') != session:
                 raise replay.StepFailed(f'the Rust Host did not make the agent {session} ({status})')
         self._end()
+        self.seed_voices({session for session, _ in seeded})
         self._launch()
         # The reference Host's stand-in for an engine that listens is there from its first
         # moment. This Host's is a worker that says when it is ready: it is waited for here, so
@@ -232,6 +231,28 @@ class RustHost(replay.Host):
         clip = {'bytes': 'is the engine there', 'content_type': 'audio/webm'}
         replay._poll('the engine that listens', lambda: self.request('POST', '/transcribe', None, clip)[0] != 503)
         return self
+
+    def seed_voices(self, sessions):
+        """Match the reference's pre-existing, voiceless fixture agents before capture.
+
+        POST /agents now fills an empty map from the contact or pool. The reference
+        fixture inserts its agents directly, so seed the same stored state while
+        this Host is stopped. Agents created by scenario steps use the normal API.
+        """
+        with contextlib.closing(sqlite3.connect(self.root / 'data' / 'fleet.db')) as db, db:
+            rows = db.execute("SELECT key, value FROM kv WHERE tbl = 'agent'").fetchall()
+            seeded = set()
+            for key, value in rows:
+                record = json.loads(value)
+                session = record['session']
+                if session not in sessions:
+                    continue
+                record['voice_id'] = '{}'
+                db.execute("UPDATE kv SET value = ? WHERE tbl = 'agent' AND key = ?",
+                           (json.dumps(record).encode(), key))
+                seeded.add(session)
+            if seeded != sessions:
+                raise replay.StepFailed(f'could not seed voices for {sorted(sessions - seeded)}')
 
     def _launch(self):
         provider = self.root / 'provider'
