@@ -273,8 +273,10 @@ def pending_heartbeat_agents(*, now: float | None = None,
         _wake_from_external_signal(agent_id, state)
         snapshot = _gather_snapshot(agent, now)
         decision = None
-        if not state.dormant and _interrupted_retry_expired(snapshot.latest, now):
-            decision = _observe_dormancy_decision(agent_id, snapshot.latest, now=now)
+        if not state.dormant and _interrupted_retry_expired(
+                snapshot.latest, now, snapshot.interrupted_since):
+            decision = _observe_dormancy_decision(
+                agent_id, snapshot.latest, now=now, since=snapshot.interrupted_since)
         reason = _skip_reason(snapshot=snapshot, state=state, now=now)
         if reason == "dormant" and not state.dormant and decision is not None:
             _record_policy_dormancy(agent_id, decision)
@@ -609,14 +611,31 @@ class _AgentSnapshot:
     active: bool = False  # the backend still holds a live handle
     compacting: bool = False
     recent_activity: str = ""  # _recent_real_activity_reason's skip reason
+    interrupted_since: float = 0.0  # the first interruption of the current run (seconds)
+
+
+def _interrupted_run_start(agent_id: str, latest: dict) -> float:
+    """When the agent's current run of failed turns began (epoch seconds): its first
+    interrupted state since its last completed or waiting one. The 11-hour retry
+    window counts from there, not from the latest failure, which every failed
+    heartbeat renews (issue 396, issue 360 R50). 0 when the agent is not interrupted."""
+    if latest.get("kind") != AgentState.INTERRUPTED:
+        return 0.0
+    row = conn().execute(
+        "SELECT MIN(ts) FROM state_log WHERE agent_id=? AND kind=? AND ts > COALESCE("
+        "(SELECT MAX(ts) FROM state_log WHERE agent_id=? AND kind IN (?, ?)), 0)",
+        (agent_id, AgentState.INTERRUPTED, agent_id, AgentState.DONE, AgentState.WAITING)).fetchone()
+    return float(row[0] or 0.0) / 1000.0 if row else 0.0
 
 
 def _gather_snapshot(agent: dict, now: float) -> _AgentSnapshot:
     from . import wake_admission
     agent_id = agent["agent_id"]
     busy, active, compacting = wake_admission.execution_busy_state(agent)
+    latest = agents_db.latest_state(agent_id) or {}
     return _AgentSnapshot(
-        latest=agents_db.latest_state(agent_id) or {},
+        latest=latest,
+        interrupted_since=_interrupted_run_start(agent_id, latest),
         busy=busy,
         active=active,
         compacting=compacting,
@@ -652,7 +671,7 @@ def _skip_reason(*, snapshot: _AgentSnapshot, state: _HeartbeatState, now: float
         else 0.0
     )
     is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
-    if _interrupted_retry_expired(latest, now):
+    if _interrupted_retry_expired(latest, now, snapshot.interrupted_since):
         return "dormant"
     last_event = max(state.last_started, interrupted_at)
     if last_event and now - last_event < MIN_WAKE_SPACING_SEC:
@@ -739,7 +758,8 @@ def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
         if latest_kind == AgentState.INTERRUPTED
         else 0.0
     )
-    if is_interrupted and interrupted_at and (current - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
+    if is_interrupted and _interrupted_retry_expired(
+            latest, current, _interrupted_run_start(agent_id, latest)):
         state.dormant = True
     interval = int(_effective_interval_sec(state, is_interrupted=is_interrupted))
     next_at = None
@@ -873,11 +893,14 @@ def _wake_from_external_signal(agent_id: str, state: _HeartbeatState) -> None:
         log("heartbeatWake", f"agent={agent_id} signal_ms={latest}")
 
 
-def _interrupted_retry_expired(latest: dict, now: float) -> bool:
+def _interrupted_retry_expired(latest: dict, now: float, since: float = 0.0) -> bool:
+    """The 11-hour retry window is over. ``since``: the run's first interruption
+    (_interrupted_run_start); without it, the latest state's time."""
     if latest.get("kind") != AgentState.INTERRUPTED or _is_user_stopped(latest):
         return False
     interrupted_at = float(latest.get("ts") or 0.0) / 1000.0
-    return bool(interrupted_at and now - interrupted_at >= MAX_INTERRUPTED_RETRY_SEC)
+    start = min(since, interrupted_at) if since and interrupted_at else interrupted_at
+    return bool(start and now - start >= MAX_INTERRUPTED_RETRY_SEC)
 
 
 @dataclass(frozen=True)
@@ -886,9 +909,11 @@ class _DormancyDecision:
     row_version: tuple | None
     latest: dict
     at: float
+    since: float = 0.0
 
 
-def _observe_dormancy_decision(agent_id: str, observed: dict, *, now: float) -> _DormancyDecision | None:
+def _observe_dormancy_decision(agent_id: str, observed: dict, *, now: float,
+                               since: float = 0.0) -> _DormancyDecision | None:
     # One read observes both identities before the decision. Absence is None,
     # never a row of defaults that a subsequent reset could also produce.
     row = conn().execute(
@@ -911,7 +936,7 @@ def _observe_dormancy_decision(agent_id: str, observed: dict, *, now: float) -> 
     version = None if row["heartbeat_rowid"] is None else tuple(row[name] for name in (
         "heartbeat_rowid", "last_started", "noop_streak", "dormant", "last_wake_signal_ms", "updated_at"))
     return _DormancyDecision(tuple(row[name] for name in ("state_id", "kind", "ts", "detail")),
-                             version, latest, now)
+                             version, latest, now, since)
 
 
 def _record_policy_dormancy(agent_id: str, decision: _DormancyDecision) -> None:
@@ -922,7 +947,7 @@ def _record_policy_dormancy(agent_id: str, decision: _DormancyDecision) -> None:
             "SELECT state_id,kind,ts,detail FROM state_log WHERE agent_id=? "
             "ORDER BY ts DESC,state_id DESC LIMIT 1", (agent_id,)).fetchone()
         if (current is None or tuple(current) != decision.state_key
-                or not _interrupted_retry_expired(decision.latest, decision.at)):
+                or not _interrupted_retry_expired(decision.latest, decision.at, decision.since)):
             return None
         if decision.row_version is None:
             if database.execute("SELECT 1 FROM heartbeat_state WHERE agent_id=?", (agent_id,)).fetchone():
