@@ -65,6 +65,11 @@ scratch files). Write it from your own notes, not from the old helper's chat.
 For a Claude helper its conversation size shows as `context_tokens` in its
 row of the snapshot; for other backends the Host does not show it.
 
+`--effort` sets a helper's reasoning effort where it is a separate setting
+(Claude, Codex): `clarp-sub-agent start --clarp-agent ... --effort high` passes it
+to the helper's creation (or sets it on a helper it reuses), and `fork --effort`
+applies it to every child. On AGY it is refused: the effort is part of the model id.
+
 ### Antigravity (`--backend agy`)
 
 AGY runs Claude Opus/Sonnet 5.5 and Gemini on the Antigravity account, so
