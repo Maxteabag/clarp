@@ -726,6 +726,7 @@ pub struct Actor {
     profile: Profile,
     backend: Arc<dyn Backend>,
     recorder: Recorder,
+    imported_anchors: conversation::ImportedAnchors,
     live: Option<LiveTurn>,
     /// The pool of the tool's accounts, where this Host has one.
     pool: Option<Arc<dyn Pooled>>,
@@ -1455,6 +1456,7 @@ impl Actor {
             profile,
             backend,
             recorder,
+            imported_anchors: conversation::ImportedAnchors::default(),
             jobs,
             provider_sessions,
             job_events: Vec::new(),
@@ -1778,10 +1780,11 @@ impl Actor {
     }
 
     /// Where the conversation begins, as it is read, and how far it has got.
-    fn span(&self) -> conversation::Span {
+    fn span(&self) -> conversation::Span<'_> {
         conversation::Span {
             floor: self.recorder.floor(),
             head_revision: self.head_revision(),
+            imported_anchors: Some(&self.imported_anchors),
         }
     }
 
@@ -2649,6 +2652,7 @@ impl Actor {
         let whole = conversation::Span {
             floor: 0,
             head_revision: self.head_revision(),
+            imported_anchors: Some(&self.imported_anchors),
         };
         conversation::tail(self.recorder.log(), self.drafts(), whole, limit, which)
     }
