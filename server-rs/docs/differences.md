@@ -502,7 +502,7 @@ the daily schedule.
 
 ## Rust-first features
 
-The bounded client log (issue 707, contract 144) is available on the Rust Host.
+The bounded client log (issue 707, contract 146) is available on the Rust Host.
 Its `POST /clog` acknowledges successful storage regardless of the diagnostics
 setting and adds `kept` and `full_capture`. The Python Host's diagnostic capture
 still controls its `/clog` acknowledgement. `GET /client-log` is implemented on
