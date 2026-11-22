@@ -1348,7 +1348,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         from lib import config
         try:
             return config.load().web_read_origins
-        except Exception:  # noqa: BLE001 - an unreadable configuration allows no origin
+        except Exception as exc:  # noqa: BLE001 - an unreadable configuration allows no origin
+            log_exception("crossOriginConfigFail", exc)
             return frozenset()
 
     def do_OPTIONS(self):
