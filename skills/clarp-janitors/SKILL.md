@@ -79,6 +79,11 @@ Pin `trigger_id` and `trigger_version`. Scheduled attachments use `schedule@1`
 with `{ "cron": "30 8 * * 1-5", "timezone": "Europe/Oslo" }` in their config.
 Do not silently convert an existing ordinary-agent UTC schedule.
 
+On the Rust Host the Goal keeper processes active goals. Its configured model
+reads the goal record and structured activity, without chat or tool text. The
+keeper updates at most two goals in parallel. Set `max_goals_per_run` to 1 to
+run them one at a time.
+
 `active-interval@1` accepts `interval_seconds` (default 900),
 `idle_timeout_seconds` (default 300), and `run_on_resume` (default true).
 Intervals/timeouts must be 60–86400 seconds. Foreground/input leases from the

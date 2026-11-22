@@ -366,6 +366,13 @@ pub fn answer(
             return (said, None);
         }
         Ask::Keeper { plan_id, written } => {
+            if book
+                .plan(plan_id)
+                .is_none_or(|plan| plan.status != "active")
+            {
+                let said = format!("agent_tasks: {}", NotUpdated::Closed.said());
+                return (ToolAnswer::said(CLOSED, said), None);
+            }
             let update = Update {
                 seen_revision: written.seen_revision,
                 steps: &written.steps,

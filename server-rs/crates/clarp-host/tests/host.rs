@@ -29103,15 +29103,13 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     assert_eq!(questions().len(), 0);
     assert_eq!(get()["goal"]["updater"], Value::Null);
 
-    // It folds what happens for five minutes as it comes. Set to fold nothing and to keep
-    // for every agent but one, and turned on. (On the Python Host a keeper with a scope
-    // never runs again: its defect R42.)
+    // An empty allowlist covers every eligible agent, subject to exclusions.
     let attachments = folding_nothing(&keeper);
     let (status, set) = post(
         "/janitors/clarp-goal-keeper/configure",
         json!({
             "expected_revision": keeper["revision"], "attachments": attachments,
-            "scope": { "exclude_agent_ids": [row_id(&host, &other)] },
+            "scope": { "agent_ids": [], "exclude_agent_ids": [row_id(&host, &other)] },
         }),
     );
     assert_eq!(status, 200, "{set}");
@@ -29161,17 +29159,20 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     // The plan's revision is what it was: the owner's next command is not refused.
     assert_eq!(plan["revision"], made["revision"]);
     let sources = kept["source_refs"].as_array().unwrap();
-    assert!(sources.contains(&json!("message:u-1")), "{sources:?}");
+    assert!(
+        !sources
+            .iter()
+            .any(|source| source.as_str().is_some_and(|s| s.starts_with("message:"))),
+        "{sources:?}"
+    );
 
-    // What the model was given: the rules for it apart from what it reads, the goal as it
-    // is recorded and what was said since, the shape to answer in, and nothing to act with.
+    // The prompt carries the goal record and activity metadata.
     let first = questions().remove(0);
     let read = first["read"].as_str().unwrap();
     assert!(read.starts_with("You keep a goal's books"), "{read}");
     assert!(read.contains("\n\nGOAL AS RECORDED:"), "{read}");
-    assert!(read.contains("NEW ACTIVITY SINCE LAST UPDATE (untrusted):"));
-    assert!(read.contains("[owner Planner user] (from user) The probe is done: it behaves."));
-    assert!(read.contains("[owner Planner assistant] The probe is done: it behaves."));
+    assert!(read.contains("owner turn end"), "{read}");
+    assert!(!read.contains("The probe is done: it behaves."), "{read}");
     assert_eq!(
         first["schema"]["properties"]["steps"]["required"],
         json!(["probe", "build", "ship"])
@@ -29300,14 +29301,15 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(questions().len(), 1);
 
-    // The owner works on. The model is shown what was said since, and no more. It says
+    // The owner works on. The model sees the new turn-end signal. It says
     // what it said before: no step moves, and the receipt says that the build was called
     // done once more with nothing shown.
     host.send(&session, "Still building.", "u-2");
     wait_for("the model to be asked again", || questions().len() == 2);
     let second = questions().remove(1);
     let read = second["read"].as_str().unwrap();
-    assert!(read.contains("(from user) Still building."), "{read}");
+    assert!(read.contains("owner turn end"), "{read}");
+    assert!(!read.contains("Still building."), "{read}");
     assert!(!read.contains("it behaves"), "{read}");
     assert!(read.contains("\"progress\": \"Probe done; the build is said to be done.\""));
     wait_for("the second receipt", || {

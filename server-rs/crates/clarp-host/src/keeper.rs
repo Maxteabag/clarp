@@ -9,19 +9,16 @@
 //! `run_batch`).
 //!
 //! **The loop.** Every fifteen seconds, for each keeper that is on, the open goals of the
-//! agents in its scope are looked at; the ones whose folded triggers are ripe, six at most,
+//! agents in its scope are looked at; the ones whose folded triggers are ripe, two at most,
 //! are updated in one run of the janitor, side by side: each is read, asked of the
 //! janitor's model once, and written through the thread of the agent that owns it, as the
 //! owner's own tool writes. One run at a time. The owner is never prompted, told or
 //! interrupted, and what a goal's world held is shown to a model that has nothing to act
 //! with ([`crate::once::read`]).
 //!
-//! **A goal's world.** What the owner and its helpers said since is read from their
-//! conversations: the revision each had at the time the update reads from is found once
-//! ([`AgentHandle::revision_at`](crate::agent::AgentHandle::revision_at)), and from then on
-//! only what changed is asked for. Of each agent no more is held than a prompt has room
-//! for. Their jobs, how the owner's last turn ended and what was done to the goal are read
-//! off what the agents publish, without asking them.
+//! **A goal's world.** Conversation revisions show when a turn ended or a helper reported.
+//! The model reads the goal record and structured activity, with no conversation or tool text.
+//! Only active goals are updated.
 //!
 //! **What is kept**, with the fleet: each keeper's own state of its goals (when a fold
 //! began, when a failed update is tried again, which goals were read from their start),
@@ -72,13 +69,8 @@ const RECEIPTS_OF_A_GOAL: usize = 200;
 const WITHIN: Duration = Duration::from_secs(150);
 /// How many rows are asked of an agent at once.
 const PAGE: usize = 200;
-/// How much of what one agent said is held for a goal, in signs: what a prompt holds of
-/// all of them together, counting of each row no more than a prompt takes of it.
-const HELD_SIGNS: usize = 40_000;
-const ROW_SIGNS: usize = 1_500;
-/// How many goals a run updates where its janitor says nothing, and at most.
-const GOALS_AT_ONCE: i64 = 5;
-const GOALS_MOST: i64 = 6;
+/// The maximum number of simultaneous model reads per keeper run.
+const GOALS_AT_ONCE: i64 = 2;
 /// The trigger a keeper's own state is kept under.
 const TURN_ENDS: &str = "agent-work-completed";
 /// What a stalled goal waits for. The Python Host names its owner here; this Host does not
@@ -271,25 +263,14 @@ fn row_of(agent_id: &str, version: &Versioned, since_ms: i64, now: i64) -> rules
     let brought = matches!(version.entry, Entry::Imported(_));
     let phase = said("phase").filter(|phase| phase != "final" || closed.is_some() || brought);
     let written = closed.map_or(version.ts_ms, |end| end.ended_at_ms.max(version.ts_ms));
-    // What a tool's own reader shows of a call stands for its card.
-    let mut tools = shown["tools"].as_array().cloned().unwrap_or_default();
-    if tools.is_empty() {
-        for cell in shown["display_cells"].as_array().into_iter().flatten() {
-            let what = match &cell["summary"] {
-                Value::String(summary) if !summary.is_empty() => cell["summary"].clone(),
-                _ => cell["lines"][0]["text"].clone(),
-            };
-            tools.push(json!({ "name": cell["title"], "summary": what }));
-        }
-    }
     rules::Row {
         message_id: version.entry.id().to_string(),
         agent_id: agent_id.to_string(),
         seq: i64::try_from(version.revision >> 20).unwrap_or(i64::MAX),
         role: said("role"),
         timestamp: said("timestamp"),
-        text: shown["text"].as_str().map(str::to_string),
-        tools,
+        text: None,
+        tools: Vec::new(),
         updated_at: if version.live {
             now
         } else {
@@ -299,21 +280,6 @@ fn row_of(agent_id: &str, version: &Versioned, since_ms: i64, now: i64) -> rules
         sender_agent_id: said("sender_agent_id"),
         phase,
     }
-}
-
-/// Of what an agent said, no more is held than a prompt has room for: the oldest goes.
-fn bound(rows: &mut Vec<rules::Row>) {
-    let weighs = |row: &rules::Row| {
-        let said = row.text.as_deref().map_or(0, |said| said.chars().count());
-        said.min(ROW_SIGNS)
-    };
-    let mut held: usize = rows.iter().map(weighs).sum();
-    let mut gone = 0;
-    while gone < rows.len() && held - weighs(&rows[gone]) >= HELD_SIGNS {
-        held -= weighs(&rows[gone]);
-        gone += 1;
-    }
-    rows.drain(..gone);
 }
 
 /// Reads on in an agent's conversation from where it was read to. The first time, from the
@@ -349,7 +315,7 @@ async fn read_on(
             break;
         }
     }
-    bound(&mut read.rows);
+    read.rows.drain(..read.rows.len().saturating_sub(PAGE));
     Ok(read.rows.clone())
 }
 
@@ -433,8 +399,7 @@ impl Gathered {
 }
 
 /// Reads a goal's world. `full`: from the goal's own start, where it was never updated.
-/// `whole`: with what each helper reported last and ended its last turn with, which an
-/// update shows its model and a look does not need. `None`: there is no such goal.
+/// `whole`: with the plan that the model reads. Returns no world for a non-active goal.
 async fn gather(
     app: &App,
     directory: &Directory,
@@ -445,7 +410,7 @@ async fn gather(
 ) -> Option<Gathered> {
     let view = owner.agent.view();
     let book = &view.books.goals;
-    let plan = book.plan(plan_id)?;
+    let plan = book.plan(plan_id).filter(|plan| plan.status == "active")?;
     let kept = plan.goal.as_ref()?;
     let goal = light(kept);
     let full = full && !python::truthy(&goal["updater"]);
@@ -497,57 +462,39 @@ async fn gather(
     });
     app.keeper.put(plan_id, seen);
 
-    // What each helper wrote to the owner last is looked for in the owner's newest rows,
-    // and what its last turn ended with in its own.
-    let mut reports: HashMap<String, String> = HashMap::new();
-    if whole
-        && !helping.is_empty()
-        && let Ok(page) = owner.agent.tail(PAGE, Which::All).await
-    {
-        for version in &page.entries {
-            let shown = wire::row(version);
-            let sender = shown["sender_agent_id"].as_str().unwrap_or_default();
-            if shown["role"] == "user" && !sender.is_empty() {
-                let said = shown["text"].as_str().unwrap_or_default().to_string();
-                reports.insert(sender.to_string(), said);
+    let helpers = helping
+        .iter()
+        .map(|member| {
+            let record = &member.record;
+            rules::Helper {
+                agent_id: record.agent_id.clone(),
+                session: record.session.clone(),
+                backend: record.backend.clone(),
+                helper_state: record.helper_state.clone(),
+                archived: record.archived_at_ms.is_some(),
+                last_report: None,
+                last_final: None,
             }
-        }
-    }
-    let mut helpers = Vec::new();
-    for member in &helping {
-        let record = &member.record;
-        let mut last_final = None;
-        if whole && let Ok(page) = member.agent.tail(PAGE / 4, Which::All).await {
-            let closing = page.entries.iter().rev().filter(|row| row.turn.is_some());
-            let mut ends = closing.map(wire::row).filter(|row| row["phase"] == "final");
-            last_final = ends
-                .next()
-                .and_then(|row| row["text"].as_str().map(str::to_string));
-        }
-        helpers.push(rules::Helper {
-            agent_id: record.agent_id.clone(),
-            session: record.session.clone(),
-            backend: record.backend.clone(),
-            helper_state: record.helper_state.clone(),
-            archived: record.archived_at_ms.is_some(),
-            last_report: reports.remove(&record.agent_id),
-            last_final,
-        });
-    }
+        })
+        .collect();
 
     let mut jobs = Vec::new();
     for member in &everyone {
         for job in &member.agent.view().jobs {
-            let why = &job.terminal_reason;
             jobs.push(rules::Job {
                 job_id: job.id.clone(),
                 agent_id: member.record.agent_id.clone(),
-                kind: job.kind.clone(),
-                title: Some(job.title.clone()),
+                kind: if job.kind == "sub-agent" {
+                    "sub-agent"
+                } else {
+                    "job"
+                }
+                .into(),
+                title: None,
                 status: job.status.as_str().to_string(),
                 started_at: job.started_at_ms,
                 terminal_at: job.terminal_at_ms,
-                terminal_reason: (!why.is_empty()).then(|| why.clone()),
+                terminal_reason: None,
             });
         }
     }
@@ -718,20 +665,13 @@ async fn keep(
         return Ended::Skipped("closed");
     };
     receipt["title"] = json!(clip(&read.title, 200));
-    if !matches!(read.status.as_str(), "active" | "paused") {
-        return Ended::Skipped("closed");
-    }
     let world = read.world();
-    let (sheet, job_refs) = rules::fact_sheet(&world, now);
+    let (mut sheet, mut refs) = rules::fact_sheet(&world, now);
     let seen = read.activity();
     let until = now.max(seen.newest_ms);
-    let (said, message_refs) = rules::delta(&world, read.since.0, until);
-    let mut refs: Vec<String> = message_refs
-        .iter()
-        .skip(message_refs.len().saturating_sub(20))
-        .cloned()
-        .collect();
-    refs.extend(job_refs);
+    // The timestamps and kinds explain what woke the keeper without quoting the work.
+    let newest_triggers = seen.triggers.len().saturating_sub(20);
+    sheet["recent_activity"] = json!(&seen.triggers[newest_triggers..]);
     if seen.newest_event != 0 {
         refs.push(format!("goal_event:{}", seen.newest_event));
     }
@@ -755,7 +695,7 @@ async fn keep(
         through_event: seen.newest_event,
         janitor_agent_id: run.janitor.clone(),
     };
-    if said.is_empty() && seen.triggers.is_empty() {
+    if seen.triggers.is_empty() {
         let Some(stalled) = stalled else {
             return Ended::Skipped("nothing new");
         };
@@ -771,7 +711,7 @@ async fn keep(
         let given = (&[][..], Some(("stalled", stalled.code)), previous);
         return write(owner, plan_id, by_rule, given, receipt).await;
     }
-    let prompt = rules::prompt(&read.plan, &sheet, &said);
+    let prompt = rules::prompt(&read.plan, &sheet, "");
     let asked = prompt.strip_prefix(rules::SYSTEM).map(str::trim_start);
     let word = |word: &str| (!word.is_empty()).then(|| word.to_string());
     let reading = Reading {
@@ -891,7 +831,7 @@ struct Open {
 }
 
 /// The open goals of the agents a keeper with this scope keeps for: durable goals that are
-/// active or paused, of agents that are no janitors and were not put away.
+/// active, of agents that are no janitors and were not put away.
 fn open_goals(directory: &Directory, scope: &Map<String, Value>, now: i64) -> Vec<Open> {
     let mut open = Vec::new();
     for member in &directory.members {
@@ -907,7 +847,7 @@ fn open_goals(directory: &Directory, scope: &Map<String, Value>, now: i64) -> Ve
         }
         let view = member.agent.view();
         for plan in view.books.goals.plans() {
-            let open_now = matches!(plan.status.as_str(), "active" | "paused");
+            let open_now = plan.status == "active";
             let Some(goal) = plan.goal.as_ref().filter(|_| open_now) else {
                 continue;
             };
@@ -985,7 +925,7 @@ async fn keep_goals(app: &App, janitor: &str, config: &Value, scope: &Map<String
         return false;
     }
     let at_once = config["options"]["max_goals_per_run"].as_i64();
-    let at_once = at_once.unwrap_or(GOALS_AT_ONCE).clamp(1, GOALS_MOST);
+    let at_once = at_once.unwrap_or(GOALS_AT_ONCE).clamp(1, GOALS_AT_ONCE);
     ready.truncate(usize::try_from(at_once).unwrap_or(1));
 
     // One run of the janitor for all of them: the same goals at the same moment are the
@@ -998,10 +938,13 @@ async fn keep_goals(app: &App, janitor: &str, config: &Value, scope: &Map<String
         .collect();
     let context = json!({ "input_hash": digest, "target_count": ready.len() });
     let begun = app.janitors.with(app, |book, world, now_ms| {
-        // The run of this keeper, if it is still on: a request that names no agent would be
-        // given to a keeper that watches everyone, and to nobody where this one has a scope.
+        // The goals were picked from this generation's scope.
+        let configured = book.configs.get(janitor)?;
+        if Some(configured.generation) != generation.as_u64() {
+            return None;
+        }
         let mut on = book.eligible(ROLE, world).into_iter();
-        let keeper = on.find(|agent_id| agent_id == janitor);
+        let keeper = Some(on.find(|agent_id| agent_id == janitor)?);
         let (request, said) = (json!(request), Some(&context));
         let run = book.begin_run_of(keeper, ROLE, &request, said, None, world, now_ms);
         let run = run.ok().flatten()?;
@@ -1252,37 +1195,6 @@ pub(crate) async fn with_receipts(app: &App, runs: &mut [Value]) {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-
-    fn row(id: &str, said: &str) -> rules::Row {
-        rules::Row {
-            message_id: id.to_string(),
-            agent_id: "a".to_string(),
-            seq: 0,
-            role: Some("assistant".to_string()),
-            timestamp: None,
-            text: Some(said.to_string()),
-            tools: Vec::new(),
-            updated_at: 1,
-            origin: None,
-            sender_agent_id: None,
-            phase: None,
-        }
-    }
-
-    #[test]
-    fn no_more_is_held_of_an_agent_than_a_prompt_has_room_for() {
-        // Thirty rows of 1,500 signs counted each: 45,000. The oldest three can go and what
-        // is left still fills a prompt; a fourth could not.
-        let long = "x".repeat(4_000);
-        let mut rows: Vec<rules::Row> = (0..30).map(|n| row(&format!("m-{n}"), &long)).collect();
-        bound(&mut rows);
-        assert_eq!(rows.len(), 27);
-        assert_eq!(rows[0].message_id, "m-3");
-        // What does not fill a prompt is all held.
-        let mut few: Vec<rules::Row> = (0..5).map(|n| row(&format!("m-{n}"), "said")).collect();
-        bound(&mut few);
-        assert_eq!(few.len(), 5);
-    }
 
     #[test]
     fn the_keeper_uses_the_recorded_owner_local_event_id() {
