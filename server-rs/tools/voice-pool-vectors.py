@@ -74,7 +74,15 @@ def reference(root):
     retired = {**active, 'archived_at':1}
     janitor = {**active, 'is_janitor':1}
     custom = {'name':'Custom','voice_id':stored(CART,'c1'),'created_at':20}
-    spoke = {'fixture-active': 70, 'fixture-other': 50, 'fixture-quieter': 10}
+    spoke = {'fixture-active': 70, 'fixture-other': 50, 'fixture-quieter': 10,
+             'fixture-recent-archive': 90, 'fixture-older-archive': 80}
+    archived_only = [
+        {'agent_id': 'fixture-recent-archive', 'persona': 'Recent Archive',
+         'voice_id': stored(CART, 'c2'), 'archived_at': 1},
+        {'agent_id': 'fixture-older-archive', 'persona': 'Older Archive',
+         'voice_id': stored(CART, 'c3'), 'archived_at': 1},
+    ]
+    exhausted_pool = {'cartesia_pool': ('c1', 'c2', 'c3')}
     assignments = []
     assignment_names = root / "assignment-voice-names.json"
     for name, raw, extra, known, agents, contacts in (
@@ -90,6 +98,12 @@ def reference(root):
         ('Exhausted', '{}', {'cartesia_pool':('c1','c2')}, [],
          [active,{**active, 'agent_id':'fixture-quieter'},
           {'agent_id':'fixture-other', 'persona':'Other','voice_id':stored(CART,'c2'), 'created_at':60}], [custom]),
+        ('Reuse an archived-only voice ahead of an older active voice', '{}',
+         exhausted_pool, [], [active, *archived_only], []),
+        ('A contact keeps an archived voice in use', '{}',
+         exhausted_pool, [], [active, *archived_only], [{'name': 'Cora', 'voice_id': stored(CART, 'c3')}]),
+        ('Reuse the least recent voice when all holders are active', '{}',
+         exhausted_pool, [], [active, *[dict(row, archived_at=None) for row in archived_only]], []),
         ('Timestamped contact', '{}', {'cartesia_pool':('c1','c2')}, [],
          [active], [{'name':'Older contact', 'voice_id':stored(CART,'c2'), 'created_at':35}]),
         ('Ada', 'e-stored', {'cartesia_voices':{'Ada':'c1'}}, [], [], []),

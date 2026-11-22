@@ -230,6 +230,7 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
         name: contact.name,
         stored: contact.voice_id,
         builtin: at < builtins,
+        archived: false,
         agent_id: None,
         created_at_ms: 0,
     });
@@ -268,6 +269,7 @@ fn an_agent_is_assigned_the_contact_the_python_host_assigns_it() {
                 name: agent["persona"].as_str().unwrap(),
                 stored: agent["voice_id"].as_str().unwrap(),
                 builtin: false,
+                archived: !agent["archived_at"].is_null(),
                 agent_id: agent["agent_id"].as_str(),
                 created_at_ms: agent["created_at"].as_i64().unwrap_or_default(),
             })

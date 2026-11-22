@@ -27,8 +27,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -77,8 +79,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -130,8 +134,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -168,8 +174,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -192,8 +200,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -241,8 +251,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -291,8 +303,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -329,8 +343,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -365,7 +381,7 @@
       "logs": [
         [
           "voicePoolExhausted",
-          "provider=cartesia pool=2 reused=c2 last_used_ms=50 shared_by=1"
+          "provider=cartesia pool=2 reused=c2 archived_only=False last_used_ms=50 shared_by=1"
         ]
       ],
       "name": "Exhausted",
@@ -390,8 +406,189 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [
+        {
+          "agent_id": "fixture-active",
+          "created_at": 30,
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        },
+        {
+          "agent_id": "fixture-recent-archive",
+          "archived_at": 1,
+          "persona": "Recent Archive",
+          "voice_id": "{\"cartesia\":\"c2\"}"
+        },
+        {
+          "agent_id": "fixture-older-archive",
+          "archived_at": 1,
+          "persona": "Older Archive",
+          "voice_id": "{\"cartesia\":\"c3\"}"
+        }
+      ],
+      "contacts": [],
+      "logs": [
+        [
+          "voicePoolExhausted",
+          "provider=cartesia pool=3 reused=c3 archived_only=True last_used_ms=80 shared_by=1"
+        ]
+      ],
+      "name": "Reuse an archived-only voice ahead of an older active voice",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
+      "result": "{\"cartesia\":\"c3\"}",
+      "settings": {
+        "cartesia_pool": [
+          "c1",
+          "c2",
+          "c3"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-older-archive": 80,
+        "fixture-other": 50,
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [
+        {
+          "agent_id": "fixture-active",
+          "created_at": 30,
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        },
+        {
+          "agent_id": "fixture-recent-archive",
+          "archived_at": 1,
+          "persona": "Recent Archive",
+          "voice_id": "{\"cartesia\":\"c2\"}"
+        },
+        {
+          "agent_id": "fixture-older-archive",
+          "archived_at": 1,
+          "persona": "Older Archive",
+          "voice_id": "{\"cartesia\":\"c3\"}"
+        }
+      ],
+      "contacts": [
+        {
+          "name": "Cora",
+          "voice_id": "{\"cartesia\":\"c3\"}"
+        }
+      ],
+      "logs": [
+        [
+          "voicePoolExhausted",
+          "provider=cartesia pool=3 reused=c2 archived_only=True last_used_ms=90 shared_by=1"
+        ]
+      ],
+      "name": "A contact keeps an archived voice in use",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
+      "result": "{\"cartesia\":\"c2\"}",
+      "settings": {
+        "cartesia_pool": [
+          "c1",
+          "c2",
+          "c3"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-older-archive": 80,
+        "fixture-other": 50,
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
+      },
+      "stored": "{}"
+    },
+    {
+      "agents": [
+        {
+          "agent_id": "fixture-active",
+          "created_at": 30,
+          "persona": "Has Voice",
+          "voice_id": "{\"cartesia\":\"c1\"}"
+        },
+        {
+          "agent_id": "fixture-recent-archive",
+          "archived_at": null,
+          "persona": "Recent Archive",
+          "voice_id": "{\"cartesia\":\"c2\"}"
+        },
+        {
+          "agent_id": "fixture-older-archive",
+          "archived_at": null,
+          "persona": "Older Archive",
+          "voice_id": "{\"cartesia\":\"c3\"}"
+        }
+      ],
+      "contacts": [],
+      "logs": [
+        [
+          "voicePoolExhausted",
+          "provider=cartesia pool=3 reused=c1 archived_only=False last_used_ms=70 shared_by=1"
+        ]
+      ],
+      "name": "Reuse the least recent voice when all holders are active",
+      "names": {
+        "_catalogue": {
+          "cartesia": {}
+        }
+      },
+      "result": "{\"cartesia\":\"c1\"}",
+      "settings": {
+        "cartesia_pool": [
+          "c1",
+          "c2",
+          "c3"
+        ],
+        "cartesia_voices": {
+          "Built In": "reserved"
+        },
+        "gemini_voices": {},
+        "roster": {},
+        "tts_fallback": "none",
+        "tts_provider": "cartesia"
+      },
+      "spoke": {
+        "fixture-active": 70,
+        "fixture-older-archive": 80,
+        "fixture-other": 50,
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -414,7 +611,7 @@
       "logs": [
         [
           "voicePoolExhausted",
-          "provider=cartesia pool=2 reused=c2 last_used_ms=35 shared_by=1"
+          "provider=cartesia pool=2 reused=c2 archived_only=False last_used_ms=35 shared_by=1"
         ]
       ],
       "name": "Timestamped contact",
@@ -439,8 +636,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -471,8 +670,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "e-stored"
     },
@@ -503,8 +704,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{\"cartesia\":\"auto-123\"}"
     },
@@ -535,8 +738,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "c0000000-0000-4000-8000-0000000000ad"
     },
@@ -567,8 +772,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "nb-NO-Chirp3-HD-Kore"
     },
@@ -604,8 +811,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -636,8 +845,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -668,8 +879,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{\"elevenlabs\":\"some-valid-id\"}"
     },
@@ -700,8 +913,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{\"elevenlabs\":\"some invalid id\"}"
     },
@@ -732,8 +947,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -764,8 +981,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     },
@@ -796,8 +1015,10 @@
       },
       "spoke": {
         "fixture-active": 70,
+        "fixture-older-archive": 80,
         "fixture-other": 50,
-        "fixture-quieter": 10
+        "fixture-quieter": 10,
+        "fixture-recent-archive": 90
       },
       "stored": "{}"
     }
