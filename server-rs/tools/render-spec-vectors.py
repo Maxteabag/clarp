@@ -710,7 +710,8 @@ def clients():
                'ios/12 contract=7' + chr(0x664), '_os/12 contract=74', 'i.s/12 contract=74', 'ios/1 2 contract=74']
     # Each client by its own name, matched exactly (its PR 474): another platform, one written in
     # another case, one whose name only begins as iOS's.
-    headers += ['android/5 contract=74', 'android/5 contract=30', 'desktop/1 contract=200',
+    headers += ['android/5 contract=74', 'android/5 contract=30',
+                'android/1058 contract=40', 'android/1058 contract=41', 'Android/1058 contract=41', 'desktop/1 contract=200',
                 'web/1 contract=0', 'web/1 contract=1', 'web/1 contract=99', 'Web/1 contract=1',
                 'Watch/1 contract=99', 'IOS/12 contract=74', 'Ios/12 contract=74', 'ios2/12 contract=74']
     # A single number is iOS's minimum; a table, the owner's, laid over the default (0: never).
@@ -818,6 +819,9 @@ def form_v2(rs, identity, refusal):
             ('web/1 contract=2', None, None),
             ('web/1 contract=2', {'web': 1}, {'web': 0}),
             ('desktop/1 contract=2', None, {'desktop': 2}),
+            ('android/1058 contract=40', None, None),
+            ('android/1058 contract=41', None, None),
+            ('android/1058 contract=41', None, {'android': 41}),
     ]:
         out.append({'kind': 'level', 'header': header, 'v1': v1, 'v2': v2,
                     'level': identity.render_spec_level(header, v1, v2)})

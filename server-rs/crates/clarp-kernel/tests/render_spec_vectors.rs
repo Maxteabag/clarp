@@ -488,7 +488,7 @@ fn a_client_may_see_a_spec_as_the_python_host_says() {
             may_not += 1;
         }
     }
-    assert_eq!((may, may_not), (103, 713));
+    assert_eq!((may, may_not), (137, 733));
 }
 
 #[test]
