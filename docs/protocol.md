@@ -710,6 +710,11 @@ tool (`claude`, `codex`, `agy`, `grok`, `opencode`) and keeps its conversation.
 to: `deepseek`, `muse`) or `error` (with `unavailable_detail`). `until_ms` and
 `unavailable_detail` are null otherwise. Each model has `default` (bool): the model the tool
 runs when none is named (the owner's configured default where it is listed, else the first).
+When the tool itself listed which models its login runs (the row's `source.kind` is
+`cli_probe`, as Codex does), only those are listed: the bundled catalogue's other models, which
+that login may not run, are left out, and `POST /agent-transit` refuses them as
+`unknown_model`. A row whose tool was only seen running one model (`cli_cache`, Claude Code)
+keeps the catalogue's models beside it.
 
 **Start.** `POST /agent-transit {session, backend, model, effort?, request_id}` answers
 `202 {transit_id}`. The same `request_id` for the same agent answers the same `transit_id`

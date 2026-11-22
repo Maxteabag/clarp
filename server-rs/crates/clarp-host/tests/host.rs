@@ -15941,6 +15941,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         models.contains(&"sonnet".to_string()) && models.len() == 14,
         "{models:?}"
     );
+    assert_eq!(of_claude["models"][0]["default"], true);
     // Codex: the models it lists, without the one it keeps back.
     let of_codex = &told["providers"]["codex"];
     assert_eq!(
@@ -15974,7 +15975,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
             &json!([{
                 "id": "gemini-stand-in-low", "label": "Gemini Stand-in (Low)",
                 "default_effort": null, "supported_efforts": null,
-                "source": of_agy["source"],
+                "source": of_agy["source"], "default": true,
             }]),
         ),
         "{of_agy}"

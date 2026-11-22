@@ -338,9 +338,17 @@ fn judge(backend: &str, row: &mut Value, used_up: &crate::quota::UsedUp, default
     row["until_ms"] = json!(until);
     // What the Host could not check would be said here (`error`); nothing it checks fails so.
     row["unavailable_detail"] = Value::Null;
+    // The tool listed which models its login runs (`cli_probe`, as Codex does): what the Host
+    // knows of it besides (a model of the bundled catalogue the login may not run) is not
+    // offered. A sighting of the one model it last ran (`cli_cache`, Claude Code's) lists
+    // nothing, and the catalogue stays.
+    let asked_the_tool = row["source"]["kind"] == "cli_probe";
     let Some(models) = row["models"].as_array_mut() else {
         return;
     };
+    if asked_the_tool {
+        models.retain(|model| model["source"]["kind"] != "static_fallback");
+    }
     let named = default.filter(|default| {
         models
             .iter()
@@ -749,6 +757,35 @@ mod tests {
         judge("muse", &mut row, &used_up, Some("b"));
         assert_eq!(row["models"][0]["default"], false);
         assert_eq!(row["models"][1]["default"], true);
+        // The tool was asked: a model it did not name is not offered, even as the default.
+        let probed = json!({"kind": "cli_probe"});
+        let known = json!({"kind": "static_fallback"});
+        let mut row = json!({"installed": true, "source": probed, "models": [
+            {"id": "seen-1", "source": probed}, {"id": "seen-2", "source": probed},
+            {"id": "known", "source": known}]});
+        judge("codex", &mut row, &used_up, Some("known"));
+        let ids: Vec<&str> = row["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|model| model["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["seen-1", "seen-2"]);
+        assert_eq!(row["models"][0]["default"], true);
+        // Not asked (no answer): the bundled catalogue is all there is, and it is offered.
+        let mut row = json!({"installed": true, "source": known, "models": [
+            {"id": "known", "source": known}]});
+        judge("codex", &mut row, &used_up, None);
+        assert_eq!(row["models"][0]["id"], "known");
+        // Seen running one model (Claude Code's cache): that lists nothing, and the
+        // catalogue's models stay beside it.
+        let cached = json!({"kind": "cli_cache"});
+        let mut row = json!({"installed": true, "source": cached, "models": [
+            {"id": "seen", "source": cached}, {"id": "opus", "source": known},
+            {"id": "sonnet", "source": known}]});
+        judge("claude", &mut row, &used_up, None);
+        assert_eq!(row["models"].as_array().unwrap().len(), 3);
+        assert_eq!(row["models"][0]["default"], true);
     }
 
     #[test]

@@ -534,6 +534,10 @@ the daily schedule.
   The agent's log holds the change; a Host stopped before the fleet record follows runs the
   agent on the new tool when it opens it again (the model is then the tool's default). What
   the Host knows of changes is in memory only. The Python Host has none of it.
+  `GET /agent-model-options` lists only the models a tool listed itself when it did (`source.kind`
+  `cli_probe`, Codex); the Python Host (and this Host before) added the bundled catalogue's
+  models beside them (`known_too`), offering a model the login could not run. A row seen
+  running one model (`cli_cache`, Claude Code) keeps the catalogue.
 
 - **Agent activity feature advertisement (feature 156).** The Rust Host
   advertises `agent_state` to clients that gate on it. Both Hosts already
