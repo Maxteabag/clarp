@@ -240,12 +240,9 @@ pub fn stored(catalog: &Catalog, payload: &J) -> Result<Map<String, Value>, Refu
     Ok(kept)
 }
 
-/// The lowest client contract that draws and answers a render spec, per client, by the name
-/// it sends (`server_identity.RENDER_SPEC_MIN_CONTRACT`, the Python Host's PR 474): iOS from
-/// contract 74. A client not named never gets the kind: Android (until its owner names its
-/// number), the desktop, the web app, the Watch, an unknown or absent name. Each client's
-/// contract numbers are its own series.
-pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74)];
+/// The lowest client contracts that draw and answer a render spec. The client names itself
+/// exactly. iOS draws from 74 and the web app from 1 (Python Host PRs 474 and 676).
+pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74), ("web", 1)];
 
 /// Whether the client that sent this header can answer a render spec
 /// (`server_identity.render_spec_capable`): it says who it is as `<name>/<build> contract=<n>`
