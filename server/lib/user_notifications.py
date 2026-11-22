@@ -190,11 +190,14 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
         # A peer's message, a schedule, a heartbeat or a dream steered into an
         # eligible user request is subordinate to it: it never becomes the cause
         # that silences the user's own turn (since R7 a steered one is this
-        # turn's row). Watcher, Oracle and automation keep their existing order.
+        # turn's row). The user's word counts whether the user wrote it or the
+        # Oracle carried it. Watcher, Oracle and automation keep their order.
+        words = sorted(origins.USER_WORD_ORIGINS)
         user = db.conn().execute(
-            select + " AND COALESCE(NULLIF(TRIM(origin), ''), 'user')='user'"
+            select + " AND COALESCE(NULLIF(TRIM(origin), ''), 'user') IN ("
+            + ",".join("?" * len(words)) + ")"
             " AND COALESCE(sender_agent_id, '')=''" + latest,
-            tuple(params)).fetchone()
+            (*params, *words)).fetchone()
         if user is not None:
             marks = ",".join("?" * len(chatter))
             return db.conn().execute(
