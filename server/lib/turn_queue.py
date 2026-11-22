@@ -9,7 +9,7 @@ import sys
 import time
 from typing import Any, Callable
 
-from . import db, prompt_admissions
+from . import db, html_forms, prompt_admissions
 from . import lifecycle as lk
 from .lifecycle import Deadline, Edge, Lifecycle, WaitForever
 from .log import log, log_exception
@@ -1765,20 +1765,29 @@ def pending_count(agent_id: str) -> int:
     return int(row["count"] if row else 0)
 
 
+# A waiting item the apps list (GET /turn-queue): not a form answer on its way to
+# its agent, whose card is the user's record (issue 428). ``count`` is every item
+# that waits, for the Host's own decisions; ``listed`` is the depth an app is told.
+_LISTED = f"COALESCE(client_msg_id, '') NOT LIKE '{html_forms.DELIVERY_ID_PREFIX}%'"
+
+
 def state(agent_id: str) -> dict[str, int | bool]:
     """Return the count and revision from one SQLite read snapshot."""
     row = db.conn().execute(
         f"""SELECT
                (SELECT COUNT(*) FROM queued_turns
                  WHERE agent_id = ? AND {IN_QUEUE_READ}) AS pending_count,
+               (SELECT COUNT(*) FROM queued_turns
+                 WHERE agent_id = ? AND {IN_QUEUE_READ} AND {_LISTED}) AS listed_count,
                COALESCE((SELECT revision FROM queue_state_revisions
                           WHERE agent_id = ?), 0) AS revision,
                COALESCE((SELECT paused FROM queue_state_revisions
                           WHERE agent_id = ?), 0) AS paused""",
-        (agent_id, agent_id, agent_id),
+        (agent_id, agent_id, agent_id, agent_id),
     ).fetchone()
     return {
         "count": int(row["pending_count"] or 0),
+        "listed": int(row["listed_count"] or 0),
         "revision": int(row["revision"] or 0),
         "paused": bool(row["paused"]),
     }
@@ -1788,17 +1797,20 @@ def states() -> dict[str, dict[str, int | bool]]:
     return {
         str(row["agent_id"]): {
             "count": int(row["pending_count"] or 0),
+            "listed": int(row["listed_count"] or 0),
             "revision": int(row["revision"] or 0),
             "paused": bool(row["paused"]),
         }
         for row in db.conn().execute(
             f"""SELECT r.agent_id,
                       COALESCE(q.pending_count, 0) AS pending_count,
+                      COALESCE(q.listed_count, 0) AS listed_count,
                       r.revision,
                       r.paused
                  FROM queue_state_revisions r
                  LEFT JOIN (
-                     SELECT agent_id, COUNT(*) AS pending_count
+                     SELECT agent_id, COUNT(*) AS pending_count,
+                            SUM(CASE WHEN {_LISTED} THEN 1 ELSE 0 END) AS listed_count
                        FROM queued_turns
                       WHERE {IN_QUEUE_READ}
                       GROUP BY agent_id

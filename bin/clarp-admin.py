@@ -148,12 +148,6 @@ def prompt(label: str, default: str) -> str:
     return answer or default
 
 
-def confirm(label: str, default: bool = True) -> bool:
-    suffix = "Y/n" if default else "y/N"
-    answer = input(f"{label} [{suffix}]: ").strip().lower()
-    return default if not answer else answer in {"y", "yes"}
-
-
 def server_connection() -> tuple[str, str]:
     cfg = tomllib.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
     server = cfg.get("server", {})
@@ -265,6 +259,20 @@ def selected_skills() -> list[str]:
     return read_json(INSTALL_STATE, {}).get("skills", [])
 
 
+def skills_turned_off(state: dict | None = None) -> set[str]:
+    """Skills the user explicitly turned off. A skill never decided about is on."""
+    state = read_json(INSTALL_STATE, {}) if state is None else state
+    return {str(item) for item in state.get("skills_off") or []}
+
+
+def enabled_skill_ids(manifest: dict, off: set[str]) -> list[str]:
+    """Every skill the release ships reaches every backend unless the user turned
+    it off; a core skill cannot be turned off. A missing requirement (wacli,
+    himalaya) is a status note and does not hold a skill back."""
+    return [item["id"] for item in manifest["skills"]
+            if item.get("pack") == "core" or item["id"] not in off]
+
+
 def installed_command(name: str) -> str:
     managed_root = SHARE / "toolchain"
     try:
@@ -301,13 +309,6 @@ def install_state_lock():
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def save_selected_skills(skills: list[str]) -> None:
-    with install_state_lock():
-        state = read_json(INSTALL_STATE, {})
-        state["skills"] = sorted(set(skills))
-        write_json(INSTALL_STATE, state)
-
-
 def cmd_skills(args) -> int:
     if args.skills_command in {"import", "source-add", "source-update"}:
         server_root = SHARE
@@ -333,65 +334,52 @@ def _cmd_skills_locked(args) -> int:
     manifest = load_manifest()
     entries = {item["id"]: item for item in manifest["skills"]}
     if args.skills_command == "list":
-        active = set(selected_skills())
+        active = set(enabled_skill_ids(manifest, skills_turned_off()))
         for item in manifest["skills"]:
-            status = "installed" if item["id"] in active else "available"
+            status = "installed" if item["id"] in active else "off"
             print(f"{item['id']:<30} {item['pack']:<10} {status}")
         return 0
     if args.skills_command == "install":
         unknown = set(args.skill_ids) - entries.keys()
         if unknown:
             raise SystemExit(f"unknown skills: {', '.join(sorted(unknown))}")
-        active = selected_skills()
         for skill_id in args.skill_ids:
             link_skill(skill_id)
-            if skill_id not in active:
-                active.append(skill_id)
-        save_selected_skills(active)
+        state = read_json(INSTALL_STATE, {})
+        state["skills_off"] = sorted(skills_turned_off(state) - set(args.skill_ids))
+        state["skills"] = sorted(set(state.get("skills") or []) | set(args.skill_ids))
+        write_json(INSTALL_STATE, state)
         return 0
     if args.skills_command == "remove":
-        active = selected_skills()
+        core = sorted(skill_id for skill_id in args.skill_ids
+                      if entries.get(skill_id, {}).get("pack") == "core")
+        if core:
+            raise SystemExit(f"core Clarp skills cannot be turned off: {', '.join(core)}")
         for skill_id in args.skill_ids:
             unlink_skill(skill_id)
-            active = [item for item in active if item != skill_id]
-        save_selected_skills(active)
+        # Recorded, so the next update does not turn it back on.
+        state = read_json(INSTALL_STATE, {})
+        state["skills_off"] = sorted(skills_turned_off(state) | set(args.skill_ids))
+        state["skills"] = sorted(set(state.get("skills") or []) - set(args.skill_ids))
+        write_json(INSTALL_STATE, state)
         return 0
     if args.skills_command == "repair-links":
-        active = selected_skills()
-        # Core skills are product contracts and cannot be disabled. Enrol core
-        # skills introduced after the original install instead of leaving them
-        # permanently inactive in an older persisted selection list.
-        for item in manifest["skills"]:
-            if item.get("pack") == "core" and item["id"] not in active:
-                active.append(item["id"])
+        # Every skill in this release is linked into every backend's skills
+        # folder unless the user turned it off. Hosts set up before opt-outs were
+        # recorded have none, so a skill missing from their old list is one the
+        # user never decided about, and it turns on here.
         state = read_json(INSTALL_STATE, {})
-        if not state.get("artifact_skill_split_v1") and "clarp-artifacts" in active:
-            active.extend(item["id"] for item in manifest["skills"]
-                          if item.get("pack") == "artifacts")
-            state["artifact_skill_split_v1"] = True
-            state["skills"] = sorted(set(active))
-            write_json(INSTALL_STATE, state)
-        else:
-            save_selected_skills(active)
-        if not state.get("artifact_skill_defaults_v2") and "clarp-artifacts" in active:
-            previous_active=set(active)
-            removed={"clarp-links","clarp-message-drafts","clarp-collections","clarp-live-tasks","clarp-deployments","clarp-workspaces"}
-            active=[s for s in active if s not in removed]
-            for new_default in ("clarp-directories","clarp-github-actions"):
-                if new_default in entries and new_default not in active: active.append(new_default)
-            state=read_json(INSTALL_STATE,{}); state["artifact_skill_defaults_v2"]=True; state["skills"]=sorted(set(active)); write_json(INSTALL_STATE,state)
-            for skill_id in previous_active-set(active): unlink_skill(skill_id)
-        # A rollback may not know skills introduced by the newer release. Keep
-        # their selection for a future re-upgrade, but remove links that would
-        # otherwise point through `current` at nonexistent sources.
-        for skill_id in set(active) - entries.keys():
+        off = skills_turned_off(state)
+        active = enabled_skill_ids(manifest, off)
+        # Links of skills turned off, and of skills this release does not ship
+        # (a rollback, or one retired), would point at nothing the user wants.
+        for skill_id in sorted((set(state.get("skills") or []) | off) - set(active)):
             unlink_skill(skill_id)
         for skill_id in active:
-            # Selection state can contain a core skill introduced by a newer
-            # release. Rollback must still repair every skill the older active
-            # manifest knows without failing on that forward-only ID.
-            if skill_id in entries:
-                link_skill(skill_id)
+            link_skill(skill_id)
+        state["skills"] = sorted(active)
+        state["skills_off"] = sorted(off)
+        write_json(INSTALL_STATE, state)
         return 0
     return 2
 
@@ -541,13 +529,18 @@ def cmd_transcription(args) -> int:
 
 def validate_setup_choices(
     backend: str, optional: list[str], toolchain: str = "existing",
+    skipped: list[str] = (),
 ) -> None:
     if backend not in {"claude", "codex", "both"}:
         raise SystemExit("backend must be claude, codex, or both")
-    known = {item["id"] for item in load_manifest()["skills"]}
-    unknown = set(optional) - known
+    entries = {item["id"]: item for item in load_manifest()["skills"]}
+    unknown = (set(optional) | set(skipped)) - entries.keys()
     if unknown:
         raise SystemExit(f"unknown optional skills: {', '.join(sorted(unknown))}")
+    core = sorted(skill_id for skill_id in skipped
+                  if entries[skill_id].get("pack") == "core")
+    if core:
+        raise SystemExit(f"core Clarp skills cannot be turned off: {', '.join(core)}")
     if toolchain not in {"managed", "existing", "none"}:
         raise SystemExit("toolchain must be managed, existing, or none")
 
@@ -634,7 +627,7 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
                    optional: list[str], channel: str,
                    toolchain: str = "existing", tts_provider: str = "",
                    tts_fallback: str = "none", network_mode: str = "",
-                   public_url: str = "") -> int:
+                   public_url: str = "", skipped: list[str] = ()) -> int:
     if (os.environ.get("PYTEST_CURRENT_TEST")
             and os.environ.get("CLARP_ALLOW_TEST_INSTALL") != "1"):
         default_config = xdg.config_dir(HOME).resolve()
@@ -734,21 +727,18 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
                 INSTALL_STATE.read_bytes() if INSTALL_STATE.is_file() else None)
             skills_reconciled = True
             manifest = load_manifest()
-            core = [item["id"] for item in manifest["skills"] if item["pack"] == "core"]
-            artifact_skills = [item["id"] for item in manifest["skills"]
-                               if item["pack"] == "artifacts" and item.get("default_enabled", True)]
-            chosen = sorted(set(core + artifact_skills + optional))
+            off = (skills_turned_off() | set(skipped)) - set(optional)
+            chosen = sorted(enabled_skill_ids(manifest, off))
             for skill_id in sorted(previous_skills - set(chosen)):
                 unlink_skill(skill_id)
             for skill_id in chosen: link_skill(skill_id)
             write_json(INSTALL_STATE, {
                 "source_repo": str(REPO), "skills": chosen,
+                "skills_off": sorted(off),
                 "source_remote": git_origin(REPO) or resolve_update_remote({}),
                 "channel": channel, "backend": backend,
                 "transcription": transcription, "python": sys.executable,
                 "toolchain": toolchain,
-                "artifact_skill_split_v1": True,
-                "artifact_skill_defaults_v2": True,
             })
             if (SHARE / "current/server.py").is_file():
                 seed_fresh_roster(backend)
@@ -842,6 +832,7 @@ def cmd_setup(args) -> int:
     bind = args.bind
     port = args.port
     optional = list(args.optional_skill)
+    skipped = list(getattr(args, "skip_skill", []) or [])
     if interactive:
         bind_default = bind or str(
             configured_server_value("bind_addr", "127.0.0.1"))
@@ -869,17 +860,15 @@ def cmd_setup(args) -> int:
             public_url = prompt("Public HTTPS URL", public_url)
         bind = prompt("Server bind address", bind_default)
         port = int(prompt("Server port", str(port_default)))
-        if confirm("Install optional native iOS skills (calendar, location)?", True):
-            optional += ["clarp-calendar", "clarp-location"]
-        if confirm("Install optional messaging watcher skill?", False):
-            optional += ["clarp-message-watch"]
+        print("Every Clarp skill is installed for every agent backend; "
+              "`clarp-admin skills remove ID` turns one off.")
 
     if not interactive:
         if not toolchain:
             raise SystemExit("--toolchain is required with --non-interactive")
         if not transcription:
             raise SystemExit("--transcription is required with --non-interactive")
-    validate_setup_choices(backend, optional, toolchain)
+    validate_setup_choices(backend, optional, toolchain, skipped)
     if toolchain == "existing":
         required = (["claude"] if backend == "claude" else
                     ["codex"] if backend == "codex" else ["claude", "codex"])
@@ -890,7 +879,7 @@ def cmd_setup(args) -> int:
 
     return _execute_setup(
         backend, transcription, bind, port, optional, args.channel, toolchain,
-        tts_provider, tts_fallback, network_mode, public_url)
+        tts_provider, tts_fallback, network_mode, public_url, skipped)
 
 
 def cmd_doctor(_args) -> int:
@@ -3192,9 +3181,7 @@ def parser() -> argparse.ArgumentParser:
     --toolchain managed \\
     --transcription recommended \\
     --tts cartesia --tts-fallback none \\
-    --network tailscale \\
-    --optional-skill clarp-calendar \\
-    --optional-skill clarp-location
+    --network tailscale
 
 First installation from a source checkout should normally use ./setup.sh,
 which creates the locked Python environment before invoking this command.
@@ -3233,7 +3220,11 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         help="server port; existing value is preserved when omitted")
     setup.add_argument(
         "--optional-skill", action="append", default=[], metavar="SKILL_ID",
-        help="optional skill to enable; repeat for multiple skills")
+        help="turn a skill back on that was turned off; every skill is on "
+             "unless turned off. Repeat for multiple skills")
+    setup.add_argument(
+        "--skip-skill", action="append", default=[], metavar="SKILL_ID",
+        help="turn a non-core skill off; repeat for multiple skills")
     setup.add_argument(
         "--channel", choices=("stable", "development"), default="stable",
         help="update channel (default: stable)")
