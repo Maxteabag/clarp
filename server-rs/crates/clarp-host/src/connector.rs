@@ -1,7 +1,7 @@
-//! The connection relay's connector: the one socket a phone's requests come down.
+//! The connection relay's connector: one outbound socket for each configured name.
 //!
-//! A Host without a public address keeps one outbound WebSocket to a relay, and whatever a
-//! phone asks at the relay comes down that socket as frames. The rules of the frames are in
+//! A Host without a public address keeps an outbound WebSocket to a relay for each name.
+//! Whatever a phone asks at that name comes down its socket as frames. The rules of the frames are in
 //! [`clarp_kernel::connector`]; here is the socket, and what serves a stream.
 //!
 //! A stream is served by the Host's own router, asked from inside the Host: the same routes,
@@ -16,11 +16,13 @@
 //! Both Hosts read the same two files the same way, so one that takes the other's place
 //! keeps its name at the relay, and the phones their pairing. A Host that is told of no file
 //! dials nobody. Two Hosts must never dial with one name: the relay gives a name's phones to
-//! whoever dialled last.
+//! whoever dialled last. Explicit `--relay-also` files let this Host take over additional
+//! former names. They are served by the same router and do not change its pairing URL.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::PermissionsExt;
 use std::panic::AssertUnwindSafe;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -68,6 +70,7 @@ pub struct Connector {
     state: Mutex<&'static str>,
     /// What was known of the last session that was lost, or of the last dial that failed.
     last_loss: Mutex<Option<Value>>,
+    also: Vec<Arc<Connector>>,
 }
 
 impl Default for Connector {
@@ -79,6 +82,7 @@ impl Default for Connector {
             stand_in: String::new(),
             state: Mutex::new("starting"),
             last_loss: Mutex::new(None),
+            also: Vec::new(),
         }
     }
 }
@@ -96,20 +100,38 @@ fn turned_on(file: &str) -> bool {
 impl Connector {
     /// What this Host is told of its relay as it starts. Nothing is dialled here.
     pub fn told(config: &Config) -> Self {
-        let Some(file) = &config.relay_config else {
-            return Self::default();
-        };
-        let enabled = match std::fs::read_to_string(file) {
-            Ok(text) => turned_on(&text),
-            Err(error) => {
-                let file = file.display();
-                eprintln!("clarp-host: the relay's settings ({file}) cannot be read: {error}");
-                false
+        let mut primary = config
+            .relay_config
+            .as_deref()
+            .filter(|file| match std::fs::read_to_string(file) {
+                Ok(text) => turned_on(&text),
+                Err(error) => {
+                    let file = file.display();
+                    eprintln!("clarp-host: the relay's settings ({file}) cannot be read: {error}");
+                    false
+                }
+            })
+            .map_or_else(Self::default, |file| Self::from_file(config, file));
+
+        let mut names: HashSet<_> = primary
+            .settings
+            .as_ref()
+            .map(|settings| settings.host_id.clone())
+            .into_iter()
+            .collect();
+        for file in &config.relay_also {
+            let mut connector = Self::from_file(config, file);
+            if let Some(settings) = &connector.settings
+                && !names.insert(settings.host_id.clone())
+            {
+                connector.invalid = Some("duplicate relay Host ID".into());
             }
-        };
-        if !enabled {
-            return Self::default();
+            primary.also.push(Arc::new(connector));
         }
+        primary
+    }
+
+    fn from_file(config: &Config, file: &Path) -> Self {
         // The relay's name for this Host and its key are beside the owner's file.
         let credential = file.with_file_name("relay.json");
         let read = std::fs::metadata(&credential).and_then(|about| {
@@ -129,7 +151,7 @@ impl Connector {
             invalid = Some("relay networking requires authentication".to_string());
         }
         Self {
-            enabled,
+            enabled: true,
             settings,
             invalid,
             stand_in: config.relay_stand_in.clone(),
@@ -150,16 +172,31 @@ impl Connector {
 
     /// What an app is told of the relay (`GET /network/relay`).
     pub fn status(&self) -> Value {
+        let mut primary = self.connection_status();
+        if !self.also.is_empty() {
+            let connections: Vec<_> = std::iter::once(primary.clone())
+                .chain(self.also.iter().map(|extra| extra.connection_status()))
+                .collect();
+            primary["connections"] = json!(connections);
+        }
+        primary
+    }
+
+    fn connection_status(&self) -> Value {
         if !self.enabled {
             return json!({ "enabled": false, "state": "disabled" });
         }
         let Some(settings) = self.used() else {
-            return json!({
+            let mut status = json!({
                 "configured": self.settings.is_some(),
                 "enabled": true,
                 "state": "invalid",
                 "error": self.invalid,
             });
+            if let Some(settings) = &self.settings {
+                status["host_id"] = json!(settings.host_id);
+            }
+            return status;
         };
         let mut status = settings.status();
         status["enabled"] = json!(true);
@@ -358,7 +395,14 @@ pub(crate) fn trust_of_the_web() -> Option<tokio_tungstenite::Connector> {
 /// Starts the connector, where the Host uses a relay: it dials, serves what comes down the
 /// socket by the Host's own router, and dials again by itself whenever the socket is lost.
 pub fn run(app: &App, router: Router) {
-    let connector = app.connector.clone();
+    let primary = &app.connector;
+    run_connector(app, router.clone(), primary.clone(), true);
+    for extra in &primary.also {
+        run_connector(app, router.clone(), extra.clone(), false);
+    }
+}
+
+fn run_connector(app: &App, router: Router, connector: Arc<Connector>, primary: bool) {
     let Some(settings) = connector.used().cloned() else {
         if let Some(why) = &connector.invalid {
             eprintln!("clarp-host: the relay is turned on and not used: {why}");
@@ -404,7 +448,9 @@ pub fn run(app: &App, router: Router) {
                     session += 1;
                     let up_since = Instant::now();
                     connector.is("connected");
-                    capture.relay_connected(clock.now_ms(), session);
+                    if primary {
+                        capture.relay_connected(clock.now_ms(), session);
+                    }
                     connector.opened(session, (up_since - without_since).as_millis());
                     let (lost, torn) = serve(&router, socket, &local).await;
                     let age = up_since.elapsed().as_secs_f64();
@@ -413,7 +459,9 @@ pub fn run(app: &App, router: Router) {
                 Ok(Err(error)) => (Lost::dial(&error), None, (0, 0)),
                 Err(_) => (Lost::of_kind("TimeoutError"), None, (0, 0)),
             };
-            capture.relay_lost(clock.now_ms(), up.is_some(), torn);
+            if primary {
+                capture.relay_lost(clock.now_ms(), up.is_some(), torn);
+            }
             without_since = Instant::now();
             connector.lost(&lost, up, torn);
             let wait = rules::redial_after(waited, up.is_some(), lost.received());

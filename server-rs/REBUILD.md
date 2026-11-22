@@ -103,10 +103,9 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
    what is tested (what its tool is handed, how its session is taken up again), and then on Sonnet: not on Haiku,
    Fable or Opus. A test that cannot be done so is a question for Peter, never an exception.
 9. **Two Hosts never dial the connection relay under one name.** The relay gives a name's phones to whoever
-   dialled last. The Rust Host takes its relay from the file `--relay-config` names and from nowhere else; the
-   installed battle-test Host has a name of its own there, or none. `~/.config/clarp/relay.json` is the Python
-   Host's until the day of the switch. Never print or copy a `relay.json`, and never log the address a
-   connector dials: both carry the key.
+   dialled last. The Rust Host takes its primary relay from the file `--relay-config` names. Explicit
+   `--relay-also` files add former names after the Python Host is stopped and disabled. Never print or copy
+   a `relay.json`, and never log the address a connector dials: both carry the key.
 
 ## 4. Decisions already made (do not reopen without the lead)
 
@@ -2692,7 +2691,7 @@ Twenty failures a minute to say who one is, by a token or by a pairing code, are
 next is told to wait (429 with `Retry-After`), each asker for itself, and who asks rightly never waits. A
 device whose pairing is revoked loses the streams of events it listens to at that moment.
 
-The Host is told of its relay by a file it is given by name (`--relay-config`): a config of the Python Host's
+The Host is told of its primary relay by a file it is given by name (`--relay-config`): a config of the Python Host's
 kind, `[network] relay_enabled` in it and `relay.json` (mode 600) beside it. Both Hosts read the two files
 the same way, so the Host that takes the other's place keeps its name at the relay and the phones keep their
 pairing. Told of no file it dials nobody, and the file its keys of speech are read from is not that file
@@ -2701,7 +2700,10 @@ it). The connector dials by itself, again 0.3 s after a session that was up, 1 t
 cannot be reached, and 5 s after another connector took its name; each session and each loss is one line in
 the journal with the Python connector's words and fields, and never the address that was dialled. The apps
 read `GET /network/relay`; `clarp-host network relay status` shows the same; `clarp-host pair --relay` and
-`POST /pairing/issue` with `relay` give the link whose address is the relay's for this Host. Tested against
+`POST /pairing/issue` with `relay` give the link whose address is the primary relay's for this Host.
+Repeatable `install-host --relay-also FILE` keeps extra names by reading the private `relay.json` beside
+each file. Each name serves the same Host's routes and reconnects independently. When extras are configured,
+`GET /network/relay` also lists the connections and their state. Tested against
 a stand-in for the relay on the loopback (`CLARP_RELAY_DIAL`, taken for an address of this machine only): a
 real Host process dials it, a phone is paired and served through it, the administrator's token is refused
 there, a stream of events flows and ends at a revocation, and the Host dials again after a loss.

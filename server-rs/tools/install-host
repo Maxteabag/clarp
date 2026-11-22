@@ -5,7 +5,7 @@
 #
 #   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH]
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
-#                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
+#                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off] [--relay-also FILE|off]
 #                                [--push-keys FILE|off] [--contact-pictures on|off]
 #                                [--seats-tool PATH|off] [--skills-from DIR] [--start] [--files-only]
 #
@@ -79,6 +79,9 @@
 #                  as the Python Host is named while that Host runs or can come back by itself.
 #                  `off`: the Host is told of no file at all. Never the Python Host's file by
 #                  default, though the keys of speech are read there
+#   --relay-also   keep serving an additional relay name with the private relay.json beside FILE.
+#                  The Python Host must be stopped and disabled. Repeat for several names;
+#                  off clears the list. New pairings still use the primary relay.
 #   --contact-pictures whether a contact that has no picture is drawn one by the provider of
 #                  pictures (OpenAI's gpt-image-2, with the owner's [openai] api_key, twenty a rolling
 #                  day at most): `on` or `off` (the default). It spends, so it is said here and
@@ -88,7 +91,7 @@
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
 # What an installation was told (--listen, --name, --claude, --codex, --push-relay, --whisper,
-# --speech-keys, --push-keys, --transcription-engine, --relay, --relay-config, --seats-tool,
+# --speech-keys, --push-keys, --transcription-engine, --relay, --relay-config, --relay-also, --seats-tool,
 # --contact-pictures) is kept with
 # it, in ~/.config/clarp-host/install.conf, so that an update is this command with no more than
 # --start: a relay that was turned off stays off. What is said now replaces what was kept, and
@@ -110,14 +113,18 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 from="$here/dist"; start=0; files_only=0
 skills_from="$here/../skills"; skills_named=0
 declare -A said=()
+said_relays=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
         --skills-from) skills_from="$2"; skills_named=1; shift 2 ;;
         --listen|--name|--claude|--codex|--agy|--opencode|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool|--contact-pictures) said["${1#--}"]="$2"; shift 2 ;;
+        --relay-also)
+            [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "install-host: --relay-also needs a file or off" >&2; exit 2; }
+            said_relays+=("$2"); shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--push-keys FILE|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--skills-from DIR] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--push-keys FILE|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--relay-also FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--skills-from DIR] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 if [ "$skills_named" = 1 ] && [ ! -f "$skills_from/manifest.json" ]; then
@@ -133,9 +140,11 @@ units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 # kept: where nobody chose, the installer's own answer of the day holds.
 kept="$config/install.conf"
 declare -A chosen=()
+extra_relays=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
+            relay-also) extra_relays+=("${line#*=}") ;;
             listen|name|claude|codex|agy|opencode|push-relay|accounts|whisper|speech-keys|push-keys|transcription-engine|relay|relay-config|seats-tool|contact-pictures) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
@@ -143,6 +152,12 @@ fi
 for key in "${!said[@]}"; do
     if [ "${said[$key]}" = default ]; then unset "chosen[$key]"; else chosen[$key]="${said[$key]}"; fi
 done
+if [ "${#said_relays[@]}" -gt 0 ]; then
+    extra_relays=("${said_relays[@]}")
+    if [ "${#extra_relays[@]}" = 1 ] && [[ "${extra_relays[0]}" = off || "${extra_relays[0]}" = default ]]; then
+        extra_relays=()
+    fi
+fi
 listen="${chosen[listen]:-127.0.0.1:7690}"; name="${chosen[name]:-$(hostname) Rust}"
 claude="${chosen[claude]:-}"; codex="${chosen[codex]:-}"; agy="${chosen[agy]:-}"
 opencode="${chosen[opencode]:-}"
@@ -297,6 +312,21 @@ if private and isinstance(name, str):
     print(name)
 PY
 }
+# A relay name cannot be handed over while the Python Host could still dial.
+relay_released() {
+    local name="$1" unit="$2" running enabled
+    running="$(systemctl --user is-active "$unit" 2>/dev/null || true)"
+    enabled="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
+    if [[ "$running" = inactive || "$running" = failed ]] &&
+        [[ "$enabled" = disabled || "$enabled" = masked || "$enabled" = masked-runtime || "$enabled" = not-found ]]; then
+        return
+    fi
+    if [ "$(systemctl --user show "$unit" -p LoadState --value 2>/dev/null || true)" = not-found ]; then
+        return
+    fi
+    echo "install-host: cannot take relay name \"$name\": the Python Host's $unit is ${running:-unknown} and ${enabled:-unknown}. Stop it and disable it first." >&2
+    exit 2
+}
 own_config="$config/config.toml"
 relay_switch="${chosen[relay]:-off}"
 case "$relay_switch" in on|off) ;; *) echo "install-host: --relay $relay_switch: on or off" >&2; exit 2 ;; esac
@@ -327,16 +357,42 @@ if [ -n "$relay_config" ]; then
     # the Python Host on this machine dials with is taken only when that Host is stopped and
     # cannot come back by itself.
     if [ -n "$relay_as" ] && [ "$relay_as" = "$(relay_name "$python_config")" ]; then
-        runs="$(systemctl --user is-active clarp-runtime.service 2>/dev/null || true)"
-        comes_back="$(systemctl --user is-enabled clarp-runtime.service 2>/dev/null || true)"
-        case "$runs" in inactive|failed|'') stopped=1 ;; *) stopped=0 ;; esac
-        case "$comes_back" in disabled|masked|masked-runtime|not-found|'') gone=1 ;; *) gone=0 ;; esac
-        if [ "$stopped" != 1 ] || [ "$gone" != 1 ]; then
-            echo "install-host: this Host would dial the relay as \"$relay_as\", the name the Python Host on this machine dials with, and that Host's unit is ${runs:-unknown} and ${comes_back:-unknown}. Stop it and disable it first (it must not come back by itself), or give this Host a relay.json of its own." >&2
-            exit 2
-        fi
+        relay_released "$relay_as" clarp-runtime.service
     fi
 fi
+extra_names=()
+for idx in "${!extra_relays[@]}"; do
+    file="${extra_relays[$idx]}"
+    if [[ "$file" = off || "$file" = default || "$file" = *$'\n'* || "$file" = *$'\r'* ]] || [ ! -f "$file" ]; then
+        echo "install-host: --relay-also requires a config file, or off by itself" >&2
+        exit 2
+    fi
+    # Keep the user's choice of directory, including when the config itself is a symlink:
+    # relay.json is beside the path supplied, as with --relay-config.
+    file="$(cd -- "$(dirname -- "$file")" && pwd -P)/$(basename -- "$file")"
+    name_also="$(relay_id "$(dirname -- "$file")/relay.json")"
+    if [[ ! "$name_also" =~ ^[a-z0-9-]{8,64}$ ]]; then
+        echo "install-host: --relay-also $file needs a private relay.json with a valid host_id beside it" >&2
+        exit 2
+    fi
+    for used_name in "$relay_as" "${extra_names[@]}"; do
+        if [ "$name_also" = "$used_name" ]; then
+            echo "install-host: duplicate relay name $name_also" >&2
+            exit 2
+        fi
+    done
+    relay_released "$name_also" clarp-runtime.service
+    relay_released "$name_also" clarp.service
+    extra_relays[$idx]="$file"
+    extra_names+=("$name_also")
+
+    # The service file expands specifiers and environment variables, even inside quotes.
+    file="${file//\\/\\\\}"
+    file="${file//\"/\\\"}"
+    file="${file//%/%%}"
+    file="${file//\$/\$\$}"
+    relayed+=" --relay-also \"$file\""
+done
 # The faces agents are shown with: the pictures the repository ships (static/avatars and the
 # janitors' beside them), copied beside the Host, which hands them out and says in each agent's
 # row which one is its. Installed without the repository beside it, the Host ships none.
@@ -373,7 +429,13 @@ fi
 # What the Host keeps is its user's alone: conversations, the phones' tokens. The unit below
 # says so for everything the Host writes from now on; this says it for what is there already.
 chmod -R go-rwx "$share/data" "$share/cache" "$share/logs"
-(umask 077; for key in "${!chosen[@]}"; do printf '%s=%s\n' "$key" "${chosen[$key]}"; done | sort > "$kept")
+(
+    umask 077
+    {
+        for key in "${!chosen[@]}"; do printf '%s=%s\n' "$key" "${chosen[$key]}"; done | sort
+        for file in "${extra_relays[@]}"; do printf 'relay-also=%s\n' "$file"; done
+    } > "$kept"
+)
 # Put in place under another name and moved: a Host that is running keeps the file it has open.
 for binary in clarp-host clarp-shim; do
     install -m 755 "$from/$binary" "$share/bin/.$binary.new"
@@ -765,10 +827,13 @@ echo "a clip no app names an engine for is heard by: $transcription_engine"
 if [ -n "$relay_as" ]; then
     echo "phones reach it through the connection relay as \"$relay_as\" (by $relay_config)"
 elif [ -n "$relay_config" ]; then
-    echo "the connection relay is off (--relay on turns it on): this Host dials no relay for the phones"
+    echo "the primary connection relay is off (--relay on turns it on)"
 else
-    echo "the connection relay: none (this Host is told of no file that could turn it on)"
+    echo "the primary connection relay has no configuration file"
 fi
+for name_also in "${extra_names[@]}"; do
+    echo "phones already paired through relay name $name_also can reach this Host there"
+done
 if [ "$contact_pictures" = on ]; then
     echo "contact pictures: on: a contact with no picture is drawn one by OpenAI, with the owner's key (--contact-pictures off turns it off)"
 else

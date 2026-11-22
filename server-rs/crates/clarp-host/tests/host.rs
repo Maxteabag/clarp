@@ -99,6 +99,8 @@ mod r108_stream_ids;
 mod r136_peer_wait;
 #[path = "host/r175_engine_order.rs"]
 mod r175_engine_order;
+#[path = "host/relay_aliases.rs"]
+mod relay_aliases;
 #[path = "host/remote_action.rs"]
 mod remote_action;
 #[path = "host/render_spec_export.rs"]
@@ -25123,8 +25125,7 @@ impl StandInWorker {
         Self { listener, address }
     }
 
-    /// Waits for a Host to dial, for so long at most, and takes its session.
-    fn session_within(&self, seconds: u64) -> Option<Session> {
+    fn connection_within(&self, seconds: u64) -> Option<TcpStream> {
         let deadline = Instant::now() + Duration::from_secs(seconds);
         let stream = loop {
             match self.listener.accept() {
@@ -25139,6 +25140,12 @@ impl StandInWorker {
         stream
             .set_read_timeout(Some(Duration::from_secs(20)))
             .unwrap();
+        Some(stream)
+    }
+
+    /// Waits for a Host to dial, for so long at most, and takes its session.
+    fn session_within(&self, seconds: u64) -> Option<Session> {
+        let stream = self.connection_within(seconds)?;
         let dialled = Arc::new(Mutex::new(String::new()));
         let asked = dialled.clone();
         // The shape of the answer is the crate's own.

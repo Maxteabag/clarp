@@ -179,6 +179,8 @@ pub struct Config {
     /// word and nothing else's: a Host that reads the owner's keys from the Python Host's
     /// file does not thereby take that Host's name at the relay.
     pub relay_config: Option<PathBuf>,
+    /// Files beside the credentials of former names served by this Host.
+    pub relay_also: Vec<PathBuf>,
     /// A stand-in for the relay, on this machine. Empty: the relay the settings name.
     pub relay_stand_in: String,
     /// The model of GPT-Live this Host runs, as the owner named it in his file (`[openai]
@@ -214,7 +216,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
 [--push-keys FILE]
-[--static DIR] [--relay-config FILE]
+[--static DIR] [--relay-config FILE] [--relay-also FILE ...]
 The administrator's token is read from CLARP_HOST_TOKEN. Additional administrator tokens can
 be listed in CLARP_HOST_TOKEN_ALIASES, separated by commas. The tools use the primary token
 to derive their own credential. This Host's push relay credential is read from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
@@ -473,6 +475,7 @@ impl Config {
         let mut push_keys = None;
         let mut static_dir = None;
         let mut relay_config = None;
+        let mut relay_also = Vec::new();
         let mut transcription_engine = "local".to_string();
         while let Some(arg) = args.next() {
             let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
@@ -588,6 +591,7 @@ impl Config {
                 "--push-keys" => push_keys = Some(PathBuf::from(value("a file")?)),
                 "--static" => static_dir = Some(PathBuf::from(value("a directory")?)),
                 "--relay-config" => relay_config = Some(PathBuf::from(value("a file")?)),
+                "--relay-also" => relay_also.push(PathBuf::from(value("a file")?)),
                 "--transcription-engine" => transcription_engine = value("a name")?,
                 other => return Err(format!("unknown argument {other}")),
             }
@@ -773,6 +777,7 @@ impl Config {
             google_speech_endpoint,
             chirp_decoder,
             relay_config,
+            relay_also,
             relay_stand_in,
             heartbeats_disabled: {
                 let said = std::env::var("CLARP_HEARTBEATS_DISABLED").unwrap_or_default();
