@@ -13,12 +13,22 @@ from functools import lru_cache
 from pathlib import Path
 
 
+class _NoTranscript(LookupError):
+    """The backend has no transcript for the session (yet)."""
+
+
 @lru_cache(maxsize=8192)
 def _transcript(backend: str, session: str, epoch: int):
-    """The transcript the backend reads the model from, cached a minute."""
+    """The transcript the backend reads the model from, cached a minute once it
+    is found. "Not there yet" raises, and lru_cache keeps no raised call, so a
+    new session's model is read as soon as its transcript appears instead of a
+    minute later (issue 360, R13)."""
     del epoch
     from .backends import by_id
-    return by_id(backend).model_transcript(session)
+    path = by_id(backend).model_transcript(session)
+    if path is None:
+        raise _NoTranscript(session)
+    return path
 
 
 @lru_cache(maxsize=8192)
@@ -77,8 +87,9 @@ def _indexed_model(home: str, session: str, epoch: int) -> str:
 def transcript_model(backend: str, session: str) -> str:
     """The model the newest turn of the session's transcript names, or ""."""
     try:
-        path = _transcript(backend, session, int(time.monotonic() // 60))
-        if path is None:
+        try:
+            path = _transcript(backend, session, int(time.monotonic() // 60))
+        except _NoTranscript:
             return ""
         stat = path.stat()
         return _read_model(str(path), stat.st_mtime_ns, stat.st_size)
