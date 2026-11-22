@@ -594,7 +594,7 @@ pub fn live_check(out: String) {
             check(titles() == ["Worked for 12s · 3 tools", "Ran npm test", "Stopped npm test"], &format!("the turn keeps its fold and what failed or stopped: {:?}", titles()));
             let shown = rows(&crate::window().expect("window"));
             let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);
-            check(at("live-abc").is_some_and(|i| at("live:fold:tr-1") == Some(i - 1) && at("live:cl:toolu_03") == Some(i + 1)), "the durable row, carrying the answer, stays in view below the work row");
+            check(at("live-abc").is_some_and(|i| at("live:fold:tr-1") == Some(i - 2) && at("live:cl:toolu_03") == Some(i - 1)), "the durable row, carrying the answer, stays in view where the answer was, below the work row");
             check(shown.iter().all(|r| !r.id.starts_with("row-toolu")), "the tool rows show as the item rows, not again as activity");
             let (_, inserted_before) = *before2.borrow();
             let (_, inserted) = crate::view::sync_stats();
