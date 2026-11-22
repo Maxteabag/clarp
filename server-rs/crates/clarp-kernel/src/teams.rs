@@ -31,6 +31,9 @@ pub struct Team {
     pub members: Vec<Member>,
 }
 
+/// The author of a team post from a paired app or the administrator.
+pub const USER_SOURCE: &str = "user";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     pub team_message_id: String,

@@ -365,6 +365,7 @@ pub struct App {
     pub capture: Arc<crate::diagnostics::Capture>,
     pub client_events: Arc<crate::client_events::Desk>,
     pub controller_actions: Arc<crate::controller_actions::Desk>,
+    pub calendar_receipts: Arc<crate::calendar::Receipts>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
     /// Held by a change to the skills this Host keeps installed, from its reading of the
     /// tools' folders to its keeping of the chosen list.
