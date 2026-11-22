@@ -121,17 +121,15 @@ def _require_payload(type: str, payload: dict, artifact_id: str, session: str = 
         if payload.get(field):
             _safe_url(str(payload[field]), field=field, allow_relative=field == "thumbnail_url")
     if type == "countdown":
-        from datetime import datetime
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        from .moments import read_moment
         target = payload.get("target_at")
         zone = payload.get("time_zone")
         if not isinstance(target, str) or not re.fullmatch(
                 r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", target):
             raise ValueError("countdown target_at must be an ISO 8601 timestamp with offset")
         try:
-            instant = datetime.fromisoformat(target.replace("Z", "+00:00"))
-            if instant.tzinfo is None or instant.utcoffset() is None:
-                raise ValueError("offset required")
+            read_moment(target)        # the one reader Updates uses too (R104)
         except ValueError as exc:
             raise ValueError("countdown target_at requires a valid date/time and explicit UTC offset") from exc
         if not isinstance(zone, str) or not zone.strip():
