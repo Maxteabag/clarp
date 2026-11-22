@@ -108,6 +108,7 @@ FILES = [
     ('-srv-beta/b-new.jsonl', user('the newest of beta', cwd='/srv/beta') + '\n', T0 + 300),
     ('-srv-beta/b-mid.jsonl', user('the middle one of beta', cwd='/srv/beta') + '\n', T0 + 200),
     ('-srv-beta/b-old.jsonl', user('the oldest of beta', cwd='/srv/beta') + '\n', T0 + 100),
+    ('-srv-beta/b-side.jsonl', user('an unindexed side chain', cwd='/srv/beta', isSidechain=True) + '\n', T0 + 350),
     ('-srv-beta/b-silent.jsonl', line(type='system') + '\n', T0 + 250),
     # A project whose index cannot be read, and one whose index is no object.
     ('-srv-delta/sessions-index.json', '{"entries": [', T0 + 50),
@@ -124,7 +125,8 @@ FILES = [
 ASKED = [
     ('/srv/alpha', False, 100), ('/srv/alpha', False, 3), ('/srv/alpha/', False, 100), ('/srv/alpha', False, 0),
     ('/srv/beta', False, 100), ('/srv/beta', False, 2), ('/srv/delta', False, 100), ('/srv/epsilon', False, 100),
-    ('/srv/my_project/v2.0', False, 100), ('/srv/nothing', False, 100), ('', False, 100),
+    ('/srv/my_project/v2.0', False, 100), ('/srv/./my_project//v2.0/', False, 100),
+    ('/srv/nothing', False, 100), ('', False, 100),
     ('', True, 100), ('/srv/alpha', True, 100), ('', True, 4),
 ]
 
