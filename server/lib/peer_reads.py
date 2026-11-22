@@ -38,8 +38,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
 
 
-# No environment proxies (an HTTP(S)_PROXY must not see a peer's token) and no redirects.
-_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+# Every request this Host makes to a peer with its token goes through this opener (the reads
+# here and lib.server_peers.send): no environment proxy (an HTTP(S)_PROXY must not see the
+# token) and no redirects (a 3xx must not carry the Authorization header elsewhere).
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 class PeerReadError(Exception):
@@ -60,7 +62,7 @@ def fetch_json(base: str, path: str, *, token: str = "", timeout: float = READ_T
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(base + path, data=data, headers=headers, method="POST" if data else "GET")
     try:
-        with _OPENER.open(request, timeout=timeout) as response:
+        with OPENER.open(request, timeout=timeout) as response:
             raw = response.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
         if 300 <= exc.code < 400:

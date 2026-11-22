@@ -182,5 +182,8 @@ def send(name: str, payload: dict) -> dict:
             "X-Clarp-Peer": name,
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    # The peer opener: no environment proxy, and a redirect is refused (an HTTPError), never
+    # followed with the token (lib.peer_reads.OPENER).
+    from .peer_reads import OPENER
+    with OPENER.open(request, timeout=30) as response:
         return json.loads(response.read() or b"{}")
