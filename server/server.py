@@ -3238,6 +3238,14 @@ def _seed_startup_invariants(ctx: ServerContext) -> None:
     initialize_janitors(cwd=str(ctx.root))
 
 
+def _transcript_turn_ended(srv: "ContextHTTPServer", agent_id: str) -> None:
+    """A DONE row: the transcript streamer imports the ended turn now (R6, R12)."""
+    workers = getattr(srv, "workers", None)
+    streamer = workers.get("transcript-streamer") if workers is not None else None
+    if streamer is not None:
+        streamer.turn_ended(agent_id)
+
+
 def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
                     adapters: DispatchAdapters, port: int) -> list[Worker]:
     """The ordered worker catalog. Order is start order and stop order.
@@ -3447,7 +3455,8 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("bonjour", start_bonjour,
                enabled=lambda: bool(getattr(cfg, "network_advertise_lan", False))),
         # Tail state_log + push every new row as an `agent-state` SSE event.
-        Worker("state-log-watcher", lambda: started(StateLogWatcher(ctx.stream))),
+        Worker("state-log-watcher", lambda: started(StateLogWatcher(
+            ctx.stream, on_done=lambda agent_id: _transcript_turn_ended(srv, agent_id)))),
         Worker("background-job-watcher",
                lambda: started(BackgroundJobWatcher(ctx.stream))),
         Worker("runtime-event-watcher", start_runtime_events, enabled=has_runtime_client),
