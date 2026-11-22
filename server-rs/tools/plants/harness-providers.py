@@ -124,7 +124,7 @@ PLANTS = [
     (H, 'host', 'a second ask starts a second sign-in', 'if current["status"] == "running" {', 'if current["status"] == "nothing" {'),
     (H, 'host', 'the method asked for is not sent', 'let body = json!({ "method": begun.method, "inputs": inputs });', 'let body = json!({ "method": 0, "inputs": inputs });'),
     (H, 'host', 'the inputs are not sent', 'let body = json!({ "method": begun.method, "inputs": inputs });', 'let body = json!({ "method": begun.method, "inputs": {} });'),
-    (K, 'vectors', 'nothing answered is a page of its own', 'if !python::truthy(answer) {\n        return Some(json!({}));', 'if answer.is_null() {\n        return Some(json!({"method": "auto"}));'),
+    (K, 'vectors', 'nothing answered is a page of its own', 'if answer.is_null() {\n        return Some(json!({}));', 'if answer.is_null() {\n        return Some(json!({"method": "auto"}));'),
     (K, 'vectors', 'an answer of another shape is taken (R156)', 'answer.is_object().then(|| answer.clone())', 'Some(answer.clone())'),
     (H, 'host', 'an answer of nothing is waited for in a page', 'Some(authorization) => (serve, authorization),', 'Some(authorization) if authorization.as_object().is_some_and(|a| !a.is_empty()) => (serve, authorization),\n                Some(_) => (serve, json!({"method": "auto"})),'),
     (H, 'host', 'a sign-in in a page is waited for as a code', 'if mode == "auto" {', 'if mode == "code" {'),

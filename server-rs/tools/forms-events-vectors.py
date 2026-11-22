@@ -153,12 +153,6 @@ def countdown_cases():
         for payload in cases:
             error = publish(payload)
             errors = [] if error is None else [error]
-            # _payload visits a set intersection. With two non-string fields
-            # either field can be first, depending on the interpreter hash seed.
-            if all(k in payload and not isinstance(payload[k], str) for k in ('target_at','time_zone')):
-                errors = sorted({publish({**payload,'time_zone':'UTC'}),
-                                 publish({**payload,'target_at':target})})
-                assert error in errors
             validation.append(dict(payload=payload, errors=errors))
     return dict(projections=projections,validation=validation)
 

@@ -63,7 +63,9 @@ impl Shelf {
 
     fn items(&self) -> Result<Vec<Value>, Malformed> {
         let bytes = std::fs::read(self.tree.join("manifest.json")).ok();
-        rules::manifest(bytes.as_deref())
+        rules::manifest_noting(bytes.as_deref(), |index, problem| {
+            eprintln!("clarp-host: managedSkillsManifestBad item={index} {problem}");
+        })
     }
 
     fn source(&self, skill: &str) -> PathBuf {

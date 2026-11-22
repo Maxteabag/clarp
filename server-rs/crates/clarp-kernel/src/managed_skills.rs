@@ -168,21 +168,51 @@ fn falsy(value: &Value) -> bool {
     }
 }
 
-/// A manifest the reference cannot go through: it fails on it (an item that is no object, or
-/// has no id; a list of requirements that is a number). This Host answers it as a manifest
-/// that cannot be read.
+/// An unavailable manifest or malformed skill item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Malformed;
 
 /// The skills of a manifest, from its file's bytes (none: no file).
 pub fn manifest(bytes: Option<&[u8]>) -> Result<Vec<Value>, Malformed> {
+    manifest_noting(bytes, |_, _| {})
+}
+
+/// Read the complete manifest before any status lookup or change and report the first bad item.
+pub fn manifest_noting(
+    bytes: Option<&[u8]>,
+    mut note: impl FnMut(usize, &str),
+) -> Result<Vec<Value>, Malformed> {
     let value: Value = bytes
         .and_then(|bytes| serde_json::from_slice(bytes).ok())
         .unwrap_or(Value::Null);
-    match value.get("skills") {
+    let skills = match value.get("skills") {
         Some(Value::Array(skills)) => Ok(skills.clone()),
         _ => Err(Malformed),
+    }?;
+    for (index, item) in skills.iter().enumerate() {
+        if let Some(problem) = item_problem(item) {
+            note(index, problem);
+            return Err(Malformed);
+        }
     }
+    Ok(skills)
+}
+
+fn item_problem(item: &Value) -> Option<&'static str> {
+    let Some(fields) = item.as_object() else {
+        return Some("is not an object");
+    };
+    match fields.get("id") {
+        Some(Value::String(id)) if !python::strip(id).is_empty() => {}
+        _ => return Some("has no text id"),
+    }
+    if fields
+        .get("requires")
+        .is_some_and(|requires| !requires.is_null() && !requires.is_array())
+    {
+        return Some("requires is not a list");
+    }
+    None
 }
 
 /// A skill's id as the reference takes it (`str(item["id"])`).

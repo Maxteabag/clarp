@@ -206,6 +206,13 @@ class SendRequest:
             # An agent waking itself from its own turn: not the user's word
             # (and not coordination), whatever origin it claims.
             origin = "automation"
+        elif origin in origins.USER_WORD_ORIGINS and sender_agent_id:
+            # A send that names a sender is an agent's, also without a turn
+            # token: the user's own sends name none (issue 360, R18). Naming the
+            # target itself is the agent waking itself.
+            from . import identity
+            target = identity.lookup(session) or {}
+            origin = "automation" if sender_agent_id == target.get("agent_id") else "agent"
         front_desk = bool(own_turn_agent) and _is_front_desk(own_turn_agent)
         if synthesize_audio_raw is None:
             synthesize_audio = origin == "user"

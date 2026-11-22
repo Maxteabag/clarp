@@ -1196,7 +1196,8 @@ def discard(artifact_id: str, *, expected_updated_at: int) -> tuple[dict, bool]:
         con.execute("UPDATE artifacts SET deleted_at=?,updated_at=?,pinned_at=NULL WHERE artifact_id=?",
                     (now, now, artifact_id))
         con.execute("COMMIT")
-        current.update(deleted_at=now, updated_at=now, pinned_at=None)
+        # ``pinned`` was derived from pinned_at when the row was read: it follows it.
+        current.update(deleted_at=now, updated_at=now, pinned_at=None, pinned=False)
         return current, True
     except BaseException:
         con.execute("ROLLBACK"); raise

@@ -79,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.endswith("/oauth/authorize"):
             if provider == "silent":
                 return self.answer(200, None)
+            if provider == "broken" and (root / "authorize-false").exists():
+                return self.answer(200, False)
             if provider == "broken":
                 return self.answer(500, {"error": "made-up failure", "key": "sk-abcdefgh12345678"})
             if provider == "github-copilot":

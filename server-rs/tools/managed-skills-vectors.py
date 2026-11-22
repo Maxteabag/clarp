@@ -248,7 +248,7 @@ def status_runs(ms, root: Path):
                                 present.append(skill_id)
                             items.append(item)
                             n += 1
-        items.append({'id': 7, 'pack': 'core'})
+        items.append({'id': '7', 'pack': 'core'})
         tree.source('7')
         active.append('7')
         present.append('7')
@@ -267,7 +267,13 @@ def manifests(ms, root: Path):
     values = [None, '', 'not json', '[]', '{}', '{"skills": {}}', '{"skills": null}',
               '{"skills": "x"}', '{"version": 1}', '{"skills": []}', '{"skills": [{"pack": "core"}]}',
               '{"skills": ["x"]}', '{"skills": [5]}', '{"skills": [{"id": null}]}',
-              '{"skills": [{"id": "a"}], "version": 2}', '"skills"', 'null']
+              '{"skills": [{"id": "a"}], "version": 2}', '"skills"', 'null',
+              '{"skills": [{"id": 7}]}', '{"skills": [{"id": "  "}]}',
+              '{"skills": [{"id": "a"}, {"id": "b", "requires": 5}]}',
+              '{"skills": [{"id": "a", "requires": false}]}',
+              '{"skills": [{"id": "a", "requires": ""}]}',
+              '{"skills": [{"id": "a", "requires": {}}]}',
+              '{"skills": [{"id": "a", "requires": null}]}']
     for n, value in enumerate(values):
         base = root / f'm{n}'
         base.mkdir()
@@ -279,8 +285,6 @@ def manifests(ms, root: Path):
             outcome = ['rows', [row['id'] for row in ms.status()]]
         except RuntimeError as exc:
             outcome = ['unavailable', str(exc)]
-        except Exception as exc:  # noqa: BLE001 - the reference's own crash is the vector
-            outcome = ['crash', type(exc).__name__]
         cases.append({'manifest': value, 'outcome': outcome})
     return cases
 
@@ -391,7 +395,7 @@ def routes(root: Path):
             providers.ProviderRoutes._handle_managed_skills_update(handler)
         asked.append([body, called, answers[0]])
     failures = []
-    for kind in ('value', 'os'):
+    for kind in ('value', 'os', 'runtime'):
         answers = []
         handler = SimpleNamespace(
             _read_json=lambda: {'skill_id': 'x', 'enabled': True},
@@ -399,6 +403,8 @@ def routes(root: Path):
             _json_ok=lambda result: answers.append([200, result]))
 
         def refuse(skill_id, enabled, kind=kind):
+            if kind == 'runtime':
+                raise RuntimeError('Clarp skill manifest is unavailable')
             raise ValueError('refused words') if kind == 'value' else OSError('system words')
         with patch('lib.managed_skills.set_enabled', refuse), \
                 patch.object(providers, 'log_exception', lambda *a, **k: None):

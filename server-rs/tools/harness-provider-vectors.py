@@ -167,11 +167,8 @@ def record(root):
             def close(self):
                 closed.append(True)
 
-        try:
-            out = {'answer': hp.start_oauth('opencode', 'openai', 1, None,
-                                            serve_factory=lambda _e: AnsweringServe())}
-        except Exception as exc:  # noqa: BLE001 - the reference's failure (R156)
-            out = {'raises': type(exc).__name__}
+        out = {'answer': hp.start_oauth('opencode', 'openai', 1, None,
+                                        serve_factory=lambda _e: AnsweringServe())}
         out['task'] = dict(hp._tasks.get('openai') or {})
         out['server_ended'] = bool(closed)
         authorize.append([answer, out])
