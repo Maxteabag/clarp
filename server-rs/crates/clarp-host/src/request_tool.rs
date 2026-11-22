@@ -101,7 +101,8 @@ fn request_owner(turn: Option<&str>, owner: &Member) -> crate::agent::GoalCaller
         Some(id) if id == owner.record.agent_id => {
             crate::agent::GoalCaller::Verified(id.to_owned())
         }
-        _ => crate::agent::GoalCaller::Default,
+        Some(id) => crate::agent::GoalCaller::Peer(id.to_owned(), true),
+        None => crate::agent::GoalCaller::Default,
     }
 }
 
