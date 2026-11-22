@@ -4266,6 +4266,40 @@ fn stop_resume_issue_308_admin_resume_releases_a_held_queue() {
 }
 
 #[test]
+fn stop_resume_issue_386_due_self_prompts_wait_for_resume() {
+    let place = Place::new("paused-self-prompt");
+    let host = place.start();
+    let session = host.new_agent("Helper");
+    let stopped = host.post("/stop", json!({"session": session}));
+    assert_eq!(stopped["queue_paused"], true, "{stopped}");
+    // The timer runs this plain clarp-admin command later, without the old turn token.
+    for (message, from) in [
+        ("named wake", Some(session.as_str())),
+        ("unattributed wake", None),
+    ] {
+        let mut args = vec!["clarp-admin", "prompt", "--to", &session, "--text", message];
+        if let Some(from) = from {
+            args.extend(["--from", from]);
+        }
+        let (code, text, err) = tool(&host, &place.root, None, &args);
+        assert_eq!(code, 0, "{err}");
+        let sent: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(sent["queued"], true, "{sent}");
+    }
+    let queue = host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(queue["paused"], true, "{queue}");
+    let rows = queue["items"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{queue}");
+    assert_eq!(rows[0]["text"], "named wake");
+    assert_eq!(rows[1]["text"], "unattributed wake");
+    assert!(host.conversation(&session).is_empty());
+    host.post("/turn-queue/resume", json!({"session": session}));
+    wait_for("both prompt deliveries after Resume", || {
+        host.conversation(&session).len() == 4 && host.state(&session) == "done"
+    });
+}
+
+#[test]
 fn an_agent_is_woken_for_a_goal_that_is_due_and_a_stop_holds_its_goals_too() {
     let place = Place::new("wake");
     let host = place.start();

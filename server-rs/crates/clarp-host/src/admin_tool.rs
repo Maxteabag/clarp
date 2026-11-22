@@ -149,9 +149,21 @@ pub(crate) async fn prompt(
         })
         .await;
     }
+    let to = parsed.option("--to").unwrap_or_default();
+    // The delayed tool runs without its original turn token. Unattributed wakeups and
+    // self-prompts are background work, including when the command names its own sender.
+    let waits_for_resume = from.is_none_or(|from| {
+        let (from, to) = (python::strip(from), python::strip(to));
+        from == to
+            || app
+                .anyone(from)
+                .zip(app.anyone(to))
+                .is_some_and(|(sender, target)| sender.record.agent_id == target.record.agent_id)
+    });
     let request = SendRequest {
-        session: parsed.option("--to").unwrap_or_default().to_string(),
+        session: to.to_string(),
         text: parsed.option("--text").unwrap_or_default().to_string(),
+        queue_if_busy: waits_for_resume.then_some(true),
         // One id for the message, however often the tool has to ask.
         client_msg_id: Some(format!("clarp-admin-{}", ids::hex(8))),
         synthesize_audio: Some(false),
