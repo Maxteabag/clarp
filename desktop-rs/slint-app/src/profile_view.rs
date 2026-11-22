@@ -521,7 +521,6 @@ pub fn wire(window: &AppWindow) {
             crate::chat_menu::set_activity(&mut app.engine.borrow_mut(), session, value);
         });
     });
-    });
     bridge.on_set_mcp(|name, on| {
         with_session(|app, _, session| {
             let mut chosen: Vec<String> = detail(app, session, "mcp_servers").as_array().into_iter().flatten().map(name_of).collect();
