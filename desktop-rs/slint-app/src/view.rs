@@ -265,6 +265,7 @@ pub(crate) fn start_turn_clock() {
     timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), || {
         if let Some(app) = crate::app() {
             app.tick_turn_stamps();
+            app.tick_stall_notices();
         }
     });
     TURN_CLOCK.with(|t| *t.borrow_mut() = Some(timer));
@@ -282,7 +283,13 @@ fn one_line(text: &str) -> String {
 
 pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str) -> ChatRow {
     let preview = one_line(if !row.last_message.is_empty() { &row.last_message } else { &row.working_directory });
-    let activity = if row.busy && !row.status_text.is_empty() { one_line(&row.status_text) } else { String::new() };
+    let activity = if row.stalled_since.is_some() {
+        clarp_core::stall::ROW_STATUS.to_owned()
+    } else if row.busy && !row.status_text.is_empty() {
+        one_line(&row.status_text)
+    } else {
+        String::new()
+    };
     let mut chat = ChatRow {
         session: row.session.clone().into(),
         initial: initial(&row.name),

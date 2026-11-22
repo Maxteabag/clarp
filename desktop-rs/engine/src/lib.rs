@@ -1613,6 +1613,7 @@ impl Engine {
             self.set_connecting(false);
             self.force_snapshot();
             self.live_server_info(object);
+            self.mutate_roster(|r| r.set_stall_feature(clarp_core::stall::offered_by(object)));
             self.coordination_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
@@ -1820,6 +1821,7 @@ impl Engine {
                 }
             }
             "agent-activity" => {
+                self.mutate_roster(|r| r.apply_activity_event(event));
                 let mut status =
                     event.get("activity_status").and_then(Value::as_str).map_or_else(|| json::string(event, "status"), str::to_owned);
                 if status.is_empty() && clarp_core::protocol::is_busy_state(&json::string(event, "state")) {

@@ -41,6 +41,12 @@ pub struct Agent {
     /// snapshot's `turn_started_at`. None while idle, and on a Host too old
     /// to send it (its 0 or null).
     pub turn_started_at: Option<i64>,
+    /// When the Host marked the running turn stalled (epoch ms, Host
+    /// contract 149): its tool silent for 10 minutes while the user's words
+    /// wait. None when not stalled, and on a Host too old to say.
+    pub stalled_since: Option<i64>,
+    /// What the Host offers for the stall: "stop", or None.
+    pub stalled_action: Option<String>,
     pub last_activity: i64,
     pub head_revision: i64,
     /// What the conversation's context holds, in tokens; None while the
@@ -114,6 +120,8 @@ impl Default for Agent {
             backend_quota: Object::new(),
             latest_state_timestamp: 0,
             turn_started_at: None,
+            stalled_since: None,
+            stalled_action: None,
             last_activity: 0,
             head_revision: 0,
             context_tokens: None,
@@ -189,6 +197,8 @@ impl Agent {
             },
             latest_state_timestamp: i("latest_state_ts"),
             turn_started_at: object.get("turn_started_at").and_then(Value::as_i64).filter(|t| *t > 0),
+            stalled_since: crate::stall::since(object),
+            stalled_action: crate::stall::action(object),
             last_activity: i("last_activity"),
             head_revision: i("head_revision"),
             context_tokens: object.get("context_tokens").and_then(Value::as_i64),

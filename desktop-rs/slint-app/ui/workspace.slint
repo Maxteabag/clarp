@@ -116,6 +116,10 @@ export struct PaneView {
     quota-notice: string,
     // What the last Stop did, who stopped it and why (engine stop_notice).
     stop-notice: string,
+    // The working indicator while the turn seems stuck and the Host offers
+    // Stop (#249; the words are core stall.rs's), and the Stop button's label.
+    stall: string,
+    stall-stop: string,
     can-send: bool,
     transcribing: int,
     recording: bool,
@@ -571,7 +575,37 @@ export component Pane inherits Rectangle {
         // and for how long by the Host's clock, and the key that stops it
         // while the agent works. Off unless Settings turn it on: the
         // running row shimmers in the chat and the shortcut bar names Stop.
-        if root.pane.live-status != "" && ChatLook.live-status-line: Rectangle {
+        // A stalled turn (#249): the working indicator says it seems stuck,
+        // whether the user's words wait, and holds the same Stop as Ctrl+.
+        // It stands in for the status line and the typing dots.
+        if root.pane.stall != "": Rectangle {
+            background: Palette.window;
+            height: 26px;
+            accessible-role: text;
+            accessible-id: "stall:" + root.pane.id;
+            accessible-label: root.pane.stall;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 10px;
+                spacing: 10px;
+                Text {
+                    text: "! " + root.pane.stall;
+                    color: Palette.warning;
+                    font-size: 12 * Look.unit;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                if root.pane.active: KeyHint {
+                    y: 3px;
+                    key: root.pane.live-stop-key;
+                    label: root.pane.stall-stop;
+                    accessible-id: "stall-stop:" + root.pane.id;
+                    clicked => { root.stop(); }
+                }
+            }
+        }
+        if root.pane.stall == "" && root.pane.live-status != "" && ChatLook.live-status-line: Rectangle {
             background: Palette.window;
             height: 26px;
             accessible-role: text;
@@ -598,7 +632,7 @@ export component Pane inherits Rectangle {
             }
         }
         // The transcript's footer (ConversationPane.qml).
-        if root.pane.working: Rectangle {
+        if root.pane.stall == "" && root.pane.working: Rectangle {
             background: Palette.window;
             HorizontalLayout {
                 padding-left: 14px;

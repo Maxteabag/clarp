@@ -442,3 +442,58 @@ fn a_running_turn_reads_in_seconds_minutes_and_hours() {
     assert_eq!(turn_elapsed(399_000), "6m 39s");
     assert_eq!(turn_elapsed(3_900_000), "1h 05m");
 }
+
+/// #249: a Host offering `stalled_turn` puts `stalled_since` and
+/// `stalled_action` on the snapshot row and on `agent-activity` (start and
+/// clear); null, absent or an older Host means no stall.
+#[test]
+fn a_stalled_turn_follows_the_host() {
+    use clarp_core::protocol::Agent;
+    use clarp_core::stall;
+    let parse = |extra: Value| Agent::from_json(&obj(roster_row("a", "a-id", 10, extra)));
+    let stalled = parse(json!({"busy": true, "stalled_since": 5_000, "stalled_action": "stop"}));
+    assert_eq!((stalled.stalled_since, stalled.stalled_action.as_deref()), (Some(5_000), Some("stop")));
+    assert_eq!(stall::stop_offered(&stalled), Some(5_000));
+    let cleared = parse(json!({"busy": true, "stalled_since": null, "stalled_action": null}));
+    assert_eq!((cleared.stalled_since, cleared.stalled_action), (None, None));
+    assert_eq!(parse(json!({"busy": true})).stalled_since, None);
+    let idle = parse(json!({"busy": false, "stalled_since": 5_000, "stalled_action": "stop"}));
+    assert_eq!(stall::stop_offered(&idle), None, "an idle agent is not stuck");
+    let other = parse(json!({"busy": true, "stalled_since": 5_000, "stalled_action": "wait"}));
+    assert_eq!(stall::stop_offered(&other), None, "only a Stop the Host offers shows");
+
+    let busy = json!({"latest_state": "tool", "busy": true});
+    let mut h = Harness::new();
+    h.with(|r| r.set_stall_feature(true));
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, busy.clone())]));
+    assert_eq!(h.row("sam").stalled_since, None);
+    h.with(|r| r.apply_activity_event(&obj(json!({"type": "agent-activity", "session": "sam", "stalled_since": 7_000, "stalled_action": "stop"}))));
+    assert_eq!(h.row("sam").stalled_since, Some(7_000), "a stall starts from the event");
+    h.with(|r| r.apply_activity_event(&obj(json!({"type": "agent-activity", "session": "sam", "status": "running"}))));
+    assert_eq!(h.row("sam").stalled_since, Some(7_000), "an event without the fields leaves it");
+    h.with(|r| r.apply_activity_event(&obj(json!({"type": "agent-activity", "session": "sam", "stalled_since": null, "stalled_action": null}))));
+    assert_eq!(h.row("sam").stalled_since, None, "and clears from the event");
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"latest_state": "tool", "busy": true, "stalled_since": 8_000, "stalled_action": "stop"}))]));
+    assert_eq!(h.row("sam").stalled_since, Some(8_000), "a snapshot carries it too");
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "idle", "ts": 9_000}))));
+    assert_eq!(h.row("sam").stalled_since, None, "the turn ending ends it");
+
+    // A Host without the feature shows nothing new, whatever it sends.
+    let mut old = Harness::new();
+    old.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"latest_state": "tool", "busy": true, "stalled_since": 8_000, "stalled_action": "stop"}))]));
+    assert_eq!(old.row("sam").stalled_since, None);
+    old.with(|r| r.apply_activity_event(&obj(json!({"session": "sam", "stalled_since": 9_000, "stalled_action": "stop"}))));
+    assert_eq!(old.row("sam").stalled_since, None);
+}
+
+#[test]
+fn a_stalled_turn_reads_in_whole_minutes_with_waiting_words() {
+    use clarp_core::stall::{ROW_STATUS, indicator, offered_by};
+    assert_eq!(indicator(0, 12 * 60_000 + 59_000, false), "Seems stuck · no progress for 12 min");
+    assert_eq!(indicator(0, 3 * 60_000, true), "Seems stuck · no progress for 3 min · Your message is waiting");
+    assert_eq!(indicator(10_000, 0, false), "Seems stuck · no progress for 0 min", "a stall ahead of the local clock never reads negative");
+    assert_eq!(ROW_STATUS, "Seems stuck");
+    assert!(offered_by(&obj(json!({"capabilities": {"features": ["live_items", "stalled_turn"]}}))));
+    assert!(!offered_by(&obj(json!({"capabilities": {"features": ["live_items"]}}))));
+    assert!(!offered_by(&obj(json!({}))));
+}

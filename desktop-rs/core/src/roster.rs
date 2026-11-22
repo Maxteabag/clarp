@@ -90,6 +90,9 @@ pub struct AgentRow {
     pub last_activity: i64,
     /// The running turn's start (epoch ms), or None: idle, or an older Host.
     pub turn_started_at: Option<i64>,
+    /// When the running turn stalled (epoch ms) while the Host offers Stop
+    /// for it (`stall::stop_offered`), else None.
+    pub stalled_since: Option<i64>,
     pub conversation_id: String,
     pub head_revision: i64,
     pub context_tokens: Option<i64>,
@@ -136,6 +139,9 @@ pub struct Roster {
     /// The Host's snapshot carries `turn_started_at`, so a turn that starts
     /// between snapshots may take its start from the state event.
     turn_clock: bool,
+    /// The Host lists the `stalled_turn` feature (contract 149): its stall
+    /// fields are read. Off, an older Host shows nothing new.
+    stall_feature: bool,
     ops: Vec<Op>,
 }
 
@@ -196,6 +202,7 @@ impl Roster {
             last_completed_message: agent.last_completed_message.clone(),
             last_activity: agent.last_activity,
             turn_started_at: agent.turn_started_at,
+            stalled_since: if live { crate::stall::stop_offered(agent) } else { None },
             conversation_id: agent.conversation_id.clone(),
             head_revision: agent.head_revision,
             context_tokens: agent.context_tokens,
@@ -310,6 +317,10 @@ impl Roster {
             let Some(object) = value.as_object() else { continue };
             self.turn_clock |= object.contains_key("turn_started_at");
             let mut agent = Agent::from_json(object);
+            if !self.stall_feature {
+                agent.stalled_since = None;
+                agent.stalled_action = None;
+            }
             if agent.session.is_empty() || agent.archived != self.archived_only {
                 continue;
             }
@@ -415,10 +426,47 @@ impl Roster {
         // state; the next snapshot brings the Host's own start.
         if !agent.busy {
             agent.turn_started_at = None;
+            agent.stalled_since = None;
+            agent.stalled_action = None;
         } else if !was_busy && agent.turn_started_at.is_none() && turn_clock && agent.latest_state_timestamp > 0 {
             agent.turn_started_at = Some(agent.latest_state_timestamp);
         }
         self.notify_row(row, &[Role::State, Role::StatusText, Role::Busy]);
+    }
+
+    /// `/server-info` answered: whether the Host offers `stalled_turn`. A
+    /// Host without it shows no stall (its next snapshot fills one in).
+    pub fn set_stall_feature(&mut self, on: bool) {
+        self.stall_feature = on;
+        if on {
+            return;
+        }
+        for row in 0..self.agents.len() {
+            let agent = &mut self.agents[row];
+            if agent.stalled_since.take().is_some() | agent.stalled_action.take().is_some() {
+                self.notify_row(row, &[Role::State, Role::StatusText]);
+            }
+        }
+    }
+
+    /// An `agent-activity` event: a Host of contract 149 or later says on
+    /// it whether the turn is stalled, so it sets the stall when one starts
+    /// and clears it when it ends. An event without the fields (an older
+    /// Host) leaves the row as it is.
+    pub fn apply_activity_event(&mut self, event: &Object) {
+        if !self.stall_feature || !crate::stall::reported(event) {
+            return;
+        }
+        let Some(row) = self.index_of_session(&json::string(event, "session")) else { return };
+        let since = crate::stall::since(event);
+        let action = since.and(crate::stall::action(event));
+        let agent = &mut self.agents[row];
+        if agent.stalled_since == since && agent.stalled_action == action {
+            return;
+        }
+        agent.stalled_since = since;
+        agent.stalled_action = action;
+        self.notify_row(row, &[Role::State, Role::StatusText]);
     }
 
     pub fn apply_focus_event(&mut self, event: &Object) {

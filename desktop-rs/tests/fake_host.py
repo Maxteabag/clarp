@@ -54,9 +54,11 @@ pair_revision = 3
 rooms_gone = False  # an older Host without /agent-conversations
 agents = [
     {"agent_id": "a1", "session": "rachel", "persona": "Rachel", "backend": "claude",
-     "latest_state": "idle", "alive": True, "last_activity": 2000, "turn_started_at": 0, "conversation_id": "c-rachel", "head_revision": 2},
+     "latest_state": "idle", "alive": True, "last_activity": 2000, "turn_started_at": 0, "conversation_id": "c-rachel", "head_revision": 2,
+     "stalled_since": None, "stalled_action": None},
     {"agent_id": "a2", "session": "mike", "persona": "Mike", "backend": "codex",
-     "latest_state": "idle", "alive": True, "last_activity": 1000, "turn_started_at": 0, "conversation_id": "c-mike", "head_revision": 1},
+     "latest_state": "idle", "alive": True, "last_activity": 1000, "turn_started_at": 0, "conversation_id": "c-mike", "head_revision": 1,
+     "stalled_since": None, "stalled_action": None},
 ]
 turns = {
     "rachel": [
@@ -177,6 +179,9 @@ sys.path.insert(0, str(REPO / "server"))
 from lib.live_items import LiveView  # noqa: E402
 
 live_features = False
+# A stalled turn (feature stalled_turn, Host contract 149): on, as a current
+# Host has it; /__control/stall-feature turns it off for an older Host.
+stall_feature = True
 # /log rows carry turn summaries (feature log_turn_summary, Host contract 47).
 turn_summaries = False
 live_truth = {}      # session -> LiveView: what GET /live answers
@@ -1150,6 +1155,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("log_turn_summary")
             if coordination["on"]:
                 features.append("hidden_coordination")
+            if stall_feature:
+                features.append("stalled_turn")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -1738,6 +1745,12 @@ class Handler(BaseHTTPRequestHandler):
                 turns["pair:a1:a2"].append({"id": f"p{pair_revision}", "role": "assistant", "text": body.get("text", "more"),
                                             "revision": pair_revision, "timestamp": "2026-09-29T09:31:00Z"})
             broadcast({"type": "transcript-updated", "session": "rachel"})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/stall-feature":
+            # Test control: the stalled_turn feature on or off (the client
+            # reads it from /server-info when it connects).
+            global stall_feature
+            stall_feature = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/live":
             # Test control: the live_items feature on or off (the client
