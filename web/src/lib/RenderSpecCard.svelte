@@ -4,7 +4,7 @@
   // does. The drawing is render-spec-draw.js; the rules are @core/render-spec.js.
   import { onDestroy } from 'svelte';
   import {
-    acceptedSubmission, carrying, matchesIdentity, newSubmissionId, readRenderSpec, refusalMeaning,
+    acceptedSubmission, answeredLine, carrying, matchesIdentity, newSubmissionId, readRenderSpec, refusalMeaning,
   } from '@core/render-spec.js';
   import { mountForm } from './render-spec-draw.js';
   import { clog } from './net.js';
@@ -13,6 +13,9 @@
 
   // loading | form | newer | unreadable | failed
   let phase = $state('loading');
+  // 'Answered · <button label>' once answered (a form this build cannot read: 'Answered').
+  let answered = $state('');
+  let status = $derived(answered || (row.status === 'completed' ? 'Answered' : ''));
   let host = $state(null);
   let pending = null;
   let controller = null;
@@ -86,6 +89,7 @@
 
   function show(content) {
     phase = 'form';
+    answered = answeredLine(content.form, content.accepted);
     pending = content;
     if (host) draw();
   }
@@ -178,7 +182,7 @@
 
 <article class="turn rs-artifact" data-artifact-id={row.artifact_id} aria-label={row.title || 'Form'}>
   <header class="rs-head">
-    <span class="rs-kind">Form</span>
+    <span class="rs-kind">Form{#if status}<span class="rs-status">{status}</span>{/if}</span>
     {#if row.title}<h2 class="rs-title">{row.title}</h2>{/if}
     {#if row.summary}<p class="rs-summary">{row.summary}</p>{/if}
   </header>

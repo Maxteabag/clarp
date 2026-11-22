@@ -2,7 +2,7 @@
 // table and button read as the Host's validator checks them, a button form's answer, and
 // integers drawn with `decimals`.
 import { describe, expect, it } from 'vitest';
-import { formatScaled, readRenderSpec, submission } from '../../static/lib/render-spec.js';
+import { answeredLine, formatScaled, readRenderSpec, submission } from '../../static/lib/render-spec.js';
 
 // The example form of the v2 agreement: a chart, a table, a note and two buttons.
 const example = () => ({
@@ -103,11 +103,24 @@ describe('a button form’s answer', () => {
   });
 });
 
+describe('the answered line', () => {
+  it('names the chosen button of a button form, and says Answered for any other', () => {
+    const { form } = readRenderSpec(example());
+    expect(answeredLine(form, { state: { action: 'hold', note: 'x' } })).toBe('Answered · Hold');
+    expect(answeredLine(form, null)).toBe('');
+    expect(answeredLine({ buttons: [] }, { state: { choice: 'send' } })).toBe('Answered');
+  });
+});
+
 describe('decimals', () => {
   it('draws an integer divided by 10^decimals with exactly that many digits, in the locale', () => {
     expect(formatScaled(125, 2, 'nb-NO')).toBe('1,25');
     expect(formatScaled(120, 1, 'nb-NO')).toBe('12,0');
     expect(formatScaled(125, 1, 'en-US')).toBe('12.5');
-    expect(formatScaled(1234567, 0, 'en-US')).toBe('1,234,567');
+  });
+  it('never groups thousands', () => {
+    expect(formatScaled(12500, 0, 'nb-NO')).toBe('12500');
+    expect(formatScaled(1234567, 0, 'en-US')).toBe('1234567');
+    expect(formatScaled(1234567, 2, 'nb-NO')).toBe('12345,67');
   });
 });
