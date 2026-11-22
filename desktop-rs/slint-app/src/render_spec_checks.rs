@@ -37,6 +37,21 @@ fn row_value(item: &ArtifactItem, key: &str) -> Option<crate::FormLeaf> {
     item.spec_rows.iter().flat_map(|r| std::iter::once(r.leaf.clone()).chain(r.cells.iter()).collect::<Vec<_>>()).find(|l| l.key == key)
 }
 
+/// How the toggle labelled `label` is drawn: on or off in every copy the
+/// window has (the chat's and its off-screen measure), None when none is.
+fn drawn_toggle(label: &str) -> Option<bool> {
+    use i_slint_backend_testing::{AccessibleRole, ElementQuery};
+    let (window, label) = (crate::window()?, label.to_owned());
+    let states: Vec<Option<bool>> = ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.accessible_role() == Some(AccessibleRole::Checkbox) && e.accessible_label().is_some_and(|l| l == label.as_str()))
+        .find_all()
+        .into_iter()
+        .map(|e| e.accessible_checked())
+        .collect();
+    let first = *states.first()?;
+    states.iter().all(|s| *s == first).then_some(first).flatten()
+}
+
 pub fn render_spec_check(out: String) {
     let (o1, o2, o3, o4) = (out.clone(), out.clone(), out.clone(), out);
     let reads_before = Rc::new(Cell::new(0usize));
@@ -113,6 +128,8 @@ pub fn render_spec_check(out: String) {
             }
             check(item.spec_footnote.is_empty(), &format!("nothing holds Send back: {:?}", item.spec_footnote));
             check(row_value(&item, "quiet").is_some_and(|l| l.on), "the toggle is on");
+            check(drawn_toggle("Skip the release notes") == Some(true), &format!("and drawn on: {:?}", drawn_toggle("Skip the release notes")));
+            check(drawn_toggle("Tell the testers when it is out") == Some(true), "the spec's own toggle is drawn on");
             shot(&o2, "render-spec-02-ready");
             bridge(window).invoke_form_send(ID.into());
             true
@@ -165,6 +182,7 @@ pub fn render_spec_check(out: String) {
             }
             check(row_value(&item, "decision").is_some_and(|l| l.chosen == 2), "the Host's answer shows after a reload");
             check(row_value(&item, "quiet").is_some_and(|l| l.on), "toggles included");
+            check(drawn_toggle("Skip the release notes") == Some(true), &format!("and drawn on: {:?}", drawn_toggle("Skip the release notes")));
             check(item.spec_footnote.starts_with("Answered"), &format!("still answered: {:?}", item.spec_footnote));
             shot(&o4, "render-spec-04-reloaded");
             true

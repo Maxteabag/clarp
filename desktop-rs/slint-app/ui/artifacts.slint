@@ -205,6 +205,10 @@ export global ArtifactBridge {
     callback form-choose(string, string, string);
     callback form-send(string);
     callback form-retry(string);
+    // A form card's rows by its id: one model for the card's life, read
+    // through here so the rows' repeater depends on the id alone (a row
+    // changed while the card's item is being replaced is still applied).
+    pure callback form-rows(string) -> [FormRow];
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
@@ -817,7 +821,7 @@ component FormBody inherits VerticalLayout {
     }
     if root.artifact.spec-state == "form": VerticalLayout {
         spacing: 0px;
-        for row in root.artifact.spec-rows: Rectangle {
+        for row in ArtifactBridge.form-rows(root.artifact.id): Rectangle {
             background: row.in-card ? Palette.raised : transparent;
             border-top-left-radius: row.card-top ? 8px : 0px;
             border-top-right-radius: row.card-top ? 8px : 0px;

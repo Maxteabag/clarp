@@ -52,6 +52,17 @@ struct Shown {
     rows: Vec<Row>,
 }
 
+impl Shown {
+    fn new() -> Self {
+        Shown { model: Rc::new(VecModel::default()), rows: Vec::new() }
+    }
+}
+
+/// The card's one row model (made empty when the card asks first).
+fn model_of(id: &str) -> ModelRc<FormRow> {
+    SHOWN.with(|shown| ModelRc::from(shown.borrow_mut().entry(id.to_owned()).or_insert_with(Shown::new).model.clone()))
+}
+
 thread_local! {
     /// Each form card's rows, by artifact.
     static SHOWN: RefCell<HashMap<String, Shown>> = RefCell::default();
@@ -199,7 +210,7 @@ fn form_row(row: &Row) -> FormRow {
 fn rows_model(id: &str, rows: Vec<Row>) -> ModelRc<FormRow> {
     SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
-        let entry = shown.entry(id.to_owned()).or_insert_with(|| Shown { model: Rc::new(VecModel::default()), rows: Vec::new() });
+        let entry = shown.entry(id.to_owned()).or_insert_with(Shown::new);
         let same_shape = entry.rows.len() == rows.len() && entry.rows.iter().zip(&rows).all(|(a, b)| a.leaf.id == b.leaf.id && a.cells.len() == b.cells.len());
         if !same_shape {
             entry.model.set_vec(rows.iter().map(form_row).collect::<Vec<_>>());
@@ -293,6 +304,7 @@ pub fn bind(window: &AppWindow) {
     bridge.on_form_toggle(|id, key, on| with_engine(|e| e.set_render_spec_value(&id, &key, Answer::Bool(on))));
     bridge.on_form_choose(|id, key, value| with_engine(|e| e.set_render_spec_value(&id, &key, Answer::Str(value.to_string()))));
     bridge.on_form_send(|id| with_engine(|e| e.send_render_spec(&id)));
+    bridge.on_form_rows(|id| model_of(&id));
     bridge.on_form_retry(|id| with_engine(|e| e.retry_render_spec(&id)));
 }
 
