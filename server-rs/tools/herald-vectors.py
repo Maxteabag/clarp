@@ -77,6 +77,12 @@ SCRIPTS = [
     {'name': 'two raise their hands and the user answers both',
      'steps': [step(FOCUS, 'rachel'), clip('mike', 1), clip('bella', 2), step(SAY, 'not now'), step(SAY, 'ok Mike, Bella later'),
                step(SAY, 'bella go')]},
+    {'name': 'a joint grant plays Mike then Bella when Mike raised first',
+     'steps': [step(FOCUS, 'rachel'), clip('mike', 1), clip('bella', 2), clip('mike', 3),
+               step(SAY, 'Mike, Bella, go ahead')]},
+    {'name': 'the same grant plays Bella then Mike when Bella raised first',
+     'steps': [step(FOCUS, 'rachel'), clip('bella', 1), clip('mike', 2), clip('bella', 3),
+               step(SAY, 'Mike, Bella, go ahead')]},
     {'name': 'a message to an agent lets what it held be heard',
      'steps': [step(FOCUS, 'rachel'), clip('mike', 1), clip('mike', 2), step(AWAIT, 'mike'), clip('mike', 3), clip('rachel', 4),
                step(AWAIT, ''), clip('rachel', 5)]},
@@ -210,15 +216,7 @@ def run(root) -> dict:
             del heard[:]
             result = act(one)
             held = {sid: manager.held_clips(sid) for sid in list(AGENTS) + ['stranger', '']}
-            told = [dict(event) for event in heard]
-            # Where a sentence lets more than one agent speak, the Python Host lets them speak
-            # in the order of a set of their sessions, which is another from one start to the
-            # next (reference defect R52). Written here in the order of the sessions' names,
-            # so that the same steps give the same file: the order is no part of what is held.
-            if isinstance(result, dict) and len(result.get('granted') or []) > 1:
-                result = {**result, 'granted': sorted(result['granted'])}
-                told.sort(key=lambda event: str(event.get('session') or ''))
-            rows.append({'step': one, 'result': result, 'heard': told,
+            rows.append({'step': one, 'result': result, 'heard': [dict(event) for event in heard],
                          'pending': sorted(manager.pending_heralds()),
                          'held': {sid: urls for sid, urls in held.items() if urls}})
         return {'name': script['name'], 'steps': rows}

@@ -69,7 +69,6 @@ fn the_register_of_push_devices_is_kept_as_the_python_host_keeps_it() {
                             provider: text(args, "provider"),
                             modes: &modes,
                         },
-                        &can_receive,
                         at,
                     )
                     .map(|rows| (rows, Value::Null)),

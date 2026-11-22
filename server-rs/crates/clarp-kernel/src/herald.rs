@@ -17,7 +17,7 @@
 //! Held to the Python Host's own manager and classifier by
 //! `tests/fixtures/herald-vectors.json`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -201,8 +201,8 @@ pub struct Herald<C> {
     awaiting: Option<(String, i64)>,
     /// What is held, for each session, in the order it came.
     held: BTreeMap<String, Vec<C>>,
-    /// The sessions whose hand is up: their herald was played.
-    pending: BTreeSet<String>,
+    /// The sessions whose hand is up, in the order their heralds played.
+    pending: Vec<String>,
     /// The sessions whose herald is being made, each with the attempt's number.
     inflight: BTreeMap<String, u64>,
     attempts: u64,
@@ -213,7 +213,7 @@ impl<C> Default for Herald<C> {
         Self {
             awaiting: None,
             held: BTreeMap::new(),
-            pending: BTreeSet::new(),
+            pending: Vec::new(),
             inflight: BTreeMap::new(),
             attempts: 0,
         }
@@ -233,7 +233,7 @@ impl<C: Clone> Herald<C> {
 
     /// Everything that is held of one session is played, across agents or as it comes.
     fn flush(&mut self, session: &str, across: bool) -> Vec<Play<C>> {
-        self.pending.remove(session);
+        self.pending.retain(|pending| pending != session);
         let held = self.held.remove(session).unwrap_or_default();
         held.into_iter()
             .map(|clip| Play::Clip {
@@ -253,7 +253,7 @@ impl<C: Clone> Herald<C> {
         held.retain(|clip| !is_it(clip));
         if held.is_empty() {
             self.held.remove(session);
-            self.pending.remove(session);
+            self.pending.retain(|pending| pending != session);
         }
     }
 
@@ -301,7 +301,7 @@ impl<C: Clone> Herald<C> {
                 self.held.entry(session.to_string()).or_default().push(clip);
                 return plays;
             }
-            let across = self.pending.contains(session);
+            let across = self.pending.iter().any(|pending| pending == session);
             plays = self.flush(session, across);
         }
         plays.push(Play::Clip {
@@ -334,7 +334,9 @@ impl<C: Clone> Herald<C> {
         // Held before the herald's clip is made, so that a user who turns to the agent
         // meanwhile finds it.
         self.held.entry(session.to_string()).or_default().push(clip);
-        if self.pending.contains(session) || self.inflight.contains_key(session) {
+        if self.pending.iter().any(|pending| pending == session)
+            || self.inflight.contains_key(session)
+        {
             return Taken::Decided(Vec::new());
         }
         self.attempts += 1;
@@ -361,7 +363,7 @@ impl<C: Clone> Herald<C> {
         if !clip_made {
             return self.flush(session, false);
         }
-        self.pending.insert(session.to_string());
+        self.pending.push(session.to_string());
         vec![Play::Herald {
             session: session.to_string(),
         }]

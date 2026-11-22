@@ -49,8 +49,11 @@ def test_an_android_phone_registers_rotates_and_owns_its_fcm_token(running_serve
     assert (row["platform"], row["provider"], row["principal"], row["disabled_at"]) == (
         "android", "fcm", android["device_id"], None)
 
-    assert _post(base, other["token"], body) == (
+    assert _post(base, "local-administrator", body) == (
         409, {"ok": False, "error": "device_token_owned_elsewhere"})
+    assert _post(base, other["token"], body) == (200, {"ok": True})     # R26: taken over
+    assert _rows()[FCM_TOKEN]["principal"] == other["device_id"]
+    assert _post(base, android["token"], body) == (200, {"ok": True})   # and back
 
     assert _post(base, android["token"], {**body, "token": FCM_ROTATED}) == (200, {"ok": True})
     rows = _rows()

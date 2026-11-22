@@ -94,7 +94,9 @@ for file,why,old,new in [
     (H+'keeper.rs','gather uses the uncorrected document cursor','let since = (since_ms, start);','let since = (since_ms, requested);'),
 ]: plant(file,'keeper',why,old,new)
 for file,why,old,new in [
-    ('request_tool.rs','arming trusts a different named requester','Some(id) if id == owner.record.agent_id','Some(id) if !id.is_empty()'),
+    ('request_tool.rs','a peer wait is attributed to the named requester',
+     '        Some(id) => crate::agent::GoalCaller::Peer(id.to_owned(), true),',
+     '        Some(_) => crate::agent::GoalCaller::Default,'),
     ('request_tool.rs','arming discards the identified owner',
      '                deadline,\n                request_owner(turn.as_deref(), &requester),',
      '                deadline,\n                crate::agent::GoalCaller::Default,'),

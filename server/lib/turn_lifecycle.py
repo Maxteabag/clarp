@@ -169,6 +169,11 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     TurnEvent.UPDATE_HANDOFF: (AgentState.IDLE, BUSY),
 }
 
+# A turn's ends that a new agent's first turn may send while it is still SPAWNED
+# (TurnStateMachine._first_turn_end, R43).
+FIRST_TURN_ENDS = frozenset({TurnEvent.HOOK_STOP, TurnEvent.PROCESS_EXITED_OK,
+                             TurnEvent.PROCESS_EXITED_FAILED, TurnEvent.TURN_FAILED_UNCLASSIFIED})
+
 # Kinds whose detail is enriched with the turn origin (see
 # ``_detail_with_origin``); the set predates the machine and is unchanged.
 _ORIGIN_ENRICHED_KINDS = frozenset({
@@ -384,6 +389,19 @@ class TurnStateMachine:
     def target(self, event: str) -> str:
         return self.table[event][0]
 
+    @staticmethod
+    def _first_turn_end(agent_id: str, from_state: str, event: str, trace: str) -> bool:
+        """A new agent's first turn ended before the Host recorded that it began (R43): a very
+        fast backend finishes inside spawn_turn, and the end found the agent still SPAWNED.
+        Refused, the dispatcher's late 'thinking' left it busy with no process. An end is
+        taken from SPAWNED when it names a turn of this agent that has its row and has not
+        settled; an end naming no such turn stays refused, as every other end from SPAWNED."""
+        if from_state != AgentState.SPAWNED or event not in FIRST_TURN_ENDS or not trace:
+            return False
+        return conn().execute(
+            "SELECT 1 FROM turns WHERE agent_id = ? AND trace_id = ? AND settled_at IS NULL LIMIT 1",
+            (agent_id, trace)).fetchone() is not None
+
     def is_legal(self, from_state: str, event: str) -> bool:
         if event == TurnEvent.RECORDED:
             return True
@@ -477,7 +495,8 @@ class TurnStateMachine:
                 raise ValueError(f"unknown turn event: {event}") from None
         if event == TurnEvent.BACKGROUND_FINISHED:
             from_state = AgentState.BACKGROUND
-        elif not force and not self.is_legal(from_state, event):
+        elif not force and not self.is_legal(from_state, event) \
+                and not self._first_turn_end(agent_id, from_state, event, trace):
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
         if (event == TurnEvent.SPAWN_STARTED and not force and ts is None and trace
