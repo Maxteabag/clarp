@@ -9,7 +9,7 @@ import sys
 import time
 from typing import Any, Callable
 
-from . import db, html_forms, prompt_admissions
+from . import db, prompt_admissions
 from . import lifecycle as lk
 from .lifecycle import Deadline, Edge, Lifecycle, WaitForever
 from .log import log, log_exception
@@ -1768,7 +1768,7 @@ def pending_count(agent_id: str) -> int:
 # A waiting item the apps list (GET /turn-queue): not a form answer on its way to
 # its agent, whose card is the user's record (issue 428). ``count`` is every item
 # that waits, for the Host's own decisions; ``listed`` is the depth an app is told.
-_LISTED = f"COALESCE(client_msg_id, '') NOT LIKE '{html_forms.DELIVERY_ID_PREFIX}%'"
+_LISTED = f"COALESCE(client_msg_id, '') NOT LIKE '{prompt_admissions.FORM_ANSWER_CLIENT_ID_PREFIX}%'"
 
 
 def state(agent_id: str) -> dict[str, int | bool]:
