@@ -24,7 +24,9 @@
 //! `view_file` is `Read`), with what it was given under the names those tools have: so the
 //! Python Host tells them (`backend/agy.py`, `_canonical_tool_input`).
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
@@ -32,6 +34,7 @@ use clarp_kernel::takeover::Input;
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
+use regex::Regex;
 use serde_json::{Map, Value, json};
 
 use crate::{
@@ -50,10 +53,7 @@ const PRINT_TIMEOUT: &str = "24h";
 use clarp_child::MANAGED_AGY_ENV as MANAGED;
 /// What the ids of Antigravity's live items begin with.
 const SHOWN: &str = "ag";
-/// The tools of Antigravity under the names the conversation knows tools by: the ten the
-/// Python Host knows (`_TOOL_NAMES`), and the three names agy gives its file tools today
-/// (`read_file`, `write_file`, `edit_file`, with the file under `Path`), which that Host
-/// shows as tools nobody knows.
+/// The tools of Antigravity under the names the conversation knows tools by.
 const TOOL_NAMES: [(&str, &str); 13] = [
     ("run_command", "Bash"),
     ("view_file", "Read"),
@@ -343,6 +343,42 @@ pub(crate) fn tool_name(raw: &str) -> String {
     }
 }
 
+/// File arguments in the order agy checks them, for both live and saved tools.
+pub(crate) const FILE_ARGUMENTS: [&str; 6] = [
+    "file_path",
+    "FilePath",
+    "AbsolutePath",
+    "TargetFile",
+    "Path",
+    "path",
+];
+
+static SECRET: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::expect_used)]
+    Regex::new(concat!(
+        r"(?i)(authorization|token|password|passwd|secret|api[_-]?key)[\s\x1c-\x1f]*[:=][\s\x1c-\x1f]*",
+        r"(?:(?:bearer|basic|token|digest|negotiate)[\s\x1c-\x1f]+)?[^\s\x1c-\x1f]+"
+    ))
+    .expect("the credential pattern is well formed")
+});
+
+/// Blank credentials before a tool input becomes a cell or a live item.
+pub(crate) fn redact_input(text: &str) -> Cow<'_, str> {
+    SECRET.replace_all(text, "${1}=[redacted]")
+}
+
+static OUTPUT_HEADING: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::expect_used)]
+    Regex::new(r"(?im)^(?:command )?output:\n").expect("the output heading pattern is well formed")
+});
+
+/// The bytes after the first output heading, or the original body when it has none.
+pub(crate) fn printed_output(body: &str) -> &str {
+    OUTPUT_HEADING
+        .find(body)
+        .map_or(body, |heading| &body[heading.end()..])
+}
+
 /// What a tool was given, under the names the conversation's tools have. Antigravity
 /// spells its own otherwise (`CommandLine`, `AbsolutePath`, `TargetFile`, `Query`).
 fn tool_input(name: &str, given: &Value) -> Value {
@@ -355,10 +391,12 @@ fn tool_input(name: &str, given: &Value) -> Value {
             Value::String(text) => !text.is_empty(),
             _ => true,
         });
-        match said.next() {
-            Some(Value::String(text)) => text.clone(),
-            Some(other) => other.to_string(),
-            None => String::new(),
+        let Some(said) = said.next() else {
+            return String::new();
+        };
+        match said {
+            Value::String(text) => redact_input(text).into_owned(),
+            other => redact_input(&other.to_string()).into_owned(),
         }
     };
     match name {
@@ -367,14 +405,7 @@ fn tool_input(name: &str, given: &Value) -> Value {
             "description": first(&["description"]),
         }),
         "Read" | "Write" | "Edit" => json!({
-            "file_path": first(&[
-                "file_path",
-                "FilePath",
-                "AbsolutePath",
-                "TargetFile",
-                "path",
-                "Path",
-            ]),
+            "file_path": first(&FILE_ARGUMENTS),
         }),
         "Grep" | "Glob" => json!({
             "pattern": first(&["pattern", "Query"]),
@@ -413,17 +444,7 @@ fn came_back(output: &str) -> (String, Option<i64>) {
             .parse::<i64>()
             .ok()
     });
-    // What it printed comes after a line that says so: `Command output:` in what agy 1.5.10
-    // writes of a step, `Output:` in its own record of a conversation.
-    let marks = ["Command output:\n", "Output:\n"];
-    let found = marks.iter().filter_map(|mark| {
-        let at = body.find(mark)?;
-        Some((at, at + mark.len()))
-    });
-    if let Some((_, after)) = found.min() {
-        body = &body[after..];
-    }
-    (clarp_kernel::python::strip(body).to_string(), code)
+    (clarp_kernel::python::strip(printed_output(body)).to_string(), code)
 }
 
 /// The figure that says only how much in all: no usage of a step's own.
@@ -1048,6 +1069,13 @@ mod tests {
         // As its own record of a conversation words it.
         let recorded = "Completed At: x\nThe command exited with code 1\nOutput:\nboom\n";
         assert_eq!(came_back(recorded), ("boom".to_string(), Some(1)));
+        let mixed = "note: Output:\nnoise\nCoMmAnD oUtPuT:\nfirst\nOutput:\nsecond";
+        assert_eq!(
+            came_back(mixed),
+            ("first\nOutput:\nsecond".to_string(), None)
+        );
+        let inline = "note: Output:\nkeep this body";
+        assert_eq!(came_back(inline), (inline.to_string(), None));
         assert_eq!(came_back("a\r\n"), ("a".to_string(), None));
         // A first line with no end is no line written around it.
         assert_eq!(
@@ -1068,8 +1096,22 @@ mod tests {
             json!({ "command": "ls -la", "description": "" })
         );
         assert_eq!(
+            tool_input(
+                "Bash",
+                &json!({
+                    "CommandLine": "request Authorization: bEaReR fake-token",
+                    "description": "TOKEN=Negotiate fake-description",
+                })
+            ),
+            json!({ "command": "request Authorization=[redacted]", "description": "TOKEN=[redacted]" })
+        );
+        assert_eq!(
             tool_input("Read", &json!({ "AbsolutePath": "/work/a.txt" })),
             json!({ "file_path": "/work/a.txt" })
+        );
+        assert_eq!(
+            tool_input("Edit", &json!({ "Path": "/preferred", "path": "/fallback" })),
+            json!({ "file_path": "/preferred" })
         );
         assert_eq!(
             tool_input(

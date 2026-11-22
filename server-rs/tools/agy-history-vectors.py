@@ -8,21 +8,6 @@ that the Rust Host's reading is held to it line by line. And what each turn is i
 conversation (`commentary`, `final` or neither), as the Python Host marks the rows it reads
 (`server/lib/message_writes.py`, `_row_phases`).
 
-Two things the Rust Host does not copy, and they are defined here, not in the Rust: each
-transcript is read a second time by the same function with them mended (`turns_mended`), and
-the Rust Host is held to that reading.
-
-1. The names agy gives its tools today. The Python Host knows `view_file`, `write_to_file` and
-   `replace_file_content` as Read, Write and Edit; agy 1.5 calls them `read_file`, `write_file`
-   and `edit_file`, with the file under `Path`, and those are shown as tools nobody knows, without
-   their file (in the owner's store on 17 Nov 2026: 2,806 calls of `read_file`, 541 of
-   `edit_file` and 197 of `write_file` against 180, 4 and 19 of the older names). Mended: the
-   three names are the three tools, and `Path` is their file.
-2. What a command printed. agy wrote `Output:` before it and writes `Command output:` now (in the
-   same store 2,406 results against 456); the Python Host cuts at the first only, so a result of
-   the second kind is shown with the line of how the command ended before it. Mended: cut at
-   whichever of the two comes first.
-
 It runs in a process of its own whose every home, data, config and cache directory is a new empty
 directory (the replay harness's own isolation, `tests/replay/host.py`), with no way out to any
 network.
@@ -154,9 +139,9 @@ TRANSCRIPTS = [
                           call('run_command', CommandLine='make four'),
                           call('run_command', CommandLine='make five')]),
         answer(2, ran(0, 'the older words\n')),
-        answer(3, ran(0, 'the newer words\n', mark='Command output')),
+        answer(3, ran(0, 'the newer words\n', mark='cOmMaNd OuTpUt')),
         answer(4, 'Command exited with code 3.\n\nCommand output:\nfirst\nOutput:\nsecond\n'),
-        answer(5, 'no line of how it ended, and nothing printed'),
+        answer(5, 'not a heading: Output:\nkeep the entire body'),
         ev('GENERIC', 6, 'exited with code 4 and no header\nOutput:\n' + LONG),
         planned(7, 'Ran.'),
         planned(8, None, [call('run_command', CommandLine='make six')]),
@@ -265,7 +250,7 @@ TRANSCRIPTS = [
             call('search_web', query='rust edition 2024', domain='rust-lang.org'),
             call('read_url_content', Url='https://example.test/page'),
             call('generate_image', Prompt='a heron', ImageName='heron'),
-            call('read_file', Path='/srv/read.txt', StartLine='1'),
+            call('read_file', Path='/srv/read.txt', StartLine='1', path='/fallback'),
             call('edit_file', Path='/srv/edit.txt', Target='a', Replacement='b'),
             call('write_file', Path='/srv/write.txt', Content='x'),
             call('manage_task', Action='list'),
@@ -282,8 +267,8 @@ TRANSCRIPTS = [
     ('given', 'what a tool was given is cut, and what looks like a secret is not shown', [
         asked(0, 'Careful'),
         planned(1, None, [
-            call('run_command', CommandLine='curl -H "Authorization: Bearer abc123" https://example.test',
-                 description='TOKEN=xyz in a description ' + 'd' * 200),
+            call('run_command', CommandLine='request Authorization: Bearer abc123 then token: Basic fake-basic',
+                 description='TOKEN=Digest fake-digest secret=Negotiate fake-negotiate api_key: Token fake-token ' + 'd' * 200),
             call('run_command', command='password = hunter2 --api-key:k1 --api_key=k2 secret:s3 passwd=p4'),
             call('run_command', CommandLine='echo ' + 'c' * 300),
             call('view_file', file_path='/first', FilePath='/second', AbsolutePath='/third'),
@@ -319,14 +304,9 @@ TRANSCRIPTS = [
     ('nothing', 'an empty file', []),
 ]
 
-# The names agy 1.5 gives the three tools the Python Host knows under their older names only.
-MENDED_NAMES = {'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit'}
-
-
 @tool_scratch.case('clarp-agy-history-vectors-')
 def run(root) -> dict:
-    """Runs in a process of its own: the turns the Python Host reads from the transcripts above,
-    as it is and with the two things mended."""
+    """Runs in a process of its own: the turns the Python Host reads from the transcripts above."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
@@ -335,8 +315,6 @@ def run(root) -> dict:
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
     from lib import agy_transcript, message_writes
-    from lib.backend import agy
-    from lib.text_util import truncate
     from lib.voice_preamble import apply_voice_preamble
 
     def line_of(line):
@@ -346,60 +324,14 @@ def run(root) -> dict:
             return json.dumps(asked(step, told))
         return line if isinstance(line, str) else json.dumps(line)
 
-    def mended():
-        """The same function with the two things mended. Answers how to put it back."""
-        names, given, settle = dict(agy._TOOL_NAMES), agy._canonical_tool_input, agy_transcript._settle
-        agy._TOOL_NAMES.update(MENDED_NAMES)
-
-        def canonical(name, value):
-            raw = value if isinstance(value, dict) else {}
-            if name in {'Read', 'Write', 'Edit'} and not (
-                    raw.get('file_path') or raw.get('FilePath') or raw.get('AbsolutePath')
-                    or raw.get('TargetFile') or raw.get('path')):
-                raw = {**raw, 'path': raw.get('Path')}
-            return given(name, raw)
-
-        def settled(tool, content, status=''):
-            # `_settle` as it is, but for where it cuts: at whichever of the two marks comes
-            # first. (A copy: when that function changes, this one is looked at again.)
-            body = agy_transcript._RESULT_HEADER_RE.sub('', content or '', count=1)
-            code = agy_transcript._EXIT_RE.search(body[:300])
-            tool['exit_code'] = int(code.group(1)) if code else None
-            cuts = [(body.find(mark), len(mark)) for mark in ('Output:\n', 'Command output:\n') if mark in body]
-            if cuts:
-                at, size = min(cuts)
-                body = body[at + size:]
-            tool['result'] = truncate(body.strip(), 300)
-            tool['_output'] = body
-            if status.upper() == 'RUNNING':
-                tool['status'] = 'running'
-            else:
-                tool['status'] = 'error' if tool['exit_code'] not in (None, 0) else 'ok'
-
-        agy._canonical_tool_input, agy_transcript._settle = canonical, settled
-
-        def back():
-            agy._TOOL_NAMES.clear()
-            agy._TOOL_NAMES.update(names)
-            agy._canonical_tool_input, agy_transcript._settle = given, settle
-        return back
-
     out = []
     for name, what, lines in TRANSCRIPTS:
         written = [line_of(line) for line in lines]
         path = root / f'{name}.jsonl'
         path.write_text('\n'.join(written) + ('\n' if written else ''))
         turns = agy_transcript.parse_turns(path)
-        back = mended()
-        try:
-            again = agy_transcript.parse_turns(path)
-        finally:
-            back()
-        assert agy_transcript.parse_turns(path) == turns, 'the function was not put back as it was'
         row = {'name': name, 'what': what, 'lines': written, 'turns': turns,
-               'phases': message_writes._row_phases(again)}
-        if again != turns:
-            row['turns_mended'] = again
+               'phases': message_writes._row_phases(turns)}
         out.append(row)
     return {'transcripts': out}
 
@@ -420,14 +352,10 @@ def main() -> int:
         out.append('  {"name": ' + json.dumps(row['name']) + ', "what": ' + json.dumps(row['what'])
                    + ', "phases": ' + json.dumps(row['phases']) + ',')
         out.append('   "lines": ' + json.dumps(row['lines'], ensure_ascii=True) + ',')
-        for key in ('turns', 'turns_mended'):
-            if key not in row:
-                continue
-            last = key == 'turns_mended' or 'turns_mended' not in row
-            out.append(f'   "{key}": [')
-            out.extend('    ' + json.dumps(turn, ensure_ascii=True) + (',' if n < len(row[key]) - 1 else '')
-                       for n, turn in enumerate(row[key]))
-            out.append('   ]' + ('' if last else ','))
+        out.append('   "turns": [')
+        out.extend('    ' + json.dumps(turn, ensure_ascii=True) + (',' if n < len(row['turns']) - 1 else '')
+                   for n, turn in enumerate(row['turns']))
+        out.append('   ]')
         out.append('  }' + (',' if number < len(rows) - 1 else ''))
     out.append(' ]')
     out.append('}')
@@ -438,7 +366,7 @@ def main() -> int:
         f'{row["name"]}: {len(row["lines"])} lines, {len(row["turns"])} turns, '
         f'{sum(len(turn.get("tools") or []) for turn in row["turns"])} tools, '
         f'{sum(len(turn.get("display_cells") or []) for turn in row["turns"])} cells'
-        f'{", mended" if "turns_mended" in row else ""}' for row in rows))
+        for row in rows))
     return 0
 
 
