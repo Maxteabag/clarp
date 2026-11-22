@@ -40,6 +40,12 @@ pub(super) struct Row {
     pub subject: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     device_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_session: Option<String>,
     pub first_seen: i64,
     pub last_seen: i64,
     pub count: u64,
@@ -82,19 +88,65 @@ pub(super) struct Book {
     summary_date: String,
 }
 
+pub(super) fn agent_label(name: &str, session: &str) -> String {
+    if name.is_empty() || name == session {
+        session.to_owned()
+    } else {
+        format!("{name} ({session})")
+    }
+}
+
 impl Row {
-    pub fn refresh_device_name(&mut self, directory: &Directory) {
-        if self.kind.starts_with("app_crash_")
-            && let Some(device) = directory
+    pub fn refresh_subject(&mut self, directory: &Directory) {
+        if self.kind.starts_with("app_crash_") {
+            if let Some(device) = directory
                 .devices
                 .values()
                 .find(|device| device.device_id == self.subject && !device.name.trim().is_empty())
+            {
+                self.device_name = Some(device.name.clone());
+            }
+            return;
+        }
+
+        if self.agent_id.is_none() {
+            self.agent_id = match self.kind.as_str() {
+                "wait" | "queue" | "sends" => Some(self.subject.clone()),
+                "release" => directory
+                    .members
+                    .iter()
+                    .chain(&directory.janitors)
+                    .find(|member| {
+                        member
+                            .agent
+                            .view()
+                            .jobs
+                            .iter()
+                            .any(|job| job.id == self.subject)
+                    })
+                    .map(|member| member.record.agent_id.clone()),
+                _ => None,
+            };
+        }
+        if let Some((name, session)) = self
+            .agent_id
+            .as_deref()
+            .and_then(|id| directory.shown_as(id))
         {
-            self.device_name = Some(device.name.clone());
+            self.agent_name = Some(name);
+            self.agent_session = Some(session);
         }
     }
 
     pub fn subject_label(&self) -> String {
+        if let Some(session) = self.agent_session.as_deref() {
+            let agent = agent_label(self.agent_name.as_deref().unwrap_or_default(), session);
+            return if self.kind == "release" {
+                format!("{} ({agent})", self.subject)
+            } else {
+                agent
+            };
+        }
         self.device_name.as_ref().map_or_else(
             || self.subject.clone(),
             |name| format!("{name} ({})", self.subject),
@@ -120,7 +172,7 @@ impl Book {
         now: i64,
     ) {
         for row in &mut self.rows {
-            row.refresh_device_name(directory);
+            row.refresh_subject(directory);
             if row.cleared_at.is_some() {
                 continue;
             }
@@ -157,6 +209,9 @@ impl Book {
                 kind,
                 subject,
                 device_name: None,
+                agent_id: None,
+                agent_name: None,
+                agent_session: None,
                 first_seen: now,
                 last_seen: now,
                 count: 1,
@@ -165,7 +220,7 @@ impl Book {
                 notified_open: Vec::new(),
                 notified_clear: Vec::new(),
             };
-            row.refresh_device_name(directory);
+            row.refresh_subject(directory);
             let text = format!(
                 "Experience watch: {} opened for {} at {}. {} (clarp-admin experience --open)",
                 row.kind,
