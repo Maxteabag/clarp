@@ -123,6 +123,8 @@ mod steer_c;
 mod takeover_b;
 #[path = "host/teams_runtime.rs"]
 mod teams_runtime;
+#[path = "host/issue_278.rs"]
+mod issue_278;
 #[path = "host/transcription_errors.rs"]
 mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]

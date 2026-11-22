@@ -1192,6 +1192,16 @@ impl GoalBook {
             .map_or_else(|| json!({}), |plan| self.view(plan, &[], now))
     }
 
+    /// The plan shown in an app, including the paused plan when nothing is active.
+    pub fn show_for_client(&self, now: i64) -> Value {
+        let plans = self.newest_first();
+        plans
+            .iter()
+            .find(|plan| plan.status == "active")
+            .or_else(|| plans.iter().find(|plan| plan.status == "paused"))
+            .map_or_else(|| json!({}), |plan| self.view(plan, &[], now))
+    }
+
     /// One version of a document, with its content: the newest, or the one asked for.
     pub fn read(&self, plan_id: &str, name: &str, revision: Option<i64>) -> Result<Value, Refused> {
         let versions: Vec<&Document> = self

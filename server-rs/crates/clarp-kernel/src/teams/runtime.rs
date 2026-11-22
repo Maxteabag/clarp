@@ -168,10 +168,14 @@ pub fn pending(
     }
     for (team, row) in unread.into_iter().take(DIGEST_LIMIT).rev() {
         let msg = &row.message;
-        let source = person(&msg.source_agent_id)
-            .map(|p| p.name)
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| "A teammate".into());
+        let source = if msg.source_agent_id == super::USER_SOURCE {
+            "User".into()
+        } else {
+            person(&msg.source_agent_id)
+                .map(|p| p.name)
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "A teammate".into())
+        };
         lines.push(format!("- [{}] {source}: {}", team.name, msg.text));
     }
     lines.push(String::new());
