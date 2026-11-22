@@ -646,6 +646,10 @@ impl Desk {
         said: &Value,
     ) -> Result<Result<Value, Refused>, Unavailable> {
         let _one_at_a_time = self.placing.lock().await;
+        let voip = crate::direct::key(&crate::owner::OwnerFile::new(
+            app.config.speech_keys.clone(),
+        ))
+        .is_some();
         let (agent, reason, line) = (
             text(said, "agent"),
             text(said, "reason"),
@@ -667,6 +671,11 @@ impl Desk {
                 rings::Admission::Again(answer) => Placing::Told(answer),
                 // A live ring's opening is its voice's own: it is placed at once.
                 rings::Admission::Place(admitted) if admitted.is_live() => {
+                    let admitted = if voip {
+                        rings.for_voip(admitted, &with.world)
+                    } else {
+                        admitted
+                    };
                     let ring = rings.place(admitted, "", with.new_id, now, out);
                     Placing::Placed(Box::new(live::placed(rings, ring, &with.world)))
                 }
@@ -694,6 +703,11 @@ impl Desk {
                 let voiced = voiced.map_or_else(String::new, |name| format!("/audio/{name}"));
                 let placed = self.ask_rings(app, None, |rings, _, with, (out, _)| {
                     let now = with.at.now_ms;
+                    let admitted = if voip {
+                        rings.for_voip(admitted, &with.world)
+                    } else {
+                        admitted
+                    };
                     let ring = rings.place(admitted, &voiced, with.new_id, now, out);
                     live::placed(rings, ring, &with.world)
                 });
@@ -1209,9 +1223,16 @@ async fn ring_answer(
             new_id: with.new_id,
             minted: names.minted(),
         };
-        rings
-            .answer(calls, &asked, given, &with.world, with.at, effects)
-            .map(|answer| crate::heard::call::project(&app, calls, answer))
+        rings.answer_projected(
+            calls,
+            &asked,
+            (given, |calls, answer| {
+                crate::heard::call::project(&app, calls, answer)
+            }),
+            &with.world,
+            with.at,
+            effects,
+        )
     });
     answered(taken.await)
 }

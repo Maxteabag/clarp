@@ -140,6 +140,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `docs/agent-rings.md`). The ring whose line is said, and not the one that listens
     // first.
     ("agent_rings", 64),
+    ("ring_answer_grace", 150),
     // A ring held as a live voice call: placed with what its producer says of an event,
     // answered with a grant, and held on a socket of its own between the phone and a voice
     // (`conversation_mode: agent_live_v1`, `GET /calls/ring/live`, its close and its switch).

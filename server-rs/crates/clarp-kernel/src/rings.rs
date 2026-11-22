@@ -39,6 +39,9 @@ pub use live::{
 
 /// How long a ring rings before it is missed.
 pub const RING_MS: i64 = 45 * 1000;
+/// Total time from placement for the original VoIP recipients.
+pub const ANSWER_GRACE_MS: i64 = 90 * 1000;
+const ANSWERS_KEPT: usize = 32;
 /// How long an agent waits between its rings.
 pub const BETWEEN_MS: i64 = 60 * 1000;
 const HOUR_MS: i64 = 60 * 60 * 1000;
@@ -66,6 +69,16 @@ const LIVE: &str = "agent_live_v1";
 const SAY: &str = "say";
 const LISTEN_FIRST: &str = "listen_first";
 
+/// One response to a paired phone's stable classic ring-answer request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnswerReceipt {
+    principal: String,
+    request_id: String,
+    nonce: String,
+    status: Option<u16>,
+    body: Value,
+}
+
 /// One ring, as it is kept and as an app reads it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ring {
@@ -84,6 +97,19 @@ pub struct Ring {
     pub state: String,
     pub created_at: i64,
     pub expires_at: i64,
+    /// Device principals selected for the VoIP push at placement, never on the wire.
+    #[serde(
+        default,
+        rename = "_answer_devices",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub answer_devices: Vec<String>,
+    #[serde(
+        default,
+        rename = "_answer_receipts",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub answer_receipts: Vec<AnswerReceipt>,
     #[serde(default)]
     pub ended_at: Option<i64>,
     /// The phone that answered.
@@ -130,6 +156,8 @@ impl Ring {
         let mut told = serde_json::to_value(self).unwrap_or_else(|_| json!({}));
         if let Some(fields) = told.as_object_mut() {
             fields.shift_remove("_live");
+            fields.shift_remove("_answer_devices");
+            fields.shift_remove("_answer_receipts");
             fields.shift_remove("_host_gen");
             fields.shift_remove("_opening");
             if !self.opening.is_null() {
@@ -211,6 +239,7 @@ pub struct Admitted {
     reason: String,
     opening: String,
     at: i64,
+    answer_devices: Vec<String>,
     /// What a ring held as a live voice call keeps of it: its voice is told its opening,
     /// and no line is voiced before.
     live: Option<Box<Live>>,
@@ -647,6 +676,7 @@ impl Rings {
                 reason,
                 opening,
                 at: now_ms,
+                answer_devices: Vec::new(),
                 live: None,
             }),
             Err(why) => {
@@ -659,6 +689,17 @@ impl Rings {
                 Err(why)
             }
         }
+    }
+
+    /// Freeze the actual VoIP push destinations while the ring is placed.
+    pub fn for_voip(&self, mut admitted: Admitted, world: &World) -> Admitted {
+        let phones = self.voip_recipients(admitted.is_live());
+        admitted.answer_devices = self
+            .pushed_as_calls(&phones, world)
+            .into_iter()
+            .map(|(principal, _, _)| principal)
+            .collect();
+        admitted
     }
 
     /// `POST /calls/ring`, its second half: the admitted ring rings. `opening_audio_url` is
@@ -677,8 +718,14 @@ impl Rings {
             reason,
             opening,
             at,
+            answer_devices,
             live,
         } = admitted;
+        let duration = if answer_devices.is_empty() {
+            RING_MS
+        } else {
+            ANSWER_GRACE_MS
+        };
         let ring = Ring {
             opening_mode: if generation.is_null() {
                 String::new()
@@ -696,7 +743,9 @@ impl Rings {
             opening_audio_url: opening_audio_url.to_string(),
             state: RINGING.to_string(),
             created_at: at,
-            expires_at: at + RING_MS,
+            expires_at: at.saturating_add(duration),
+            answer_devices,
+            answer_receipts: Vec::new(),
             ended_at: None,
             answered_by: String::new(),
             call_id: String::new(),
@@ -723,7 +772,8 @@ impl Rings {
     pub fn rung(ring: &Ring, delivery: Value, now_ms: i64) -> Value {
         json!({
             "ok": true, "ring": ring.told(now_ms), "delivery": delivery,
-            "summary": format!("Calling the user. The call rings for {} seconds.", RING_MS / 1000),
+            "summary": format!("Calling the user. The call rings for {} seconds.",
+                               ring.expires_at.saturating_sub(ring.created_at) / 1000),
         })
     }
 
@@ -811,6 +861,122 @@ impl Rings {
         at: calls::At,
         (out, of_calls): (&mut Effects, &mut calls::Effects),
     ) -> Result<Value, Refused> {
+        self.answer_projected(
+            calls,
+            asked,
+            (given, |_, answer| answer),
+            world,
+            at,
+            (out, of_calls),
+        )
+    }
+
+    /// Project a classic answer before saving its retry receipt.
+    pub fn answer_projected(
+        &mut self,
+        calls: &mut Calls,
+        asked: &Answer,
+        (given, project): (Given, impl FnOnce(&Calls, Value) -> Value),
+        world: &World,
+        at: calls::At,
+        (out, of_calls): (&mut Effects, &mut calls::Effects),
+    ) -> Result<Value, Refused> {
+        let now_ms = at.now_ms;
+        self.settle(now_ms, out);
+        let place = self.place_of(asked.ring_id)?;
+        let ring = &self.rings[place];
+        let paired = asked.principal.starts_with("device_");
+        if paired && !(world.device_ok)(asked.principal) {
+            return Err(refused(403, "ring_not_for_device"));
+        }
+        // Classic CallKit retries supply the identity that older classic answers lacked.
+        // Live has its own durable grant identity, and can report a retired grant safely.
+        let retry = if paired
+            && ring.conversation_mode != LIVE
+            && (!asked.request_id.is_null() || !asked.client_nonce.is_null())
+        {
+            Some(live::intent(asked.request_id, asked.client_nonce)?)
+        } else {
+            None
+        };
+        if let Some((request_id, nonce)) = retry
+            && let Some(held) = ring.answer_receipts.iter().find(|held| {
+                held.principal == asked.principal
+                    && held.request_id == request_id
+                    && held.nonce == nonce
+            })
+        {
+            return match held.status {
+                Some(status) => Err(Refused {
+                    status,
+                    body: held.body.clone(),
+                }),
+                None => Ok(held.body.clone()),
+            };
+        }
+        let grace = !ring.answer_devices.is_empty();
+        let boundary = ring.created_at.saturating_add(RING_MS);
+        let refusal = if !(grace || retry.is_some()) {
+            None
+        } else if ring.state == ANSWERED && ring.answered_by != asked.principal {
+            Some(refused(409, "ring_answered_elsewhere"))
+        } else if !ring.rings() && ring.state != ANSWERED {
+            Some(refused(410, "ring_expired"))
+        } else if ring.rings()
+            && now_ms >= boundary
+            && !ring
+                .answer_devices
+                .iter()
+                .any(|device| device == asked.principal)
+        {
+            Some(refused(403, "ring_not_for_device"))
+        } else {
+            None
+        };
+        let answer = refusal
+            .map_or_else(
+                || self.answer_uncached(calls, asked, given, world, at, (&mut *out, of_calls)),
+                Err,
+            )
+            .map(|answer| project(calls, answer));
+        if let Some((request_id, nonce)) = retry {
+            let ring = &mut self.rings[place];
+            // A successful answer must remain replayable while its ring is kept.
+            if ring.answer_receipts.len() == ANSWERS_KEPT
+                && let Some(remove) = ring
+                    .answer_receipts
+                    .iter()
+                    .position(|item| item.status.is_some())
+            {
+                ring.answer_receipts.remove(remove);
+            }
+            if ring.answer_receipts.len() < ANSWERS_KEPT {
+                let (status, body) = match &answer {
+                    Ok(body) => (None, body.clone()),
+                    Err(why) => (Some(why.status), why.body.clone()),
+                };
+                ring.answer_receipts.push(AnswerReceipt {
+                    principal: asked.principal.to_string(),
+                    request_id: request_id.to_string(),
+                    nonce: nonce.to_string(),
+                    status,
+                    body,
+                });
+                out.changed.rings = true;
+            }
+        }
+        answer
+    }
+
+    fn answer_uncached(
+        &mut self,
+        calls: &mut Calls,
+        asked: &Answer,
+        given: Given,
+        world: &World,
+        at: calls::At,
+        (out, of_calls): (&mut Effects, &mut calls::Effects),
+    ) -> Result<Value, Refused> {
         let now_ms = at.now_ms;
         if self.is_live(asked.ring_id) {
             return self.answer_live(asked, (calls, given.minted), world, now_ms, out);
@@ -821,7 +987,6 @@ impl Rings {
             // A ring is answered as it was placed, and this one is no live voice call.
             return Err(refused(409, "live_mode_conflict"));
         }
-        self.settle(now_ms, out);
         let place = self.place_of(asked.ring_id)?;
         let ring = &self.rings[place];
         if ring.state == ANSWERED {
@@ -1243,6 +1408,173 @@ mod tests {
         assert_eq!(rings.alerted(&ring, 1), None);
         assert!(alert_follows("", 0) && !alert_follows("", 2));
         assert!(!alert_follows("agent_live_v1", 0));
+    }
+
+    #[test]
+    fn only_the_original_paired_voip_device_can_answer_during_the_grace() {
+        let known = |id: &str| (id == "a-theo").then(theo);
+        let roster = [Contact {
+            session: "theo-97e5".into(),
+            agent_id: "a-theo".into(),
+            persona: "Theo".into(),
+            helper: false,
+        }];
+        let people = People {
+            roster: &roster,
+            known: &known,
+        };
+        let paired = |_: &str| true;
+        let phones = world(&paired);
+        let mut rings = Rings::default();
+        let mut out = Effects::default();
+        let at = 1_000;
+        rings
+            .voip_token(
+                "device_original",
+                (&*"ab".repeat(32), "", &Value::Null),
+                at,
+                &mut out,
+            )
+            .unwrap();
+        let admitted = placed(
+            rings
+                .admit(&asked(&Value::Null, None), people, &phones, at, &mut out)
+                .unwrap(),
+        );
+        let admitted = rings.for_voip(admitted, &phones);
+        let ring = rings.place(admitted, "", "grace-fixture", at, &mut out);
+        assert_eq!(ring.expires_at, at + ANSWER_GRACE_MS);
+        assert!(ring.told(at).get("_answer_devices").is_none());
+        // A device registering while a ring is in flight gets no grace for it.
+        rings
+            .voip_token(
+                "device_new",
+                (&*"cd".repeat(32), "", &Value::Null),
+                at + 1,
+                &mut out,
+            )
+            .unwrap();
+        let mut expired = rings.clone();
+        assert!(rings.timer(at + RING_MS + 1, &mut out).is_empty());
+        let mut calls = Calls::default();
+        let ask = |rings: &mut Rings,
+                   calls: &mut Calls,
+                   principal,
+                   request,
+                   now_ms,
+                   phones: &World<'_>| {
+            rings.answer(
+                calls,
+                &Answer {
+                    principal,
+                    ring_id: &ring.ring_id,
+                    conversation_mode: &Value::Null,
+                    opening_mode: None,
+                    request_id: &json!(request),
+                    client_nonce: &json!("fixture-nonce"),
+                    client: None,
+                },
+                Given {
+                    roster: &roster,
+                    new_id: "answer-fixture",
+                    minted: Minted {
+                        call: "call",
+                        attempt: "attempt",
+                        nonce: "nonce",
+                        ticket: "ticket",
+                    },
+                },
+                phones,
+                calls::At {
+                    now_ms,
+                    host_id: "host-1",
+                },
+                (&mut Effects::default(), &mut calls::Effects::default()),
+            )
+        };
+        let denied = ask(
+            &mut rings,
+            &mut calls,
+            "device_new",
+            "new-1",
+            at + RING_MS + 1,
+            &phones,
+        )
+        .unwrap_err();
+        assert_eq!(
+            (denied.status, &denied.body["error"]),
+            (403, &json!("ring_not_for_device"))
+        );
+        let revoked = |device: &str| device != "device_original";
+        let revoked_world = world(&revoked);
+        let denied = ask(
+            &mut rings,
+            &mut calls,
+            "device_original",
+            "original-1",
+            at + RING_MS + 1,
+            &revoked_world,
+        )
+        .unwrap_err();
+        assert_eq!(
+            (denied.status, &denied.body["error"]),
+            (403, &json!("ring_not_for_device"))
+        );
+
+        let answered = ask(
+            &mut rings,
+            &mut calls,
+            "device_original",
+            "original-1",
+            at + RING_MS + 1,
+            &phones,
+        )
+        .unwrap();
+        assert_eq!(answered["ring"]["answered_by"], "device_original");
+        assert!(answered["ring"].get("_answer_receipts").is_none());
+        let stored = serde_json::to_vec(rings.rings()).unwrap();
+        let mut restarted = Rings::kept(
+            serde_json::from_slice(&stored).unwrap(),
+            vec![],
+            &json!({}),
+            vec![],
+        );
+        let retry = ask(
+            &mut restarted,
+            &mut calls,
+            "device_original",
+            "original-1",
+            at + RING_MS + 500,
+            &phones,
+        )
+        .unwrap();
+        assert_eq!(answered, retry);
+        let denied = ask(
+            &mut restarted,
+            &mut calls,
+            "device_new",
+            "new-2",
+            at + RING_MS + 500,
+            &phones,
+        )
+        .unwrap_err();
+        assert_eq!(
+            (denied.status, &denied.body["error"]),
+            (409, &json!("ring_answered_elsewhere"))
+        );
+        let denied = ask(
+            &mut expired,
+            &mut calls,
+            "device_original",
+            "expired-1",
+            at + ANSWER_GRACE_MS,
+            &phones,
+        )
+        .unwrap_err();
+        assert_eq!(
+            (denied.status, &denied.body["error"]),
+            (410, &json!("ring_expired"))
+        );
     }
 
     #[test]

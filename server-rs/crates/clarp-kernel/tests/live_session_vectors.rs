@@ -249,6 +249,8 @@ fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
             state: "answered".to_string(),
             created_at: NOW,
             expires_at: NOW + 45_000,
+            answer_devices: Vec::new(),
+            answer_receipts: Vec::new(),
             ended_at: Some(NOW),
             answered_by: phone.to_string(),
             call_id: String::new(),

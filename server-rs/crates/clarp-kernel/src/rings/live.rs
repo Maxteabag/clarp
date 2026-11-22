@@ -259,7 +259,7 @@ fn not_allowed() -> Refused {
 }
 
 /// An answer names what it means exactly: a request id and a nonce.
-fn intent<'a>(
+pub(super) fn intent<'a>(
     request_id: &'a Value,
     client_nonce: &'a Value,
 ) -> Result<(&'a str, &'a str), Refused> {
@@ -396,17 +396,25 @@ impl Rings {
             sent.android = phones.into_iter().map(str::to_string).collect();
         }
         if kind == "ring" {
-            let tokens: Vec<String> = if live {
-                let tokens = self.live_tokens().filter(|phone| self.receives(phone));
-                tokens.map(str::to_string).collect()
-            } else {
-                let phones = self.voip.iter().filter_map(|row| row["principal"].as_str());
-                let phones = phones.filter(|phone| self.receives(phone));
-                phones.map(str::to_string).collect()
-            };
-            sent.voip = Some(tokens);
+            sent.voip = Some(self.voip_recipients(live));
         }
         sent
+    }
+
+    pub(super) fn voip_recipients(&self, live: bool) -> Vec<String> {
+        if live {
+            self.live_tokens()
+                .filter(|phone| self.receives(phone))
+                .map(str::to_string)
+                .collect()
+        } else {
+            self.voip
+                .iter()
+                .filter_map(|row| row["principal"].as_str())
+                .filter(|phone| self.receives(phone))
+                .map(str::to_string)
+                .collect()
+        }
     }
 
     /// The phones a ring that begins to ring is pushed to as an incoming call, each with
@@ -589,6 +597,7 @@ impl Rings {
                 reason,
                 opening,
                 at: now_ms,
+                answer_devices: Vec::new(),
                 live: Some(live),
             })),
             Ok(Err(place)) => Ok(Admission::Again(json!({
@@ -738,7 +747,6 @@ impl Rings {
         out: &mut Effects,
     ) -> Result<Value, Refused> {
         let mode = live_call::mode_of(asked.conversation_mode, None)?;
-        self.settle(now_ms, out);
         let place = self.place_of(asked.ring_id)?;
         let wanted = (
             asked.principal,
@@ -854,6 +862,8 @@ impl Rings {
             state: RINGING.to_string(),
             created_at: now_ms,
             expires_at: now_ms + RING_MS,
+            answer_devices: Vec::new(),
+            answer_receipts: Vec::new(),
             ended_at: None,
             answered_by: String::new(),
             call_id: String::new(),

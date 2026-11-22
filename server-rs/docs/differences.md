@@ -565,3 +565,7 @@ On a Rust Host coordination turn that a user's message joins, the final reply
 retains its agents audience if the user received a note after their latest
 steer. The note, the steered message, and the other post-steer rows remain
 visible. If no note followed the steer, the final reply remains visible.
+
+Issue 217 (feature contract 150) gives the Rust Host's original paired VoIP recipients
+a bounded ring answer grace through the existing answer route. The Python Host
+still settles the ring at 45 seconds.
