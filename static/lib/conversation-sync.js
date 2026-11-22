@@ -10,6 +10,10 @@
 //                    conversation_id means drop_cache + fetch_tail
 //   SSE wake-up    → onEvent() → fetch_delta (coalesced while fetching)
 //   roster reset   → onEvent() → drop_cache + fetch_tail
+//   coordination   → applyLog() keeps the policy a page was read under and its
+//                    hidden_after; applySnapshot() / onEvent(coordination-changed)
+//                    drop_cache + fetch_tail when the chat's visibility moved
+//                    (static/lib/coordination.js)
 //
 // Effects are strings the adapter turns into requests: fetch_tail,
 // fetch_delta, fetch_older, drop_cache. Unknown event types and unknown
@@ -18,6 +22,8 @@
 // The PWA's conversation store (web/src/stores/conversations.svelte.js) is
 // an adapter over this file and the golden fixtures in contract/fixtures
 // pin its behaviour, so a change here is a change to every client.
+
+import { needsReload, normalizeCount, normalizeEcho } from './coordination.js';
 
 export const Effects = Object.freeze({
   FETCH_TAIL: 'fetch_tail',
@@ -39,6 +45,10 @@ export function blankSync(session) {
     loaded: false,
     pendingFetch: null,
     wakeWhileFetching: false,
+    /** The coordination policy the kept rows were read under (null: read without one). */
+    coordination: null,
+    /** The hidden run after the newest visible row (null: none). */
+    hiddenAfter: null,
   };
 }
 
@@ -81,6 +91,9 @@ export function applySnapshot(state, row) {
       && conversationId !== state.conversationId) {
     return { state: resetSync(state), effects: [Effects.DROP_CACHE, Effects.FETCH_TAIL] };
   }
+  if (state.loaded && needsReload(state.coordination, row.coordination_visibility)) {
+    return { state: resetSync(state), effects: [Effects.DROP_CACHE, Effects.FETCH_TAIL] };
+  }
   if (state.loaded && head > state.cursor) {
     return requestDelta(state);
   }
@@ -101,6 +114,8 @@ export function applyLog(state, response, mode) {
     next.hasMore = !!d.has_more;
     next.missing = !!d.missing;
     next.latestTs = String(d.latest_ts || '');
+    next.coordination = normalizeEcho(d.coordination);
+    next.hiddenAfter = next.coordination ? normalizeCount(d.hidden_after) : null;
     for (const t of Array.isArray(d.turns) ? d.turns : []) {
       if (t && t.id) {
         next.turns[t.id] = t;
@@ -151,6 +166,12 @@ export function applyLog(state, response, mode) {
   next.cursor = Math.max(next.cursor, Number(d.latest_revision) || 0);
   if (incomingId) next.conversationId = incomingId;
   if (d.latest_ts) next.latestTs = d.latest_ts;
+  // A delta read under a policy says the whole run after the newest visible row (or none).
+  const echo = normalizeEcho(d.coordination);
+  if (echo) {
+    next.coordination = echo;
+    next.hiddenAfter = normalizeCount(d.hidden_after);
+  }
   next.missing = !!d.missing && next.order.length === 0;
   next.loaded = true;
   const effects = d.has_more ? [Effects.FETCH_DELTA] : [];
@@ -171,6 +192,17 @@ export function onEvent(state, event) {
   }
   if (type === 'agent-roster') {
     const kind = String(ev.kind || '');
+    if (kind === 'coordination-changed') {
+      // With a session: that chat's effective value. Without one: the Host's, which only moves
+      // a chat that follows it.
+      const session = String(ev.session || '');
+      const ours = session ? session === state.session
+        : !!(state.coordination && state.coordination.source === 'global');
+      if (ours && state.loaded && needsReload(state.coordination, ev.coordination_visibility)) {
+        return { state: resetSync(state), effects: [Effects.DROP_CACHE, Effects.FETCH_TAIL] };
+      }
+      return { state, effects: [] };
+    }
     if (String(ev.session || '') !== state.session) return { state, effects: [] };
     if (kind === 'created' || kind === 'relaunched' || kind === 'forked') {
       return { state: resetSync(state), effects: [Effects.DROP_CACHE, Effects.FETCH_TAIL] };
