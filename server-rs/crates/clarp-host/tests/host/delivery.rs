@@ -4,7 +4,7 @@ use super::*;
 
 /// What a user's send is shown of its delivery (send_delivery_state), as the Python Host shows
 /// it with its PR 462 (R120): handed over once its tool is launched; a plain send behind a busy
-/// turn pending until then; the user's Stop fences it (stopped) and moves the generation; the
+/// turn pending until then; a maintenance Stop fences it (stopped) and moves the generation; the
 /// same id sent again changes nothing; a resume runs it, and its launch replaces the fence. The
 /// apps are told of each fence and each launch by the send's id alone, and the feed gives the
 /// sends from its start. A number that is not plain digits is the Python Host's 400.
