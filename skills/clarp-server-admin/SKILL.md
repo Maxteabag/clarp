@@ -45,9 +45,9 @@ clarp-admin client-log --device device_<id> --since 30m     # one phone, with co
 clarp-admin client-log --event metrickit_report --since 7d  # crash reports (file names under crashes/)
 ```
 
-`clarp-admin pair list` names the devices. The full MetricKit payloads are the
-files the `metrickit_report` events name, beside the state database in
-`crashes/`.
+The owner's `clarp-admin pair list` also works on the Rust Host. Use
+`--all` to include revoked devices. The full MetricKit payloads are the files
+the `metrickit_report` events name, beside the state database in `crashes/`.
 
 ## Which code may meet which database
 

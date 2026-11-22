@@ -800,6 +800,9 @@ enum Ask {
         device_id: String,
         answer: Answer<bool>,
     },
+    PairedDeviceHistory {
+        answer: Answer<Vec<Device>>,
+    },
     /// An agent registers a background job under an id. The inner error is the agent that
     /// or computer that has the id already.
     ComputerJobs {
@@ -1236,6 +1239,11 @@ impl FleetHandle {
     /// Takes a device's right to speak away. Returns whether it had one.
     pub async fn revoke(&self, device_id: String) -> Result<bool, Unavailable> {
         self.ask(|answer| Ask::Revoke { device_id, answer }).await
+    }
+
+    /// The public device records, including those removed from the active directory.
+    pub(crate) async fn paired_device_history(&self) -> Result<Vec<Device>, Unavailable> {
+        self.ask(|answer| Ask::PairedDeviceHistory { answer }).await
     }
 
     /// Registers a push token. The inner error is why it was refused.
@@ -2197,6 +2205,22 @@ impl Fleet {
                 }
                 Ask::Revoke { device_id, answer } => {
                     let _ = answer.send(self.revoke(&device_id));
+                }
+                Ask::PairedDeviceHistory { answer } => {
+                    let history = crate::kept::rows::<Device>(
+                        self.store.as_mut(),
+                        DEVICES,
+                        &self.works.left_out,
+                        &self.works.log,
+                    )
+                    .map(|rows| {
+                        rows.read
+                            .into_iter()
+                            .map(|(_, device)| device.public())
+                            .collect()
+                    })
+                    .map_err(|why| Unavailable::new(why.to_string()));
+                    let _ = answer.send(history);
                 }
                 Ask::ComputerJobs { answer } => {
                     let _ = answer.send(Ok(self.computer_jobs.list()));

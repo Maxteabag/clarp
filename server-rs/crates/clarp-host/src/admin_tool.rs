@@ -2386,6 +2386,9 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
         Some((command, rest)) if command == "experience" => {
             crate::experience_watch::command(app, rest).await
         }
+        Some((command, rest)) if command == "pair" => {
+            crate::admin_pair::run(app, rest, owner_token).await
+        }
         Some((command, rest)) if command == "prompt" => prompt(app, call, rest, owner_token).await,
         Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,

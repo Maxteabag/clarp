@@ -629,7 +629,7 @@ if [ ! -s "$config/env" ]; then
     (umask 077; printf 'CLARP_HOST_TOKEN=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-48)" > "$config/env")
 fi
 token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
-# Keep only the owner's web read origins and experience watcher settings.
+# Keep the owner's public URL, web read origins and experience watcher settings.
 carried_config="$(python3 - "$own_config" <<'PYTHON'
 from datetime import date, time
 import json
@@ -671,6 +671,9 @@ try:
 except (OSError, UnicodeError, ValueError):
     config = {}
 server = config.get("server")
+public_url = server.get("public_base_url") if isinstance(server, dict) else None
+if isinstance(public_url, str):
+    print("public_base_url = " + value(public_url))
 origins = server.get("web_read_origins") if isinstance(server, dict) else None
 if isinstance(origins, list):
     print("web_read_origins = " + value([item for item in origins if isinstance(item, str)]))

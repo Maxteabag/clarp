@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
+#[path = "host/admin_pair.rs"]
+mod admin_pair;
 #[path = "host/agent_creation.rs"]
 mod agent_creation;
 #[path = "host/agent_moved.rs"]

@@ -13,6 +13,7 @@
 #![recursion_limit = "256"]
 
 pub mod admin;
+mod admin_pair;
 pub mod admin_tool;
 pub mod agent;
 mod agent_moved;

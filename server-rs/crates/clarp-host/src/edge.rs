@@ -4055,19 +4055,19 @@ async fn pairing_exchange(
 }
 
 #[derive(Debug, Deserialize)]
-struct IssueRequest {
+pub(crate) struct IssueRequest {
     #[serde(default)]
-    device_name: String,
+    pub(crate) device_name: String,
     #[serde(default)]
-    scope: String,
-    ttl_seconds: Option<i64>,
+    pub(crate) scope: String,
+    pub(crate) ttl_seconds: Option<i64>,
     /// The address the device will reach this Host at. With it the answer carries the link
     /// that pairs a device when it is opened there.
-    url: Option<String>,
+    pub(crate) url: Option<String>,
     /// The device will reach this Host through its relay: the address is the relay's for
     /// this Host.
     #[serde(default)]
-    relay: bool,
+    pub(crate) relay: bool,
 }
 
 /// The administrator has a code made for a device.
@@ -4075,6 +4075,11 @@ async fn pairing_issue(
     State(app): State<App>,
     Json(request): Json<IssueRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    issue_pairing(&app, request).await.map(Json)
+}
+
+/// The same issuance used by the owner tool and the pairing endpoint.
+pub(crate) async fn issue_pairing(app: &App, request: IssueRequest) -> Result<Value, ApiError> {
     let scope = Scope::parse(&request.scope)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "scope must be full or limited"))?;
     let through_the_relay = if request.relay {
@@ -4108,18 +4113,25 @@ async fn pairing_issue(
         answer["url"] = json!(url.trim());
         answer["uri"] = json!(uri);
     }
-    Ok(Json(answer))
+    Ok(answer)
 }
 
 async fn paired_devices(State(app): State<App>) -> Json<Value> {
-    let directory = app.fleet.directory();
-    let mut devices: Vec<Device> = directory
+    Json(public_devices(active_devices(&app)))
+}
+
+pub(crate) fn active_devices(app: &App) -> Vec<Device> {
+    app.fleet
+        .directory()
         .devices
         .values()
         .map(|device| device.public())
-        .collect();
+        .collect()
+}
+
+pub(crate) fn public_devices(mut devices: Vec<Device>) -> Value {
     devices.sort_by_key(|device| std::cmp::Reverse(device.created_at));
-    Json(json!({ "devices": devices }))
+    json!({ "devices": devices })
 }
 
 #[derive(Debug, Deserialize)]
@@ -4133,7 +4145,6 @@ async fn revoke_device(
     Extension(principal): Extension<Principal>,
     Json(request): Json<RevokeRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    use clarp_kernel::devices::{self, RevokeRefusal};
     let limited_id = match &principal {
         Principal::Device {
             device_id,
@@ -4141,7 +4152,17 @@ async fn revoke_device(
         } => Some(device_id.as_str()),
         _ => None,
     };
-    let device_id = devices::revoke_target(&request.device_id, limited_id)
+    revoke_pairing(&app, &request.device_id, limited_id).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub(crate) async fn revoke_pairing(
+    app: &App,
+    requested: &str,
+    limited_id: Option<&str>,
+) -> Result<(), ApiError> {
+    use clarp_kernel::devices::{self, RevokeRefusal};
+    let device_id = devices::revoke_target(requested, limited_id)
         .map_err(|why| match why {
             RevokeRefusal::Missing => ApiError::new(StatusCode::BAD_REQUEST, "device_id required"),
             RevokeRefusal::OtherDevice => {
@@ -4152,9 +4173,9 @@ async fn revoke_device(
     if app.fleet.revoke(device_id.clone()).await? {
         // What the device still listens to ends now, not when it next asks.
         let _ = app.door.revoked.send(device_id.clone());
-        app.android_chip.forget(&app, &device_id).await?;
-        app.calls.retire_openings(&app, Some(&device_id)).await?;
-        Ok(Json(json!({ "ok": true })))
+        app.android_chip.forget(app, &device_id).await?;
+        app.calls.retire_openings(app, Some(&device_id)).await?;
+        Ok(())
     } else {
         Err(ApiError::new(StatusCode::NOT_FOUND, "device not found"))
     }
