@@ -232,3 +232,19 @@ def test_agys_renamed_file_tools_are_read_write_and_edit_with_their_file(tmp_pat
     tools = agy_transcript.parse_turns(p)[1]["tools"]
     assert [(tool["name"], tool["input"]["file_path"]) for tool in tools] == [
         ("Read", "/repo/notes.md"), ("Write", "/repo/new.md"), ("Edit", "/repo/notes.md")]
+
+
+def test_a_command_result_written_as_command_output_drops_its_exit_line(tmp_path):
+    """R45: agy now heads a command's output with 'Command output:'; the result kept the
+    exit line above it, because only 'Output:' was looked for."""
+    p = _write_transcript(tmp_path / "brain", "conv-45", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>run it</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Running.", "tool_calls": [
+            {"name": "run_command", "args": {"CommandLine": "echo hi"}},
+            {"name": "run_command", "args": {"CommandLine": "false"}}]},
+        {"step_index": 2, "type": "GENERIC", "content": "The command exited with code 0.\nCommand output:\nhi\n"},
+        {"step_index": 3, "type": "GENERIC", "content": "The command exited with code 1.\nCommand Output:\nboom\n"},
+    ])
+    ran, failed = agy_transcript.parse_turns(p)[1]["tools"]
+    assert (ran["status"], ran["result"]) == ("ok", "hi")
+    assert (failed["status"], failed["result"]) == ("error", "boom")
