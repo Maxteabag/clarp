@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use clarp_actor::{QueueItemStatus, Waiting};
 use clarp_kernel::experience::Window;
-use clarp_kernel::jobs::Job;
 use clarp_kernel::turn::Origin;
 use clarp_store_sqlite::client_events::CrashCandidate;
 use futures_util::{StreamExt as _, stream};
@@ -14,7 +13,7 @@ use serde_json::Value;
 use crate::edge::App;
 use crate::fleet::Directory;
 
-use super::{Relaunches, book::Seen, settings::Settings};
+use super::{Relaunches, book::Seen, release, settings::Settings};
 
 const RECENT_MS: i64 = 24 * 60 * 60 * 1_000;
 
@@ -134,24 +133,6 @@ fn cards(seen: &mut Seen, settings: &Settings, directory: &Directory, now: i64) 
             format!(
                 "{count} open decision cards. Oldest {} h. Agents: {named}.",
                 oldest / 3_600_000,
-            ),
-        );
-    }
-}
-
-fn release(seen: &mut Seen, settings: &Settings, job: &Job, now: i64) {
-    let age = now.saturating_sub(job.started_at_ms);
-    if job.status.is_active()
-        && age > settings.release_hold_ms
-        && settings.release_kinds.contains(&job.kind)
-    {
-        seen.add(
-            "release",
-            &job.id,
-            format!(
-                "{} has held the release for {} min.",
-                job.kind,
-                age / 60_000,
             ),
         );
     }
@@ -291,7 +272,7 @@ pub(super) async fn collect(app: &App, settings: &Settings, now: i64) -> Seen {
             seen.unavailable_kinds.insert("release");
         }
         for job in &view.jobs {
-            release(&mut seen, settings, job, now);
+            release::collect(&mut seen, settings, job, now);
         }
     }
 
@@ -299,7 +280,7 @@ pub(super) async fn collect(app: &App, settings: &Settings, now: i64) -> Seen {
     match app.fleet.computer_jobs().await {
         Ok(jobs) => {
             for job in &jobs {
-                release(&mut seen, settings, job, now);
+                release::collect(&mut seen, settings, job, now);
             }
         }
         Err(why) => {
@@ -375,6 +356,55 @@ mod tests {
     use clarp_kernel::turn::{Admission, TurnId};
     use tower::ServiceExt as _;
 
+    fn release_steps(settings: &Settings, zone: &jiff::tz::TimeZone, now: i64) {
+        let job: clarp_kernel::jobs::Job = serde_json::from_value(serde_json::json!({
+            "id": "release-fixture",
+            "kind": "test",
+            "title": "Release candidate",
+            "status": "running",
+            "generation": 1,
+            "revision": 1,
+            "started_at_ms": now - 25 * 60_000,
+            "updated_at_ms": now,
+            "heartbeat_timeout_ms": 600_000,
+            "heartbeat_source": "registration",
+        }))
+        .unwrap();
+        let command = |line: &str| {
+            release::step(&line.split_whitespace().map(str::to_owned).collect::<Vec<_>>()).unwrap()
+        };
+        let check = command("cargo check");
+        let mut seen = Seen::default();
+        for args in [
+            "ssh build-host ./release_build.sh",
+            "bash ./release_build.sh",
+            "cargo build",
+            "./tools/build release",
+            "xcodebuild build-for-testing -scheme test",
+            "./tools/install-host",
+        ] {
+            release::observe(
+                &mut seen, settings, &job, &[(command(args), 14 * 60_000), (check, 14 * 60_000)],
+                now, zone,
+            );
+        }
+        release::observe(&mut seen, settings, &job, &[(check, 60_000)], now, zone);
+        assert!(seen.found.is_empty());
+
+        for kind in ["release", "build", "install"] {
+            let mut other = job.clone();
+            other.kind = kind.into();
+            release::observe(&mut seen, settings, &other, &[(check, 14 * 60_000)], now, zone);
+        }
+        assert!(seen.found.is_empty());
+
+        release::observe(&mut seen, settings, &job, &[(check, 14 * 60_000)], now, zone);
+        assert_eq!(
+            seen.found[&("release".into(), job.id)],
+            "Registered kind test. Active step cargo check has held the release for 14 min, since 2026-11-22 16:09 +01:00.",
+        );
+    }
+
     #[tokio::test]
     async fn experience_watch_findings_open_clear_and_summarize_once() {
         let place = crate::unkept::at_the_port::place("experience-watch-pass");
@@ -402,6 +432,7 @@ mod tests {
         let directory = app.fleet.directory();
         let config: toml::Value = "enabled = true\nsummary_hour = 17\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\n".parse().unwrap();
         let settings = Settings::from_section(Some(&config));
+        release_steps(&settings, &zone, now);
         let router = crate::edge::router(app.clone());
         let request = |method: Method, path, token: &str, client, state| {
             let body = if method == Method::POST {
@@ -425,7 +456,7 @@ mod tests {
         let ios = "ios/200 contract=130";
         // Background requests do not add a launch. A background marker on
         // another API route can rearm the device for a later foreground.
-        for background_path in ["/server-info", "/host/start"] {
+        for background_path in ["/server-info", "/agents/snapshot"] {
             assert_eq!(
                 request(
                     Method::GET,

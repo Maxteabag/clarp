@@ -64,7 +64,7 @@ impl Settings {
             .and_then(toml::Value::as_array)
             .map_or_else(
                 || {
-                    ["release", "install", "check", "test"]
+                    ["check", "test"]
                         .into_iter()
                         .map(str::to_owned)
                         .collect()
