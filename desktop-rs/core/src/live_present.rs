@@ -313,19 +313,20 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             presented.stripped_calls.insert(text(tool, "call_id").to_owned());
         }
         if text(item, "kind") == "message" && giving.contains(row) {
-            // The row's text holds every message it carries: it shows once.
-            if placed.insert(row) {
+            // The row's text holds every message it carries: it shows once. Where it
+            // holds the answer it stands in the answer's place (and keeps the answer's
+            // row there when it lands): it is the answer, it never folds (#653);
+            // otherwise in its first message's place, spoken when one of them was.
+            let carried: Vec<&Object> = items.iter().copied()
+                .filter(|other| text(other, "kind") == "message" && owner_of(*other) == Some(row))
+                .collect();
+            let stands_for = carried.iter().copied()
+                .find(|other| item_entry(*other, options).phase != "commentary")
+                .or_else(|| carried.first().copied());
+            if stands_for.is_some_and(|chosen| text(chosen, "id") == text(item, "id")) && placed.insert(row) {
                 let mut entry = item_entry(item, options);
                 entry.row = row.to_owned();
-                // One row for several messages: it is the answer when one of them is,
-                // and spoken when one of them was, so it never folds then (#653).
-                let carried: Vec<Entry> = items.iter()
-                    .filter(|other| text(other, "kind") == "message" && owner_of(*other) == Some(row))
-                    .map(|other| item_entry(other, options)).collect();
-                if let Some(answer) = carried.iter().find(|e| e.phase != "commentary") {
-                    entry.phase = answer.phase.clone();
-                }
-                entry.spoken = carried.iter().any(|e| e.spoken);
+                entry.spoken = entry.spoken || carried.iter().any(|other| item_entry(*other, options).spoken);
                 rows_of.insert(text(item, "id"), entry);
                 shown.push(*item);
             }
