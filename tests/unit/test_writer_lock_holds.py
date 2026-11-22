@@ -168,7 +168,9 @@ def test_recording_helpers_run_once_per_real_import(tmp_path, monkeypatch):
     changed[-1]["text"] = "answer 5, revised <team>status for the team</team>"
     _store(agent_id, changed)
     assistant_rows = sum(turn["role"] == "assistant" for turn in changed)
-    assert calls == {"team": assistant_rows, "oracle": assistant_rows}, \
+    # Team capture follows a row the import writes: the one changed row, not the rows stored
+    # as they are (a replay over those captured old blocks into teams joined since).
+    assert calls == {"team": 1, "oracle": assistant_rows}, \
         "the probe pass must not run them before the locked pass runs them again"
 
 
