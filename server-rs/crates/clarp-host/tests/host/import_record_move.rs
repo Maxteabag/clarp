@@ -276,7 +276,9 @@ fn import_with_optional_avatar(
             "/avatars/move-picture" => {
                 return ("200 OK", source_picture.clone().unwrap());
             }
-            "/log" => json!({"turns": [{"id": "row-1", "role": "assistant", "text": "Moved history"}]}),
+            "/log" => {
+                json!({"turns": [{"id": "row-1", "role": "assistant", "text": "Moved history"}]})
+            }
             "/task-plans" => json!({"plans": []}),
             "/artifacts" => json!({"artifacts": []}),
             "/media" => json!({"assets": []}),
@@ -288,11 +290,23 @@ fn import_with_optional_avatar(
     });
     let output = place
         .host_command()
-        .args(["import", "--from", &source, "--host", &host.address, "--session", "mover"])
+        .args([
+            "import",
+            "--from",
+            &source,
+            "--host",
+            &host.address,
+            "--session",
+            "mover",
+        ])
         .env("CLARP_SOURCE_TOKEN", SOURCE_TOKEN)
         .env("CLARP_HOST_TOKEN", DESTINATION_TOKEN)
         .ended();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     String::from_utf8(output.stdout).unwrap()
 }
 
@@ -302,20 +316,30 @@ fn an_oversized_avatar_does_not_prevent_an_agent_import() {
     let host = place.start_with_token(DESTINATION_TOKEN);
     let cwd = place.root.join("work");
     let too_large = clarp_kernel::personas::AVATAR_MOST + 1;
-    let report = import_with_optional_avatar(&place, &host, cwd.clone(), Some("x".repeat(too_large)));
+    let report =
+        import_with_optional_avatar(&place, &host, cwd.clone(), Some("x".repeat(too_large)));
     assert!(report.contains("avatar not carried: too large"), "{report}");
-    assert_eq!(host.conversation("mover"), [said("assistant", "Moved history")]);
+    assert_eq!(
+        host.conversation("mover"),
+        [said("assistant", "Moved history")]
+    );
 
     // An older importer can still include the oversized picture in its request.
-    let answer = host.post("/agents/import", json!({
-        "agent": {"agent_id": "older-import-id", "session": "older-mover",
-            "persona": "Older Mover", "backend": "scripted", "cwd": cwd, "busy": false},
-        "from": "http://old-host",
-        "picture": clarp_kernel::python::b64encode(&vec![b'x'; too_large]),
-        "turns": [{"id": "row-2", "role": "assistant", "text": "Older history"}],
-    }));
+    let answer = host.post(
+        "/agents/import",
+        json!({
+            "agent": {"agent_id": "older-import-id", "session": "older-mover",
+                "persona": "Older Mover", "backend": "scripted", "cwd": cwd, "busy": false},
+            "from": "http://old-host",
+            "picture": clarp_kernel::python::b64encode(&vec![b'x'; too_large]),
+            "turns": [{"id": "row-2", "role": "assistant", "text": "Older history"}],
+        }),
+    );
     assert_eq!(answer["avatar_not_carried"], "too large");
-    assert_eq!(host.conversation("older-mover"), [said("assistant", "Older history")]);
+    assert_eq!(
+        host.conversation("older-mover"),
+        [said("assistant", "Older history")]
+    );
 }
 
 #[test]
@@ -325,8 +349,14 @@ fn an_import_creates_its_missing_working_directory() {
     let cwd = place.root.join("absent").join("workspace");
     assert!(!cwd.exists());
     let report = import_with_optional_avatar(&place, &host, cwd.clone(), None);
-    assert!(report.contains(&format!("created working directory: {}", cwd.display())), "{report}");
+    assert!(
+        report.contains(&format!("created working directory: {}", cwd.display())),
+        "{report}"
+    );
     assert!(cwd.is_dir());
     assert!(std::fs::read_dir(&cwd).unwrap().next().is_none());
-    assert_eq!(host.conversation("mover"), [said("assistant", "Moved history")]);
+    assert_eq!(
+        host.conversation("mover"),
+        [said("assistant", "Moved history")]
+    );
 }

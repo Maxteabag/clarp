@@ -543,7 +543,9 @@ pub(crate) fn providers(app: &App) -> Vec<String> {
     }
     clarp_kernel::seats::READ_PROVIDERS
         .into_iter()
-        .filter(|tool| clarp_backend::program(tool).is_some_and(|path| crate::logins::installed(&path)))
+        .filter(|tool| {
+            clarp_backend::program(tool).is_some_and(|path| crate::logins::installed(&path))
+        })
         .map(str::to_owned)
         .collect()
 }

@@ -17,10 +17,16 @@ fn a_calendar_response_returns_to_the_agent_that_asked() {
         "platform": "android",
         "event_id": "123",
     });
-    assert_eq!(host.ask("POST", "/calendar/response", Some(&receipt)).0, 404);
+    assert_eq!(
+        host.ask("POST", "/calendar/response", Some(&receipt)).0,
+        404
+    );
     receipt["session"] = json!(session);
     receipt["status"] = json!("unknown");
-    assert_eq!(host.ask("POST", "/calendar/response", Some(&receipt)).0, 400);
+    assert_eq!(
+        host.ask("POST", "/calendar/response", Some(&receipt)).0,
+        400
+    );
     receipt["status"] = json!("added");
     assert_eq!(host.post("/calendar/response", receipt.clone())["ok"], true);
     receipt["status"] = json!("failed");
@@ -32,7 +38,10 @@ fn a_calendar_response_returns_to_the_agent_that_asked() {
     });
     let message_id = format!("u-calendar-response-{request_id}");
     let turns = host.turns(&session);
-    assert_eq!(turns.iter().filter(|row| row["id"] == message_id).count(), 1);
+    assert_eq!(
+        turns.iter().filter(|row| row["id"] == message_id).count(),
+        1
+    );
 }
 
 #[test]
@@ -48,10 +57,20 @@ fn an_app_can_post_as_the_user_to_a_team_feed() {
     host.post(&team_path, json!({"communication_enabled": true}));
     let session = host.new_agent("Member");
     let snapshot = host.get("/agents/snapshot");
-    let member = snapshot["agents"].as_array().unwrap().iter()
-        .find(|row| row["session"] == session).unwrap();
-    host.post(&format!("{team_path}/members"), json!({"agent_id":member["agent_id"]}));
-    assert_eq!(host.ask("POST", &messages, Some(&json!({"text": ""}))).0, 400);
+    let member = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == session)
+        .unwrap();
+    host.post(
+        &format!("{team_path}/members"),
+        json!({"agent_id":member["agent_id"]}),
+    );
+    assert_eq!(
+        host.ask("POST", &messages, Some(&json!({"text": ""}))).0,
+        400
+    );
     let posted = host.post(&messages, body);
     let feed = host.get(&messages);
     let row = &feed["messages"][0];
@@ -91,8 +110,10 @@ fn a_paused_goal_stays_visible_and_its_change_is_announced() {
     assert_eq!(read["plan"]["revision"], 1);
     wait_for("task-plan update", || {
         heard.lock().unwrap().iter().any(|row| {
-            row["type"] == "task-plan-updated" && row["session"] == session
-                && row["plan_id"] == id && row["revision"] == 1
+            row["type"] == "task-plan-updated"
+                && row["session"] == session
+                && row["plan_id"] == id
+                && row["revision"] == 1
         })
     });
 }

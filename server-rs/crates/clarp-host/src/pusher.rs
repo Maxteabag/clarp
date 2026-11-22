@@ -205,8 +205,17 @@ pub fn pusher() -> (Pusher, Waiting) {
     let (badge_wake, wakes) = watch::channel(());
     let badge_jobs = tx.clone();
     (
-        Pusher { tx, live, badge_wake },
-        Waiting { rx, live: waiting, badge_wake: wakes, badge_jobs },
+        Pusher {
+            tx,
+            live,
+            badge_wake,
+        },
+        Waiting {
+            rx,
+            live: waiting,
+            badge_wake: wakes,
+            badge_jobs,
+        },
     )
 }
 
@@ -235,7 +244,9 @@ pub struct Works {
 impl Waiting {
     /// Starts the pusher's thread.
     pub fn run(self, works: Works) -> Result<(), String> {
-        works.runtime.spawn(badge_wakes(self.badge_wake, self.badge_jobs));
+        works
+            .runtime
+            .spawn(badge_wakes(self.badge_wake, self.badge_jobs));
         let android = works.clone();
         std::thread::Builder::new()
             .name("android-live-rings".into())
@@ -318,7 +329,9 @@ async fn badge_wakes(mut changes: watch::Receiver<()>, jobs: mpsc::Sender<Job>) 
         if let Some(last) = sent.back() {
             due = due.max(*last + SPACING);
         }
-        if sent.len() == 3 && let Some(first) = sent.front() {
+        if sent.len() == 3
+            && let Some(first) = sent.front()
+        {
             due = due.max(*first + HOUR);
         }
         tokio::time::sleep_until(due).await;
@@ -583,8 +596,11 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         .active()
         .filter(|row| directory.can_receive(&row.principal))
         .filter(|row| match targets {
-            Targets::Apple => routes.enabled() && row.provider != "fcm"
-                && (!matches!(job, Job::BadgeWake) || row.platform == "ios"),
+            Targets::Apple => {
+                routes.enabled()
+                    && row.provider != "fcm"
+                    && (!matches!(job, Job::BadgeWake) || row.platform == "ios")
+            }
             Targets::Android(named) => {
                 android
                     && row.provider == "fcm"
@@ -628,7 +644,11 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
             payload["conversation_mode"] = serde_json::json!("agent_live_v1");
         }
         let background = matches!(job, Job::BadgeWake);
-        let collapse_id = if background { "badge-sync".into() } else { push::collapse_id(&payload) };
+        let collapse_id = if background {
+            "badge-sync".into()
+        } else {
+            push::collapse_id(&payload)
+        };
         let push = Push {
             payload: &payload,
             collapse_id: &collapse_id,

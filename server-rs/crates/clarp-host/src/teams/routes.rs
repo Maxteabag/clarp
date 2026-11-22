@@ -207,7 +207,10 @@ async fn post_message(
     raw: Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let body = object(&raw)?;
-    let text = body.get("text").and_then(Value::as_str).map_or("", str::trim);
+    let text = body
+        .get("text")
+        .and_then(Value::as_str)
+        .map_or("", str::trim);
     if text.is_empty() {
         return Err(bad("text required"));
     }
@@ -238,12 +241,17 @@ async fn post_message(
                     text,
                     created_at: app.clock.now_ms(),
                 },
-                inbox: team.members.iter().map(|member| (member.agent_id.clone(), None)).collect(),
+                inbox: team
+                    .members
+                    .iter()
+                    .map(|member| (member.agent_id.clone(), None))
+                    .collect(),
             }]
         })?;
         if let Some(error) = refusal {
             return Err(error);
         }
         Ok(json!({ "ok": true, "team_message_id": message_id }))
-    }).await
+    })
+    .await
 }

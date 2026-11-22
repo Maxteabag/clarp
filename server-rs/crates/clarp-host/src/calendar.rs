@@ -75,7 +75,12 @@ pub(crate) fn request(app: &App, said: &Map<String, Value>) -> Result<Value, Str
             id: request_id.clone(),
             agent_id: member.record.agent_id.clone(),
             session: session.to_string(),
-            title: event["title"].as_str().unwrap_or_default().chars().take(200).collect(),
+            title: event["title"]
+                .as_str()
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect(),
             at: now,
         });
     }
@@ -99,38 +104,58 @@ async fn responded(State(app): State<App>, body: Bytes) -> Result<Json<Value>, A
     let session = crate::edge::body_text(&data, "session")?;
     let status = crate::edge::body_text(&data, "status")?;
     if request_id.is_empty() || session.is_empty() {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "request_id and session required"));
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "request_id and session required",
+        ));
     }
     let outcome = match status {
         "added" => "was added",
         "declined" => "was declined",
         "failed" => "could not be added",
-        _ => return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid calendar status")),
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid calendar status",
+            ));
+        }
     };
     let not_found = || ApiError::new(StatusCode::NOT_FOUND, "calendar request not found");
-    let request = app.calendar_receipts
+    let request = app
+        .calendar_receipts
         .find(request_id, session, app.clock.now_ms())
         .ok_or_else(not_found)?;
     let directory = app.fleet.directory();
     let member = directory.by_id(&request.agent_id).ok_or_else(not_found)?;
-    let sent = member.agent.send(
-        Message {
-            id: format!("u-calendar-response-{}", request.id),
-            text: format!("Calendar request {} for {:?}: the event {outcome}.", request.id, request.title),
-            origin: Origin::Trigger { name: "calendar-response".into() },
-            unminted: true,
-            ..Message::default()
-        },
-        Admission::Background,
-    ).await?;
+    let sent = member
+        .agent
+        .send(
+            Message {
+                id: format!("u-calendar-response-{}", request.id),
+                text: format!(
+                    "Calendar request {} for {:?}: the event {outcome}.",
+                    request.id, request.title
+                ),
+                origin: Origin::Trigger {
+                    name: "calendar-response".into(),
+                },
+                unminted: true,
+                ..Message::default()
+            },
+            Admission::Background,
+        )
+        .await?;
     if !sent.duplicate {
-        app.hub.publish(json!({
-            "type": "calendar-response",
-            "request_id": request.id,
-            "session": member.record.session,
-            "agent_id": request.agent_id,
-            "status": status,
-        }), app.clock.now_ms());
+        app.hub.publish(
+            json!({
+                "type": "calendar-response",
+                "request_id": request.id,
+                "session": member.record.session,
+                "agent_id": request.agent_id,
+                "status": status,
+            }),
+            app.clock.now_ms(),
+        );
     }
     Ok(Json(json!({ "ok": true })))
 }

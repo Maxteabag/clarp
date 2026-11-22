@@ -52,7 +52,14 @@ async fn active(State(app): State<App>, Query(query): Params) -> Result<Json<Val
     let session = session_of(&query)?;
     let mut plan = app
         .member(session)
-        .map(|member| member.agent.view().books.goals.show_for_client(app.clock.now_ms()))
+        .map(|member| {
+            member
+                .agent
+                .view()
+                .books
+                .goals
+                .show_for_client(app.clock.now_ms())
+        })
         .filter(|plan| plan.as_object().is_some_and(|fields| !fields.is_empty()));
     crate::keeper::tell(&app, plan.iter_mut()).await;
     Ok(Json(json!({ "plan": plan })))

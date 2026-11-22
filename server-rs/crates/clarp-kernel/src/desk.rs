@@ -1040,10 +1040,19 @@ impl Desk {
     /// be. Whether it made a desk: where the tool's own desk did not answer, none is made,
     /// the desk before stays, and how it failed is kept.
     pub fn read(&mut self, seats: &mut Seats, answers: Answers, began_ms: i64) -> bool {
-        self.source_errors = [("tui", &answers.desk), ("list", &answers.list), ("work", &answers.work)]
-            .into_iter()
-            .filter_map(|(source, answer)| answer.as_ref().err().map(|error| (source.to_owned(), *error)))
-            .collect();
+        self.source_errors = [
+            ("tui", &answers.desk),
+            ("list", &answers.list),
+            ("work", &answers.work),
+        ]
+        .into_iter()
+        .filter_map(|(source, answer)| {
+            answer
+                .as_ref()
+                .err()
+                .map(|error| (source.to_owned(), *error))
+        })
+        .collect();
         let desk = match answers.desk {
             Ok(desk) => desk,
             Err(how) => {
@@ -1101,10 +1110,14 @@ impl Desk {
             .filter_map(|provider| {
                 let name = provider["provider"].as_str()?;
                 let failed = list_error.filter(|_| crate::seats::READ_PROVIDERS.contains(&name));
-                let inventory = if failed.is_some() || provider["read_state"] == "failed" { json!("unavailable") } else {
+                let inventory = if failed.is_some() || provider["read_state"] == "failed" {
+                    json!("unavailable")
+                } else {
                     provider["inventory"].clone()
                 };
-                let read_state = if failed.is_some() { json!("failed") } else {
+                let read_state = if failed.is_some() {
+                    json!("failed")
+                } else {
                     provider["read_state"].clone()
                 };
                 let error_code = match failed {

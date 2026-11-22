@@ -719,23 +719,35 @@ fn account_metadata_names_the_shared_harness_and_installed_hotseat_providers() {
     ];
     let host = place.start_in("", &["--seats-tool", "/bin/false"], &world);
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["features"]["account_harness_metadata"], 147);
+    assert_eq!(
+        info["contract"]["features"]["account_harness_metadata"],
+        147
+    );
     assert_eq!(info["capabilities"]["hotseat_providers"], json!(["claude"]));
 
     let auth = host.get("/backend-auth?harnesses=all");
     let catalogue = host.get("/agent-model-options");
-    for tool in ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"] {
+    for tool in [
+        "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+    ] {
         let auth = row(&auth, tool);
         let catalogue = &catalogue["providers"][tool];
         let expected = (tool == "deepseek").then_some("opencode");
         assert_eq!(auth.get("runs_through"), Some(&json!(expected)), "{tool}");
-        assert_eq!(catalogue.get("runs_through"), Some(&json!(expected)), "{tool}");
+        assert_eq!(
+            catalogue.get("runs_through"),
+            Some(&json!(expected)),
+            "{tool}"
+        );
     }
     let legacy = host.get("/backend-auth");
     assert!(row(&legacy, "claude").get("runs_through").is_none());
     drop(host);
     let without = place.start_in("", &[], &world);
-    assert_eq!(without.get("/server-info")["capabilities"]["hotseat_providers"], json!([]));
+    assert_eq!(
+        without.get("/server-info")["capabilities"]["hotseat_providers"],
+        json!([])
+    );
 }
 
 #[test]
