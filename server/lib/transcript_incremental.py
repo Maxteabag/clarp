@@ -52,11 +52,15 @@ SUPPORTED_BACKENDS = ("claude", "codex", "agy")
 # The sources whose behaviour a checkpoint depends on. Any edit to one of them
 # changes the parser version, so every checkpoint taken by older code is
 # refused and the next import is a full one.
+# A backend module only hands its transcripts to these parsers (each backend's
+# parse_transcript is its transcript module's parse_turns, pinned by
+# test_transcript_parser_version), so it is not hashed: a change to how a backend runs
+# its CLI does not make every transcript of that backend read in full again.
 _VERSION_SOURCES = {
-    "claude": ("claude_transcript.py", "claude_reply_evidence.py", "backend/claude.py", "transcript_paths.py"),
-    "codex": ("codex_transcript.py", "codex_tool_cells.py", "backend/codex.py", "transcript_paths.py"),
+    "claude": ("claude_transcript.py", "claude_reply_evidence.py", "transcript_paths.py"),
+    "codex": ("codex_transcript.py", "codex_tool_cells.py", "transcript_paths.py"),
     "agy": ("agy_transcript.py", "codex_transcript.py", "codex_tool_cells.py", "opencode_transcript.py",
-            "claude_transcript.py", "claude_reply_evidence.py", "backend/agy.py", "transcript_paths.py"),
+            "claude_transcript.py", "claude_reply_evidence.py", "transcript_paths.py"),
 }
 # What a checkpoint is valid for. ``parser_version`` hashes the parser's
 # sources: ``_VERSION_SOURCES`` per backend and ``_PARSE_COMMON``: how a range

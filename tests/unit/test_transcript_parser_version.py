@@ -28,6 +28,8 @@ import json
 import os
 import pathlib
 
+import pytest
+
 from lib import transcript_incremental as inc
 
 GOLDEN = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "transcript-parser-version.json"
@@ -110,7 +112,8 @@ def test_every_module_a_parser_imports_is_hashed_or_named_exempt():
     transcript parser imports (also inside a function) is in its backend's list or
     in _PARSE_COMMON, and every module those shared helpers import at module level
     is hashed too, or named exempt above with its reason. The backend modules
-    (backend/<name>.py) are hashed whole; their imports are the backend's runtime."""
+    (backend/<name>.py) are not parser sources: they only hand a transcript to its
+    parser (test_each_backend_hands_its_transcripts_to_its_hashed_parser)."""
     missing = {}
     for backend, names in inc._VERSION_SOURCES.items():
         allowed = set(names) | set(inc._PARSE_COMMON) | set(EXEMPT)
@@ -138,3 +141,26 @@ def test_how_a_range_is_read_and_the_parser_carry_are_parser_sources():
     assert "transcript_ranges.py" in inc._PARSE_COMMON
     for name in ("parse_range", "parser_carry", "_RangePath", "_Range", "_claude_carry", "_agy_carry"):
         assert getattr(inc, name) is getattr(transcript_ranges, name)
+
+
+@pytest.mark.parametrize("backend, module", [("claude", "claude_transcript"), ("codex", "codex_transcript"),
+                                             ("agy", "agy_transcript")])
+def test_each_backend_hands_its_transcripts_to_its_hashed_parser(backend, module, monkeypatch, tmp_path):
+    """Why the backend modules are not in _VERSION_SOURCES: a backend's parse_transcript is
+    its transcript module's parse_turns and nothing else, so what a transcript parses into
+    is decided by hashed files only. A backend that parses itself fails here, and then its
+    module must be hashed again."""
+    import importlib
+    from lib import backends
+    from lib.backend.stream_json import StreamJsonBackend
+    parser = importlib.import_module(f"lib.{module}")
+    assert f"{module}.py" in inc._VERSION_SOURCES[backend]
+    assert not any(name.startswith("backend/") for name in inc._VERSION_SOURCES[backend])
+    seen = []
+    monkeypatch.setattr(parser, "parse_turns", lambda path: seen.append(path) or [{"role": "user", "text": "x"}])
+    runner = backends.by_id(backend)
+    path = tmp_path / "synthetic.jsonl"
+    assert runner.parse_transcript(path) == [{"role": "user", "text": "x"}] and seen == [path]
+    if backend != "claude":
+        assert type(runner).parse_transcript is StreamJsonBackend.parse_transcript
+        assert type(runner).transcript is parser
