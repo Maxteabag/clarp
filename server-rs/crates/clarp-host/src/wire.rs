@@ -1538,6 +1538,12 @@ pub fn row(version: &Versioned) -> Value {
             if let Origin::Agent { agent_id } = &reply.origin {
                 row["reply_to_agent_id"] = json!(agent_id);
             }
+            // Which session of the agent's tool said it: its own, or its conversation fork's
+            // (issue 718, contract 153). Absent where the Host did not know it when it wrote the
+            // row. The conversation's id is the same for both.
+            if let Some(session) = &reply.backend_session {
+                row["backend_session_id"] = json!(session);
+            }
             // The tools its message calls, a card each, in the message's order.
             row["tools"] = version
                 .tools
@@ -2277,6 +2283,7 @@ mod tests {
             text: text.to_string(),
             trace_id: None,
             tools: tools.iter().map(|call| call.id.clone()).collect(),
+            backend_session: None,
         })
     }
 
@@ -3583,6 +3590,7 @@ mod tests {
                             trace_id: None,
                             origin: Origin::Agent { agent_id },
                             tools: Vec::new(),
+                            backend_session: None,
                         })
                     };
                     row(&version(entry, (n as u64 + 1) << 20, None))

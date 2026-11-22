@@ -647,6 +647,7 @@ impl ClaudeInterpreter {
             },
             trace_id: None,
             tools: draft.tools.clone(),
+            backend_session: None,
         }));
         for call in draft.tools {
             if let Some(call) = self.tools.get_mut(&call) {
@@ -1426,6 +1427,7 @@ mod tests {
                     text: "I will look.".to_string(),
                     trace_id: None,
                     tools: vec!["toolu_1".to_string()],
+                    backend_session: None,
                 }),
                 Signal::Tool(tool(ToolStatus::Running, None, None)),
                 Signal::Tool(tool(ToolStatus::Ok, Some("a.txt"), Some(1_130))),
@@ -1759,6 +1761,7 @@ mod tests {
                 text: "Half a sen".to_string(),
                 trace_id: None,
                 tools: vec!["toolu_1".to_string()],
+                backend_session: None,
             }),
             "what the agent had written is kept, with the tool it had called"
         );

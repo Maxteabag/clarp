@@ -268,6 +268,7 @@ impl Draft {
             trace_id: None,
             origin: self.origin.clone(),
             tools: Vec::new(),
+            backend_session: None,
         });
         Versioned {
             live: true,

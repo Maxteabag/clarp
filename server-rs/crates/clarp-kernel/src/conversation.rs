@@ -137,6 +137,10 @@ pub struct Reply {
     /// Each use is an item of its own ([`ToolCall`]), written when it starts and when it ends.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
+    /// The session of the agent's tool that said it, where the Host knew it when it wrote the
+    /// row: the agent's own, or its conversation fork's (issue 718). Absent on older rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -608,6 +612,7 @@ mod tests {
                 text: "hi".to_string(),
                 trace_id: None,
                 tools: vec!["toolu_2".to_string()],
+                backend_session: None,
             }),
             Entry::Tool(ToolCall {
                 origin: Origin::User,
