@@ -517,6 +517,7 @@ pub(crate) mod at_the_port {
                 models: Arc::default(),
                 sign_ins: Arc::default(),
                 door: Arc::default(),
+                calendar_receipts: Arc::default(),
             }
         }
     }
