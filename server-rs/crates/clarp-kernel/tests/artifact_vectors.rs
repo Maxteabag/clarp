@@ -28,6 +28,9 @@ fn differences(path: &str, ours: &Value, theirs: &Value, found: &mut Vec<String>
             for (key, value) in a {
                 match b.get(key) {
                     Some(other) => differences(&format!("{path}.{key}"), value, other, found),
+                    // Rust exposes a receipt on the single read of a reusable HTML form (#279).
+                    None if key == "latest_submission"
+                        && a.get("type").and_then(Value::as_str) == Some("html_form") => {}
                     None => found.push(format!("{path}.{key}: only here: {value}")),
                 }
             }

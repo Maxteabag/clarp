@@ -898,6 +898,11 @@ fn shown_as_it_is(key: &str, value: &Value) -> bool {
 }
 
 impl Artifact {
+    /// The most recently accepted submission of a reusable HTML form.
+    pub fn latest_html_submission(&self) -> Option<&forms::Submission> {
+        self.submissions.last().filter(|_| self.kind == "html_form")
+    }
+
     /// The artifact as it is shown: its own fields, what of its payload its kind shows, and
     /// its request or its plan.
     pub fn public(&self, persona: &str, goals: &GoalBook, now: i64) -> Value {
@@ -1361,7 +1366,11 @@ pub struct Shelf<'a> {
 pub fn get(shelves: &[Shelf<'_>], artifact_id: &str, now: i64) -> Option<Value> {
     shelves.iter().find_map(|shelf| {
         let artifact = shelf.artifacts.get(artifact_id)?;
-        Some(artifact.public(shelf.maker.persona, shelf.goals, now))
+        let mut row = artifact.public(shelf.maker.persona, shelf.goals, now);
+        if let Some(submission) = artifact.latest_html_submission() {
+            row["latest_submission"] = submission.receipt(artifact_id);
+        }
+        Some(row)
     })
 }
 
