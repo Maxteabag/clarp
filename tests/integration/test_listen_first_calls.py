@@ -173,7 +173,12 @@ def test_a_capable_answer_runs_nothing(host):
 
 def test_an_old_client_gets_the_legacy_answer_and_no_initiative(host):
     rid, out = answered(host, mode=None)
-    assert out["opening"] == {"text": LINE, "audio_url": "", "session": "rachel", "persona": "Rachel"}
+    # Every agent has a voice since 683, so the legacy opening may carry its audio; what makes
+    # it legacy is the shape and that no initiative turn ever starts.
+    opening = dict(out["opening"])
+    audio = opening.pop("audio_url")
+    assert opening == {"text": LINE, "session": "rachel", "persona": "Rachel"}
+    assert audio == "" or audio.startswith("/audio/")
     got = host.request(f"/calls/ring?ring_id={rid}")["ring"]
     assert got["opening"]["state"] == "fallback"
     time.sleep(0.5)
