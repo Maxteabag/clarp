@@ -1078,8 +1078,21 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `GET /dirs?path=` — directory completion for the start dialog. Answers `{"base", "matches"}`: a path that
   ends in a slash lists the visible directories inside it (absolute paths only); any other path completes its last
   name in its parent. At most 20 matches. A directory that is not there answers no matches.
-- `POST /clog` — batched client diagnostics `{"events": [{"event", "detail",
-  "trace_id", "clip_id"}]}`; the server files them next to its own logs.
+- `POST /clog` — batched client diagnostics `{"events":[{"event","detail","level","trace_id","clip_id"}]}`.
+  With `client_events_kept` (Rust Host contract 146), a bounded store accepts the batch
+  regardless of diagnostics settings and answers `{ok,captured,kept,full_capture}`.
+  `captured` confirms persistence to the bounded store. `kept` counts the events it took.
+  `full_capture` indicates that diagnostics also captured events from the batch.
+  Errors, crashes, exceptions, faults, fatal events and hangs keep the preceding 30 minutes
+  from their device and stay up to seven days. Ordinary events expire after 30 minutes.
+  Capacity is 50,000 events or 50 MiB in total and 20,000 events or 20 MiB per device.
+  Oldest events leave first. Details are redacted and capped at 4 KiB. `POST /crash` adds a
+  `metrickit_report` row with its counts and file name.
+- `GET /client-log?device=&since=&level=&event=&limit=` — full device access required.
+  `since` accepts a duration such as `30m` or epoch milliseconds. `level=error` includes
+  fault, critical and fatal. `level=warning` also includes warn. The newest matching
+  events are returned oldest first in `{events,count}`. Limit defaults to 200 and
+  cannot exceed 5,000. `clarp-admin client-log` reads them as JSON lines.
 
 ### The sync algorithm
 

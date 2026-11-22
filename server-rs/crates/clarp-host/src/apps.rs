@@ -142,6 +142,8 @@ fn kept_report(directory: &Path, name: &str, report: &[u8]) -> std::io::Result<(
 /// never what is in it.
 async fn app_diagnostics(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
     // A report is an object; nothing at all is an empty one, as on the Python Host.
@@ -151,7 +153,8 @@ async fn app_diagnostics(
         _ => return Err(bad("bad json")),
     };
     let name = format!("ios-diagnostic-{}-{}.json", app.clock.now_ms(), ids::hex(4));
-    let written = serde_json::to_vec_pretty(&report).unwrap_or_default();
+    let written = serde_json::to_vec_pretty(&crate::client_events::redact_report(&report))
+        .unwrap_or_default();
     let counts = diagnostic_counts(&report);
     let (directory, bytes, file) = (
         app.config.data_dir.join("crashes"),
@@ -165,6 +168,19 @@ async fn app_diagnostics(
             StatusCode::INTERNAL_SERVER_ERROR,
             "store failed",
         ));
+    }
+    let mut detail = json!({"file": name, "bytes": bytes});
+    for (kind, count) in counts {
+        detail[kind] = json!(count);
+    }
+    let level = if counts[0].1 > 0 || counts[1].1 > 0 {
+        "fault"
+    } else {
+        "info"
+    };
+    let item = json!({"event": "metrickit_report", "level": level, "detail": detail});
+    if let Err(why) = crate::client_events::record(&app, &principal, &headers, &[item]).await {
+        eprintln!("clientEventsKeepFail {why}");
     }
     let counted: Vec<String> = counts
         .iter()
@@ -713,6 +729,7 @@ pub fn routes() -> Router<App> {
         .route("/application-activity", post(activity))
         .route("/upload", post(upload))
         .route("/clog", post(crate::diagnostics::clog))
+        .route("/client-log", get(crate::client_events::read))
         .route("/crash", post(app_diagnostics))
         .route("/automation-settings", get(automation_settings))
         .route("/dirs", get(dirs))

@@ -1,0 +1,386 @@
+//! Admission and redaction for the always-kept client log.
+use std::{
+    path::PathBuf,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
+
+use axum::{
+    Extension, Json,
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode},
+};
+use clarp_ports::clock::Clock;
+use clarp_store_sqlite::client_events::{Event, Query as Filters, Store};
+use regex::Regex;
+use serde_json::{Map, Value, json};
+
+use crate::edge::{ApiError, App, Principal};
+
+const DETAIL_BYTES: usize = 4096;
+const REDACTED: &str = "[redacted]";
+const MARKER: &str = "…[truncated]";
+
+fn pattern(text: &str) -> Regex {
+    Regex::new(text).unwrap_or_else(|why| panic!("client event redaction pattern: {why}"))
+}
+
+static IMPORTANT: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"(?i)error|crash|exception|fatal|hang|fault|metrickit"));
+static SECRET_KEY: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(r"(?i)token|secret|password|passwd|authorization|cookie|api[ _-]?key|credential")
+});
+static SECRETS: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
+    [
+        (
+            pattern(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=\-]+"),
+            "$1 [redacted]",
+        ),
+        (
+            pattern(r"(?i)\b(cld|clp)_[A-Za-z0-9_\-]+"),
+            "${1}_[redacted]",
+        ),
+        (
+            pattern(r#"(?i)\b((?:access_|auth_|api_)?token|secret|password|key)=[^&\s"']+"#),
+            "$1=[redacted]",
+        ),
+        (
+            pattern(r#"(?i)(authorization"?\s*[:=]\s*"?)[^",}\s]+"#),
+            "$1[redacted]",
+        ),
+    ]
+});
+
+fn redact_text(text: &str) -> String {
+    let mut text = std::borrow::Cow::Borrowed(text);
+    for (re, replacement) in SECRETS.iter() {
+        if let std::borrow::Cow::Owned(replaced) = re.replace_all(&text, *replacement) {
+            text = std::borrow::Cow::Owned(replaced);
+        }
+    }
+    text.into_owned()
+}
+
+fn redact(value: &Value, depth: usize, bounded: bool) -> Value {
+    if bounded && depth > 12 {
+        return json!("[deep]");
+    }
+    let most = if bounded { 200 } else { usize::MAX };
+    match value {
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .take(most)
+                .map(|(key, value)| {
+                    let value = if SECRET_KEY.is_match(key) {
+                        json!(REDACTED)
+                    } else {
+                        redact(value, depth + 1, bounded)
+                    };
+                    let key = redact_text(key);
+                    let key = if bounded {
+                        clarp_kernel::python::first(&key, 80).to_owned()
+                    } else {
+                        key
+                    };
+                    (key, value)
+                })
+                .collect::<Map<_, _>>(),
+        ),
+        Value::Array(rows) => Value::Array(
+            rows.iter()
+                .take(most)
+                .map(|row| redact(row, depth + 1, bounded))
+                .collect(),
+        ),
+        Value::String(text) => json!(redact_text(text)),
+        value => value.clone(),
+    }
+}
+
+/// Preserve a MetricKit report's shape while removing secrets before writing it.
+pub(crate) fn redact_report(report: &Value) -> Value {
+    redact(report, 0, false)
+}
+
+fn detail(value: &Value) -> Option<String> {
+    if value.is_null() || value == "" {
+        return None;
+    }
+    let mut text = redact(value, 0, true).to_string();
+    if text.len() > DETAIL_BYTES {
+        text.truncate(text.floor_char_boundary(DETAIL_BYTES - MARKER.len()));
+        text.push_str(MARKER);
+    }
+    Some(text)
+}
+
+fn text(value: &Value, field: &str, fallback: &str) -> String {
+    let value = &value[field];
+    if clarp_kernel::python::truthy(value) {
+        value
+            .as_str()
+            .map_or_else(|| clarp_kernel::python::repr(value), str::to_owned)
+    } else {
+        fallback.to_owned()
+    }
+}
+
+struct Source {
+    device: String,
+    client: String,
+    build: String,
+    contract: Option<i64>,
+    server_id: String,
+}
+
+impl Source {
+    fn from(app: &App, principal: &Principal, headers: &HeaderMap) -> Self {
+        let label = match principal {
+            Principal::Administrator if app.config.auth_token.is_empty() => "local",
+            Principal::Administrator => "administrator",
+            Principal::Device { device_id, .. } => device_id,
+            Principal::Tools => "unknown",
+        };
+        let mut words = headers
+            .get("x-clarp-client")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .split_whitespace();
+        let first = words.next().unwrap_or_default();
+        let (client, build) = first.split_once('/').unwrap_or((first, ""));
+        let contract = (!client.is_empty()).then(|| {
+            words
+                .filter_map(|word| word.strip_prefix("contract="))
+                .next_back()
+                .and_then(|raw| raw.parse::<i64>().ok())
+                .unwrap_or_default()
+                .max(0)
+        });
+        let cap =
+            |text: &str, most| clarp_kernel::python::first(&redact_text(text), most).to_owned();
+        Self {
+            device: cap(label, 120),
+            client: cap(&client.to_lowercase(), 32),
+            build: cap(if client.is_empty() { "" } else { build }, 80),
+            contract,
+            server_id: cap(&app.server_id, 64),
+        }
+    }
+
+    fn event(&self, item: &Value, now: i64) -> Event {
+        let cap =
+            |text: &str, most| clarp_kernel::python::first(&redact_text(text), most).to_owned();
+        let name = text(item, "event", "log");
+        let name = clarp_kernel::python::first(&name, 64);
+        let level = text(item, "level", "");
+        let level = level.trim().to_lowercase();
+        let level = clarp_kernel::python::first(&level, 16);
+        let important = IMPORTANT.is_match(name) || IMPORTANT.is_match(level);
+        let level = if !level.is_empty() {
+            level
+        } else if important {
+            "error"
+        } else {
+            "info"
+        };
+        let trace = cap(&text(item, "trace_id", ""), 80);
+        Event {
+            received_at: now,
+            device: self.device.clone(),
+            client: self.client.clone(),
+            client_build: self.build.clone(),
+            client_contract: self.contract,
+            server_id: self.server_id.clone(),
+            event: cap(name, 64),
+            level: cap(level, 16),
+            detail: detail(&item["detail"]),
+            trace_id: (!trace.is_empty()).then_some(trace),
+            kept: important,
+        }
+    }
+}
+
+pub struct Desk {
+    path: PathBuf,
+    connection: Arc<tokio::sync::Mutex<Option<Store>>>,
+}
+
+impl Desk {
+    pub fn new(path: PathBuf) -> Arc<Self> {
+        Arc::new(Self {
+            path,
+            connection: Arc::default(),
+        })
+    }
+
+    async fn call<T: Send + 'static>(
+        self: &Arc<Self>,
+        operation: impl FnOnce(&mut Store) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let mut connection = self.connection.clone().lock_owned().await;
+        let path = self.path.clone();
+        tokio::task::spawn_blocking(move || {
+            if connection.is_none() {
+                *connection = Some(Store::open(&path)?);
+            }
+            let store = connection
+                .as_mut()
+                .ok_or("client event store unavailable")?;
+            operation(store)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    pub fn age_out(self: &Arc<Self>, clock: Arc<dyn Clock + Send + Sync>) {
+        let desk = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let Some(desk) = desk.upgrade() else { return };
+                if desk.path.is_file() {
+                    let now = clock.now_ms();
+                    if let Err(why) = desk
+                        .call(move |store| store.prune(now).map_err(|e| e.to_string()))
+                        .await
+                    {
+                        eprintln!("clientEventsPruneFail {why}");
+                    }
+                }
+            }
+        });
+    }
+}
+
+pub(crate) async fn record(
+    app: &App,
+    principal: &Principal,
+    headers: &HeaderMap,
+    items: &[Value],
+) -> Result<usize, String> {
+    let source = Source::from(app, principal, headers);
+    let now = app.clock.now_ms();
+    let rows: Vec<_> = items
+        .iter()
+        .filter(|item| item.is_object())
+        .map(|item| source.event(item, now))
+        .collect();
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    app.client_events
+        .call(move |store| {
+            store
+                .record(&rows, &source.device, now)
+                .map_err(|e| e.to_string())
+        })
+        .await
+}
+
+fn parse_since(since: &str, now: i64) -> Result<Option<i64>, ApiError> {
+    if since.is_empty() {
+        return Ok(None);
+    }
+    if since.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Ok(Some(since.parse().unwrap_or(i64::MAX)));
+    }
+    for (unit, ms) in [
+        ('s', 1000),
+        ('m', 60_000),
+        ('h', 3_600_000),
+        ('d', 86_400_000),
+    ] {
+        if let Some(amount) = since.strip_suffix(unit) {
+            let amount = amount.trim_end();
+            if !amount.is_empty() && amount.bytes().all(|byte| byte.is_ascii_digit()) {
+                let amount = amount.parse::<i64>().unwrap_or(i64::MAX);
+                return Ok(Some(now.saturating_sub(amount.saturating_mul(ms))));
+            }
+        }
+    }
+    Err(ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "since is 30m, 2h, 7d or milliseconds since the epoch",
+    ))
+}
+
+fn shown(row: Event) -> Value {
+    let detail = row.detail.map(|detail| {
+        if detail.ends_with(MARKER) {
+            Value::String(detail)
+        } else {
+            serde_json::from_str(&detail).unwrap_or(Value::String(detail))
+        }
+    });
+    json!({
+        "received_at": row.received_at, "device": row.device, "client": row.client,
+        "client_build": row.client_build, "client_contract": row.client_contract,
+        "server_id": row.server_id, "event": row.event, "level": row.level,
+        "detail": detail, "trace_id": row.trace_id, "kept": row.kept,
+    })
+}
+
+pub async fn read(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Result<Json<Value>, ApiError> {
+    if matches!(
+        principal,
+        Principal::Device {
+            scope: crate::pairing::Scope::Limited,
+            ..
+        }
+    ) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            clarp_kernel::devices::LIMITED_REFUSAL,
+        ));
+    }
+    let events = events(app, |name| {
+        query
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    })
+    .await?;
+    Ok(Json(json!({"count":events.len(),"events":events})))
+}
+
+pub(crate) async fn events<'a>(
+    app: App,
+    value: impl Fn(&str) -> Option<&'a str>,
+) -> Result<Vec<Value>, ApiError> {
+    let value = |name| value(name).map(str::trim).filter(|value| !value.is_empty());
+    let limit = value("limit").unwrap_or("200");
+    let limit = limit
+        .parse::<i64>()
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "invalid literal for int() with base 10: {}",
+                    clarp_kernel::python::repr(&json!(limit))
+                ),
+            )
+        })?
+        .clamp(1, 5000);
+    let now = app.clock.now_ms();
+    let filters = Filters {
+        device: value("device").map(str::to_owned),
+        since_ms: parse_since(value("since").unwrap_or_default(), now)?,
+        level: value("level").map(str::to_lowercase),
+        event: value("event").map(str::to_owned),
+        limit,
+    };
+    let rows = app
+        .client_events
+        .call(move |store| store.read(&filters, now).map_err(|e| e.to_string()))
+        .await
+        .map_err(|why| {
+            eprintln!("clientEventsReadFail {why}");
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store failed")
+        })?;
+    Ok(rows.into_iter().map(shown).collect())
+}

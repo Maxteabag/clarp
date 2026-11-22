@@ -498,3 +498,12 @@ after a transient catalogue failure. Python selects the Cartesia provider for a 
 and can also look up its missing voices by ID. Rust leaves those lookups to the next
 full refresh. Skipped passes, including a pass for a previously refused key, keep
 the daily schedule.
+
+
+## Rust-first features
+
+The bounded client log (issue 707, contract 146) is available on the Rust Host.
+Its `POST /clog` acknowledges successful storage regardless of the diagnostics
+setting and adds `kept` and `full_capture`. The Python Host's diagnostic capture
+still controls its `/clog` acknowledgement. `GET /client-log` is implemented on
+the Rust Host.

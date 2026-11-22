@@ -18,7 +18,7 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
     wait_for("the busy fixture agent settles", || h.state(&who) == "done");
     assert_eq!(
         h.post("/clog", payload.clone()),
-        json!({"ok":true,"captured":false})
+        json!({"ok":true,"captured":true,"kept":1,"full_capture":false})
     );
     let dir = place.root.join("data/diagnostics");
     use clarp_ports::diagnostics::DiagnosticUsage;
@@ -44,7 +44,7 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
     );
     assert_eq!(
         h.ask_as(&limited, "POST", "/clog", Some(&payload)).1,
-        json!({"ok":true})
+        json!({"ok":true,"captured":true,"kept":1,"full_capture":true})
     );
     let hour = now_ms().div_euclid(3_600_000);
     let name = "sseDup";
@@ -101,5 +101,106 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
     let h = place.start_with_token(token);
     assert_eq!(h.get(key)["settings"]["enabled"], true);
     h.post(key, json!({"enabled":false,"categories":["client"]}));
-    assert_eq!(h.post("/clog", payload)["captured"], false);
+    assert_eq!(h.post("/clog", payload)["full_capture"], false);
+}
+
+#[test]
+fn client_events_are_kept_without_diagnostics_redacted_and_readable_by_the_admin() {
+    let place = Place::new("client-events-kept");
+    let h = place.start_with_token("fixture-admin");
+    let (phone, device) = pair(&h, "Log Phone", "limited");
+    let post = |items: Value| {
+        let response = fetch(
+            &h,
+            &phone,
+            "POST",
+            "/clog",
+            &[
+                ("content-type", "application/json"),
+                ("x-clarp-client", "iOS/2990 contract=80"),
+            ],
+            &serde_json::to_vec(&items).unwrap(),
+        );
+        assert_eq!(response.status, 200, "{}", response.text());
+        serde_json::from_slice::<Value>(&response.body).unwrap()
+    };
+    let secret = "fixture-secret-that-must-not-be-stored";
+    let payload = json!({"events":[
+        {"event":"launch","trace_id":"t1","detail":{"nested":{"api key":secret},
+            "url":format!("https://fixture.example/x?token={secret}&keep=1")}},
+        {"event":"fatalError","level":"fault",
+         "detail":"Bearer fixturesecretvalue cld_fixturetoken clp_fixturecode"},
+        {"event":"large","detail":"é".repeat(4200)}
+    ]});
+    assert_eq!(
+        post(payload),
+        json!({"ok":true,"captured":true,"kept":3,"full_capture":false})
+    );
+    let rows = h.get(&format!("/client-log?device={device}&since=30m"));
+    assert_eq!(rows["count"], 3);
+    let events = rows["events"].as_array().unwrap();
+    assert_eq!(events[0]["trace_id"], "t1");
+    assert_eq!(events[0]["device"], device);
+    assert_eq!(events[0]["client"], "ios");
+    assert_eq!(events[0]["client_build"], "2990");
+    assert_eq!(events[0]["client_contract"], 80);
+    assert_eq!(events[0]["kept"], true);
+    assert_eq!(events[1]["kept"], true);
+    assert_eq!(events[0]["detail"]["nested"]["api key"], "[redacted]");
+    assert_eq!(
+        events[0]["detail"]["url"],
+        "https://fixture.example/x?token=[redacted]&keep=1"
+    );
+    let error = events[1]["detail"].as_str().unwrap();
+    for gone in ["fixturesecretvalue", "fixturetoken", "fixturecode"] {
+        assert!(!error.contains(gone));
+    }
+    let large = events[2]["detail"].as_str().unwrap();
+    assert!(large.len() <= 4096 && large.ends_with("…[truncated]"));
+    let (status, _) = h.ask_as(&phone, "GET", "/client-log", None);
+    assert_eq!(status, 403);
+    assert_eq!(h.ask("GET", "/client-log?since=yesterday", None).0, 400);
+    assert_eq!(h.get("/client-log?limit=1")["events"][0]["event"], "large");
+
+    assert_eq!(
+        h.post(
+            "/crash",
+            json!({
+                "crashDiagnostics": [{"authorization":format!("Bearer {secret}")}]
+            })
+        ),
+        json!({"ok":true})
+    );
+    let reports = h.get("/client-log?event=metrickit_report");
+    let report = &reports["events"][0];
+    assert_eq!(report["kept"], true);
+    assert_eq!(report["detail"]["crashes"], 1);
+    let path = place
+        .root
+        .join("data/crashes")
+        .join(report["detail"]["file"].as_str().unwrap());
+    let stored = std::fs::read_to_string(path).unwrap();
+    assert!(!stored.contains(secret));
+
+    let answered = h.post(
+        "/tools/run",
+        json!({
+            "tool":"clarp-admin","argv":["client-log","--device",device,"--level","error"]
+        }),
+    );
+    assert_eq!(answered["exit"], 0, "{answered}");
+    let lines = answered["stdout"]
+        .as_str()
+        .unwrap()
+        .lines()
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "{answered}");
+    assert_eq!(
+        serde_json::from_str::<Value>(lines[0]).unwrap()["event"],
+        "fatalError"
+    );
+
+    h.kill();
+    let h = place.start_with_token("fixture-admin");
+    assert_eq!(h.get("/client-log?event=fatalError")["count"], 1);
 }

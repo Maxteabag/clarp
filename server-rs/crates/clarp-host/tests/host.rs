@@ -611,11 +611,12 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 145);
+    assert_eq!(info["contract"]["host"], 146);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["voice_pool"], 123);
+    assert_eq!(info["contract"]["features"]["client_events_kept"], 146);
     assert_eq!(info["contract"]["features"]["voice_for_helpers"], 135);
     assert_eq!(info["contract"]["features"]["cross_origin_read"], 139);
     assert_eq!(info["contract"]["features"]["previous_server_ids"], 144);
@@ -9271,7 +9272,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 145);
+    assert_eq!(info["contract"]["host"], 146);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
     assert_eq!(info["contract"]["features"]["render_spec_v2"], 133);
     assert_eq!(
@@ -19939,7 +19940,13 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
 
     // A client can submit diagnostics without enabling capture.
     let (status, said) = host.ask_as(&limited, "POST", "/clog", Some(&json!({"event":"fixture"})));
-    assert_eq!((status, said), (200, json!({"ok":true,"captured":false})));
+    assert_eq!(
+        (status, said),
+        (
+            200,
+            json!({"ok":true,"captured":true,"kept":1,"full_capture":false})
+        )
+    );
     assert_eq!(
         fetch(&host, token, "POST", "/clog", &[], b"[1]").status,
         400
