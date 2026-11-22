@@ -3150,12 +3150,19 @@ async fn send_as(
     let provided = sender_named(request.sender.as_ref())
         .map(python::strip)
         .filter(|name| !name.is_empty());
-    let foreign = provided.filter(|_| {
-        made.owner_token && made.turn.is_none() && !made.peer && known_sender.is_empty()
+    let foreign = made.internal_sender.or_else(|| {
+        provided.filter(|_| {
+            made.owner_token && made.turn.is_none() && !made.peer && known_sender.is_empty()
+        })
     });
+    let principal_sender = if made.internal_sender.is_some() {
+        ""
+    } else {
+        &known_sender
+    };
     let mut principal = coordination::principal(
         &member.record.agent_id,
-        &known_sender,
+        principal_sender,
         &caller,
         caller_session.as_deref(),
     )

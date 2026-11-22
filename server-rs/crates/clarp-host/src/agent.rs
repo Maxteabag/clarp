@@ -252,6 +252,11 @@ enum Ask {
     Queue {
         answer: Answer<(Vec<Waiting>, QueueState)>,
     },
+    Experience {
+        since: i64,
+        now: i64,
+        answer: Answer<crate::experience_watch::AgentFacts>,
+    },
     /// What became of the turn that answers a message, by the message's id.
     OpeningRow {
         id: String,
@@ -842,6 +847,15 @@ impl AgentHandle {
     /// starts an agent again stops first.
     pub async fn start_again(&self) -> Result<bool, Unavailable> {
         self.ask(|answer| Ask::StartAgain { answer }).await
+    }
+
+    pub(crate) async fn experience(
+        &self,
+        since: i64,
+        now: i64,
+    ) -> Result<crate::experience_watch::AgentFacts, Unavailable> {
+        self.ask(|answer| Ask::Experience { since, now, answer })
+            .await
     }
 
     pub async fn queue(&self) -> Result<(Vec<Waiting>, QueueState), Unavailable> {
@@ -3080,6 +3094,23 @@ impl Worker {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
             }
+            Ask::Experience { since, now, answer } => {
+                let facts = actor.queue().map(|queue| {
+                    let status = actor.status();
+                    let parked = status
+                        .live
+                        .and_then(|live| live.parked)
+                        .filter(|turn| turn.origin == clarp_kernel::turn::Origin::User)
+                        .map(|turn| turn.accepted_at_ms);
+                    crate::experience_watch::AgentFacts {
+                        queue,
+                        parked,
+                        paused: status.paused,
+                        window: actor.experience_window(since, now),
+                    }
+                });
+                return read(facts, answer);
+            }
             Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
             Ask::UnrunRequest {
@@ -4873,6 +4904,7 @@ fn refuse_for(
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Experience { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::UnrunRequest { answer, .. }) => drop(answer.send(Err(refusal()))),

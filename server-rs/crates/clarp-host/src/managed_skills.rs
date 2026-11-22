@@ -365,20 +365,25 @@ async fn blocking<T: Send + 'static>(
 
 /// `GET /managed-skills`: the full status where this Host keeps the tools, else none.
 async fn list(State(app): State<App>) -> Result<Json<Value>, ApiError> {
+    status(&app)
+        .await
+        .map(|rows| Json(json!({ "skills": rows })))
+}
+
+pub(crate) async fn status(app: &App) -> Result<Vec<Value>, ApiError> {
     let Some(shelf) = Shelf::of(&app.config) else {
-        return Ok(Json(json!({ "skills": [] })));
+        return Ok(Vec::new());
     };
     let _one = app.skill_links.lock().await;
     let path = app.config.data_dir.join("install.json");
     let seed = app.config.skills_chosen_before.clone();
-    let rows = blocking(move || {
+    blocking(move || {
         let state = InstallState::load(&path, seed.as_deref()).map_err(disk_error)?;
         shelf
             .status(&state.skills_off)
             .map_err(|Malformed| unavailable())
     })
-    .await??;
-    Ok(Json(json!({ "skills": rows })))
+    .await?
 }
 
 /// `POST /managed-skills`: a skill switched on or off, where this Host keeps the tools.

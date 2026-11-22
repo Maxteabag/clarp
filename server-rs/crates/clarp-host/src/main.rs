@@ -420,6 +420,7 @@ async fn serve(config: Config) -> Result<(), String> {
     }
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
+    clarp_host::experience_watch::run(&app);
     // And a handoff of the Oracle's that a phone does not get on with is not waited for.
     clarp_host::oracle::run(&app);
     // And an idle agent that asked for it is given a heartbeat when one is due.

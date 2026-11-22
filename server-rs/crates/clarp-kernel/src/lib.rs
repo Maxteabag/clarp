@@ -36,6 +36,7 @@ pub mod devices;
 pub mod difflib;
 pub mod direct_push;
 pub mod doors;
+pub mod experience;
 pub mod explain;
 pub mod failures;
 pub mod fcm;

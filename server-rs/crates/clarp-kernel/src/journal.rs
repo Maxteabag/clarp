@@ -243,6 +243,7 @@ pub enum Reworded {
 
 pub struct Recorder {
     log: Box<dyn AgentLog>,
+    experience: crate::experience::History,
     turn_sessions: turn_sessions::TurnSessions,
     agent: Agent,
     /// Legacy waiting turns that already have a conversation row.
@@ -332,6 +333,7 @@ impl Recorder {
     /// Opens an agent from its log: the state is whatever its history says.
     pub fn open(log: Box<dyn AgentLog>) -> Result<Self, JournalError> {
         let mut agent = Agent::new();
+        let mut experience = crate::experience::History::default();
         // What changed of a send's delivery before the Host started is not told again.
         agent.deliveries_mut().folding(true);
         let mut turn_sessions = turn_sessions::TurnSessions::default();
@@ -354,6 +356,7 @@ impl Recorder {
                         if matches!(event, AgentEvent::StartedAgain { .. }) {
                             floor = item.seq;
                         }
+                        experience.observe(&event);
                         agent.at(item.seq);
                         agent
                             .apply(&event)
@@ -404,6 +407,7 @@ impl Recorder {
         }
         Ok(Self {
             log,
+            experience,
             turn_sessions,
             agent,
             shown_waiting,
@@ -565,6 +569,10 @@ impl Recorder {
     }
 
     /// The log, for reading. Only a [`Batch`] writes to it.
+    pub fn experience_window(&self, since: i64, now: i64) -> crate::experience::Window {
+        self.experience.window(since, now)
+    }
+
     pub fn log(&self) -> &dyn AgentLog {
         self.log.as_ref()
     }
@@ -969,6 +977,7 @@ impl Batch<'_> {
         }
         self.recorder.agent = self.work;
         for event in &self.events {
+            self.recorder.experience.observe(event);
             if let AgentEvent::Turn {
                 turn,
                 change: TurnEvent::Started { .. } | TurnEvent::Settled { .. },

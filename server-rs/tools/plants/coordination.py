@@ -163,7 +163,7 @@ PLANTS = [
     (HE, 'host', 'the origin a send claimed is kept whoever made it', '        coordination::origin(request.origin.as_deref(), &principal, made.peer)',
      '        coordination::origin(request.origin.as_deref(), &coordination::Principal::default(), false)'),
     (HE, 'host', "a send is marked by the Host's own origin", '        Some(&named),\n        Some(&principal.sender_agent_id),', '        Some("agent"),\n        Some(&principal.sender_agent_id),'),
-    (HE, 'host', "a sender the Host does not know is another agent's", '        &known_sender,\n        &caller,', '        sender_named(request.sender.as_ref()).unwrap_or_default(),\n        &caller,'),
+    (HE, 'host', "a sender the Host does not know is another agent's", '        principal_sender,\n        &caller,', '        sender_named(request.sender.as_ref()).unwrap_or_default(),\n        &caller,'),
     (HE, 'host', 'a trace taken is answered as a send', '        Err(clarp_actor::TraceTaken) => {\n            drop(guard);\n            return Err(ApiError::new(\n                StatusCode::CONFLICT,', '        Err(clarp_actor::TraceTaken) => {\n            drop(guard);\n            return Err(ApiError::new(\n                StatusCode::BAD_REQUEST,'),
     (HE, 'host', 'there is no route of a note', '        .route("/agent-notes", post(crate::coordination::agent_note))\n', ''),
     # The note at the edge, and its tool.
