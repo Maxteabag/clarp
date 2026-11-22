@@ -55,6 +55,7 @@ describe('the quiet chat: one work row per settled turn', () => {
       prompt('u3', 't3'), row('a3', 't3', { kind: 'live', tools: [tool('c3')] })];
     const out = foldTurns(rows, { busy: true });
     expect(out.stripped.has('a1')).toBe(false);                 // the failed call stays in its row
+    expect(out.byRow.has('u1')).toBe(false);                    // and no fold opens to nothing
     expect(out.byRow.has('u2')).toBe(false);                    // nothing to fold
     expect(out.byRow.get('u3').label).toBe('Working · 1 tool'); // running: its count so far
   });
@@ -64,5 +65,26 @@ describe('the quiet chat: one work row per settled turn', () => {
       row('a1', 't1', { tools: [tool('c1')], turn: { worked_ms: 5000, tool_count: 1 } })];
     const out = foldTurns(rows);
     expect(out.byRow.get('u1').key).toBe('fold:t1');
+  });
+
+  it('counts only the calls the fold opens to, not failed ones left in their rows', () => {
+    const rows = [prompt('u1', 't1'),
+      row('a1', 't1', { tools: [tool('c1'), tool('c2', 'error')], display_cells: [{ id: 'd1', kind: 'command' }],
+                        turn: { worked_ms: 4000, tool_count: 3 } })];
+    const fold = foldTurns(rows).byRow.get('u1');
+    expect(fold.label).toBe('Worked for 4s · 2 tools');
+    expect(fold.calls[0].tools.map(t => t.id)).toEqual(['c1']);
+  });
+
+  it('folds a chat of thousands of rows in one walk', () => {
+    const rows = [];
+    for (let i = 0; i < 4000; i++) {
+      rows.push(prompt(`u${i}`, `t${i}`), row(`a${i}`, `t${i}`, { tools: [tool(`c${i}`)], turn: { worked_ms: 1000, tool_count: 1 } }));
+    }
+    rows.push(row('late', 't7', { tools: [tool('cl')] }));      // a late row of an early turn
+    const out = foldTurns(rows);
+    expect(out.folds.length).toBe(4000);
+    expect(out.byRow.get('u7').calls.map(c => c.rowId)).toEqual(['a7', 'late']);
+    expect(out.byRow.get('u3999').running).toBe(false);
   });
 });
