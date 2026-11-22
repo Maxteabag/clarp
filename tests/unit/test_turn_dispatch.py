@@ -655,6 +655,8 @@ def test_queued_completion_keeps_its_own_notification_provenance(
     pytest.param(("user", "schedule"), 1, (1, 0, 1, 1), id="schedule-after-user"),
     pytest.param(("user", "dreaming"), 1, (1, 0, 1, 1), id="dreaming-after-user"),
     pytest.param(("user", "watcher", "heartbeat"), 2, (1, 1, 1, 1), id="watcher-then-heartbeat"),
+    pytest.param(("oracle", "heartbeat"), 1, (1, 0, 1, 1), id="heartbeat-after-oracle"),
+    pytest.param(("oracle", "agent"), 1, (1, 0, 1, 1), id="peer-after-oracle"),
     pytest.param(("user", "watcher", "agent"), 2, (1, 1, 1, 1), id="watcher-then-peer"),
     pytest.param(("user", "agent", "watcher"), 3, (1, 1, 1, 1), id="peer-then-watcher"),
     pytest.param(("agent", "agent"), 1, (0, 0, 0, 0), id="pure-peer"),
