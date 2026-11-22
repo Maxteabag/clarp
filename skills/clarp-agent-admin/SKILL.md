@@ -95,8 +95,9 @@ On contract 135 and later (feature `voice_for_helpers`), these rules also apply:
   voices, one per name). Agents in other languages get one from Cartesia's
   catalogue in their language.
 - A voice is unused when no agent holds it, archived agents included, and no
-  contact holds it. When the pool runs out, the Host reuses the least recently
-  used voice and logs `voicePoolExhausted`.
+  contact holds it. When the pool runs out, the Host first reuses a voice that
+  only archived agents hold, then the least recently used voice, and logs
+  `voicePoolExhausted`.
 - A helper (`--role helper`) speaks with its parent's voice. A fork gets its own.
   A Janitor has none, because it never speaks.
 

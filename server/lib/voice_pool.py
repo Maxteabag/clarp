@@ -8,7 +8,8 @@ caller gave is kept. Google and Deepgram need nothing: each has one default voic
 A voice is picked by a walk from sha256(name) through the provider's pool to the first voice no
 agent (archived ones included: an archived agent can be restored with its voice) and no contact
 speaks with, and that no built-in contact owns (the persona lists and the roster keep their
-voices for their own names). When every voice is taken, the least recently used one is reused:
+voices for their own names). When every voice is taken, a voice only archived agents hold is
+reused first (reusing a voice the user still hears is worse); then the least recently used one:
 the voice whose holders last spoke (their newest clip, else their creation) longest ago, logged
 as voicePoolExhausted. The walk is stable: the same name on the same pool and the same fleet
 gets the same voice, and two agents do not share a voice while the pool has a free one.
@@ -215,9 +216,13 @@ def _last_clips() -> dict[str, int]:
 
 
 def pick(cfg, provider: str, name: str, taken: Counter, *, keep: set[str] | frozenset = frozenset(),
-         language: str = "en", recency: Callable[[], Mapping[str, int]] | None = None) -> str | None:
+         language: str = "en", recency: Callable[[], Mapping[str, int]] | None = None,
+         heard: Counter | None = None) -> str | None:
     """The walk. ``keep``: voices never handed out while another is free (built-in contacts'
-    own); ``recency``: voice -> last used (ms), read only when every voice is taken."""
+    own); ``recency``: voice -> last used (ms), read only when every voice is taken;
+    ``heard``: holders still in use (active agents and contacts) per voice. With ``taken``
+    counting archived agents too, a voice in ``taken`` but not in ``heard`` is held only by
+    archived agents, and is reused before one the user still hears."""
     voices = pool(cfg, provider, language)
     if not voices:
         return None
@@ -227,11 +232,14 @@ def pick(cfg, provider: str, name: str, taken: Counter, *, keep: set[str] | froz
         if not taken.get(voice):
             return voice
     used = dict(recency() if recency else {})
-    # The least recently used voice; among equals the least shared, then the walk's order.
-    least = min(order, key=lambda voice: (used.get(voice, 0), taken.get(voice, 0)))
+    heard = taken if heard is None else heard
+    # A voice only archived agents hold first; then the least recently used; among equals
+    # the least shared, then the walk's order.
+    least = min(order, key=lambda voice: (bool(heard.get(voice)), used.get(voice, 0), taken.get(voice, 0)))
     from .log import log
     log("voicePoolExhausted", f"provider={provider} pool={len(voices)} reused={least} "
-        f"last_used_ms={used.get(least, 0)} shared_by={taken.get(least, 0)}")
+        f"archived_only={not heard.get(least)} last_used_ms={used.get(least, 0)} "
+        f"shared_by={taken.get(least, 0)}")
     return least
 
 
@@ -259,11 +267,13 @@ def assign(cfg, name: str, stored: str | None, *, agents: Iterable[Mapping] | No
     agents, contacts = list(agents), list(contacts)
     custom = [c for c in contacts if not c.get("builtin")]
     language = speech_language(name)
+    in_use = [a for a in agents if not a.get("archived_at")]
     for provider in missing:
         voice = pick(cfg, provider, name, users(cfg, provider, agents, contacts),
                      keep=reserved(cfg, provider) | set(users(cfg, provider, [], contacts) - users(cfg, provider, [], custom)),
                      language=language,
-                     recency=functools.partial(last_used, cfg, provider, agents, contacts))
+                     recency=functools.partial(last_used, cfg, provider, agents, contacts),
+                     heard=users(cfg, provider, in_use, contacts))
         if voice:
             mapping[provider] = voice
     return json.dumps(mapping, sort_keys=True, separators=(",", ":"))
