@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use crate::ids;
 
 mod import_devices;
+mod import_jobs;
 mod import_settings;
 mod offline_import;
 
@@ -41,9 +42,13 @@ pub const IMPORT_USAGE: &str =
        clarp-host import --back --from ADDR:PORT --session NAME [--host ADDR:PORT]
        clarp-host import --devices --from-db PATH --data DIR
        clarp-host import --settings --from-db PATH --data DIR [--dry-run]
+       clarp-host import --jobs --from-db PATH --data DIR [--dry-run]
 Stop the Python Host before reading its database. Run a writing import before starting the
-Rust Host. --settings --dry-run prints the same plan without updating the destination.
-PATH is the Python state.sqlite and DIR is the Rust Host's --data directory with fleet.db.
+Rust Host, and for --jobs stop the Rust Host first. --dry-run prints the same plan without
+updating the destination. PATH is the Python state.sqlite and DIR is the Rust Host's --data
+directory with fleet.db. --jobs carries each running background job of an agent that has moved
+here, as it stands, so that its worker, which keeps running, goes on reporting to this Host; a
+job whose worker is gone, or that this Host already has, is left.
 Reads the agent NAME, its conversation, its library, its plans and goals and the files it
 published or shows from the Host at --from and gives them to this Host. With --files only
 the files are given, for an agent that is here already: a move whose files did not all
@@ -828,6 +833,10 @@ pub fn import(
         Some("--settings") => {
             args.next();
             return import_settings::run(args);
+        }
+        Some("--jobs") => {
+            args.next();
+            return import_jobs::run(args);
         }
         _ => {}
     }

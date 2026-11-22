@@ -125,14 +125,14 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[
 pub(crate) const VOICE_EVENTS: &str = "voice-events";
 pub(crate) const VOICE_SEQUENCE: &str = "voice-event-sequence";
 
-const AGENTS: &str = "agent";
+pub(crate) const AGENTS: &str = "agent";
 const SETTINGS: &str = "setting";
 const FOCUS: &str = "focus";
 /// Pairing codes that wait to be handed in, by the digest of the code.
 const CODES: &str = "pairing-code";
 /// Paired devices, by device id.
 pub(crate) const DEVICES: &str = "device";
-const JOBS: &str = "job";
+pub(crate) const JOBS: &str = "job";
 /// The register of push devices: one row for each token, under the token.
 const PUSH: &str = "push";
 /// The other Hosts this one may write to, by the name the owner gave each.
