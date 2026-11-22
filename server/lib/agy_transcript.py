@@ -32,6 +32,58 @@ from .log import log_exception
 from . import transcript_paths
 from .text_util import truncate
 
+# How agy's tools read: their names, and their inputs with secrets blanked (also used by
+# the backend's live stream, backend/agy.py).
+# The value is the credential, with the scheme word in front of it if there is one
+# (R46: 'Authorization: Bearer abc123' blanked 'Bearer' and kept the token).
+_SECRET_VALUE = re.compile(
+    r"(?i)(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*"
+    r"(?:(?:bearer|basic|token|digest|negotiate)\s+)?[^\s]+")
+
+
+_TOOL_NAMES = {
+    "run_command": "Bash", "view_file": "Read", "write_to_file": "Write",
+    "replace_file_content": "Edit", "multi_replace_file_content": "Edit",
+    "grep_search": "Grep", "find_by_name": "Glob",
+    "list_dir": "LS", "search_web": "WebSearch",
+    "read_url_content": "WebFetch",
+    # The names newer agy releases use for its file tools (R44).
+    "read_file": "Read", "write_file": "Write", "edit_file": "Edit",
+}
+
+
+def _canonical_tool_name(value: str) -> str:
+    return _TOOL_NAMES.get(value, value or "tool")
+
+
+def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+
+    def clean(item: Any, limit: int = 180) -> str:
+        text = str(item or "")[:limit]
+        return _SECRET_VALUE.sub(r"\1=[redacted]", text)
+
+    if name == "Bash":
+        return {
+            "command": clean(raw.get("command") or raw.get("CommandLine")),
+            "description": clean(raw.get("description"), 120),
+        }
+    # agy spells its arguments AbsolutePath, TargetFile, Query, SearchPath...
+    if name in {"Read", "Write", "Edit"}:
+        return {"file_path": clean(
+            raw.get("file_path") or raw.get("FilePath") or raw.get("AbsolutePath")
+            or raw.get("TargetFile") or raw.get("Path") or raw.get("path"), 240)}
+    if name in {"Grep", "Glob"}:
+        return {"pattern": clean(raw.get("pattern") or raw.get("Query"), 100),
+                "path": clean(raw.get("path") or raw.get("SearchPath"), 240)}
+    if name == "LS":
+        return {"path": clean(raw.get("path") or raw.get("DirectoryPath"), 240)}
+    if name in {"WebSearch", "WebFetch"}:
+        return {"query": clean(raw.get("query") or raw.get("Query"), 130),
+                "url": clean(raw.get("url") or raw.get("Url"), 180)}
+    return {}
+
+
 # Map agy's event types onto the tool names the UI already styles.
 _TOOL_TYPES = {
     "RUN_COMMAND": "Bash",
@@ -114,6 +166,7 @@ def _tool_from(ev: dict) -> dict:
 # typed tool step), which is also the step the live stream names `step-<N+1+i>`.
 _RESULT_HEADER_RE = re.compile(r"\A(?:(?:Created|Completed) At:[^\n]*\n)*\n?")
 _EXIT_RE = re.compile(r"exited with code (-?\d+)")
+_OUTPUT_HEADING_RE = re.compile(r"(?im)^(?:command )?output:\n")
 _TASK_RE = re.compile(r"tasks/(task-\d+)\.log")
 
 
@@ -130,7 +183,6 @@ def _plain(value: Any) -> Any:
 def _call_tool(call: dict, result_step: int) -> dict:
     # The live path's own mapping and redaction, so a saved call shows (and
     # hides) exactly what its live item did.
-    from .backend.agy import _canonical_tool_input, _canonical_tool_name
     from .claude_transcript import summarise_tool
     raw = str(call.get("name") or "tool")
     args_in = call.get("args") if isinstance(call.get("args"), dict) else {}
@@ -153,8 +205,10 @@ def _settle(tool: dict, content: str, status: str = "") -> None:
     body = _RESULT_HEADER_RE.sub("", content or "", count=1)
     code = _EXIT_RE.search(body[:300])
     tool["exit_code"] = int(code.group(1)) if code else None
-    if "Output:\n" in body:
-        body = body.split("Output:\n", 1)[1]
+    # The output follows its heading: "Output:", or "Command output:" in newer agy (R45).
+    heading = _OUTPUT_HEADING_RE.search(body)
+    if heading:
+        body = body[heading.end():]
     tool["result"] = truncate(body.strip(), 300)
     tool["_output"] = body
     if status.upper() == "RUNNING":

@@ -217,3 +217,48 @@ def test_sessions_come_from_agys_catalogue_with_titles_and_folders(tmp_path, mon
     here = agy_transcript.list_sessions("/home/u/proj", brain_root=brain, summaries_file=db)
     assert [(s["id"], s["title"], s["cwd"]) for s in here] == [
         ("proj", "Fix the build", "/home/u/proj")]
+
+
+def test_agys_renamed_file_tools_are_read_write_and_edit_with_their_file(tmp_path):
+    """R44: agy renamed its file tools (read_file, write_file, edit_file) and passes the file
+    as Path; they were shown under their raw names with no file."""
+    p = _write_transcript(tmp_path / "brain", "conv-44", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>edit it</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Editing.", "tool_calls": [
+            {"name": "read_file", "args": {"Path": "/repo/notes.md"}},
+            {"name": "write_file", "args": {"Path": "/repo/new.md"}},
+            {"name": "edit_file", "args": {"Path": "/repo/notes.md"}}]},
+    ])
+    tools = agy_transcript.parse_turns(p)[1]["tools"]
+    assert [(tool["name"], tool["input"]["file_path"]) for tool in tools] == [
+        ("Read", "/repo/notes.md"), ("Write", "/repo/new.md"), ("Edit", "/repo/notes.md")]
+
+
+def test_a_command_result_written_as_command_output_drops_its_exit_line(tmp_path):
+    """R45: agy now heads a command's output with 'Command output:'; the result kept the
+    exit line above it, because only 'Output:' was looked for."""
+    p = _write_transcript(tmp_path / "brain", "conv-45", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>run it</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Running.", "tool_calls": [
+            {"name": "run_command", "args": {"CommandLine": "echo hi"}},
+            {"name": "run_command", "args": {"CommandLine": "false"}}]},
+        {"step_index": 2, "type": "GENERIC", "content": "The command exited with code 0.\nCommand output:\nhi\n"},
+        {"step_index": 3, "type": "GENERIC", "content": "The command exited with code 1.\nCommand Output:\nboom\n"},
+    ])
+    ran, failed = agy_transcript.parse_turns(p)[1]["tools"]
+    assert (ran["status"], ran["result"]) == ("ok", "hi")
+    assert (failed["status"], failed["result"]) == ("error", "boom")
+
+
+def test_redaction_blanks_the_credential_after_its_scheme_word():
+    """R46: 'Authorization: Bearer abc123' became 'Authorization=[redacted] abc123': the scheme
+    word was blanked and the token kept."""
+    redact = lambda command: agy_transcript._canonical_tool_input("Bash", {"CommandLine": command})["command"]  # noqa: E731
+    for command in ("curl -H 'Authorization: Bearer abc123' https://example.test/x",
+                    "curl -H 'authorization=Basic dXNlcjpwYXNz' https://example.test/x",
+                    "curl -H 'Authorization: Token abc123' https://example.test/x"):
+        cleaned = redact(command)
+        assert "abc123" not in cleaned and "dXNlcjpwYXNz" not in cleaned, cleaned
+        assert "[redacted]" in cleaned and cleaned.endswith("https://example.test/x"), cleaned
+    assert redact("login --password hunter2 next") == "login --password hunter2 next"   # no ':' or '='
+    assert redact("run token=abc next") == "run token=[redacted] next"                  # as before

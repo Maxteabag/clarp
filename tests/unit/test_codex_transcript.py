@@ -920,3 +920,33 @@ def test_wrapped_scripts_with_quotes_unwrap_and_classify(tmp_path):
     assert cells[0]["lines"][0]["label"] == "Search"
     assert cells[0]["lines"][0]["text"] == "it's in server/lib"
     assert cells[1]["summary"] == heredoc
+
+
+def test_an_outer_exec_whose_output_arrived_is_still_superseded_by_its_commands(tmp_path):
+    """R41: the outer exec call's output rebuilt its command cell without the marks that say
+    which turn and kind it stands in for, so the structured command it ran no longer replaced
+    it and both were shown."""
+    f = tmp_path / "rollout.jsonl"
+    _write_rollout(f, [
+        {"timestamp": "t0", "type": "response_item", "payload": {
+            "type": "custom_tool_call", "name": "exec", "call_id": "outer-1",
+            "input": 'const r = await tools.exec_command({"cmd":"pytest -q"});',
+            "internal_chat_message_metadata_passthrough": {"turn_id": "turn-1"},
+        }},
+        {"timestamp": "t1", "type": "event_msg", "payload": {
+            "type": "item_completed", "turn_id": "turn-1", "item": {
+                "type": "CommandExecution", "id": "cmd-1",
+                "command": ["bash", "-lc", "pytest -q"],
+                "status": "completed", "stdout": "12 passed", "exit_code": 0,
+            }}},
+        {"timestamp": "t2", "type": "response_item", "payload": {
+            "type": "custom_tool_call_output", "call_id": "outer-1",
+            "output": "Script completed\nWall time 1s\nOutput:\n12 passed\n",
+        }},
+    ])
+
+    cells = codex_transcript.parse_turns(f)[0]["display_cells"]
+    assert [(cell["kind"], cell["title"], cell["summary"]) for cell in cells] == [
+        ("command", "Ran", "pytest -q")
+    ]
+    assert not any(key.startswith("_legacy") for cell in cells for key in cell)
