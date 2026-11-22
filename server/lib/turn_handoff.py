@@ -108,7 +108,7 @@ class HandoffMixin:
             return
         self._release_unsent_opening(spec, error)
         failures = spec.handoff_failures + 1
-        if failures >= HANDOFF_GIVE_UP and spec.queue_id:
+        if failures >= HANDOFF_GIVE_UP and (spec.queue_id or spec.park_id):
             self._give_up_handoff(agent_id, spec, error, failures)
             return
         delay = min(60.0, float(2 ** (failures - 1)))
@@ -151,7 +151,15 @@ class HandoffMixin:
             log_exception("queuedSpawnCloseFail", exc, detail=spec.session)
         reason = str(error)[:200] or type(error).__name__
         ended = False
-        row = turn_queue.get(spec.queue_id)
+        row_id = spec.queue_id or spec.park_id
+        if not spec.queue_id:
+            # A send that waited behind a process has only its park row: it becomes
+            # the queued item it stands for, then ends failed like one.
+            try:
+                turn_queue.requeue_rows([row_id])
+            except Exception as exc:  # noqa: BLE001 - recovery requeues the park row
+                log_exception("queuedSpawnGiveUpRequeueFail", exc, detail=spec.session)
+        row = turn_queue.get(row_id)
         if row is not None:
             try:
                 ended = turn_queue.fail_refused_launch(row, failures=failures, error=reason)
@@ -360,9 +368,12 @@ class HandoffMixin:
                 except Exception as close_error:  # noqa: BLE001
                     log_exception("callOpenTurnCloseFail", close_error, detail=next_spec.session)
                 return
-            if not next_spec.queue_id:
+            if not next_spec.queue_id and not next_spec.park_id:
                 # Legacy automatic terminal queue is memory-only; preserve its
-                # existing behavior and continue to the next waiting spec.
+                # existing behavior and continue to the next waiting spec. A spec
+                # with a park row (a send that waited behind a process) was
+                # acknowledged queued: it is kept and tried again like a queue item,
+                # never dropped with its row (R193).
                 log_exception("queuedSpawnFail", e, detail=next_spec.session)
                 self._finish_turn(next_spec)
                 return

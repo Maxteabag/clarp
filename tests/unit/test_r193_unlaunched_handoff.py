@@ -136,3 +136,38 @@ def test_the_ownerless_start_says_nothing_while_the_head_backs_off(tmp_path, mon
     monkeypatch.setattr(turn_recovery, "log", lambda event, detail="": said.append(event))
     service._start_ownerless_queues(None)
     assert "ownerlessQueueStarted" not in said
+
+
+
+def test_a_spec_with_only_a_park_row_is_kept_when_its_launch_fails_and_gives_up_later(tmp_path):
+    """A send held by a park row only (no queue item: a send parked behind a Stop or the
+    release drain, not through admission). Its failed launch dropped it, and _finish_turn
+    deleted that row: lost without a word. It is kept and tried again now, and after the
+    last try its row ends failed, its sender told."""
+    scheduled = []
+    service, _b, agent_id = _make_service(
+        tmp_path, retry_scheduler=lambda delay, fn: scheduled.append((delay, fn)))
+    backends = _GoneDirectoryBackends()
+    backends.live = False
+    service.backends = backends
+    spec = _td._TurnSpec(
+        backend="claude", text="parked words", cwd=tmp_path, backend_session_id="",
+        is_new_session=False, session="mike", agent_id=agent_id, trace_id="t-queued",
+        context=None, synthesize_audio=False, client_msg_id="m-parked")
+    park = _td._park(spec, prefix="stop-park")
+    assert park and turn_queue.status(park) == "parked"
+    from dataclasses import replace
+    _td._SLOTS.enqueue(agent_id, replace(spec, park_id=park))
+    service._retry_handoff(agent_id, due=True)            # its turn comes: the launch fails
+    assert backends.tries == 1
+    assert turn_queue.status(park) in ("parked", "queued"), "kept, not dropped with its row"
+    while backends.tries < turn_handoff.HANDOFF_GIVE_UP:
+        pending = [fn for d, fn in scheduled if d >= 1.0]
+        scheduled.clear()
+        assert pending, f"no retry scheduled after {backends.tries} tries"
+        pending[-1]()
+    assert turn_queue.status(park) == "failed"
+    notice = db.conn().execute(
+        "SELECT 1 FROM messages WHERE agent_id=? AND message_id LIKE ?",
+        (agent_id, f"%{turn_queue.REFUSED_LAUNCH}:{park}%")).fetchone()
+    assert notice is not None, "its sender is told"
