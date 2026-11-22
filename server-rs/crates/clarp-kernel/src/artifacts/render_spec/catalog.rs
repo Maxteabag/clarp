@@ -38,6 +38,7 @@ const CODES_V2: &[&str] = &[
     "action_schema",
     "action_bound",
     "button_action_duplicate",
+    "chart_series_duplicate",
     "chart_x_mixed",
     "chart_x_duplicate",
     "chart_x_order",

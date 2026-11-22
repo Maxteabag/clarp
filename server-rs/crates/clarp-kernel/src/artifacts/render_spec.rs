@@ -423,7 +423,7 @@ pub fn message_with_payload(
     version: &str,
     submission_id: &str,
     answers_json: &str,
-    payload: &J,
+    payload: &Map<String, Value>,
     answers: &J,
 ) -> String {
     let mut line = String::new();
@@ -431,7 +431,7 @@ pub fn message_with_payload(
         .get("state")
         .and_then(|state| state.get("action"))
         .and_then(J::str)
-        && let Some(label) = v2::labels(payload).get(action)
+        && let Some(label) = v2::label(payload, action)
     {
         let mut quoted = String::new();
         json::quoted(label, &mut quoted);
@@ -462,6 +462,23 @@ fn message_with_action(
          Submission ID: {submission_id}\nThese are user preferences for review, not approval \
          to perform protected actions.\n{action}Answers:\n{answers_json}"
     )
+}
+
+/// What the earliest accepted answer chose, if this is a completed button form.
+pub(super) fn answered_button(artifact: &Artifact) -> Option<(&str, &str)> {
+    if artifact.status != "completed" {
+        return None;
+    }
+    let first = artifact.submissions.iter().min_by(|left, right| {
+        (left.created_at, &left.submission_id).cmp(&(right.created_at, &right.submission_id))
+    })?;
+    let action = first
+        .answers
+        .as_ref()?
+        .get("state")?
+        .get("action")?
+        .as_str()?;
+    Some((action, v2::label(&artifact.payload, action)?))
 }
 
 /// The fields a row of a client that knows the kind has besides the plain ones.
@@ -679,7 +696,7 @@ impl ArtifactBook {
             version,
             sid,
             &answers_json,
-            &payload,
+            &form.payload,
             data.get("answers").unwrap_or(&J::Null),
         );
         let answers = data.get("answers").map_or(Value::Null, J::to_value);
