@@ -259,3 +259,61 @@ fn taking_a_move_back_holds_the_import_before_clearing_the_source() {
 fn an_import_holds_messages_until_the_files_retry_finishes_the_move() {
     exercise(Source::Retries, false);
 }
+
+fn import_with_optional_avatar(
+    place: &Place,
+    host: &Host,
+    cwd: PathBuf,
+    source_picture: Option<String>,
+) -> String {
+    let (source, _) = answers_using(move |path, _| {
+        let response = match path.split('?').next().unwrap() {
+            "/agents/snapshot" => json!({"agents": [{
+                "agent_id": "optional-import", "session": "mover", "persona": "Mover",
+                "backend": "scripted", "cwd": cwd, "busy": false,
+                "avatar_url": source_picture.as_ref().map(|_| "/avatars/move-picture"),
+            }]}),
+            "/avatars/move-picture" => {
+                return ("200 OK", source_picture.clone().unwrap());
+            }
+            "/log" => json!({"turns": [{"id": "row-1", "role": "assistant", "text": "Moved history"}]}),
+            "/task-plans" => json!({"plans": []}),
+            "/artifacts" => json!({"artifacts": []}),
+            "/media" => json!({"assets": []}),
+            "/agent-portraits" => json!({"portraits": []}),
+            "/server-info" | "/transcription-providers" => json!({}),
+            _ => return ("404 Not Found", "{}".into()),
+        };
+        ("200 OK", response.to_string())
+    });
+    let output = place
+        .host_command()
+        .args(["import", "--from", &source, "--host", &host.address, "--session", "mover"])
+        .env("CLARP_SOURCE_TOKEN", SOURCE_TOKEN)
+        .env("CLARP_HOST_TOKEN", DESTINATION_TOKEN)
+        .ended();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn an_oversized_avatar_does_not_prevent_an_agent_import() {
+    let place = Place::new("import-oversized-avatar");
+    let host = place.start_with_token(DESTINATION_TOKEN);
+    let cwd = place.root.join("work");
+    let too_large = clarp_kernel::personas::AVATAR_MOST + 1;
+    let report = import_with_optional_avatar(&place, &host, cwd.clone(), Some("x".repeat(too_large)));
+    assert!(report.contains("avatar not carried: too large"), "{report}");
+    assert_eq!(host.conversation("mover"), [said("assistant", "Moved history")]);
+
+    // An older importer can still include the oversized picture in its request.
+    let answer = host.post("/agents/import", json!({
+        "agent": {"agent_id": "older-import-id", "session": "older-mover",
+            "persona": "Older Mover", "backend": "scripted", "cwd": cwd, "busy": false},
+        "from": "http://old-host",
+        "picture": clarp_kernel::python::b64encode(&vec![b'x'; too_large]),
+        "turns": [{"id": "row-2", "role": "assistant", "text": "Older history"}],
+    }));
+    assert_eq!(answer["avatar_not_carried"], "too large");
+    assert_eq!(host.conversation("older-mover"), [said("assistant", "Older history")]);
+}

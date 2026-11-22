@@ -2342,10 +2342,27 @@ async fn import_agent(
         .map_err(|why| ApiError::new(StatusCode::CONFLICT, why))?;
     let field = |name: &str| request.agent[name].as_str().unwrap_or("").to_string();
     let backend_session = Some(field("backend_session_id")).filter(|session| !session.is_empty());
-    // A picture that cannot be read is refused before anything is written: an agent that
-    // arrives with another face than it was sent with is not what was asked for.
-    let picture = clarp_kernel::personas::picture(request.picture.as_deref().unwrap_or(""))
-        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    let mut avatar_not_carried = None;
+    let avatar = match clarp_kernel::personas::picture(request.picture.as_deref().unwrap_or("")) {
+        Ok(Some((bytes, digest))) => {
+            match app.blobs.put(&crate::fleet::picture_name(&digest), &bytes) {
+                Ok(()) => Some(digest),
+                Err(_) => {
+                    avatar_not_carried = Some("could not be stored");
+                    None
+                }
+            }
+        }
+        Ok(None) => None,
+        Err(why) => {
+            avatar_not_carried = Some(if why == clarp_kernel::personas::AVATAR_TOO_LARGE {
+                "too large"
+            } else {
+                "unreadable"
+            });
+            None
+        }
+    };
     // The portraits it keeps, the one it wears among them: that one is known by its
     // picture, which is the agent's. One whose picture cannot be read, or is no picture,
     // is left behind: the agent arrives, with the face it was sent with. A portrait whose
@@ -2404,13 +2421,10 @@ async fn import_agent(
         // moves it reads off the persona of its name there), and its own picture.
         avatar_symbol: field("avatar_symbol"),
         personality: field("personality").trim().to_string(),
-        avatar: picture.as_ref().map(|(_, digest)| digest.clone()),
+        avatar,
         ..AgentRecord::default()
     };
-    // The picture is kept before the agent that names it, and so are its portraits'.
-    if let Some((bytes, digest)) = &picture {
-        pictures.push((crate::fleet::picture_name(digest), bytes.clone()));
-    }
+    // Its portfolio pictures are kept before the agent that names them.
     for (name, bytes) in &pictures {
         let kept = app.blobs.put(name, bytes);
         kept.map_err(|error| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
@@ -2497,7 +2511,7 @@ async fn import_agent(
         }
     };
     // The actor put the move hold in the same journal append as the conversation.
-    Ok(Json(json!({
+    let mut answer = json!({
         "ok": true,
         "session": member.record.session,
         "agent_id": member.record.agent_id,
@@ -2505,7 +2519,11 @@ async fn import_agent(
         "artifacts": artifacts,
         "plans": plans,
         "held": true,
-    })))
+    });
+    if let Some(why) = avatar_not_carried {
+        answer["avatar_not_carried"] = json!(why);
+    }
+    Ok(Json(answer))
 }
 
 // ---- a conversation --------------------------------------------------------------------------

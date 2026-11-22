@@ -1057,13 +1057,23 @@ pub fn import(
         agent["personality"] = json!(way_of_speaking);
     }
     let own_face = agent["avatar_url"].as_str().unwrap_or("");
+    let mut avatar_not_carried = None;
     let picture = if own_face.starts_with("/avatars/") {
-        match exchange("GET", &from, own_face, source_token, &[], &[])? {
-            (200, _, bytes) => Some(clarp_kernel::python::b64encode(&bytes)),
-            (status, _, _) => {
-                return Err(format!(
-                    "the Host at {from} answered {status} for the picture {session} has of its own"
-                ));
+        match exchange("GET", &from, own_face, source_token, &[], &[]) {
+            Ok((200, _, bytes)) if bytes.len() <= clarp_kernel::personas::AVATAR_MOST => {
+                Some(clarp_kernel::python::b64encode(&bytes))
+            }
+            Ok((200, _, _)) => {
+                avatar_not_carried = Some("too large".to_owned());
+                None
+            }
+            Ok((status, _, _)) => {
+                avatar_not_carried = Some(format!("source returned HTTP {status}"));
+                None
+            }
+            Err(_) => {
+                avatar_not_carried = Some("source unavailable".to_owned());
+                None
             }
         }
     } else {
@@ -1083,11 +1093,12 @@ pub fn import(
             continue;
         }
         match exchange("GET", &from, address, source_token, &[], &[])? {
-            (200, _, bytes) => portraits.push(json!({
+            (200, _, bytes) if bytes.len() <= clarp_kernel::personas::AVATAR_MOST => portraits.push(json!({
                 "portrait_id": portrait["portrait_id"], "media_asset_id": portrait["media_asset_id"],
                 "created_by": portrait["created_by"], "created_at": portrait["created_at"],
                 "picture": clarp_kernel::python::b64encode(&bytes),
             })),
+            (200, _, _) => {}
             (status, _, _) => {
                 return Err(format!(
                     "the Host at {from} answered {status} for a portrait {session} keeps"
@@ -1104,6 +1115,10 @@ pub fn import(
         let why = answer["error"].as_str().unwrap_or("no reason given");
         return Err(format!("this Host refused ({status}): {why}"));
     }
+    let avatar_not_carried = answer["avatar_not_carried"]
+        .as_str()
+        .or(avatar_not_carried.as_deref())
+        .map_or_else(String::new, |why| format!("avatar not carried: {why}\n"));
     // The agent is here. Its files follow: one that does not arrive does not undo the move.
     let followed = files(&way, &wants);
     let (came, more) = followed.told(&way);
@@ -1112,7 +1127,7 @@ pub fn import(
     let handoff = finish_handoff(&way, &agent["agent_id"], answer["held"] == true, &followed);
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {came}.\n\
-         {skipped}{more}{heard}{handoff}"
+         {avatar_not_carried}{skipped}{more}{heard}{handoff}"
     ))
 }
 
