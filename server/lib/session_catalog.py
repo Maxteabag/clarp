@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from . import transcript_paths
+from .fork import encoded_project_dir
 from .log import log_exception
 
 
@@ -26,10 +27,12 @@ def _user_text(event: dict[str, Any]) -> str:
 def _claude_metadata(path: pathlib.Path) -> dict[str, Any] | None:
     """Read Claude's persisted cwd, preview, and latest generated/custom title."""
     cwd = preview = generated_title = custom_title = ""
+    side_chain = False
     def ingest(event: Any) -> None:
-        nonlocal cwd, preview, generated_title, custom_title
+        nonlocal cwd, preview, generated_title, custom_title, side_chain
         if not isinstance(event, dict):
             return
+        side_chain = side_chain or event.get("isSidechain") is True
         cwd = str(event.get("cwd") or cwd)
         preview = preview or _user_text(event)
         if event.get("type") == "custom-title":
@@ -63,6 +66,8 @@ def _claude_metadata(path: pathlib.Path) -> dict[str, Any] | None:
     except OSError as exc:
         log_exception("pastSessionsReadFail", exc, detail=str(path))
         return None
+    if side_chain:
+        return None         # a side chain no index lists, known by its own records (R37)
     try:
         mtime = int(path.stat().st_mtime)
     except OSError:
@@ -93,8 +98,8 @@ def list_claude_sessions(
         return []
     index_paths = list(root.glob("*/sessions-index.json")) if all_projects else []
     if not all_projects:
-        encoded = "-" + str(pathlib.Path(cwd)).strip("/").replace("/", "-")
-        index = root / encoded / "sessions-index.json"
+        # Claude Code's name for the directory (R36: a dot, an underscore or a space is '-').
+        index = encoded_project_dir(cwd, root) / "sessions-index.json"
         if index.is_file():
             index_paths = [index]
     indexed: dict[str, dict[str, Any]] = {}
@@ -106,7 +111,11 @@ def list_claude_sessions(
             log_exception("pastSessionsIndexReadFail", exc, detail=str(index))
             continue
         for entry in payload.get("entries", []) if isinstance(payload, dict) else []:
-            if not isinstance(entry, dict) or entry.get("isSidechain"):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("isSidechain"):
+                # Never offered: the pass over the files the index does not list skips it too (R37).
+                indexed_transcript_ids.add(str(entry.get("sessionId") or ""))
                 continue
             sid = str(entry.get("sessionId") or "")
             if not sid or not transcript_paths.checked_id("claude", sid):
@@ -156,8 +165,7 @@ def list_claude_sessions(
             and transcript_paths.session_id_ok(path.stem)
         ]
     else:
-        encoded = "-" + str(pathlib.Path(cwd)).strip("/").replace("/", "-")
-        project = root / encoded
+        project = encoded_project_dir(cwd, root)
         candidates = [
             path for path in project.glob("*.jsonl")
             if path.is_file() and path.stem not in indexed_transcript_ids
