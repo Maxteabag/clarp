@@ -20,7 +20,9 @@ use crate::pairing::Scope;
 use transport::{contains_token, direct_agent, fetch};
 pub(crate) use transport::{normalize_url, valid_token};
 
-const READ_SECONDS: u64 = 4;
+const READ_SECONDS: u64 = 15;
+const READ_MAX_BYTES: usize = 16 * 1024 * 1024;
+const PAIRING_MAX_BYTES: usize = 4 * 1024 * 1024;
 const CACHE_SECONDS: u64 = 10;
 
 /// Why a message did not reach a peer.
@@ -169,13 +171,15 @@ fn read_peer(name: &str, peer: &Peer, known_id: &str) -> (String, Value) {
             "/server-info",
             Some(&peer.token),
             READ_SECONDS,
+            READ_MAX_BYTES,
             None,
         )?;
         let snapshot = fetch(
             &peer.url,
-            "/agents/snapshot",
+            "/agents/snapshot?include_archived=0",
             Some(&peer.token),
             READ_SECONDS,
+            READ_MAX_BYTES,
             None,
         )?;
         Ok::<_, String>((info, snapshot))
@@ -324,12 +328,19 @@ pub(crate) fn warn_plain_http(base: &str) {
 
 /// Names and IDs come from the tokenless identity endpoint. Only the exchange receives the code.
 pub(crate) fn identity(url: &str) -> Result<Map<String, Value>, String> {
-    fetch(url, "/pairing/identity", None, 10, None)
+    fetch(url, "/pairing/identity", None, 10, PAIRING_MAX_BYTES, None)
 }
 
 pub(crate) fn exchange_code(url: &str, code: &str, device_name: &str) -> Result<String, String> {
     let body = json!({"code": code.trim(), "device_name": device_name});
-    let reply = fetch(url, "/pairing/exchange", None, 15, Some(&body))?;
+    let reply = fetch(
+        url,
+        "/pairing/exchange",
+        None,
+        15,
+        PAIRING_MAX_BYTES,
+        Some(&body),
+    )?;
     reply
         .get("device")
         .and_then(|device| device.get("token"))
