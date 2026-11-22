@@ -1,7 +1,7 @@
 //! `--check quiet-chat`: the quiet chat (#653). Under Tool activity
 //! Grouped (the default) a running turn reads as one work row,
-//! `Working · 2 tools` (the calls it folds; a failed one keeps its row and
-//! is not counted), that shimmers and opens in place; settled, its time is
+//! `Working · 3 tools` (the calls it folds so far, the running one too; a
+//! call that failed keeps its row and is not counted), that shimmers and opens in place; settled, its time is
 //! the Host's /log summary's once it lands, the live turn's until then. Hide when done leaves the finished turn's work row out and keeps
 //! its messages and what failed or stopped. Driven by the fake Host
 //! replaying the recorded `turn-full` stream, as `--check live` is.
@@ -15,6 +15,7 @@ use super::{Stage, app_now, check, control, posts, requests, rows, run_stages, s
 
 thread_local! {
     /// The profile's artifacts request before the menu's Artifacts.
+    static SAID: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static ARTIFACTS_BEFORE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
 
@@ -87,7 +88,8 @@ pub fn quiet_chat_check(out: String) {
                 return false;
             }
             let fold = live_row(FOLD).unwrap_or_default();
-            check(fold.live.title == "Working · 2 tools", &format!("the running turn is one work row with its tools so far: {:?}", titles()));
+            // Read and Grep (done) and npm test (still running: it fails only at lseq 17).
+            check(fold.live.title == "Working · 3 tools", &format!("the running turn is one work row with its tools so far: {:?}", titles()));
             check(fold.live.shimmer == "accent", &format!("it shimmers while the turn runs: {:?}", fold.live.shimmer));
             check(!titles().iter().any(|t| t.starts_with("Running") || t.starts_with("Thought") || t.starts_with("Explored")), &format!("its tools and thinking fold into it: {:?}", titles()));
             check(live_row("live:cl:msg_01:1").is_none(), "the commentary folds into it too, as a working detail");
@@ -130,8 +132,14 @@ pub fn quiet_chat_check(out: String) {
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
             true
         })),
-        ("always visible", Box::new(move |_, _window, elapsed| {
+        ("always visible", Box::new(move |app, _window, elapsed| {
             if live_row(FOLD).is_none() || elapsed < Duration::from_millis(300) {
+                if elapsed > Duration::from_secs(3) && !SAID.with(|s| s.replace(true)) {
+                    let engine = app.engine.borrow();
+                    let turn = engine.live_view("rachel").and_then(|v| v.turn().cloned());
+                    check(true, &format!("diag always visible: mode {} live_active {} lseq {:?} turn {:?} titles {:?} ids {:?}",
+                        engine.chat_activity_mode("rachel"), engine.live_active("rachel"), lseq(), turn, titles(), shown_ids()));
+                }
                 return false;
             }
             check(live_row("live:cl:msg_01:1").is_some(), "Always visible shows the commentary in its place");
