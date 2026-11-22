@@ -36,7 +36,7 @@ pub struct PaneState {
     book: crate::scroll_book::HeightBook,
     /// The presentation settings the rows were last presented with; a
     /// preference change re-presents only when these moved.
-    presented_with: Option<(i32, bool, bool)>,
+    presented_with: Option<(i32, bool, bool, bool)>,
     pub report: Report,
     pub draft: String,
     draft_set: i32,
@@ -720,15 +720,18 @@ impl App {
             self.splice_live(pane, &live, &mut fresh, &mut rows);
             kept.extend(live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.clone()));
         }
+        self.splice_coordination(pane, &mut fresh, &mut rows, &mut kept);
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
         crate::scroll_book::measure_soon();
     }
 
     /// What a transcript's rows depend on among the preferences.
-    fn presentation_key(&self) -> (i32, bool, bool) {
+    fn presentation_key(&self) -> (i32, bool, bool, bool) {
         let engine = self.engine.borrow();
-        (engine.activity_mode(), engine.show_when_ready(), self.prefs.borrow().timestamps)
+        // The quiet line where agent messages were (#653) is drawn or not.
+        let line = engine.hidden_coordination() && engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true);
+        (engine.activity_mode(), engine.show_when_ready(), self.prefs.borrow().timestamps, line)
     }
 
     /// Puts the live rows where the turn happened (`Presented::anchors`):
@@ -776,6 +779,49 @@ impl App {
             let at = at.min(fresh.len());
             fresh.insert(at, source);
             rows.insert(at, row);
+        }
+    }
+
+    /// The quiet line where the Host left coordination between agents out
+    /// (`hidden_coordination`, #653): "3 messages between agents" above the
+    /// row that follows a run (`hidden_before`), and after the newest row
+    /// for a run at the end (`hidden_after`). Opened, the chat is read again
+    /// with every run shown for the visit. None when this device turned
+    /// the line off, nor while the visit shows them.
+    fn splice_coordination(&self, pane: &mut PaneState, fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>, kept: &mut std::collections::HashSet<String>) {
+        let after = {
+            let engine = self.engine.borrow();
+            if !engine.hidden_coordination() || engine.coordination_visit(&pane.session) || !engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true) {
+                return;
+            }
+            engine.conversation(&pane.session).and_then(|c| c.hidden_after().cloned())
+        };
+        let line = |anchor: &str, count: &clarp_core::json::Object| clarp_core::live_present::Entry {
+            key: format!("{}{anchor}", crate::artifacts_view::COORDINATION_PREFIX),
+            kind: clarp_core::live_present::Kind::Fold,
+            status: "completed".into(),
+            title: clarp_core::coordination::line(&clarp_core::coordination::Count::from_json(count)),
+            expandable: true,
+            ..Default::default()
+        };
+        let mut at = 0;
+        while at < fresh.len() {
+            if let Some(count) = fresh[at].0.message.hidden_before.clone() {
+                let entry = line(&fresh[at].0.message.id, &count);
+                kept.insert(entry.key.clone());
+                rows.insert(at, pane.rows.live_row(&entry));
+                fresh.insert(at, live_source(&entry));
+                at += 1;
+            }
+            at += 1;
+        }
+        if let Some(count) = after {
+            // After the newest row the Host sent, before unsent ones.
+            let end = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
+            let entry = line("end", &count);
+            kept.insert(entry.key.clone());
+            rows.insert(end, pane.rows.live_row(&entry));
+            fresh.insert(end, live_source(&entry));
         }
     }
 

@@ -33,6 +33,9 @@ export struct ProfileInfo {
     prompts-loading: bool,
     prompts-more: bool,
     mcp-shown: bool,
+    // Coordination between agents in this chat (`hidden_coordination`).
+    agent-messages-shown: bool,
+    agent-messages: bool,
     error: string,
 }
 
@@ -93,6 +96,7 @@ export global ProfileBridge {
     callback set-heartbeat(bool);
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
+    callback set-agent-messages(bool);
     callback set-mcp(string, bool);
     callback set-schedule(string, bool);
     callback compact();
@@ -304,6 +308,7 @@ export component AgentProfile inherits Modal {
                     ToggleRow { label: "Heartbeat"; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } }
                     ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } }
                     ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
+                    if root.info.agent-messages-shown: ToggleRow { label: "Show messages between agents"; checked: root.info.agent-messages; toggled(on) => { ProfileBridge.set-agent-messages(on); } }
                 }
                 Card {
                     title: "HEARTBEAT";

@@ -410,6 +410,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         prompts_loading: engine.profile_prompts_loading(),
         prompts_more: engine.profile_prompts_have_more(),
         mcp_shown: value("backend") == "claude" && !available.is_empty(),
+        agent_messages_shown: engine.hidden_coordination(),
+        agent_messages: !clarp_core::coordination::hides(&first(&[value("coordination_visibility")], engine.coordination_visibility())),
         error: engine.profile_error().into(),
     };
     drop(engine);
@@ -502,6 +504,14 @@ pub fn wire(window: &AppWindow) {
     bridge.on_set_heartbeat(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_heartbeat(session, on)));
     bridge.on_set_dreaming(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_dreaming(session, on)));
     bridge.on_set_push_alerts(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_push_muted(session, !on)));
+    // This chat's own choice: following the Host where it agrees.
+    bridge.on_set_agent_messages(|on| {
+        with_session(|app, _, session| {
+            let host_shows = app.engine.borrow().coordination_shown();
+            let choice = if on == host_shows { "default" } else if on { "show" } else { "hide" };
+            app.engine.borrow_mut().set_chat_coordination(session, choice);
+        });
+    });
     bridge.on_set_mcp(|name, on| {
         with_session(|app, _, session| {
             let mut chosen: Vec<String> = detail(app, session, "mcp_servers").as_array().into_iter().flatten().map(name_of).collect();

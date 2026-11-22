@@ -10,6 +10,7 @@ pub mod audio_journal;
 pub mod avatar_motion;
 pub mod catalog;
 pub mod conversation;
+pub mod coordination;
 pub mod decision_receipt;
 pub mod delivery;
 pub mod diagnostics;

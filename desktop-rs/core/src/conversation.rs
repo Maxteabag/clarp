@@ -91,6 +91,11 @@ pub struct Conversation {
     by_id: HashMap<String, usize>,
     activity_counter: u64,
     ops: Vec<Op>,
+    /// The policy the rows were read under (`hidden_coordination`'s echo
+    /// `{hidden, source, visibility}`), none for a read without it.
+    coordination: Option<Object>,
+    /// Rows the Host left out after the newest visible row.
+    hidden_after: Option<Object>,
 }
 
 /// QJsonValue::toString(fallback): the value when it is a string.
@@ -260,6 +265,18 @@ impl Conversation {
             }
         }
 
+        // Every answer to a read with `coordination` echoes its policy; a
+        // tail page or a delta also says what it left out at the end. An
+        // older page leaves both as they are.
+        if kind != LoadKind::Older {
+            if let Some(echo) = response.get("coordination").and_then(Value::as_object) {
+                self.coordination = Some(echo.clone());
+                self.hidden_after = response.get("hidden_after").and_then(Value::as_object).cloned();
+            } else if replaces {
+                self.coordination = None;
+                self.hidden_after = None;
+            }
+        }
         if self.conversation_id != next_id {
             self.conversation_id = next_id;
             self.emit(Signal::ConversationIdChanged);
@@ -293,7 +310,7 @@ impl Conversation {
             .filter(|m| !m.activity && !m.pending && m.kind != "live")
             .map(message_to_json)
             .collect();
-        json!({
+        let mut snapshot = json!({
             "conversation_id": self.conversation_id,
             "turns": turns,
             "latest_revision": self.latest_revision,
@@ -301,7 +318,25 @@ impl Conversation {
         })
         .as_object()
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_default();
+        // The policy it was read under, so a delta says it (`coordination_read`).
+        if let Some(echo) = &self.coordination {
+            snapshot.insert("coordination".into(), Value::Object(echo.clone()));
+            if let Some(after) = &self.hidden_after {
+                snapshot.insert("hidden_after".into(), Value::Object(after.clone()));
+            }
+        }
+        snapshot
+    }
+
+    /// The `coordination` echo the rows were read under.
+    pub fn coordination(&self) -> Option<&Object> {
+        self.coordination.as_ref()
+    }
+
+    /// Rows left out after the newest visible row, if any.
+    pub fn hidden_after(&self) -> Option<&Object> {
+        self.hidden_after.as_ref()
     }
 
     pub fn restore_cache_snapshot(&mut self, snapshot: &Object) -> bool {
@@ -807,7 +842,7 @@ pub fn message_to_json(message: &Message) -> Value {
         "automated": message.automated, "activity_count": message.activity_count,
         "tool_details_available": message.tool_details_available,
         "delivery_failed": message.delivery_failed, "tools": message.tools,
-        "display_cells": message.display_cells,
+        "display_cells": message.display_cells, "hidden_before": message.hidden_before,
     })
 }
 

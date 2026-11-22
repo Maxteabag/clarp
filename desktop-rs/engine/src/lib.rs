@@ -12,6 +12,7 @@ mod avatars;
 pub mod blocks;
 mod composer;
 mod connection;
+mod coordination;
 mod form_events;
 pub use form_events::{FormEventStore, FormEvents};
 mod voice;
@@ -248,6 +249,7 @@ pub struct Engine {
     // over a page behind is replaced by the latest page, not walked forward.
     catching_up: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
+    coordination: coordination::Coordination,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
     cache_save_due: HashSet<String>,
@@ -382,6 +384,7 @@ impl Engine {
             order_check: HashSet::new(),
             catching_up: HashSet::new(),
             pending_log_mode: HashMap::new(),
+            coordination: coordination::Coordination::default(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
             cache_saved_at: HashMap::new(),
@@ -973,6 +976,7 @@ impl Engine {
             self.changes.push(Change::Archive);
         }
         self.schedule_agent_conversations();
+        self.coordination_reloads();
         self.open_shown_panes();
         if self.lifecycle_snapshot(object) {
             return;
@@ -1119,6 +1123,9 @@ impl Engine {
         self.waiting_for_session_choice = false;
         let changed = self.selected != session;
         self.selected = session.to_owned();
+        if changed {
+            self.end_coordination_visits(session);
+        }
         self.mutate_roster(|r| r.clear_unread(session));
         if changed {
             self.ensure_conversation(session);
@@ -1165,7 +1172,7 @@ impl Engine {
     /// A chat's rows changed from the Host: cache them a moment later, at
     /// most once per cooldown.
     fn schedule_cache_save(&mut self, session: &str) {
-        if self.transcript_cache.is_none() || session.is_empty() || !self.cache_save_due.insert(session.to_owned()) {
+        if self.transcript_cache.is_none() || session.is_empty() || !self.coordination_cacheable(session) || !self.cache_save_due.insert(session.to_owned()) {
             return;
         }
         let delay = Duration::from_millis(clarp_core::transcript_cache::SAVE_DELAY_MS);
@@ -1181,6 +1188,9 @@ impl Engine {
             return;
         }
         self.cache_save_due.remove(session);
+        if !self.coordination_cacheable(session) {
+            return;
+        }
         let (Some(cache), Some(conversation)) = (self.transcript_cache.clone(), self.conversations.get(session)) else { return };
         if conversation.latest_revision() <= 0 {
             return;
@@ -1241,11 +1251,9 @@ impl Engine {
         };
         self.log_in_flight.insert(session.to_owned());
         self.with_conversation(session, |c| c.set_loading(true));
-        self.api.get(
-            &format!("log-older:{session}"),
-            "/log",
-            &[("session", session), ("limit", "100"), ("include_automated", "0"), ("before", &before)],
-        );
+        let mut query = vec![("session", session), ("limit", "100"), ("include_automated", "0"), ("before", before.as_str())];
+        query.extend(self.coordination_query(session, false));
+        self.api.get(&format!("log-older:{session}"), "/log", &query);
     }
 
     fn begin_log_request(&mut self, session: &str, mode: &str) -> bool {
@@ -1280,7 +1288,9 @@ impl Engine {
         self.ensure_conversation(&session);
         self.with_conversation(&session, |c| c.set_loading(true));
         let tag = format!("{}{session}", if replace { "log-replace:" } else { "log-tail:" });
-        self.api.get(&tag, "/log", &[("session", &session), ("limit", "100"), ("include_automated", "0")]);
+        let mut query = vec![("session", session.as_str()), ("limit", "100"), ("include_automated", "0")];
+        query.extend(self.coordination_query(&session, false));
+        self.api.get(&tag, "/log", &query);
     }
 
     fn request_delta(&mut self, session: &str) {
@@ -1290,11 +1300,9 @@ impl Engine {
         }
         self.ensure_conversation(&session);
         let after = self.conversations.get(&session).map_or(0, |c| c.latest_revision()).to_string();
-        self.api.get(
-            &format!("log-delta:{session}"),
-            "/log",
-            &[("session", &session), ("limit", "100"), ("include_automated", "0"), ("after_revision", &after)],
-        );
+        let mut query = vec![("session", session.as_str()), ("limit", "100"), ("include_automated", "0"), ("after_revision", after.as_str())];
+        query.extend(self.coordination_query(&session, true));
+        self.api.get(&format!("log-delta:{session}"), "/log", &query);
     }
 
     fn apply_log(&mut self, session: &str, object: &Object, kind: LoadKind) {
@@ -1474,7 +1482,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) {
+        if self.live_json(tag, object) || self.coordination_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -1491,6 +1499,7 @@ impl Engine {
             self.set_connecting(false);
             self.force_snapshot();
             self.live_server_info(object);
+            self.coordination_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
@@ -1527,7 +1536,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {

@@ -149,6 +149,7 @@ impl Engine {
             "context_window": agent.context_window, "queue_count": agent.queued_turn_count, "muted": agent.muted,
             "heartbeat_enabled": agent.heartbeat_enabled, "dreaming_enabled": agent.dreaming_enabled,
             "schedules": agent.schedules, "mcp_servers": agent.mcp_servers, "team_ids": agent.team_ids,
+            "coordination_visibility": agent.coordination_visibility, "coordination_override": agent.coordination_override,
         }))
     }
 

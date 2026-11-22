@@ -17,6 +17,8 @@ const ACTIVITY: [(&str, &str); 4] = [
     ("Group old", "Recent tool calls show; older ones fold."),
     ("Hide when done", "The work row shows while the turn runs and goes when it has finished."),
 ];
+/// This device shows the quiet line where agent messages were (#653).
+pub const COORDINATION_LINE: &str = "conversation/coordinationLine";
 /// The double-press windows offered, in milliseconds.
 const DOUBLE_PRESS: [u64; 8] = [150, 200, 250, 300, 400, 500, 700, 1000];
 /// The chat's font sizes offered, in pixels.
@@ -96,6 +98,31 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("0"),
+        // Coordination between agents (`hidden_coordination`, #653): the
+        // Host's own setting, written only when the reader flips it.
+        Setting::toggle(
+            e("agent-messages", clarp_core::coordination::SETTING, "chats", "Shows the messages agents send each other in every chat (the Host's setting). Off, they are left out; each chat's profile can still show them.", &["coordination", "between agents", "agent to agent", "a2a", "hide agent messages", "quiet chat", "toggle"]),
+            "CHATS",
+            |app| app.engine.borrow().coordination_shown(),
+            |app, _, on| app.engine.borrow_mut().set_coordination_shown(on),
+        )
+        .when(|app| app.engine.borrow().hidden_coordination()),
+        // This device's choice, under it while it is off: the quiet
+        // "N messages between agents" line, or nothing at all.
+        Setting::toggle(
+            e("agent-messages-line", clarp_core::coordination::LINE_SETTING, "chats", "Draws a quiet 'N messages between agents' line where the Host left them out; it opens them in place. Off, no line at all: the chat's profile still shows them.", &["agent messages line", "messages between agents", "hidden messages", "count line", "quiet chat", "toggle"]),
+            "CHATS",
+            |app| app.engine.borrow().settings().boolean(COORDINATION_LINE, true),
+            |app, _, on| {
+                store(app, COORDINATION_LINE, on);
+                app.refresh(&[Change::Preferences]);
+            },
+        )
+        .default("on")
+        .when(|app| {
+            let engine = app.engine.borrow();
+            engine.hidden_coordination() && !engine.coordination_shown()
+        }),
         // Off, the working row shimmers in the chat and the shortcut bar
         // names the stop key.
         Setting::stored_toggle(
