@@ -30,20 +30,29 @@ def test_r10_the_spoken_preview_hides_emotion_tags():
 
 
 # R13: a session whose transcript is not there yet stayed modelless for up to a minute,
-# because the "no transcript" answer was cached per clock minute.
-def test_r13_a_missing_transcript_is_asked_again_not_cached(monkeypatch, tmp_path):
+# because the "no transcript" answer was cached per clock minute. A miss is now
+# believed for a few seconds only, and still cached for those (a Codex miss is a
+# recursive scan, and the snapshot asks per agent per build).
+def test_r13_a_missing_transcript_is_believed_seconds_not_a_minute(monkeypatch, tmp_path):
     from lib import backends, session_models
     asked = []
     found = tmp_path / "t.jsonl"
     found.write_text("")
     answers = [None, found]
+    clock = [6000.0]                       # inside one clock minute throughout
 
     def model_transcript(session):
         asked.append(session)
         return answers[min(len(asked) - 1, 1)]
     monkeypatch.setattr(backends.by_id("claude"), "model_transcript", model_transcript)
     monkeypatch.setattr(session_models, "_read_model", lambda path, stamp, size: "the-model")
+    monkeypatch.setattr(session_models.time, "monotonic", lambda: clock[0])
     session = "r13-session"
     assert session_models.transcript_model("claude", session) == ""
-    assert session_models.transcript_model("claude", session) == "the-model"   # same minute
-    assert len(asked) == 2
+    assert session_models.transcript_model("claude", session) == ""     # the miss is cached
+    assert len(asked) == 1
+    clock[0] += session_models._MISS_WINDOW_S                            # next miss window
+    assert session_models.transcript_model("claude", session) == "the-model"
+    clock[0] += 1
+    assert session_models.transcript_model("claude", session) == "the-model"
+    assert len(asked) == 2                                               # found: kept

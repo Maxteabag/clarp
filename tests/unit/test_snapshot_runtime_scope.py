@@ -114,7 +114,7 @@ def test_snapshot_model_reads_are_bounded_and_reused_across_a_large_fleet(
     monkeypatch.setenv("HOME", str(tmp_path))
     projects = tmp_path / ".claude" / "projects" / "-fixture"
     projects.mkdir(parents=True)
-    caches = (session_models._read_model, session_models._transcript,
+    caches = (session_models._read_model, session_models._transcript, session_models._lookup,
               session_models._indexed_model)
     for cache in caches:
         cache.cache_clear()

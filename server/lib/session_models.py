@@ -17,15 +17,29 @@ class _NoTranscript(LookupError):
     """The backend has no transcript for the session (yet)."""
 
 
+# How long "no transcript yet" is believed. A found transcript is kept a minute,
+# but a miss only this long: a new session's model is read within seconds of its
+# transcript appearing (issue 360, R13), while a session that never gets one (a
+# Codex agent with no rollout: each lookup is a recursive scan of its sessions
+# directory) is looked up at most once per window, not on every snapshot build.
+_MISS_WINDOW_S = 5
+
+
+@lru_cache(maxsize=8192)
+def _lookup(backend: str, session: str, epoch: int):
+    """The backend's answer, found or None, cached for one miss window."""
+    del epoch
+    from .backends import by_id
+    return by_id(backend).model_transcript(session)
+
+
 @lru_cache(maxsize=8192)
 def _transcript(backend: str, session: str, epoch: int):
     """The transcript the backend reads the model from, cached a minute once it
-    is found. "Not there yet" raises, and lru_cache keeps no raised call, so a
-    new session's model is read as soon as its transcript appears instead of a
-    minute later (issue 360, R13)."""
+    is found. "Not there yet" raises, and lru_cache keeps no raised call, so the
+    miss is only believed for _lookup's window."""
     del epoch
-    from .backends import by_id
-    path = by_id(backend).model_transcript(session)
+    path = _lookup(backend, session, int(time.monotonic() // _MISS_WINDOW_S))
     if path is None:
         raise _NoTranscript(session)
     return path
