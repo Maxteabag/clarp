@@ -16,11 +16,19 @@ What it compares:
      Hotseat and janitor bookkeeping, client focus, budgets, observations), against the Rust Host's stored settings;
      the transcription engine and audio keeping are also compared through GET /transcription-providers;
   2. the janitors: enabled and options of each Python janitor_configs row against GET /janitors on the Rust Host;
-  3. the connection relay's name (host_id) in each Host's relay.json;
-  4. owner config keys the Rust Host does not read (informational; from the audit of 22 Nov 2026).
+  3. the connection relay's name (host_id): the Python Host's relay.json against the name the Rust Host dials (its
+     own relay.json, the file named by relay-config in its install.conf, or a relay-also name);
+  4. owner config keys the Rust Host does not read (informational; from the audit of 22 Nov 2026);
+  5. (since laptopstudio's cut-over, 22 Nov 2026) each janitor's MODEL (the Python janitor agent's model against the
+     Rust janitor's), janitors the Rust Host lacks, and the Python Host's peers (~/.config/clarp/peers.json) against
+     the Rust Host's (GET /peers): both cut-overs had lost them and nothing noticed.
+Keys the import carries somewhere else (the heartbeat fields; orchestrator.* in the message delegator's janitor) and
+keys the Python Host itself no longer reads (LEGACY) are not compared.
 Restores: (1) through POST /transcription-providers; (2) through clarp-admin janitor enable / configure (a configure
-leaves a janitor disabled on the Rust Host, so an enabled one is enabled again right after). account-hotseat is left
-to the operator while the account-switch hang fix is not installed (it makes scheduled account switches).
+leaves a janitor disabled on the Rust Host, so an enabled one is enabled again right after), a janitor's model through
+configure --model, an enabled janitor the Rust Host lacks through janitor create with the Python janitor agent's name,
+backend, model, effort, cwd and options; (5) a missing peer through `clarp-host peers add NAME URL --token-stdin`
+(the token goes through stdin, never shown).
 """
 import json
 import os
@@ -42,6 +50,13 @@ RUNTIME_PREFIXES = (
     "tool_explanations.identity_key",
     "quota-keeper.", "controller_actions.audit", "label-auditor.last-", "janitor-adaptive.", "desktop-presence",
     "heartbeat.janitor_adopted", "judgments.errors", "dreaming.",  # runtime, or dreaming (not built on the Rust Host)  # a random key each Host makes for itself, not an owner choice
+)
+LEGACY = {  # keys left in the Python settings table that the Python Host itself no longer reads
+    "transcription.auto_languages": "automatic language detection, dropped on 2 Oct 2026 (09222d3be)",
+}
+CARRIED = (  # keys the import carries into another place on the Rust Host (admin/import_settings.rs)
+    "heartbeat.interval_sec", "heartbeat.backoff_strategy", "heartbeat.backoff_cap_sec", "heartbeat.dormant_after_noops",
+    "orchestrator.",
 )
 SECRET_WORDS = ("key", "token", "secret", "password", "credential", "private", "voip")
 UNREAD_CONFIG = {  # owner config keys the Rust Host does not read (audit 22 Nov 2026), with what that means
@@ -95,6 +110,50 @@ def janitor_tool(*args):
         return done.returncode, {"error": (done.stdout + done.stderr).strip()[:200]}
 
 
+def relay_name(path):
+    try:
+        return json.loads(path.read_text()).get("host_id")
+    except (OSError, ValueError):
+        return None
+
+
+def install_conf():
+    try:
+        lines = (HOME / ".config/clarp-host/install.conf").read_text().splitlines()
+    except OSError:
+        return {}
+    return dict(line.split("=", 1) for line in lines if "=" in line)
+
+
+def rust_relay_names():
+    """The names the Rust Host dials: its relay file (or the one relay-config names) and a relay-also name."""
+    conf = install_conf()
+    files = [pathlib.Path(conf["relay-config"]).parent / "relay.json"] if conf.get("relay-config") else [HOME / ".config/clarp-host/relay.json"]
+    if conf.get("relay-also"):
+        files.append(pathlib.Path(conf["relay-also"]).parent / "relay.json")
+    return {name for name in (relay_name(f) for f in files) if name}
+
+
+def python_janitor_agents(py):
+    """template_id -> the Python janitor agent's row (name, backend, model, effort, cwd)."""
+    cols = [r[1] for r in py.execute("pragma table_info(agents)")]
+    agents = {}
+    for template, agent_id in py.execute("select template_id, agent_id from janitor_configs"):
+        row = py.execute("select * from agents where agent_id=?", (agent_id,)).fetchone()
+        if row:
+            agents[template] = dict(zip(cols, row))
+    return agents
+
+
+def python_peers():
+    try:
+        data = json.loads((HOME / ".config/clarp/peers.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    peers = data.get("peers", data) if isinstance(data, dict) else {}
+    return {name: p for name, p in peers.items() if isinstance(p, dict) and p.get("enabled", True)}
+
+
 def python_db():
     db = HOME / ".local/share/clarp/state.sqlite"
     return sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -116,7 +175,7 @@ def compare(findings):
                 value = row[2].decode() if isinstance(row[2], bytes) else row[2]
                 rust_settings.setdefault(row[1], value)
     for key, value in py.execute("select key, value from settings"):
-        if key.startswith(RUNTIME_PREFIXES):
+        if key.startswith(RUNTIME_PREFIXES) or key in LEGACY or key.startswith(CARRIED):
             continue
         theirs = rust_settings.get(key)
         mine = str(value).strip()
@@ -142,15 +201,26 @@ def compare(findings):
             if their_options.get(name) != value:
                 findings.append(("janitor option", f"{template}.{name}", "<hidden>" if secretish(name) else json.dumps(value)[:60],
                                  "missing" if name not in their_options else json.dumps(their_options.get(name))[:60]))
+    # 2b. each janitor's model (the Python janitor agent's) and janitors the Rust Host lacks are handled above;
+    #     the model is compared here
+    py_agents = python_janitor_agents(py)
+    for template, row in py_agents.items():
+        theirs = by_template.get(template)
+        mine = row.get("model") or ""
+        if theirs is not None and mine and (theirs.get("model") or "") != mine:
+            findings.append(("janitor model", template, mine, theirs.get("model") or "default"))
+    # 2c. peers
+    status, listed_peers = rust("GET", "/peers")
+    rust_peers = listed_peers.get("peers", listed_peers) if isinstance(listed_peers, dict) else listed_peers
+    rust_peer_names = {p.get("name") for p in (rust_peers or []) if isinstance(p, dict)}
+    for name, peer in python_peers().items():
+        if name not in rust_peer_names:
+            findings.append(("peer", name, str(peer.get("url")), "missing"))
     # 3. relay name
-    names = []
-    for path in (HOME / ".config/clarp/relay.json", HOME / ".config/clarp-host/relay.json"):
-        try:
-            names.append(json.loads(path.read_text()).get("host_id"))
-        except (OSError, ValueError):
-            names.append(None)
-    if names[0] and names[0] != names[1]:
-        findings.append(("relay name", "host_id", str(names[0]), str(names[1])))
+    python_name = relay_name(HOME / ".config/clarp/relay.json")
+    rust_names = rust_relay_names()
+    if python_name and python_name not in rust_names:
+        findings.append(("relay name", "host_id", str(python_name), ", ".join(sorted(rust_names)) or "None"))
     # 4. config keys the Rust Host does not read (informational)
     try:
         cfg = tomllib.loads((HOME / ".config/clarp/config.toml").read_text())
@@ -163,13 +233,49 @@ def compare(findings):
     return findings
 
 
+def rust_janitor_session(template):
+    status, listed = rust("GET", "/janitors")
+    rows = listed.get("janitors", listed) if isinstance(listed, dict) else listed
+    return next((j.get("session") for j in rows or [] if (j.get("template_id") or j.get("template")) == template), f"clarp-{template}")
+
+
+def create_janitor(template):
+    """An enabled Python janitor the Rust Host lacks: created with the Python janitor agent's name, backend, model,
+    effort, cwd and options, then enabled (a created janitor starts paused)."""
+    py = python_db()
+    row = python_janitor_agents(py).get(template) or {}
+    options = py.execute("select options_json from janitor_configs where template_id=?", (template,)).fetchone()
+    args = ["create", "--template", template, "--config", json.dumps({"options": json.loads((options or ["{}"])[0] or "{}")})]
+    for flag, key in (("--name", "persona"), ("--backend", "backend"), ("--model", "model"), ("--effort", "effort"), ("--cwd", "cwd")):
+        if row.get(key):
+            args += [flag, str(row[key])]
+    if row.get("cwd"):
+        pathlib.Path(row["cwd"]).mkdir(parents=True, exist_ok=True)
+    code, j = janitor_tool(*args)
+    session = j.get("session")
+    say(f"  janitor {template} created as {session} (exit {code}{', ' + str(j.get('error')) if j.get('error') else ''})")
+    if session and not j.get("enabled"):
+        code, j = janitor_tool("enable", session)
+        say(f"  janitor {session} enabled (exit {code}, enabled {j.get('enabled')})")
+
+
+def add_peer(name):
+    """A Python peer the Rust Host lacks: added with the same URL; its token goes through stdin."""
+    peer = python_peers().get(name) or {}
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PWA_CONFIG", "CLARP_CONFIG_DIR")}
+    env["CLARP_HOST_TOKEN"] = rust_token()
+    done = subprocess.run([str(HOME / ".local/share/clarp-host/bin/clarp-host"), "peers", "add", name, str(peer.get("url")), "--token-stdin"],
+                          input=(peer.get("token") or "") + "\n", capture_output=True, text=True, env=env, timeout=60)
+    say(f"  peer {name} added (exit {done.returncode})")
+
+
 def restore(findings):
     for kind, name, mine, theirs in findings:
         if kind == "setting" and name in ("transcription.engine", "transcription.retain_audio"):
             body = {"engine": mine} if name == "transcription.engine" else {"retain_audio": mine == "true"}
             status, _ = rust("POST", "/transcription-providers", body)
             say(f"  restored {name} -> {mine} ({status})")
-        elif kind == "janitor" and theirs in ("off", "enabled") and name != "account-hotseat":
+        elif kind == "janitor" and theirs in ("off", "enabled"):
             session = f"clarp-{name}"
             code, j = janitor_tool("enable" if mine == "enabled" else "pause", session)
             say(f"  janitor {session} {'enabled' if mine == 'enabled' else 'paused'} (exit {code}, enabled {j.get('enabled')})")
@@ -185,6 +291,19 @@ def restore(findings):
             if was_enabled and not j.get("enabled"):
                 code, j = janitor_tool("enable", session)
                 say(f"  janitor {session} enabled again after configure (exit {code}, enabled {j.get('enabled')})")
+        elif kind == "janitor model":
+            session = rust_janitor_session(name)
+            code, j = janitor_tool("inspect", session)
+            was_enabled = bool(j.get("enabled"))
+            code, j = janitor_tool("configure", session, "--model", mine)
+            say(f"  janitor {session} model -> {mine} (exit {code})")
+            if was_enabled and not j.get("enabled"):
+                code, j = janitor_tool("enable", session)
+                say(f"  janitor {session} enabled again after configure (exit {code}, enabled {j.get('enabled')})")
+        elif kind == "janitor" and theirs == "missing" and mine == "enabled":
+            create_janitor(name)
+        elif kind == "peer" and theirs == "missing":
+            add_peer(name)
         else:
             say(f"  not restored here: {kind} {name} ({mine} vs {theirs})")
 
