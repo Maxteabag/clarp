@@ -18,6 +18,7 @@ pub mod calendar;
 pub mod call_transcription;
 pub mod calls;
 pub mod cartesia_language;
+pub mod chat_view;
 pub mod chip;
 pub mod client;
 pub mod compaction;

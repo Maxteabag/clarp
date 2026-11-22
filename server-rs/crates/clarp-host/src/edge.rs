@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 144;
+pub const HOST_CONTRACT: u64 = 145;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -334,6 +334,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // What a user send's delivery is, on `GET /log` and its feed (`delivery_*`), and the
     // `delivery-updated` hint: in the in-process mode, the Host owning its turns itself.
     ("send_delivery_state", 81),
+    ("chat_view", 145),
     ("waited_send_order", 115),
     // GET /turn-queue reads the same priority order the mailbox dispatches.
     ("queue_user_first", 118),
@@ -668,6 +669,7 @@ pub fn router(app: App) -> Router {
         .route("/events", get(events))
         .route("/send", post(send))
         .route("/agent-moved", post(crate::agent_moved::set))
+        .route("/agent-chat-view", post(crate::chat_view::set))
         .route(
             "/agent-coordination",
             post(crate::hidden_coordination::set_chat),
@@ -1454,6 +1456,10 @@ pub(crate) fn agent_row(
     );
     row["coordination_visibility"] = json!(visibility);
     row["coordination_override"] = json!(choice);
+    row["chat_view"] = json!(crate::chat_view::preference(
+        directory,
+        &member.record.agent_id
+    ));
     let working = view.working.as_ref();
     let sender = working
         .and_then(wire::WorkingWith::sender)
@@ -2495,6 +2501,7 @@ struct LogQuery {
     limit: Option<usize>,
     after_revision: Option<u64>,
     before: Option<String>,
+    view: Option<String>,
     /// `0`, `false` or `no`: without what a watcher or the Host's own routine began.
     include_automated: Option<String>,
     /// `0`, `false` or `no`: with one header for a row's tools instead of every card whole.
@@ -2517,6 +2524,21 @@ async fn log(
     let mode =
         clarp_kernel::hidden_coordination::Mode::parse(query.coordination.as_deref().unwrap_or(""))
             .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    use clarp_kernel::chat_view::View;
+    let view = query
+        .view
+        .as_deref()
+        .map(python::strip)
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| {
+            View::parse(raw).ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "view must be conversation or session",
+                )
+            })
+        })
+        .transpose()?;
     let Some(member) = app.anyone(&query.session) else {
         // An agent the Host does not have has no conversation: the answer is the one for an
         // agent that has not said anything yet, and not an error.
@@ -2541,6 +2563,11 @@ async fn log(
     let policy = mode.map(|mode| mode.policy(global, chat));
     let which = if hides && policy.is_some_and(|policy| policy.hidden) {
         which.hide_coordination()
+    } else {
+        which
+    };
+    let which = if view == Some(View::Conversation) {
+        which.conversation_view(hides)
     } else {
         which
     };
@@ -2616,6 +2643,11 @@ async fn log(
     // The other agents a row names are named as the roster has them now.
     let directory = app.fleet.directory();
     wire::roster_names(&mut answer, &|agent_id| directory.shown_as(agent_id));
+    if let Some(view) = view
+        && !answer["missing"].as_bool().unwrap_or_default()
+    {
+        answer["view"] = json!(view);
+    }
     Ok(Json(answer))
 }
 

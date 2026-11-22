@@ -56,6 +56,7 @@ fn launch_and_steering_prompts_keep_the_reference_envelope() {
             protocol: text("protocol").to_owned(),
             digest: text("digest").to_owned(),
             ids: Vec::new(),
+            ..Brief::default()
         };
         assert_eq!(brief.prompt(text("text")), row["steer"]);
         brief.append_protocol(&rules::reminder("ivy", Some("Boss")));

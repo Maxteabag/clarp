@@ -360,6 +360,7 @@ GET /log?…&include_automated=0&include_tool_details=0
 | `include_automated=0` | Hide heartbeat, leader, dreaming, and watcher traffic. |
 | `include_tool_details=0` | Collapse tool cards to one summary card per message; fetch `/message-tool-details?session=&message_id=` on demand. |
 | `coordination=auto\|hide\|show` | Feature `hidden_coordination`: leave coordination between agents out (`hide`), keep it (`show`), or follow the chat's setting (`auto`). Absent: every row, as before. |
+| `view=conversation\|session` | Feature `chat_view`: `conversation` returns only the rows of the conversation view (before the page limit) and echoes `view`; `session`, or absent, returns every row as before. |
 | `coordination_read=show\|hide` | With `coordination` on a delta: the `visibility` the client's cache was read under. When it differs from the answer's, the answer says `replace_required: true`. |
 
 Response:
@@ -612,6 +613,42 @@ Sub-agent cells (`kind: "subagents"`) come from two backends:
   exist. The Host does not import sub-agent transcripts as conversations.
   They appear only as these cells.
 
+#### Conversation and session views
+
+Rust Host feature `chat_view` (issue 702, contract 145). Every `/log` row carries `view`,
+`conversation` or `session`, beside `audience`:
+
+- `conversation`, in a turn the user sees (`audience` `user`): the user's own message (a user
+  row of origin `user` or `oracle`); an agent's note (`kind` `note`: `POST /agent-notes`,
+  `clarp-admin tell-user`); a row the Host writes for the user (origin `system`); a turn's
+  final reply; an assistant text row that no known turn wrote (`trace_id` empty) whose `phase`
+  is `final`.
+- `session`: everything else: assistant text in between (commentary), tool rows, prompts the
+  Host or another agent sent (schedules, wakes, delivered answers, another agent's message), and
+  every row of a turn with `audience` `agents`.
+
+A turn's **final reply** is its last assistant text row (words, no tool name, not a note), and
+only once the turn has ended (settled; a turn a follow-up replaced has none). While a turn runs
+all its text is `session`. When it ends, its anchor row is written again with a new revision:
+the final reply, or its last note or user prompt if there is no reply. The anchor carries
+`session_rows`, how many of the turn's rows the conversation view leaves out, so a client offers
+"Show work" there and opens that turn in the session view. A delta (`after_revision`) brings the
+anchor, so a row a client holds as `session` arrives again as `conversation`. The Rust Host
+derives the anchor and its revision from its turn records.
+
+`GET /log?view=conversation` returns only `conversation` rows, filtered before the page limit,
+for a snapshot, a delta and an older page alike, and echoes `view`. With `view=session`, or
+without `view`, every row comes as before. The two combine with `coordination` and
+`include_automated`.
+
+The agent's choice is kept on the Host: every snapshot agent row carries `chat_view`
+(`conversation` or `session`, default `session`). `POST /agent-chat-view {session, chat_view}`
+stores it and answers `{ok: true, session, chat_view}`, and broadcasts `agent-roster` with
+`kind: chat_view`, `session` and `chat_view`. An agent's own turn or a peer Host is refused
+`403 agents_may_not`; another value is `400`. A client may still override the view locally.
+In conversation view, the brief the Host adds to each of the agent's turns says that its final
+reply and its posts reach the user and its text in between does not.
+
 #### Pair conversations: `GET /agent-conversations`
 
 Agent-to-agent exchanges are also readable as one conversation per pair,
@@ -662,7 +699,7 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text`, `origin`, `sender` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. An event that names an item (edited, deleted, a retired goal wake) also carries its `origin` and `sender` as `GET /turn-queue` does (R182). |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
