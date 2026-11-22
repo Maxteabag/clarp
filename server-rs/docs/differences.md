@@ -581,5 +581,8 @@ Every `/log` row carries `conversation_id` on the Rust Host (contract 153, featu
 `conversation_fork`), and `session_id` is present where the producing session is known.
 The conversation ID stays the same across a relaunch or conversation fork. The retired Python
 reference has neither row field. `conformance/intended.txt` registers their addition on log rows.
-The snapshot tells per agent whether it may fork (`conversation_fork`, from
-`[conversation_forks]` in the Host's `config.toml`). The fork itself is issue 718's next piece.
+The agent-row flag `conversation_fork` is true for an eligible agent named in
+`[conversation_forks]` in the Host's `config.toml` and false otherwise. The retired
+Python reference has no such flag. The conformance register covers its boolean addition
+in the snapshot, archived roster and made-agent response. The fork itself is issue
+718's next piece.

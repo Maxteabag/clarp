@@ -2259,23 +2259,35 @@ def told_by_rule(difference: dict, base: dict, head: dict, bases=()) -> str:
     return f'defect {defect}' if defect else PLACE if only_its_place(difference) else ''
 
 
-LOG_ROW_FIELD = re.compile(r'^\[(\d+)\]\.body\.turns\[\d+\]\.([a-z0-9_#]+)$')
+HTTP_ADDED_FIELD = re.compile(r'^\[(\d+)\]\.body\.(.+)\.([a-z0-9_#]+)$')
+LOG_ROW = re.compile(r'^turns\[\d+\]$')
+AGENT_ROW = re.compile(r'^agents\[\d+\]$')
 LOG_ROW_TEXT = re.compile(r'^(?:str\[[1-9]\d*\]#[0-9a-f]{8}|<(?:id|secret):\d+>)$')
 
 
-def intended_log_row_field(difference: dict, base: dict, registered: set) -> bool:
-    """The two registered Rust-only identities of rows in a successful log read."""
-    if (difference['channel'] != 'http' or difference['kind'] != 'field-added'
-            or not LOG_ROW_TEXT.fullmatch(difference['head'])):
+def intended_http_field(difference: dict, base: dict, registered: set) -> bool:
+    """The registered Rust-only additions to known log and roster responses."""
+    if difference['channel'] != 'http' or difference['kind'] != 'field-added':
         return False
-    match = LOG_ROW_FIELD.fullmatch(difference['locator'])
+    match = HTTP_ADDED_FIELD.fullmatch(difference['locator'])
     if not match:
         return False
     exchange = base['http'][int(match[1])]
-    if exchange['method'] != 'GET' or exchange['path'] != '/log' or exchange['status'] != 200:
+    if exchange['status'] != 200:
         return False
-    return any(f'log-row-field-added:{key}' in registered and match[2] == diff.safe_key(key)
-               for key in ('conversation_id', 'session_id'))
+    route = exchange['method'], exchange['path']
+    row, field = match[2], match[3]
+    if route == ('GET', '/log') and LOG_ROW.fullmatch(row):
+        return bool(LOG_ROW_TEXT.fullmatch(difference['head'])) and any(
+            f'log-row-field-added:{key}' in registered and field == diff.safe_key(key)
+            for key in ('conversation_id', 'session_id'))
+    if ('agent-row-field-added:conversation_fork' not in registered
+            or field != diff.safe_key('conversation_fork')
+            or difference['head'] not in ('true', 'false')):
+        return False
+    if route in (('GET', '/agents/snapshot'), ('GET', '/agents/archived')):
+        return bool(AGENT_ROW.fullmatch(row))
+    return route == ('POST', '/agents') and row == diff.safe_key('agent')
 
 
 def rendered(report, intended: set, shaped: dict, title: str, errors=(), awaited=()) -> str:
@@ -2358,7 +2370,7 @@ def held(recordings: list, seen: dict, chosen, registered: set) -> tuple:
         counted = [[d for d in items if place(d) in everywhere] for items in against]
         bases = [recording[name]['core'] for recording in recordings]
         head = seen[name]['core']
-        told = [{d['id']: 'intended' if intended_log_row_field(d, bases[n], registered)
+        told = [{d['id']: 'intended' if intended_http_field(d, bases[n], registered)
                  else told_by_rule(d, bases[n], head, bases)
                  for d in counted[n] if d['id'] not in registered}
                 for n in range(len(recordings))]

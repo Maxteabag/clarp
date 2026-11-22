@@ -84,6 +84,35 @@ def main() -> int:
     check(not ok and 'unexplained: 5' in '\n'.join(lines),
           'log additions still differ without their register entries', failed)
 
+    def roster(path, agents, status=200):
+        return {'method': 'GET', 'path': path, 'status': status, 'body': {'agents': agents}}
+
+    def made_agent(row):
+        return {'method': 'POST', 'path': '/agents', 'status': 200, 'body': {'agent': row}}
+
+    base = recording(
+        roster('/agents/snapshot', [{'id': 'a'}, {'id': 'b', 'conversation_fork': False}, {'id': 'c'}]),
+        roster('/agents/archived', [{'id': 'a'}]),
+        made_agent({'id': 'a', 'activity': {}}),
+        roster('/agents/snapshot', [{'id': 'a'}], 403),
+        roster('/another-route', [{'id': 'a'}]),
+    )
+    head = recording(
+        roster('/agents/snapshot', [
+            {'id': 'a', 'conversation_fork': True}, {'id': 'b', 'conversation_fork': True},
+            {'id': 'c', 'conversation_fork': 'false'},
+        ]),
+        roster('/agents/archived', [{'id': 'a', 'conversation_fork': False}]),
+        made_agent({'id': 'a', 'conversation_fork': False, 'activity': {'conversation_fork': True}}),
+        roster('/agents/snapshot', [{'id': 'a', 'conversation_fork': False}], 403),
+        roster('/another-route', [{'id': 'a', 'conversation_fork': False}]),
+    )
+    entries = {'agent-row-field-added:conversation_fork'}
+    lines, ok = conform.judged([base], head, ROUTER, entries, [])
+    page = '\n'.join(lines)
+    check(not ok and 'differences: 8  registered intended: 3' in page and 'unexplained: 5' in page,
+          'the fork flag is intended only as a boolean addition directly on known agent rows', failed)
+
     made = report(('router', '[10].body.session'), ('router', '[14].body.session'))
     ids = [d['id'] for d in made.items]
     shown = set(ids)

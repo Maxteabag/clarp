@@ -189,3 +189,7 @@ c8103eeafa7a  stop-with-queue: null stalled_action on the activity event at lane
 # Match only text fields added on turns in a successful GET /log response.
 log-row-field-added:conversation_id  the stable conversation ID of every row
 log-row-field-added:session_id  the producing tool session where the Host knows it
+
+# Issue 718 also adds per-agent conversation_fork. It is a boolean, false
+# unless the agent is configured for forks. The retired reference has no flag.
+agent-row-field-added:conversation_fork  agent rows in the snapshot, archived roster and made-agent response
