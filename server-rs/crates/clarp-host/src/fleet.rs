@@ -42,6 +42,13 @@ use crate::wire;
 pub(crate) mod computer_jobs;
 pub(crate) mod portrait_jobs;
 mod voice_migration;
+
+pub(crate) enum VoiceMigration {
+    Plan,
+    Reviewed(String),
+    AtStart,
+}
+
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
 pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
 
@@ -376,7 +383,7 @@ pub struct Directory {
     /// The devices that are told of finished turns: who gets a push.
     pub push: Arc<PushBook>,
     /// The other Hosts this one may write to, by name.
-    pub peers: Arc<BTreeMap<String, Peer>>,
+    pub(crate) legacy_peers: Arc<BTreeMap<String, Peer>>,
     /// The settings the owner makes from an app, each a text under its key
     /// (`transcription.agent_engines`), as the Python Host keeps them.
     pub settings: Arc<BTreeMap<String, String>>,
@@ -437,6 +444,21 @@ pub type Left = Vec<(String, Vec<u8>)>;
 /// own, apart from every table the fleet keeps for itself.
 pub fn shelf(kind: &str) -> String {
     format!("kept.{kind}")
+}
+
+fn voice_or_contact(requested: String, contact: Option<&serde_json::Value>) -> String {
+    if clarp_kernel::said::has_voice(Some(&requested)) {
+        return requested;
+    }
+    let stored = contact.and_then(|row| row["voice_id"].as_str());
+    if clarp_kernel::said::has_voice(stored) {
+        return stored.unwrap_or_default().to_owned();
+    }
+    if requested.is_empty() {
+        "{}".into()
+    } else {
+        requested
+    }
 }
 
 fn creation_picture(base64: &str) -> Result<Option<(Vec<u8>, String)>, NotMade> {
@@ -577,12 +599,23 @@ fn can_receive(devices: &HashMap<String, Arc<Device>>, owner: &str) -> bool {
 
 /// Another Host this one may write to: where it is, and the token it takes. The owner names
 /// it; an agent then writes to an agent there by that name (`clarp-admin prompt --server`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Peer {
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Peer {
     pub url: String,
     pub token: String,
     #[serde(default = "enabled")]
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub server_id: String,
+}
+
+impl std::fmt::Debug for Peer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Peer")
+            .field("enabled", &self.enabled)
+            .finish_non_exhaustive()
+    }
 }
 
 fn enabled() -> bool {
@@ -795,17 +828,6 @@ enum Ask {
         token: String,
         outcome: Pushed,
     },
-    /// The owner names another Host. The inner error is what is missing.
-    PeerAdd {
-        name: String,
-        url: String,
-        token: String,
-        answer: Answer<Result<(), String>>,
-    },
-    PeerRemove {
-        name: String,
-        answer: Answer<bool>,
-    },
     /// The owner sets settings. The inner error is a store that failed, or a key that is
     /// no setting's.
     Set {
@@ -814,7 +836,7 @@ enum Ask {
     },
     VoiceMigration {
         view: Box<clarp_kernel::voice_profile::HostView>,
-        reviewed: Option<String>,
+        mode: VoiceMigration,
         answer: Answer<Result<Result<serde_json::Value, String>, Unavailable>>,
     },
     SetCoordination {
@@ -903,6 +925,7 @@ enum Ask {
 #[derive(Clone)]
 pub struct FleetHandle {
     pub(crate) delegation_view: delegations::Rejoin,
+    pub(crate) peer_snapshot: Arc<tokio::sync::Mutex<crate::peers::SnapshotCache>>,
     tx: Arc<mpsc::Sender<Ask>>,
     directory: Arc<watch::Receiver<Arc<Directory>>>,
     log: crate::unkept::Log,
@@ -1213,28 +1236,6 @@ impl FleetHandle {
         .await
     }
 
-    /// Names another Host this one may write to, or renames where one is. The inner error
-    /// is what is missing.
-    pub async fn peer_add(
-        &self,
-        name: String,
-        url: String,
-        token: String,
-    ) -> Result<Result<(), String>, Unavailable> {
-        self.ask(|answer| Ask::PeerAdd {
-            name,
-            url,
-            token,
-            answer,
-        })
-        .await
-    }
-
-    /// Forgets another Host. Returns whether it was known.
-    pub async fn peer_remove(&self, name: String) -> Result<bool, Unavailable> {
-        self.ask(|answer| Ask::PeerRemove { name, answer }).await
-    }
-
     /// Makes a persona, or changes the one named `original`. The inner error is why not,
     /// in the Python Host's words. Answers the persona as an app is told it.
     pub async fn persona_write(
@@ -1329,11 +1330,11 @@ impl FleetHandle {
     pub(crate) async fn migrate_voices(
         &self,
         view: clarp_kernel::voice_profile::HostView,
-        reviewed: Option<String>,
+        mode: VoiceMigration,
     ) -> Result<Result<serde_json::Value, String>, Unavailable> {
         self.ask(|answer| Ask::VoiceMigration {
             view: Box::new(view),
-            reviewed,
+            mode,
             answer,
         })
         .await?
@@ -1682,8 +1683,8 @@ struct Fleet {
     computer_jobs: computer_jobs::ComputerJobs,
     /// The register of push devices.
     push: PushBook,
-    /// The other Hosts this one may write to.
-    peers: BTreeMap<String, Peer>,
+    /// Older Rust Hosts kept peers in the fleet table, before peers.json.
+    legacy_peers: Arc<BTreeMap<String, Peer>>,
     /// The owner's settings, by key.
     settings: BTreeMap<String, String>,
     /// The personas the owner made, and how he made built-in ones look.
@@ -1953,6 +1954,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     for (name, peer) in read!(Peer, PEERS).read {
         peers.insert(name, peer);
     }
+    let legacy_peers = Arc::new(peers);
     let (roster, janitors) = apart(&members);
     let cwd_owners = Arc::new(owners);
     let (directory, read) = watch::channel(Arc::new(Directory {
@@ -1963,7 +1965,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         focus: focus.clone(),
         devices: devices.clone(),
         push: Arc::new(push.clone()),
-        peers: Arc::new(peers.clone()),
+        legacy_peers: legacy_peers.clone(),
         settings: Arc::new(settings.clone()),
         coordination: crate::hidden_coordination::Roster::of(
             &settings,
@@ -2001,7 +2003,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         jobs,
         computer_jobs,
         push,
-        peers,
+        legacy_peers,
         settings,
         book,
         directory,
@@ -2013,6 +2015,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         .map_err(|error| format!("the fleet's thread could not be started: {error}"))?;
     Ok(FleetHandle {
         delegation_view,
+        peer_snapshot: Arc::default(),
         tx,
         directory: read,
         log,
@@ -2207,17 +2210,6 @@ impl Fleet {
                     let _ = answer.send(self.push_disable(&token, &owner, only_owner.as_deref()));
                 }
                 Ask::Pushed { token, outcome } => self.pushed(&token, outcome),
-                Ask::PeerAdd {
-                    name,
-                    url,
-                    token,
-                    answer,
-                } => {
-                    let _ = answer.send(self.peer_add(&name, &url, &token));
-                }
-                Ask::PeerRemove { name, answer } => {
-                    let _ = answer.send(self.peer_remove(&name));
-                }
                 Ask::PersonaWrite {
                     original,
                     said,
@@ -2255,12 +2247,8 @@ impl Fleet {
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));
                 }
-                Ask::VoiceMigration {
-                    view,
-                    reviewed,
-                    answer,
-                } => {
-                    let result = self.migrate_voices(*view, reviewed.as_deref());
+                Ask::VoiceMigration { view, mode, answer } => {
+                    let result = self.migrate_voices(*view, mode);
                     let _ = answer.send(Ok(result));
                 }
                 Ask::Set { settings, answer } => {
@@ -2440,7 +2428,7 @@ impl Fleet {
             focus: self.focus.clone(),
             devices: self.devices.clone(),
             push: Arc::new(self.push.clone()),
-            peers: Arc::new(self.peers.clone()),
+            legacy_peers: self.legacy_peers.clone(),
             settings,
             coordination: crate::hidden_coordination::Roster::of(
                 &self.settings,
@@ -2469,6 +2457,7 @@ impl Fleet {
         name: &str,
         stored: &str,
         catalogue: &VoiceCatalogue,
+        parent: Option<&AgentRecord>,
     ) -> String {
         let host = clarp_kernel::voice_profile::HostView {
             voices: crate::owner::voices(file),
@@ -2492,26 +2481,59 @@ impl Fleet {
             catalogue,
             roster: owner.roster,
         };
+        fn voice_of(record: &AgentRecord) -> clarp_kernel::voice_pool::User<'_> {
+            clarp_kernel::voice_pool::User {
+                name: &record.persona,
+                stored: &record.voice_id,
+                builtin: false,
+                archived: record.archived_at_ms.is_some(),
+                agent_id: Some(&record.agent_id),
+                created_at_ms: record.created_at_ms,
+            }
+        }
+        let inherited = parent.map(|parent| pool.inherited(name, stored, &voice_of(parent)));
         let contacts = self.book.listed(owner);
+        let resting: Vec<_> = self
+            .held
+            .iter()
+            .filter_map(|held| self.stored_agent(&held.agent_id).ok().flatten())
+            .filter(|record| record.deleted_at_ms.is_none())
+            .collect();
         let agents = self
             .members
             .iter()
             .map(|member| &member.record)
-            .filter(|record| !record.is_janitor && record.archived_at_ms.is_none())
-            .map(|record| clarp_kernel::voice_pool::User {
-                name: &record.persona,
-                stored: &record.voice_id,
-                builtin: false,
-            });
+            .chain(&resting)
+            .filter(|record| !record.is_janitor)
+            .map(voice_of);
         let contacts = contacts
             .iter()
             .map(|contact| clarp_kernel::voice_pool::User {
                 name: contact["name"].as_str().unwrap_or(""),
                 stored: contact["voice_id"].as_str().unwrap_or(""),
                 builtin: contact["builtin"] == true,
+                archived: false,
+                agent_id: None,
+                created_at_ms: self.book.created_at(contact["id"].as_str().unwrap_or("")),
             });
         let users: Vec<_> = agents.chain(contacts).collect();
-        let assigned = pool.assign(name, stored, &users);
+        let assigned = pool.assign(name, inherited.as_deref().unwrap_or(stored), &users, || {
+            self.members
+                .iter()
+                .filter(|member| !member.record.is_janitor)
+                .filter_map(|member| {
+                    let view = member.agent.view();
+                    let newest = view
+                        .speech
+                        .lines()
+                        .iter()
+                        .filter_map(|line| line.clip_id)
+                        .max()
+                        .and_then(|id| i64::try_from(id).ok())?;
+                    Some((member.record.agent_id.clone(), newest))
+                })
+                .collect()
+        });
         if let Some(note) = assigned.catalogue_miss {
             eprintln!(
                 "voicePoolNoCatalogueVoice provider=cartesia language={} eligible=0 total={}",
@@ -2520,8 +2542,13 @@ impl Fleet {
         }
         for note in assigned.exhausted {
             eprintln!(
-                "voicePoolExhausted provider={} pool={} shared_by={}",
-                note.provider, note.size, note.shared_by
+                "voicePoolExhausted provider={} pool={} reused={} archived_only={} last_used_ms={} shared_by={}",
+                note.provider,
+                note.size,
+                note.reused,
+                if note.archived_only { "True" } else { "False" },
+                note.last_used_ms,
+                note.shared_by
             );
         }
         assigned.stored
@@ -2544,30 +2571,21 @@ impl Fleet {
             gemini: &gemini,
         };
         let name = personas::named(&said.name).unwrap_or_else(|| said.name.clone());
-        let voice_id = if original.is_none() {
-            let stored = if said.voice_id.is_empty() {
-                "{}"
-            } else {
-                &said.voice_id
-            };
-            clarp_kernel::said::canonical_voice(
-                &self.assigned_voice(&file, &owner, &name, stored, fetched),
-            )
-        } else if said.voice_id.is_empty() {
-            String::new()
-        } else if let Some(original) = original {
-            let current = self.book.named(&owner, original);
-            let stored = current
-                .as_ref()
-                .and_then(|row| row["voice_id"].as_str())
-                .unwrap_or("");
-            clarp_kernel::said::merge_provider_maps(
-                stored,
-                &said.voice_id,
-                said.base_voice_id.as_deref(),
-            )
+        let fill = |voice: &str| self.assigned_voice(&file, &owner, &name, voice, fetched, None);
+        let voice_id = if let Some(original) = original {
+            self.book
+                .named(&owner, original)
+                .filter(|row| row["builtin"] != true)
+                .map_or_else(String::new, |current| {
+                    clarp_kernel::voice_pool::contact_voice_edit(
+                        current["voice_id"].as_str().unwrap_or(""),
+                        &said.voice_id,
+                        said.base_voice_id.as_deref(),
+                        fill,
+                    )
+                })
         } else {
-            clarp_kernel::said::canonical_voice(&said.voice_id)
+            fill(&said.voice_id)
         };
         let wanted = Wanted {
             name: &said.name,
@@ -2576,19 +2594,13 @@ impl Fleet {
             personality: &said.personality,
             picture: &said.picture,
         };
-        let voice = original
-            .filter(|_| voice_id.is_empty())
-            .and_then(|original| self.book.named(&owner, original))
-            .filter(|current| current["voice_id"].as_str().is_none_or(str::is_empty))
-            .map(|_| self.assigned_voice(&file, &owner, &name, "{}", fetched))
-            .unwrap_or_default();
         let mut book = (*self.book).clone();
         let changed = match original {
             None => {
                 let id = format!("persona-{}", ids::hex(8));
-                book.create(&owner, &wanted, (&id, &voice), self.now_ms())
+                book.create(&owner, &wanted, (&id, ""), self.now_ms())
             }
-            Some(original) => book.update(&owner, original, &wanted, &voice),
+            Some(original) => book.update(&owner, original, &wanted, ""),
         };
         let change = match changed {
             Ok(change) => change,
@@ -2786,42 +2798,6 @@ impl Fleet {
         }
         self.works.hub.publish(event, self.now_ms());
         Ok(effective)
-    }
-
-    fn peer_add(
-        &mut self,
-        name: &str,
-        url: &str,
-        token: &str,
-    ) -> Result<Result<(), String>, Unavailable> {
-        let (name, url, token) = (name.trim(), url.trim().trim_end_matches('/'), token.trim());
-        let addressed = url.starts_with("http://") || url.starts_with("https://");
-        if name.is_empty() || !addressed || token.is_empty() {
-            return Ok(Err("peer requires name, HTTP(S) URL, and token".to_string()));
-        }
-        let peer = Peer {
-            url: url.to_string(),
-            token: token.to_string(),
-            enabled: true,
-        };
-        let stored =
-            serde_json::to_vec(&peer).map_err(|error| Unavailable::new(error.to_string()))?;
-        self.store
-            .put(PEERS, name, &stored)
-            .map_err(|error| Unavailable::new(error.to_string()))?;
-        self.peers.insert(name.to_string(), peer);
-        self.publish();
-        Ok(Ok(()))
-    }
-
-    fn peer_remove(&mut self, name: &str) -> Result<bool, Unavailable> {
-        let known = self
-            .store
-            .delete(PEERS, name)
-            .map_err(|error| Unavailable::new(error.to_string()))?;
-        self.peers.remove(name);
-        self.publish();
-        Ok(known)
     }
 
     /// Keeps rows of the push register as a change left them, and publishes the register.
@@ -3221,7 +3197,13 @@ impl Fleet {
         } else {
             before.avatar.clone()
         };
-        let voice_id = or_kept(said(&request.voice_id), &before.voice_id);
+        let voice_id = said(&request.voice_id);
+        let voice_id = if clarp_kernel::said::has_voice(Some(&voice_id)) {
+            voice_id
+        } else {
+            or_kept(before.voice_id.clone(), &voice_id)
+        };
+        let voice_id = voice_or_contact(voice_id, definition.as_ref());
         self.check_creation_voice(
             &file,
             &persona,
@@ -3504,7 +3486,7 @@ impl Fleet {
         let said_parent = request.parent.as_deref().unwrap_or("").trim();
         let parent = match (said_parent, self.place_of(said_parent)) {
             ("", _) => None,
-            (_, Some(at)) => Some(self.members[at].record.agent_id.clone()),
+            (_, Some(at)) => Some(&self.members[at].record),
             (_, None) => {
                 let why = format!("No live agent matches parent '{said_parent}'.");
                 return Err(Told::new(404, "parent_not_found", why).into());
@@ -3546,10 +3528,7 @@ impl Fleet {
             "avatar_symbol",
             personas::SYMBOL_MOST,
         );
-        let voice_id = match asked(&request.voice_id) {
-            voice if voice.is_empty() => of_persona("voice_id").to_string(),
-            voice => voice,
-        };
+        let voice_id = voice_or_contact(asked(&request.voice_id), definition.as_ref());
         self.check_creation_voice(&file, &persona, &voice_id, definition.as_ref(), None)?;
         Self::check_creation_effort(
             &backend,
@@ -3557,11 +3536,14 @@ impl Fleet {
             &effort,
             &file,
         )?;
-        let voice_id = if role == "agent" && !was_forked {
-            self.assigned_voice(&file, &owner, &persona, &voice_id, catalogue)
-        } else {
-            voice_id
-        };
+        let voice_id = self.assigned_voice(
+            &file,
+            &owner,
+            &persona,
+            &voice_id,
+            catalogue,
+            parent.filter(|_| role == "helper"),
+        );
         // Its picture: the one it is given, else the one its persona has of its own.
         let given = creation_picture(&asked(&request.avatar_base64))?;
         let avatar = match &given {
@@ -3582,7 +3564,7 @@ impl Fleet {
             mcp_servers: request.mcp_servers,
             conversation_id: forked.unwrap_or_else(ids::uuid),
             created_at_ms: self.now_ms(),
-            parent_agent_id: parent,
+            parent_agent_id: parent.map(|parent| parent.agent_id.clone()),
             role: if role == "helper" {
                 role.to_string()
             } else {
@@ -3808,7 +3790,7 @@ impl Fleet {
                 let voice = of_persona("voice_id");
                 let voice = if voice.is_empty() { "{}" } else { &voice };
                 record.voice_id =
-                    self.assigned_voice(&file, &owner, &record.persona, voice, &catalogue);
+                    self.assigned_voice(&file, &owner, &record.persona, voice, &catalogue, None);
                 record.personality = of_persona("personality");
                 record.avatar_symbol = of_persona("avatar_symbol");
                 record.avatar = persona["id"]

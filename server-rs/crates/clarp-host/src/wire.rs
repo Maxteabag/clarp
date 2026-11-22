@@ -755,7 +755,7 @@ pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<
         "type": "queue-updated",
         "agent_id": record.agent_id,
         "session": record.session,
-        "queue_depth": status.queue_depth,
+        "queue_depth": status.listed_queue_depth,
         "queue_paused": status.paused,
         "queue_started": matches!(update, QueueUpdate::Started(_)),
         "queue_revision": status.queue_revision,
@@ -1686,9 +1686,9 @@ fn activity_count(tools: &[Value], cells: &[Value]) -> usize {
 }
 
 /// A page of a conversation as an app asks for it that opens a card's details itself
-/// (`include_tool_details=0`): of each row's tools one header is left, enough to show that
-/// there was work, with how many cards there are and whether there is more to open. The
-/// rule is the Python Host's (`conversation.py`).
+/// (`include_tool_details=0`): keep every failed card alongside the representative.
+/// Tools keep their first header. Display cells fold only non-failed cards
+/// (`conversation.py`, PR 691).
 pub fn without_tool_details(response: &mut Value) {
     let Some(rows) = response["turns"].as_array_mut() else {
         return;
@@ -1702,10 +1702,16 @@ pub fn without_tool_details(response: &mut Value) {
                 .filter_map(|key| Some(((*key).to_string(), compact(from.get(*key)?))));
             fields.collect()
         };
-        let headers: Vec<Value> = tools
+        let failed = |header: &Map<String, Value>| {
+            header.get("status").and_then(Value::as_str) == Some("error")
+        };
+        let headers = tools
             .iter()
             .filter(|tool| tool.is_object())
-            .map(|tool| Value::Object(kept(tool, &["id", "name", "summary", "action", "status"])))
+            .map(|tool| kept(tool, &["id", "name", "summary", "action", "status"]))
+            .enumerate()
+            .filter(|(index, header)| *index == 0 || failed(header))
+            .map(|(_, header)| Value::Object(header))
             .collect();
         let details = |cell: &Value| cell["lines"].as_array().map_or(0, Vec::len);
         let mut cell_headers: Vec<Map<String, Value>> = cells
@@ -1720,19 +1726,25 @@ pub fn without_tool_details(response: &mut Value) {
             .collect();
         row["tool_details_available"] = json!(!tools.is_empty() || !cells.is_empty());
         row["activity_count"] = json!(activity_count(&tools, &cells));
-        row["tools"] = json!(headers.into_iter().take(1).collect::<Vec<_>>());
-        // One header stands for all the cells: it says how much there is behind it.
+        row["tools"] = Value::Array(headers);
         let behind: u64 = cell_headers
             .iter()
+            .filter(|header| !failed(header))
             .map(|header| header["detail_count"].as_u64().unwrap_or(0).max(1))
             .sum();
-        row["display_cells"] = match cell_headers.first_mut() {
-            Some(first) => {
-                first.insert("detail_count".to_string(), json!(behind));
-                json!([first])
+        let mut represented = false;
+        cell_headers.retain_mut(|header| {
+            if failed(header) {
+                return true;
             }
-            None => json!([]),
-        };
+            if represented {
+                return false;
+            }
+            represented = true;
+            header.insert("detail_count".to_string(), json!(behind));
+            true
+        });
+        row["display_cells"] = json!(cell_headers);
     }
 }
 
@@ -2022,6 +2034,7 @@ mod tests {
         };
         let status = Status {
             queue_depth: 1,
+            listed_queue_depth: 1,
             paused: true,
             queue_revision: 7,
             ..status(None, None)
@@ -2152,6 +2165,7 @@ mod tests {
             interrupted_since_ms: None,
             waiting: vec![TurnId(3)],
             queue_depth: 1,
+            listed_queue_depth: 1,
             paused: true,
             queue_revision: 7,
             stop_generation: 0,
@@ -3461,6 +3475,17 @@ mod tests {
             rows[2]["tools"],
             json!([{ "id": "c-1", "name": "Edit", "summary": "notes.md" }])
         );
+    }
+
+    #[test]
+    fn compact_log_keeps_failed_entries_as_in_the_python_host() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/compact-log-vectors.json"
+        ))
+        .unwrap();
+        let mut page = json!({ "turns": vectors["full"] });
+        without_tool_details(&mut page);
+        assert_eq!(page["turns"], vectors["compact"]);
     }
 
     /// The other agents a row names are named as the roster has them when the row is read,

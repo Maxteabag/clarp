@@ -12,6 +12,13 @@
 import {
   createHealth, noteFetch, noteSse, registerModule,
 } from '@core/client-health.js';
+import { clientHeader } from '@core/render-spec.js';
+import { version as appVersion } from '../../../package.json';
+
+// Who this client is, on every request it makes (X-Clarp-Client, docs/compatibility.md): the
+// web app's own name and contract series. The Host decides per client what it may draw
+// (render_spec: server_identity.RENDER_SPEC_MIN_CONTRACT).
+export const CLIENT_HEADER_VALUE = clientHeader(appVersion);
 
 // A fresh id per module evaluation: a second one for the same module means a
 // hot reload left two live copies, which is what silently wedges the app.
@@ -74,18 +81,32 @@ function pathOf(input) {
   } catch (_) { return ''; }
 }
 
+function sameOrigin(input) {
+  try {
+    // A string, a URL object or a Request; anything else is not known to be this Host's.
+    const url = typeof input === 'string' ? input
+      : input instanceof URL ? input.href
+      : input && typeof input.url === 'string' ? input.url : null;
+    if (url === null) return false;
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function installAuthFetch() {
   const nativeFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
     const path = pathOf(input);
     const token = getAuthToken();
     const opts = { ...(init || {}) };
-    if (token) {
-      const h = new Headers(opts.headers || {});
-      if (!h.has('Authorization')) h.set('Authorization', 'Bearer ' + token);
-      opts.headers = h;
-    }
-    return nativeFetch(input, token ? opts : init).then(
+    const h = new Headers(opts.headers || (input instanceof Request ? input.headers : {}));
+    // This Host's token goes to this Host only: another Host's request (the all-Hosts list)
+    // carries that Host's own token, set by its caller, and never this one.
+    if (token && !h.has('Authorization') && sameOrigin(input)) h.set('Authorization', 'Bearer ' + token);
+    if (!h.has('X-Clarp-Client')) h.set('X-Clarp-Client', CLIENT_HEADER_VALUE);
+    opts.headers = h;
+    return nativeFetch(input, opts).then(
       (res) => {
         noteFetch(health, { path, ok: res.ok, status: res.status });
         if (res.status === 401) authRejected();

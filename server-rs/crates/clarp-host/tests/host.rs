@@ -37,6 +37,8 @@ mod contacts;
 mod controller_actions;
 #[path = "host/coordination.rs"]
 mod coordination;
+#[path = "host/cross_origin_read.rs"]
+mod cross_origin_read;
 #[path = "host/delivery.rs"]
 mod delivery;
 #[path = "host/diagnostics.rs"]
@@ -79,6 +81,8 @@ mod move_janitors;
 mod native_agent_goal;
 #[path = "host/pairing_identity.rs"]
 mod pairing_identity;
+#[path = "host/peer_snapshot.rs"]
+mod peer_snapshot;
 #[path = "host/pictures.rs"]
 mod pictures;
 #[path = "host/provider_tasks.rs"]
@@ -603,11 +607,14 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 129);
+    assert_eq!(info["contract"]["host"], 142);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
     assert_eq!(info["contract"]["features"]["voice_pool"], 123);
+    assert_eq!(info["contract"]["features"]["voice_for_helpers"], 135);
+    assert_eq!(info["contract"]["features"]["cross_origin_read"], 139);
+    assert_eq!(info["contract"]["features"]["peer_snapshot"], 140);
     assert_eq!(info["contract"]["features"]["voice_provider_maps"], 122);
     assert_eq!(info["contract"]["features"]["speech_outcome"], 109);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
@@ -723,7 +730,7 @@ fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
     wait_for("the turn to run", || host.state(&session) == "thinking");
     let queued = host.post(
         "/send",
-        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true }),
+        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true, "origin": "automation" }),
     );
     assert_eq!(queued["queued"], true);
 
@@ -822,7 +829,7 @@ fn a_stop_while_another_message_waits_ends_the_turn_that_ran_by_its_own_trace() 
     wait_for("the turn to run", || host.state(&session) == "thinking");
     let waits = host.post(
         "/send",
-        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true }),
+        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true, "origin": "automation" }),
     );
     assert_eq!(waits["queued"], true, "{waits}");
 
@@ -5456,7 +5463,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     );
     assert_eq!(
         named,
-        json!({ "name": "work", "url": format!("http://{}", other.address), "enabled": true })
+        json!({ "name": "work", "url": format!("http://{}", other.address), "enabled": true, "server_id": "" })
     );
     assert_eq!(host.get("/peers"), json!([named]), "never its token");
     // The owner's own command for it reads the same.
@@ -8785,6 +8792,12 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         read["artifact"].get("spec").is_some()
     };
     assert!(spec_of("ios/12 contract=74"), "iOS from 74, by default");
+    assert!(spec_of("web/1 contract=1"), "web from 1, by default");
+    assert!(spec_of("android/1058 contract=41"));
+    assert!(!spec_of("android/1058 contract=40"));
+    assert!(!spec_of("Android/1058 contract=41"));
+    assert!(!spec_of("web/1 contract=0"));
+    assert!(!spec_of("Web/1 contract=1"));
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 0\n").unwrap();
     assert!(!spec_of("ios/12 contract=74"), "iOS switched off");
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"80\"\n").unwrap();
@@ -8812,7 +8825,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     // or a value that is no whole number of at least 0, is refused in a line that names it.
     std::fs::write(
         &owner,
-        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Android = 2, Ios = 1, \"a b\" = 1, \"1os\" = 1, \
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Android = 2, Ios = 1, Web = 2, \"a b\" = 1, \"1os\" = 1, \
          android = -1, web = 2.5 }\n",
     )
     .unwrap();
@@ -8824,10 +8837,15 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     assert!(spec_of("ios/12 contract=74"));
     assert!(!spec_of("iOs/12 contract=74"), "only the name as written");
     assert!(
-        !spec_of("android/5 contract=99"),
-        "a value below 0 is refused"
+        spec_of("android/5 contract=41"),
+        "a value below 0 is ignored and the default stands"
     );
-    assert!(!spec_of("web/1 contract=99"), "so is a fraction");
+    assert!(
+        spec_of("web/1 contract=1"),
+        "a fraction is ignored and the default stands"
+    );
+    assert!(!spec_of("Web/1 contract=1"));
+    assert!(spec_of("Web/1 contract=2"));
     let said = |line: &str| {
         host.heard
             .lock()
@@ -8847,7 +8865,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         host.heard.lock().unwrap()
     );
     let line = "config.render_spec_min_contract: 'IOS' (not 'ios'), 'Android' (not 'android'), \
-                'Ios' (not 'ios'): names are matched exactly as clients send them, so each is \
+                'Ios' (not 'ios'), 'Web' (not 'web'): names are matched exactly as clients send them, so each is \
                 another client and leaves the built-in one as it is";
     assert_eq!(said(line), 1, "{line}: {}", host.heard.lock().unwrap());
     assert_eq!(
@@ -9001,7 +9019,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (_, listed) = ask("GET", "/artifacts?search=Decide", capable, None);
     assert!(!listed.to_string().contains("submit_decision"));
     wait_for("the agent to be told the first answers", || {
-        host.conversation(&theo).len() == 2 && host.state(&theo) == "done"
+        host.conversation(&theo).len() == 1 && host.state(&theo) == "done"
     });
 
     // The first accepted answers close the spec, are told to the agent once, and are told
@@ -9019,17 +9037,12 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (status, first) = ask("POST", "/artifacts/answered/submit", capable, Some(&sent));
     assert_eq!((status, &first), (200, &receipt));
     wait_for("the agent to be told the answers", || {
-        host.conversation(&theo).len() == 4 && host.state(&theo) == "done"
+        host.conversation(&theo).len() == 2 && host.state(&theo) == "done"
     });
-    let message = "The user answered \"Decide\".\nArtifact ID: answered\nVersion: build-1\n\
-                   Submission ID: recorded-answer-01\nThese are user preferences for review, not approval \
-                   to perform protected actions.\nAnswers:\n\
-                   {\"intent\":\"submit_decision\",\"state\":{\"choice\":\"send\"}}";
-    assert_eq!(
-        host.conversation(&theo)[2],
-        ("user".to_string(), message.to_string())
-    );
-    assert_eq!(host.turns(&theo)[2]["id"], "u-html-form-recorded-answer-01");
+    let turns = host.turns(&theo);
+    assert!(turns.iter().all(|row| row["role"] == "assistant"));
+    assert!(turns[1]["text"].as_str().unwrap().contains("Decide"));
+    let reply_id = turns[1]["id"].clone();
     let (status, again) = ask("POST", "/artifacts/answered/submit", capable, Some(&sent));
     let mut delivered = receipt.clone();
     delivered["delivery_status"] = json!("delivered");
@@ -9041,7 +9054,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         events_of("answered"),
         [published[0].clone(), published[0].clone()]
     );
-    assert_eq!(host.conversation(&theo).len(), 4);
+    assert_eq!(host.conversation(&theo).len(), 2);
     // Other answers under the same id; a new id after it was answered; another version.
     let mut other = sent.clone();
     other["answers"]["state"]["choice"] = json!("review");
@@ -9223,8 +9236,13 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 129);
+    assert_eq!(info["contract"]["host"], 142);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
+    assert_eq!(info["contract"]["features"]["render_spec_v2"], 133);
+    assert_eq!(
+        info["contract"]["features"]["render_spec_answered_button"],
+        138
+    );
 
     // What the envelope says is read as the reference reads it: without its blanks and its
     // hidden blocks, in small letters, a value that is no text as Python writes it.
@@ -9761,6 +9779,16 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     assert_eq!(code, 1, "{out}");
     let printed: Value = serde_json::from_str(err.trim()).unwrap();
     assert_eq!(printed, refusal("not_open", "/session"));
+    // A metadata refusal is a JSON error string, rather than a render-spec triple.
+    std::fs::write(
+        work.join("metadata.json"),
+        json!({"type": "data", "session": "nobody"}).to_string(),
+    )
+    .unwrap();
+    let (code, out, err) = artifacts(&["publish-render-spec", "metadata.json"]);
+    assert_eq!(code, 1, "{out}");
+    let printed: Value = serde_json::from_str(err.trim()).unwrap();
+    assert_eq!(printed, json!({"error": "unknown agent session"}));
     let payload = form.to_string();
     let (code, out, err) = artifacts(&[
         "create",
@@ -9818,8 +9846,13 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         "delivered"
     );
     assert_eq!(read["artifact"]["submission"]["answers"], sent["answers"]);
-    let told: Vec<(String, String)> = host.conversation(&theo);
-    assert_eq!(told.iter().filter(|(_, text)| text == message).count(), 1);
+    assert_eq!(
+        host.turns(&theo)
+            .iter()
+            .filter(|row| row["id"] == reply_id && row["role"] == "assistant")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -11258,7 +11291,10 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     };
     let lineage = |session: &str| host.get(&format!("/agent-helper-state?session={session}"));
     let refused = |path: &str, body: Value| -> (u16, Value) { host.ask("POST", path, Some(&body)) };
-    let maker_id = row(&maker)["agent_id"].as_str().unwrap().to_string();
+    let maker_row = row(&maker);
+    let maker_id = maker_row["agent_id"].as_str().unwrap().to_string();
+    let maker_voice = &maker_row["voice_id"];
+    assert!(!clarp_kernel::said::voice_map(maker_voice.as_str()).is_empty());
 
     // Who makes it, and as what.
     let told = |status: u16, code: &str, message: &str| {
@@ -11489,7 +11525,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
             &about[0]["backend"],
             &about[0]["voice_id"]
         ),
-        (&json!("Slice Helper"), &json!("scripted"), &json!("{}"))
+        (&json!("Slice Helper"), &json!("scripted"), maker_voice)
     );
     assert_eq!(about[1]["detail"], json!({ "session": "slice-1" }));
 
@@ -19134,13 +19170,13 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         }
         host.ask("POST", "/artifacts/audio-form/submit", Some(&data))
     };
-    let done = |id: &str| {
+    let done = |replies| {
         wait_for("the reply to the form", || {
-            let turns = host.turns(&agent);
-            turns
+            host.turns(&agent)
                 .iter()
-                .position(|r| r["id"] == format!("u-html-form-{id}"))
-                .is_some_and(|i| turns[i + 1..].iter().any(|r| r["role"] == "assistant"))
+                .filter(|r| r["role"] == "assistant")
+                .count()
+                == replies
                 && host.state(&agent) == "done"
         })
     };
@@ -19169,7 +19205,7 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         .0,
         200
     );
-    done(silent);
+    done(1);
     assert!(voice.asked().is_empty());
     let mut clips = Vec::new();
     for (index, (id, words, audio)) in [
@@ -19185,21 +19221,26 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         }
         let (status, receipt) = submit(id, words, audio);
         if index == 1 {
-            let queued = successful
-                .iter()
-                .find(|row| row["input"]["synthesize_audio"] == true)
-                .unwrap();
+            wait_for("the form answer to be queued", || {
+                host.get("/agents/snapshot")["agents"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["session"] == agent && row["queued_turn_count"] == 1)
+            });
             let queue = host.get(&format!("/turn-queue?session={agent}"));
-            let item = queue["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|r| r["id"] == format!("html-form-{id}"))
-                .unwrap();
-            assert_eq!(item["synthesize_audio"], queued["synthesize_audio"]);
+            assert_eq!(queue["items"], json!([]));
+            wait_for("the listed queue depth to be sent", || {
+                events.lock().unwrap().iter().any(|event| {
+                    event["type"] == "queue-updated"
+                        && event["client_msg_id"] == format!("html-form-{id}")
+                        && event["queue_started"] == false
+                        && event["queue_depth"] == 0
+                })
+            });
         }
         assert_eq!(status, 200, "{receipt}");
-        done(id);
+        done(if index == 0 { 2 } else { 4 });
         wait_for("the scripted voice receives the requested reply", || {
             voice.asked().len() == index + 1
         });
@@ -19233,7 +19274,7 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         let trace = host
             .turns(&agent)
             .into_iter()
-            .find(|r| r["id"] == format!("u-html-form-{id}"))
+            .rfind(|r| r["role"] == "assistant")
             .unwrap()["trace_id"]
             .clone();
         assert_eq!(announced["trace_id"], trace);
@@ -19493,17 +19534,11 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
                 "accepted": true, "delivery_status": "pending" })
     );
     wait_for("the agent's answer to the form's answers", || {
-        host.conversation(&maker).len() == 2 && host.state(&maker) == "done"
+        host.conversation(&maker).len() == 1 && host.state(&maker) == "done"
     });
-    let told = format!(
-        "The user submitted answers to HTML form \"Plan: it's time\".\nArtifact ID: form-plan\n\
-         Version: 1\nSubmission ID: {first}\nThese are user preferences for review, not \
-         approval to perform protected actions. Interpret the answers in the context of the \
-         originating plan.\nAnswers:\n{{\"budget\":12.5,\"when\":\"now\"}}"
-    );
-    assert_eq!(host.conversation(&maker)[0], ("user".to_string(), told));
     let rows = host.turns(&maker);
-    assert_eq!(rows[0]["id"], format!("u-html-form-{first}"));
+    assert_eq!(rows[0]["role"], "assistant");
+    assert!(rows[0]["text"].as_str().unwrap().contains("it's time"));
     // Sent again, they are the same answers: answered as told, and told once.
     let (status, again) = send(&host, "form-plan", &answers(first, given.clone()));
     assert_eq!(
@@ -19520,7 +19555,7 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
         other["error"],
         "submission ID already used for different answers"
     );
-    assert_eq!(host.conversation(&maker).len(), 2);
+    assert_eq!(host.conversation(&maker).len(), 1);
 
     // After the Host was killed the form, its page and what was answered are all there.
     host.kill();
@@ -19541,9 +19576,13 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
         (200, &json!("pending"))
     );
     wait_for("the agent's answer to the second answers", || {
-        host.conversation(&maker).len() == 4 && host.state(&maker) == "done"
+        host.conversation(&maker).len() == 2 && host.state(&maker) == "done"
     });
-    assert_eq!(host.turns(&maker)[2]["id"], format!("u-html-form-{second}"));
+    assert!(
+        host.turns(&maker)
+            .iter()
+            .all(|row| row["role"] == "assistant")
+    );
     let shown = fetch(&host, token, "GET", "/artifacts/form-plan/html", &[], b"");
     assert!(shown.status == 200 && shown.text().contains(page));
 }
@@ -21811,15 +21850,15 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
             "name":"Stranger","backend":"scripted","role":"helper","parent":maximus["session"],
         }),
     );
-    let silent = speech_of(&stranger["agent"]["voice_profile"]);
+    let inherited = speech_of(&stranger["agent"]["voice_profile"]);
     assert_eq!(
         (
-            &silent["voice_id"],
-            &silent["origin"],
-            &silent["silent_reason"],
-            &silent["shared_with"]
+            &inherited["voice_id"],
+            &inherited["origin"],
+            &inherited["silent_reason"],
+            &inherited["shared_with"]
         ),
-        (&Value::Null, &Value::Null, &json!("no_voice"), &json!(0))
+        (&shown["voice_id"], &json!("own"), &Value::Null, &json!(2))
     );
     let [maximus, theo, stranger] =
         [maximus, theo, stranger].map(|made| made["session"].as_str().unwrap().to_string());
@@ -21851,11 +21890,11 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     let mine = row_of(&first, &maximus)["voice_profile"].clone();
     assert_eq!(
         (&mine["speech"]["voice_id"], &mine["speech"]["shared_with"]),
-        (&json!("v-shared"), &json!(1))
+        (&json!("v-shared"), &json!(2))
     );
     assert_eq!(
-        row_of(&first, &stranger)["voice_profile"]["speech"]["silent_reason"],
-        "no_voice"
+        row_of(&first, &stranger)["voice_profile"]["speech"]["voice_id"],
+        mine["speech"]["voice_id"]
     );
     wait_for("Relaunch test agent is ready", || {
         host.state(&theo) == "spawned"
@@ -21915,24 +21954,17 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     };
     wait_for("the clip", || spoken().is_some());
     assert_eq!(spoken().unwrap()["voice"]["id"], mine["speech"]["voice_id"]);
-    host.send(&stranger, "<speak>Nobody hears this.</speak>", "s1");
-    wait_for("the silence told", || {
-        heard
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| e["type"] == "tts-error")
-    });
-    let told = heard
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|e| e["type"] == "tts-error")
-        .cloned()
-        .unwrap();
+    host.send(&stranger, "<speak>The helper can speak.</speak>", "s1");
+    let helper_clip = || {
+        voice
+            .asked()
+            .into_iter()
+            .find(|asked| asked["transcript"] == "The helper can speak.")
+    };
+    wait_for("the helper's clip", || helper_clip().is_some());
     assert_eq!(
-        (&told["session"], &told["reason"]),
-        (&json!(stranger), &json!("no_voice"))
+        helper_clip().unwrap()["voice"]["id"],
+        mine["speech"]["voice_id"]
     );
 
     // The speech providers: the apps are told to re-read the agents, and the version moves;
@@ -21996,8 +22028,8 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     );
     let v1 = version(&moved);
 
-    // The owner's file is read when a snapshot is made: one asked after it changed shows the
-    // new voice and a new version at once (no event tells of it: docs/differences.md).
+    // A changed persona default moves the version. The helper still has its inherited
+    // voice stored, so changing that default cannot change what it says.
     file("Stranger = \"v-stranger\"\n");
     let moved = snapshot();
     assert_ne!(version(&moved), v1);
@@ -22008,7 +22040,7 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
             &found["origin"],
             &found["silent_reason"]
         ),
-        (&json!("v-stranger"), &json!("own"), &Value::Null)
+        (&json!("v-shared"), &json!("own"), &Value::Null)
     );
 
     // A voice given from an app: told with the profile it makes.
@@ -23658,7 +23690,8 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         "a symbol, and no picture of its own"
     );
 
-    // What the request says of the agent comes before what its persona has.
+    // The empty map supplies no voice, so Rachel takes her Contact's voices.
+    // The explicit picture, symbol and personality still belong to this agent.
     let (status, made) = ask(
         "/agents",
         json!({
@@ -23671,7 +23704,15 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         made["session"].as_str().unwrap().to_string(),
         made["agent"]["agent_id"].as_str().unwrap().to_string(),
     );
-    assert_eq!(made["agent"]["voice_id"], "{}");
+    let rachel_voice: Value =
+        serde_json::from_str(made["agent"]["voice_id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        rachel_voice,
+        json!({
+            "cartesia": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+            "elevenlabs": "21m00Tcm4TlvDq8ikWAM",
+        })
+    );
     assert_eq!(made["agent"]["avatar_symbol"], "moon");
     let own = format!("/avatars/{rachel_id}?v=b2917681b4f4fee3");
     assert_eq!(
@@ -26110,7 +26151,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     );
 
     // The turn is stopped: what waits is held.
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("the turn to end", || host.state(&echo) == "interrupted");
     let held = queue();
     assert_eq!((&held["paused"], waiting().len()), (&json!(true), 3));
@@ -26179,7 +26220,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     host.send(&echo, "sleep 60", "m6");
     wait_for("a turn to run again", || host.state(&echo) == "thinking");
     leave("seventh", "m7");
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("that turn to end", || host.state(&echo) == "interrupted");
     assert_eq!(queue()["paused"], true);
     host.ask("DELETE", "/turn-queue/m7", None);
@@ -26340,7 +26381,7 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
     assert_eq!(waiting(&echo).len(), 2);
     // Fox's goes to run: the id is Echo's alone again, and each route acts on the one that
     // still waits.
-    host.post("/stop", json!({ "session": fox }));
+    host.post("/stop", json!({ "session": fox, "actor": "maintenance" }));
     wait_for("Fox's turn to end", || host.state(&fox) == "interrupted");
     host.post("/turn-queue/resume", json!({ "session": fox }));
     wait_for("Fox's waiting message to be answered", || {
@@ -26375,7 +26416,7 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
             .conversation(&fox)
             .contains(&said("assistant", "other words for Echo"))
     );
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("Echo's turn to end", || host.state(&echo) == "interrupted");
 
     // Two agents taken over from another Host whose conversations have rows of one name:
@@ -26695,7 +26736,7 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
 
     // The turn is stopped, and the words of what is held are changed once more. Let go,
     // each turn answers the words its message has now, under the id it always had.
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("the turn to end", || host.state(&echo) == "interrupted");
     assert_eq!(
         put("m2", json!({ "text": "the second, as it was held" })).0,
@@ -32952,8 +32993,8 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         host.send(agent, "sleep 60", id);
         wait_for("the turn to run", || host.state(agent) == "thinking");
     }
-    let later =
-        json!({ "session": gamma, "text": "later", "client_msg_id": "g-2", "queue_if_busy": true });
+    let later = json!({ "session": gamma, "text": "later", "client_msg_id": "g-2",
+                "queue_if_busy": true, "origin": "automation" });
     assert_eq!(host.post("/send", later)["queued"], true);
     for agent in [&gamma, &delta] {
         host.post("/stop", json!({ "session": agent }));

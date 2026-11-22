@@ -84,6 +84,28 @@ choose a voice on description alone. `taken_by` is computed from running
 agents only, so also check the personas list for a voice already claimed by a
 personality with no live session.
 
+You may also leave `voice_id` out. Every Host that advertises feature
+`voice_pool` (Host contract 123 and later) gives a new agent or contact made
+without a voice an unused one. That holds on every route: `POST /agents`,
+`clarp-admin agent create`, adoption, `POST /personas`, minted and assigned contacts.
+On contract 135 and later (feature `voice_for_helpers`), these rules also apply:
+
+- An English agent gets its Cartesia voice from the Host's curated list
+  (`server/lib/cartesia_voice_pool.json`: native English accents, no novelty
+  voices, one per name). Agents in other languages get one from Cartesia's
+  catalogue in their language.
+- A voice is unused when no agent holds it, archived agents included, and no
+  contact holds it. When the pool runs out, the Host first reuses a voice that
+  only archived agents hold, then the least recently used voice, and logs
+  `voicePoolExhausted`.
+- A helper (`--role helper`) speaks with its parent's voice. A fork gets its own.
+  A Janitor has none, because it never speaks.
+
+To see which voice an agent got, read its `voice_profile.speech` row in
+`GET /agents/snapshot`: `provider_label`, `voice_id` and `voice_label` (for
+example "Voice: Brooke (Cartesia)"). When nothing would be heard,
+`silent_reason` says why.
+
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.
 

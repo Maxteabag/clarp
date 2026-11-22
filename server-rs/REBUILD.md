@@ -365,7 +365,11 @@ app to sync, an agent's portrait in a push.
 **Agents write to each other, also across Hosts** (15 Nov 2026). The skill tells an agent to hand work to
 another with `clarp-admin prompt --to SESSION --from ME`; on this Host the same command is answered by the Host
 (`admin_tool.rs`). With `--server NAME` the message goes to an agent of another Host the owner named
-(`peers.rs`, `clarp-host peer add NAME URL`, the Python Host's scheme): that Host's own `POST /send`. This is
+(`peers.rs`, `clarp-admin peers add [NAME] URL --code CODE` or `clarp-host peers add`): that Host's own
+`POST /send`. Code pairing registers the peer in the Rust Host's config directory in `peers.json`. Full-scope
+clients may ask for `GET /peers/snapshot`, which reads the enabled peers' identities and agent snapshots
+with their stored device tokens and shares the result for ten seconds. Reads and sends use direct
+connections and refuse redirects. This is
 what lets agents move one by one: an agent that lives here still reaches the ones on the Python Host beside
 it, and they reach it once the Python Host has this one as a peer (`clarp-admin peers add`, the release
 owner's to do at an install). A request that comes back is there too (`clarp-admin request` and `reply`,
@@ -3662,11 +3666,24 @@ its messages and inbox. The feature is advertised after the runtime integration.
 
 **Voices for new agents and contacts (PR 553, contract 123).** The fleet assigns voices
 as it creates new agents and contacts. The choice and the write run in the same turn.
-The configured Cartesia pool takes precedence. Otherwise, the pool uses the background
-catalogue's public, non-owner, non-deleted voices in the recipient's speech language,
-with the built-in pool as a fallback. A stable walk reserves built-in contacts' voices
-while other voices are free and chooses the least shared voice when the pool is exhausted.
+The configured Cartesia pool takes precedence. PR 683 ships the curated English pool,
+filtered by the last fetched catalogue and the deleted-voice list. Other languages and
+an empty curated selection use the background catalogue's public, non-owner, non-deleted
+voices in the recipient's speech language. The built-in list is the final fallback.
+Curated names supply labels until the saved catalogue or picker names the voice.
+Archived agents hold their voices. After the stable walk finds no free voice, prefer
+a voice held only by archived agents, then the oldest last use, then the least shared
+voice, then walk order. A voice shared with an active agent or contact is still in use.
+A helper inherits its parent's effective voice for each needed provider it lacks.
+A fork gets a pool voice, and a new agent's explicit voice is stored as a provider map.
 A rename pins the old name's voices. Janitors are shown as `voiceless_role`.
+At startup the fleet applies the existing migration plan before serving requests.
+It logs and leaves any voice whose sound would change under any provider.
+An empty provider map on creation uses the contact's voice where available.
+On relaunch it keeps the agent's existing voice. A contact edit fills missing
+provider voices when the contact was stored as a map. One-off announcements
+and ring openings skip synthesis when no stored voice is named (PR 688).
+The herald passes an empty map as no voice so the persona fallback can speak (PR 689).
 
 **Cartesia catalogue access (PR 562, 21 Nov 2026).** The names worker recognizes
 public access, public or all visibility, and the legacy boolean public marker. The

@@ -29,6 +29,8 @@ pub struct Config {
     pub shim: PathBuf,
     /// The administrator's token. Empty: every request is accepted.
     pub auth_token: String,
+    /// The web app origins allowed to read the Host identity and roster.
+    pub(crate) web_read_origins: std::collections::BTreeSet<String>,
     /// The Host's name, as the apps show it.
     pub name: String,
     /// Where a new agent works when nobody says.
@@ -51,7 +53,7 @@ pub struct Config {
     /// The folder of the releases of the Host that kept this machine's tools before
     /// (`--skills-other-releases`): a link it left into one of them is Clarp's own, outdated.
     pub skills_other_releases: Option<PathBuf>,
-    /// That Host's record of the skills it kept chosen (`--skills-chosen-before`, its
+    /// That Host's record of explicit skill opt-outs (`--skills-chosen-before`, its
     /// `install.json`): read once, at the first start that keeps the tools, and never written.
     pub skills_chosen_before: Option<PathBuf>,
     pub ask_usage: bool,
@@ -212,6 +214,15 @@ CLARP_HEARTBEATS_DISABLED=1 turns the heartbeat of every agent off.";
 /// The home of whoever runs this Host.
 pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
+}
+
+/// This Rust Host's configuration directory, separate from the Python Host's.
+pub(crate) fn host_config_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home().join(".config"))
+        .join("clarp-host")
 }
 
 /// A path as a person types it on a phone, as a path on this machine: `~` is the home of
@@ -655,6 +666,9 @@ impl Config {
             launcher,
             shim,
             auth_token: std::env::var("CLARP_HOST_TOKEN").unwrap_or_default(),
+            web_read_origins: crate::cross_origin::read_config(
+                &host_config_dir().join("config.toml"),
+            ),
             name,
             default_cwd,
             keep_spools,

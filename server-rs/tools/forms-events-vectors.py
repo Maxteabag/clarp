@@ -87,6 +87,30 @@ def reply_cases():
     return rows
 
 
+def answer_reads():
+    from lib import agents, html_forms, message_previews, message_store, turn_queue
+
+    agent = agents.create_agent(persona="Forms", voice_id="", cwd="/tmp", session="forms")
+    ordinary = "typed"
+    submission = "submission-example"
+    answer = html_forms.delivery_id(submission)
+    for cid, text in [(ordinary, "Show me a form"), (answer, "The user's answers")]:
+        message_store.record_user_message(agent_id=agent, backend_session_id="fixture", client_msg_id=cid, text=text)
+        turn_queue.enqueue(queue_id=cid, agent_id=agent, session="forms", text=text,
+                           trace_id=cid, client_msg_id=cid, synthesize_audio=False,
+                           origin="user", sender_agent_id="")
+    chat = dict(agent_id=agent, backend_session_id="fixture")
+    earlier = message_store.list_messages(**chat, limit=1, hide_form_answers=True)
+    state = turn_queue.state(agent)
+    return dict(ordinary_id=ordinary, submission_id=submission,
+                app_rows=[row["id"] for row in earlier],
+                agent_rows=[row["id"] for row in message_store.list_messages(**chat)],
+                preview=message_previews.last_message_head(agent_id=agent)["message_id"],
+                queue_items=[row["client_msg_id"] for row in turn_queue.waiting_items(agent)
+                             if not html_forms.is_answer_delivery(row["client_msg_id"])],
+                count=state["count"], listed=state["listed"])
+
+
 """Reference cases for the wired countdown projection and its accepted payload."""
 from datetime import datetime
 from unittest.mock import patch
@@ -163,6 +187,7 @@ if __name__ == '__main__':
         for name, fields in [
             (OUT.name, {'cases': reference(Path(root))}),
             ('form-reply-dispatch.json', {'cases': reply_cases()}),
+            ('form-answer-reads.json', answer_reads()),
             ('countdown-attention.json', countdown_cases()),
         ]:
             fixture = {'written_by': writer, **fields}

@@ -144,9 +144,12 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
                     name: contact["name"].as_str().unwrap(),
                     stored: contact["voice_id"].as_str().unwrap(),
                     builtin: contact["builtin"] == true,
+                    archived: false,
+                    agent_id: None,
+                    created_at_ms: book.created_at(contact["id"].as_str().unwrap()),
                 })
                 .collect();
-            pool.assign(name, voice, &users).stored
+            pool.assign(name, voice, &users, Default::default).stored
         };
         let mut book = Book::default();
         for (at, step) in room["steps"].as_array().unwrap().iter().enumerate() {
@@ -163,19 +166,14 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
                 .and_then(|contact| contact["voice_id"].as_str())
                 .unwrap_or("");
             let voice = match what.as_str() {
-                "create" => {
-                    let plain = if plain.is_empty() { "{}" } else { plain };
-                    said::canonical_voice(&assigned(&book, &name, plain))
-                }
-                "update" if !plain.is_empty() => {
-                    said::merge_provider_maps(stored, plain, given["base_voice_id"].as_str())
-                }
+                "create" => assigned(&book, &name, plain),
+                "update" => clarp_kernel::voice_pool::contact_voice_edit(
+                    stored,
+                    plain,
+                    given["base_voice_id"].as_str(),
+                    |voice| assigned(&book, &name, voice),
+                ),
                 _ => String::new(),
-            };
-            let fallback = if what == "update" && stored.is_empty() && plain.is_empty() {
-                assigned(&book, &name, "{}")
-            } else {
-                String::new()
             };
             let wanted = Wanted {
                 name: said("name"),
@@ -192,7 +190,7 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
                     let now = i64::try_from(at).unwrap();
                     Some(book.create(&owner, &wanted, (id, ""), now))
                 }
-                "update" => Some(book.update(&owner, original, &wanted, &fallback)),
+                "update" => Some(book.update(&owner, original, &wanted, "")),
                 _ => None,
             };
             match changed {

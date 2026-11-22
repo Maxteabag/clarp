@@ -24,6 +24,7 @@ use clarp_speech::markup::strip_hidden_blocks;
 
 pub mod catalog;
 pub mod json;
+mod v2;
 pub mod validate;
 
 pub use catalog::{Catalog, Ident, Unavailable};
@@ -216,7 +217,7 @@ fn hex(bytes: &[u8]) -> String {
 
 /// What a spec is, by its version, its length and its digest (`content_identity`).
 pub fn content_identity(catalog: &Catalog, spec: &J, version: &str) -> Result<Value, Refusal> {
-    let raw = json::canonical(spec, "/spec", Some(&catalog.ident))?;
+    let raw = json::canonical(spec, "/spec", Some(catalog.pointer_ident()))?;
     Ok(json!({
         "version": version,
         "bytes": raw.len(),
@@ -240,12 +241,9 @@ pub fn stored(catalog: &Catalog, payload: &J) -> Result<Map<String, Value>, Refu
     Ok(kept)
 }
 
-/// The lowest client contract that draws and answers a render spec, per client, by the name
-/// it sends (`server_identity.RENDER_SPEC_MIN_CONTRACT`, the Python Host's PR 474): iOS from
-/// contract 74. A client not named never gets the kind: Android (until its owner names its
-/// number), the desktop, the web app, the Watch, an unknown or absent name. Each client's
-/// contract numbers are its own series.
-pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74)];
+/// The lowest client contracts that draw and answer a render spec. The client names itself
+/// exactly. iOS draws from 74, the web app from 1, and Android from 41.
+pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74), ("web", 1), ("android", 41)];
 
 /// Whether the client that sent this header can answer a render spec
 /// (`server_identity.render_spec_capable`): it says who it is as `<name>/<build> contract=<n>`
@@ -267,6 +265,32 @@ pub fn capable(header: Option<&str>, overrides: Option<&BTreeMap<String, i64>>) 
         .or_else(defaulted)
         .filter(|minimum| *minimum >= 1)
         .is_some_and(|minimum| contract >= minimum)
+}
+
+/// The default v2 minimums. Every other client needs an explicit entry from the owner.
+pub const DEFAULT_V2_MINIMUMS: &[(&str, i64)] = &[("web", 2), ("android", 42)];
+
+/// The highest catalog the client can draw and answer. V2 also requires V1 capability.
+pub fn client_level(
+    header: Option<&str>,
+    v1: Option<&BTreeMap<String, i64>>,
+    v2: Option<&BTreeMap<String, i64>>,
+) -> u8 {
+    if !capable(header, v1) {
+        return 0;
+    }
+    let draws_v2 = header
+        .and_then(crate::client::named)
+        .is_some_and(|(name, contract)| {
+            let minimum = v2.and_then(|table| table.get(name).copied()).or_else(|| {
+                DEFAULT_V2_MINIMUMS
+                    .iter()
+                    .find(|(client, _)| *client == name)
+                    .map(|(_, minimum)| *minimum)
+            });
+            minimum.is_some_and(|minimum| minimum >= 1 && contract >= minimum)
+        });
+    1 + u8::from(draws_v2)
 }
 
 /// Whether a submission id is one (`[A-Za-z0-9-]{16,80}`).
@@ -359,10 +383,11 @@ pub fn admit(
     if Some(version) != payload.get("version") {
         return refuse("version_mismatch", "/version");
     }
-    let declared = payload
-        .get("submit")
-        .and_then(|submit| submit.get("intent"));
-    if given.get("intent") != declared {
+    let intent_matches = match payload.get("submit") {
+        Some(submit) => given.get("intent") == submit.get("intent"),
+        None => given.get("intent").and_then(J::str) == Some("button"),
+    };
+    if !intent_matches {
         return refuse("intent_mismatch", "/answers/intent");
     }
     let empty = Obj::new();
@@ -388,13 +413,72 @@ pub fn message_text(
     submission_id: &str,
     answers_json: &str,
 ) -> String {
+    message_with_action(title, artifact_id, version, submission_id, answers_json, "")
+}
+
+/// A button submission names the chosen label and action before the values.
+pub fn message_with_payload(
+    title: &str,
+    artifact_id: &str,
+    version: &str,
+    submission_id: &str,
+    answers_json: &str,
+    payload: &Map<String, Value>,
+    answers: &J,
+) -> String {
+    let mut line = String::new();
+    if let Some(action) = answers
+        .get("state")
+        .and_then(|state| state.get("action"))
+        .and_then(J::str)
+        && let Some(label) = v2::label(payload, action)
+    {
+        let mut quoted = String::new();
+        json::quoted(label, &mut quoted);
+        line = format!("Action: {quoted} ({action})\n");
+    }
+    message_with_action(
+        title,
+        artifact_id,
+        version,
+        submission_id,
+        answers_json,
+        &line,
+    )
+}
+
+fn message_with_action(
+    title: &str,
+    artifact_id: &str,
+    version: &str,
+    submission_id: &str,
+    answers_json: &str,
+    action: &str,
+) -> String {
     let mut quoted = String::new();
     json::quoted(title, &mut quoted);
     format!(
         "The user answered {quoted}.\nArtifact ID: {artifact_id}\nVersion: {version}\n\
          Submission ID: {submission_id}\nThese are user preferences for review, not approval \
-         to perform protected actions.\nAnswers:\n{answers_json}"
+         to perform protected actions.\n{action}Answers:\n{answers_json}"
     )
+}
+
+/// What the earliest accepted answer chose, if this is a completed button form.
+pub(super) fn answered_button(artifact: &Artifact) -> Option<(&str, &str)> {
+    if artifact.status != "completed" {
+        return None;
+    }
+    let first = artifact.submissions.iter().min_by(|left, right| {
+        (left.created_at, &left.submission_id).cmp(&(right.created_at, &right.submission_id))
+    })?;
+    let action = first
+        .answers
+        .as_ref()?
+        .get("state")?
+        .get("action")?
+        .as_str()?;
+    Some((action, v2::label(&artifact.payload, action)?))
 }
 
 /// The fields a row of a client that knows the kind has besides the plain ones.
@@ -606,7 +690,15 @@ impl ArtifactBook {
         };
         let version = data.get("version").and_then(J::str).unwrap_or_default();
         let sid = sid.unwrap_or_default();
-        let prompt = message_text(&form.title, artifact_id, version, sid, &answers_json);
+        let prompt = message_with_payload(
+            &form.title,
+            artifact_id,
+            version,
+            sid,
+            &answers_json,
+            &form.payload,
+            data.get("answers").unwrap_or(&J::Null),
+        );
         let answers = data.get("answers").map_or(Value::Null, J::to_value);
         let submission = Submission {
             submission_id: sid.to_string(),

@@ -35,6 +35,7 @@ import argparse
 import bisect
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -42,6 +43,7 @@ import re
 import shlex
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -142,14 +144,44 @@ class PythonHost(replay.Host):
 HEARD = scenarios.HEARD
 
 
-# What the reference Host's config says when a scenario brings none, and where the Rust Host is
-# given the same. No scenario turns speech out on: the reference speaks what a Claude agent says
-# from the transcript Claude Code writes, and the harness's fake Claude writes none, so the
-# reference says nothing aloud here and there is no clip to compare. What a clip is and how it
-# is fetched is held by the Rust Host's own tests (crates/clarp-host/tests/host.rs, with a
-# stand-in for the engine) and by its rules' vectors.
+# Scenarios without their own config leave speech off. The rings scenario supplies
+# deterministic voices and a loopback synthesis endpoint.
 SPEECH_OFF = '[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n'
 OWNERS_FILE = 'owner-config.toml'
+
+
+class RingSpeech(BaseHTTPRequestHandler):
+    """The Rust Host's Cartesia transport for the rings scenario."""
+
+    def log_message(self, *_args):
+        pass
+
+    def send_body(self, content_type, body):
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = urllib.parse.urlsplit(self.path).path
+        if path == '/voices':
+            voices = [{'id': voice, 'language': 'en', 'is_public': True, 'is_owner': False}
+                      for voice in scenarios.RING_VOICES.values()]
+            self.send_body('application/json', json.dumps({'data': voices}).encode())
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        if self.path != '/tts/bytes':
+            self.send_error(404)
+            return
+        asked = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        if asked['voice']['id'] not in scenarios.RING_VOICES.values():
+            self.send_error(400)
+            return
+        # A complete synthetic MPEG frame. Only the clip address is compared.
+        self.send_body('audio/mpeg', b'\xff\xfb\x90\x00' + bytes(413))
 
 
 class RustHost(replay.Host):
@@ -173,23 +205,25 @@ class RustHost(replay.Host):
         # reference Host as its config, this Host reads its owner's choices of speech from. With
         # none, speech out is off on both (tests/replay/host.py, isolate).
         (self.root / OWNERS_FILE).write_text(config or SPEECH_OFF)
+        self.ring_speech = None
+        if config == scenarios.RING_SPEECH:
+            self.ring_speech = ThreadingHTTPServer(('127.0.0.1', 0), RingSpeech)
+            threading.Thread(target=self.ring_speech.serve_forever, daemon=True).start()
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         # The reference Host has its agents before it serves its first request. This one is given
         # the same agents and then started again, so that making them is not part of what a client
         # sees of the scenario. The scenarios are about the first; the other two are the reference
         # Host's codex agents, which no scenario runs: they are there to be other agents.
-        # The reference Host's agents are written into its table without a voice. An agent that is
-        # made as a persona takes that persona's voices, on both Hosts, and the other two are
-        # named as personas: they are made with the word for no voice, which is what they have
-        # there.
+        seeded = ((scenarios.AGENT, 'claude'), *((other, 'codex') for other in OTHER_AGENTS))
         self._launch()
-        for session, backend in ((scenarios.AGENT, 'claude'), *((other, 'codex') for other in OTHER_AGENTS)):
+        for session, backend in seeded:
             status, _, made = self.request('POST', '/agents', {
                 'name': session.title(), 'backend': backend, 'cwd': str(self.root / 'workspace'),
-                **({'voice_id': '{}'} if session in OTHER_AGENTS else {})})
+            })
             if status != 200 or (made or {}).get('session') != session:
                 raise replay.StepFailed(f'the Rust Host did not make the agent {session} ({status})')
         self._end()
+        self.seed_voices({session for session, _ in seeded})
         self._launch()
         # The reference Host's stand-in for an engine that listens is there from its first
         # moment. This Host's is a worker that says when it is ready: it is waited for here, so
@@ -197,6 +231,28 @@ class RustHost(replay.Host):
         clip = {'bytes': 'is the engine there', 'content_type': 'audio/webm'}
         replay._poll('the engine that listens', lambda: self.request('POST', '/transcribe', None, clip)[0] != 503)
         return self
+
+    def seed_voices(self, sessions):
+        """Match the reference's pre-existing, voiceless fixture agents before capture.
+
+        POST /agents now fills an empty map from the contact or pool. The reference
+        fixture inserts its agents directly, so seed the same stored state while
+        this Host is stopped. Agents created by scenario steps use the normal API.
+        """
+        with contextlib.closing(sqlite3.connect(self.root / 'data' / 'fleet.db')) as db, db:
+            rows = db.execute("SELECT key, value FROM kv WHERE tbl = 'agent'").fetchall()
+            seeded = set()
+            for key, value in rows:
+                record = json.loads(value)
+                session = record['session']
+                if session not in sessions:
+                    continue
+                record['voice_id'] = '{}'
+                db.execute("UPDATE kv SET value = ? WHERE tbl = 'agent' AND key = ?",
+                           (json.dumps(record).encode(), key))
+                seeded.add(session)
+            if seeded != sessions:
+                raise replay.StepFailed(f'could not seed voices for {sorted(sessions - seeded)}')
 
     def _launch(self):
         provider = self.root / 'provider'
@@ -211,6 +267,9 @@ class RustHost(replay.Host):
                     # The reference's harness turns the heartbeats of its Hosts off (`host.isolate`):
                     # this Host is told the same.
                     'CLARP_HEARTBEATS_DISABLED': '1'})
+        if self.ring_speech is not None:
+            port = self.ring_speech.server_address[1]
+            env['CLARP_CARTESIA_ENDPOINT'] = f'http://127.0.0.1:{port}/tts/bytes'
         self.process = subprocess.Popen(
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
              '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
@@ -240,6 +299,16 @@ class RustHost(replay.Host):
             os.killpg(self.process.pid, signal.SIGKILL)
         self.process.wait(timeout=5)
         self.process = None
+
+
+    def stop(self):
+        try:
+            super().stop()
+        finally:
+            if getattr(self, 'ring_speech', None) is not None:
+                self.ring_speech.shutdown()
+                self.ring_speech.server_close()
+                self.ring_speech = None
 
 
 class Events(replay.SSE):
@@ -355,6 +424,16 @@ def run_step(host, events, step, http, variables, clock=None):
         replay._record(named, answer, http, variables)
         if clock is not None:
             clock.read(http[-1], asked_at)
+    elif op == 'mark_reply':
+        # Form prompts are not in /log. Remember the replies already visible
+        # before submitting, so waiting for the next reply needs no prompt row.
+        variables['form_replies'] = [turn.get('id') for turn in turns(host, session)
+                                     if turn.get('role') == 'assistant']
+    elif op == 'wait_form_reply':
+        earlier = variables.pop('form_replies')
+        replay._poll('a reply to the form', lambda: any(
+            turn.get('role') == 'assistant' and (turn.get('text') or '').strip()
+            and turn.get('id') not in earlier for turn in turns(host, session)))
     elif op == 'wait_reply':
         # The agent has answered the message with this id.
         def replied():
@@ -413,6 +492,16 @@ def capture(make_host, scenario, root: Path) -> dict:
     try:
         # A scenario may bring the owner's settings its Host runs with (`config`).
         host.start(scenario.get('config'))
+        if scenario.get('config') == scenarios.RING_SPEECH:
+            # Python's seeded agent starts with no stored voice. Give both Hosts the
+            # same explicit voice before recording the ring and its legacy opening.
+            status, _, body = host.request('POST', '/agent-voice', {
+                'session': scenarios.AGENT,
+                'provider': 'cartesia',
+                'voice_id': scenarios.RING_VOICES[scenarios.AGENT],
+            })
+            if status != 200:
+                raise replay.StepFailed(f'could not set the ring fixture voice ({status}): {body}')
         # A scenario that watches turns as they run names the agents it watches.
         watched = tuple(scenario.get('sessions', (scenarios.AGENT,))) if scenario.get('live') else None
         events = Events(host, watched)

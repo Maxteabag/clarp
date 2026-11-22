@@ -41,6 +41,12 @@ def voice_map(raw: str | None) -> dict[str, str]:
     return {ELEVENLABS: s}
 
 
+def has_voice(raw: str | None) -> bool:
+    """Whether a stored ``voice_id`` names any voice. ``""`` and ``"{}"`` (the one stored
+    shape's "no voice of its own") both say no: never test the raw text's truthiness."""
+    return bool(voice_map(raw))
+
+
 def resolve_voice(raw: str | None, provider: str) -> str | None:
     """Return the voice id to use for `provider`, or None if the agent
     has no voice configured for it."""

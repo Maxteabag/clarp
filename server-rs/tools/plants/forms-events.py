@@ -83,13 +83,13 @@ RUNS['reply']=['test','--test','host','a_forms_spoken_answer_belongs_to_the_subm
 for why,old,new in [
  ('all form replies are spoken','speak: spoken,','speak: true,'),
  ('no form replies are spoken','speak: spoken,','speak: false,'),
- ('form answers are attached to the wrong message','format!("u-html-form-{submission_id}")','format!("u-{submission_id}")'),
+ ('form answers are attached to the wrong message','clarp_kernel::artifacts::forms::answer_row_id(&submission_id)','format!("u-{submission_id}")'),
 ]:
     PLANTS.append(('clarp-host/src/library.rs','reply',why,old,new))
 
-PLANTS.append(('clarp-host/src/wire.rs','reply','queued form conceals its audio choice',
-               'item.insert("synthesize_audio".into(), json!(message.speak));',
-               'item.insert("synthesize_audio".into(), json!(false));'))
+PLANTS.append(('clarp-host/src/library.rs','reply','a form that waits loses its audio choice',
+               'speak: spoken,',
+               'speak: spoken && actor.status().live.is_none(),'))
 RUNS['clock']=['test','--test','forms_events','a_countdown_crosses_its_target']
 RUNS['countdown']=['test','--test','host','countdowns_are_created_with_a_clock']
 CLOCK='clarp-kernel/src/artifacts/countdown.rs'

@@ -9,9 +9,11 @@ from lib import events
 
 
 def _can_render(handler):
+    """The highest render_spec catalog version the requesting client draws (0: none)."""
     from lib import config, server_identity
-    return server_identity.render_spec_capable(
-        handler.headers.get(server_identity.CLIENT_HEADER), config.load().render_spec_min_contract)
+    loaded = config.load()
+    return server_identity.render_spec_level(handler.headers.get(server_identity.CLIENT_HEADER),
+                                             loaded.render_spec_min_contract, loaded.render_spec_v2_min_contract)
 
 
 def _administrator(handler):
@@ -41,9 +43,15 @@ class ArtifactRoutes:
         return row
 
     def _handle_render_spec_catalog(self):
+        return self._send_render_spec_catalog(1)
+
+    def _handle_render_spec_catalog_v2(self):
+        return self._send_render_spec_catalog(2)
+
+    def _send_render_spec_catalog(self, version):
         from lib import render_spec
         try:
-            raw = render_spec.catalog().raw
+            raw = render_spec.catalog(version).raw
         except render_spec.Refusal as exc:
             return _spec_refusal(self, exc)
         return self._send(200, raw, "application/json")
@@ -157,9 +165,9 @@ class ArtifactRoutes:
             return self._json_error(404, "artifact not found")
         if row["type"] == "render_spec":
             from lib import render_spec, render_spec_store
-            if _can_render(self):
+            if render_spec_store.drawable(row, _can_render(self)):
                 try:
-                    render_spec.catalog()
+                    render_spec.catalog(row.meta["catalog_version"])
                 except render_spec.Refusal as exc:
                     return _spec_refusal(self, exc)
                 row = render_spec_store.open_current(artifact_id)

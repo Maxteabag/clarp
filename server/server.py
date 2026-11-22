@@ -417,6 +417,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         # (e.g. 401 before the handler ever touched rfile).
         self._body_consumed = False
         self._json_read = None      # the body, once read (lib.request_texts reads it first)
+        # CORS headers for this response (lib.cross_origin), set only for an allowed origin's GET
+        # of a cross-origin read route; per request, so keep-alive never carries them over.
+        self._cors_headers = None
         # The request clock starts here. handle_one_request() blocks in
         # readline() for the next request on a keep-alive connection, so a
         # clock started there counts idle socket time as handler latency
@@ -528,6 +531,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/server-update": "_handle_server_update_status",
         "/turn-queue": "_handle_turn_queue",
         "/agents/snapshot": "_handle_snapshot",
+        "/peers/snapshot": "_handle_peers_snapshot",
         "/agents/archived": "_handle_archived_agents",
         "/agent-conversations": "_handle_agent_conversations",
         "/identity/prompt-history": "_handle_prompt_history",
@@ -539,6 +543,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/goal-ledger/delegations": "_handle_goal_delegations",
         "/artifacts": "_handle_artifacts_list",
         "/artifact-catalogs/clarp.form/1": "_handle_render_spec_catalog",
+        "/artifact-catalogs/clarp.form/2": "_handle_render_spec_catalog_v2",
         "/attention": "_handle_attention",
         "/attention/inbox": "_handle_attention_inbox",
         "/pinned-artifacts": "_handle_pinned_artifacts",
@@ -825,6 +830,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             started = getattr(self, "_request_started_wall", None)
             if started is not None and getattr(self, "command", None):
                 self._log_http(code, started)
+
+    def end_headers(self):
+        for name, value in (getattr(self, "_cors_headers", None) or {}).items():
+            self.send_header(name, value)
+        super().end_headers()
 
     def send_response(self, code, message=None):
         self._status_code = code
@@ -1186,7 +1196,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             if bare.startswith(p):
                 return True
         from lib.request_security import local_request
+        # A cross-origin read (lib.cross_origin: an allowed origin's GET of a read route) is never
+        # local, whatever the peer and the Origin: a listed localhost page on the same machine
+        # must not get the administrator's token taken, or read a Host without a token at all.
         self._request_is_local = (not getattr(self.server, "local_tls", False)
+                                  and not getattr(self, "_cors_headers", None)
                                   and local_request(self.client_address[0], self.headers))
         if not token:
             return self._request_is_local
@@ -1330,10 +1344,40 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     # --- GET dispatch ----------------------------------------------------
 
+    def _web_read_origins(self) -> frozenset:
+        from lib import config
+        try:
+            return config.load().web_read_origins
+        except Exception as exc:  # noqa: BLE001 - an unreadable configuration allows no origin
+            log_exception("crossOriginConfigFail", exc)
+            return frozenset()
+
+    def do_OPTIONS(self):
+        """A CORS preflight for the web app's all-Hosts list (lib.cross_origin): answered for an
+        origin on `[server] web_read_origins` asking to GET a cross-origin read route with only
+        Authorization and X-Clarp-Client; every other OPTIONS is refused, with no CORS header.
+        A preflight carries no credentials, so it is answered before authentication and says
+        nothing but the policy."""
+        from lib import cross_origin
+        path = self.path.split("?", 1)[0]
+        allowed = cross_origin.preflight(self.headers, path, self._web_read_origins())
+        if allowed is None:
+            return self._send(403, b"", "text/plain")
+        return self._send(204, b"", "text/plain", extra_headers=allowed)
+
     def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        from lib import cross_origin
+        origin = cross_origin.allowed_origin(self.headers.get("Origin"), path, "GET", self._web_read_origins())
+        if origin:
+            # Before authentication, so a refusal (401, 403) reaches the page as one too.
+            self._cors_headers = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
         if not self._authorized():
             return self._reject_unauthorized()
-        path = self.path.split("?", 1)[0]
+        if origin and getattr(self, "_request_auth_source", "") not in ("header", ""):
+            # A cross-origin read is taken with the token in the Authorization header only,
+            # never a cookie or a URL token (no credentials mode; lib.cross_origin).
+            return self._json_error(401, "send the token in the Authorization header")
         if self._oracle_auth_missing(path):
             return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "GET"):
@@ -2631,6 +2675,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             else:
                 turn_dispatch.finish_stop(
                     self.ctx, agent_id, backend_registry=backends)
+            if actor == "user":
+                self._start_users_waiting_after_stop(agent_id, session)
             if stop_unrecorded is not None:
                 raise StopNotRecorded(agent_id) from stop_unrecorded
         log("turnStop", f"session={session} terminated={n} actor={actor} "
@@ -2721,6 +2767,37 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             "paused": state["paused"],
             "revision": state["revision"],
         })
+
+    def _start_users_waiting_after_stop(self, agent_id: str, session: str) -> None:
+        """The user's Stop means "stop and take my waiting message now": a message of
+        the user's that waited behind the stopped turn starts at once, in queue
+        order, with no further send. The pause stays for everything else (agents,
+        peers, goal wakes), which waits as before for the user's next message."""
+        from lib import turn_queue
+        try:
+            # The user's own words: typed, or spoken through the Oracle on a call.
+            waiting = [row for row in turn_queue.pending(agent_id)
+                       if str(row.get("origin") or "user") in ("user", "oracle")]
+            released = [row["queue_id"] for row in waiting
+                        if turn_queue.allow_paused(str(row["queue_id"]))]
+        except Exception as exc:  # noqa: BLE001 - the stop itself already succeeded
+            log_exception("stopStartsUserMessageFail", exc, detail=session)
+            return
+        if not released:
+            return
+        log("stopStartsUserMessage", f"session={session} items={len(released)}")
+        runtime_client = getattr(self.ctx, "runtime_client", None)
+        try:
+            if runtime_client is not None:
+                runtime_client.recover_queued()
+            else:
+                TurnDispatchService(self.ctx).recover_queued()
+        except Exception as exc:  # noqa: BLE001 - the next recovery pass runs them
+            log_exception("stopStartsUserMessageRecoverFail", exc, detail=session)
+        try:
+            self._broadcast_turn_queue(agent_id, session)
+        except Exception as exc:  # noqa: BLE001 - a projection of durable state
+            log_exception("stopStartsUserMessageBroadcastFail", exc, detail=session)
 
     def _handle_turn_queue_resume(self):
         """Lift a Stop's pause and let the waiting messages run in order."""
@@ -3246,6 +3323,13 @@ def _seed_startup_invariants(ctx: ServerContext) -> None:
     before request threads start so every read model remains read-only."""
     from lib import personas
     personas.ensure_builtins()
+    # Every stored voice in the one shape (issue 476): only rows that sound the same under
+    # every provider are written; the others are logged and left for the owner.
+    try:
+        from lib import voice_migration
+        voice_migration.apply_at_start()
+    except Exception as exc:  # noqa: BLE001 - a stored voice still reads in its old shape
+        log_exception("voiceShapeMigrationFail", exc)
     from lib.janitor_bootstrap import initialize as initialize_janitors
     initialize_janitors(cwd=str(ctx.root))
 

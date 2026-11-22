@@ -119,6 +119,40 @@
       "stored": "{\"cartesia\":\"new\",\"elevenlabs\":\"later\",\"gemini\":\"Kore\"}"
     }
   ],
+  "present": [
+    {
+      "has_voice": false,
+      "input": null
+    },
+    {
+      "has_voice": false,
+      "input": ""
+    },
+    {
+      "has_voice": false,
+      "input": "{}"
+    },
+    {
+      "has_voice": false,
+      "input": "  {} "
+    },
+    {
+      "has_voice": false,
+      "input": "{\"cartesia\":\"\"}"
+    },
+    {
+      "has_voice": false,
+      "input": "{\"cartesia\":null}"
+    },
+    {
+      "has_voice": true,
+      "input": "{\"cartesia\":\"c-1\"}"
+    },
+    {
+      "has_voice": true,
+      "input": "21m00Tcm4TlvDq8ikWAM"
+    }
+  ],
   "report": {
     "digest": "62cdedb2ffd4cf01",
     "fallback": "elevenlabs",

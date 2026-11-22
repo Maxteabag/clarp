@@ -83,6 +83,39 @@ allows sending work to agents that run with the host user's permissions.
 `GET /` and the static assets are public so a browser can load the shell
 before it has a token.
 
+### Cross-origin reads (feature `cross_origin_read`)
+
+The web app is served by one Host. Its all-Hosts list reads the user's other Hosts from its own
+origin, which needs CORS on those Hosts. A Host allows it only for the origins on its
+`[server] web_read_origins` list (exact `scheme://host[:port]`, the user's own web apps), and
+only for two routes:
+
+- `GET /server-info` (the Host's `server_id` and name, for the Host badge and the moved line)
+- `GET /agents/snapshot` (the roster: names, activity, `moved`)
+
+For a listed origin those two answer `Access-Control-Allow-Origin: <origin>` and
+`Vary: Origin`, on success and on a refusal alike. `OPTIONS` on them is the preflight: 204 with
+`Access-Control-Allow-Methods: GET`, `Access-Control-Allow-Headers: Authorization,
+X-Clarp-Client` and `Access-Control-Max-Age: 600` when the origin is listed and nothing else is
+asked; every other `OPTIONS` is 403 with no CORS header. No credentials mode: the Host never
+sends `Access-Control-Allow-Credentials`, and takes such a request with the token in the
+`Authorization` header only (a cookie or URL token gets 401). A cross-origin request is never
+local, so the token is a paired device's (`POST /pairing/exchange`), with that device's scope.
+Every other route and every write stays same-origin. With no list, nothing is allowed
+cross-origin.
+
+### Peers' chat lists (feature `peer_snapshot`)
+
+A Host can keep a device token for each of its owner's other Hosts (`clarp-admin peers add`,
+pairing by a one-time code made on the peer). `GET /peers/snapshot` (full scope only: a
+limited device gets 403) answers `{peers: {<server_id>: {name, url, server_id, reachable, error,
+snapshot}}, cache_seconds}`: the Host reads each peer's `GET /server-info` and `GET
+/agents/snapshot` server to server with that token and returns the peer's snapshot as the peer
+gave it. Unreachable: `reachable: false`, `snapshot: null`, an `error` code. Only the peers'
+own configured URLs are fetched, never one from the request; redirects are refused; tokens are
+never returned. The web app's all-Hosts list reads this, so the browser needs no other Host's
+token; opening a peer's chat opens `url` (that Host's own web app).
+
 ## Core conversation protocol
 
 ### 1. Bootstrap: `GET /agents/snapshot`
@@ -1200,12 +1233,33 @@ A new agent (`POST /agents`, an adopted session, an anonymous launch, an assigne
 contact, the first-install roster) and a new contact (`POST /personas`) end with a voice that
 is heard under the Host's configured provider and under its configured fallback. The Host keeps
 every voice the request gave and adds, for each of those providers it has none for, a free
-voice from its pool (`[cartesia] pool`, by default the distinct built-in Cartesia voices; the
-ElevenLabs and Gemini catalogues). A free voice is one no active agent or contact speaks with;
-when there is none, the least shared. With this feature an app may create an agent or contact
+voice from its pool (`[cartesia] pool` when set; else, for an English agent, the curated list
+in `server/lib/cartesia_voice_pool.json` less the voices Cartesia no longer offers, and for
+another language Cartesia's catalogue in that language; the ElevenLabs and Gemini
+catalogues). A free voice is one no agent (archived ones included) or contact speaks with; when
+there is none, one is reused (below). With this feature an app may create an agent or contact
 with no voice at all and trust the Host; a phone's `auto-<uuid>` stand-in voice is replaced.
-Existing agents are not changed. A helper or fork, and a Janitor, get no voice from the pool.
-Renaming an agent keeps the voice it spoke with.
+The stored value is always in the one shape (a bare Cartesia uuid on create becomes
+`{"cartesia":"<uuid>"}`). A `voice_id` of `{}` means "no voice given", as `""` does: a new
+agent then takes its contact's voice, and a relaunch keeps its own. `POST /personas/update` fills
+a contact stored in the one shape the same way a contact assignment does (a pool voice for each
+of those providers it has none for, an empty map included). Existing agents are not changed. A Janitor gets no voice: no app can
+send it a message, so it never speaks. Renaming an agent keeps the voice it spoke with.
+
+With feature `voice_for_helpers` (Host contract 135): a helper (`role` `helper`) is created
+with its parent's voice for each provider it has none for, the voice the parent is heard with,
+and takes a pool voice only where the parent has none; a helper is heard only when the user
+opens its chat, and giving each of them a voice of its own would empty the pool within days.
+A fork gets a pool voice like any new agent. When every pool voice is taken, one is reused: a
+voice that only archived agents hold first (reusing a voice the user still hears is worse),
+then the least recently used one (the voice whose holders' newest clip, else their creation,
+is oldest); the Host logs `voicePoolExhausted`. At start the Host writes every stored voice in
+the one shape where that changes nothing anyone hears under any provider (the rows
+`clarp-admin voice migrate --apply` writes), and logs `voiceShapeMigrated` with the rows it
+left because they would sound different. The same pass copies each agent's own transcription
+engine and language settings, today matched by its name or session, under its agent id
+(`transcription.agent_engines`, `transcription.agent_languages`); an existing entry under the
+id is kept, and nothing is removed.
 
 ### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
 

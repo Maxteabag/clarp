@@ -37,9 +37,10 @@ def test_lifecycle_service_creates_agent_without_http(tmp_path):
 
     assert result.session == "axel"
     assert result.backend == "codex"
-    assert agents_db.get_by_session("axel")["voice_id"] == "V_AXEL"
+    # Stored in the one shape (issue 476): a bare id the form says nothing about is ElevenLabs'.
+    assert agents_db.get_by_session("axel")["voice_id"] == '{"elevenlabs":"V_AXEL"}'
     assert agents_db.current_runtime_id(agents_db.get_by_session("axel")["agent_id"])
-    assert ctx.announcements == [("Axel is ready.", "V_AXEL")]
+    assert ctx.announcements == [("Axel is ready.", '{"elevenlabs":"V_AXEL"}')]
     assert ctx.stream.events[-1]["kind"] == "created"
     assert agents_db.favorite_paths()[0]["path"] == str(tmp_path)
 

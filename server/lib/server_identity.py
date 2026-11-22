@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 131  # A submitted form's answer reaches its agent but no longer stands as a chat row: /log, the chat-list preview and /turn-queue (items and queue_depth) leave it out; the answered card is the record (feature form_answer_rows_hidden, issue 428). 130: Every skill the release ships is on unless the user turned it off: GET /managed-skills reports a never-decided skill enabled, items no longer carry default_enabled (issue 428). 129: POST /send refuses 409 'client_msg_id is held by another agent' for an app id another agent already holds (issue 360, R63). 128: no plain send ends a running turn; a send of any origin waits for it (issue 360, R7). 127: the user's next fresh message ends a Stop's pause; a shown item a backend took leaves 'queued' on every recovery pass. 126: Each GET /turn-queue item carries status (queued, claimed or started): a started item is already being read and is no longer waiting. 125: PROVISIONAL (the release owner sets it at merge): an agent that moved to another Host; admission refuses its turns, snapshot rows carry moved (feature agent_moved). 124: the snapshot's last_message and working state follow the coordination setting; working_audience and working_with on agent rows; every working agent-state carries the turn's audience; the agents-working push names the partner, not the hidden work (feature coordination_working_state, issue 478; number provisional). 123: every new agent and contact ends with a working voice from the Host's pool, today's catalogue only (voice_pool, issue 476). 122: One stored voice shape, a contact's voice merged per provider (voice_provider_maps, issue 476). 121: A limited device's snapshot gives each agent an empty cwd, the key kept (R123). 120: Coordination between agents, whole (issue 478): the setting, the /log filter and the counts; feature hidden_coordination. 119: A limited device may also GET /transcription-capabilities, /transcription-providers and /transcription-audio, which both apps read in chat (R123). 118: PROVISIONAL (the next free number on main at merge): the user's word goes first in an agent's queue (feature queue_user_first, issue 481). 117: A limited device may GET only a named list; every other GET and every PATCH is refused; /server-info is trimmed (R123). 116: voice_profile.hearing.configured_languages, the agent's chosen language set; voice_label filled from names tables. 109: An agent's voice and hearing as the Host resolves them: voice_profile on snapshot rows, voice_defaults (issue 475). 108: Coordination between agents, first part (issue 478): /log rows and the working state carry audience; an agent's note to the user (POST /agent-notes, kind note). 107: An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).. 115: a user message that waited for a running turn is shown where its turn started; /log rows carry sent_at (feature waited_send_order, issue 491). 114: Pairing identity before the code is spent: GET /pairing/identity without a token; a limited device may revoke itself (feature pairing_identity, R172). 113: Delete and favourite a chat's gallery images (feature media_manage, issue 489). 112: a recording whose engine cannot take the agent's language set is heard within the owner's choice or refused with 422 language_set_unsupported; /transcribe answers engine_fallback (R152). 111: render_spec switched on per client (iOS 74); GET /artifacts/<id>/export for the administrator (issue 428, R137). 110: GPT-Live-1.1: the configured model per Host and per agent-Live client; oracle_v2.standby; standby usage (#473). 109: An agent's voice and hearing as the Host resolves them: voice_profile on snapshot rows, voice_defaults (issue 475). 108: Coordination between agents, first part (issue 478): /log rows and the working state carry audience; an agent's note to the user (POST /agent-notes, kind note). 107: An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).. 129: POST /send refuses 409 'client_msg_id is held by another agent' for an app id another agent already holds (issue 360, R63). 128: no plain send ends a running turn; a send of any origin waits for it (issue 360, R7). 127: the user's next fresh message ends a Stop's pause; a shown item a backend took leaves 'queued' on every recovery pass. 126: Each GET /turn-queue item carries status (queued, claimed or started): a started item is already being read and is no longer waiting. 125: PROVISIONAL (the release owner sets it at merge): an agent that moved to another Host; admission refuses its turns, snapshot rows carry moved (feature agent_moved). 124: the snapshot's last_message and working state follow the coordination setting; working_audience and working_with on agent rows; every working agent-state carries the turn's audience; the agents-working push names the partner, not the hidden work (feature coordination_working_state, issue 478; number provisional). 123: every new agent and contact ends with a working voice from the Host's pool, today's catalogue only (voice_pool, issue 476). 122: One stored voice shape, a contact's voice merged per provider (voice_provider_maps, issue 476). 121: A limited device's snapshot gives each agent an empty cwd, the key kept (R123). 120: Coordination between agents, whole (issue 478): the setting, the /log filter and the counts; feature hidden_coordination. 119: A limited device may also GET /transcription-capabilities, /transcription-providers and /transcription-audio, which both apps read in chat (R123). 118: PROVISIONAL (the next free number on main at merge): the user's word goes first in an agent's queue (feature queue_user_first, issue 481). 117: A limited device may GET only a named list; every other GET and every PATCH is refused; /server-info is trimmed (R123). 116: voice_profile.hearing.configured_languages, the agent's chosen language set; voice_label filled from names tables. 109: An agent's voice and hearing as the Host resolves them: voice_profile on snapshot rows, voice_defaults (issue 475). 108: Coordination between agents, first part (issue 478): /log rows and the working state carry audience; an agent's note to the user (POST /agent-notes, kind note). 107: An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).. 115: a user message that waited for a running turn is shown where its turn started; /log rows carry sent_at (feature waited_send_order, issue 491). 114: Pairing identity before the code is spent: GET /pairing/identity without a token; a limited device may revoke itself (feature pairing_identity, R172). 113: Delete and favourite a chat's gallery images (feature media_manage, issue 489). 112: a recording whose engine cannot take the agent's language set is heard within the owner's choice or refused with 422 language_set_unsupported; /transcribe answers engine_fallback (R152). 111: render_spec switched on per client (iOS 74); GET /artifacts/<id>/export for the administrator (issue 428, R137). 110: GPT-Live-1.1: the configured model per Host and per agent-Live client; oracle_v2.standby; standby usage (#473). 109: An agent's voice and hearing as the Host resolves them: voice_profile on snapshot rows, voice_defaults (issue 475). 108: Coordination between agents, first part (issue 478): /log rows and the working state carry audience; an agent's note to the user (POST /agent-notes, kind note). 107: An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 143  # An unanswered render_spec is attention_bucket blocking, not review, so opening its chat never reads it away. Every earlier number is a row in docs/compatibility.md.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -50,9 +50,17 @@ CLIENT_HEADER = "X-Clarp-Client"
 # The lowest client contract that draws and answers a render_spec, PER CLIENT (issue 428): each
 # client's contract numbers are its own series, so one number for all would one day tell a client
 # without a renderer that it can render. The name is the client's own (`ios/2981 contract=74`),
-# matched exactly. A client not named here never gets the kind: Android (until its owner names
-# its number), the desktop, the web app, the Watch, an unknown or absent name. 0: never.
-RENDER_SPEC_MIN_CONTRACT: dict[str, int] = {"ios": 74}  # iOS TestFlight 2981, the first to send 74
+# matched exactly. A client not named here never gets the kind: the native desktop (until its
+# owner names its number), the Watch, an unknown or absent name. 0: never.
+# iOS from 74 (TestFlight 2981, the first to send 74); the web app (PWA and the Tauri shell,
+# `web/<version> contract=1`) from 1, its first contract, the build that draws clarp.form v1.
+RENDER_SPEC_MIN_CONTRACT: dict[str, int] = {"ios": 74, "web": 1, "android": 41}
+# The lowest client contract that draws catalog version 2 of render_spec (chart, table, button;
+# issue 673), per client as above. No client is named until its owner names the contract that
+# draws v2: a client not named (or named with 0) is off and gets a v2 form as the plain card. A
+# client draws v2 only where it also draws v1. The web app from 2 (`web/<version> contract=2`),
+# the first build that draws chart, table and button.
+RENDER_SPEC_V2_MIN_CONTRACT: dict[str, int] = {"web": 2, "android": 42}
 
 # A client's name: the form of the X-Clarp-Client header's name, and of the keys of every Host table
 # that admits clients by name (render_spec's minimums, the live model's). It is matched EXACTLY as
@@ -61,7 +69,7 @@ CLIENT_NAME = r"[A-Za-z][A-Za-z0-9_-]{0,31}"
 _STRICT_CLIENT_HEADER = re.compile(rf"({CLIENT_NAME})/[A-Za-z0-9._-]{{1,80}} contract=([0-9]{{1,9}})")
 # The names the Host's own clients send. A table key that differs from one only in case is another
 # client, and the configuration says so once when it is read.
-BUILT_IN_CLIENTS: tuple[str, ...] = ("ios", "android")
+BUILT_IN_CLIENTS: tuple[str, ...] = ("ios", "android", "web")
 
 
 def strict_client(header) -> tuple[str, int] | None:
@@ -128,6 +136,25 @@ def render_spec_capable(header, minimums=None):
         return False
     return contract_number >= minimum
 
+def _meets(client, table) -> bool:
+    if client is None:
+        return False
+    name, contract_number = client
+    minimum = table.get(name)                                     # the name as sent, exactly
+    return type(minimum) is int and minimum >= 1 and contract_number >= minimum
+
+
+def render_spec_level(header, minimums=None, v2_minimums=None) -> int:
+    """The highest render_spec catalog version the client that sent ``header`` draws: 0 (none),
+    1, or 2. Version 1 is render_spec_capable's; version 2 needs that and the client's own entry in
+    ``v2_minimums`` laid over RENDER_SPEC_V2_MIN_CONTRACT (no default entry: unnamed is off)."""
+    from collections.abc import Mapping
+    if not render_spec_capable(header, minimums):
+        return 0
+    table = {**RENDER_SPEC_V2_MIN_CONTRACT, **(v2_minimums if isinstance(v2_minimums, Mapping) else {})}
+    return 2 if _meets(strict_client(header), table) else 1
+
+
 FEATURES: tuple[str, ...] = (
     "decision_on_behalf",
     "accounts_hotseat",
@@ -139,6 +166,10 @@ FEATURES: tuple[str, ...] = (
     "agent_call_live",
     "artifact_summary_v1",
     "render_spec",
+    "render_spec_v2",
+    "cross_origin_read",
+    "peer_snapshot",
+    "render_spec_answered_button",
     "agent_ring_device_optout",
     "agent_ring_live",
     "tts_google_id_guard",
@@ -270,6 +301,10 @@ FEATURES: tuple[str, ...] = (
     # A new agent or contact always ends with a working voice from the Host's pool; an app
     # may create one with no voice and trust it (an auto-<uuid> stand-in is replaced).
     "voice_pool",
+    # A helper is created speaking with its parent's voice and a fork with a pool voice of its
+    # own; the pool counts archived agents as holders and, when every voice is taken, reuses
+    # the least recently used one. Every stored voice is in the one shape after a start.
+    "voice_for_helpers",
     # An agent moved to another Host: snapshot rows carry moved {to: {host, id}, at};
     # every door that starts a turn answers 409 agent_moved; POST /agent-moved.
     "agent_moved",
@@ -286,6 +321,11 @@ FEATURES: tuple[str, ...] = (
 # introduces it.
 FEATURE_CONTRACTS: dict[str, int] = {feature: 1 for feature in FEATURES}
 FEATURE_CONTRACTS["render_spec"] = 102
+FEATURE_CONTRACTS["render_spec_v2"] = 133  # issue 673
+FEATURE_CONTRACTS["cross_origin_read"] = 139  # issue 651
+FEATURE_CONTRACTS["peer_snapshot"] = 140  # issue 651
+FEATURE_CONTRACTS["render_spec_answered_button"] = 138  # issue 673
+FEATURE_CONTRACTS["voice_for_helpers"] = 135  # issue 476; next free at merge
 FEATURE_CONTRACTS["agent_goals"] = 5
 FEATURE_CONTRACTS["attention_index"] = 2
 FEATURE_CONTRACTS["backend_quota"] = 3

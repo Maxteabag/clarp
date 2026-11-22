@@ -101,8 +101,6 @@ impl Drop for TerminalLease {
 pub struct Stopped {
     /// How many turns were told to end.
     pub told: u32,
-    /// Where the queue stands after.
-    pub queue: QueueState,
     /// How many goals that were being worked are paused now.
     pub goals_paused: usize,
 }
@@ -232,6 +230,7 @@ enum Ask {
     },
     Stop {
         by: Control,
+        start_waiting: bool,
         answer: Answer<Stopped>,
     },
     /// A turn nothing runs is looked for and given back, and a note of who and why is kept.
@@ -538,6 +537,7 @@ pub struct View {
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
     pub newest: Option<Versioned>,
+    pub(crate) newest_is_form_answer: bool,
     pub(crate) visible_previews: (Option<Versioned>, Option<Versioned>),
     pub(crate) working: Option<wire::WorkingWith>,
     pub(crate) can_leave_note: bool,
@@ -810,12 +810,22 @@ impl AgentHandle {
     }
 
     pub async fn stop(&self, by: String) -> Result<Stopped, Unavailable> {
-        self.stop_as(Control::by(by)).await
+        self.ask(|answer| Ask::Stop {
+            by: Control::by(by),
+            start_waiting: false,
+            answer,
+        })
+        .await
     }
 
-    /// Stops the agent: who asks it, whether the Host knows it is they, and why.
+    /// The non-deferred Stop requested through the API or admin tool.
     pub async fn stop_as(&self, by: Control) -> Result<Stopped, Unavailable> {
-        self.ask(|answer| Ask::Stop { by, answer }).await
+        self.ask(|answer| Ask::Stop {
+            by,
+            start_waiting: true,
+            answer,
+        })
+        .await
     }
 
     /// Gives back a turn of the agent that nothing runs, and keeps a note of who and why.
@@ -1349,6 +1359,7 @@ pub(crate) fn never_ran() -> Status {
         interrupted_since_ms: None,
         waiting: Vec::new(),
         queue_depth: 0,
+        listed_queue_depth: 0,
         paused: false,
         queue_revision: 0,
         stop_generation: 0,
@@ -1373,6 +1384,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     let (view_tx, view) = watch::channel(Arc::new(View {
         team_activity_ms: setup.record.created_at_ms,
         last_real_message_ms: 0,
+        newest_is_form_answer: false,
         native_goal: None,
         latest_turn_start: 0,
         latest_turn_activity: None,
@@ -1409,6 +1421,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         queue_edit: None,
         takeover_wait: VecDeque::new(),
         newest: None,
+        listed_preview: None,
         visible_previews: Default::default(),
         ended: None,
         finished: None,
@@ -1484,6 +1497,7 @@ struct Worker {
     takeover_wait: VecDeque<Ask>,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
+    listed_preview: Option<Versioned>,
     visible_previews: (Option<Versioned>, Option<Versioned>),
     /// How the last turn ended.
     ended: Option<TurnEnd>,
@@ -2994,7 +3008,11 @@ impl Worker {
                 }
                 answered(left, answer)?
             }
-            Ask::Stop { by, answer } => {
+            Ask::Stop {
+                by,
+                start_waiting,
+                answer,
+            } => {
                 // The turn is no longer the agent's to finish: the pool of its tool's
                 // accounts does not wait for it, and does not take it up.
                 if let (Some(pool), Some(_)) = (self.setup.pool(), self.pooled) {
@@ -3003,7 +3021,12 @@ impl Worker {
                 // A Stop holds the agent's goals too: each one that is being worked is paused
                 // until someone resumes it, so that none wakes the agent the user just stopped.
                 let reason = clarp_kernel::control::paused_by(&by);
-                let stopped = actor.stop_as(by, now).and_then(|(told, mut out)| {
+                let stopped = if start_waiting {
+                    actor.stop_and_start_waiting(by, now)
+                } else {
+                    actor.stop_as(by, now)
+                };
+                let stopped = stopped.and_then(|(told, mut out)| {
                     let paused = with_goals(actor, now, |book, world| book.stopped(&reason, world));
                     for change in &paused {
                         let kept = keep_goal(
@@ -3019,13 +3042,8 @@ impl Worker {
                     }
                     Ok(((told, paused.len()), out))
                 });
-                let queue = actor.queue_state();
                 let stopped = stopped.map(|((told, goals_paused), out)| {
-                    let stopped = Stopped {
-                        told,
-                        queue,
-                        goals_paused,
-                    };
+                    let stopped = Stopped { told, goals_paused };
                     (stopped, out)
                 });
                 answered(stopped, answer)?
@@ -4093,30 +4111,47 @@ impl Worker {
 
     /// The newest row of the conversation that a list of chats shows, as the actor has it
     /// now: the newest thing someone said, not a tool call and nothing automated.
-    fn newest_row(&self) -> Option<Versioned> {
+    fn newest_row(&self, which: Which) -> Option<Versioned> {
         let actor = self.actor.as_ref()?;
         // Nearly always it is the newest row itself. Otherwise look back, as far as the
         // Python Host does. Also into a conversation that ended when the agent was started
         // again: what it last said is shown of it until it says something new.
-        let newest = actor.tail_of_any(1).ok()?.entries.into_iter().last()?;
+        let newest = actor
+            .tail_of_any(1, which)
+            .ok()?
+            .entries
+            .into_iter()
+            .last()?;
         if wire::previewed(&newest) {
             return Some(newest);
         }
-        let back = actor.tail_of_any(50).ok()?.entries;
+        let back = actor.tail_of_any(50, which).ok()?.entries;
         back.into_iter().rev().find(wire::previewed)
     }
 
     fn update_previews(&mut self) {
         const HIDDEN_PREVIEW_ROWS: usize = 200;
 
-        self.newest = self.newest_row();
+        self.newest = self.newest_row(Which::All);
+        self.listed_preview = match &self.newest {
+            Some(row) if clarp_kernel::artifacts::forms::is_answer_row(row.entry.id()) => {
+                self.newest_row(Which::chat(true))
+            }
+            _ => self.newest.clone(),
+        };
         self.visible_previews = self
             .actor
             .as_ref()
             .filter(|actor| actor.profile().hides_coordination)
             .and_then(|actor| {
                 actor
-                    .visible_previews(wire::previewed_entry, HIDDEN_PREVIEW_ROWS)
+                    .visible_previews(
+                        |entry| {
+                            !clarp_kernel::artifacts::forms::is_answer_row(entry.id())
+                                && wire::previewed_entry(entry)
+                        },
+                        HIDDEN_PREVIEW_ROWS,
+                    )
                     .ok()
             })
             .unwrap_or_default();
@@ -4190,7 +4225,11 @@ impl Worker {
             latest_turn_start: actor.latest_turn_start(),
             latest_turn_activity: actor.latest_turn_activity(),
             status,
-            newest: self.newest.clone(),
+            newest: self.listed_preview.clone(),
+            newest_is_form_answer: self
+                .newest
+                .as_ref()
+                .is_some_and(|row| clarp_kernel::artifacts::forms::is_answer_row(row.entry.id())),
             visible_previews: self.visible_previews.clone(),
             working,
             can_leave_note: actor.profile().hides_coordination,
@@ -4400,7 +4439,7 @@ impl Worker {
                 sender_name: name(sender),
             };
             let mut event = wire::queue_updated(&record, &status, wire::QueueUpdate::Started(item));
-            event["queue_depth"] = json!(read.queue.waiting);
+            event["queue_depth"] = json!(read.queue.listed);
             event["queue_paused"] = json!(read.queue.paused);
             event["queue_revision"] = json!(read.queue.revision);
             hub.publish(event, now);
@@ -4477,7 +4516,10 @@ impl Worker {
                 item,
                 sender_name: name(item.sender_agent_id.as_deref()),
             }),
-            None if (held_or_let_go && !told_with_its_turn) || taken_back => {
+            None if (held_or_let_go && !told_with_its_turn)
+                || taken_back
+                || changed.stop_released_waiting =>
+            {
                 Some(wire::QueueUpdate::Mailbox)
             }
             None => None,
@@ -4930,6 +4972,7 @@ mod mailbox_tests {
         let (_, view) = watch::channel(Arc::new(View {
             team_activity_ms: 0,
             last_real_message_ms: 0,
+            newest_is_form_answer: false,
             native_goal: None,
             latest_turn_start: 0,
             latest_turn_activity: None,

@@ -1,0 +1,1960 @@
+{
+ "provider": "cartesia",
+ "language": "en",
+ "rules": "scripts/build_cartesia_voice_pool.py",
+ "voices": [
+  {
+   "id": "a0e8430e-1267-4a4d-baa5-a5d5e53122a9",
+   "name": "Aila",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Aila offers a paced and approachable Australian delivery, ideal for service announcements, healthcare information, and general guidance."
+  },
+  {
+   "id": "83ae58a1-7e97-4b94-b03f-e4cc0a10d8af",
+   "name": "Eden",
+   "gender": "gender_neutral",
+   "country": "US",
+   "description": "Young clean delivery that keeps conversations simple and easy to follow."
+  },
+  {
+   "id": "12e85709-099c-480a-ba3e-875c41a9611a",
+   "name": "Arlo",
+   "gender": "masculine",
+   "country": "AU",
+   "description": "Arlo's friendly, mid-toned Australian voice is excellent for customer support, offering clear and helpful assistance with ease."
+  },
+  {
+   "id": "b2e12ebd-7bed-4d48-9243-0aa7acef4140",
+   "name": "Maren",
+   "gender": "feminine",
+   "country": "CA",
+   "description": "Explains options clearly and helps someone find a practical next step."
+  },
+  {
+   "id": "3945925b-9143-4b7d-9ab5-cc4878001106",
+   "name": "Max",
+   "gender": "masculine",
+   "country": "CA",
+   "description": "Delivers a warm, natural, and engaging tone for friendly interactions and helpful customer service."
+  },
+  {
+   "id": "3c7dfd17-3fa8-47aa-aacc-6313fe025442",
+   "name": "Evelyn",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "A clear, neutral, and precise female voice with a smooth digital polish - perfect for virtual-assistant style responses, instructions, and general interactions."
+  },
+  {
+   "id": "dcddf1f4-b114-4b5d-9158-895cbba0e406",
+   "name": "Martin",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "A mature, composed delivery offering precise, practical guidance to ensure absolute dependability."
+  },
+  {
+   "id": "d79d2b77-9192-4e10-9407-5d43ca034803",
+   "name": "Siobhan",
+   "gender": "feminine",
+   "country": "IE",
+   "description": "Approachable Irish female for friendly, everyday dialogue."
+  },
+  {
+   "id": "1ec736fa-db96-4eea-9299-235ce2cb7a0e",
+   "name": "Conor",
+   "gender": "masculine",
+   "country": "IE",
+   "description": "Decisive Irish male for straightforward customer communication."
+  },
+  {
+   "id": "c5d00dfb-501f-43f3-8e79-c810d24f5acd",
+   "name": "Harper",
+   "gender": "feminine",
+   "country": "NZ",
+   "description": "Adult female for highly structured communication."
+  },
+  {
+   "id": "c63361f8-d142-4c62-8da7-8f8149d973d6",
+   "name": "Krishna",
+   "gender": "masculine",
+   "country": "IN",
+   "description": "Easygoing adult male voice with a slight Indian accent for casual conversations, approachable dialogue, and friendly interactions"
+  },
+  {
+   "id": "efddb3d2-4464-45e0-9f8a-fcd5fd4fc54f",
+   "name": "Nadia",
+   "gender": "feminine",
+   "country": "SG",
+   "description": "Friendly and clear Singaporean female voice."
+  },
+  {
+   "id": "df38a4f6-5d10-4fe7-b268-952aef25d76a",
+   "name": "Justin",
+   "gender": "masculine",
+   "country": "SG",
+   "description": "Delivers a calm and methodical Singaporean accent, perfect for tracking updates and ensuring smooth communication in complex situations."
+  },
+  {
+   "id": "2a17e905-8f14-4db7-9b9d-9223a8e3f278",
+   "name": "Jane",
+   "gender": "feminine",
+   "country": "US",
+   "description": "A crisp, modern voice with a friendly, intelligent tone — great for virtual-assistant tasks, guidance, and simple conversational prompts."
+  },
+  {
+   "id": "55f006ff-520f-4413-8c01-b37d4555b194",
+   "name": "Dalton",
+   "gender": "masculine",
+   "country": "US",
+   "description": "A grounded, professional delivery that keeps callers oriented through booking adjustments, status updates, and administrative workflows."
+  },
+  {
+   "id": "33d406dd-ff6f-4be7-a7f5-8b1ba183b3e4",
+   "name": "Nandi",
+   "gender": "feminine",
+   "country": "ZA",
+   "description": "A poised and eloquent delivery, ideal for corporate presentations, documentary narration, and sophisticated informational content."
+  },
+  {
+   "id": "baf84392-fa95-4d44-8871-d32ee36b0e01",
+   "name": "Pieter",
+   "gender": "masculine",
+   "country": "ZA",
+   "description": "Clear, articulate South African male ideal for business briefings."
+  },
+  {
+   "id": "2a12b36c-7f9b-4c3a-9f7a-72731b15323a",
+   "name": "Ella",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Approachable presence for bright, lightweight and everyday customer conversations."
+  },
+  {
+   "id": "79d2cf27-444a-4c3a-9eed-2ad5cf795a3b",
+   "name": "Fraser",
+   "gender": "masculine",
+   "country": "AU",
+   "description": "Fraser brings a bright and articulate Australian voice, ensuring messages are delivered with precision and natural confidence."
+  },
+  {
+   "id": "f4c33650-23a7-43bd-8199-1af16815e58a",
+   "name": "Bronwen",
+   "gender": "feminine",
+   "country": "CA",
+   "description": "Guides a listener through a topic with a calm, confident pace."
+  },
+  {
+   "id": "ca6e2abc-f3e6-4f62-9625-92fada58eb9b",
+   "name": "Declan",
+   "gender": "masculine",
+   "country": "CA",
+   "description": "Keeps support conversations clear, steady, and easy to follow."
+  },
+  {
+   "id": "81cd8d19-45e7-47b2-ad0e-bcd94f557ad0",
+   "name": "Pippa",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Bright, upbeat delivery for helpful guidance, friendly onboarding, and clear everyday support conversations."
+  },
+  {
+   "id": "5e7d492a-5502-482e-b315-ebf587427806",
+   "name": "Alfie",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Calm, balanced delivery for thoughtful guidance and professional assistant experiences."
+  },
+  {
+   "id": "24894159-1d4e-4b7c-80ca-4ae37dce9400",
+   "name": "Tamsin",
+   "gender": "feminine",
+   "country": "NZ",
+   "description": "Delivers content with a pleasant, mid-pitched delivery, making e-learning and informational narratives accessible."
+  },
+  {
+   "id": "15a13943-32a7-49a9-b944-d6062129c5a3",
+   "name": "Cillian",
+   "gender": "masculine",
+   "country": "IE",
+   "description": "This voice offers a confident, polished tone, ideal for corporate presentations and professional broadcast content."
+  },
+  {
+   "id": "cfce9402-0067-458b-95a7-95846f469406",
+   "name": "Sheryl",
+   "gender": "feminine",
+   "country": "SG",
+   "description": "This voice provides a warm and understanding approach, fostering trust and ensuring every customer interaction feels valued."
+  },
+  {
+   "id": "7c96bf7d-a60b-43c9-95ee-75ca22bac753",
+   "name": "Desmond",
+   "gender": "masculine",
+   "country": "SG",
+   "description": "Grounds troubleshooting conversations in methodical clarity, making complex status tracking feel straightforward, prompt, and easy to follow."
+  },
+  {
+   "id": "78ab82d5-25be-4f7d-82b3-7ad64e5b85b2",
+   "name": "Savannah",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Adult female for casual, authentic conservations"
+  },
+  {
+   "id": "0dbf0e38-5ffc-4074-a498-f9bc6a002ac0",
+   "name": "Alvin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "An inviting and efficient tone that provides natural, pleasant clarity across digital reception desks and automated caller inquiries."
+  },
+  {
+   "id": "072d954b-8379-4b6b-816a-bb0cd38725f8",
+   "name": "Anele",
+   "gender": "feminine",
+   "country": "ZA",
+   "description": "Clear South African female for customer service."
+  },
+  {
+   "id": "56c7989e-7a5f-4d12-838f-e0f910e7356e",
+   "name": "Tristan",
+   "gender": "masculine",
+   "country": "ZA",
+   "description": "Tristan's steady South African tone exudes confidence and calm, making him an excellent choice for authoritative narration and support."
+  },
+  {
+   "id": "391f4c0a-f1a8-4c21-9aa2-7a07f0a4b0dc",
+   "name": "Bronte",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Bright and trustworthy Australian voice provides approachable guidance, making her excellent for customer support and helpful directions."
+  },
+  {
+   "id": "f0e50f2a-9116-4510-9c5b-fec928daff4b",
+   "name": "Ethan",
+   "gender": "masculine",
+   "country": "AU",
+   "description": "Laid-back with a relaxed, low-key delivery for effortless, grounded customer support."
+  },
+  {
+   "id": "6c756032-11c3-4be8-a120-74f9673fb700",
+   "name": "Harlow",
+   "gender": "feminine",
+   "country": "CA",
+   "description": "Offers a friendly yet professional presence, perfect for efficient problem-solving and customer support conversations."
+  },
+  {
+   "id": "3a01612e-07da-4a85-bba8-ce10481df477",
+   "name": "Gareth",
+   "gender": "masculine",
+   "country": "CA",
+   "description": "Provides a naturally warm and approachable tone, fostering engagement in interactive dialogues and customer care."
+  },
+  {
+   "id": "fb02b554-7d64-4f90-841e-e57fc88f410c",
+   "name": "Ailsa",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Calm and personable Scottish delivery suited to friendly guidance and calm service interactions."
+  },
+  {
+   "id": "3bf35adc-bcc4-464b-b834-c90c88cf6492",
+   "name": "Spencer",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Casual voice with an engaging, upbeat tone that feels friendly and effortlessly conversational"
+  },
+  {
+   "id": "5f621418-ab01-4bf4-9a9d-73d66032234e",
+   "name": "Willow",
+   "gender": "feminine",
+   "country": "NZ",
+   "description": "Friendly female for approachable, down-to-earth support."
+  },
+  {
+   "id": "ac5a9529-3965-4eac-b574-dce63664fbf4",
+   "name": "Kiran",
+   "gender": "masculine",
+   "country": "SG",
+   "description": "Kiran provides a steady and trustworthy voice, well-suited for financial services, e-learning, and reliable customer interactions."
+  },
+  {
+   "id": "741a0606-3f3a-430e-a928-aa81be7a5aef",
+   "name": "Gabriela",
+   "gender": "feminine",
+   "country": "US",
+   "description": "An articulate and pleasant presence, perfect for engaging listeners in storytelling or dynamic presentations."
+  },
+  {
+   "id": "c78dd7ae-6692-4c44-a2a2-834e365afe60",
+   "name": "Clark",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Approachable male voice with a confident, knowledgeable tone ideal for customer service and support"
+  },
+  {
+   "id": "263b9cc0-0d99-44e7-ae92-3d4ad5d2ad18",
+   "name": "Zanele",
+   "gender": "feminine",
+   "country": "ZA",
+   "description": "Lively, positive delivery that brings authentic energy."
+  },
+  {
+   "id": "aa2cafe9-97ba-4052-ac3c-875000f95212",
+   "name": "Zander",
+   "gender": "masculine",
+   "country": "ZA",
+   "description": "Zander delivers a measured and calm presence, ideal for professional guidance and reassuring explanations."
+  },
+  {
+   "id": "7d7d769c-5ab1-4dd5-bb17-ec8d4b69d03d",
+   "name": "Eleanor",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Clear, professional adult female for customer communication"
+  },
+  {
+   "id": "49743b08-0f5d-4741-839c-b12933853780",
+   "name": "Cooper",
+   "gender": "masculine",
+   "country": "AU",
+   "description": "Warm and highly relatable, excellent for customer service."
+  },
+  {
+   "id": "62ae83ad-4f6a-430b-af41-a9bede9286ca",
+   "name": "Gemma",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Confident, emotive British female for professional assistance"
+  },
+  {
+   "id": "df89f42f-f285-4613-adbf-14eedcec4c9e",
+   "name": "Harrison",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Crisp, professional British male for efficient customer interactions."
+  },
+  {
+   "id": "5a033900-2ed6-4fd4-a257-707f2688e713",
+   "name": "Maia",
+   "gender": "feminine",
+   "country": "NZ",
+   "description": "Prompt, polished voice with crisp articulation, composed warmth, and a collaborative tone, ideal for corporate care, client support, and professional customer conversations."
+  },
+  {
+   "id": "2bc8e99c-bf1c-4977-93ff-151d7383921c",
+   "name": "Darren",
+   "gender": "masculine",
+   "country": "SG",
+   "description": "Offers structured and dependable advice, ideal for explaining intricate concepts with precision and confidence in a Singaporean accent."
+  },
+  {
+   "id": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+   "name": "Skylar",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Approachable American female ideal for customer care and support."
+  },
+  {
+   "id": "3e39e9a5-585c-4f5f-bac6-5e4905c51095",
+   "name": "Cole",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Articulate, approachable male designed for friendly communication."
+  },
+  {
+   "id": "7348f896-8516-4382-9c8f-ad2aee1ffedc",
+   "name": "Naledi",
+   "gender": "feminine",
+   "country": "ZA",
+   "description": "Naledi offers an engaging and informative tone, ideal for e-learning and clear, comprehensive educational narration."
+  },
+  {
+   "id": "c99d36f3-5ffd-4253-803a-535c1bc9c306",
+   "name": "Griffin",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Elderly male for narrations"
+  },
+  {
+   "id": "f014dce5-df0e-4cfa-98e1-bd4bb73bb0b1",
+   "name": "Haven",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Easy to place in commerce, care, and onboarding scripts, with a survey host presence without sounding stiff."
+  },
+  {
+   "id": "74f42072-6245-4fe2-b5dc-3dc9b56fdbd0",
+   "name": "Regis",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Authoritative voice with polished clarity and balanced tone, perfect for news delivery and formal announcements"
+  },
+  {
+   "id": "c46cf1f6-49a1-4d67-9a57-ff859a4046d3",
+   "name": "Cora",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Cora offers a helpful and articulate tone, perfectly suited for customer support and service-oriented communication."
+  },
+  {
+   "id": "15070120-82ab-48e5-87e5-c4bf28fa4bf9",
+   "name": "Finn",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Finn provides an upbeat and amiable listening experience, perfect for presentations or welcoming introductions."
+  },
+  {
+   "id": "db408a93-859c-4a0a-b6a2-220c074cc90d",
+   "name": "Hana",
+   "gender": "feminine",
+   "country": "NZ",
+   "description": "Relaxed female voice with a warm, rounded tone, natural pacing, and an easy conversational feel, ideal for approachable support, everyday guidance, and casual customer conversations."
+  },
+  {
+   "id": "c0f43c66-9f21-4034-b485-8f1d3340d759",
+   "name": "Clarkson",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Businesslike voice with confident tone and professional delivery, perfect for corporate and formal settings"
+  },
+  {
+   "id": "f0377496-2708-4cc9-b2f8-1b7fdb5e1a2a",
+   "name": "Elaine",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Assured voice with calm confidence and clear tone, ideal for professional, informative, or guiding narration"
+  },
+  {
+   "id": "22df7143-7987-4e15-a720-d65c69a443b3",
+   "name": "Oscar",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Keen, professional delivery with an energetic undertone for practical guidance, accurate explanations, and professional service conversations."
+  },
+  {
+   "id": "8d673f7e-4a22-47fd-973a-ead9a85b7187",
+   "name": "Lindiwe",
+   "gender": "feminine",
+   "country": "ZA",
+   "description": "Offers a composed and thoughtful approach, guiding listeners through complex information with ease and assurance."
+  },
+  {
+   "id": "356f4a89-d056-4e2e-8c73-865fa4d3af0a",
+   "name": "Chandler",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual male voice with a warm, natural tone that feels friendly and effortlessly relatable"
+  },
+  {
+   "id": "8634bd27-0acf-4056-b014-4fea0385ed9e",
+   "name": "Suzanne",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Matured voice with a natural, conversational tone that feels warm, relatable, and approachable"
+  },
+  {
+   "id": "17044048-bfab-44b2-9532-9c1b65e9c217",
+   "name": "Alec",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Lively, warm British male with an upbeat, welcoming energy for sales, product demos, and engaging customer conversations."
+  },
+  {
+   "id": "dc30854e-e398-4579-9dc8-16f6cb2c19b9",
+   "name": "Victoria",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Crisp, professional British female for reassuring communication."
+  },
+  {
+   "id": "d2c66146-c1c8-4c3a-9870-38e5a6b72442",
+   "name": "Lawson",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Charming matured male voice with smooth delivery and refined tone, perfect for narrations and advertisements"
+  },
+  {
+   "id": "ed9ccfa4-8fa1-40f8-bfb2-cb7d67d2f9cd",
+   "name": "Ruby",
+   "gender": "feminine",
+   "country": "NZ",
+   "description": "Adult female for everyday dialogue."
+  },
+  {
+   "id": "dc52ada6-0e11-4684-a8fa-e0af5b7bdcb2",
+   "name": "Gary",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Measured and direct delivery for no-nonsense conversations."
+  },
+  {
+   "id": "f4c1a0b2-669d-403f-b440-4b34b34856aa",
+   "name": "Nora",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Balanced, neutral female voice that sounds natural and approachable for everyday conversations"
+  },
+  {
+   "id": "9fa83ce3-c3a8-4523-accc-173904582ced",
+   "name": "Keith",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Chill, young adult male for casual conversations"
+  },
+  {
+   "id": "692846ad-1a6b-49b8-bfc5-86421fd41a19",
+   "name": "Thandi",
+   "gender": "feminine",
+   "country": "ZA",
+   "description": "Professional South African female for structured support."
+  },
+  {
+   "id": "b24f41fd-00a3-4cd8-992a-a0c9f13f3ef1",
+   "name": "Clive",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Offers a composed and articulate voice, perfect for delivering educational content or detailed advice."
+  },
+  {
+   "id": "fd91495f-b8da-4944-ab8f-674c13089d7f",
+   "name": "Blair",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Provides a steady and reliable presence as a triage ally, making complex information accessible with clear, friendly delivery."
+  },
+  {
+   "id": "3f04e815-3260-4f50-8fd9-af9c657be4c2",
+   "name": "Arvin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Clear, steady male voice that communicates instructions and troubleshooting steps with confidence and ease"
+  },
+  {
+   "id": "e5d4c33a-d8f6-46e8-a10f-b5afecc35648",
+   "name": "Evie",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Formal British female for high-level corporate interactions."
+  },
+  {
+   "id": "0ea47942-be0b-4bc7-a1bf-5dba008dc1cc",
+   "name": "Owen",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Owen provides precise and efficient support in a Scottish accent, ideal for navigating services and tech solutions as a support anchor."
+  },
+  {
+   "id": "5f21130c-c643-4e44-8d24-e0a63f32e4e2",
+   "name": "Linnea",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Balances polite attentiveness with energetic promptness, perfect for logistics coordination and virtual administrative tasks."
+  },
+  {
+   "id": "9301949d-b7cd-40d9-a246-5a4430992d6b",
+   "name": "Marcus",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Composed voice with approachable warmth, perfect for customer service and support"
+  },
+  {
+   "id": "548172e3-7581-406b-8788-f5346fb992de",
+   "name": "Shana",
+   "gender": "feminine",
+   "country": "ZA",
+   "description": "This composed South African voice provides reliable and clear consultation, perfect for detailed financial advice and professional presentations."
+  },
+  {
+   "id": "3c0f09d6-e0d7-499c-a594-70c5b7b93048",
+   "name": "Benedict",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Polished, and formal British male."
+  },
+  {
+   "id": "f4e419a9-fc75-4252-9d4e-93e4247f07c9",
+   "name": "Peyton",
+   "gender": "feminine",
+   "country": "AU",
+   "description": "Provides a steady and reliable presence as a peer ally, making complex information accessible with clear, friendly delivery."
+  },
+  {
+   "id": "9287676d-f0cc-423f-ac03-3b3c7242f091",
+   "name": "Allen",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident young adult male voice with a neutral American accent for presentations, ads, and engaging everyday conversations"
+  },
+  {
+   "id": "5a93ae96-9e3e-4b9d-8575-5f62b7de6d0f",
+   "name": "Imogen",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Polished, articulate delivery for refined support, clear explanations, and calm customer guidance."
+  },
+  {
+   "id": "8c254787-4eb4-4577-bd3d-fb3c273baea2",
+   "name": "Rowan",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Provides a reliable and steady vocal presence, ensuring clarity and trust in every piece of communication."
+  },
+  {
+   "id": "fdd6abff-902a-4885-9f5f-0d3d9f7567e5",
+   "name": "Betty",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Bold and reassured voice perfect for conveying command and a sharp, confident Southern presence."
+  },
+  {
+   "id": "17488b72-f815-44d8-bdd9-869971c3ec06",
+   "name": "Steven",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Conversational voice with a relaxed, natural tone that feels genuine and easy to engage with"
+  },
+  {
+   "id": "2f251ac3-89a9-4a77-a452-704b474ccd01",
+   "name": "Lucy",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Reassuring British female for customer assistance."
+  },
+  {
+   "id": "bb7e8daa-8b79-47a2-8408-a7a1cc72b53c",
+   "name": "Arthur",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Refined and confident tone for formal support and clear customer communication."
+  },
+  {
+   "id": "5241b0aa-3c09-479d-b0b8-a6ec68daef5e",
+   "name": "Brielle",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Brielle delivers engaging renewal partner narration with professional pacing and a friendly presence."
+  },
+  {
+   "id": "3d83e30f-c31b-4f26-b442-7075feafa53a",
+   "name": "Wade",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Country-sounding male voice with a warm drawl and genuine charm, perfect for friendly storytelling"
+  },
+  {
+   "id": "273f9ef7-9fc2-4def-88bb-ab108c6249ca",
+   "name": "Julia",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Soft, graceful tone with a composed rhythm for polished guidance and reassurance."
+  },
+  {
+   "id": "c8f7835e-28a3-4f0c-80d7-c1302ac62aae",
+   "name": "Alistair",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Sophisticated, steady British male for customer interactions."
+  },
+  {
+   "id": "8d2c9eda-31df-477a-9eb6-df6f00b82845",
+   "name": "Ellie Mae",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Bright, approachable Southern female that feels like a trusted neighbor."
+  },
+  {
+   "id": "e2d48e7b-cd73-4c4c-bc1e-f232580e8709",
+   "name": "Adrian",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Deep American adult male voice with a curious and engaging tone for explorations, documentaries, and storytelling"
+  },
+  {
+   "id": "16a4052e-1f11-47ac-95f5-9330bee062f9",
+   "name": "Courtney",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Warm, professional, measured delivery, perfect for complex information and professional guidance."
+  },
+  {
+   "id": "4bc3cb8c-adb9-4bb8-b5d5-cbbef950b991",
+   "name": "George",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Steady, British male voice for capable assistance."
+  },
+  {
+   "id": "55deba52-bc73-4481-ab69-9c8831c8a7c3",
+   "name": "Camille",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Calm, neutral female for customer support and instructional videos"
+  },
+  {
+   "id": "59cb0f89-5d66-49f8-b965-f72b252789e0",
+   "name": "Chase",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Dependable sound for everyday assurance and guided next steps."
+  },
+  {
+   "id": "1e9b9b3d-d2ce-4cac-9d05-bc36a63fa28e",
+   "name": "Saira",
+   "gender": "feminine",
+   "country": "GB",
+   "description": "Warm, attentive delivery for organized, thoughtful follow-up, and approachable service conversations."
+  },
+  {
+   "id": "ef191366-f52f-447a-a398-ed8c0f2943a1",
+   "name": "Archie",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Warm, conversational British male for casual and engaging dialogue."
+  },
+  {
+   "id": "3af40927-948e-429b-b92d-e2158f79fb9f",
+   "name": "Cera",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual female voice with an easy, conversational flow that feels natural and friendly"
+  },
+  {
+   "id": "01fd7d67-d2a0-4e4e-8c48-42611c71a926",
+   "name": "Skyler",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Easygoing voice with effortless tone that feels natural and approachable"
+  },
+  {
+   "id": "f6ce3444-478b-4ce4-982e-bcb72dffe7aa",
+   "name": "Emily",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Cheerful voice with warm and welcoming tone that feels natural and easy to connect with"
+  },
+  {
+   "id": "f2ddbdca-59d9-4363-abeb-a197d65ea24a",
+   "name": "Roy",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Measured, professional delivery that channels a serious and experienced business attitude into trusted support."
+  },
+  {
+   "id": "999df508-4de5-40a7-8bd3-8c12f678c284",
+   "name": "Layla",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Chill voice with a smooth, easygoing tone that feels relaxed and effortlessly cool"
+  },
+  {
+   "id": "da69d796-4603-4419-8a95-293bfc5679eb",
+   "name": "David",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Engaging adult male for advertising and upbeat conversations"
+  },
+  {
+   "id": "d6a09f6b-89cd-4858-b1a3-c4137e37e799",
+   "name": "Carly",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Clear and energetic phrasing tailored for modern interactive phone menus, booking confirmations, and everyday digital assistance."
+  },
+  {
+   "id": "5568a7df-e5ab-4442-9fae-2e9ba1b15ad8",
+   "name": "Quentin",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Polished narrator with a measured pace, perfect for corporate and professional settings"
+  },
+  {
+   "id": "caa06a3e-c85d-459d-a1c0-4a25eeb60aeb",
+   "name": "Faye",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Comforting and hospitable Southern voice, perfect for conveying trust and charm."
+  },
+  {
+   "id": "9a0894a9-28f0-436e-9a1d-e92bccbce4dd",
+   "name": "Albert",
+   "gender": "masculine",
+   "country": "US",
+   "description": "English male adult voice with a firm and authoritative tone for providing clear instructions and guidance"
+  },
+  {
+   "id": "aedba0db-d65d-408e-b146-72f62c2ce30c",
+   "name": "Simone",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Composed resonance well suited for automated phone trees, order tracking, and schedule updates."
+  },
+  {
+   "id": "3faa81ae-d3d8-4ab1-9e44-e50e46d33c30",
+   "name": "Jasper",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Warm, expressive voice for customer support and sales conversations"
+  },
+  {
+   "id": "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+   "name": "Jacqueline",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Confident, young adult female for empathic customer support"
+  },
+  {
+   "id": "2d5b8c3a-116c-4741-acaf-ba4fa289eba2",
+   "name": "Benji",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Excited and cheerful voice with bright energy and lively tone, perfect for upbeat chats and engaging content"
+  },
+  {
+   "id": "6665c84e-f686-4169-bc82-9f24ddeffed3",
+   "name": "Brynn",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Crisp, friendly pacing with an attentive quality, designed to guide callers seamlessly through self-service options and status updates."
+  },
+  {
+   "id": "0ad65e7f-006c-47cf-bd31-52279d487913",
+   "name": "Rupert",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Warm, mature voice for caring, reassuring conversations"
+  },
+  {
+   "id": "f9846bf1-f1df-4502-b07d-d1d6bfe7a107",
+   "name": "Bethany",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Direct and engaging vocal presence that keeps telephone menus, order verifications, and status check-ins moving smoothly."
+  },
+  {
+   "id": "aec42b73-8c46-4528-a377-537b5ecb8e7b",
+   "name": "Warren",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Experienced, reassuring delivery for thoughtful guidance, careful explanations, and high-trust service conversations."
+  },
+  {
+   "id": "57dcab65-68ac-45a6-8480-6c4c52ec1cd1",
+   "name": "Kira",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Emotive, young adult female for empathetic conversations"
+  },
+  {
+   "id": "3d5ce2fb-e56c-42f0-9ed9-4662484063b4",
+   "name": "Toby",
+   "gender": "masculine",
+   "country": "GB",
+   "description": "Warm, conversational British male with a polished tone."
+  },
+  {
+   "id": "3d9b50f9-10c5-4026-9ae1-c4a698f67fc5",
+   "name": "Marjorie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Encouraging matured voice with warm reassurance and steady tone, perfect for motivational and supportive messages"
+  },
+  {
+   "id": "92c41dd4-04aa-45de-8504-a92b40cb8818",
+   "name": "Connor",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Expressive American adult male voice with a grateful yet firm tone for speeches, storytelling, and professional communication"
+  },
+  {
+   "id": "1f575487-6f3d-40e0-862a-814f55b5fb15",
+   "name": "Ariane",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Engaging voice with expressive warmth and clarity, perfect for drawing listeners into any conversation"
+  },
+  {
+   "id": "00967b2f-88a6-4a31-8153-110a92134b9f",
+   "name": "Asher",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Firm adult male for audiobooks and clear communication"
+  },
+  {
+   "id": "a7a59115-2425-4192-844c-1e98ec7d6877",
+   "name": "Amber",
+   "gender": "feminine",
+   "country": "US",
+   "description": "English female adult voice with a cheerful yet deeper tone, striking a balance of warmth and authority for customer service use"
+  },
+  {
+   "id": "4df027cb-2920-4a1f-8c34-f21529d5c3fe",
+   "name": "Carson",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly, young adult male for customer support conversations"
+  },
+  {
+   "id": "02fe5732-a072-4767-83e3-a91d41d274ca",
+   "name": "Madison",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Enthusiastic, young adult female for emotive discussions"
+  },
+  {
+   "id": "7d444628-dd13-442b-b687-71a6baf0c07e",
+   "name": "Joseph",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Gentle and reassuring tone designed to offer comfort and build trust."
+  },
+  {
+   "id": "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+   "name": "Katie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Enunciating young adult female for conversational support use cases"
+  },
+  {
+   "id": "1df0b2fe-acb0-4484-8f32-9e231d9e7a90",
+   "name": "Harvey",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Harvey offers a calm, reassuring delivery that works well for appointment reminders, care updates, and precise liaison flows."
+  },
+  {
+   "id": "a33f7a4c-100f-41cf-a1fd-5822e8fc253f",
+   "name": "Lauren",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Expressive female voice for narration, storytelling, and creative content"
+  },
+  {
+   "id": "6cb8801d-259a-4bdc-978f-b45808d58cd3",
+   "name": "Jeremy",
+   "gender": "masculine",
+   "country": "US",
+   "description": "High energy voice with clear and engaging tone, perfect for advertisements and promotions"
+  },
+  {
+   "id": "3ef78ba6-9aaa-46a2-b5b5-f9ded76a2370",
+   "name": "Serena",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Female adult voice with a relaxed, easygoing tone and laid-back delivery"
+  },
+  {
+   "id": "23112795-d54e-4560-9568-791a87c30201",
+   "name": "Darius",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Husky matured male voice with rich texture and commanding tone, ideal for engaging story telling and narrations"
+  },
+  {
+   "id": "f4e8781b-a420-4080-81cf-576331238efa",
+   "name": "Samantha",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Firm, confident adult female for conversational support"
+  },
+  {
+   "id": "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+   "name": "Ronald",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Intense, deep young adult male for casual conversations"
+  },
+  {
+   "id": "ec1e269e-9ca0-402f-8a18-58e0e022355a",
+   "name": "Ariana",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Friendly and approachable female voice with a warm, welcoming tone that builds instant connection"
+  },
+  {
+   "id": "630ed21c-2c5c-41cf-9d82-10a7fd668370",
+   "name": "Corey",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Inviting, cheerful young adult male for casual conversation."
+  },
+  {
+   "id": "02a924f6-bb49-4177-8fbb-52238c5056d6",
+   "name": "Maeve",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Gentle, welcoming delivery for friendly guidance, patient support, and relaxed customer conversations."
+  },
+  {
+   "id": "df872fcd-da17-4b01-a49f-a80d7aaee95e",
+   "name": "Cameron",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Laidback voice with a natural, conversational tone that feels friendly and easy to engage with"
+  },
+  {
+   "id": "b60048c2-abb5-43fa-b403-90dce232e55e",
+   "name": "Amanda",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Inviting and approachable tone perfect for providing friendly guidance."
+  },
+  {
+   "id": "68fb6747-b6ea-4c44-a18e-4e29921424d3",
+   "name": "Derek",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Low-register, grounded presence for authoritative guidance, high-trust support, and calm issue resolution."
+  },
+  {
+   "id": "ea93f57f-7c71-4d79-aeaa-0a39b150f6ca",
+   "name": "Diana",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Matured voice with a casual, friendly tone that feels warm, relatable, and easy to connect with"
+  },
+  {
+   "id": "0d42f0f6-c019-4082-b250-1c16133d1c82",
+   "name": "Howard",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Male adult voice with a clear, approachable tone and steady delivery"
+  },
+  {
+   "id": "01eaafa9-308a-4276-a017-6ab0cf061b1f",
+   "name": "Clara",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Middle-aged American female voice with a clear tone and precise enunciation for instructions, customer support, and professional presentations"
+  },
+  {
+   "id": "9c8880b2-ccf9-4730-b805-cea23df247d7",
+   "name": "Conrad",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Mature, confident voice with composed authority and clear tone, perfect for professional or narrative use"
+  },
+  {
+   "id": "9329fbdb-e285-4fba-95ec-592e15f14476",
+   "name": "Rory",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Motherlike female voice with a calm, nurturing tone that brings warmth and reassurance to any conversation"
+  },
+  {
+   "id": "ed82c17b-4704-4d34-be43-5d19065acdf1",
+   "name": "Carl",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Matured male voice with calm depth and measured pacing, perfect for narrations and documentaries"
+  },
+  {
+   "id": "8d8ce8c9-44a4-46c4-b10f-9a927b99a853",
+   "name": "Connie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Natural, cheery young adult female for authentic conversations"
+  },
+  {
+   "id": "146485fd-8736-41c7-88a8-7cdd0da34d84",
+   "name": "Tim",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Nasal-y male for casual conversations"
+  },
+  {
+   "id": "cc00e582-ed66-4004-8336-0175b85c85f6",
+   "name": "Dana",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Neutral female voice with clear articulation and calm tone, ideal for versatile conversational or professional use"
+  },
+  {
+   "id": "d709a7e8-9495-4247-aef0-01b3207d11bf",
+   "name": "Donny",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Neutral male voice with balanced tone and clarity, adaptable for a wide range of casual speaking contexts"
+  },
+  {
+   "id": "e8e5fffb-252c-436d-b842-8879b84445b6",
+   "name": "Cathy",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Nice, young adult female for casual conversations"
+  },
+  {
+   "id": "5cf0e4d9-ca2b-4fd5-81fa-89db3b645539",
+   "name": "Derrick",
+   "gender": "masculine",
+   "country": "US",
+   "description": "No-nonsense voice with steady confidence and clear tone, ideal for customer service and tech support"
+  },
+  {
+   "id": "d6b0c62a-c7ff-477c-9a1f-eadd64b94360",
+   "name": "Melina",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Outgoing voice with lively warmth and friendly tone, perfect for casual chats and everyday conversations"
+  },
+  {
+   "id": "bd89603f-0efb-4721-a0c8-d10b3642acc3",
+   "name": "Evan",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Practical and easygoing delivery for step-by-step help, service tasks, and conversational assistance."
+  },
+  {
+   "id": "0ee8beaa-db49-4024-940d-c7ea09b590b3",
+   "name": "Morgan",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Polished American female for highly professional interactions."
+  },
+  {
+   "id": "a825d201-a75b-4b03-8edb-3bf4471008cf",
+   "name": "Rashad",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Relaxed yet capable, this pleasant tone offers effortless clarity across automated support queues, appointment reminders, and concierge prompts."
+  },
+  {
+   "id": "6c6e47ac-862e-45ed-9c18-4b5882baa605",
+   "name": "Jocelyn",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Polite, articulate phrasing and a welcoming cadence ensure smooth account verification and pleasant service interactions."
+  },
+  {
+   "id": "f688c0a6-dddd-48ba-8246-c099d494a162",
+   "name": "Romeo",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Relaxing voice with smooth depth and calm pacing, perfect for storytelling and immersive narrations"
+  },
+  {
+   "id": "8a1b8af0-c4f6-423f-a268-5507fd4aefdf",
+   "name": "Denise",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Professional female voice with confident clarity and polished tone, ideal for corporate and business settings"
+  },
+  {
+   "id": "1fcd23d0-bf12-4896-8f60-4f21ef5c9b98",
+   "name": "Austin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Reliable and approachable guide for dependable everyday assistance."
+  },
+  {
+   "id": "10bd4af4-825b-49b8-b8bd-0ca11865536e",
+   "name": "Rachel",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Refined and smooth articulation for high-quality corporate messaging."
+  },
+  {
+   "id": "a924b0e6-9253-4711-8fc3-5cb8e0188c94",
+   "name": "Noah",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Slow-paced voice with gentle warmth and soothing tone, perfect for ASMR and relaxation content"
+  },
+  {
+   "id": "ca566b43-944e-4474-b494-7d9f0695f307",
+   "name": "Celine",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Relaxed voice with smooth tone and gentle warmth, ideal for calm conversations and easy listening"
+  },
+  {
+   "id": "533b2990-5b82-45a4-b9f2-367776972ca6",
+   "name": "Reed",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Steady, polished delivery for professional support, confident explanations, and structured customer conversations."
+  },
+  {
+   "id": "63927f41-9616-4ac2-89cf-f3afa346e0ef",
+   "name": "Selene",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Relaxing and calm voice with gentle flow and serene tone, ideal for meditation and mindfulness content"
+  },
+  {
+   "id": "4703c250-66e4-4682-a223-0a60acafcfc0",
+   "name": "Levi",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Strong, confident voice for customer service, newscasting, and reliable narration"
+  },
+  {
+   "id": "d1d9c946-7cfc-4378-85a4-07d09827cb7e",
+   "name": "Jolene",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Rich, honeyed Southern female perfect for narration."
+  },
+  {
+   "id": "c58bda25-abd5-4c72-97a2-4dbe049b368d",
+   "name": "Garrett",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Upbeat voice with bright energy and confident tone, perfect for lively conversations and engaging content"
+  },
+  {
+   "id": "25bf938a-025c-4dd0-906f-8cf8be2e26e9",
+   "name": "Loretta",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Settled delivery with a slow and comfortable cadence, entirely discarding useless small talk in favor of a heavy, peaceful presence."
+  },
+  {
+   "id": "65209f8e-6140-4a20-b819-3cc2e21da19b",
+   "name": "Nolan",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Warm, engaging, and effortlessly dependable with a natural, conversational touch."
+  },
+  {
+   "id": "6385d6e7-e385-4693-b2b6-c76260452d71",
+   "name": "Colleen",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Smooth and accommodating tones that make service triage, automated routing, and account updates feel effortless and personal."
+  },
+  {
+   "id": "87bc56aa-ab01-4baa-9071-77d497064686",
+   "name": "Jordan",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Welcoming adult male for engaging conversations"
+  },
+  {
+   "id": "d6c52d6f-6478-47a2-ad54-dbc8f3335a2b",
+   "name": "Pearl",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Soft-spoken, poised Southern female for attentive client support."
+  },
+  {
+   "id": "911b8b22-887f-4caf-bf87-85d834c08708",
+   "name": "Kenneth",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Well-paced male voice with clear enunciation, great for approachable and informative conversations"
+  },
+  {
+   "id": "c1b9a03e-747f-40ad-8e7b-18caf8aaac0b",
+   "name": "Lira",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Soothing female voice with gentle warmth, ideal for calm narrations and ASMR"
+  },
+  {
+   "id": "87286a8d-7ea7-4235-a41a-dd9fa6630feb",
+   "name": "Henry",
+   "gender": "masculine",
+   "country": "US",
+   "description": "A relaxed, youthful male voice with a monotone, matter-of-fact attitude - ideal for casual, straightforward conversations."
+  },
+  {
+   "id": "1a0c6bb2-bc1b-476e-8d45-56a66300362b",
+   "name": "Esther",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Steady, gentle Southern American female for a comforting and reliable customer experience."
+  },
+  {
+   "id": "7a8ae0b6-504a-49af-92d3-4e7e2eb84ca1",
+   "name": "Eliott",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Approachable and cheerful voice with bright warmth that instantly connects and uplifts listeners"
+  },
+  {
+   "id": "9f14cf59-e7e2-4783-b733-dbae49640789",
+   "name": "Sofía",
+   "gender": "feminine",
+   "country": "US",
+   "description": "This voice offers clear, patient guidance, ideal for navigating complex information or providing detailed customer support."
+  },
+  {
+   "id": "18f8d87b-0da9-4efa-b504-4580e303f7db",
+   "name": "Colby",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual voice with an engaging, upbeat tone that brings energy and friendliness to any conversation"
+  },
+  {
+   "id": "a7b8d8fa-f6e5-4908-900e-0c11d1d82519",
+   "name": "Joanie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Upbeat matured female voice with lively warmth and confidence, perfect for natural and engaging conversations"
+  },
+  {
+   "id": "b58b6b46-1a27-46ba-8648-bc203a5d394e",
+   "name": "Mason",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Chill voice with a smooth, conversational tone that feels relaxed and genuine"
+  },
+  {
+   "id": "ca31ce53-ebf6-4e51-b87d-2f65d5d1f7f8",
+   "name": "Vivian",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Voice with rich emotion and expressive depth, perfect for dramatic readings and heartfelt narratio"
+  },
+  {
+   "id": "47c38ca4-5f35-497b-b1a3-415245fb35e1",
+   "name": "Daniel",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Clear, crisp male voice for digital assistants and system interactions"
+  },
+  {
+   "id": "87041166-c212-4838-9028-05d7437df750",
+   "name": "Aubrey",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Warm voice with a relaxed, natural tone that feels friendly and effortlessly relatable"
+  },
+  {
+   "id": "5cad89c9-d88a-4832-89fb-55f2f16d13d3",
+   "name": "Brandon",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident voice with strong clarity and composed tone, perfect for persuasive and professional delivery"
+  },
+  {
+   "id": "5abd2130-146a-41b1-bcdb-974ea8e19f56",
+   "name": "Jo",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Young adult female for casual conversations"
+  },
+  {
+   "id": "dbfa416f-d5c3-4006-854b-235ef6bdf4fd",
+   "name": "Damon",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Deep and serious male voice with steady gravitas, ideal for documentaries and impactful storytelling"
+  },
+  {
+   "id": "58fbaf73-d7de-4e82-a6b3-118180e7057c",
+   "name": "Janet",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Bright, warm female voice for guidance, narration, and supportive interactions"
+  },
+  {
+   "id": "efa653e5-314d-46ca-9f90-70ac7d6ca71e",
+   "name": "Kurt",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Engaging male voice with expressive tone and natural warmth, ideal for customer service"
+  },
+  {
+   "id": "eef47c0d-cb49-4160-a4a0-6b97ed4c81e6",
+   "name": "Isla",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Calm voice with gentle warmth and steady rhythm, perfect for yoga, meditation, and relaxation"
+  },
+  {
+   "id": "3d808d23-cb09-4c39-8afd-528e209cba4f",
+   "name": "Brent",
+   "gender": "masculine",
+   "country": "US",
+   "description": "English male adult voice with a calm, steady, and composed delivery"
+  },
+  {
+   "id": "66c6b81c-ddb7-4892-bdd5-19b5a7be38e7",
+   "name": "Dorothy",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual female voice with a relaxed and natural tone, perfect for everyday conversations and relatable content"
+  },
+  {
+   "id": "6776173b-fd72-460d-89b3-d85812ee518d",
+   "name": "Jace",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly and chill male voice with an easygoing tone that feels relaxed and natural"
+  },
+  {
+   "id": "aef96ff9-4578-4b5d-9744-7fb347cbe4d4",
+   "name": "Holly",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Cheerful voice with bright warmth and friendly energy, perfect for engaging conversations and upbeat content"
+  },
+  {
+   "id": "87a983d8-3471-4c4b-9ade-f1d10a4110ac",
+   "name": "Devin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Laidback male voice with a smooth, easygoing tone that feels relaxed and effortlessly cool."
+  },
+  {
+   "id": "3f38cbe2-ce6a-4051-b5dc-2b2ee20b9bc1",
+   "name": "Sasha",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Chill female voice with a smooth, laid-back tone that brings ease and calm to any conversation"
+  },
+  {
+   "id": "921034a2-aace-4ef7-87b1-b9bc455c9a15",
+   "name": "Edric",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Matured male voice with steady pacing and clear intonation, delivering messages with poise and clarity"
+  },
+  {
+   "id": "358e650d-ac0b-4a74-b14f-aca3daa40d79",
+   "name": "Kendra",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Clear, steady, and professional voice perfect for conveying reliability and smooth confidence."
+  },
+  {
+   "id": "f24ae0b7-a3d2-4dd1-89df-959bdc4ab179",
+   "name": "Ross",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Steady voice with balanced tone and clear delivery, ideal for customer support and service"
+  },
+  {
+   "id": "4d3d2e9c-14e4-4802-a8d8-bd5268a73fde",
+   "name": "Judith",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Confident voice with clear articulation and composed tone, perfect for presentations and professional dialogue"
+  },
+  {
+   "id": "fbf7d2ec-ebea-49f2-8889-a482b9b0a7ed",
+   "name": "Wade 2.0",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Warm male voice with an unhurried, slightly playful charm, built for telling a story."
+  },
+  {
+   "id": "8d221fd0-24b1-4b60-abb2-6f383f299272",
+   "name": "Danica",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Crisp, lighthearted clarity that effortlessly directs caller inquiries, appointment updates, and everyday service troubleshooting workflows."
+  },
+  {
+   "id": "41468051-3a85-4b68-92ad-64add250d369",
+   "name": "Cory",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual male voice with a friendly, easygoing tone that feels natural and approachable"
+  },
+  {
+   "id": "489b647b-5662-408f-8c95-82e26ef8d29e",
+   "name": "Kate",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Direct, no-nonsense female voice for instructions and clear explanations"
+  },
+  {
+   "id": "2948c301-9211-4112-8f36-4c3fc836ef12",
+   "name": "Bryce",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident voice with clear enunciation and strong delivery, ideal for professional and instructional use"
+  },
+  {
+   "id": "69092565-1c93-4a88-9f2c-ac8cddaf9f65",
+   "name": "Janice",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Engaging voice with a casual, friendly tone that draws listeners in and keeps conversations lively"
+  },
+  {
+   "id": "a892d232-f705-40d7-bc8d-e368b295ec2a",
+   "name": "Harlan",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Deep male voice with classic resonance and smooth authority, reminiscent of an old radio announcer"
+  },
+  {
+   "id": "f762e181-ddc7-486e-9a48-636bd7e229d4",
+   "name": "Chloe",
+   "gender": "feminine",
+   "country": "US",
+   "description": "English female adult voice with a confident and persuasive tone, able to influence and engage listeners with clarity and conviction"
+  },
+  {
+   "id": "7edf9efb-58fc-46ba-a648-3a00a86b111b",
+   "name": "Elliott",
+   "gender": "masculine",
+   "country": "US",
+   "description": "English male adult voice with a soft, melancholic tone and a questioning inflection for storytelling and emotional dialogue"
+  },
+  {
+   "id": "dcc82bcd-647e-4478-955f-8232d5122f8b",
+   "name": "Melanie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Enthusiastic voice with bright, engaging energy that brings excitement to any conversation"
+  },
+  {
+   "id": "a5136bf9-224c-4d76-b823-52bd5efcffcc",
+   "name": "Jameson",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly, laid-back male voice for customer support and onboarding"
+  },
+  {
+   "id": "eb649460-7e23-43bc-ad20-0a7a2749b938",
+   "name": "Kim",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Friendly voice with a smooth, easygoing tone"
+  },
+  {
+   "id": "90c896fa-aaa1-41af-a612-5267636440a3",
+   "name": "Dean",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual male voice with a relaxed, natural tone that feels easy to listen to and effortlessly genuine"
+  },
+  {
+   "id": "d7bf7d75-64b7-4c1e-86c0-79d647366587",
+   "name": "Michelle",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Gentle and reassuring tone designed to offer comfort and build trust."
+  },
+  {
+   "id": "b9cf5ec3-eaa4-46a5-a5b2-b0d0f22395a2",
+   "name": "Caleb",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident male voice with authoritative clarity, perfect for delivering expert insights and professional guidance"
+  },
+  {
+   "id": "19e399df-5b30-4fba-9d1d-99434f993614",
+   "name": "Edna",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Matured female voice with gentle wisdom and poise, perfect for thoughtful narration and reflective dialogue"
+  },
+  {
+   "id": "49808e4c-998a-40a8-b2ea-8ac8e8ce779e",
+   "name": "Marvin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Deep, comforting voice with calm authority and warmth, perfect for reassuring and professional customer service"
+  },
+  {
+   "id": "dda51133-5d43-4a3b-84e6-e68c13f60cba",
+   "name": "Lily",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Relaxed, casual voice for friendly, everyday conversations"
+  },
+  {
+   "id": "710feaa3-b550-42f3-b3eb-6f37f2a7cc0a",
+   "name": "Tanner",
+   "gender": "masculine",
+   "country": "US",
+   "description": "English male adult voice with an upbeat and energetic tone"
+  },
+  {
+   "id": "b6818e33-e03d-4cc1-84fa-5774709ee8ab",
+   "name": "Giselle",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Smooth and attentive delivery structured for high-clarity phone menus, automated reservations, and helpful customer support flows."
+  },
+  {
+   "id": "5319c0b1-3dd1-4c00-b721-bfd2ec88ef56",
+   "name": "Julian",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly and cheerful male voice with uplifting warmth, great for feel-good narrations and advertisements"
+  },
+  {
+   "id": "694f9389-aac1-45b6-b726-9d9369183238",
+   "name": "Sarah",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Soothing female for meditations and calming conversations"
+  },
+  {
+   "id": "b2222537-1561-4425-8c3c-e1aca96ad853",
+   "name": "Dylan",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual male voice with an easy, conversational tone that feels friendly and down-to-earth"
+  },
+  {
+   "id": "b87d697c-0af2-4617-a72f-a17444b32d1b",
+   "name": "Natalie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Steady warm tone for customer care and smooth conversational flow."
+  },
+  {
+   "id": "e39b9fc0-23f5-4616-962a-da99c8ccb1dc",
+   "name": "Colin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident voice with clear articulation and reassuring tone, ideal for professional and customer service use"
+  },
+  {
+   "id": "050f5a7a-9d2b-4b76-84e3-2d056a0a3eb0",
+   "name": "Kelsey",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Upbeat voice with lively energy and friendly warmth, perfect for energetic and engaging conversations"
+  },
+  {
+   "id": "4c2dcd38-5608-45ca-8f11-51c88208d01c",
+   "name": "Orin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Deep, silky male voice that delivers authority and allure, perfect for impactful ads and promos"
+  },
+  {
+   "id": "c894559e-d529-4d70-a6fb-3330ecf7ef6b",
+   "name": "Iris",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Warm, conversational American female with a steady, relatable tone, ideal for customer care, scheduling, and everyday assistance."
+  },
+  {
+   "id": "efd255c7-f030-43d3-b5d8-c7b72063be70",
+   "name": "Todd",
+   "gender": "masculine",
+   "country": "US",
+   "description": "English male adult voice with a direct, matter-of-fact delivery"
+  },
+  {
+   "id": "c9440d34-5641-427b-bbb7-80ef7462576d",
+   "name": "Joan",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Young adult female for casual conversations"
+  },
+  {
+   "id": "c961b81c-a935-4c17-bfb3-ba2239de8c2f",
+   "name": "Kyle",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly male voice with a warm, conversational tone that builds instant connection and trust"
+  },
+  {
+   "id": "86faee7e-bf54-4293-bd90-076138544609",
+   "name": "Paige",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Calm, articulate, and welcoming delivery tailored for high-volume customer intake, call menus, and routine account inquiries."
+  },
+  {
+   "id": "f4a3a8e4-694c-4c45-9ca0-27caf97901b5",
+   "name": "Gavin",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual male voice with a relaxed, conversational tone that feels approachable and genuine"
+  },
+  {
+   "id": "64b2a604-f0de-449f-9d90-255602357c05",
+   "name": "Elise",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual female voice with a smooth, approachable tone that feels effortless and natural in conversation"
+  },
+  {
+   "id": "5fb68a42-0ed7-46fa-8a8f-ad4b332fbf6f",
+   "name": "Edward",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident voice with clarity and persuasive tone, perfect for advertisements and promotional content"
+  },
+  {
+   "id": "e4d5f4c4-6601-4779-bee1-b3c14d629dc6",
+   "name": "Jillian",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Cheerful voice with lively warmth and friendly tone, perfect for upbeat conversations"
+  },
+  {
+   "id": "0834f3df-e650-4766-a20c-5a93a43aa6e3",
+   "name": "Leo",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly and approachable male voice that brings warmth and ease to any interaction"
+  },
+  {
+   "id": "643f5eee-459d-4b41-b4fc-0b8407139be6",
+   "name": "Vicky",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Clear and crisp voice with precise delivery and bright tone, ideal for professional and instructional content"
+  },
+  {
+   "id": "fdf6303b-4cfa-4f8e-b7ae-acb398984cf9",
+   "name": "Harley",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual voice with a relaxed, natural tone that feels approachable and genuine"
+  },
+  {
+   "id": "045f0292-0731-4a4c-971d-64594fc2c35a",
+   "name": "Quinn",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Confident voice with clear articulation and poised tone, perfect for presentations and customer interactions"
+  },
+  {
+   "id": "1628cfcd-a161-4e47-98ff-46bffa4ab290",
+   "name": "Graham",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident male voice with a clear, reassuring tone, perfect for professional and customer service interactions"
+  },
+  {
+   "id": "25d7abcb-4d6d-4aca-adce-8a1c85620c8b",
+   "name": "Jessica",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Crisp and articulate delivery designed for seamless information sharing."
+  },
+  {
+   "id": "8d7d11ff-d985-48a2-a737-1da0b6fedc8b",
+   "name": "Ronan",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly male voice with an easygoing tone that feels natural and inviting in any context"
+  },
+  {
+   "id": "86600680-b836-41e1-9916-8475728dcc14",
+   "name": "Tiffany",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Engaging voice with lively clarity and confident warmth, ideal for keeping listeners interested and connected"
+  },
+  {
+   "id": "bbc5d060-50e1-45a3-87ff-191b8cea3092",
+   "name": "Jett",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual male voice with an easygoing rhythm and friendly tone that feels natural and relatable"
+  },
+  {
+   "id": "1b4ea5fb-b1c0-43ee-a7be-4e315878c2b1",
+   "name": "Monica",
+   "gender": "feminine",
+   "country": "US",
+   "description": "English female adult voice with rich emotional range and expressive delivery"
+  },
+  {
+   "id": "228fca29-3a0a-435c-8728-5cb483251068",
+   "name": "Kiefer",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident voice with strong clarity and composed delivery, ideal for presentations and customer interactions"
+  },
+  {
+   "id": "d6905573-8e91-4e32-b103-fd4d1205cd87",
+   "name": "Mindy",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Enthusiastic female voice with bright energy and cheerful tone, great for lively conversations and upbeat content"
+  },
+  {
+   "id": "5fc5c797-12c5-4f2b-ac9b-d4e53c08098f",
+   "name": "Wyatt",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Friendly, clear American male with a subtle Southern drawl."
+  },
+  {
+   "id": "cbaf8084-f009-4838-a096-07ee2e6612b1",
+   "name": "Maya",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Friendly, casual female voice with clear articulation, ideal for natural conversations and customer support"
+  },
+  {
+   "id": "ea7c252f-6cb1-45f5-8be9-b4f6ac282242",
+   "name": "Logan",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual voice with an easy, conversational tone that feels natural and approachable"
+  },
+  {
+   "id": "26403c37-80c1-4a1a-8692-540551ca2ae5",
+   "name": "Marian",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Matured female voice with calm authority and smooth pacing, perfect for narrations and storytelling"
+  },
+  {
+   "id": "cd6256ef-2b2a-41f6-a8d8-c1307af5061f",
+   "name": "Preston",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Confident voice with expressive tone and charismatic delivery, great for engaging conversations"
+  },
+  {
+   "id": "0a9a5903-0a30-4d2e-b6b6-891f73d4b4e0",
+   "name": "Sabrina",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Relaxed female voice with an easy, conversational tone that feels approachable and genuine"
+  },
+  {
+   "id": "30894953-bcce-41fe-892c-15ce19c843ff",
+   "name": "Parker",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual, supportive warmth for friendly conversational flows and approachable check-ins."
+  },
+  {
+   "id": "6fbca103-0f7f-4e49-97ed-49a53b4f3534",
+   "name": "Maxine",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Smooth voice with a calm, laid-back tone that brings an easy sense of comfort to any conversation"
+  },
+  {
+   "id": "1cb5b8bc-77c9-4e7c-a251-da02348e2727",
+   "name": "Sean",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual voice with an easy, relaxed tone that feels natural and effortlessly approachable"
+  },
+  {
+   "id": "6a73e45f-3fa6-427c-97da-0fc6a7a1bc0d",
+   "name": "Stephanie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Steady and even pacing that offers a grounding presence for any script."
+  },
+  {
+   "id": "8cbfe3ab-8364-4e72-b606-93f749519c66",
+   "name": "Shane",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual male voice with clear, steady delivery that makes troubleshooting steps easy to follow and understand"
+  },
+  {
+   "id": "48369ca9-0645-40de-9821-0d55e18a03c2",
+   "name": "Zoey",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Upbeat female voice with lively energy and warmth, perfect for energetic and engaging conversations"
+  },
+  {
+   "id": "6fccb471-26f7-4f7a-93dd-542935db6c20",
+   "name": "Wesley",
+   "gender": "masculine",
+   "country": "US",
+   "description": "Casual voice with a relaxed, friendly tone that feels natural and easy to listen to"
+  },
+  {
+   "id": "cb6a8744-41b0-4cdc-b643-fabeb545c6a9",
+   "name": "Laurel",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Warm voice with gentle empathy and clarity, perfect for heartfelt conversations and customer support"
+  },
+  {
+   "id": "cec7cae1-ac8b-4a59-9eac-ec48366f37ae",
+   "name": "Haley",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual female voice with a relaxed, friendly tone that feels natural and easy to engage with"
+  },
+  {
+   "id": "efc5488b-5429-4e72-aaa2-570981cf47d9",
+   "name": "Lacey",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Cheerful and friendly female voice with bright energy that uplifts and engages listeners instantly"
+  },
+  {
+   "id": "3308b492-50cc-417e-89dd-1f446c574546",
+   "name": "Tara",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Confident voice with clear, composed tone, perfect for professional and customer service settings"
+  },
+  {
+   "id": "e7cc2b3d-b862-49a1-ac63-cb578c74daa1",
+   "name": "Wendy",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Crisp, welcoming articulation with an upbeat cadence, ideal for automated telephone routing, reception systems, and interactive service menus."
+  },
+  {
+   "id": "e2d08065-b658-466b-ad52-cef8ee21d307",
+   "name": "Natasha",
+   "gender": "feminine",
+   "country": "US",
+   "description": "English female adult voice with a lively, upbeat tone for energetic conversations"
+  },
+  {
+   "id": "0d2162c2-2fe9-40a7-b3c1-43eab576a64b",
+   "name": "Shelly",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Friendly voice with a bright, approachable tone that feels natural and welcoming in any setting"
+  },
+  {
+   "id": "e5a6cd18-d552-4192-9533-82a08cac8f23",
+   "name": "Patricia",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Matured voice with lively warmth and enthusiasm, perfect for engaging and energetic customer service"
+  },
+  {
+   "id": "b56c6aac-f35f-46f7-9361-e8f078cec72e",
+   "name": "Tabitha",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Smooth voice with easy warmth and relaxed tone, perfect for casual conversations"
+  },
+  {
+   "id": "b5c1bab5-f036-481f-9295-4db6f06f6443",
+   "name": "Jamie",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual voice with a warm, friendly tone that feels like chatting with a close friend"
+  },
+  {
+   "id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
+   "name": "Tessa",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Friendly female voice with a warm, conversational tone that feels like chatting with a close friend"
+  },
+  {
+   "id": "1ac31ebd-9113-405b-9d80-4a4bbbeea91c",
+   "name": "Kayla",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual female voice with a friendly, natural tone that feels effortless and engaging in conversation"
+  },
+  {
+   "id": "4b1e0bf9-53a0-4e9e-8664-ba1314dbcb38",
+   "name": "Kelly",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual voice with a friendly, natural tone that feels easygoing and approachable"
+  },
+  {
+   "id": "c7c790c5-2bf4-47e4-bc83-5f43e61f3803",
+   "name": "Reese",
+   "gender": "feminine",
+   "country": "US",
+   "description": "Casual, friendly female voice with a bright and welcoming tone suited for everyday conversations."
+  }
+ ]
+}

@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
-use clarp_kernel::agent::{Command, Effect, Note, Refusal, Rest};
+use clarp_kernel::agent::{AgentEvent, Command, Effect, Note, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::control::Control;
 use clarp_kernel::conversation::{
@@ -239,6 +239,8 @@ pub struct Changed {
     pub status: bool,
     /// What waits in the mailbox changed, or whether it is held.
     pub queue: bool,
+    /// The Stop released waiting messages while the mailbox was paused.
+    pub stop_released_waiting: bool,
     /// One of the agent's background jobs changed.
     pub jobs: bool,
     /// One of the agent's goals or plans changed.
@@ -354,6 +356,8 @@ pub enum TurnFate {
 pub struct QueueState {
     /// How many messages wait.
     pub waiting: usize,
+    /// The waiting messages listed for the apps.
+    pub listed: usize,
     /// The mailbox is held: what waits runs only after a resume.
     pub paused: bool,
     /// Grows with every change of the two above.
@@ -539,6 +543,8 @@ pub struct Status {
     pub waiting: Vec<TurnId>,
     /// How many of the waiting turns have yet to put a row in the conversation.
     pub queue_depth: usize,
+    /// How many waiting turns the apps list.
+    pub listed_queue_depth: usize,
     pub paused: bool,
     pub queue_revision: u64,
     pub stop_generation: u64,
@@ -2046,13 +2052,15 @@ impl Actor {
             }),
             _ => None,
         };
+        let (queue_depth, listed_queue_depth) = self.recorder.queue_depths();
         Status {
             moved: agent.moved().cloned(),
             live,
             last: agent.last().cloned(),
             interrupted_since_ms: agent.interrupted_since_ms(),
             waiting: agent.waiting().map(|queued| queued.id).collect(),
-            queue_depth: self.recorder.unshown_waiting().count(),
+            queue_depth,
+            listed_queue_depth,
             paused: agent.is_paused(),
             queue_revision: agent.queue_revision(),
             stop_generation: agent.stop_generation(),
@@ -2421,8 +2429,10 @@ impl Actor {
     /// Where the queue stands right now.
     pub fn queue_state(&self) -> QueueState {
         let agent = self.recorder.agent();
+        let (waiting, listed) = self.recorder.queue_depths();
         QueueState {
-            waiting: self.recorder.unshown_waiting().count(),
+            waiting,
+            listed,
             paused: agent.is_paused(),
             revision: agent.queue_revision(),
         }
@@ -2624,12 +2634,12 @@ impl Actor {
     /// those that ended when it was started again. What a list of chats shows of an agent
     /// is the last thing that was said: an agent that was started again shows it until
     /// something is said in its new conversation.
-    pub fn tail_of_any(&self, limit: usize) -> Result<Page, ActorError> {
+    pub fn tail_of_any(&self, limit: usize, which: Which) -> Result<Page, ActorError> {
         let whole = conversation::Span {
             floor: 0,
             head_revision: self.head_revision(),
         };
-        conversation::tail(self.recorder.log(), self.drafts(), whole, limit, Which::All)
+        conversation::tail(self.recorder.log(), self.drafts(), whole, limit, which)
     }
 
     pub fn visible_previews(
@@ -3660,9 +3670,41 @@ impl Actor {
     /// Ends the live turn and holds the mailbox: who asks it, and why. Returns how many turns
     /// were told to end.
     pub fn stop_as(&mut self, by: Control, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
+        self.stop_with(by, false, now_ms)
+    }
+
+    /// The user's non-deferred Stop also gives its already waiting messages their turn.
+    pub fn stop_and_start_waiting(
+        &mut self,
+        by: Control,
+        now_ms: i64,
+    ) -> Result<(u32, Outputs), ActorError> {
+        self.stop_with(by, true, now_ms)
+    }
+
+    fn stop_with(
+        &mut self,
+        by: Control,
+        start_waiting: bool,
+        now_ms: i64,
+    ) -> Result<(u32, Outputs), ActorError> {
         let silenced = by.is_the_users();
-        let command = Command::Stop { by };
-        let effects = self.recorder.handle(command, now_ms)?;
+        let command = if start_waiting {
+            Command::StopAndStartWaiting { by }
+        } else {
+            Command::Stop { by }
+        };
+        let conversation_before = self.recorder.conversation_seq();
+        let mut batch = self.recorder.batch();
+        batch
+            .command(command, now_ms)
+            .map_err(JournalError::Refused)?;
+        let committed = batch.commit()?;
+        let stop_released_waiting = committed
+            .events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::StopReleasedWaiting { .. }));
+        let effects = committed.effects;
         self.say_owed_compaction()?;
         let told = effects
             .iter()
@@ -3670,9 +3712,10 @@ impl Actor {
             .count();
         let mut out = Outputs {
             changed: Changed {
-                conversation: false,
+                conversation: self.recorder.conversation_seq() != conversation_before,
                 status: true,
                 queue: true,
+                stop_released_waiting,
                 ..Changed::default()
             },
             ..Outputs::default()

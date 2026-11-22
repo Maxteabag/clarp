@@ -134,3 +134,76 @@ fn queued_items_and_mutation_events_keep_their_origin_and_resolve_the_current_se
 fn a_new_oracle_send_after_stop_runs_then_releases_what_waited() {
     a_fresh_send_releases_the_held_queue("oracle", true);
 }
+
+#[test]
+fn the_users_stop_starts_waiting_user_and_oracle_sends_in_order() {
+    let place = Place::new("stop-starts-user-waiting");
+    let host = place.start();
+    let target = host.new_agent("Receiver");
+    let sender = host.new_agent("Sender");
+    let sender_id = row_id(&host, &sender);
+    let events = host.listen();
+    host.send(&target, "sleep 60", "running");
+    wait_for("the target to be busy", || {
+        host.state(&target) == "thinking"
+    });
+    for (id, origin, sender) in [
+        ("agent", "agent", json!(sender_id)),
+        ("first", "user", Value::Null),
+        ("second", "oracle", Value::Null),
+        ("third", "user", Value::Null),
+    ] {
+        let queued = host.post(
+            "/send",
+            json!({
+                "session": target, "text": id, "client_msg_id": id,
+                "queue_if_busy": true, "origin": origin, "sender": sender,
+            }),
+        );
+        assert_eq!(queued["queued"], true, "{queued}");
+    }
+
+    let stopped = host.post("/stop", json!({"session": target, "actor": "agent:sender"}));
+    assert_eq!(stopped["terminated"], 1);
+    wait_for("the target to be stopped", || {
+        host.state(&target) == "interrupted"
+    });
+    let queue = || host.get(&format!("/turn-queue?session={target}"));
+    let held = queue();
+    assert_eq!(held["paused"], true);
+    assert_eq!(held["items"].as_array().unwrap().len(), 4);
+    assert_eq!(host.turns(&target).len(), 1);
+
+    // From an already-paused idle agent. Neither a new send nor Resume intervenes.
+    let stopped = host.post("/stop", json!({"session": target}));
+    assert_eq!(stopped["queue_paused"], true);
+    wait_for("the third released message to be answered", || {
+        host.conversation(&target)
+            .contains(&said("assistant", "third"))
+            && host.state(&target) == "done"
+    });
+    let rows = host.turns(&target);
+    let prompts: Vec<_> = rows
+        .iter()
+        .filter(|row| row["role"] == "user")
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(prompts, ["u-running", "u-first", "u-second", "u-third"]);
+    let held = queue();
+    assert_eq!(held["paused"], true);
+    assert_eq!(held["items"].as_array().unwrap().len(), 1);
+    assert_eq!(held["items"][0]["id"], "agent");
+    wait_for(
+        "the queue start to be broadcast with its remaining pause",
+        || {
+            events.lock().unwrap().iter().any(|event| {
+                event["type"] == "queue-updated"
+                    && event["session"] == target
+                    && event["client_msg_id"] == "third"
+                    && event["queue_started"] == true
+                    && event["queue_paused"] == true
+                    && event["queue_depth"] == 1
+            })
+        },
+    );
+}

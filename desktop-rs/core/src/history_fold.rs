@@ -298,7 +298,10 @@ fn turn(
     // A row sent without its tool calls lists one and counts them all.
     let unlisted: usize = members.iter().map(|m| (m.activity_count.max(0) as usize).saturating_sub(calls(m).count())).sum();
     let tool_count = listed + unlisted;
-    if !over || tool_count == 0 {
+    // A turn without tool calls folds too when it has work to fold (commentary or
+    // reasoning) and a time, as live folds it, so nothing reappears at the handover
+    // (#653); arrange decides, and without a work row history keeps its rows.
+    if !over {
         return None;
     }
     // Without a phase (an older row) the last text is the answer.
@@ -389,6 +392,9 @@ fn turn(
     }
     let shown: Vec<&Object> = items.iter().collect();
     let entries = live_present::arrange(&id, &summary, true, &shown, rows_of, &live_options);
+    if tool_count == 0 && !entries.iter().any(|e| e.kind == live_present::Kind::Fold) {
+        return None;
+    }
     let pieces: Vec<Piece> = entries.into_iter().map(|e| if e.row.is_empty() { Piece::Entry(e) } else { Piece::Row(e.row) }).collect();
     // Only rows in view ask for an explanation.
     let visible: HashSet<&str> = pieces.iter().filter_map(|p| if let Piece::Entry(e) = p { Some(e.key.as_str()) } else { None }).collect();

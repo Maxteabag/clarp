@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 129;
+pub const HOST_CONTRACT: u64 = 142;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -108,6 +108,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     // spec only for an exact client name at its minimum. Contract 111 adds per-client
     // negotiation and administrator export while retaining the original feature number.
     ("render_spec", 102),
+    ("render_spec_v2", 133),
+    ("render_spec_answered_button", 138),
     ("flat_artifact_responses", 1),
     ("artifacts", 1),
     // What an agent publishes: `POST /media`, an agent's gallery, a file fetched whole and
@@ -121,6 +123,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("html_form_network", 59),
     ("html_form_events", 51),
     ("html_form_reply_audio", 50),
+    ("form_answer_rows_hidden", 131),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
     ("provider_background_tasks", 24),
@@ -338,6 +341,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("compaction_outcome", 107),
     ("voice_profile", 109),
     ("voice_pool", 123),
+    ("voice_for_helpers", 135),
+    ("cross_origin_read", 139),
+    ("peer_snapshot", 140),
     ("voice_provider_maps", 122),
     ("speech_outcome", 109),
     ("pairing_identity", 114),
@@ -572,14 +578,6 @@ impl ApiError {
         Self {
             body: ErrorBody::Plain,
             ..Self::new(status, text)
-        }
-    }
-
-    /// What is answered under `error`, where it is more than words.
-    pub(crate) fn detail(&self) -> Option<&Value> {
-        match &self.body {
-            ErrorBody::Detail(detail) => Some(detail.as_ref()),
-            _ => None,
         }
     }
 }
@@ -1115,7 +1113,12 @@ fn asked(request: &Request) -> (bool, String) {
 
 /// Who is asking, by the token the request carries: in its header, in its cookie, or, from
 /// this machine, in its address.
-fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presented)> {
+fn who(
+    app: &App,
+    request: &Request,
+    local: bool,
+    header_only: bool,
+) -> Option<(Principal, Presented)> {
     let expected = &app.config.auth_token;
     if expected.is_empty() {
         // A Host without a token is open to this machine, and to nobody else.
@@ -1125,8 +1128,8 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
         // The administrator's token opens the Host only from the machine it runs on, and so
         // does what a turn was given for its agent's tools. From anywhere else a device
         // presents a token of its own, which can be taken away again.
-        if local && same_token(token, expected) {
-            return Some(Principal::Administrator);
+        if same_token(token, expected) {
+            return local.then_some(Principal::Administrator);
         }
         if local && same_token(token, &crate::tool_token(expected)) {
             return Some(Principal::Tools);
@@ -1142,6 +1145,9 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
     let text = |name| headers.get(name).and_then(|value| value.to_str().ok());
     if let Some(principal) = text(header::AUTHORIZATION).and_then(bearer).and_then(known) {
         return Some((principal, Presented::Header));
+    }
+    if header_only {
+        return None;
     }
     if let Some(principal) = text(header::COOKIE).and_then(cookie).and_then(known) {
         return Some((principal, Presented::Cookie));
@@ -1159,16 +1165,26 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     // Scope is decided on the raw path before route parameters are decoded.
     let path = request.uri().path().to_string();
+    let origins = &app.config.web_read_origins;
+    if request.method() == Method::OPTIONS {
+        return crate::cross_origin::preflight(&path, request.headers(), origins);
+    }
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
     let read = request.method() == Method::GET;
     let open = path == EXCHANGE || (read && (path == PAIRING_IDENTITY || picture));
     let (local, source) = asked(&request);
+    let listed = crate::cross_origin::from_listed_origin(request.headers(), origins);
+    let origin = if read && crate::cross_origin::read_path(&path) {
+        crate::cross_origin::response_origin(request.headers(), origins)
+    } else {
+        None
+    };
     let mut device = None;
     let mut response = if open {
         request.extensions_mut().insert(Asker { source });
         next.run(request).await
     } else {
-        match who(&app, &request, local) {
+        match who(&app, &request, local && !listed, listed) {
             None => {
                 let too_many = app
                     .door
@@ -1217,6 +1233,9 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
         .headers_mut()
         .entry(header::CACHE_CONTROL)
         .or_insert(HeaderValue::from_static("no-store"));
+    if let Some(origin) = origin {
+        crate::cross_origin::allow(response.headers_mut(), origin);
+    }
     response
 }
 
@@ -1443,16 +1462,18 @@ pub(crate) fn agent_row(
                 .map(wire::preview)
                 .unwrap_or_default()
         );
-        let at = newest.map_or(member.record.created_at_ms, |preview| {
-            preview.ts_ms.max(member.record.created_at_ms)
-        });
-        row["last_activity"] = json!(at / 1_000);
         if working.is_some_and(|with| with.audience() == clarp_kernel::coordination::AGENTS) {
             let headline =
                 clarp_kernel::hidden_coordination::working_headline(sender.map(|(_, name)| name));
             clarp_kernel::hidden_coordination::veil_activity(&mut row["activity"], &headline);
             clarp_kernel::hidden_coordination::veil_live(&mut row["live_activity"], &headline);
         }
+    }
+    if hides || view.newest_is_form_answer {
+        let at = newest.map_or(member.record.created_at_ms, |preview| {
+            preview.ts_ms.max(member.record.created_at_ms)
+        });
+        row["last_activity"] = json!(at / 1_000);
     }
     // Whether its tool's account is used up: advice for whoever is about to write to it.
     row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
@@ -2497,11 +2518,7 @@ async fn log(
         .include_automated
         .as_deref()
         .is_some_and(|said| matches!(said.to_lowercase().as_str(), "0" | "false" | "no"));
-    let which = if include_automated {
-        Which::All
-    } else {
-        Which::WithoutAutomated
-    };
+    let which = Which::chat(include_automated);
     // Only an agent that can leave a note for its user has rows for the agents.
     let hides = coordination::can_leave_note(
         &member.record.agent_id,
@@ -3291,7 +3308,7 @@ async fn send_as(
         // Where the queue stands with this message in it. A message that did not have to
         // wait says nothing about the queue: the Python Host answers zeros, and so does this.
         queue_depth: Some(if sent.queued {
-            sent.queue.waiting as u64
+            sent.queue.listed as u64
         } else {
             0
         }),
@@ -3680,6 +3697,7 @@ async fn queue(
     let directory = app.fleet.directory();
     let items: Vec<Value> = waiting
         .iter()
+        .filter(|item| !clarp_kernel::artifacts::forms::is_answer_delivery(&item.client_id))
         .map(|item| wire::queue_item(item, &directory))
         .collect();
     Ok(Json(json!({
@@ -3721,7 +3739,7 @@ async fn resume(
     let (_, state) = member.agent.resume("user".to_string()).await?;
     Ok(Json(json!({
         "session": member.record.session,
-        "count": state.waiting,
+        "count": state.listed,
         "paused": state.paused,
         "revision": state.revision,
     })))

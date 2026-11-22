@@ -160,3 +160,20 @@ def apply(report: dict[str, Any], *, reviewed: str) -> dict[str, Any]:
             settings_store.set_text(key, json.dumps(current, sort_keys=True, separators=(",", ":")))
         written += [f"{setting} {agent_id}" for agent_id in additions]
     return {"written": written, "refused_audible": refused}
+
+
+def apply_at_start(cfg=None) -> dict[str, Any] | None:
+    """At Host start, before any request: the rows with no audible change are brought to the
+    one shape, the same rows ``--apply`` writes. The plan and the write are made in the same
+    moment with nothing running between them, so the plan's own digest is the reviewed one.
+    A row that would sound different under any provider is left as it is and logged by name:
+    it stays the owner's to decide. None when there was nothing to do."""
+    from .log import log
+    report = plan(cfg)
+    if not report["voices"] and not any(report["transcription"][k] for k in ("engines", "languages")):
+        return None
+    result = apply(report, reviewed=report["digest"])
+    log("voiceShapeMigrated", f"written={len(result['written'])} "
+        f"audible_left={len(result['refused_audible'])}"
+        + "".join(f" left={name!r}" for name in result["refused_audible"]))
+    return result

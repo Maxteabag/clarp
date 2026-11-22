@@ -8,6 +8,9 @@
 //! folder, answers the list empty, refuses every change in one sentence and writes nothing,
 //! at a request or at its start.
 
+use std::collections::BTreeSet;
+use std::io::{self, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -19,6 +22,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use clarp_kernel::managed_skills::{self as rules, Act, At, Facts, Link, Malformed, Root};
 use clarp_kernel::recovery::Accounts;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::config::{Config, home};
@@ -129,7 +133,7 @@ impl Shelf {
     }
 
     /// The rows of `GET /managed-skills`.
-    fn status(&self, chosen: &[String]) -> Result<Vec<Value>, Malformed> {
+    fn status(&self, off: &[String]) -> Result<Vec<Value>, Malformed> {
         let roots = self.read_roots();
         let mut rows = Vec::new();
         for item in self.items()? {
@@ -140,7 +144,7 @@ impl Shelf {
                 .collect();
             let facts = Facts {
                 links,
-                enabled: chosen.contains(&skill),
+                enabled: rules::enabled(&item, &skill, off),
                 source: self.has_source(&skill),
                 requirements: rules::requirements(&item, &mut |name: &str| on_path(name))?,
             };
@@ -293,22 +297,53 @@ fn on_path(name: &str) -> bool {
     path.split(':').any(|dir| runs(&Path::new(dir).join(name)))
 }
 
-/// The chosen list in the store, when the first one has been taken.
-fn chosen(app: &App) -> Option<Vec<String>> {
-    let kept = app
-        .fleet
-        .directory()
-        .setting(rules::CHOSEN_SETTING)
-        .map(str::to_owned)?;
-    Some(serde_json::from_str(&kept).unwrap_or_default())
+/// This Host's install record. The previous Host's file is a read-only seed.
+#[derive(Default, Deserialize, Serialize)]
+#[serde(default)]
+struct InstallState {
+    skills: Vec<String>,
+    skills_off: Vec<String>,
 }
 
-async fn keep_chosen(app: &App, chosen: &[String]) -> Result<(), ApiError> {
-    let kept = serde_json::to_string(chosen).unwrap_or_else(|_| "[]".to_owned());
-    app.fleet
-        .set(vec![(rules::CHOSEN_SETTING.to_owned(), kept)])
-        .await?;
-    Ok(())
+impl InstallState {
+    fn load(path: &Path, seed: Option<&Path>) -> io::Result<Self> {
+        match std::fs::read(path) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let other = seed
+                    .and_then(|file| std::fs::read(file).ok())
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+                Ok(Self {
+                    skills_off: rules::first_off(other.as_ref()),
+                    ..Self::default()
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn keep(&self, path: &Path) -> io::Result<()> {
+        let beside = path.with_file_name(format!(".install.json.{}.next", crate::ids::hex(8)));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&beside)?;
+        let write = (|| {
+            serde_json::to_writer(&mut file, self)?;
+            file.write_all(b"\n")?;
+            file.sync_all()?;
+            std::fs::rename(&beside, path)
+        })();
+        if write.is_err() {
+            let _ = std::fs::remove_file(beside);
+        }
+        write
+    }
+}
+
+fn disk_error(error: io::Error) -> ApiError {
+    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
 }
 
 fn refused(code: &str, why: &str) -> Response {
@@ -333,9 +368,16 @@ async fn list(State(app): State<App>) -> Result<Json<Value>, ApiError> {
     let Some(shelf) = Shelf::of(&app.config) else {
         return Ok(Json(json!({ "skills": [] })));
     };
-    let chosen = chosen(&app).unwrap_or_default();
-    let rows = blocking(move || shelf.status(&chosen)).await?;
-    let rows = rows.map_err(|Malformed| unavailable())?;
+    let _one = app.skill_links.lock().await;
+    let path = app.config.data_dir.join("install.json");
+    let seed = app.config.skills_chosen_before.clone();
+    let rows = blocking(move || {
+        let state = InstallState::load(&path, seed.as_deref()).map_err(disk_error)?;
+        shelf
+            .status(&state.skills_off)
+            .map_err(|Malformed| unavailable())
+    })
+    .await??;
     Ok(Json(json!({ "skills": rows })))
 }
 
@@ -363,107 +405,84 @@ async fn change(State(app): State<App>, body: Bytes) -> Response {
 }
 
 async fn changed(app: &App, shelf: Shelf, skill: String, enabled: bool) -> Result<Value, ApiError> {
-    // One change at a time: each reads the folders and the list it then writes.
     let _one = app.skill_links.lock().await;
-    let before = chosen(app).unwrap_or_default();
-    let worked = blocking(move || {
-        let items = shelf.items()?;
-        let item = rules::entry(&items, &skill)?.cloned();
+    let path = app.config.data_dir.join("install.json");
+    let seed = app.config.skills_chosen_before.clone();
+    blocking(move || {
+        let items = shelf.items().map_err(|Malformed| unavailable())?;
+        let item = rules::entry(&items, &skill).map_err(|Malformed| unavailable())?;
+        let mut state = InstallState::load(&path, seed.as_deref()).map_err(disk_error)?;
         let roots: Vec<(Root, Link)> = shelf
             .written_roots()
             .into_iter()
             .map(|root| (root, shelf.link(root, &skill)))
             .collect();
-        let decided = rules::change(
-            item.as_ref(),
-            &skill,
-            enabled,
-            shelf.has_source(&skill),
-            &roots,
-        );
-        let acts = match decided {
-            Ok(acts) => acts,
-            Err(refusal) => {
+        let acts = rules::change(item, &skill, enabled, shelf.has_source(&skill), &roots).map_err(
+            |refusal| {
                 let words = refusal.words(&|root| text(&shelf.place(root, &skill)));
-                return Ok(Err(ApiError::new(StatusCode::CONFLICT, words)));
-            }
-        };
-        let undo = match shelf.apply(&skill, &acts) {
-            Ok(undo) => undo,
-            Err(error) => {
-                let why = error.to_string();
-                return Ok(Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, why)));
-            }
-        };
-        let told = rules::changed(&item.unwrap_or_default(), enabled);
-        Ok::<_, Malformed>(Ok((told, undo, skill)))
+                ApiError::new(StatusCode::CONFLICT, words)
+            },
+        )?;
+        state.skills_off = rules::chosen_after(&state.skills_off, &skill, !enabled);
+        state.skills =
+            rules::enrolled(&state.skills_off, &items).map_err(|Malformed| unavailable())?;
+        let undo = shelf.apply(&skill, &acts).map_err(disk_error)?;
+        if let Err(error) = state.keep(&path) {
+            undo.run();
+            return Err(disk_error(error));
+        }
+        Ok(rules::changed(item.unwrap_or(&Value::Null), enabled))
     })
-    .await?;
-    let (told, undo, skill) = worked.map_err(|Malformed| unavailable())??;
-    let after = rules::chosen_after(&before, &skill, enabled);
-    if let Err(error) = keep_chosen(app, &after).await {
-        // The list could not be kept: the links go back to how they were.
-        let _ = blocking(move || undo.run()).await;
-        return Err(error);
-    }
-    Ok(told)
+    .await?
 }
 
-/// At the start of a Host that keeps the machine's tools: the chosen list is taken the first
-/// time (the other Host's, else the release's defaults), the core skills a newer release
-/// brought are chosen, and every chosen skill is linked to this release where nothing or
-/// another release's link is. A Host that does not keep the tools does nothing here.
+/// Reconcile the shipped skill tree at every start of the Host that keeps the tools.
 pub async fn at_start(app: &App) {
     let Some(shelf) = Shelf::of(&app.config) else {
         return;
     };
-    let before_file = app.config.skills_chosen_before.clone();
-    let kept = chosen(app);
-    let was = kept.clone();
-    let worked = tokio::task::spawn_blocking(move || {
-        let items = shelf.items()?;
-        let first = match kept {
-            Some(kept) => kept,
-            None => {
-                let other = before_file
-                    .and_then(|file| std::fs::read(file).ok())
-                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
-                rules::first_chosen(other.as_ref(), &items)?
-            }
-        };
-        let chosen = rules::enrolled(&first, &items)?;
+    let _one = app.skill_links.lock().await;
+    let path = app.config.data_dir.join("install.json");
+    let seed = app.config.skills_chosen_before.clone();
+    let worked = blocking(move || {
+        let items = shelf.items().map_err(|Malformed| unavailable())?;
+        let mut state = InstallState::load(&path, seed.as_deref()).map_err(disk_error)?;
+        state.skills =
+            rules::enrolled(&state.skills_off, &items).map_err(|Malformed| unavailable())?;
         let roots = shelf.written_roots();
-        let mut failed = Vec::new();
-        for skill in &chosen {
-            let in_release = rules::entry(&items, skill)?.is_some() && shelf.has_source(skill);
+
+        // Include links left by old releases even when they are absent from the previous
+        // on-list. Link ownership is checked before any of them can be removed.
+        let mut candidates: BTreeSet<String> = state.skills.iter().cloned().collect();
+        for root in &roots {
+            if let Ok(entries) = std::fs::read_dir(shelf.folder(*root)) {
+                candidates.extend(entries.flatten().filter_map(|entry| {
+                    if entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+                        entry.file_name().into_string().ok()
+                    } else {
+                        None
+                    }
+                }));
+            }
+        }
+        for skill in candidates {
+            let enabled = state.skills.contains(&skill) && shelf.has_source(&skill);
             let acts: Vec<(Root, Act)> = roots
                 .iter()
-                .map(|root| (*root, rules::at_start(shelf.link(*root, skill), in_release)))
+                .map(|root| (*root, rules::at_start(shelf.link(*root, &skill), enabled)))
                 .collect();
-            if let Err(error) = shelf.apply(skill, &acts) {
-                failed.push(format!("{skill}: {error}"));
+            if let Err(error) = shelf.apply(&skill, &acts) {
+                eprintln!("clarp-host: a skill could not be linked: {skill}: {error}");
             }
         }
-        Ok::<_, Malformed>((chosen, failed))
+        state.keep(&path).map_err(disk_error)
     })
     .await;
-    match worked {
-        Ok(Ok((chosen, failed))) => {
-            for why in failed {
-                eprintln!("clarp-host: a skill could not be linked: {why}");
-            }
-            if was.as_ref() == Some(&chosen) {
-                return;
-            }
-            if let Err(error) = keep_chosen(app, &chosen).await {
-                eprintln!(
-                    "clarp-host: the chosen skills were not kept: {}",
-                    error.message()
-                );
-            }
-        }
-        Ok(Err(Malformed)) => eprintln!("clarp-host: {}", rules::UNAVAILABLE),
-        Err(error) => eprintln!("clarp-host: the skills were not linked: {error}"),
+    if let Err(error) = worked.and_then(|result| result) {
+        eprintln!(
+            "clarp-host: the skills were not reconciled: {}",
+            error.message()
+        );
     }
 }
 

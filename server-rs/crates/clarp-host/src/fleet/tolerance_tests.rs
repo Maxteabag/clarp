@@ -308,29 +308,31 @@ async fn a_record_that_cannot_be_read_is_left_out_kept_as_it_was_and_counted() {
 #[tokio::test]
 async fn the_owners_write_to_a_key_that_was_left_out_repairs_it_and_nothing_else_writes_it() {
     let place = Place::new("repaired");
+    let near = "other-fixture-token";
     let mut store = place.store();
-    store.put(PEERS, "far", NO_JSON).unwrap();
-    store.put(PEERS, "near", NO_JSON).unwrap();
+    store.put(PUSH, TOKEN, NO_JSON).unwrap();
+    store.put(PUSH, near, NO_JSON).unwrap();
     drop(store);
     let fleet = place.start();
-    assert_eq!(counts(&fleet).get("peer"), Some(&2));
-    // The owner names the peer again: that write is the repair, said, and no longer counted.
-    let (url, token) = ("http://far.invalid".to_string(), "t".to_string());
+    assert_eq!(counts(&fleet).get("push"), Some(&2));
+    // Registering the same token rewrites just its damaged record and clears its count.
     fleet
-        .peer_add("far".to_string(), url, token)
+        .push_register(PushRegistration {
+            token: TOKEN.to_string(),
+            ..PushRegistration::default()
+        })
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(counts(&fleet).get("peer"), Some(&1));
+    assert_eq!(counts(&fleet).get("push"), Some(&1));
     let said = place.said();
     assert!(
         said.iter()
-            .any(|s| s.ends_with("could not be read was written anew: far")),
+            .any(|s| s.contains("kind push that could not be read was written anew:")),
         "{said:?}"
     );
-    // The other is as it was.
     assert_eq!(
-        place.store().get(PEERS, "near").unwrap().as_deref(),
+        place.store().get(PUSH, near).unwrap().as_deref(),
         Some(NO_JSON)
     );
 }

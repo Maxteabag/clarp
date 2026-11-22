@@ -429,21 +429,26 @@ fn agent_moved_records_decision_and_form_answers_without_delivering_until_return
         json!([])
     );
     assert_eq!(change(&host, &session, Value::Null).0, 200);
-    let requests = || {
-        host.conversation(&session)
-            .into_iter()
-            .filter_map(|(role, text)| (role == "user").then_some(text))
-            .collect::<Vec<_>>()
-    };
     wait_for("both saved answers to be delivered on return", || {
-        requests().len() == 2
-    });
-    assert!(
-        requests()
+        host.turns(&session)
             .iter()
-            .any(|text| text.contains("[Clarp decision resolved]"))
+            .filter(|row| row["role"] == "assistant")
+            .count()
+            == 2
+    });
+    let rows = host.turns(&session);
+    assert!(rows.iter().any(|row| {
+        row["role"] == "user"
+            && row["text"]
+                .as_str()
+                .unwrap()
+                .contains("[Clarp decision resolved]")
+    }));
+    assert!(
+        rows.iter().any(
+            |row| row["role"] == "assistant" && row["text"].as_str().unwrap().contains("Route")
+        )
     );
-    assert!(requests().iter().any(|text| text.contains("Bridge")));
 }
 
 #[test]

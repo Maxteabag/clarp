@@ -201,7 +201,7 @@ fn every_row_of_the_status_is_the_references_row() {
     let cases = vectors();
     let mut counted: HashMap<String, usize> = HashMap::new();
     for run in cases["status"].as_array().unwrap() {
-        let chosen = texts(&run["chosen"]);
+        let off = texts(&run["off"]);
         let present = texts(&run["present"]);
         let items = run["manifest"].as_array().unwrap();
         let rows = run["rows"].as_array().unwrap();
@@ -225,7 +225,7 @@ fn every_row_of_the_status_is_the_references_row() {
             let mut found = which(&run["found"]);
             let facts = Facts {
                 links,
-                enabled: chosen.contains(&id),
+                enabled: skills::enabled(item, &id, &off),
                 source: present.contains(&id),
                 requirements: skills::requirements(item, &mut found).unwrap(),
             };
@@ -285,6 +285,7 @@ fn a_change_does_in_each_folder_what_the_reference_does() {
                 assert_eq!(refusal.words(&place), case["result"][1], "{case}");
                 assert_eq!(case["after"], case["before"], "{case}");
                 assert_eq!(case["chosen_after"], case["chosen"], "{case}");
+                assert_eq!(case["off_after"], case["off"], "{case}");
                 refused += 1;
             }
             ("ok", Ok(acts)) => {
@@ -317,6 +318,8 @@ fn a_change_does_in_each_folder_what_the_reference_does() {
                 }
                 let after = skills::chosen_after(&chosen, skill, enabled);
                 assert_eq!(json!(after), case["chosen_after"], "{case}");
+                let off = skills::chosen_after(&texts(&case["off"]), skill, !enabled);
+                assert_eq!(json!(off), case["off_after"], "{case}");
                 done += 1;
             }
             (_, outcome) => panic!("{outcome:?} for {case}"),
@@ -370,36 +373,21 @@ fn a_start_links_the_chosen_skills_and_leaves_what_is_not_clarps() {
         json!({"id": "o1", "pack": "optional"}),
         json!({"id": "c0", "pack": "core"}),
     ];
-    // With nothing to take over: the Python Host's setup's choice.
+    let all = ["a1", "a2", "a3", "c0", "c1", "o1"];
+    assert!(skills::first_off(None).is_empty());
+    assert_eq!(skills::enrolled(&[], &items).unwrap(), all);
+    let legacy = json!({"skills": ["o1", "gone"]});
+    assert!(skills::first_off(Some(&legacy)).is_empty());
+
+    let other = json!({"skills": ["gone"], "skills_off": ["o1", "c1", "o1", "a1"]});
+    let off = skills::first_off(Some(&other));
+    assert_eq!(off, ["a1", "c1", "o1"]);
     assert_eq!(
-        skills::first_chosen(None, &items).unwrap(),
-        ["a1", "c0", "c1"]
-    );
-    let empty = json!({"channel": "stable"});
-    assert_eq!(
-        skills::first_chosen(Some(&empty), &items).unwrap(),
-        ["a1", "c0", "c1"]
-    );
-    // The other Host's list, as it is: nothing added, doubles and non-texts dropped.
-    let other = json!({"skills": ["o1", 5, "o1", "gone"]});
-    assert_eq!(
-        skills::first_chosen(Some(&other), &items).unwrap(),
-        ["gone", "o1"]
-    );
-    let none = json!({"skills": []});
-    assert!(
-        skills::first_chosen(Some(&none), &items)
-            .unwrap()
-            .is_empty()
-    );
-    // A start enrols the core skills a newer release brought.
-    let chosen = ["o1".to_owned(), "gone".to_owned()];
-    assert_eq!(
-        skills::enrolled(&chosen, &items).unwrap(),
-        ["c0", "c1", "gone", "o1"]
+        skills::enrolled(&off, &items).unwrap(),
+        ["a2", "a3", "c0", "c1"]
     );
     assert_eq!(
-        skills::enrolled(&chosen, &[json!({"pack": "core"})]),
+        skills::enrolled(&off, &[json!({"pack": "core"})]),
         Err(Malformed)
     );
     for (link, in_release, act) in [
@@ -408,6 +396,7 @@ fn a_start_links_the_chosen_skills_and_leaves_what_is_not_clarps() {
         (Link::Healthy, true, Act::Leave),
         (Link::Modified, true, Act::Leave),
         (Link::Outdated, false, Act::Unlink),
+        (Link::Healthy, false, Act::Unlink),
         (Link::Missing, false, Act::Leave),
         (Link::Modified, false, Act::Leave),
     ] {

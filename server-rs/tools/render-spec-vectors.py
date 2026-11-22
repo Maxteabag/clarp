@@ -268,7 +268,7 @@ def payload_cases():
     case('another catalog', put(['catalog'], 'other'))
     case('a catalog that is a number', put(['catalog'], 1))
     case('a catalog that is a list', put(['catalog'], ['clarp.form']))
-    case('catalog version 2', put(['catalog_version'], 2))
+    case('catalog version 3', put(['catalog_version'], 3))
     case('catalog version as text', put(['catalog_version'], '1'))
     case('catalog version true', put(['catalog_version'], True))
     case('catalog version null', put(['catalog_version'], None))
@@ -710,11 +710,13 @@ def clients():
                'ios/12 contract=7' + chr(0x664), '_os/12 contract=74', 'i.s/12 contract=74', 'ios/1 2 contract=74']
     # Each client by its own name, matched exactly (its PR 474): another platform, one written in
     # another case, one whose name only begins as iOS's.
-    headers += ['android/5 contract=74', 'android/5 contract=30', 'desktop/1 contract=200', 'web/1 contract=99',
+    headers += ['android/5 contract=74', 'android/5 contract=30',
+                'android/1058 contract=40', 'android/1058 contract=41', 'Android/1058 contract=41', 'desktop/1 contract=200',
+                'web/1 contract=0', 'web/1 contract=1', 'web/1 contract=99', 'Web/1 contract=1',
                 'Watch/1 contract=99', 'IOS/12 contract=74', 'Ios/12 contract=74', 'ios2/12 contract=74']
     # A single number is iOS's minimum; a table, the owner's, laid over the default (0: never).
     minimums = [None, -1, 0, 1, 74, 75, 999999999, 1000000000,
-                {}, {'ios': 80}, {'ios': 0}, {'android': 30}, {'android': 0}, {'desktop': 1, 'web': 5},
+                {}, {'ios': 80}, {'ios': 0}, {'android': 30}, {'android': 0}, {'desktop': 1, 'web': 5}, {'web': 0},
                 {'Watch': 1, 'ios': 74}, {'IOS': 1}]
     # A table that names each unusual platform above by its own name: whether the header's form
     # is one a client may send decides then, not the want of a minimum.
@@ -734,6 +736,154 @@ def messages():
         for given in answers:
             out.append(({'title': title, 'artifact_id': 'vector-message'},
                         {'version': 'v' + chr(0xf8), 'submission_id': SID, 'answers': given}))
+    return out
+
+
+# ---- catalog version 2 -------------------------------------------------------------------------------------------
+
+def form_v2(rs, identity, refusal):
+    """The shared fixture and focused single-rule changes, as the reference judges them."""
+    base = json.loads((REPO / 'tests/fixtures/render_spec/deploy-v2.json').read_text())
+    def changed(path, value):
+        item = copy.deepcopy(base)
+        target = item
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        return item
+
+    chart = ['spec', 'elements', 'lat', 'props']
+    table = ['spec', 'elements', 'cmp', 'props']
+    points = [*chart, 'series', 0, 'points']
+    action = ['answer_schema', 'properties', 'action']
+    cases = [
+        ('shared example', base),
+        ('action enum order is immaterial', changed([*action, 'enum'], ['hold', 'ship'])),
+        ('a button form has no footer', changed(['submit'], {'label': 'Send', 'intent': 'send'})),
+        ('action rejects other schema keywords', changed([*action, 'minLength'], 1)),
+        ('action must be required', changed(['answer_schema', 'required'], [])),
+        ('action cannot be bound', changed(['spec', 'elements', 'note', 'props', 'value'], {'$bindState': '/action'})),
+        ('duplicate actions by element name', changed(['spec', 'elements', 'ship', 'props', 'action'], 'hold')),
+        ('all x values have one kind', changed([*points, 1, 'x'], 42)),
+        ('x is a string or integer', changed([*points, 1, 'x'], True)),
+        ('duplicate x', changed([*points, 1, 'x'], 'Mon')),
+        ('decreasing numeric x', changed([*chart, 'series'], [{'name': 'One', 'points': [{'x': 3, 'y': 1}, {'x': 2, 'y': 2}]}])),
+        ('negative pie point', changed([*chart], {'kind': 'pie', 'series': [{'name': 'One', 'points': [{'x': 1, 'y': -1}]}]})),
+        ('a pie with two series', changed([*chart, 'kind'], 'pie')),
+        ('duplicate series names', changed([*chart, 'series', 1, 'name'], 'before')),
+        ('names before pie count', changed(chart, {'kind': 'pie', 'series': [
+            {'name': 'One', 'points': [{'x': 1, 'y': 2}]},
+            {'name': 'One', 'points': [{'x': 2, 'y': 1}]},
+        ]})),
+        ('series name equality is exact', changed([*chart, 'series', 1, 'name'], 'Before')),
+        ('a bar with too many points', changed([*chart], {'kind': 'bar', 'series': [{'name': 'One', 'points': [{'x': i, 'y': 1} for i in range(61)]}]})),
+        ('points above chart total', changed([*chart, 'series'], [
+            {'name': str(j), 'points': [{'x': i, 'y': 1} for i in range(151)]} for j in range(4)])),
+        ('decimals within limits', changed([*chart, 'decimals'], 6)),
+        ('decimals outside limits', changed([*chart, 'decimals'], 7)),
+        ('table column decimals', changed([*table, 'columns', 1, 'decimals'], 1)),
+        ('table null cell', changed([*table, 'rows', 0, 'ok'], None)),
+        ('table rejects an object cell', changed([*table, 'rows', 0, 'ok'], {'bad': True})),
+        ('table checks a schema before a row key', changed([*table, 'rows', 0, 'bad'], {'bad': True})),
+        ('table unknown row key', changed([*table, 'rows', 0, 'bad'], True)),
+        ('table duplicate column', changed([*table, 'columns', 1, 'key'], 'host')),
+        ('table size', changed([*table], {'columns': [{'key': f'c{i}', 'label': str(i)} for i in range(6)], 'rows': [{}] * 167})),
+    ]
+    out = []
+    for name, payload in cases:
+        given = {'kind': 'payload', 'name': name, 'payload': payload}
+        try:
+            rs.validate(payload)
+        except rs.Refusal as error:
+            given['refused'] = refusal(error)
+        else:
+            given['stored'] = {**payload, 'content_identity': rs.content_identity(payload['spec'], payload['version']),
+                               'element_count': len(payload['spec']['elements']), 'catalog_sha256': rs.catalog(2).sha256}
+        out.append(given)
+    artifact = {'artifact_id': 'release-example', 'title': 'Decide'}
+    for intent, state in [('button', {'action': 'ship', 'note': 'ready'}),
+                          ('send', {'action': 'ship'}), ('button', {}), ('button', {'action': 'other'})]:
+        answer = {'submission_id': SID, 'version': base['version'], 'answers': {'intent': intent, 'state': state}}
+        given = {'kind': 'answer', 'artifact': artifact, 'payload': base, 'answer': answer}
+        try:
+            result = rs.admit(artifact['artifact_id'], base, 'ready', answer, None)
+        except rs.Refusal as error:
+            given['refused'] = refusal(error)
+        else:
+            given['admitted'] = result
+            given['message'] = rs.message_text(artifact, answer, base)
+        out.append(given)
+    out.extend(answered_buttons(base))
+    for header, v1, v2 in [
+            ('ios/12 contract=74', None, None),
+            ('ios/12 contract=74', None, {'ios': 74}),
+            ('ios/12 contract=74', None, {'ios': 75}),
+            ('ios/12 contract=74', {'ios': 0}, {'ios': 1}),
+            ('ios/12 contract=73', None, {'ios': 1}),
+            ('ios/12 contract=75', None, {'ios': 0}),
+            ('IOS/12 contract=75', None, {'ios': 1}),
+            ('web/1 contract=1', None, None),
+            ('web/1 contract=2', None, None),
+            ('web/1 contract=2', {'web': 1}, {'web': 0}),
+            ('desktop/1 contract=2', None, {'desktop': 2}),
+            ('android/1058 contract=40', None, None),
+            ('android/1058 contract=41', None, None),
+            ('android/1058 contract=41', None, {'android': 41}),
+            ('android/1058 contract=42', None, None),
+            ('android/1058 contract=42', None, {'android': 43}),
+            ('android/1058 contract=42', None, {'android': 0}),
+            ('android/1058 contract=42', {'android': 0}, None),
+            ('Android/1058 contract=42', None, None),
+    ]:
+        out.append({'kind': 'level', 'header': header, 'v1': v1, 'v2': v2,
+                    'level': identity.render_spec_level(header, v1, v2)})
+    return out
+
+
+def answered_buttons(base):
+    from sqlite3 import connect, Row
+    from unittest.mock import patch
+
+    from lib import render_spec_store
+    from lib.persistence.schema_parts.html_forms import SCHEMA
+
+    def submission(id, created_at, action):
+        return dict(submission_id=id, created_at=created_at, version=base['version'],
+                    payload_hash='fixture', synthesize_audio=False,
+                    answers={'intent': 'button', 'state': {'action': action}})
+
+    hold = submission('a', 10, 'hold')
+    ship = submission('z', 20, 'ship')
+    plain = {**base, 'spec': {'elements': {}}}
+    cases = [
+        ('still ready', 'ready', base, [hold]),
+        ('no accepted submission', 'completed', base, []),
+        ('earliest timestamp wins', 'completed', base, [ship, hold]),
+        ('earliest id breaks a tie', 'completed', base, [{**ship, 'created_at': 10}, hold]),
+        ('earliest unknown action stays absent', 'completed', base, [hold, submission('b', 1, 'other')]),
+        ('v1 has no answered button', 'completed', BASE, [hold]),
+        ('no buttons', 'completed', plain, [hold]),
+    ]
+    out = []
+    with connect(':memory:') as conn:
+        conn.row_factory = Row
+        conn.executescript('CREATE TABLE artifacts (artifact_id TEXT PRIMARY KEY);' + SCHEMA)
+        with patch.object(render_spec_store.db, 'conn', return_value=conn):
+            for number, (name, status, payload, entries) in enumerate(cases):
+                id = f'form-{number}'
+                conn.execute('DELETE FROM form_submissions')
+                conn.execute('INSERT INTO artifacts VALUES (?)', (id,))
+                conn.executemany(
+                    'INSERT INTO form_submissions '
+                    '(submission_id, artifact_id, version, session, answers_json, payload_hash, prompt, created_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [(entry['submission_id'], id, entry['version'], 'fixture', dumps(entry['answers']),
+                      entry['payload_hash'], '', entry['created_at']) for entry in entries],
+                )
+                item = dict(artifact_id=id, status=status, type='render_spec')
+                out.append(dict(kind='answered_button', name=name, item=item,
+                                payload=payload, submissions=entries,
+                                fields=render_spec_store.answered_button(item, payload)))
     return out
 
 
@@ -1091,6 +1241,8 @@ def run(root) -> dict:
                          'capable': server_identity.render_spec_capable(client['header'], wire['development_minimum']),
                          'wire': client['capable']})
 
+        v2 = form_v2(rs, server_identity, refusal)
+
         # Catalogs of this program's own.
         loaded = []
         place = root / 'catalogs'
@@ -1138,7 +1290,7 @@ def run(root) -> dict:
             'probes': [dumps(probe) for probe in probes()],
             'without_a_catalog': without, 'canonical': canonical, 'reads': reads, 'payloads': payloads,
             'answers': answers, 'flows': flows, 'messages': told, 'clients': seen, 'catalogs': loaded,
-            'envelopes': envelopes, 'texts': unstorable, 'sentence': request_texts.SENTENCE}
+            'envelopes': envelopes, 'texts': unstorable, 'form_v2': v2, 'sentence': request_texts.SENTENCE}
 
 
 def main() -> int:
@@ -1154,7 +1306,7 @@ def main() -> int:
     lines = ['{']
     for name in ('what', 'catalog_sha256', 'identifiers', 'probes', 'without_a_catalog', 'canonical', 'sentence'):
         lines.append(f' {json.dumps(name)}: {json.dumps(said[name], ensure_ascii=True)},')
-    sections = ('reads', 'payloads', 'answers', 'flows', 'messages', 'clients', 'catalogs', 'envelopes', 'texts')
+    sections = ('reads', 'payloads', 'answers', 'flows', 'messages', 'clients', 'catalogs', 'envelopes', 'texts', 'form_v2')
     for number, name in enumerate(sections):
         lines.append(f' {json.dumps(name)}: [')
         items = said[name]

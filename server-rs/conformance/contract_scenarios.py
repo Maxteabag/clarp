@@ -123,19 +123,18 @@ SCENARIOS = [
     },
     {
         'id': 'stop-with-queue',
-        'what': 'a Stop while a message waits: the turn ends, the queue is held, a resume runs it',
+        'what': 'the user's Stop starts the user's and Oracle's waiting messages, leaving other work held',
         'steps': [
             send(SLOW + 'synthetic task to stop', 'first'),
             {'op': 'wait_busy', 'busy': True},
-            send('synthetic held golf', 'golf', queue_if_busy=True),
+            send('synthetic background', 'background', origin='automation', queue_if_busy=True),
+            send('synthetic waiting golf', 'golf', queue_if_busy=True),
+            send('synthetic waiting hotel', 'hotel', origin='oracle', queue_if_busy=True),
             post('/stop', {'session': AGENT}),
-            {'op': 'wait_busy', 'busy': False},
-            {'op': 'quiesce', 'held': True},
-            QUEUE,
-            SNAPSHOT,
-            post('/turn-queue/resume', {'session': AGENT}),
             {'op': 'wait_reply', 'after': 'u-golf'},
-            {'op': 'quiesce'},
+            {'op': 'wait_reply', 'after': 'u-hotel'},
+            {'op': 'quiesce', 'held': True},
+            SNAPSHOT,
             LOG,
             QUEUE,
         ],
@@ -159,13 +158,13 @@ SCENARIOS = [
     {
         'id': 'delivery-of-a-held-send',
         'what': "what a user's plain send to a busy agent is shown of its delivery (send_delivery_state, the "
-                "Python Host's PR 462): pending until its tool is launched, the user's Stop holds it and fences it, "
+                "Python Host's PR 462): pending until its tool is launched, a maintenance Stop holds it and fences it, "
                 'a resume runs it and it is handed over; the feed of the sends, from the start',
         'steps': [
             send(SLOW + 'synthetic task to stop', 'papa'),
             {'op': 'wait_busy', 'busy': True},
             send('synthetic held quebec', 'quebec'),
-            post('/stop', {'session': AGENT}),
+            post('/stop', {'session': AGENT, 'actor': 'maintenance'}),
             {'op': 'wait_busy', 'busy': False},
             {'op': 'quiesce', 'held': True},
             get(f'/log?session={AGENT}&delivery_since=0'),
@@ -899,9 +898,10 @@ SCENARIOS.append({
         answers('report-1', ANSWERS_ONE, {}, 'answers to a report', version='v1'),
         LOG,
         # Answers that fit: a receipt, and the agent is told them as what its user said.
+        {'op': 'mark_reply'},
         answers('form-1', ANSWERS_ONE, {'when': 'now', 'budget': 12.5, 'notes': 'synthetic, "quoted" æøå',
                                         'steps': ['a', 'b']}, 'answers that fit', synthesize_audio=False),
-        {'op': 'wait_reply', 'after': f'u-html-form-{ANSWERS_ONE}'},
+        {'op': 'wait_form_reply'},
         {'op': 'quiesce'},
         LOG,
         answers('form-1', ANSWERS_ONE, {'steps': ['a', 'b'], 'notes': 'synthetic, "quoted" æøå', 'budget': 12.5,
@@ -1075,10 +1075,11 @@ def spec_doors():
         spec_answers('no-such-spec', SPEC_ANSWER_ONE, 'answers to nothing'),
         LOG,
         # The first answers that fit: a receipt, and the agent is told them as what its user said.
+        {'op': 'mark_reply'},
         spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers that fit',
                      state={'choice': 'send', 'notify': True, 'answer': 'synthetic, "quoted" æøå'},
                      synthesize_audio=False),
-        {'op': 'wait_reply', 'after': f'u-html-form-{SPEC_ANSWER_ONE}'},
+        {'op': 'wait_form_reply'},
         {'op': 'quiesce'},
         LOG,
         spec_answers('spec-1', SPEC_ANSWER_ONE, 'the same answers again',
@@ -1098,8 +1099,9 @@ def spec_doors():
         spec('spec-4', 'a spec to put away'),
         {**as_client(post('/artifacts/spec-4/archive', {'archived': True}, 'put it away'), AT),
          'body_from_last': {'expected_updated_at': 'artifact.updated_at'}},
+        {'op': 'mark_reply'},
         spec_answers('spec-4', 'synthetic-answer-0004', 'answers to a spec put away'),
-        {'op': 'wait_reply', 'after': 'u-html-form-synthetic-answer-0004'},
+        {'op': 'wait_form_reply'},
         {'op': 'quiesce'},
         spec('spec-5', 'a spec to withdraw'),
         {**as_client(post('/artifacts/spec-5/discard', {}, 'withdraw it'), AT),
@@ -2154,12 +2156,22 @@ SCENARIOS.append({
     ],
 })
 
+RING_SPEECH = (
+    '[tts]\nprovider = "cartesia"\nfallback = "none"\n'
+    '[network]\nadvertise_lan = false\n'
+    '[cartesia]\napi_key = "replay-ring-key"\n'
+    '[cartesia.voices]\nClaire = "replay-ring-claire"\nNova = "replay-ring-nova"\n'
+)
+RING_VOICES = {AGENT: "replay-ring-claire", NOVA: "replay-ring-nova"}
+
+
 def rings(agent, number):
     return {'agent': agent, 'reason': f'  synthetic   reason {number} ', 'opening_line': f'synthetic opening {number}'}
 
 
 SCENARIOS.append({
     'id': 'rings',
+    'config': RING_SPEECH,
     'what': 'a ring: an agent calls its owner. The owner\'s tools ring for an agent by its name, with why and '
             'with the line it opens with; while it rings nobody else does; the answer starts a call with '
             'the agent on the floor and hands back the line to play first, the same again for who answered '
@@ -2185,7 +2197,8 @@ SCENARIOS.append({
         post('/calls/ring/cancel', {}, 'no ring is taken back'),
         get('/calls/ring?ring_id=rng_nothing', 'a ring that is none'),
         # Both agents have a conversation before they ring: a notice is written where one is.
-        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make a second agent'),
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA,
+                         'voice_id': json.dumps({'cartesia': RING_VOICES[NOVA]})}, 'make a second agent'),
         send('synthetic word before the ring', 'ringzero'),
         {'op': 'wait_reply', 'after': 'u-ringzero'},
         {'op': 'quiesce'},
@@ -2410,7 +2423,7 @@ SCENARIOS.append({
         taken_back('u-q-hotel', 'one is taken back, by the id its app gave it'),
         taken_back('u-q-hotel', 'taken back a second time'),
         {**QUEUE, 'name': 'three wait'},
-        post('/stop', {'session': AGENT}),
+        post('/stop', {'session': AGENT, 'actor': 'maintenance'}),
         {'op': 'wait_busy', 'busy': False},
         {'op': 'quiesce', 'held': True},
         {**QUEUE, 'name': 'three are held'},
@@ -2429,7 +2442,7 @@ SCENARIOS.append({
         send(SLOW + 'synthetic queue kilo', 'q-kilo'),
         {'op': 'wait_busy', 'busy': True},
         send('synthetic queue lima', 'q-lima', queue_if_busy=True),
-        post('/stop', {'session': AGENT}),
+        post('/stop', {'session': AGENT, 'actor': 'maintenance'}),
         {'op': 'wait_busy', 'busy': False},
         {'op': 'quiesce', 'held': True},
         {**QUEUE, 'name': 'one is held'},
@@ -2462,7 +2475,7 @@ SCENARIOS.append({
         reworded('r-golf', '  synthetic reword golf, in other words  ', 'one is reworded'),
         reworded('u-r-hotel', 'synthetic reword hotel, as the phone has it now', "one of the phone's is reworded"),
         {**QUEUE, 'name': 'the queue with the new words'},
-        post('/stop', {'session': AGENT}),
+        post('/stop', {'session': AGENT, 'actor': 'maintenance'}),
         {'op': 'wait_busy', 'busy': False},
         {'op': 'quiesce', 'held': True},
         reworded('r-golf', 'synthetic reword golf, as it was held', 'reworded while a hold holds it'),

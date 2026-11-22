@@ -18,12 +18,34 @@ def public_row(item):
     stored = json.loads(item.pop("payload_json"))
     meta = {k: stored[k] for k in ("version", "catalog", "catalog_version", "catalog_sha256",
                                     "content_identity", "element_count")}
+    item.update(answered_button(item, stored))
     return PublicRow(item, meta)
+
+
+def answered_button(item, stored):
+    """An answered button form's chosen button, for every row and summary (issue 673):
+    answered_action and answered_label. Nothing for an open form or one without buttons."""
+    labels = contract.buttons_of(stored)
+    if item.get("status") != "completed" or not labels:
+        return {}
+    found = db.conn().execute("SELECT answers_json FROM form_submissions WHERE artifact_id=? "
+                              "ORDER BY created_at, submission_id LIMIT 1", (item["artifact_id"],)).fetchone()
+    action = (json.loads(found["answers_json"]).get("state") or {}).get(contract.ACTION_KEY) if found else None
+    if action not in labels:
+        return {}
+    return {"answered_action": action, "answered_label": labels[action]}
+
+
+def drawable(row, capable):
+    """Whether a client of render ``capable`` (the highest catalog version it draws, 0 for none;
+    True is version 1) draws this public row. Below it the client gets the plain card."""
+    meta = getattr(row, "meta", None) or {}
+    return bool(capable) and int(capable) >= meta.get("catalog_version", 1)
 
 
 def summary(row, capable):
     result = dict(row)
-    if capable:
+    if drawable(row, capable):
         meta = row.meta
         result.update({k: meta[k] for k in ("version", "catalog", "catalog_version", "catalog_sha256",
                                             "element_count")})
@@ -108,7 +130,7 @@ def publish(agent, ident, title, summary_text, status, reference, payload, expec
     contract.validate(payload)
     identity = contract.content_identity(payload["spec"], payload["version"])
     stored = {**payload, "content_identity": identity, "element_count": len(payload["spec"]["elements"]),
-              "catalog_sha256": contract.CATALOG_SHA256}
+              "catalog_sha256": contract.catalog(payload["catalog_version"]).sha256}
     con = db.conn()
     con.execute("BEGIN" if validate_only else "BEGIN IMMEDIATE")
     try:
@@ -162,13 +184,16 @@ def submit(ident, data, *, capable, on_completed=None):
         # pair included) is refused by admit() with its own triple, before SQLite sees it (R71).
         previous = (con.execute("SELECT * FROM form_submissions WHERE submission_id=?", (sid,)).fetchone()
                     if contract.submission_id_ok(sid) else None)
-        result = contract.admit(ident, json.loads(row["payload_json"]), row["status"], data, previous)
+        payload = json.loads(row["payload_json"])
+        if int(capable) < contract.version_of(payload):
+            raise contract.Refusal("client_contract", "")
+        result = contract.admit(ident, payload, row["status"], data, previous)
         if not result["repeat"]:
             now = db.now_ms()
             html_forms.record_submission_in(
                 con, submission_id=sid, artifact_id=ident, version=data["version"], session=row["session"],
                 answers_json=result["answers_json"], payload_hash=result["payload_hash"],
-                prompt=contract.message_text(row, data), created_at=now,
+                prompt=contract.message_text(row, data, payload), created_at=now,
                 synthesize_audio=int(data.get("synthesize_audio", True)))
             artifacts.complete_in(con, ident, now=now, updated_at=max(now, row["updated_at"] + 1))
             previous = con.execute("SELECT * FROM form_submissions WHERE submission_id=?", (sid,)).fetchone()
