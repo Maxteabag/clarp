@@ -36,14 +36,10 @@ fn agent(
     let mut longest = 0;
     let (mut queued, mut claimed, mut parked, mut oldest) = (0, 0, 0, 0);
     let mut stuck = false;
-    for row in facts
-        .queue
-        .iter()
-        .filter(|row| {
-            row.status != QueueItemStatus::Started
-                && is_user_wait(&row.origin, &row.client_id, row.sender_agent_id.is_some())
-        })
-    {
+    for row in facts.queue.iter().filter(|row| {
+        row.status != QueueItemStatus::Started
+            && is_user_wait(&row.origin, &row.client_id, row.sender_agent_id.is_some())
+    }) {
         let waited = now.saturating_sub(row.accepted_at_ms);
         if waited > settings.wait_ms {
             current_waits += 1;
@@ -445,18 +441,61 @@ mod tests {
 
         let cases = [
             ("user", Origin::User, false, true),
-            ("oracle", Origin::Trigger { name: "oracle".into() }, false, true),
-            ("agent", Origin::Agent { agent_id: "sender".into() }, true, false),
-            ("watcher", Origin::Agent { agent_id: String::new() }, true, false),
+            (
+                "oracle",
+                Origin::Trigger {
+                    name: "oracle".into(),
+                },
+                false,
+                true,
+            ),
+            (
+                "agent",
+                Origin::Agent {
+                    agent_id: "sender".into(),
+                },
+                true,
+                false,
+            ),
+            (
+                "watcher",
+                Origin::Agent {
+                    agent_id: String::new(),
+                },
+                true,
+                false,
+            ),
             ("html-form-fixture", Origin::User, false, false),
             ("mislabeled", Origin::User, true, false),
-            ("schedule", Origin::Trigger { name: "schedule".into() }, false, false),
+            (
+                "schedule",
+                Origin::Trigger {
+                    name: "schedule".into(),
+                },
+                false,
+                false,
+            ),
         ];
         for (id, origin, has_sender, counts) in cases {
             let engine = clarp_store_mem::MemEngine::new();
-            let open = || engine.open(std::path::Path::new("watch-wait"), clarp_codec::standard_set("none").unwrap()).unwrap();
+            let open = || {
+                engine
+                    .open(
+                        std::path::Path::new("watch-wait"),
+                        clarp_codec::standard_set("none").unwrap(),
+                    )
+                    .unwrap()
+            };
             let mut recorder = Recorder::open(open()).unwrap();
-            let first = recorder.accept(serde_json::to_vec(&Message::default()).unwrap(), Origin::User, now - 180_000).unwrap().turn.unwrap();
+            let first = recorder
+                .accept(
+                    serde_json::to_vec(&Message::default()).unwrap(),
+                    Origin::User,
+                    now - 180_000,
+                )
+                .unwrap()
+                .turn
+                .unwrap();
             let message = Message {
                 id: format!("u-{id}"),
                 text: "Fixture".into(),
@@ -469,14 +508,21 @@ mod tests {
                 ..Message::default()
             };
             let at = now - 120_000;
-            let second = recorder.accept_message(Incoming {
-                key: Some(message.id.clone()),
-                body: serde_json::to_vec(&message).unwrap(),
-                origin: origin.clone(),
-                admission: Admission::Later,
-                coordination: None,
-                user_word: false,
-            }, at).unwrap().turn.unwrap();
+            let second = recorder
+                .accept_message(
+                    Incoming {
+                        key: Some(message.id.clone()),
+                        body: serde_json::to_vec(&message).unwrap(),
+                        origin: origin.clone(),
+                        admission: Admission::Later,
+                        coordination: None,
+                        user_word: false,
+                    },
+                    at,
+                )
+                .unwrap()
+                .turn
+                .unwrap();
 
             let facts = AgentFacts {
                 queue: vec![Waiting {
@@ -493,19 +539,38 @@ mod tests {
                     sender_agent_id: message.sender.map(|sender| sender.agent_id),
                 }],
                 parked: None,
-                paused: false,
+                paused: true,
                 window: Window::default(),
             };
             let mut seen = Seen::default();
             agent(&mut seen, settings, "receiver", now, &facts, 0);
-            assert_eq!(seen.found.contains_key(&("wait".into(), "receiver".into())), counts, "{id} in mailbox");
+            for kind in ["wait", "queue"] {
+                assert_eq!(
+                    seen.found.contains_key(&(kind.into(), "receiver".into())),
+                    counts,
+                    "{id} for {kind} in mailbox",
+                );
+            }
 
             let mut batch = recorder.batch();
-            batch.command(Command::TurnEnded { turn: first, outcome: RunOutcome::Completed }, now - 30_000).unwrap();
-            batch.command(Command::TurnStarted { turn: second }, now).unwrap();
+            batch
+                .command(
+                    Command::TurnEnded {
+                        turn: first,
+                        outcome: RunOutcome::Completed,
+                    },
+                    now - 30_000,
+                )
+                .unwrap();
+            batch
+                .command(Command::TurnStarted { turn: second }, now)
+                .unwrap();
             batch.commit().unwrap();
             let live = recorder.experience_window(at, now).unwrap();
-            let replayed = Recorder::open(open()).unwrap().experience_window(at, now).unwrap();
+            let replayed = Recorder::open(open())
+                .unwrap()
+                .experience_window(at, now)
+                .unwrap();
             assert_eq!(live.reads.len(), usize::from(counts), "{id} live journal");
             assert_eq!(live.reads, replayed.reads, "{id} after replay");
         }
@@ -559,20 +624,21 @@ mod tests {
         let router = crate::edge::router(app.clone());
         let request = |method: Method, path, token: &str, client, state| {
             let body = if method == Method::POST {
-                Body::from(format!(r#"{{"token":"{}"}}"#, "a".repeat(64)))
+                format!(r#"{{"token":"{}"}}"#, "a".repeat(64))
             } else {
-                Body::empty()
+                String::new()
             };
             let mut request = Request::builder()
                 .method(method)
                 .uri(path)
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::CONTENT_LENGTH, body.len())
                 .header("x-clarp-client", client);
             if let Some(state) = state {
                 request = request.header("x-clarp-app-state", state);
             }
-            let request = request.body(body).unwrap();
+            let request = request.body(Body::from(body)).unwrap();
             let router = router.clone();
             async move { router.oneshot(request).await.unwrap().status() }
         };
