@@ -2999,7 +2999,8 @@ async fn send_as(
         );
         return Err(ApiError::plain(StatusCode::PAYLOAD_TOO_LARGE, why));
     }
-    // A resolved sender cannot claim the user's word, even without a turn token (R18).
+    // Who it comes from. A sender named in the body is a claim. It supplies the message's
+    // sender, while a user or Oracle origin still governs the coordination audience (PR 482).
     // Without a sender, use the origin the client names if it is allowed, or the user.
     // Only the Host can stamp an origin such as a janitor or a leader's tick.
     //
@@ -3056,16 +3057,12 @@ async fn send_as(
         }
         LEADER_TICK.to_owned()
     } else {
-        coordination::origin(
-            request.origin.as_deref(),
-            &principal,
-            made.peer,
-            &member.record.agent_id,
-        )
+        coordination::origin(request.origin.as_deref(), &principal, made.peer)
     };
     // Another agent addressing this one: its turn is marked so, with that agent (none for an
-    // agent of a peer Host). Decide from the resolved origin before mapping it to the Host's
-    // own kinds (`coordination::is_coordination`).
+    // agent of a peer Host). Decided from the origin as it was claimed and who made it, before
+    // this Host maps the origin to its own kinds: the user's word never is, whatever sender it
+    // names (`coordination::is_coordination`).
     let coordination = coordination::is_coordination(
         &member.record.agent_id,
         Some(&named),
@@ -3080,8 +3077,7 @@ async fn send_as(
             "Heartbeats are disabled on this Host",
         ));
     }
-    let self_wake = named == "automation" && principal.sender_agent_id == member.record.agent_id;
-    let origin = match (sender.is_some() && !self_wake, named.as_str()) {
+    let origin = match (sender.is_some(), named.as_str()) {
         (true, _) | (false, "agent") => from_agent(),
         (
             false,
