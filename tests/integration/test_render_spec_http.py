@@ -609,7 +609,7 @@ def test_a_v2_button_form_is_published_drawn_and_answered_once(host, monkeypatch
     from lib import config, html_forms
     from tests.integration.test_attention_questions_http import TOKEN
     configured = dataclasses.replace(config.load(), render_spec_min_contract={"ios": 74, "android": 30},
-                                     render_spec_v2_min_contract={"ios": 80})
+                                     render_spec_v2_min_contract={"ios": 80, "android": 0})
     monkeypatch.setattr(config, "load", lambda *a, **k: configured)
     request = urllib.request.Request(host.base + "/artifact-catalogs/clarp.form/2",
                                      headers={"Authorization": "Bearer " + TOKEN})
