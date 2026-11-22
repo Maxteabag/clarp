@@ -1732,47 +1732,18 @@ def shapes_tried() -> int:
         found = told_by_shape(at(locator, **more), base, head, bases)
         assert found == expected, (tried, locator, expected, found)
 
-    # R6: the reply that closes a completed turn, unmarked by the reference and final here.
-    def closing(phase, status='completed', text='The answer'):
-        return {'role': 'assistant', 'phase': phase, 'text': text, 'turn': {'status': status}}
-    phase = '[0].body.turns[1].phase'
-    theirs = answered({'turns': [{'role': 'user', 'text': 'A question'}, closing(None)]})
-    ours = answered({'turns': [{'role': 'user', 'text': 'A question'}, closing('final')]})
-    told('R6', phase, theirs, ours)
-    told('', phase, ours, theirs)                                   # the other way round
-    told('', phase, theirs, ours, kind='field-removed')             # another kind of difference
-    told('', phase, theirs, ours, channel='sse')                    # another channel
-    told('', '[0].body.turns[0].phase', theirs, ours)               # a row that closes nothing
-    told('', '[0].body.turns[7].phase', theirs, ours)               # no such row
-    told('', '[3].body.turns[1].phase', theirs, ours)               # no such exchange
-    told('', '[0].body.turns[1].phase.more', theirs, ours)          # another place
-    for theirs_row, ours_row in (
-            (closing(None, 'failed'), closing('final', 'failed')),  # a turn that did not complete
-            (closing(None), closing('final', 'failed')),
-            (closing(None, text='One reply'), closing('final', text='Another')),   # not the same reply
-            (closing(None, text=''), closing('final', text='')),
-            (closing(None), closing('commentary')),                 # not what the contract asks for
-            (closing('commentary'), closing('final')),              # the reference says something else
-            ({'role': 'assistant', 'phase': None, 'text': 'The answer'}, closing('final')),
-            ({**closing(None), 'role': 'user'}, {**closing('final'), 'role': 'user'})):
-        told('', phase, answered({'turns': [{}, theirs_row]}), answered({'turns': [{}, ours_row]}))
+    # PR 626 fixed R6 and R12. These differences no longer have a reference-defect rule.
+    reply = {'role': 'assistant', 'text': 'The answer', 'turn': {'status': 'completed'}}
+    theirs = answered({'turns': [{**reply, 'phase': None}]})
+    ours = answered({'turns': [{**reply, 'phase': 'final'}]})
+    told('', '[0].body.turns[0].phase', theirs, ours)
 
-    # R12: at rest, the last completed message; the reference's own row names the newer one.
-    def row(completed, last='The answer', state='done', session='claire', **more):
-        return {'session': session, 'latest_state': state, 'last_message': last,
-                'last_completed_message': completed, **more}
+    agent = {'session': 'claire', 'latest_state': 'done', 'last_message': 'The answer'}
     place = '[0].body.agents[0].last_completed_message'
-    theirs, ours = answered({'agents': [row('You: the question')]}), answered({'agents': [row('The answer')]})
-    told('R12', place, theirs, ours)
-    told('R12', place, answered({'agents': [row('An older answer')]}), ours)
-    told('', place, ours, theirs)
-    told('', place, answered({'agents': [row('You: the question', last='Something else')]}), ours)
-    told('', place, theirs, answered({'agents': [row('The answer', last='Not the answer')]}))
-    told('', place, answered({'agents': [row('You: the question', state='thinking')]}), ours)
-    told('', place, theirs, answered({'agents': [row('The answer', state='thinking')]}))
-    told('', place, answered({'agents': [row('You: the question', session='mike')]}), ours)
-    told('', place, theirs, answered({'agents': [row('', last='')]}))
-    told('', '[0].body.agents[1].last_completed_message', theirs, ours)
+    ours = answered({'agents': [{**agent, 'last_completed_message': 'The answer'}]})
+    for old in ('You: the question', 'An older answer'):
+        theirs = answered({'agents': [{**agent, 'last_completed_message': old}]})
+        told('', place, theirs, ours)
 
     # R13: no model shown, though the reference shows that model for that agent elsewhere.
     def of(model, session='claire'):
@@ -2054,25 +2025,6 @@ def _closes_a_completed_turn(row: dict) -> bool:
     return row.get('role') == 'assistant' and isinstance(turn, dict) and turn.get('status') == 'completed'
 
 
-def _unmarked_reply(base: dict, head: dict, exchange: int, at: int, _bases) -> bool:
-    """R6: the reply that closes a completed turn is `final`; the reference leaves it unmarked."""
-    theirs, ours = _row(base, exchange, 'turns', at), _row(head, exchange, 'turns', at)
-    return (_closes_a_completed_turn(theirs) and _closes_a_completed_turn(ours)
-            and theirs.get('phase') is None and ours.get('phase') == 'final'
-            and bool(ours.get('text')) and theirs.get('text') == ours.get('text'))
-
-
-def _stale_last_completed(base: dict, head: dict, exchange: int, at: int, _bases) -> bool:
-    """R12: at rest after a turn, the last completed message is the agent's last message; the
-    reference's row still names an older one, beside the newer one it names as its last."""
-    theirs, ours = _row(base, exchange, 'agents', at), _row(head, exchange, 'agents', at)
-    said = ours.get('last_completed_message')
-    return (bool(said) and said == ours.get('last_message') == theirs.get('last_message')
-            and theirs.get('last_completed_message') != said
-            and theirs.get('latest_state') == ours.get('latest_state') == 'done'
-            and theirs.get('session') == ours.get('session'))
-
-
 def _model_not_shown(base: dict, head: dict, exchange: int, at: int, bases) -> bool:
     """R13: the model that answered is shown after a turn; the reference shows none for the rest
     of a minute, though it shows that very model for that agent elsewhere in what was recorded."""
@@ -2138,9 +2090,6 @@ def _stamped_late_there(base: dict, head: dict, exchange: int, at: int, _bases) 
 # The defect, the kinds of difference it shows as, where a difference of its shape lies (the
 # exchange and the row), and what the rows have to say for it to be that defect.
 SHAPES = (
-    ('R6', ('changed',), re.compile(r'^\[(\d+)\]\.body\.turns\[(\d+)\]\.phase$'), _unmarked_reply),
-    ('R12', ('changed',), re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.last_completed_message$'),
-     _stale_last_completed),
     ('R13', ('changed',), re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.model$'), _model_not_shown),
     ('R17', ('changed',), re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.live_activity$'), _no_line_at_rest),
     # A row without the field at all, or with nothing in it.
