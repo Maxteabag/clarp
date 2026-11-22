@@ -150,17 +150,20 @@ fn without_explanations_the_second_line_is_the_command() {
 fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     let view = turn_full(after(23));
     let p = present(&view, &[], &options(&[], 1759480012000));
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "", "Stopped npm test"]);
-    assert_eq!(p.entries[0].kind, Kind::Fold);
-    assert_eq!(p.entries[0].key, "live:fold:tr-1");
-    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
-    assert_eq!(p.entries[1].text, "Let me look at the parser and its tests.", "the commentary stays in view");
+    // The thinking before the commentary does not put the fold above it: the
+    // commentary first, then the fold where the work after it begins.
+    assert_eq!(titles(&p), ["", "Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(p.entries[1].kind, Kind::Fold);
+    assert_eq!(p.entries[1].key, "live:fold:tr-1");
+    assert_eq!(p.entries[1].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
+    assert_eq!(p.entries[0].text, "Let me look at the parser and its tests.", "the commentary stays in view, first");
     assert_eq!(p.entries[3].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
     assert_eq!(p.entries[3].status, "interrupted");
     assert_eq!(p.entries[4].meta, "interrupted");
     let open = present(&view, &[], &options(&["live:fold:tr-1"], 1759480012000));
     assert_eq!(open.entries.len(), 1 + 7, "the fold opened shows every row again");
-    assert!(open.entries[0].expanded);
+    assert_eq!(open.entries[0].kind, Kind::Message, "the commentary still first");
+    assert!(open.entries.iter().any(|e| e.kind == Kind::Fold && e.expanded));
 }
 
 #[test]
@@ -198,10 +201,11 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let tools: Vec<Value> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id})).collect();
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
-    // The row carries both messages: it shows once, where the first is.
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "Stopped npm test"]);
-    assert_eq!(p.entries[1].row, "live-abc", "the row shows where its first message was");
-    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
+    // The row carries both messages: it shows once, where the first is, and
+    // the thinking before that message does not put the fold above it.
+    assert_eq!(titles(&p), ["", "Worked for 12s · 5 tools", "Ran npm test", "Stopped npm test"]);
+    assert_eq!(p.entries[0].row, "live-abc", "the row shows where its first message was");
+    assert_eq!(p.entries[1].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
 }
 
@@ -601,4 +605,93 @@ fn a_live_item_never_goes_above_a_row_written_before_it_started() {
     let place = |id: &str| order.iter().position(|o| o == id).unwrap_or_else(|| panic!("{id} in {order:?}"));
     assert!(place("live:cl:msg_a2:0") < place("u-note") && place("u-note") < place("live:cl:toolu_a3"), "{order:?}");
     assert!(place("u-stale-second") < place("live:cl:msg_b1:0"), "{order:?}");
+}
+
+const SPOKEN_STARTED: i64 = 1791100000000;
+
+fn iso(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+}
+
+/// A spoken turn as a backend that writes its answer only to `/log` sends it:
+/// its live items carry the thinking, the acknowledgment it speaks first and
+/// the tools, but no final message. `/log` holds the prompt, the
+/// acknowledgment (with the turn's exploration cell) and the answer.
+fn spoken_turn() -> (LiveView, Vec<Message>) {
+    let s = SPOKEN_STARTED;
+    let tool = |id: &str, call: &str, ordinal: i64, at: i64| json!({"id": id, "kind": "tool", "rev": 2, "conv": "c-voice", "turn_id": "tr-voice",
+        "status": "completed", "ordinal": ordinal, "started_at_ms": s + at, "ended_at_ms": s + at + 900,
+        "tool": {"name": "bash", "call_id": call, "category": "exec", "group": null, "label": "ls"}});
+    let snapshot = json!({"conv": "c-voice", "session": "rachel", "agent_id": "agent-1", "epoch": "boot-v", "lseq": 30, "server_now_ms": s + 200_000,
+        "activity": {"state": "idle", "turn_id": "tr-voice", "tool": null, "running_tools": 0, "headline": null, "item_id": null, "since_ms": s + 185_000, "turn_started_ms": null},
+        "turn": {"turn_id": "tr-voice", "status": "completed", "started_at_ms": s, "ended_at_ms": s + 185_000, "worked_ms": 185_000, "tool_count": 2},
+        "items": [
+            {"id": "oc:think", "kind": "reasoning", "rev": 2, "conv": "c-voice", "turn_id": "tr-voice", "status": "completed", "ordinal": 1,
+             "started_at_ms": s + 500, "ended_at_ms": s + 1_500, "title": "Plan the lookup", "text": "Plan the lookup"},
+            {"id": "oc:ack", "kind": "message", "rev": 3, "conv": "c-voice", "turn_id": "tr-voice", "status": "completed", "ordinal": 2,
+             "started_at_ms": s + 1_900, "ended_at_ms": s + 2_000, "phase": "commentary", "row_id": "live-ack", "text": "On it, let me look."},
+            tool("oc:t1", "call-1", 3, 2_100),
+            tool("oc:t2", "call-2", 4, 3_100),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    (view, spoken_rows())
+}
+
+fn spoken_rows() -> Vec<Message> {
+    let s = SPOKEN_STARTED;
+    vec![
+        row(json!({"id": "u-voice", "role": "user", "text": "Add the other host too", "timestamp": iso(s), "trace_id": "tr-voice", "revision": 9})),
+        row(json!({"id": "live-ack", "role": "assistant", "kind": "commentary", "phase": "commentary", "text": "On it, let me look.",
+            "timestamp": iso(s + 2_000), "trace_id": "tr-voice", "revision": 12, "activity_count": 2,
+            "display_cells": [{"id": "exploration-call-1-call-2", "kind": "exploration", "title": "Explored", "lines": []}]})),
+        row(json!({"id": "live-answer", "role": "assistant", "kind": "final_answer", "phase": "final", "text": "Which host do you mean?",
+            "timestamp": iso(s + 176_000), "trace_id": "tr-voice", "revision": 14,
+            "turn": {"turn_id": "tr-voice", "status": "completed", "started_at_ms": s, "ended_at_ms": s + 185_000, "worked_ms": 185_000, "tool_count": 2}})),
+    ]
+}
+
+#[test]
+fn a_spoken_acknowledgment_stays_above_the_work_and_the_answer_while_live_holds_the_turn() {
+    let (view, rows) = spoken_turn();
+    // Folded: the acknowledgment, the fold, then the answer no item stands for.
+    let p = present(&view, &rows, &options(&[], 0));
+    let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, [Kind::Message, Kind::Fold], "{:?}", titles(&p));
+    assert_eq!(p.entries[0].row, "live-ack");
+    assert_eq!(shown_order(&p, &rows), ["u-voice", "live:oc:ack", "live:fold:tr-voice", "live-answer"]);
+    assert!(p.stripped_calls.contains("exploration-call-1-call-2"), "the row's cell of those tools is not shown again beside the fold");
+    // Opened: the acknowledgment still first, the work under it, the answer last.
+    let open = present(&view, &rows, &options(&["live:fold:tr-voice"], 0));
+    let order = shown_order(&open, &rows);
+    assert_eq!(order.first().map(String::as_str), Some("u-voice"));
+    assert_eq!(order[1], "live:oc:ack");
+    assert_eq!(order.last().map(String::as_str), Some("live-answer"));
+    // Activity hidden: the acknowledgment, then the answer.
+    let hidden = present(&view, &rows, &Options { hide_activity: true, ..options(&[], 0) });
+    assert_eq!(shown_order(&hidden, &rows), ["u-voice", "live:oc:ack", "live-answer"]);
+}
+
+/// A settled turn of thinking and its answer, no tool: the fold stays above
+/// the answer (the answer is never taken for an acknowledgment).
+#[test]
+fn a_turn_of_thinking_and_its_answer_keeps_the_fold_above_the_answer() {
+    let s = SPOKEN_STARTED;
+    let snapshot = json!({"conv": "c-think", "session": "rachel", "agent_id": "agent-1", "epoch": "boot-t", "lseq": 12, "server_now_ms": s + 10_000,
+        "activity": {"state": "idle", "turn_id": "tr-think", "tool": null, "running_tools": 0, "headline": null, "item_id": null, "since_ms": s + 5_000, "turn_started_ms": null},
+        "turn": {"turn_id": "tr-think", "status": "completed", "started_at_ms": s, "ended_at_ms": s + 5_000, "worked_ms": 5_000, "tool_count": 0},
+        "items": [
+            {"id": "oc:think", "kind": "reasoning", "rev": 2, "conv": "c-think", "turn_id": "tr-think", "status": "completed", "ordinal": 1,
+             "started_at_ms": s + 200, "ended_at_ms": s + 3_000, "title": "Weigh it", "text": "Weigh it"},
+            {"id": "oc:answer", "kind": "message", "rev": 3, "conv": "c-think", "turn_id": "tr-think", "status": "completed", "ordinal": 2,
+             "started_at_ms": s + 3_100, "ended_at_ms": s + 5_000, "phase": "final", "text": "Yes, that works."},
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    for expanded in [&[][..], &["live:fold:tr-think"][..]] {
+        let p = present(&view, &[], &options(expanded, 0));
+        let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
+        assert_eq!(kinds.first(), Some(&Kind::Fold), "the fold first: {:?}", titles(&p));
+        assert_eq!(kinds.last(), Some(&Kind::Message), "the answer last: {:?}", titles(&p));
+    }
 }

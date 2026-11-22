@@ -568,3 +568,22 @@ fn a_stopped_send_keeps_its_state_until_the_host_says_otherwise() {
     h.log(row(json!({"state": "handed_over", "for": {"client_msg_id": "abc"}})), LoadKind::Tail);
     assert_eq!(h.model.rows()[0].send_state, "handed_over");
 }
+
+/// A turn's acknowledgment lands first; the answer next; then the
+/// acknowledgment again at a higher revision as the turn's cells land on it.
+/// The chat keeps the Host's order: an update stays in its place.
+#[test]
+fn an_acknowledgment_whose_revision_rises_after_the_answer_keeps_its_place() {
+    let mut h = Harness::new("voice");
+    h.log(json!({"conversation_id": "c-voice", "latest_revision": 10, "turns": [
+        {"id": "u-voice", "role": "user", "text": "Add the other host too", "revision": 9, "timestamp": "2026-11-01T10:00:00.000Z"},
+        {"id": "live-ack", "role": "assistant", "kind": "commentary", "phase": "commentary", "text": "On it.", "revision": 10,
+         "timestamp": "2026-11-01T10:00:02.000Z", "activity_count": 1}]}), LoadKind::Tail);
+    h.log(json!({"conversation_id": "c-voice", "latest_revision": 12, "turns": [
+        {"id": "live-answer", "role": "assistant", "kind": "final_answer", "phase": "final", "text": "Which host?", "revision": 12,
+         "timestamp": "2026-11-01T10:03:00.000Z"}]}), LoadKind::Delta);
+    h.log(json!({"conversation_id": "c-voice", "latest_revision": 15, "turns": [
+        {"id": "live-ack", "role": "assistant", "kind": "commentary", "phase": "commentary", "text": "On it.", "revision": 15,
+         "timestamp": "2026-11-01T10:00:02.000Z", "activity_count": 5}]}), LoadKind::Delta);
+    assert_eq!(h.ids(), ["u-voice", "live-ack", "live-answer"]);
+}
