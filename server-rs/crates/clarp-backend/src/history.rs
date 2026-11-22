@@ -206,6 +206,13 @@ pub fn claude_with_children(transcript: &str, children: &Children) -> Vec<Value>
                 row["parts"] = json!(parts);
             }
         }
+        // Keep the provider's message ID on each assistant row (R107).
+        let provider_id = record["message"]["id"].as_str().filter(|id| !id.is_empty());
+        if role == "assistant"
+            && let Some(id) = provider_id
+        {
+            row["provider_id"] = json!(id);
+        }
         turns.push(row);
     }
     for (row, col) in calls.values().copied() {

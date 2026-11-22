@@ -39,7 +39,7 @@ fn a_transcript_is_read_as_the_python_host_reads_it() {
         }
         turns += read.len();
     }
-    assert_eq!((turns, tools), (14, 13));
+    assert_eq!((turns, tools), (21, 14));
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn the_model_a_session_last_ran_on_is_read_as_the_python_host_reads_it() {
         asked += 1;
         named += usize::from(!theirs.is_empty());
     }
-    assert_eq!((asked, named), (8, 6));
+    assert_eq!((asked, named), (9, 7));
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn what_each_turn_is_in_its_conversation_is_told_as_the_python_host_tells_it() {
         commentary += theirs.iter().filter(|phase| *phase == "commentary").count();
         last += theirs.iter().filter(|phase| *phase == "final").count();
     }
-    assert_eq!((asked, commentary, last), (47, 5, 18));
+    assert_eq!((asked, commentary, last), (54, 6, 22));
     // The tools a turn itself used do not follow what it said: named, since it reads oddly.
     let own = made_up
         .iter()
