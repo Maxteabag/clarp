@@ -470,7 +470,15 @@ Rules:
     which tells the agent's own session what the fork was asked, said and did when its next
     turn begins, is the Host's alone: apps show nothing for it.
   - A fork that cannot start, or fails before it answers, loses no row: the user's message
-    stays a normal queued message and runs as it would have without a fork.
+    stays a normal queued message and runs as it would have without a fork. A Stop of a
+    fork that has not begun to answer settles its message as stopped; it does not run later.
+  - Never two sessions answer the user at once: a message of the user's that arrives while
+    the fork's turn runs and the agent's own session is free waits, and the agent's own turn
+    for it begins when the fork's turn ends, opening with the note.
+  - Known limit: the fork takes the user's message when its first reply or tool call is read.
+    If the agent's own turn ends in the moment between the fork's first action and that read
+    (or while the Host is away), the message is given back and answered once by the agent's
+    own session; the fork's first action (a relay, a note) may then have gone out as well.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
 - **A message that waits enters the conversation where its turn starts (feature

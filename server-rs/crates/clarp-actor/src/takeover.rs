@@ -279,7 +279,7 @@ impl Actor {
             },
             ..Outputs::default()
         };
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         Ok(out)
     }
 }

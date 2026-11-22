@@ -101,13 +101,21 @@ struct Asked {
     did: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     failed: Option<String>,
+    /// The user stopped the fork's turn for it.
+    #[serde(default)]
+    stopped: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum State {
     Open,
-    /// Told to the agent's own session at the start of this turn of its.
+    /// Given to the agent's own session at the start of this turn of its, whose tool has not
+    /// started yet: a turn that never runs passes the note on to the next.
+    Offered {
+        into: u64,
+    },
+    /// Told to the agent's own session: the tool of this turn of its started with it.
     Merged {
         into: u64,
     },
@@ -159,6 +167,9 @@ pub(super) struct Lane {
     shown: Option<Shown>,
     /// Events that go out whatever is shown: those of the moment what is shown changed.
     ready: Vec<serde_json::Value>,
+    /// The agent's own turn of the user's that waits for the fork's turn to end: its number,
+    /// its message and its attempt. Its tool is started then, with the note.
+    deferred: Option<(TurnId, u64, u32)>,
 }
 
 /// The fork's turn as those who watch the agent see it (`GET /live` and its events), in a hub
@@ -179,6 +190,26 @@ struct Shown {
 /// The operation that tells the agent's own turn beside the fork's (clarp-ios#139): a client
 /// that knows it draws it beside the turn; the reducer leaves it alone.
 pub const MAIN_TURN_OP: &str = "main_turn";
+
+impl Lane {
+    /// The tool of the agent's own turn `turn` started: a note offered to it is told now, and
+    /// the fork is over. The item goes into the append that says the turn started.
+    pub(super) fn ran(
+        &mut self,
+        turn: TurnId,
+        t: i64,
+    ) -> Result<Option<clarp_ports::log::NewItem>, ActorError> {
+        let Some(record) = self
+            .record
+            .as_mut()
+            .filter(|record| record.state == (State::Offered { into: turn.0 }))
+        else {
+            return Ok(None);
+        };
+        record.state = State::Merged { into: turn.0 };
+        lane_item(record, t).map(Some)
+    }
+}
 
 fn shortened(text: &str) -> String {
     let text = text.trim();
@@ -203,7 +234,13 @@ fn note(record: &Record) -> Option<String> {
             if !asked.did.is_empty() {
                 line.push_str(&format!("\n  It did: {}", asked.did.join("; ")));
             }
-            if let Some(why) = &asked.failed {
+            if asked.stopped {
+                line.push_str(if asked.replied.is_empty() && asked.did.is_empty() {
+                    "\n  The user stopped it before the fork answered."
+                } else {
+                    "\n  The user stopped the fork while it answered."
+                });
+            } else if let Some(why) = &asked.failed {
                 line.push_str(&format!(
                     "\n  It could not finish ({why}): this message is yours to answer."
                 ));
@@ -344,7 +381,12 @@ impl Actor {
             return no();
         }
         let mut record = match self.fork.record.clone() {
-            Some(record) if record.state == State::Open => record,
+            // A note not yet told (offered to a turn whose tool has not started) stays with
+            // the fork, which takes the user's words again; it is offered anew.
+            Some(mut record) if matches!(record.state, State::Open | State::Offered { .. }) => {
+                record.state = State::Open;
+                record
+            }
             _ => {
                 let name = format!(
                     "fork:{}:{}:{}:{}",
@@ -389,6 +431,7 @@ impl Actor {
             replied: String::new(),
             did: Vec::new(),
             failed: None,
+            stopped: false,
         });
         let mut batch = self.recorder.batch();
         if batch.command(Command::Join { turn, join }, now_ms).is_err() {
@@ -653,9 +696,25 @@ impl Actor {
                         reason: "the fork's tool ended and nothing said how".to_owned(),
                     },
                 };
+                // A message the user stopped before the fork began to answer is settled as
+                // stopped, as a stopped turn's message is: it enters the conversation now, with
+                // its end, and is not given back to run later.
+                let answered = asked.read;
+                if !answered && running.stopped {
+                    read_now(&mut batch, asked, (&running.message, &session), out, now_ms)?;
+                }
                 if asked.read {
-                    record.begun = true;
+                    if answered {
+                        record.begun = true;
+                    } else if !record.begun {
+                        // Whether the copy was made is not known: the next turn makes a new one.
+                        let fresh = format!("{}:{}", record.session, turn.0);
+                        if let Some(session) = clarp_kernel::takeover::prompt_uuid(&fresh) {
+                            record.session = session;
+                        }
+                    }
                     asked.stage = Stage::Answered;
+                    asked.stopped = running.stopped;
                     let (status, failed) = match &outcome {
                         RunOutcome::Completed => ("completed", None),
                         RunOutcome::Stopped { .. } => ("stopped", None),
@@ -717,6 +776,13 @@ impl Actor {
                     self.fork.ended = Some((turn, status, failed.map(str::to_owned)));
                     // The agent's own turn may have settled it already, when it ended first.
                     let _ = batch.command(Command::JoinSettled { turn }, now_ms);
+                } else if running.stopped {
+                    // The agent's own turn took it back already: a Stop still means it does
+                    // not run.
+                    let by = clarp_kernel::control::USER.to_owned();
+                    let _ = batch.command(Command::Withdraw { turn, by }, now_ms);
+                    asked.stage = Stage::GivenBack;
+                    self.fork.ended = Some((turn, "interrupted", None));
                 } else {
                     self.fork.ended = Some((turn, "interrupted", None));
                     // Nothing of it reached the user: its message stays the agent's own, and
@@ -776,6 +842,7 @@ impl Actor {
             self.pump_fork(&mut out, now_ms)?;
         }
         self.fork_reconcile(&mut out, now_ms)?;
+        self.fork_resume(&mut out, now_ms)?;
         Ok(out)
     }
 
@@ -839,20 +906,23 @@ impl Actor {
         turn: TurnId,
         skip: bool,
         out: &mut Outputs,
+        now_ms: i64,
     ) -> Result<Option<String>, ActorError> {
         if skip {
             return Ok(None);
         }
-        // A turn's start has no clock of its own here; the record's time is not read.
-        let at = 0;
-        self.fork_reconcile(out, at)?;
+        self.fork_reconcile(out, now_ms)?;
         let Some(record) = self.fork.record.as_ref() else {
             return Ok(None);
         };
         match record.state {
-            State::Merged { into } if into == turn.0 => return Ok(note(record)),
-            State::Open => {}
-            _ => return Ok(None),
+            // Another attempt of the turn that has it is told it again.
+            State::Merged { into } | State::Offered { into } if into == turn.0 => {
+                return Ok(note(record));
+            }
+            // The turn it was offered to never ran its tool: this one is given it.
+            State::Offered { .. } | State::Open => {}
+            State::Merged { .. } | State::Closed => return Ok(None),
         }
         let busy = self.fork.running.is_some()
             || record
@@ -865,14 +935,47 @@ impl Actor {
         let told = note(record);
         let mut record = record.clone();
         record.state = match told {
-            Some(_) => State::Merged { into: turn.0 },
+            Some(_) => State::Offered { into: turn.0 },
             None => State::Closed,
         };
         let mut batch = self.recorder.batch();
-        batch.item(lane_item(&record, at)?);
+        batch.item(lane_item(&record, now_ms)?);
         batch.commit()?;
         self.fork.record = Some(record);
         Ok(told)
+    }
+
+    pub(super) fn fork_defer(&mut self, turn: TurnId, message_seq: u64, attempt: u32) {
+        self.fork.deferred = Some((turn, message_seq, attempt));
+    }
+
+    pub(super) fn fork_deferred_is(&self, turn: TurnId) -> bool {
+        self.fork
+            .deferred
+            .is_some_and(|(deferred, _, _)| deferred == turn)
+    }
+
+    pub(super) fn fork_undefer(&mut self) {
+        self.fork.deferred = None;
+    }
+
+    /// The fork's turn is over: the agent's own turn of the user's that waited for it starts,
+    /// opening with the note, if it still holds the agent.
+    pub(super) fn fork_resume(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
+        if self.fork_runs() {
+            return Ok(());
+        }
+        let Some((turn, message_seq, attempt)) = self.fork.deferred.take() else {
+            return Ok(());
+        };
+        let still = matches!(
+            self.recorder.agent().live(),
+            Some(Turn::Starting(starting)) if starting.id == turn && starting.attempt == attempt
+        );
+        if still {
+            self.start(turn, message_seq, attempt, out, now_ms)?;
+        }
+        Ok(())
     }
 
     /// Whether a turn of the agent's conversation fork runs now.
@@ -1082,7 +1185,7 @@ impl Actor {
         let live = self
             .live
             .as_ref()
-            .filter(|live| live.turn == turn && turn != forked)?;
+            .filter(|live| live.turn == turn && turn != forked && !self.fork_deferred_is(turn))?;
         let name = super::shown_name(live.trace_id.as_deref(), &live.message_id);
         let audience = self
             .audience_of(turn)
@@ -1127,10 +1230,16 @@ impl Actor {
             let message = self.message_at(message_seq)?;
             let name = attempt_of(turn_name(&message.id), FORK_ATTEMPT);
             let mut interpreter = self.backend.interpreter(turn.0, &name);
-            // Where the old Host was: what it read is read again, and nothing of it written.
+            // Where the old Host was: what it read is read again, and nothing of it written,
+            // but what the turn holds as it runs: when it began, its calls that have not
+            // returned, and when each call that is a row was first written. As `rejoin` does
+            // for the agent's own turn.
             let spool = self.profile.spool_path_of(turn, FORK_ATTEMPT);
             let mut at = 0;
-            let mut ignored = Vec::new();
+            let mut signals = Vec::new();
+            let mut started_at_ms = None;
+            let mut calls: Vec<ToolCall> = Vec::new();
+            let mut first_written = HashMap::new();
             while at < offset {
                 let read = SpoolReader::new(&spool)
                     .read_window(at, offset, WINDOW)
@@ -1139,8 +1248,24 @@ impl Actor {
                     break;
                 }
                 for line in &read.records {
-                    interpreter.on_record(line, &mut ignored);
-                    ignored.clear();
+                    started_at_ms.get_or_insert(line.t);
+                    interpreter.on_record(line, &mut signals);
+                    for signal in signals.drain(..) {
+                        let Signal::Tool(call) = signal else {
+                            continue;
+                        };
+                        if call.reply.is_none() {
+                            first_written.entry(call.id.clone()).or_insert(line.t);
+                        }
+                        calls.retain(|open| open.id != call.id);
+                        if call.status == ToolStatus::Running {
+                            let mut call = call;
+                            call.turn = turn.0;
+                            call.trace_id.clone_from(&message.trace_id);
+                            call.origin = message.origin.clone();
+                            calls.push(call);
+                        }
+                    }
                 }
                 at = read.next_offset;
             }
@@ -1148,9 +1273,9 @@ impl Actor {
                 turn,
                 interpreter,
                 message,
-                calls: Vec::new(),
-                first_written: HashMap::new(),
-                started_at_ms: now_ms,
+                calls,
+                first_written,
+                started_at_ms: started_at_ms.unwrap_or(now_ms),
                 outcome: None,
                 over: false,
                 stopped: false,

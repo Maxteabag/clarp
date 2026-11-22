@@ -35,6 +35,10 @@ struct World {
     forks: Vec<ShimOrder>,
     followed: Vec<(u64, u32)>,
     stopped: Vec<PathBuf>,
+    /// The next launch of the agent's own turn is held: no shim takes it.
+    hold_next: bool,
+    /// The launches that were held.
+    held: Vec<u64>,
 }
 
 impl World {
@@ -70,6 +74,8 @@ impl World {
             forks: Vec::new(),
             followed: Vec::new(),
             stopped: Vec::new(),
+            hold_next: false,
+            held: Vec::new(),
         }
     }
 
@@ -95,6 +101,9 @@ impl World {
         while let Some(out) = asked.pop() {
             for action in out.actions {
                 match action {
+                    Action::Launch(order) if std::mem::take(&mut self.hold_next) => {
+                        self.held.push(order.turn.0);
+                    }
                     Action::Launch(order) => {
                         self.launch(&order);
                         let now = self.tick();
@@ -608,4 +617,186 @@ fn the_live_events_hand_over_to_the_fork_and_back_and_tell_the_agents_turn_besid
     assert_eq!(whole["turn"]["audience"], "agents", "{whole:#}");
     assert_eq!(whole["turn"]["status"], "running");
     assert!(whole.get("main_turn").is_none());
+}
+
+/// One message of Claude Code's that calls a tool.
+fn calls_a_tool(world: &mut World, spool: &PathBuf, id: &str, call: &str) {
+    let block = json!({"type": "tool_use", "id": call, "name": "Bash", "input": {"command": "ls"}});
+    let whole =
+        json!({"type": "assistant", "message": {"id": format!("msg_{id}"), "content": [block]}});
+    world.says(spool, whole);
+}
+
+/// The fork answers one message and is done; the agent's own turn then ends.
+fn fork_answered_and_main_ended(world: &mut World, actor: &mut Actor) {
+    busy_for_an_agent(world, actor);
+    assert!(world.user(actor, "u-1", "Are you there?"));
+    let fork = world.fork(2);
+    world.answers(&fork, "f1", "Yes, here.");
+    world.ends(&fork, "Yes, here.");
+    world.hint(actor);
+    let main = world.main(1);
+    world.answers(&main, "m1", "Done.");
+    world.ends(&main, "Done.");
+    world.hint(actor);
+    assert!(actor.status().live.is_none());
+}
+
+#[test]
+fn the_note_goes_to_the_first_turn_whose_tool_runs() {
+    let mut world = World::new("note-kept");
+    let mut actor = world.open();
+    fork_answered_and_main_ended(&mut world, &mut actor);
+
+    // The next turn is given the note, and is stopped before its tool ever starts.
+    world.hold_next = true;
+    world.agent_writes(&mut actor, "u-a2");
+    assert_eq!(world.held, [3]);
+    assert!(world.stdin(3, 1).contains("While you were busy"));
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let lane = log
+        .find(clarp_kernel::journal::kind::FORK_LANE)
+        .unwrap()
+        .unwrap();
+    assert!(
+        lane.ts_ms > 0,
+        "the fork's record has the time of the turn's start"
+    );
+    let now = world.tick();
+    let (_, out) = actor.stop("user", now).unwrap();
+    world.carry_out(&mut actor, out);
+    let now = world.tick();
+    let out = actor.shim_gone(TurnId(3), 1, now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert!(actor.status().live.is_none());
+
+    // The turn after it is given the note again; once its tool ran, no later turn is.
+    let now = world.tick();
+    let (_, out) = actor.resume("user", now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.agent_writes(&mut actor, "u-a3");
+    assert!(world.stdin(4, 1).contains("While you were busy"));
+    assert!(world.stdin(4, 1).contains("Yes, here."));
+    let main = world.main(4);
+    world.answers(&main, "m4", "Noted.");
+    world.ends(&main, "Noted.");
+    world.hint(&mut actor);
+    world.agent_writes(&mut actor, "u-a4");
+    assert!(!world.stdin(5, 1).contains("While you were busy"));
+}
+
+#[test]
+fn a_users_message_while_the_fork_answers_waits_for_it_and_opens_with_its_note() {
+    let mut world = World::new("never-two");
+    let mut actor = world.open();
+    busy_for_an_agent(&mut world, &mut actor);
+    assert!(world.user(&mut actor, "u-1", "Are you there?"));
+    let fork = world.fork(2);
+    world.answers(&fork, "f1", "Looking.");
+    world.hint(&mut actor);
+    // The agent's own turn ends while the fork still answers.
+    let main = world.main(1);
+    world.answers(&main, "m1", "Done.");
+    world.ends(&main, "Done.");
+    world.hint(&mut actor);
+
+    // The user writes again: the agent's own session does not answer beside the fork.
+    let now = world.tick();
+    let (sent, out) = actor
+        .send(&message("u-2", "And the plan?"), Admission::Queue, now)
+        .unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(sent.turn, Some(TurnId(3)));
+    assert!(!world.took.contains(&world.main(3)), "{:?}", world.took);
+
+    // The fork's turn ends: the agent's own turn begins, told what the fork said.
+    world.answers(&fork, "f2", "Here now.");
+    world.ends(&fork, "Here now.");
+    world.hint(&mut actor);
+    assert!(world.took.contains(&world.main(3)));
+    let opened = world.stdin(3, 1);
+    assert!(opened.contains("While you were busy"), "{opened}");
+    assert!(opened.contains("Here now.") && opened.contains("And the plan?"));
+}
+
+#[test]
+fn a_stop_of_a_fork_that_had_not_answered_settles_its_message_as_stopped() {
+    let mut world = World::new("stopped-unread");
+    let mut actor = world.open();
+    busy_for_an_agent(&mut world, &mut actor);
+    assert!(world.user(&mut actor, "u-1", "Never mind"));
+    let (stopped, out) = actor.fork_halt();
+    assert!(stopped);
+    world.carry_out(&mut actor, out);
+    let fork = world.fork(2);
+    world.write(
+        &fork,
+        Line::Shim(ShimEvent::Exited {
+            code: None,
+            signal: Some(15),
+        }),
+    );
+    world.shims.remove(&fork);
+    world.hint(&mut actor);
+    let page = actor.tail(10).unwrap();
+    let user = page
+        .entries
+        .iter()
+        .find(|row| row.entry.id() == "u-1")
+        .expect("the stopped message is in the conversation");
+    assert_eq!(
+        user.turn.as_ref().map(|end| end.status.as_str()),
+        Some("stopped")
+    );
+
+    // The agent's own turn ends: the stopped message does not run.
+    let main = world.main(1);
+    world.answers(&main, "m1", "Done.");
+    world.ends(&main, "Done.");
+    world.hint(&mut actor);
+    assert!(!world.took.contains(&world.main(2)), "{:?}", world.took);
+    assert!(actor.status().live.is_none());
+}
+
+#[test]
+fn a_fork_followed_again_after_a_restart_still_closes_its_open_call() {
+    let mut world = World::new("restore-calls");
+    let mut actor = world.open();
+    busy_for_an_agent(&mut world, &mut actor);
+    assert!(world.user(&mut actor, "u-1", "List the files"));
+    let fork = world.fork(2);
+    calls_a_tool(&mut world, &fork, "f1", "toolu_1");
+    world.hint(&mut actor);
+    let began = world.now_ms;
+    drop(actor);
+
+    let mut actor = world.open();
+    let reopened = world.now_ms;
+    // The fork's tool dies without a word: its open call is cut off, at its first time.
+    world.exits(&fork, Some(1));
+    world.hint(&mut actor);
+    let page = actor.tail(20).unwrap();
+    let end = page
+        .entries
+        .iter()
+        .find_map(|row| row.turn.clone().filter(|end| end.turn == 2))
+        .expect("the fork's turn has its end");
+    assert!(
+        end.started_at_ms.is_some_and(|at| at < began && at > 0),
+        "{end:?}"
+    );
+    let call = page
+        .entries
+        .iter()
+        .flat_map(|row| row.tools.iter())
+        .find(|call| call.id == "toolu_1")
+        .expect("the call is on its row");
+    assert_eq!(
+        call.status,
+        clarp_kernel::conversation::ToolStatus::Interrupted
+    );
+    assert!(reopened > began);
 }

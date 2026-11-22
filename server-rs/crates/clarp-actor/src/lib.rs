@@ -1960,7 +1960,7 @@ impl Actor {
             self.held_for_an_account = false;
             self.forget_live();
         }
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         if let Some(waited) = self.settle_moved_wait(now_ms)? {
             out.changed.conversation |= waited.changed.conversation;
             out.changed.status |= waited.changed.status;
@@ -2068,7 +2068,7 @@ impl Actor {
             },
             ..Outputs::default()
         };
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         Ok(Some(out))
     }
 
@@ -3535,7 +3535,7 @@ impl Actor {
             queue: !started,
             ..Changed::default()
         };
-        self.carry_out(accepted.effects, &mut out)?;
+        self.carry_out(accepted.effects, &mut out, now_ms)?;
         // A send of a user, an agent or the Oracle asks for the agent again: a turn that waits
         // because its launch was refused is tried at once, on a count begun anew (R121,
         // `clear_recovery_backoff`). It is still the agent's turn: the send waits behind it.
@@ -3846,7 +3846,7 @@ impl Actor {
             },
             ..Outputs::default()
         };
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         // Only the user's own Stop means "be quiet": the rest of what the agent had to say is
         // not spoken. An agent that stops another orchestrates; what was about to be said is
         // still the user's to hear.
@@ -4136,7 +4136,7 @@ impl Actor {
             },
             ..Outputs::default()
         };
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         Ok((ByHand::Sent, out))
     }
 
@@ -4157,7 +4157,7 @@ impl Actor {
             },
             ..Outputs::default()
         };
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         Ok((true, out))
     }
 
@@ -4213,7 +4213,7 @@ impl Actor {
                     if batch.command(parked, now_ms).is_ok() {
                         let effects = batch.commit()?.effects;
                         out.changed.status = true;
-                        self.carry_out(effects, &mut out)?;
+                        self.carry_out(effects, &mut out, now_ms)?;
                         return Ok(out);
                     }
                 }
@@ -4321,7 +4321,7 @@ impl Actor {
                 self.shown_events.extend(events);
                 out.changed.status = true;
                 out.changed.conversation = true;
-                self.carry_out(effects, &mut out)?;
+                self.carry_out(effects, &mut out, now_ms)?;
                 if let Some(pool) = &self.pool {
                     pool.stopped(now_ms);
                 }
@@ -4426,7 +4426,7 @@ impl Actor {
         self.forget_live();
         out.changed.status = true;
         out.changed.conversation = true;
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         // The turn that started next may already have something in its spool.
         self.pump(&mut out, now_ms)?;
         Ok(out)
@@ -4461,7 +4461,12 @@ impl Actor {
         Ok(out)
     }
 
-    fn carry_out(&mut self, effects: Vec<Effect>, out: &mut Outputs) -> Result<(), ActorError> {
+    fn carry_out(
+        &mut self,
+        effects: Vec<Effect>,
+        out: &mut Outputs,
+        now_ms: i64,
+    ) -> Result<(), ActorError> {
         self.flush_teams()?;
         for effect in effects {
             match effect {
@@ -4471,7 +4476,7 @@ impl Actor {
                         Some(Turn::Starting(starting)) if starting.id == turn => starting.attempt,
                         _ => 1,
                     };
-                    self.start(turn, message_seq, attempt, out)?;
+                    self.start(turn, message_seq, attempt, out, now_ms)?;
                 }
                 Effect::RetryTurn {
                     turn,
@@ -4479,7 +4484,17 @@ impl Actor {
                     attempt,
                 } => {
                     out.changed.status = true;
-                    self.start(turn, message_seq, attempt, out)?;
+                    self.start(turn, message_seq, attempt, out, now_ms)?;
+                }
+                // A turn that waits for the agent's fork has no shim: it is gone at once.
+                Effect::StopTurn { turn } if self.fork_deferred_is(turn) => {
+                    let attempt = self.attempt_of_live(turn);
+                    self.fork_undefer();
+                    let gone = self.shim_gone(turn, attempt, now_ms)?;
+                    out.actions.extend(gone.actions);
+                    out.changed.status |= gone.changed.status;
+                    out.changed.queue |= gone.changed.queue;
+                    out.changed.conversation |= gone.changed.conversation;
                 }
                 Effect::StopTurn { turn } => out.actions.push(Action::Stop {
                     turn,
@@ -4510,8 +4525,10 @@ impl Actor {
         message_seq: Seq,
         attempt: u32,
         out: &mut Outputs,
+        now_ms: i64,
     ) -> Result<(), ActorError> {
         let message = self.message_at(message_seq)?;
+        let origin_is_user = message.origin.is_user_send();
         let opening = if opening_message(&message) {
             // A missing tool leaves only the shim's optional session record and
             // SpawnFailed. A lost, damaged, or already invoked attempt has no
@@ -4632,7 +4649,7 @@ impl Actor {
         } else {
             prompt
         };
-        let fork_note = self.fork_note(turn, bare || opening.is_some(), out)?;
+        let fork_note = self.fork_note(turn, bare || opening.is_some(), out, now_ms)?;
         let told = self.profile.told.as_ref().filter(|_| !bare);
         let mut brief = if let Some(teams) = &self.teams
             && !bare
@@ -4797,6 +4814,13 @@ impl Actor {
             for_account: false,
             tool_count: 0,
         });
+        // Never two sessions answer the user at once: a turn of the user's waits while the
+        // agent's fork answers, and begins once the fork's turn is over, told what it said.
+        let defer = attempt <= 1 && origin_is_user && self.fork_runs();
+        if defer {
+            self.fork_defer(turn, message_seq, attempt);
+            return Ok(());
+        }
         out.actions.push(Action::Launch(Box::new(ShimOrder {
             opening,
             turn,
@@ -4850,7 +4874,7 @@ impl Actor {
             }
             if starting && self.moved().is_none() && !self.recorder.agent().import_held() {
                 // The attempt was decided and no shim ever took it. Nothing ran: start it now.
-                return self.start(turn, message_seq, attempt, out);
+                return self.start(turn, message_seq, attempt, out, now_ms);
             }
             let command = Command::TurnEnded {
                 turn,
@@ -4887,7 +4911,7 @@ impl Actor {
             let effects = batch.commit()?.effects;
             out.changed.status = true;
             out.changed.conversation = true;
-            return self.carry_out(effects, out);
+            return self.carry_out(effects, out, now_ms);
         }
         // A shim took this turn. Read its spool up to the position in the log, only to be where
         // the actor before this one was: what those lines meant is in the log already.
@@ -5331,7 +5355,7 @@ impl Actor {
         out.changed.status = true;
         out.changed.queue = true;
         self.forget_live();
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         Ok(out)
     }
 
@@ -5379,7 +5403,7 @@ impl Actor {
         batch.cursor(turn, 0, now_ms);
         let effects = batch.commit()?.effects;
         out.changed.status = true;
-        self.carry_out(effects, &mut out)?;
+        self.carry_out(effects, &mut out, now_ms)?;
         Ok(out)
     }
 
@@ -5389,7 +5413,8 @@ impl Actor {
     fn pump(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
         self.pump_fork(out, now_ms)?;
         self.pump_main(out, now_ms)?;
-        self.fork_reconcile(out, now_ms)
+        self.fork_reconcile(out, now_ms)?;
+        self.fork_resume(out, now_ms)
     }
 
     /// Reads what is new in the live turn's spool and writes what it means to the log.
@@ -5459,6 +5484,10 @@ impl Actor {
                         // A launch that went through ends the count of its refusals.
                         self.refused = None;
                         let _ = batch.command(Command::TurnStarted { turn }, t);
+                        // The note of the agent's fork this turn was given is told now.
+                        if let Some(told) = self.fork.ran(turn, t)? {
+                            batch.item(told);
+                        }
                     }
                     Line::Shim(ShimEvent::SpawnFailed { error }) => {
                         let reason = error.clone();
@@ -5995,7 +6024,7 @@ impl Actor {
             if over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
                 self.forget_live();
             }
-            self.carry_out(committed.effects, out)?;
+            self.carry_out(committed.effects, out, now_ms)?;
             // That nothing of the turn runs any more is in the log: the pool is told.
             if std::mem::take(&mut self.stopped_for_pool)
                 && let Some(pool) = &self.pool
