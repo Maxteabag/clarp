@@ -1,2 +1,2 @@
-b457ecdf690c8834209fafd33b1f6cd972525a4d
-everything through 630 as before; 594 ported, no request query reaches a log line (this Host's body-size journal lines now name the matched route family); 624 no port (contracts 127 and 128 final in the shared docs); 623 no port (a steered heartbeat never silences an Oracle-carried turn; this Host keeps the opening's cause)
+07d5306e4fb58f1de5f864cddadf04782ba8b69e
+The merge of the Python Host's PR 635 (it holds every merge through PR 635 in main's order: everything through 634 as before; 635 no port, a Goal keeper with a scope has its run begun for that keeper, as this Host already does (R42)): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
