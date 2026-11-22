@@ -377,12 +377,14 @@ ring from `GET /calls/ring`, and no ring alert push on the alert tokens it owns.
 A Live ring is admitted only for a capable phone that still receives rings (else 409 `live_client_required`).
 
 Alert tokens are owned by the device that registered them: `POST /devices` binds a token to the authenticated paired,
-full-scope device (never a body field or the session) and refuses with 409 `device_token_owned_elsewhere` a token that
-another device owns. Legacy tokens registered before this are unbound and still get ring alerts, so rings-off reads
+full-scope device (never a body field or the session). A full-scope device that registers a token another pairing
+holds takes it over (the same phone paired again); the other pairing is not revoked, it only stops getting pushes for
+that token. Any other registrant (a limited device, the administrator) is refused with 409
+`device_token_owned_elsewhere` for a token a device owns. Legacy tokens registered before this are unbound and still get ring alerts, so rings-off reads
 `partial` while any live unbound token remains: show it as pending, never as off. A revoked device keeps its
 provenance and gets no pushes of any kind (its rows are disabled when it is revoked, see
-[push-android.md](push-android.md#unregistering-and-revocation)); a re-paired phone with a new device id cannot take
-the old id's token while the old pairing is valid, and takes it over once the old pairing is revoked. Provenance means token possession by an authenticated device, not proof of the
+[push-android.md](push-android.md#unregistering-and-revocation)); a re-paired phone with a new device id takes the
+old id's token over on its first registration, whether the old pairing is revoked or still valid (R26). Provenance means token possession by an authenticated device, not proof of the
 physical phone.
 
 

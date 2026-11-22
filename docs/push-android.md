@@ -77,11 +77,13 @@ token (`onNewToken`):
 - A new token from the same paired device disables that device's previous
   Android token, so a rotation never pushes twice. Another phone's token
   is never touched.
-- A token another paired device already registered answers
-  `409 {"ok": false, "error": "device_token_owned_elsewhere"}`. That
-  includes the same phone paired again (a new device id) while its earlier
-  pairing is still valid. Once the earlier pairing is revoked, the phone's
-  new pairing takes the token over on its next registration.
+- A token another paired device already registered passes to the
+  full-scope device that registers it now: the same phone paired again (a
+  new device id) takes it over on its first registration, whether its
+  earlier pairing is revoked or still valid. The earlier pairing is not
+  revoked; it only stops getting pushes for that token. Any other
+  registrant (a limited device, the administrator) is answered
+  `409 {"ok": false, "error": "device_token_owned_elsewhere"}`.
 - A token is registered for one push service for good. Registering a token
   the Host already holds as an APNs row (an iPhone's, or an unbound legacy
   row) as Android/FCM, or an FCM token as anything else, answers

@@ -255,12 +255,16 @@ def test_a_rotated_token_replaces_the_devices_old_row(monkeypatch):
     assert rows[IPHONE]["disabled_at"] is None
 
 
-def test_another_device_cannot_take_an_owned_android_token(monkeypatch):
+def test_another_full_scope_device_takes_an_owned_android_token_over(monkeypatch):
+    """R26: the same phone paired again takes its token over while device_a is still paired;
+    an unbound registrant never does."""
     from lib import agent_ring_live
     monkeypatch.setattr(agent_ring_live, "device_ok", lambda principal: True)   # device_a is still paired
     _register_android(owner="device_a")
     with pytest.raises(apns.TokenOwnedElsewhere):
-        _register_android(owner="device_b")
+        _register_android(owner="")
+    _register_android(owner="device_b")
+    assert _rows()[ANDROID]["principal"] == "device_b"
 
 
 @pytest.mark.parametrize("token,provider", [
