@@ -297,7 +297,7 @@ own_config="$config/config.toml"
 relay_switch="${chosen[relay]:-off}"
 case "$relay_switch" in on|off) ;; *) echo "install-host: --relay $relay_switch: on or off" >&2; exit 2 ;; esac
 # This Host's own file is written below, at every run. Its relay switch is the installation's;
-# the allow-list of web origins belongs to its owner.
+# the web origin allow-list and experience watcher settings belong to its owner.
 relay_config="${chosen[relay-config]:-$own_config}"
 [ "$relay_config" = off ] && relay_config=""
 relayed=""; relay_as=""
@@ -542,22 +542,54 @@ if [ ! -s "$config/env" ]; then
     (umask 077; printf 'CLARP_HOST_TOKEN=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-48)" > "$config/env")
 fi
 token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
-# The installation rewrites the generated server settings. Carry the owner's read-origin
-# allow-list as data, without carrying any other setting from the old file.
-web_read_origins="$(python3 - "$own_config" <<'PYTHON'
+# Keep only the owner's web read origins and experience watcher settings.
+carried_config="$(python3 - "$own_config" <<'PYTHON'
+from datetime import date, time
 import json
-from pathlib import Path
+import re
 import sys
 import tomllib
 
+def quoted(text):
+    return json.dumps(text, ensure_ascii=False).replace("\x7f", r"\u007f")
+
+def key(name):
+    return name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else quoted(name)
+
+def value(item):
+    if isinstance(item, str):
+        return quoted(item)
+    if isinstance(item, bool):
+        return "true" if item else "false"
+    if isinstance(item, (date, time)):
+        return item.isoformat()
+    if isinstance(item, list):
+        return "[" + ", ".join(map(value, item)) + "]"
+    if isinstance(item, dict):
+        return "{ " + ", ".join(f"{key(k)} = {value(v)}" for k, v in item.items()) + " }"
+    return repr(item)
+
+def table(path, entries):
+    print(f"\n[{path}]")
+    for name, item in entries.items():
+        if not isinstance(item, dict):
+            print(f"{key(name)} = {value(item)}")
+    for name, item in entries.items():
+        if isinstance(item, dict):
+            table(f"{path}.{key(name)}", item)
+
 try:
-    config = tomllib.loads(Path(sys.argv[1]).read_text())
-    origins = config.get("server", {}).get("web_read_origins")
-except (AttributeError, OSError, UnicodeError, ValueError):
-    origins = None
+    with open(sys.argv[1], "rb") as source:
+        config = tomllib.load(source)
+except (OSError, UnicodeError, ValueError):
+    config = {}
+server = config.get("server")
+origins = server.get("web_read_origins") if isinstance(server, dict) else None
 if isinstance(origins, list):
-    print("web_read_origins = " + json.dumps(
-        [value for value in origins if isinstance(value, str)], ensure_ascii=False))
+    print("web_read_origins = " + value([item for item in origins if isinstance(item, str)]))
+watch = config.get("experience_watch")
+if isinstance(watch, dict):
+    table("experience_watch", watch)
 PYTHON
 )"
 # What the agents' Clarp tools read to find their Host: this one.
@@ -570,8 +602,8 @@ bind_addr = "$address"
 port = $port
 auth_token = "$token"
 EOF
-    if [ -n "$web_read_origins" ]; then
-        printf '%s\n' "$web_read_origins" >> "$config/config.toml"
+    if [ -n "$carried_config" ]; then
+        printf '%s\n' "$carried_config" >> "$config/config.toml"
     fi
     # Whether phones reach this Host through the connection relay: the Host reads it here.
     if [ "$relay_config" = "$own_config" ] && [ "$relay_switch" = on ]; then
