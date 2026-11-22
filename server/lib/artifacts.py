@@ -54,6 +54,17 @@ def _agent(session: str) -> dict:
     return row
 
 
+# The typed payload fields, in their declared order (R103).
+_STRING_FIELDS = ("url", "thumbnail_url", "mime_type", "file_name", "content",
+                  "target_at", "source_url", "commit", "branch", "repository", "subject",
+                  "starts_at", "ends_at", "time_zone", "location", "notes",
+                  "version", "build", "environment", "diff", "path_label", "asset_id",
+                  "root", "relative_path", "provider", "run_id", "run_url",
+                  "workflow_name", "current_step", "conclusion")
+_INTEGER_FIELDS = ("duration_ms", "size_bytes", "row_count", "source_count",
+                   "files_changed", "additions", "deletions", "total_steps", "completed_steps")
+
+
 def _payload(value: Any, *, preserve_html: bool = False) -> dict:
     if value is None:
         return {}
@@ -69,20 +80,14 @@ def _payload(value: Any, *, preserve_html: bool = False) -> dict:
         raise ValueError("payload must contain finite JSON values") from exc
     if len(encoded.encode()) > (4 * 1024 * 1024 if "answer_schema" in value else 131072):
         raise ValueError("artifact payload too large")
-    string_fields = {"url", "thumbnail_url", "mime_type", "file_name", "content",
-                     "target_at", "source_url", "commit", "branch", "repository", "subject",
-                     "starts_at", "ends_at", "time_zone", "location", "notes",
-                     "version", "build", "environment", "diff", "path_label", "asset_id",
-                     "root", "relative_path", "provider", "run_id", "run_url",
-                     "workflow_name", "current_step", "conclusion"}
-    integer_fields = {"duration_ms", "size_bytes", "row_count", "source_count",
-                      "files_changed", "additions", "deletions", "total_steps", "completed_steps"}
-    for key in string_fields & value.keys():
+    # In the schema's declared order (R103): with two fields of the wrong type, the first
+    # one refused is the same in every process, not whichever a set's hash order gives.
+    for key in (key for key in _STRING_FIELDS if key in value):
         if not isinstance(value[key], str): raise ValueError(f"payload {key} must be a string")
         value = dict(value)
         if not (preserve_html and key == "content"):
             value[key] = strip_hidden_blocks(value[key])
-    for key in integer_fields & value.keys():
+    for key in (key for key in _INTEGER_FIELDS if key in value):
         if isinstance(value[key], bool) or not isinstance(value[key], int):
             raise ValueError(f"payload {key} must be an integer")
         if value[key] < 0 or value[key] > 9223372036854775807:
