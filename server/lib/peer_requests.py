@@ -116,7 +116,8 @@ def _arm(plan, requester, request_id, recipient, deadline_s, point, own, read):
     from . import goal_ledger, turn_identity
     plan_id = plan["plan_id"]
     caller = turn_identity.caller_agent_id()
-    with goal_ledger.acting_as("owner", requester["agent_id"],
+    # A verified caller is named as itself, as record_result names it (R116).
+    with goal_ledger.acting_as("owner", requester["agent_id"], caller=caller,
                                verified=caller == requester["agent_id"]):
         return _arm_wait(plan, plan_id, request_id, recipient, deadline_s, point, own, read)
 
@@ -147,9 +148,10 @@ def abandon_wait(plan_id: str, request_id: str, error: str, *, by_host: bool = F
             return False
         try:
             from . import goal_ledger, turn_identity
+            caller = "" if by_host else turn_identity.caller_agent_id()
             actor = (goal_ledger.acting_as("system") if by_host else
-                     goal_ledger.acting_as("owner", plan["agent_id"],
-                                           verified=turn_identity.caller_agent_id() == plan["agent_id"]))
+                     goal_ledger.acting_as("owner", plan["agent_id"], caller=caller,
+                                           verified=caller == plan["agent_id"]))
             with actor:
                 task_plans._goal_mutate(plan_id, revision=plan["revision"], action="dependency", data={
                     "key": dependency_key(request_id), "outcome": "failed",
