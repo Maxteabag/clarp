@@ -171,6 +171,13 @@ skills once never reached any agent; this rule is what prevents a repeat.
   skill text. A purely internal change, one that adds or alters nothing an agent
   can call, publish, read or set, needs no skill.
 
+## The web app is deprecated
+
+Peter, 22 Nov 2026: "Web appen er egentlig deprecated." The browser web app (web/ and the
+static it builds) gets no new features. It keeps working as it does today, his old browser link
+included, until he says to remove it; fix it only when something that worked breaks. New client
+work goes to the iOS app, the Android app and the Rust desktop app (desktop-rs/).
+
 ## The Host in Rust (`server-rs/`)
 
 `server-rs/` is the rebuild of the Host in Rust (Peter's go of 14 Nov 2026). Read `server-rs/REBUILD.md` before you
