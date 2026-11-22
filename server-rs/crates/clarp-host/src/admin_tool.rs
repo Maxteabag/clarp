@@ -2138,7 +2138,59 @@ async fn client_log(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// Usage lines and value-taking flags from the Python argparse tree, with the
+/// Rust commands added. Reading help never dispatches the command.
+fn help(args: &[String]) -> Option<ToolAnswer> {
+    fn usage_of(path: &str) -> Option<(&'static str, &'static str)> {
+        include_str!("admin_usage.tsv").lines().find_map(|line| {
+            let (name, definition) = line.split_once('\t')?;
+            if name == path {
+                definition.split_once('\t')
+            } else {
+                None
+            }
+        })
+    }
+
+    // A value equal to --help (especially prompt --text) still belongs to its option.
+    if !args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+    {
+        return None;
+    }
+    let mut path = String::new();
+    let mut prefix = 0;
+    for arg in args.iter().take_while(|arg| !arg.starts_with('-')) {
+        if !path.is_empty() {
+            path.push(' ');
+        }
+        path.push_str(arg);
+        if usage_of(&path).is_none() {
+            break;
+        }
+        prefix += 1;
+    }
+    let path = args[..prefix].join(" ");
+    let (valued, line) = usage_of(&path)?;
+    let mut tail = args[prefix..].iter();
+    while let Some(arg) = tail.next() {
+        match arg.as_str() {
+            "--" => break,
+            "-h" | "--help" => return Some(ToolAnswer::printed(0, line)),
+            option if valued.split_whitespace().any(|name| name == option) => {
+                tail.next();
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
+    if let Some(answer) = help(&call.argv) {
+        return answer;
+    }
     match call.argv.split_first() {
         Some((command, rest)) if command == "leader-decision" => {
             crate::teams::leader_memory::run(app, call, rest).await
@@ -2196,6 +2248,35 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admin_gap_help_reports_the_selected_command_without_dispatching() {
+        for (args, expected) in [
+            ("--help", "usage: clarp-admin [-h]"),
+            (
+                "agent --help",
+                "usage: clarp-admin agent [-h] {create,fork,helper-state}",
+            ),
+            ("agent create -h", "usage: clarp-admin agent create [-h]"),
+            (
+                "prompt --to oak --help",
+                "usage: clarp-admin prompt [-h] --to TO",
+            ),
+            ("request --help", "usage: clarp-admin request [-h]"),
+            ("reply -h", "usage: clarp-admin reply [-h]"),
+            (
+                "leader-decision log --help",
+                "usage: clarp-admin leader-decision log [-h]",
+            ),
+        ] {
+            let argv: Vec<_> = args.split_whitespace().map(str::to_string).collect();
+            let answer = help(&argv).unwrap();
+            assert_eq!(answer.exit, 0);
+            assert!(answer.stdout.starts_with(expected), "{}", answer.stdout);
+            assert!(answer.stderr.is_empty());
+        }
+        assert!(help(&["prompt", "--text", "--help"].map(str::to_string)).is_none());
+    }
 
     #[tokio::test]
     async fn admin_gap_prompt_delay_schedules_the_managed_wrapper() {
