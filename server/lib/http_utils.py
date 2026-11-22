@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -12,8 +13,21 @@ from .log import log_exception
 SECRET_QUERY_KEYS = {"token", "auth", "access_token", "refresh_token", "key", "code", "pairing_code"}
 
 
+# A secret key right after any '?' or '&' anywhere in the path, also in a path a
+# client malformed (a second '?', or '&' with no '?'), which the query parse
+# does not see as a query parameter. Its value runs to the next separator.
+_SECRET_ANYWHERE = re.compile(
+    r"([?&](?:" + "|".join(sorted(map(re.escape, SECRET_QUERY_KEYS))) + r")=)[^&?#\s]*",
+    re.IGNORECASE)
+
+
 def redact_query_secrets(path: str) -> str:
-    """Return `path` with sensitive query values replaced by REDACTED."""
+    """Return `path` with sensitive query values replaced by REDACTED, in a
+    well-formed query and after any '?' or '&' a malformed one leaves."""
+    return _SECRET_ANYWHERE.sub(r"\1REDACTED", _redact_parsed_query(path))
+
+
+def _redact_parsed_query(path: str) -> str:
     parts = urlsplit(path)
     if not parts.query:
         return path
