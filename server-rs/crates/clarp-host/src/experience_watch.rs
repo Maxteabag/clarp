@@ -1,7 +1,18 @@
-//! Experience watcher signals that do not already have a Host journal.
+//! The Host's experience watcher and its HTTP-only signals.
+
+mod book;
+mod checks;
+mod settings;
+
+pub(crate) use checks::AgentFacts;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
+
+use crate::kept::{Found, Key, Kind};
+use crate::tools::ToolAnswer;
+use book::Book;
+use settings::Settings;
 
 use clarp_protocol::requests::SendRequest;
 use clarp_protocol::responses::SendResponse;
@@ -134,9 +145,169 @@ pub async fn tell(
         ..SendRequest::default()
     };
     let made = Made {
-        // The Host itself authorizes this fixed sender, as it does a local owner-token prompt.
-        owner_token: true,
+        // The Host itself authorizes this fixed sender.
+        internal_sender: Some(SENDER),
         ..Made::default()
     };
     edge::send_from(app, request, &made).await
+}
+
+const KIND: &str = "experience-watch";
+const BOOK: &str = "findings";
+
+pub(crate) const KEPT: &[Kind] = &[Kind::book(KIND, Key::Plain, fits).when_read()];
+
+fn fits(data: &[u8]) -> bool {
+    serde_json::from_slice::<Book>(data).is_ok()
+}
+
+async fn load(app: &App) -> Result<Book, String> {
+    match app
+        .fleet
+        .judged(KIND, BOOK.into())
+        .await
+        .map_err(|why| why.0)?
+    {
+        Found::Absent => Ok(Book::default()),
+        Found::Read(data) => serde_json::from_slice(&data).map_err(|why| why.to_string()),
+        Found::Unfit => Err("the findings book cannot be read".into()),
+    }
+}
+
+async fn save(app: &App, book: &Book) -> Result<(), String> {
+    let bytes = serde_json::to_vec(book).map_err(|why| why.to_string())?;
+    app.fleet
+        .keep(KIND, BOOK.into(), Some(bytes))
+        .await
+        .map_err(|why| why.0)
+}
+
+async fn pass(app: &App, settings: &Settings, now: i64) -> Result<(), String> {
+    let mut book = load(app).await?;
+    let seen = checks::collect(app, settings, now).await;
+    book.reconcile(seen, settings, now);
+    // Record pending notices before sending, with stable IDs across a restart.
+    save(app, &book).await?;
+    if book.owed.is_empty() {
+        return Ok(());
+    }
+    for owed in std::mem::take(&mut book.owed) {
+        let id = owed.message_id();
+        match tell(app, &owed.to, id, owed.text.clone()).await {
+            Ok(_) => book.told(owed),
+            Err(why) => {
+                eprintln!(
+                    "clarp-host: experience-watch could not tell {}: {}",
+                    owed.to,
+                    why.message(),
+                );
+                // A summary can be retried the same day using its original text and id.
+                if matches!(owed.notice, book::Notice::Summary(_)) {
+                    book.owed.push(owed);
+                }
+            }
+        }
+    }
+    save(app, &book).await
+}
+
+/// The first pass waits one interval. The next pass uses newly read owner settings.
+pub fn run(app: &App) {
+    let app = app.clone();
+    tokio::spawn(async move {
+        let mut settings = Settings::read();
+        loop {
+            tokio::time::sleep(settings.interval).await;
+            settings = Settings::read();
+            if settings.enabled
+                && let Err(why) = pass(&app, &settings, app.clock.now_ms()).await
+            {
+                eprintln!("clarp-host: experience-watch pass: {why}");
+            }
+        }
+    });
+}
+
+fn duration_ms(raw: &str) -> Option<i64> {
+    let raw = raw.trim();
+    let (value, scale) = match raw.as_bytes().last()?.to_ascii_lowercase() {
+        b's' => (&raw[..raw.len() - 1], 1_000),
+        b'm' => (&raw[..raw.len() - 1], 60_000),
+        b'h' => (&raw[..raw.len() - 1], 3_600_000),
+        b'd' => (&raw[..raw.len() - 1], 86_400_000),
+        _ => (raw, 1_000),
+    };
+    let value: i64 = value.parse().ok()?;
+    (value >= 0).then_some(value.saturating_mul(scale))
+}
+
+fn clock(ms: i64, format: &str) -> String {
+    jiff::Timestamp::from_millisecond(ms)
+        .map(|ts| {
+            ts.to_zoned(jiff::tz::TimeZone::system())
+                .strftime(format)
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// `clarp-admin experience [--since 1h] [--open] [--json]`.
+pub(crate) async fn command(app: &App, args: &[String]) -> ToolAnswer {
+    let parsed = match crate::artifact_tool::parse(args, &["--since"], &["--open", "--json"], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return ToolAnswer::said(2, why),
+    };
+    let since = if let Some(raw) = parsed.option("--since") {
+        let Some(ms) = duration_ms(raw) else {
+            return ToolAnswer::said(2, "--since: give a duration such as 30m, 1h or 2d");
+        };
+        app.clock.now_ms().saturating_sub(ms)
+    } else {
+        i64::MIN
+    };
+    let book = match load(app).await {
+        Ok(book) => book,
+        Err(why) => return ToolAnswer::said(1, format!("clarp-admin experience: {why}")),
+    };
+    let only_open = parsed.flags.contains("--open");
+    let mut rows = book
+        .rows
+        .into_iter()
+        .filter(|row| row.last_seen >= since && (!only_open || row.cleared_at.is_none()))
+        .collect::<Vec<_>>();
+    rows.sort_unstable_by_key(|row| std::cmp::Reverse((row.last_seen, row.id)));
+    rows.truncate(500);
+    if parsed.flags.contains("--json") {
+        return match serde_json::to_string_pretty(&rows) {
+            Ok(text) => ToolAnswer::printed(0, text),
+            Err(why) => ToolAnswer::said(1, format!("clarp-admin experience: {why}")),
+        };
+    }
+    let settings = Settings::read();
+    let enabled = if settings.enabled { "on" } else { "off" };
+    let mut lines = vec![format!(
+        "experience watch: {enabled}, every {}s; {} finding(s)",
+        settings.interval.as_secs(),
+        rows.len(),
+    )];
+    for row in rows {
+        let state = if row.cleared_at.is_none() {
+            "OPEN"
+        } else {
+            "cleared"
+        };
+        let told = |to: &[String]| {
+            if to.is_empty() {
+                "-".to_owned()
+            } else {
+                to.join(", ")
+            }
+        };
+        lines.push(format!(
+            "  {state:<7} {:<18} {:<28} since {}, last {}, seen {}x, told on open {}, on clear {}\n          {}",
+            row.kind, row.subject, clock(row.first_seen, "%H:%M"), clock(row.last_seen, "%Y-%m-%d %H:%M"),
+            row.count, told(&row.notified_open), told(&row.notified_clear), row.detail,
+        ));
+    }
+    ToolAnswer::printed(0, lines.join("\n"))
 }

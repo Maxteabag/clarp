@@ -17,6 +17,7 @@ pub static REGISTRY: &[&[crate::kept::Kind]] = &[
     crate::edge::KEPT,
     crate::controller_actions::KEPT,
     crate::usage::KEPT,
+    crate::experience_watch::KEPT,
     crate::explain::KEPT,
     crate::heartbeat::KEPT,
     crate::janitors::KEPT,

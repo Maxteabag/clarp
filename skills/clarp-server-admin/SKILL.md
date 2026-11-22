@@ -18,6 +18,19 @@ Never hand-edit the active generated release. Use `clarp-admin paths` to find
 the platform-native release, configuration, database, cache, log, service, and
 toolchain paths.
 
+## What the user is experiencing
+
+On a Rust Host, `clarp-admin experience --open` lists outstanding findings.
+Use `--since 1h` to limit the time window and `--json` for stored rows. The
+watcher reads late sends, stuck or paused queues, app relaunch bursts,
+failed sends, skill links, old decision cards, and release-blocking jobs.
+
+The watcher is off unless `[experience_watch] enabled = true` is set in
+the Host configuration. Each finding's owner and the configured front
+desk hear once on open and once on clear, from `experience-watch`. The
+front desk also gets one daily summary. Findings are stored even without
+a configured recipient. See [the watcher configuration](../../server-rs/docs/experience-watch.md).
+
 ## Which code may meet which database
 
 Only the installed Host and runtime services upgrade a database, when they

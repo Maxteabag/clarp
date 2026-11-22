@@ -29,6 +29,9 @@ pub struct Made {
     pub peer: bool,
     /// Authenticated with this Host's administrator token.
     pub owner_token: bool,
+    /// A fixed sender authorized by the Host itself. Never accepted from an HTTP request.
+    #[serde(skip)]
+    pub internal_sender: Option<&'static str>,
     /// The caller named the send's trace itself (else the Host names one).
     pub trace_named: bool,
 }
@@ -81,6 +84,7 @@ pub(crate) async fn made(
         peer,
         trace_named,
         owner_token,
+        internal_sender: None,
     })
 }
 
