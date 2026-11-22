@@ -201,10 +201,11 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let tools: Vec<Value> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id})).collect();
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
-    // The row carries both messages: it shows once, where the first is.
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "Stopped npm test"]);
-    assert_eq!(p.entries[1].row, "live-abc", "the row shows where its first message was");
-    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
+    // The row carries both messages: it shows once, where the first is, and
+    // the thinking before that message does not put the fold above it.
+    assert_eq!(titles(&p), ["", "Worked for 12s · 5 tools", "Ran npm test", "Stopped npm test"]);
+    assert_eq!(p.entries[0].row, "live-abc", "the row shows where its first message was");
+    assert_eq!(p.entries[1].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
 }
 

@@ -406,12 +406,19 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
         let stays = |entry: &Entry| matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending") || entry.kind == Kind::Message;
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
         let first_message = entries.iter().position(|e| e.kind == Kind::Message);
-        let thought_first = first_message.is_some_and(|m| {
-            let before: Vec<&usize> = folded.iter().filter(|&&i| i < m).collect();
-            !before.is_empty() && before.iter().all(|&&i| entries[i].kind == Kind::Reasoning)
-        });
+        // The thinking folded above the first message, when that is all that is.
+        let leading: Vec<usize> = match first_message {
+            Some(m) => {
+                let before: Vec<usize> = folded.iter().copied().filter(|&i| i < m).collect();
+                if before.iter().all(|&i| entries[i].kind == Kind::Reasoning) { before } else { Vec::new() }
+            }
+            None => Vec::new(),
+        };
+        // Where the fold goes, as an index among the entries as they are (it
+        // may be one past the last): after the first message when only
+        // thinking came before it, at the work after it or else right below it.
         let start = match first_message {
-            Some(m) if thought_first => folded.iter().find(|&&i| i > m).or(folded.first()).copied(),
+            Some(m) if !leading.is_empty() => Some(folded.iter().copied().find(|&i| i > m).unwrap_or(m + 1)),
             _ => folded.first().copied(),
         };
         if let Some(first) = start {
@@ -438,20 +445,28 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
                 expanded: open,
                 ..Entry::default()
             };
-            if open {
-                entries.insert(first, fold);
-            } else {
-                let mut kept = Vec::with_capacity(entries.len());
-                for (i, entry) in entries.into_iter().enumerate() {
-                    if i == first {
-                        kept.push(fold.clone());
-                    }
-                    if !folded.contains(&i) {
-                        kept.push(entry);
-                    }
+            // Opened, the folded rows follow it (the leading thinking too, below
+            // the first message); closed, only the fold stands for them.
+            let mut kept = Vec::with_capacity(entries.len() + 1);
+            let mut moved = Vec::new();
+            let mut placed = false;
+            for (i, entry) in entries.into_iter().enumerate() {
+                if i == first {
+                    kept.push(fold.clone());
+                    kept.append(&mut moved);
+                    placed = true;
                 }
-                entries = kept;
+                if open && leading.contains(&i) {
+                    moved.push(entry);
+                } else if open || !folded.contains(&i) {
+                    kept.push(entry);
+                }
             }
+            if !placed {
+                kept.push(fold);
+                kept.append(&mut moved);
+            }
+            entries = kept;
         }
     }
     entries
