@@ -261,6 +261,13 @@ running turn. Decision cards and artifacts are shown as always.
   leaked test children, match on the executable (`pgrep -x bash` plus
   `/proc/PID/cmdline` starting with the script path) and skip your own
   process tree.
+- **Not from a conversation fork.** On a Rust Host at contract 153 or later
+  (feature `conversation_fork`), an agent its owner named may answer the user
+  through a short-lived fork of its session while its own session works for
+  other agents. Such a turn runs with `CLARP_FORK=1`, and `start` and `fork`
+  refuse it (exit 77), as do `clarp-agent-bg job-upsert` and `clarp-admin
+  agent create|fork`. Answer, read, relay with `clarp-admin prompt`, and say
+  what needs a helper: the agent's own session is told before its next turn.
 - Systemd mode is Linux only. On macOS `start` exits with status 3; use
   `launchctl submit` with the same command until a launchd path exists.
   `--clarp-agent` works on macOS too, but without systemd no background job

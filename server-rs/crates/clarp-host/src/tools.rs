@@ -102,8 +102,41 @@ impl ToolAnswer {
 /// The exit code of a tool this Host does not have: "service unavailable".
 pub const NOT_HERE: i32 = 69;
 
+/// The exit code of a tool a conversation fork may not use (`EX_NOPERM`).
+pub const NOT_IN_A_FORK: i32 = 77;
+
+/// What an agent's conversation fork (issue 718) is refused: it answers its user and relays,
+/// and leaves helpers, background jobs and new agents to the agent's own session. Its turn's
+/// tools are started with [`clarp_actor::fork::FORK_ENV`].
+fn fenced(call: &ToolCall) -> Option<ToolAnswer> {
+    let in_a_fork = call
+        .env
+        .get(clarp_actor::fork::FORK_ENV)
+        .is_some_and(|value| !value.trim().is_empty());
+    if !in_a_fork {
+        return None;
+    }
+    let argv: Vec<&str> = call.argv.iter().map(String::as_str).collect();
+    let what = match (call.tool.as_str(), argv.as_slice()) {
+        ("clarp-agent-bg", [_, "job-upsert" | "job-restart", ..]) => "register a background job",
+        ("clarp-admin", ["agent", "create" | "fork", ..]) => "make or fork an agent",
+        _ => return None,
+    };
+    Some(ToolAnswer::said(
+        NOT_IN_A_FORK,
+        format!(
+            "{}: a conversation fork may not {what}. Nothing was done. Say what is needed in \
+             your answer: the agent's own session is told before its next turn.",
+            call.tool
+        ),
+    ))
+}
+
 /// Answers a tool.
 pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
+    if let Some(refused) = fenced(call) {
+        return refused;
+    }
     match call.tool.as_str() {
         "clarp-agent-bg" => agent_bg(app, call).await,
         "clarp-goal" | "clarp-agent-tasks" => goal(app, call).await,
@@ -588,5 +621,52 @@ mod tests {
             shorten_label("Supercalifragilisticexpialidocious"),
             ("Supercalifragilistic".to_string(), true)
         );
+    }
+
+    #[test]
+    fn a_conversation_fork_may_not_start_jobs_or_agents() {
+        let call = |tool: &str, argv: &[&str], fork: bool| ToolCall {
+            tool: tool.to_string(),
+            argv: argv.iter().map(|arg| (*arg).to_string()).collect(),
+            env: fork
+                .then(|| (clarp_actor::fork::FORK_ENV.to_string(), "1".to_string()))
+                .into_iter()
+                .collect(),
+            ..ToolCall::default()
+        };
+        let refused = |tool: &str, argv: &[&str]| fenced(&call(tool, argv, true));
+        for (tool, argv) in [
+            (
+                "clarp-agent-bg",
+                &["hazel", "job-upsert", "j1", "build", "Build"][..],
+            ),
+            (
+                "clarp-agent-bg",
+                &["hazel", "job-restart", "j1", "build", "Build"][..],
+            ),
+            ("clarp-admin", &["agent", "create", "--name", "x"][..]),
+            ("clarp-admin", &["agent", "fork", "--task", "x"][..]),
+        ] {
+            let exit = refused(tool, argv).map(|answer| answer.exit);
+            assert_eq!(
+                exit,
+                Some(NOT_IN_A_FORK),
+                "{tool} {argv:?} is refused in a fork"
+            );
+            assert!(
+                fenced(&call(tool, argv, false)).is_none(),
+                "outside a fork: as ever"
+            );
+        }
+        for (tool, argv) in [
+            ("clarp-admin", &["prompt", "--to", "x", "--text", "y"][..]),
+            ("clarp-admin", &["tell-user", "--text", "y"][..]),
+            ("clarp-agent-bg", &["hazel", "list"][..]),
+        ] {
+            assert!(
+                refused(tool, argv).is_none(),
+                "{tool} {argv:?} is the fork's to use"
+            );
+        }
     }
 }

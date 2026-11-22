@@ -508,6 +508,13 @@ if [ -f "$sub_agent" ]; then
 # Written by install-host: the program an agent on the Rust Host starts helpers with.
 # What it keeps of its helpers is this Host's own, apart from a Python Host's on the same machine.
 $mark_ends
+# A conversation fork answers its user and relays; helpers are its agent's own session's to start.
+if [ -n "\${CLARP_FORK:-}" ]; then
+    case "\${1:-}" in start|fork)
+        echo "clarp-sub-agent: a conversation fork may not start helpers. Nothing was done." >&2
+        exit 77 ;;
+    esac
+fi
 CLARP_SUB_AGENT_DIR="\${CLARP_SUB_AGENT_DIR:-$share/data/sub-agents}"; export CLARP_SUB_AGENT_DIR
 exec python3 "$share/libexec/sub_agent.py" "\$@"
 EOF
