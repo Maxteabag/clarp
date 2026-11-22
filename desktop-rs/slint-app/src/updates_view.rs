@@ -41,6 +41,7 @@ fn attention_view(engine: &clarp_engine::Engine, item: &Object) -> AttentionView
         question: first(item, &["question", "summary"], "").into(),
         context: text(item, "context").into(),
         meta: match text(item, "host") {
+            host if host.is_empty() && clarp_core::all_hosts::is_peer_session(&text(item, "session")) => text(item, "agent_name"),
             host if host.is_empty() => format!("{}  ·  {}", text(item, "agent_name"), text(item, "session")),
             host => format!("{}  ·  {host}", text(item, "agent_name")),
         }

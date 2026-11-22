@@ -45,8 +45,12 @@ pub(crate) struct Peer {
 pub(crate) struct Peers {
     pub(crate) enabled: bool,
     pub(crate) list: Vec<Peer>,
-    /// Saved Hosts whose device token is being looked up.
-    looking_up: HashSet<String>,
+    /// Saved Hosts whose device token was looked up (or is being looked up).
+    looked_up: HashSet<String>,
+    /// Saved Hosts the keyring holds a device token for: paired.
+    tokens: HashMap<String, String>,
+    /// Whether rows show their Host badge, as last applied.
+    badges: bool,
     /// Bumped whenever the peers are dropped: older lookups are ignored.
     generation: u64,
     retry_scheduled: bool,
@@ -157,12 +161,12 @@ impl Engine {
 
     // ---- the switch --------------------------------------------------------
 
-    /// Whether "Chats from all paired Hosts" is on.
+    /// Whether "Show chats from all Hosts" is on.
     pub fn all_hosts(&self) -> bool {
         self.settings.boolean(all_hosts::SETTING, false)
     }
 
-    /// Turns "Chats from all paired Hosts" on or off (a device preference).
+    /// Turns "Show chats from all Hosts" on or off (a device preference).
     pub fn set_all_hosts(&mut self, on: bool) {
         if self.all_hosts() != on {
             self.settings.set(all_hosts::SETTING, on);
@@ -182,22 +186,26 @@ impl Engine {
             }
             self.changes.extend([Change::Roster, Change::Updates, Change::RosterFreshness]);
         }
-        if on {
-            self.find_peers();
-        }
+        self.look_up_pairings();
+        self.create_peers();
+        self.apply_badges();
     }
 
     /// The primary changed: every peer is found again.
     pub(crate) fn restart_peers(&mut self) {
+        if self.peer {
+            return;
+        }
         if self.peers.enabled {
             self.drop_peers();
-            self.find_peers();
         }
+        self.look_up_pairings();
+        self.create_peers();
+        self.apply_badges();
     }
 
     fn drop_peers(&mut self) {
         self.peers.generation += 1;
-        self.peers.looking_up.clear();
         self.peers.retry_scheduled = false;
         for mut peer in std::mem::take(&mut self.peers.list) {
             peer.engine.shutdown();
@@ -219,18 +227,18 @@ impl Engine {
         }
     }
 
-    /// Looks up the device token of every saved Host not read yet. A Host
-    /// counts as paired exactly when the keyring holds one for it.
-    fn find_peers(&mut self) {
+    /// Looks up the device token of every saved Host not looked up yet,
+    /// whether or not the option is on: a Host counts as paired exactly when
+    /// the keyring holds one for it (the Host badges count pairings).
+    pub(crate) fn look_up_pairings(&mut self) {
+        if self.peer {
+            return;
+        }
         let generation = self.peers.generation;
         for host in clarp_core::hosts::list(&self.settings) {
-            if host.url == self.base_url
-                || self.peers.looking_up.contains(&host.url)
-                || self.peers.list.iter().any(|p| p.url == host.url)
-            {
+            if host.url == self.base_url || !self.peers.looked_up.insert(host.url.clone()) {
                 continue;
             }
-            self.peers.looking_up.insert(host.url.clone());
             if !self.keyring {
                 // Checks and tests: no keyring, so CLARP_PEER_TOKEN (when
                 // set) stands for every saved Host's device token.
@@ -248,13 +256,100 @@ impl Engine {
         }
     }
 
-    pub(crate) fn peer_credential(&mut self, base: &str, token: String, generation: u64) {
-        if generation != self.peers.generation || !self.peers.enabled {
+    pub(crate) fn peer_credential(&mut self, base: &str, token: String, _generation: u64) {
+        let base = normalized_base_url(base);
+        let token = token.trim().to_owned();
+        if token.is_empty() {
+            self.peers.tokens.remove(&base);
+        } else {
+            self.peers.tokens.insert(base, token);
+        }
+        self.create_peers();
+        self.apply_badges();
+    }
+
+    /// How many Hosts this desktop is paired with: the primary and every
+    /// other saved Host with a device token, one per server id.
+    pub fn paired_hosts(&self) -> usize {
+        let mut seen: Vec<String> = vec![self.base_url.clone()];
+        if !self.server_id.is_empty() {
+            seen.push(self.server_id.clone());
+        }
+        let mut count = 1;
+        for host in clarp_core::hosts::list(&self.settings) {
+            if host.url == self.base_url || !self.peers.tokens.contains_key(&host.url) {
+                continue;
+            }
+            let identity = if host.server_id.is_empty() { host.url.clone() } else { host.server_id.clone() };
+            if !seen.contains(&identity) {
+                seen.push(identity);
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// "Show the Host on each chat" (on unless set off).
+    pub fn host_badges_setting(&self) -> bool {
+        self.settings.boolean(all_hosts::BADGES_SETTING, true)
+    }
+
+    pub fn set_host_badges_setting(&mut self, on: bool) {
+        if self.host_badges_setting() != on {
+            self.settings.set(all_hosts::BADGES_SETTING, on);
+            self.changes.push(Change::Preferences);
+        }
+        self.apply_badges();
+    }
+
+    /// Whether rows and chat headers name their Host: the setting is on and
+    /// this desktop is paired with more than one Host (#651).
+    pub fn host_badges(&self) -> bool {
+        !self.peer && self.host_badges_setting() && self.paired_hosts() > 1
+    }
+
+    /// The rows are rebuilt when whether they show badges changed.
+    pub(crate) fn apply_badges(&mut self) {
+        let shown = self.host_badges();
+        if shown != self.peers.badges {
+            self.peers.badges = shown;
+            self.rebuild_merged();
+            self.changes.push(Change::Roster);
+        }
+    }
+
+    /// The badge a chat's row and header show ("" for none): its Host's
+    /// name as this desktop shows it, or where a moved agent lives now.
+    pub fn host_badge(&self, session: &str) -> String {
+        if self.peers.merged.is_some() {
+            return self.roster().find(session).map(|a| a.host.clone()).unwrap_or_default();
+        }
+        if !self.host_badges() {
+            return String::new();
+        }
+        let Some(agent) = self.roster.find(session) else { return String::new() };
+        let listed = [self.server_id.as_str()];
+        all_hosts::badge(agent, &self.primary_label(), &listed, false, true)
+    }
+
+    /// Starts a peer for every paired saved Host not read yet, while the
+    /// option is on.
+    fn create_peers(&mut self) {
+        if !self.peers.enabled || self.peer {
             return;
         }
-        let base = normalized_base_url(base);
-        self.peers.looking_up.remove(&base);
-        if token.trim().is_empty() || base == self.base_url || self.peers.list.iter().any(|p| p.url == base) {
+        let paired: Vec<(String, String)> = clarp_core::hosts::list(&self.settings)
+            .into_iter()
+            .filter_map(|h| self.peers.tokens.get(&h.url).map(|t| (h.url.clone(), t.clone())))
+            .collect();
+        for (base, token) in paired {
+            self.start_peer(&base, &token);
+        }
+    }
+
+    fn start_peer(&mut self, base: &str, token: &str) {
+        let base = base.to_owned();
+        if base == self.base_url || self.peers.list.iter().any(|p| p.url == base) {
             return;
         }
         let Some(saved) = clarp_core::hosts::list(&self.settings).into_iter().find(|h| h.url == base) else { return };
@@ -271,7 +366,7 @@ impl Engine {
         }
         let config = Config {
             base_url: base.clone(),
-            token: token.trim().to_owned(),
+            token: token.to_owned(),
             settings,
             workspace_store: None,
             keyring: false,
@@ -345,7 +440,7 @@ impl Engine {
                 peer.engine.reconnect();
             }
         }
-        self.find_peers();
+        self.create_peers();
         self.schedule_peer_retry();
     }
 
@@ -370,6 +465,12 @@ impl Engine {
         let roster_change = |c: &Change| matches!(c, Change::Roster | Change::Archive | Change::RosterFreshness | Change::Connection | Change::ServerInfo);
         let mut roster_changed = self.changes.iter().any(roster_change);
         let mut updates_changed = self.changes.contains(&Change::Updates);
+        if !self.peer && self.changes.iter().any(|c| matches!(c, Change::Hosts | Change::ServerInfo)) {
+            // A Host saved, forgotten or identified: the pairings may differ.
+            self.look_up_pairings();
+            self.create_peers();
+            self.apply_badges();
+        }
         if self.peers.list.is_empty() {
             if roster_changed && self.peers.merged.is_some() {
                 self.rebuild_merged();
@@ -378,11 +479,12 @@ impl Engine {
         }
         let mut out = Vec::new();
         let mut identified = Vec::new();
+        let badges = self.peers.badges;
         for (index, peer) in self.peers.list.iter_mut().enumerate() {
             for change in peer.engine.pump() {
                 if change == Change::ServerInfo {
                     let (id, name) = (peer.engine.server_id().to_owned(), peer.engine.server_name().to_owned());
-                    if !name.is_empty() {
+                    if peer.label.is_empty() || peer.label == peer.url {
                         peer.label = name;
                     }
                     if !id.is_empty() && id != peer.server_id {
@@ -401,7 +503,10 @@ impl Engine {
                     Change::AgentMutated(s) => out.push(Change::AgentMutated(q(s))),
                     Change::AssignmentSucceeded(s) => out.push(Change::AssignmentSucceeded(q(s))),
                     Change::AssignmentRequested { session, automatic } => out.push(Change::AssignmentRequested { session: q(session), automatic }),
-                    Change::Notification { title, body } => out.push(Change::Notification { title: all_hosts::titled(&title, &peer.label), body }),
+                    Change::Notification { title, body } => {
+                        let title = if badges { all_hosts::titled(&title, &peer.label) } else { title };
+                        out.push(Change::Notification { title, body })
+                    }
                     Change::Roster | Change::Archive | Change::RosterFreshness | Change::Connection | Change::ServerInfo | Change::Error | Change::Rooms => {
                         roster_changed = true
                     }
@@ -437,6 +542,8 @@ impl Engine {
         if clarp_core::hosts::list(&self.settings) != before {
             self.changes.push(Change::Hosts);
         }
+        let label = self.label_of(&url, &name);
+        self.peers.list[index].label = label;
         self.hand_over(index);
     }
 
@@ -462,15 +569,20 @@ impl Engine {
         engine.roster.transport_available() && !matches!(engine.connection_state(), "offline" | "reconnecting" | "unauthorized")
     }
 
+    /// The name this desktop shows for a pairing (`SavedHost::label`): the
+    /// saved name, else `fallback` (its `/server-info` name), else its address.
+    fn label_of(&self, url: &str, fallback: &str) -> String {
+        let saved = clarp_core::hosts::list(&self.settings).into_iter().find(|h| h.url == url);
+        match saved {
+            Some(host) if !host.name.is_empty() => host.label(),
+            _ if !fallback.is_empty() => fallback.to_owned(),
+            _ => clarp_core::hosts::SavedHost { url: url.to_owned(), name: String::new(), server_id: String::new() }.label(),
+        }
+    }
+
     /// What the primary's rows say about their Host.
     fn primary_label(&self) -> String {
-        if !self.server_name.is_empty() {
-            return self.server_name.clone();
-        }
-        clarp_core::hosts::list(&self.settings)
-            .into_iter()
-            .find(|h| h.url == self.base_url)
-            .map_or_else(|| clarp_core::hosts::SavedHost { url: self.base_url.clone(), name: String::new(), server_id: String::new() }.label(), |h| h.label())
+        self.label_of(&self.base_url, &self.server_name)
     }
 
     /// Rebuilds the merged chat list and attention items from every Host.
@@ -491,17 +603,20 @@ impl Engine {
             agents: p.engine.roster.agents(),
             reachable: Self::reachable(&p.engine),
         }));
-        let merged = Roster::from_agents(all_hosts::merge(&hosts));
+        let merged = Roster::from_agents(all_hosts::merge(&hosts, self.peers.badges));
         // Attention and artifacts: each names its Host; a peer's sessions
         // are qualified like its rows, and its ids remember their Host.
         let mut owners = HashMap::new();
+        let badges = self.peers.badges;
         let tag = |items: &[Value], server_id: &str, label: &str, peer: bool, owners: &mut HashMap<String, String>| -> Vec<Value> {
             items
                 .iter()
                 .map(|item| {
                     let mut item = item.clone();
                     if let Some(object) = item.as_object_mut() {
-                        object.insert("host".into(), json!(label));
+                        if badges {
+                            object.insert("host".into(), json!(label));
+                        }
                         if peer {
                             for key in ["decision_id", "artifact_id", "id"] {
                                 if let Some(id) = object.get(key).and_then(Value::as_str).filter(|id| !id.is_empty()) {
@@ -547,11 +662,6 @@ impl Engine {
     pub fn unreachable_hosts_note(&self) -> String {
         let labels: Vec<&str> = self.peers.list.iter().filter(|p| !Self::reachable(&p.engine)).map(|p| p.label.as_str()).collect();
         all_hosts::unreachable_note(&labels)
-    }
-
-    /// The Host a chat's header names with several Hosts listed ("" else).
-    pub fn chat_host(&self, session: &str) -> String {
-        self.roster().find(session).map(|a| a.host.clone()).unwrap_or_default()
     }
 
     /// The peers' Updates lists reload with the primary's.

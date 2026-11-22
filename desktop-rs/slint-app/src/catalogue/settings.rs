@@ -73,9 +73,9 @@ fn chats() -> Vec<Setting> {
         Setting::toggle(
             e(
                 "all-hosts",
-                "Chats from all paired Hosts",
+                "Show chats from all Hosts",
                 "chats",
-                "Lists the chats of every Host this desktop is paired with, each naming its Host; opening one talks to its own Host. New chats and Host settings stay on the connected Host.",
+                "Lists the chats of every Host this desktop is paired with; opening one talks to its own Host. New chats and Host settings stay on the connected Host.",
                 &["hosts", "all hosts", "paired hosts", "other hosts", "every host", "merge hosts", "servers", "multiple hosts", "combined list"],
             ),
             "CHATS",
@@ -86,6 +86,22 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("off"),
+        Setting::toggle(
+            e(
+                "host-badges",
+                "Show the Host on each chat",
+                "chats",
+                "Names the Host each chat lives on, in its row and header, when this desktop is paired with more than one Host.",
+                &["host badge", "host name", "which host", "badges", "host label", "server name", "where it lives"],
+            ),
+            "CHATS",
+            |app| app.engine.borrow().host_badges_setting(),
+            |app, _, on| {
+                app.engine.borrow_mut().set_host_badges_setting(on);
+                crate::pump_now(app);
+            },
+        )
+        .default("on"),
         Setting::toggle(
             e("show-when-ready", "Show when ready", "chats", "Shows a reply once it is complete instead of while it streams in.", &["stream", "streaming", "typing", "live text", "wait for answer", "toggle"]),
             "CHATS",

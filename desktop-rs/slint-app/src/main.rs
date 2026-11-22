@@ -272,6 +272,7 @@ impl App {
             .into_iter()
             .map(|row| {
                 let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
+                chat.host = engine.host_badge(&row.session).into();
                 chat.fold_count = folded_under.get(&row.session).copied().unwrap_or(0);
                 (chat.running_helpers, chat.running_processes) = view::running_work(&chat, working_under.get(&row.session).copied().unwrap_or(0));
                 chat.queue = queue.iter().position(|s| *s == row.session).map_or(0, |i| i as i32 + 1);
@@ -405,9 +406,7 @@ impl App {
             self.focus_composer();
         }
         let engine = self.engine.borrow();
-        window.set_selected_name(
-            if selected.is_empty() { String::new() } else { clarp_core::all_hosts::titled(&engine.chat_name(&selected), &engine.chat_host(&selected)) }.into(),
-        );
+        window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
         window.set_connection(engine.connection_state().into());
         window.set_base_url(engine.base_url().into());
         if changes.iter().any(|c| matches!(c, Change::Hosts | Change::ServerInfo | Change::Endpoint)) {

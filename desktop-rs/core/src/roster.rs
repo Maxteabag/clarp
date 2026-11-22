@@ -113,6 +113,8 @@ pub struct AgentRow {
     pub process_count: i32,
     /// The Host's name in a merged list of several Hosts, else empty.
     pub host: String,
+    /// "Moved to <Host>" for an agent that moved (Host contract 125).
+    pub moved: String,
 }
 
 pub type Op = ListOp<AgentRow, Role, Signal>;
@@ -212,6 +214,7 @@ impl Roster {
             sub_agent_count: if live { counts.sub_agents } else { 0 },
             process_count: if live { self.running_work(agent) } else { 0 },
             host: agent.host.clone(),
+            moved: crate::all_hosts::moved_line(agent),
         }
     }
 
