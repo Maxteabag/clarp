@@ -1477,6 +1477,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         diagnostic["imported"] = state.checkpoint
     if state is None:
         return refuse("no_frontier", reason=reason)
+    # Taken now: ``reason`` is reused below for decide()'s answer.
+    after_yield = restored and reason in _YIELD_REFUSALS
     cp = load_checkpoint(db.conn(), agent_id, backend_session_id, str(path))
     if cp != state.checkpoint:
         return refuse("checkpoint_changed")
@@ -1506,11 +1508,14 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     unchanged = (restored and (before.size, before.mtime_ns) == (cp.size, cp.mtime_ns)
                  and cp.complete_size == before.size
                  and not recorded_rows_changed())
-    if restored and not unchanged:
+    if restored and not unchanged and not after_yield:
         # A frontier from the store: its rows are asked before anything of
         # the file is read. The checks below read its samples and the bytes
         # after the boundary, and the first tail from it every imported
-        # byte: all wasted on a tail the rows refuse.
+        # byte: all wasted on a tail the rows refuse. Not after a tail refused
+        # in a yield: that tail's rows stand above the stored mark, and only
+        # the plan below can say whether they pass (asked here without it,
+        # they were always refused, and that branch was never reached).
         why: dict = {}
         what = recorded_rows_changed(rules, why)
         if what:
@@ -1717,7 +1722,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             snapshot.append(None)
 
     accepted = None
-    if restored and reason in _YIELD_REFUSALS:
+    if after_yield:
         # The refused tail's rows stand above the stored mark. They pass only
         # if this tail's plan writes each of them again exactly as it stands
         # (reproduced from the transcript, line for line); anything else is
