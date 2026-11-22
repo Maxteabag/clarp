@@ -591,7 +591,7 @@ def _recording_submissions(monkeypatch):
     from lib import transcript_import_cache
     submitted: list[str] = []
 
-    def record(path, importer, *, owner="", after=None):
+    def record(path, importer, *, owner="", after=None, urgent=False):
         submitted.append(str(path))
         return True
 
@@ -853,3 +853,46 @@ def test_a_failed_runtimes_read_unbinds_nothing_and_the_next_pass_is_full(stream
     streamer.reconcile_once()
     assert reads == [1], "the pass after a failed read is a full one"
     assert streamer.pool.has(agent_id)
+
+
+def test_a_turns_end_imports_its_transcript_without_waiting_out_the_window(streamer_env, monkeypatch):
+    """R6, R12: a change seen while a turn ran waits out the agent's import window; the
+    turn's end imports at once, so its reply is the transcript's (phase, tools) and the
+    agent's last completed message is the reply. One import, and the change is settled."""
+    from lib import transcript_import_cache as cache, transcript_incremental
+
+    cache.reset_for_tests()
+    streamer, tmp_path = streamer_env
+    agent_id, tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-ended")
+    streamer._stream = _FakeStream()
+    imported = []
+
+    def native_import(**kwargs):
+        imported.append(tx.stat().st_size)
+        return {"rows": 0, "parse_s": 0.0, "store_s": 0.0,
+                "_clarp_transcript_completion_v1": "completed-changed"}
+
+    monkeypatch.setattr(transcript_incremental, "import_transcript", native_import)
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 600.0)
+    try:
+        assert streamer.turn_ended("nobody") is False
+        streamer.reconcile_once()
+        agent = agents_db.get_by_agent_id(agent_id)
+        generation = streamer._bind_generation[agent_id]
+        _append(tx, _assistant_text("synthetic first reply"))
+        assert streamer._submit(agent, streamer._note_change(agent, "cs-ended", generation))
+        assert cache.wait_for_background(2) and len(imported) == 1
+        # The next turn's words: within the window, so they wait.
+        _append(tx, _assistant_text("synthetic second reply"))
+        assert streamer._submit(agent, streamer._note_change(agent, "cs-ended", generation))
+        assert cache.wait_for_background(2) and len(imported) == 1
+        assert streamer.turn_ended(agent_id) is True
+        assert cache.wait_for_background(2)
+        assert imported == [imported[0], tx.stat().st_size]
+        with streamer._dirty_lock:
+            assert agent_id not in streamer._dirty
+    finally:
+        try:
+            streamer.stop(timeout=2)
+        finally:
+            assert cache.reset_for_tests()

@@ -2,6 +2,16 @@
 use clarp_kernel::rings::opening::{self as rules, Effects, Greeting, World};
 use serde_json::{Value, json};
 
+// The Python lifecycle stores trace-based clip metadata in the same transaction.
+// The Rust actor binds its durable turn after admission; that policy is tested separately.
+fn lifecycle_record(record: &Value) -> Value {
+    let mut record = record.clone();
+    if let Some(fields) = record.as_object_mut() {
+        fields.remove("clip_bindings");
+    }
+    record
+}
+
 #[test]
 fn every_claim_greeting_and_supersession_matches_the_reference() {
     let fixture: Value =
@@ -16,7 +26,7 @@ fn every_claim_greeting_and_supersession_matches_the_reference() {
             let cmd = &step["cmd"];
             let body = &step["body"];
             if !step["before"].is_null() {
-                op = step["before"].clone();
+                op = lifecycle_record(&step["before"]);
             }
             if let Some(g) = cmd.get("gen") {
                 generation = g.clone();
@@ -89,7 +99,7 @@ fn every_claim_greeting_and_supersession_matches_the_reference() {
                 op["updated_at"] = json!(at);
             }
             let mut expected = before;
-            for (k, v) in step["written"].as_object().unwrap() {
+            for (k, v) in lifecycle_record(&step["written"]).as_object().unwrap() {
                 expected[k] = v.clone();
             }
             assert_eq!(op, expected, "{} {cmd}", story["name"]);
@@ -109,8 +119,6 @@ fn every_claim_greeting_and_supersession_matches_the_reference() {
             json!({"reason":row["reason"],"silence_ms":row["ms"],"intent":{"cause":row["cause"]}});
         assert_eq!(json!(rules::header(&op)), row["text"]);
     }
-    // R77 superseded trace-based clip selection. The independent binding
-    // stories now exercise the phone's tag and its output fence.
     for row in fixture["uuids"].as_array().unwrap() {
         assert_eq!(
             json!(rules::uuid(row["raw"].as_str().unwrap().as_bytes())),
@@ -208,7 +216,7 @@ fn admission_checks_the_stored_channel_and_both_traces() {
         };
         let result = rules::admit(&mut op, &case["existing"], false, &w, &mut fx);
         assert_eq!(result, case["result"], "{case}");
-        assert_eq!(op, case["after"], "{case}");
+        assert_eq!(op, lifecycle_record(&case["after"]), "{case}");
         assert_eq!(
             result == "admitted",
             case["effects"] == json!(["create", "record", "enqueue", "allow_paused"])
@@ -221,4 +229,51 @@ fn admission_checks_the_stored_channel_and_both_traces() {
         }] += 1;
     }
     assert_eq!(counts, [2, 2, 236]);
+}
+
+#[test]
+fn the_admitted_agent_and_turn_have_the_references_opening_audio_tag_and_fence() {
+    use clarp_kernel::rings::binding::{Binding, Kind, key};
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/listen-first-vectors.json")).unwrap();
+    let clips = fixture["clips"].as_array().unwrap();
+    assert_eq!(clips.len(), 120);
+    for case in clips {
+        let op = &case["op"];
+        let agent = op["agent_id"].as_str().unwrap();
+        let epoch = op["epoch"].as_u64().unwrap();
+        let bindings = [
+            Binding {
+                turn_id: 1,
+                kind: Kind::Initiative,
+                admission_id: op["intent"]["admission_id"].as_str().unwrap().into(),
+                epoch,
+            },
+            Binding {
+                turn_id: 2,
+                kind: Kind::GreetingReply,
+                admission_id: op["greeting"]["client_msg_id"].as_str().unwrap().into(),
+                epoch,
+            },
+        ];
+        let index: std::collections::BTreeMap<_, _> = bindings
+            .iter()
+            .map(|binding| (key(agent, binding.turn_id).unwrap(), binding.audio(op)))
+            .collect();
+        let found = key(
+            case["agent"].as_str().unwrap(),
+            case["turn"].as_u64().unwrap(),
+        )
+        .and_then(|key| index.get(&key));
+        assert_eq!(
+            found.map_or(&Value::Null, |result| &result["tag"]),
+            &case["tag"],
+            "{case}"
+        );
+        assert_eq!(
+            found.is_some_and(|result| result["skip"] == true),
+            case["skip"].as_bool().unwrap(),
+            "{case}"
+        );
+    }
 }

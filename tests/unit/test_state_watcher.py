@@ -141,6 +141,34 @@ def test_completed_turn_classification_keeps_row_order(monkeypatch):
         watcher.stop()
 
 
+def test_a_done_row_tells_on_done_its_agent_and_a_failing_callback_breaks_nothing(monkeypatch):
+    """The transcript streamer imports an ended turn when its DONE row is read (R6, R12)."""
+    from lib import apns, user_notifications
+    monkeypatch.setattr(user_notifications, "classify_completed_turn", lambda **kw: {"notify": False})
+    monkeypatch.setattr(apns, "on_user_notification", lambda n: None)
+    working = agents_db.create_agent(persona="Busy", voice_id="V", cwd="/tmp", session="busy")
+    agents_db.record_state(working, "thinking", {"source": "pwa"})
+    first, second = _done_agent("first"), _done_agent("second")
+    told = []
+
+    def on_done(agent_id):
+        told.append(agent_id)
+        if agent_id == first:
+            raise RuntimeError("synthetic streamer failure")
+
+    stream = FakeStream()
+    watcher = StateLogWatcher(stream, on_done=on_done)
+    try:
+        watcher._poll_once()
+        assert watcher.wait_for_notifications(5)
+    finally:
+        watcher.stop()
+    assert told == [first, second]
+    states = [(e["agent_id"], e["kind"]) for e in stream.events if e["type"] == SSEType.AGENT_STATE]
+    assert (working, "thinking") in states
+    assert [agent for agent, kind in states if kind == "done"] == [first, second]
+
+
 def test_state_watcher_stop_joins_notification_worker():
     watcher = StateLogWatcher(FakeStream())
     watcher.INTERVAL_SEC = 10

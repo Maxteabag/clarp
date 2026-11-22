@@ -13,8 +13,7 @@ PLANTS=[(K,'stories',label,old,new) for label,old,new in [
     ('prune just before the day is over','>= 86_400_000','>= 86_399_999'),
     ('keep an opening at its deadline','>= 86_400_000','> 86_400_000'),
     ('prune without retirement','let Some(retired) = retired_at else','let Some(retired) = retired_at.or(Some(0)) else'),
-    ('count only from the call end','retired.max(ended)','ended'),
-    ('count only from retirement','retired.max(ended)','retired'),
+    ('count from the end of the call','CallEnd::Ended(_) => retired','CallEnd::Ended(ended) => ended'),
     ('keep retired records with no end forever','CallEnd::Unknown => retired','CallEnd::Unknown => return false'),
     ('prune while a call is live','CallEnd::Live => return false','CallEnd::Live => retired'),
 ]]
