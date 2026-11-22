@@ -12,6 +12,8 @@
 export const COORDINATION_FEATURE = 'hidden_coordination';
 export const VISIBILITIES = ['show', 'hide'];
 export const OVERRIDES = ['default', 'show', 'hide'];
+/** One chat's own choice as the chat's menu and profile name it ('default' follows the Host's). */
+export const OVERRIDE_LABELS = { default: 'Follow Settings', show: 'Show', hide: 'Hide' };
 
 /** The policy an answer was read under, {hidden, source, visibility}, or null. */
 export function normalizeEcho(value) {

@@ -43,7 +43,7 @@
         <p class="start-hint">
           {#if coordination.error}{coordination.error}{:else}
             Messages agents send each other, and the work they do for them, in every chat that has no
-            setting of its own (⇄ in a chat). The Host keeps this, so your other devices follow.
+            setting of its own (the chat's … menu). The Host keeps this, so your other devices follow.
             Notes, cards and files an agent leaves for you always show.
           {/if}
         </p>

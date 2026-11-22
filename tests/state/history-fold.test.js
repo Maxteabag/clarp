@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { foldTurns, workLabel } from '../../static/lib/history-fold.js';
+import {
+  CHAT_TOOL_ACTIVITY, CHAT_TOOL_ACTIVITY_LABELS, FOLLOW, chatKey, chatToolChoice, effectiveToolActivity,
+  foldTurns, workLabel,
+} from '../../static/lib/history-fold.js';
+import { OVERRIDE_LABELS, OVERRIDES } from '../../static/lib/coordination.js';
 
 const prompt = (id, trace) => ({ id, role: 'user', trace_id: trace, text: 'synthetic prompt' });
 const tool = (id, status = 'ok') => ({ id, name: 'Bash', command: 'ls', status });
@@ -144,5 +148,30 @@ describe('the quiet chat: one work row per settled turn', () => {
     expect(out.byRow.get('u1').label).toBe('Worked for 4s');
     expect(out.byRow.get('u1').calls.map(c => c.text)).toEqual(['Trying the build.']);
     expect(out.byRow.get('u2').calls).toEqual([]);
+  });
+});
+
+describe('a chat\'s own choices', () => {
+  it('keys a chat by the Host\'s server id and its session, and nothing without either', () => {
+    expect(chatKey('host-1', 'rachel')).toBe('host-1|rachel');
+    expect(chatKey('', 'rachel')).toBe('');
+    expect(chatKey('host-1', '')).toBe('');
+  });
+
+  it('follows the device\'s Tool activity unless the chat chose its own', () => {
+    const byChat = { 'host-1|rachel': 'always', 'host-1|mike': 'bogus', 'host-2|rachel': 'hide_done' };
+    expect(chatToolChoice(byChat, 'host-1|rachel')).toBe('always');
+    expect(chatToolChoice(byChat, 'host-1|mike')).toBe(FOLLOW);           // an unknown value follows
+    expect(chatToolChoice(byChat, '')).toBe(FOLLOW);
+    expect(effectiveToolActivity('group_old', byChat, 'host-1|rachel')).toBe('always');
+    expect(effectiveToolActivity('group_old', byChat, 'host-1|mike')).toBe('group_old');
+    expect(effectiveToolActivity('group_old', byChat, 'host-3|rachel')).toBe('group_old');  // another Host
+    expect(effectiveToolActivity('nonsense', {}, '')).toBe('grouped');
+  });
+
+  it('names the five Tool activity choices and the three for messages between agents', () => {
+    expect(CHAT_TOOL_ACTIVITY.map(v => CHAT_TOOL_ACTIVITY_LABELS[v]))
+      .toEqual(['Follow Settings', 'Grouped', 'Always visible', 'Group old', 'Hide when done']);
+    expect(OVERRIDES.map(v => OVERRIDE_LABELS[v])).toEqual(['Follow Settings', 'Show', 'Hide']);
   });
 });
