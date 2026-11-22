@@ -193,12 +193,18 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     // A message sent while the tool compacts waits behind the compaction, and nothing of it
     // ends the compaction. Stopped before the tool recorded it: not compacted. The Stop holds
     // what waited, and a compaction asked for while that waits is refused in the Python
-    // Host's words.
+    // Host's words. The message is background work: the user's Stop starts the user's own
+    // waiting messages (Host contract 141), and holds the rest.
     compact(&host);
     wait_for("the row to say it is compacting", || {
         row_of(&host, &agent)["compacting"] == true
     });
-    host.send(&agent, "third, sent while it compacts", "u-3");
+    let waits = host.post(
+        "/send",
+        json!({ "session": agent, "text": "third, sent while it compacts", "client_msg_id": "u-3",
+                "queue_if_busy": true, "origin": "automation" }),
+    );
+    assert_eq!(waits["queued"], true, "{waits}");
     wait_for("the message to wait", || {
         row_of(&host, &agent)["queued_turn_count"] == 1
     });
