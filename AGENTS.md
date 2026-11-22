@@ -95,13 +95,15 @@ about the tests. Read the recorded
 foreground. Two commits were pushed and deployed from a false green this way.
 
 A change to any file in `server/lib/transcript_incremental.py`'s
-`_VERSION_SOURCES`, `_PARSE_COMMON` or `_STORE_SOURCES` runs
-`tests/unit/test_transcript_parser_version.py` before its pull request is sent:
-those files make the transcript digest, and its golden
-(`tests/fixtures/transcript-parser-version.json`) must move with them or main is
-red. A moved parse digest is a recorded decision, said in the pull request: it
-refuses every checkpoint of that backend, so the next import re-reads every
-transcript of it in full.
+`_VERSION_SOURCES`, `_PARSE_COMMON` or `_STORE_SOURCES` moves the transcript
+digest, so it regenerates the digest's golden in the same change:
+`UPDATE_TRANSCRIPT_VERSION_GOLDEN=1 python -m pytest
+tests/unit/test_transcript_parser_version.py` writes
+`tests/fixtures/transcript-parser-version.json`, and the diff is part of the
+change, like any generated fixture (generating it builds the change; it is not
+a test gate). Otherwise main is red at the install pass. A moved parse digest
+is a decision to say in the pull request: it refuses every checkpoint of that
+backend, so the next import re-reads every transcript of it in full.
 
 `tests/unit/test_dashboard_projection.py` and `test_model_fallbacks.py` are
 load-sensitive under `pytest-xdist`: confirm a failure by running that test
