@@ -55,7 +55,7 @@ rules(V, 'door', [
     ('cache parent permits a linked directory', 'crate::files::open(&self.previews, true)', 'std::fs::File::open(&self.previews)'),
     ('a dangling cache link loses its refusal', 'if self.previews.is_symlink()', 'if false'),
     ('the store is created without owner execute permission', '.mode(0o700)\n                .create(&self.previews)', '.mode(0o600)\n                .create(&self.previews)'),
-    ('a cached range ignores its start', 'file.read_at(&mut bytes, at)', 'file.read_at(&mut bytes, 0)'),
+    ('a cached range ignores its start', '                            let read = file.read_at(&mut bytes, at)?;', '                            let read = file.read_at(&mut bytes, 0)?;'),
 
 ])
 rules(V, 'store', [

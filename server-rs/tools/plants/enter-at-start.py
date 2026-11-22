@@ -19,7 +19,8 @@ L = 'clarp-actor/src/lib.rs'
 W = 'clarp-host/src/wire.rs'
 H = 'clarp-host/src/agent.rs'
 OUTSIDE = '        let outside = !self.agent.starts_at_once(message.admission);\n'
-HERE = '        self.moved.is_none()\n'
+HERE = ('        self.moved.is_none()\n'
+        '            && !self.import_held\n')
 AT_ONCE = HERE + ('            && self.live.is_none()\n'
                   '            && !(self.paused && admission == Admission::Background)\n')
 SENT_AT = '                        let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);\n'
