@@ -88,9 +88,11 @@ The equivalent non-interactive command is:
 ```bash
 ./setup.sh --non-interactive --backend both \
   --toolchain managed --transcription recommended \
-  --tts cartesia --tts-fallback none --network tailscale \
-  --optional-skill clarp-calendar
+  --tts cartesia --tts-fallback none --network tailscale
 ```
+
+Every skill is installed; add `--skip-skill clarp-whatsapp` (repeatable) to
+turn a non-core one off, or `--optional-skill ID` to turn one back on.
 
 ## Voice-output providers
 
@@ -296,8 +298,16 @@ clarp-admin skills remove clarp-calendar
 clarp-admin skills repair-links
 ```
 
-Canonical skill files live in `current/skills`. The installer links each chosen
-skill into both `~/.claude/skills` and `${CODEX_HOME:-~/.codex}/skills`.
+Canonical skill files live in `current/skills`. Every skill the release ships
+is on unless the user turned it off: setup and every install or update
+(`skills repair-links`) link it into `~/.claude/skills`,
+`${CODEX_HOME:-~/.codex}/skills` and, where Antigravity is installed,
+`~/.gemini/config/skills`. A skill a later release adds turns on at the next
+update. `skills remove`, an app's toggle or the setup TUI turns one off and
+records it in `install.json` (`skills_off`), so updates leave it off;
+`skills install` turns it back on. Core skills cannot be turned off. A missing
+tool a skill needs (`wacli`, `himalaya`) is shown as a status and does not stop
+the skill from being linked.
 
 The iOS app exposes the same inventory under **Settings → Servers → Computer
 settings**. It reports healthy, inactive, missing, outdated, modified/conflicting,
@@ -320,7 +330,8 @@ Default core:
 - `clarp-transcription-model-installation`
 - `clarp-voice-adapters`
 
-Optional packs contain only Clarp-native and messaging integrations. Developer,
+The other packs (artifacts, native, messaging) are on by default and can be
+turned off. Developer,
 web-research, travel, workplace, hardware, and personal skills are deliberately
 outside the product.
 
