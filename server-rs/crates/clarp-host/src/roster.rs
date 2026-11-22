@@ -342,6 +342,11 @@ async fn archived(
     let used_up = crate::quota::used_up(&app).await;
     let owners = app.mouth.owners();
     let forks = crate::conversation_forks::Named::read();
+    // What the snapshot adds to a row of its own, so that the row here is the same one.
+    let (live_defaults, live_available) = app.calls.taking(&app).await;
+    let teams = app
+        .teams
+        .read(|teams, _| clarp_kernel::teams::memberships(teams));
     let agents: Vec<Value> = order[page.start..page.end]
         .iter()
         .filter_map(|(_, agent_id)| {
@@ -349,9 +354,16 @@ async fn archived(
                 .members
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
-            Some(edge::agent_row(
+            let mut row = edge::agent_row(
                 &directory, &families, member, &app.faces, &owners, &used_up, &forks,
-            ))
+            );
+            let session = &member.record.session;
+            row["team_ids"] = json!(teams.get(agent_id).map_or(&[][..], Vec::as_slice));
+            row["live_call_available"] = json!(live_available.contains(session));
+            if live_defaults.contains(session) {
+                row["call_mode"] = json!(clarp_kernel::live_call::LIVE);
+            }
+            Some(row)
         })
         .collect();
     Ok(Json(json!({
