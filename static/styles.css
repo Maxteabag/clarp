@@ -773,6 +773,15 @@ body::before {
   gap: 10px;
   align-items: center;
 }
+/* The composer of an agent that moved to another Host: one line, no input (contract 125). */
+.chat-held {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  font: 400 13px/1.35 var(--font-ui);
+  color: var(--washi-low);
+}
+
 .chat-input {
   flex: 1;
   border: 0;

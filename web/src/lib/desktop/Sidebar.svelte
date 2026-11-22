@@ -11,6 +11,7 @@
     shortActivityPhase, shortActivityText, statusFor,
   } from '../../stores/app.svelte.js';
   import { orderChats } from '../chat-order.js';
+  import { movedLine } from '@core/agent-moved.js';
   import { input, setRegion } from '../../stores/input.svelte.js';
 
   let { collapsed = false, forced = false, onToggle, onOpenOverview } = $props();
@@ -39,7 +40,8 @@
           current: row.sid === app.session,
           busy: !!s.busy,
           unread: isUserNotificationUnread(row.sid),
-          line: shortActivityText(s) || shortActivityPhase(s)
+          // A moved agent's row says where it went (contract 125).
+          line: movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
                 || (s.busy ? 'Working' : 'Idle'),
         };
       });
