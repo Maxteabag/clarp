@@ -397,6 +397,10 @@ class Config:
     bind_addr: str = "127.0.0.1"
     port: int = 7682
     auth_token: str = ""                 # empty = no auth check
+    # The user's own web app origins that may read this Host's chat list cross-origin
+    # (lib.cross_origin): GET /server-info and /agents/snapshot only, bearer token, no cookies.
+    # Empty (the default): nothing cross-origin.
+    web_read_origins: frozenset = frozenset()
     # Public HTTPS origin the phone reaches the server at (e.g. the tailscale
     # serve name https://host.tailnet.ts.net). Used for URLs handed to
     # out-of-process clients such as the notification extension; empty =
@@ -1023,6 +1027,11 @@ def _render_spec_v2_minimums(artifacts: dict) -> dict[str, int] | None:
     return None
 
 
+def _web_read_origins(values) -> frozenset:
+    from .cross_origin import configured_origins
+    return configured_origins(values)
+
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -1155,6 +1164,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         bind_addr       = str(server.get("bind_addr", "127.0.0.1")),
         port            = int(server.get("port", 7682)),
         auth_token      = str(server.get("auth_token", "")),
+        web_read_origins = _web_read_origins(server.get("web_read_origins")),
         public_base_url = str(server.get("public_base_url", "")).strip().rstrip("/"),
         network_mode    = str(network.get("mode", "off")).strip().lower(),
         network_advertise_lan = bool(network.get("advertise_lan", False)),
