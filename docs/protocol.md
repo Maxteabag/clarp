@@ -1204,7 +1204,7 @@ voice from its pool (`[cartesia] pool` when set; else, for an English agent, the
 in `server/lib/cartesia_voice_pool.json` less the voices Cartesia no longer offers, and for
 another language Cartesia's catalogue in that language; the ElevenLabs and Gemini
 catalogues). A free voice is one no agent (archived ones included) or contact speaks with; when
-there is none, the least recently used (below). With this feature an app may create an agent or contact
+there is none, one is reused (below). With this feature an app may create an agent or contact
 with no voice at all and trust the Host; a phone's `auto-<uuid>` stand-in voice is replaced.
 The stored value is always in the one shape (a bare Cartesia uuid on create becomes
 `{"cartesia":"<uuid>"}`). Existing agents are not changed. A Janitor gets no voice: no app can
@@ -1214,12 +1214,16 @@ With feature `voice_for_helpers` (Host contract 135): a helper (`role` `helper`)
 with its parent's voice for each provider it has none for, the voice the parent is heard with,
 and takes a pool voice only where the parent has none; a helper is heard only when the user
 opens its chat, and giving each of them a voice of its own would empty the pool within days.
-A fork gets a pool voice like any new agent. When every pool voice is taken, the least recently
-used one is reused (the voice whose holders' newest clip, else their creation, is oldest) and
-the Host logs `voicePoolExhausted`. At start the Host writes every stored voice in the one
-shape where that changes nothing anyone hears under any provider (the rows
+A fork gets a pool voice like any new agent. When every pool voice is taken, one is reused: a
+voice that only archived agents hold first (reusing a voice the user still hears is worse),
+then the least recently used one (the voice whose holders' newest clip, else their creation,
+is oldest); the Host logs `voicePoolExhausted`. At start the Host writes every stored voice in
+the one shape where that changes nothing anyone hears under any provider (the rows
 `clarp-admin voice migrate --apply` writes), and logs `voiceShapeMigrated` with the rows it
-left because they would sound different.
+left because they would sound different. The same pass copies each agent's own transcription
+engine and language settings, today matched by its name or session, under its agent id
+(`transcription.agent_engines`, `transcription.agent_languages`); an existing entry under the
+id is kept, and nothing is removed.
 
 ### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
 

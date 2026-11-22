@@ -200,6 +200,33 @@ def test_an_exhausted_pool_reuses_the_least_recently_used_voice_and_logs_it(monk
     assert json.loads(voice_pool.assign(cfg, "D", "{}", agents=agents, contacts=[]))["cartesia"] == "v2"
 
 
+def test_an_exhausted_pool_reuses_a_voice_only_archived_agents_hold_first(monkeypatch):
+    """Reusing a voice the user still hears is worse than one only an archived agent held, however
+    recently that archived agent spoke; among archived-only voices, the least recently used."""
+    logged = []
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a))
+    day = 86_400_000
+    monkeypatch.setattr(voice_pool, "_last_clips", lambda: {"a": 1, "b": 9 * day, "c": 5 * day})
+    cfg = config.Config(tts_provider="cartesia", cartesia_pool=("v1", "v2", "v3"), cartesia_voices={})
+    agents = [{"agent_id": "a", "persona": "A", "voice_id": '{"cartesia":"v1"}', "created_at": 1},
+              {"agent_id": "b", "persona": "B", "voice_id": '{"cartesia":"v2"}', "created_at": 1,
+               "archived_at": 2},
+              {"agent_id": "c", "persona": "C", "voice_id": '{"cartesia":"v3"}', "created_at": 1,
+               "archived_at": 2}]
+    # v1 is the least recently used, but A is active: v3 (archived only, older than v2).
+    assert json.loads(voice_pool.assign(cfg, "D", "{}", agents=agents, contacts=[]))["cartesia"] == "v3"
+    assert "reused=v3" in logged[0][1] and "archived_only=True" in logged[0][1]
+    # A contact counts as heard: an archived agent's voice that a contact also holds is not first.
+    contacts = [{"name": "Cora", "voice_id": '{"cartesia":"v3"}'}]
+    assert json.loads(voice_pool.assign(cfg, "D", "{}", agents=agents, contacts=contacts))["cartesia"] == "v2"
+    # No archived-only voice left: the least recently used, as before.
+    for agent in agents:
+        agent.pop("archived_at", None)
+    logged.clear()
+    assert json.loads(voice_pool.assign(cfg, "D", "{}", agents=agents, contacts=[]))["cartesia"] == "v1"
+    assert "archived_only=False" in logged[0][1]
+
+
 def test_given_voices_are_kept_and_nothing_is_added_when_nothing_is_missing():
     cfg = config.Config(tts_provider="cartesia", cartesia_voices={"Ada": "c-ada"})
     assert voice_pool.assign(cfg, "Ada", "V_ADA", agents=[], contacts=[]) == '{"elevenlabs":"V_ADA"}'
