@@ -34,8 +34,11 @@ from .text_util import truncate
 
 # How agy's tools read: their names, and their inputs with secrets blanked (also used by
 # the backend's live stream, backend/agy.py).
+# The value is the credential, with the scheme word in front of it if there is one
+# (R46: 'Authorization: Bearer abc123' blanked 'Bearer' and kept the token).
 _SECRET_VALUE = re.compile(
-    r"(?i)(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*[^\s]+")
+    r"(?i)(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*"
+    r"(?:(?:bearer|basic|token|digest|negotiate)\s+)?[^\s]+")
 
 
 _TOOL_NAMES = {
