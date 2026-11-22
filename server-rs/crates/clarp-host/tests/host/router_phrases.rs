@@ -133,11 +133,14 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
         }
         let host = start();
         assert_eq!(fetch(&host, "", "GET", file, &[], &[]).status, 404);
-        assert!(
-            host.heard
-                .lock()
-                .unwrap()
-                .contains("unreadable phrase clip")
+        wait_for(
+            &format!("the unreadable phrase clip log ({damage})"),
+            || {
+                host.heard
+                    .lock()
+                    .unwrap()
+                    .contains("unreadable phrase clip")
+            },
         );
         press(&host, &mike, "fixed repair", damage);
         wait_for("the repaired blob", || {
