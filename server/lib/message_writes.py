@@ -42,7 +42,9 @@ from .message_import_common import (  # noqa: F401 - facade compatibility
     _PARKED_POSITIONAL_SEQ_BASE,
     _client_provenance_rows,
     _client_provenance,
+    _pending_steer_rows,
     _session_parts,
+    _steered_sent,
 )
 from .message_import_rows import (  # noqa: F401 - facade compatibility
     _own_turns_row,
@@ -1248,6 +1250,17 @@ class _ImportPrelude:
     session_rows: bool = False
     # The head carry_rows were read under, read BEFORE them (_carry_head; R119).
     carry_head: tuple | None = None
+    # The rows follow-ups steered into the running turn will have, not written yet
+    # (_pending_steer_rows), and the send times of steered /send rows (_steered_sent).
+    # Not carry inputs: what they decide is the consumed row id, which the carry holds.
+    steers: tuple = ()
+    steered_sent: dict | None = None
+
+    @property
+    def link_rows(self) -> list:
+        """The /send rows a copy of a prompt is linked to: the written ones, then the
+        pending steers' (in send order, as their rows will be written)."""
+        return [*self.client_rows, *self.steers]
 
     def raw_carry_inputs(self) -> tuple:
         return (self.turn_index._rows, self.client_rows, self.user_provenance,
@@ -1275,7 +1288,7 @@ class _ImportPrelude:
             self.turn_index, self.phases,
             {key: list(rows) for key, rows in self.client_user_provenance.items()},
             self.user_provenance, self.client_rows, self.carry_rows, self.oracle_rows,
-            self.session_rows, self.carry_head)
+            self.session_rows, self.carry_head, self.steers, self.steered_sent)
 
 
 def _carry_head(database, agent_id, backend_session_id, session_rows) -> tuple:
@@ -1322,6 +1335,8 @@ def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
                              (agent_id,)).fetchall())
     turn_index = message_turns.TurnIndex(database, agent_id)
     phases = _row_phases(turns) if phases is None else phases
+    # The pending steers BEFORE the /send rows: a steer read in between has its row in them.
+    pending = _pending_steer_rows(database, agent_id, backend_session_id)
     # The head FIRST, then the rows: a change before the read is in the rows and
     # in a later head, one after it is in a later head only (R119).
     carry_head = _carry_head(database, agent_id, backend_session_id, session_rows) if guard_carry else None
@@ -1331,8 +1346,19 @@ def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
     oracle_rows = database.execute(
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if guard_carry else None
-    return _ImportPrelude(turn_index, phases, _client_provenance(rows), user,
-                          rows, carry_rows, oracle_rows, session_rows, carry_head)
+    steers, steered_sent = _steers(database, agent_id, backend_session_id, turn_index, rows, pending)
+    return _ImportPrelude(turn_index, phases, _client_provenance([*rows, *steers]), user,
+                          rows, carry_rows, oracle_rows, session_rows, carry_head,
+                          steers, steered_sent)
+
+
+def _steers(database, agent_id, backend_session_id, turn_index, rows, pending):
+    """The pending steers whose rows are not among ``rows`` yet, and the send times
+    the linker judges steered rows by."""
+    written = {row.message_id for row in rows}
+    pending = [(row, sent) for row, sent in pending if row.message_id not in written]
+    return (tuple(row for row, _sent in pending),
+            _steered_sent(database, agent_id, backend_session_id, turn_index.outcomes, pending))
 
 
 def _sends_and_latest_user(database, agent_id, backend_session_id, message_rows):
@@ -1355,6 +1381,7 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
     # of membership and ordering. A count/MAX fingerprint cannot certify that.
     # No normalization or index rebuilding is done unless that input changed.
     turn_rows = message_turns.TurnIndex.read_rows(database, agent_id)
+    pending = _pending_steer_rows(database, agent_id, backend_session_id)
     carry_rows, carry_head = None, None
     if prelude.carry_rows is not None:
         # Under the writer lock: the head, one row (or one statement for the
@@ -1372,14 +1399,17 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
     turn_index = prelude.turn_index
     if turn_rows != turn_index._rows:
         turn_index = message_turns.TurnIndex.from_rows(turn_rows)
+    steers, steered_sent = _steers(database, agent_id, backend_session_id, turn_index,
+                                   client_rows, pending)
     provenance = prelude.client_user_provenance
-    if client_rows != prelude.client_rows:
-        provenance = _client_provenance(client_rows)
+    if client_rows != prelude.client_rows or steers != prelude.steers:
+        provenance = _client_provenance([*client_rows, *steers])
     oracle_rows = database.execute(
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if prelude.carry_rows is not None else None
     return _ImportPrelude(turn_index, prelude.phases, provenance, user, client_rows,
-                          carry_rows, oracle_rows, prelude.session_rows, carry_head)
+                          carry_rows, oracle_rows, prelude.session_rows, carry_head,
+                          steers, steered_sent)
 
 
 # R62: turns whose own id a row of another agent holds, and when that was last
@@ -1568,12 +1598,14 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     client_keys: set[str] | None = None      # every client row's words, read when needed
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
-    client_traces = {row.message_id: row.trace_id for row in prelude.client_rows
+    client_traces = {row.message_id: row.trace_id for row in prelude.link_rows
                      if hasattr(row, "trace_id")}
+    steered_sent = prelude.steered_sent or {}
     final_rows = _FinalRows(database, agent_id, backend_session_id,
                             turns=turns, visible_replies=visible_replies,
                             start_seq=start_seq, turn_index=turn_index,
-                            client_rows=prelude.client_rows, provenance=provenance,
+                            client_rows=prelude.link_rows, provenance=provenance,
+                            steered_sent=steered_sent,
                             current_trace=(carry or {}).get("current_request_trace", ""),
                             unanswered_key=(carry or {}).get("unanswered_key", ""))
     # Rows this import already wrote: never moved again (RM-N1).
@@ -1787,7 +1819,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         parts = [p for p in (turn.get("parts") or []) if _norm_text(p)] if role == "user" else []
         if parts and len(parts) >= 2 and turn.get("id") is None:
             if client_keys is None:
-                client_keys = {_norm_text(row.text) for row in prelude.client_rows}
+                client_keys = {_norm_text(row.text) for row in prelude.link_rows}
             matched: list[tuple[str, list]] = []
             for part in parts:
                 part_key = _norm_text(part)
@@ -1830,13 +1862,18 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 own = _own_turns_row(
                     database, rows, running, began, trace_ids=client_traces,
                     written_at=turn.get("timestamp"),
-                    ended_before=lambda sent, at=turn.get("timestamp"): turn_index.ended_before(sent, at))
+                    ended_before=lambda sent, at=turn.get("timestamp"): turn_index.ended_before(sent, at),
+                    steered_sent=steered_sent)
             if own is not None:
                 client_msg_id, current_origin, current_sender_agent_id, _ = \
                     provenance.take(key, rows, own)
                 unanswered_key = key
-                authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
-                current_request_trace = (authored["trace_id"] or "") if authored else ""
+                if client_msg_id in client_traces:
+                    # As the row has it (a pending steer's row is not written yet).
+                    current_request_trace = client_traces[client_msg_id] or ""
+                else:
+                    authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
+                    current_request_trace = (authored["trace_id"] or "") if authored else ""
                 if running and current_request_trace not in turn_index.outcomes:
                     # A message steered into the running turn has a trace but
                     # no turn of its own: what follows it is that turn's reply.
