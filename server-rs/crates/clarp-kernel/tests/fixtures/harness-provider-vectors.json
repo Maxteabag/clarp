@@ -1155,7 +1155,7 @@
       {
         "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1163,12 +1163,12 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
         "task": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1176,10 +1176,10 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "server_ended": true
       }
     ],
     [
@@ -1187,7 +1187,7 @@
       {
         "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1195,12 +1195,12 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
         "task": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1208,10 +1208,10 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "server_ended": true
       }
     ],
     [
@@ -1219,7 +1219,7 @@
       {
         "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1227,12 +1227,12 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
         "task": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1240,10 +1240,10 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "server_ended": true
       }
     ],
     [
@@ -1251,7 +1251,7 @@
       {
         "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1259,12 +1259,12 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
         "task": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1272,19 +1272,18 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "server_ended": true
       }
     ],
     [
       "plain text",
       {
-        "raises": "AttributeError",
-        "task": {
+        "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1292,10 +1291,23 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "task": {
+          "provider": "openai",
+          "status": "failed",
+          "method": "",
+          "verification_url": "",
+          "instructions": "",
+          "user_code": "",
+          "awaiting_code": false,
+          "code_submitted": false,
+          "started_at": 1789000000000,
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
+        },
+        "server_ended": true
       }
     ],
     [
@@ -1303,10 +1315,9 @@
         "x"
       ],
       {
-        "raises": "AttributeError",
-        "task": {
+        "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1314,19 +1325,31 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "task": {
+          "provider": "openai",
+          "status": "failed",
+          "method": "",
+          "verification_url": "",
+          "instructions": "",
+          "user_code": "",
+          "awaiting_code": false,
+          "code_submitted": false,
+          "started_at": 1789000000000,
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
+        },
+        "server_ended": true
       }
     ],
     [
       5,
       {
-        "raises": "AttributeError",
-        "task": {
+        "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1334,19 +1357,31 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "task": {
+          "provider": "openai",
+          "status": "failed",
+          "method": "",
+          "verification_url": "",
+          "instructions": "",
+          "user_code": "",
+          "awaiting_code": false,
+          "code_submitted": false,
+          "started_at": 1789000000000,
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
+        },
+        "server_ended": true
       }
     ],
     [
       true,
       {
-        "raises": "AttributeError",
-        "task": {
+        "answer": {
           "provider": "openai",
-          "status": "running",
+          "status": "failed",
           "method": "",
           "verification_url": "",
           "instructions": "",
@@ -1354,10 +1389,23 @@
           "awaiting_code": false,
           "code_submitted": false,
           "started_at": 1789000000000,
-          "expires_at": 1789000600000,
-          "error": ""
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
         },
-        "server_ended": false
+        "task": {
+          "provider": "openai",
+          "status": "failed",
+          "method": "",
+          "verification_url": "",
+          "instructions": "",
+          "user_code": "",
+          "awaiting_code": false,
+          "code_submitted": false,
+          "started_at": 1789000000000,
+          "expires_at": 0,
+          "error": "OpenCode did not answer the sign-in"
+        },
+        "server_ended": true
       }
     ],
     [

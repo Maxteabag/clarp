@@ -415,18 +415,10 @@ fn an_answer_to_the_authorize_call_is_taken_as_the_reference_takes_it() {
                 code_submitted: false,
             })
         };
-        if out.get("raises").is_some() {
-            // R156, the reference's failure: it raises and leaves the sign-in running with
-            // its server open. This Host fails the sign-in and ends the server.
+        if out["answer"]["status"] == "failed" {
             assert_eq!(taken, None, "{row}");
-            assert_eq!(
-                (&out["task"]["status"], &out["server_ended"]),
-                (&json!("running"), &json!(false))
-            );
+            assert_eq!(out["server_ended"], true, "{row}");
             failures += 1;
-        } else if out["answer"]["status"] == "failed" {
-            // The reference repaired (R156): the same answer.
-            assert_eq!(taken, None, "{row}");
             assert_eq!(
                 out["answer"],
                 task("failed", &Value::Null, hp::NOT_ANSWERED),
@@ -435,9 +427,10 @@ fn an_answer_to_the_authorize_call_is_taken_as_the_reference_takes_it() {
         } else {
             let authorization = taken.unwrap_or_else(|| panic!("{row}"));
             assert_eq!(out["answer"], task("running", &authorization, ""), "{row}");
+            assert_eq!(out["server_ended"], false, "{row}");
             assert_eq!(out["task"], out["answer"], "{row}");
         }
     }
     assert_eq!(CASES["authorize"].as_array().unwrap().len(), 13);
-    assert_eq!(failures, 4);
+    assert_eq!(failures, 8);
 }

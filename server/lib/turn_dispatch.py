@@ -531,8 +531,9 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         ``client_msg_id``, as the handover says it for an item whose turn starts. After
         ``_start_queued_row`` committed and sent the row's own events, and only when the
         item's receipt did start (also after the retry of a failed start): an item whose
-        start failed twice is settled by recovery, and was not started here."""
-        if turn_queue.status(spec.queue_id) == "started":
+        start failed twice is settled by recovery, and was not started here. An item whose
+        joined turn already ended (done, failed, ...) did start too: it is said as well."""
+        if turn_queue.status(spec.queue_id) not in ("", "queued", "claimed", "parked"):
             self._broadcast_queue_state(spec, started=True)
 
     def _steer_unread(self, spec: _TurnSpec) -> None:

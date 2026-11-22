@@ -71,7 +71,10 @@ def _spoken_preview(raw: str | None) -> str:
     matches = [m.group(1) for m in _SPEAK_BLOCK_RE.finditer(text)]
     if not matches:
         return ""
-    preview = clean_for_display(" ".join(matches), oneline=True).strip()
+    # Each block's inner text goes back inside its <speak> markers, so the display
+    # cleaner drops the bare emotion tags ([sigh]) it drops in every other view.
+    preview = clean_for_display(" ".join(f"<speak>{m}</speak>" for m in matches),
+                                oneline=True).strip()
     if not preview:
         return ""
     return preview[:PREVIEW_MAX - 1] + "…" if len(preview) > PREVIEW_MAX else preview
