@@ -922,12 +922,12 @@ component FormTableView inherits VerticalLayout {
     }
     flick := Flickable {
         height: (root.table.rows.length + 1) * root.line;
-        viewport-width: Math.max(self.width, root.wide);
-        viewport-height: self.height;
-        accessible-role: table;
+        content-width: Math.max(self.width, root.wide);
+        content-height: self.height;
+        accessible-role: AccessibleRole.table;
         accessible-label: root.table.title;
         VerticalLayout {
-            width: flick.viewport-width;
+            width: flick.content-width;
             spacing: 0px;
             HorizontalLayout {
                 height: root.line;
