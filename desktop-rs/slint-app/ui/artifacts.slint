@@ -17,6 +17,43 @@ export struct CardHint {
     chosen: bool,
 }
 
+// One element of a native form (render_spec, catalog clarp.form v1) as the
+// card draws it. `kind` is the element's type as drawn: heading, text,
+// field, toggle, choice, divider or card (a card's title row). A type the
+// catalog adds later (a chart, a table, a button) is one more kind here and
+// one more arm in FormLeafView; until then its form reads as needing a newer
+// app and the card stays plain.
+export struct FormLeaf {
+    id: string,
+    kind: string,
+    // A heading's or text's words, a control's label, a card's title.
+    text: string,
+    level: int,
+    placeholder: string,
+    multiline: bool,
+    // The answer key a control writes.
+    key: string,
+    // A text field's text (or the answer read-only), a toggle's state.
+    value: string,
+    on: bool,
+    // A choice's options (id: the value) and the one chosen (-1: none).
+    options: [ArtifactOption],
+    chosen: int,
+    required: bool,
+    // Why a text cannot be sent yet ("At least 10 characters.").
+    note: string,
+}
+
+// One row of a form: an element, or a horizontal stack's elements side by
+// side (cells), and whether it sits in a card (first and last row rounded).
+export struct FormRow {
+    leaf: FormLeaf,
+    cells: [FormLeaf],
+    in-card: bool,
+    card-top: bool,
+    card-bottom: bool,
+}
+
 // One artifact card in the chat (iOS ArtifactCard): what every type shows
 // inline, and the state its controls are in.
 export struct ArtifactItem {
@@ -113,6 +150,16 @@ export struct ArtifactItem {
     keep-line: bool,
     // Its keys, shown as hints (the selected card's emphasised).
     hints: [CardHint],
+    // render_spec: loading, form, newer, unreadable or failed ("" for
+    // another kind); the form's rows; Send's label, whether it may be sent
+    // now and is being sent; read-only once answered; the line above Send.
+    spec-state: string,
+    spec-rows: [FormRow],
+    spec-send: string,
+    spec-can-send: bool,
+    spec-sending: bool,
+    spec-read-only: bool,
+    spec-footnote: string,
 }
 
 // What the cards share: the clock countdowns read, and their actions.
@@ -151,6 +198,17 @@ export global ArtifactBridge {
     callback hint(string, string);
     // A click on an image in a message (its block, its tile): enlarge it.
     callback image-clicked(string, int);
+    // A native form's controls: (card, answer key, value), Send and the
+    // Retry of a form that could not be read.
+    callback form-text(string, string, string);
+    callback form-toggle(string, string, bool);
+    callback form-choose(string, string, string);
+    callback form-send(string);
+    callback form-retry(string);
+    // A form card's rows by its id: one model for the card's life, read
+    // through here so the rows' repeater depends on the id alone (a row
+    // changed while the card's item is being replaced is still applied).
+    pure callback form-rows(string) -> [FormRow];
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
@@ -158,7 +216,7 @@ export global ArtifactLook {
     public pure function tint(kind: string, failed: bool) -> color {
         if (failed) { return Palette.danger; }
         if (kind == "countdown" || kind == "plan" || kind == "release") { return Palette.success; }
-        if (kind == "decision" || kind == "question" || kind == "html_form") { return Palette.warning; }
+        if (kind == "decision" || kind == "question" || kind == "html_form" || kind == "render_spec") { return Palette.warning; }
         if (kind == "workflow_run" || kind == "code_change") { return Palette.accent; }
         return Palette.link;
     }
@@ -166,7 +224,7 @@ export global ArtifactLook {
         if (kind == "countdown") { return "◷"; }
         if (kind == "plan") { return "☰"; }
         if (kind == "decision" || kind == "question") { return "?"; }
-        if (kind == "html_form") { return "▤"; }
+        if (kind == "html_form" || kind == "render_spec") { return "▤"; }
         if (kind == "code_change") { return "±"; }
         if (kind == "data") { return "▦"; }
         if (kind == "audio") { return "♪"; }
@@ -617,6 +675,222 @@ component ProgressBody inherits VerticalLayout {
     }
 }
 
+// One element of a native form (iOS RenderSpecFormController's views), by
+// its kind.
+component FormLeafView inherits VerticalLayout {
+    in property <string> card;
+    in property <FormLeaf> leaf;
+    in property <bool> read-only;
+    in property <bool> measuring;
+    spacing: 4px;
+    if root.leaf.kind == "heading": Text {
+        text: root.leaf.text;
+        color: Palette.text;
+        font-size: root.leaf.level == 1 ? ChatText.body * 1.2 : root.leaf.level == 2 ? ChatText.lead : ChatText.label;
+        font-weight: root.leaf.level < 3 ? 700 : 600;
+        wrap: word-wrap;
+        accessible-role: text;
+    }
+    if root.leaf.kind == "card": Text {
+        text: root.leaf.text;
+        color: Palette.text;
+        font-size: ChatText.label;
+        font-weight: 600;
+        wrap: word-wrap;
+    }
+    if root.leaf.kind == "text": Text {
+        text: root.leaf.text;
+        color: Palette.text;
+        font-size: ChatText.detail;
+        wrap: word-wrap;
+    }
+    if root.leaf.kind == "divider": Rectangle { height: 1px; background: Palette.rule; }
+    // A caption, with 'Required' after it while the answer is owed.
+    if root.leaf.kind == "field" || root.leaf.kind == "choice": HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+        Text { text: root.leaf.text; color: Palette.muted; font-size: ChatText.detail; wrap: word-wrap; }
+        if root.leaf.required && !root.read-only: Text { text: "Required"; color: Palette.faint; font-size: ChatText.note; vertical-alignment: center; }
+    }
+    if root.leaf.kind == "field" && root.read-only: Text {
+        text: root.leaf.value != "" ? root.leaf.value : "—";
+        color: root.leaf.value != "" ? Palette.text : Palette.faint;
+        font-size: ChatText.detail;
+        wrap: word-wrap;
+    }
+    if root.leaf.kind == "field" && !root.read-only: Rectangle {
+        height: (root.leaf.multiline ? 72px : 26px) * ChatText.scale;
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: input.has-focus ? Palette.accent : Palette.border;
+        background: Palette.sunken;
+        accessible-role: text-input;
+        accessible-label: root.leaf.text;
+        if input.text == "": Text {
+            x: 8px;
+            y: root.leaf.multiline ? 5px : 0px;
+            height: root.leaf.multiline ? self.preferred-height : parent.height;
+            text: root.leaf.placeholder;
+            color: Palette.faint;
+            font-size: ChatText.detail;
+            vertical-alignment: center;
+        }
+        input := TextInput {
+            x: 8px;
+            y: root.leaf.multiline ? 5px : 0px;
+            width: parent.width - 16px;
+            height: root.leaf.multiline ? parent.height - 10px : parent.height;
+            text: root.leaf.value;
+            color: Palette.text;
+            font-size: ChatText.detail;
+            single-line: !root.leaf.multiline;
+            wrap: root.leaf.multiline ? word-wrap : no-wrap;
+            vertical-alignment: root.leaf.multiline ? top : center;
+            edited => { ArtifactBridge.form-text(root.card, root.leaf.key, self.text); }
+            // Letters type here; they are not the chat's shortcuts.
+            changed has-focus => {
+                if (!root.measuring) {
+                    ArtifactBridge.editing = self.has-focus;
+                }
+            }
+        }
+    }
+    if root.leaf.kind == "field" && root.leaf.note != "" && !root.read-only: Text {
+        text: root.leaf.note;
+        color: Palette.warning;
+        font-size: ChatText.note;
+    }
+    if root.leaf.kind == "toggle": HorizontalLayout {
+        spacing: 12px;
+        Text { text: root.leaf.text; color: Palette.text; font-size: ChatText.detail; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
+        Rectangle {
+            width: 34px * ChatText.scale;
+            height: 18px * ChatText.scale;
+            border-radius: self.height / 2;
+            background: root.leaf.on ? (root.read-only ? Palette.accent.with-alpha(0.5) : Palette.accent) : Palette.control;
+            accessible-role: checkbox;
+            accessible-checked: root.leaf.on;
+            accessible-label: root.leaf.text;
+            accessible-action-default => { if (!root.read-only) { ArtifactBridge.form-toggle(root.card, root.leaf.key, !root.leaf.on); } }
+            Rectangle {
+                x: root.leaf.on ? parent.width - self.width - 2px : 2px;
+                y: 2px;
+                width: parent.height - 4px;
+                height: parent.height - 4px;
+                border-radius: self.height / 2;
+                background: Palette.text;
+            }
+            TouchArea {
+                enabled: !root.read-only;
+                mouse-cursor: self.enabled ? pointer : default;
+                clicked => { ArtifactBridge.form-toggle(root.card, root.leaf.key, !root.leaf.on); }
+            }
+        }
+    }
+    if root.leaf.kind == "choice": Rectangle {
+        border-radius: 6px;
+        background: Palette.sunken;
+        VerticalLayout {
+            padding: 2px;
+            spacing: 0px;
+            for option[index] in root.leaf.options: OptionRow {
+                number: index + 1;
+                label: option.label;
+                chosen: root.leaf.chosen == index;
+                enabled: !root.read-only;
+                clicked => { ArtifactBridge.form-choose(root.card, root.leaf.key, option.id); }
+            }
+        }
+    }
+}
+
+// A native form in its card (iOS RenderSpecFormController): its rows, then
+// the line saying what holds Send back (or how the answer went) and Send.
+component FormBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    in property <bool> measuring;
+    // The card's id, assigned once (no binding): the rows' repeater must
+    // depend on nothing that changes with the card's item, or a row changed
+    // while the item is replaced is dropped (Slint ignores a row change
+    // while the repeater's model binding is dirty and the model is the same).
+    property <string> card;
+    init => { self.card = root.artifact.id; }
+    spacing: 6px;
+    if root.artifact.spec-state == "loading": Text { text: "Loading the form…"; color: Palette.muted; font-size: ChatText.detail; }
+    if root.artifact.spec-state == "newer": Text { text: "This form needs a newer version of Clarp."; color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
+    if root.artifact.spec-state == "unreadable": Text { text: "This form can't be shown. Ask the agent to publish it again."; color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
+    if root.artifact.spec-state == "failed": HorizontalLayout {
+        alignment: start;
+        spacing: 10px;
+        Text { text: "The form could not be loaded."; color: Palette.warning; font-size: ChatText.detail; vertical-alignment: center; }
+        KeyHint { chat: true; label: "Try again"; emphasised: true; clicked => { ArtifactBridge.form-retry(root.artifact.id); } }
+    }
+    if root.artifact.spec-state == "form": VerticalLayout {
+        spacing: 0px;
+        for row in ArtifactBridge.form-rows(root.card): Rectangle {
+            background: row.in-card ? Palette.raised : transparent;
+            border-top-left-radius: row.card-top ? 8px : 0px;
+            border-top-right-radius: row.card-top ? 8px : 0px;
+            border-bottom-left-radius: row.card-bottom ? 8px : 0px;
+            border-bottom-right-radius: row.card-bottom ? 8px : 0px;
+            HorizontalLayout {
+                padding-left: row.in-card ? 12px : 0px;
+                padding-right: row.in-card ? 12px : 0px;
+                padding-top: row.card-top ? 10px : 5px;
+                padding-bottom: row.card-bottom ? 10px : 5px;
+                spacing: 12px;
+                if row.cells.length == 0: FormLeafView {
+                    card: root.artifact.id;
+                    leaf: row.leaf;
+                    read-only: root.artifact.spec-read-only;
+                    measuring: root.measuring;
+                }
+                for cell in row.cells: FormLeafView {
+                    horizontal-stretch: 1;
+                    card: root.artifact.id;
+                    leaf: cell;
+                    read-only: root.artifact.spec-read-only;
+                    measuring: root.measuring;
+                }
+            }
+        }
+    }
+    if root.artifact.spec-state == "form": HorizontalLayout {
+        spacing: 10px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.artifact.spec-footnote;
+            color: root.artifact.spec-read-only ? Palette.success : Palette.muted;
+            font-size: ChatText.note;
+            wrap: word-wrap;
+            vertical-alignment: center;
+        }
+        if !root.artifact.spec-read-only: Rectangle {
+            height: 28px * ChatText.scale;
+            width: send-label.preferred-width + 28px;
+            border-radius: 6px;
+            background: root.artifact.spec-can-send && !root.artifact.spec-sending
+                ? (send-area.has-hover ? Palette.accent.brighter(0.15) : Palette.accent) : Palette.control;
+            accessible-role: button;
+            accessible-label: root.artifact.spec-send;
+            accessible-action-default => { ArtifactBridge.form-send(root.artifact.id); }
+            send-label := Text {
+                text: root.artifact.spec-sending ? "Sending…" : root.artifact.spec-send;
+                color: root.artifact.spec-can-send && !root.artifact.spec-sending ? Palette.window : Palette.faint;
+                font-size: ChatText.detail;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            send-area := TouchArea {
+                enabled: root.artifact.spec-can-send && !root.artifact.spec-sending;
+                mouse-cursor: self.enabled ? pointer : default;
+                clicked => { ArtifactBridge.form-send(root.artifact.id); }
+            }
+        }
+    }
+}
+
 export component ArtifactCard inherits Rectangle {
     in property <ArtifactItem> artifact;
     // A copy measured off screen (the transcript's): it reports nothing and
@@ -686,6 +960,7 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
         if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; measuring: root.measuring; }
+        if root.artifact.spec-state != "": FormBody { artifact: root.artifact; measuring: root.measuring; }
         // The body's first lines (iOS shows four), always four lines tall.
         // The body's first lines (iOS: four for a document, five for
         // research), as tall as they are up to that.
