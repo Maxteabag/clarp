@@ -379,3 +379,30 @@ def test_effort_reaches_the_helper_and_is_refused_where_the_model_id_carries_it(
     prompt = tmp_path / "task.md"
     with pytest.raises(SystemExit, match="needs --clarp-agent"):
         sub.main(["start", "plain", str(workdir), str(prompt), "--effort", "high"])
+
+
+def test_effort_is_checked_against_the_backend_actually_used(sub, tmp_path, monkeypatch):
+    """A fork without --backend takes the parent's backend; a reused helper keeps its own. On
+    agy the effort is refused locally, and a refused reuse leaves the helper's state untouched."""
+    backends = {"boss": "agy", "stream-a-3f9c": "agy"}
+
+    def admin(*args):
+        sub.calls["admin"].append(args)
+        if args[:1] == ("model",) and "--effort" not in args:
+            return {"backend": backends[args[args.index("--session") + 1]]}
+        if args == ("agent", "helper-state", "stream-a-3f9c"):
+            return {"role": "helper", "helper_state": "done", "archived_at": None}
+        return {"ok": True}
+    monkeypatch.setattr(sub, "_admin", admin)
+
+    with pytest.raises(SystemExit, match="part of the model id"):
+        sub.main(["fork", "probe", "--task", "Try it.", "--effort", "high"])
+    assert not any(args[:2] == ("agent", "fork") for args in sub.calls["admin"])
+
+    sub.DIR.mkdir(parents=True, exist_ok=True)
+    (sub.DIR / "stream-a.session").write_text("stream-a-3f9c\n")
+    sub.calls["admin"].clear()
+    with pytest.raises(SystemExit, match="part of the model id"):
+        _start(sub, tmp_path, "--backend", "claude", "--effort", "high")
+    assert not any(args[:3] == ("agent", "helper-state", "stream-a-3f9c") and len(args) > 3
+                   for args in sub.calls["admin"])
