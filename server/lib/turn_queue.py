@@ -301,11 +301,14 @@ CLIENT_ID_HELD_ELSEWHERE = "client_msg_id is held by another agent"
 
 
 def client_id_held_elsewhere(con, agent_id: str, client_msg_id: str) -> bool:
-    """Whether another agent already holds this app id: a queue item, a user row
-    (u-<id>) or an admission. The Host keeps one such id per Host (the queue's key
-    and the user row's id are Host-wide), so a second agent's send under it would
-    be dropped as a duplicate of the first; /send refuses it instead (R63). The
-    apps mint a fresh id per message, so only a client bug meets this."""
+    """Whether another agent already holds this app id: a queue item or a user row
+    (u-<id>). The Host keeps one such id per Host (the queue's key and the user
+    row's id are Host-wide), so a second agent's send under it would be dropped as
+    a duplicate of the first; /send refuses it instead (R63). Every admitted send
+    leaves one of the two (a waiting send its queue item, a started one its row),
+    so admissions are not read: both reads are by an index, inside /send's write
+    transaction. The apps mint a fresh id per message, so only a client bug meets
+    this."""
     from .message_import_common import _client_message_id
     cid = (client_msg_id or "").strip()
     if not cid:
@@ -315,10 +318,8 @@ def client_id_held_elsewhere(con, agent_id: str, client_msg_id: str) -> bool:
             WHERE (queue_id = ? OR client_msg_id = ?) AND agent_id != ?
            UNION ALL
            SELECT 1 FROM messages WHERE message_id = ? AND agent_id != ?
-           UNION ALL
-           SELECT 1 FROM prompt_admissions WHERE client_admission_id = ? AND agent_id != ?
            LIMIT 1""",
-        (cid, cid, agent_id, _client_message_id(cid), agent_id, cid, agent_id),
+        (cid, cid, agent_id, _client_message_id(cid), agent_id),
     ).fetchone() is not None
 
 
