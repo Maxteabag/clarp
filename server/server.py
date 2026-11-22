@@ -1279,7 +1279,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     # carries the worker's folder and log path).
     _LIMITED_DEVICE_GET_EXACT = frozenset({
         "/server-info", "/events", "/live", "/status",
-        "/agents/snapshot", "/peers/snapshot", "/log", "/message-tool-details", "/turn-queue", "/location",
+        "/agents/snapshot", "/log", "/message-tool-details", "/turn-queue", "/location",
         "/attention", "/attention/inbox", "/artifacts", "/pinned-artifacts",
         "/task-plan", "/task-plans", "/task-plan/document", "/goal-ledger",
         "/clips/message", "/clips/recoverable", "/media",

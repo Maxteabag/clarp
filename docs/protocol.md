@@ -107,8 +107,8 @@ cross-origin.
 ### Peers' chat lists (feature `peer_snapshot`)
 
 A Host can keep a device token for each of its owner's other Hosts (`clarp-admin peers add`,
-pairing by a one-time code made on the peer). `GET /peers/snapshot` (same access as
-`/agents/snapshot`) answers `{peers: {<server_id>: {name, url, server_id, reachable, error,
+pairing by a one-time code made on the peer). `GET /peers/snapshot` (full scope only: a
+limited device gets 403) answers `{peers: {<server_id>: {name, url, server_id, reachable, error,
 snapshot}}, cache_seconds}`: the Host reads each peer's `GET /server-info` and `GET
 /agents/snapshot` server to server with that token and returns the peer's snapshot as the peer
 gave it. Unreachable: `reachable: false`, `snapshot: null`, an `error` code. Only the peers'

@@ -2653,6 +2653,9 @@ def cmd_peers(args) -> int:
                 pass
         if not name:
             raise SystemExit("could not learn the peer's name; give it: peers add <name> <url>")
+        warning = server_peers.plain_http_warning(url)
+        if warning:
+            print(warning, file=sys.stderr)
         print(json.dumps(server_peers.add(name, url, token, server_id=server_id), indent=2))
     elif args.peers_command == "remove":
         server_peers.remove(args.name)

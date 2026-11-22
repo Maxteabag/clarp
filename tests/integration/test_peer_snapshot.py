@@ -75,9 +75,11 @@ class Peer:
 @pytest.fixture
 def peers_file(tmp_path, monkeypatch):
     monkeypatch.setattr(server_peers, "PATH", tmp_path / "peers.json")
+    server_peers._learned.clear()
     peer_reads.reset_cache()
     yield tmp_path / "peers.json"
     peer_reads.reset_cache()
+    server_peers._learned.clear()
 
 
 @pytest.fixture
@@ -139,8 +141,58 @@ def test_a_peer_is_read_with_its_token_in_the_header_only(peer):
         assert method == "GET" and TOKEN not in path
         assert headers["Authorization"] == "Bearer " + TOKEN
         assert "Cookie" not in headers and "X-Clarp-Peer" not in headers
-    # The server_id it reported is kept, so it stays keyed the same while it is unreachable.
-    assert server_peers.list_public()[0]["server_id"] == "peer-sid"
+    # The server_id it reported is kept in memory, so it stays keyed the same while it is
+    # unreachable; the read path never writes peers.json.
+    assert server_peers.enabled()[0]["server_id"] == "peer-sid"
+    assert server_peers.list_public()[0]["server_id"] == ""
+
+
+def test_the_read_path_never_writes_the_peer_file(peer, peers_file):
+    server_peers.add("host-b", peer.url, TOKEN)
+    before = (peers_file.read_bytes(), peers_file.stat().st_mtime_ns)
+    peer_reads.snapshot()
+    assert (peers_file.read_bytes(), peers_file.stat().st_mtime_ns) == before
+
+
+def test_concurrent_adds_and_removes_lose_nothing(peers_file):
+    server_peers.add("gone", "https://gone.example.ts.net", TOKEN)
+    errors = []
+
+    def add(i):
+        try:
+            server_peers.add(f"p{i}", f"https://p{i}.example.ts.net", TOKEN)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=add, args=(i,)) for i in range(24)]
+    threads.append(threading.Thread(target=server_peers.remove, args=("gone",)))
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    names = {p["name"] for p in server_peers.list_public()}
+    assert names == {f"p{i}" for i in range(24)}
+    assert oct(os.stat(peers_file).st_mode & 0o777) == "0o600"
+    assert [p.name for p in peers_file.parent.iterdir() if p.name.endswith(".next")] == []
+
+
+def test_no_environment_proxy_sees_the_token(peer, monkeypatch):
+    for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    server_peers.add("host-b", peer.url, TOKEN)
+    assert peer_reads.snapshot()["peer-sid"]["reachable"] is True
+
+
+@pytest.mark.parametrize("url,warns", [
+    ("http://192.168.1.20:7682", True), ("http://studio.example.com", True),
+    ("https://studio.example.com", False), ("http://127.0.0.1:7682", False), ("http://localhost:7682", False),
+    ("http://100.101.102.103:7682", False), ("http://studio.example.ts.net", False),
+])
+def test_a_plain_http_peer_outside_loopback_and_tailscale_is_warned(url, warns):
+    assert bool(server_peers.plain_http_warning(url)) is warns
 
 
 def test_results_are_cached_and_shared(peer):
@@ -193,10 +245,11 @@ def test_the_route_answers_like_the_snapshot_and_takes_no_url(host, peer):
     assert list(data["peers"]) == ["peer-sid"] and data["cache_seconds"] == 10
     assert TOKEN.encode() not in body
     assert all(path in ("/server-info", "/agents/snapshot") for _, path, _ in peer.requests)
-    # A limited device reads it, as it reads /agents/snapshot; no token reads nothing.
-    code = device_pairing.issue(device_name="Phone", scope="limited")["code"]
-    limited = device_pairing.exchange(code)["token"]
-    assert _get(host, "/peers/snapshot", limited)[0] == 200
+    # Full scope only: a full device reads it, a limited device gets 403, no token 401.
+    full = device_pairing.exchange(device_pairing.issue(device_name="Mac", scope="full")["code"])["token"]
+    assert _get(host, "/peers/snapshot", full)[0] == 200
+    limited = device_pairing.exchange(device_pairing.issue(device_name="Phone", scope="limited")["code"])["token"]
+    assert _get(host, "/peers/snapshot", limited)[0] == 403
     assert _get(host, "/peers/snapshot", "")[0] == 401
 
 

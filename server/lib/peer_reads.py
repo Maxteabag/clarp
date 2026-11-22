@@ -9,7 +9,8 @@ What is fetched, and how:
   GET /agents/snapshot. Nothing in the request to this Host chooses a URL, a path or a peer.
 - The peer's device token goes in the Authorization header, to that peer only. It is never
   logged, never returned, never put in a URL.
-- Redirects are refused (a peer cannot send this Host's request, or the token, elsewhere), a
+- Redirects are refused (a peer cannot send this Host's request, or the token, elsewhere), no
+  environment proxy is used, a
   read takes at most READ_TIMEOUT seconds and at most MAX_BYTES of body, and only JSON objects
   are taken.
 - Results are cached for CACHE_SECONDS; one refresh runs at a time and every caller shares it.
@@ -37,7 +38,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
 
 
-_OPENER = urllib.request.build_opener(_NoRedirect)
+# No environment proxies (an HTTP(S)_PROXY must not see a peer's token) and no redirects.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 class PeerReadError(Exception):
