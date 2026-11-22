@@ -148,10 +148,18 @@ def _requirements(item: dict) -> tuple[bool, list[str]]:
     return not missing, missing
 
 
+def _turned_off(state: dict) -> set[str]:
+    """Skills the user explicitly turned off. Every other skill the release ships
+    is on for every backend: one the user never decided about counts as on, and a
+    core skill cannot be off. `clarp-admin skills repair-links` applies the same
+    rule after every install and update."""
+    return {str(item) for item in state.get("skills_off") or []}
+
+
 def status() -> list[dict]:
     with _lock:
         with _state_file_lock(exclusive=False):
-            active = set(_read_json(INSTALL_STATE, {}).get("skills") or [])
+            off = _turned_off(_read_json(INSTALL_STATE, {}))
             rows = []
             for item in _manifest():
                 skill_id = str(item["id"])
@@ -163,7 +171,7 @@ def status() -> list[dict]:
                 required = dict(links)   # an optional folder never decides health
                 if agy_usable(AGY_SKILLS):
                     links["agy"] = _link_status(AGY_SKILLS / skill_id, source)
-                enabled = skill_id in active
+                enabled = item.get("pack") == "core" or skill_id not in off
                 requirements_ok, missing_requirements = _requirements(item)
                 if not (source / "SKILL.md").is_file():
                     health = "missing"
@@ -208,6 +216,7 @@ def _set_enabled_locked(skill_id: str, enabled: bool) -> dict:
         raise ValueError(f"skill source is missing: {skill_id}")
     state = _read_json(INSTALL_STATE, {})
     active = set(state.get("skills") or [])
+    off = _turned_off(state)
     roots = _roots()
     destinations = [root / skill_id for _name, root in roots]
     link_states = {destination: _link_status(destination, source)
@@ -246,9 +255,13 @@ def _set_enabled_locked(skill_id: str, enabled: bool) -> dict:
                 destination.unlink()
         if enabled:
             active.add(skill_id)
+            off.discard(skill_id)
         else:
+            # Recorded, so the next update does not turn it back on.
             active.discard(skill_id)
+            off.add(skill_id)
         state["skills"] = sorted(active)
+        state["skills_off"] = sorted(off)
         _write_state(state)
     except BaseException:
         for destination, original in originals.items():

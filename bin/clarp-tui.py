@@ -98,8 +98,8 @@ def installed_setup_state() -> dict:
     state["backends"] = ({"claude", "codex"} if backend == "both"
                          else {backend} & {"claude", "codex"})
     state["toolchain"] = str(installed.get("toolchain") or "managed")
-    state["skills"] = (set(installed["skills"])
-                       if isinstance(installed.get("skills"), list) else None)
+    state["skills-off"] = ({str(item) for item in installed["skills_off"]}
+                           if isinstance(installed.get("skills_off"), list) else set())
     tts = configured.get("tts", {}) if isinstance(configured, dict) else {}
     network = configured.get("network", {}) if isinstance(configured, dict) else {}
     server = configured.get("server", {}) if isinstance(configured, dict) else {}
@@ -120,21 +120,20 @@ def installed_setup_state() -> dict:
 
 
 def optional_skill_selections(
-    selected: set[str] | None = None,
+    turned_off: set[str] | None = None,
 ) -> list[tuple[str, str, bool]]:
+    """Every skill that can be turned off, ticked unless the user turned it off."""
     manifest_path = admin_script().parents[1] / "skills/manifest.json"
     manifest = json.loads(manifest_path.read_text())
     choices = []
     for item in manifest["skills"]:
         pack = str(item.get("pack", ""))
-        if not (pack in {"native", "messaging"}
-                or item.get("default_enabled") is False):
+        if pack == "core":
             continue
         skill_id = str(item["id"])
         name = skill_id.removeprefix("clarp-").replace("-", " ").title()
-        enabled = (skill_id in selected if selected is not None else
-                   skill_id in {"clarp-calendar", "clarp-location"})
-        choices.append((f"{name} ({pack})", skill_id, enabled))
+        choices.append((f"{name} ({pack})", skill_id,
+                        skill_id not in (turned_off or set())))
     return choices
 
 
@@ -167,9 +166,7 @@ def included_skill_selections() -> list[tuple[str, str, bool]]:
     choices = []
     for item in manifest["skills"]:
         pack = str(item.get("pack", ""))
-        included = pack == "core" or (
-            pack == "artifacts" and item.get("default_enabled") is not False)
-        if not included:
+        if pack != "core":
             continue
         skill_id = str(item["id"])
         name = skill_id.removeprefix("clarp-").replace("-", " ").title()
@@ -208,6 +205,8 @@ def setup_admin_command(values: dict) -> list[str]:
     ]
     for skill_id in values["optional-skills"]:
         command += ["--optional-skill", str(skill_id)]
+    for skill_id in values.get("skipped-skills", []):
+        command += ["--skip-skill", str(skill_id)]
     return command
 
 
@@ -348,8 +347,8 @@ class ClarpAdminApp(App[None]):
         border: none; margin-left: 1; padding: 0;
     }
     #backends { height: 4; }
-    #included-skills { height: 20; }
-    #optional-skills { height: 10; }
+    #included-skills { height: 12; }
+    #optional-skills { height: 20; }
     .actions { height: auto; margin: 0 0 1 0; }
     Button { margin-right: 1; }
     #setup-progress { height: 2; margin-bottom: 1; }
@@ -463,8 +462,8 @@ class ClarpAdminApp(App[None]):
                         with Container(classes="form-section") as skill_section:
                             skill_section.border_title = "Skills"
                             yield Static(
-                                "Core and standard artifact skills are included "
-                                "automatically. Additional integrations are optional.",
+                                "Every skill is installed for every agent backend. "
+                                "Core skills always stay on; untick any other to turn it off.",
                                 classes="hint")
                             yield self._selection_list(
                                 "Included", "included-skills",
@@ -472,7 +471,7 @@ class ClarpAdminApp(App[None]):
                             yield self._selection_list(
                                 "Optional", "optional-skills",
                                 optional_skill_selections(
-                                    self.setup_state.get("skills")))
+                                    self.setup_state.get("skills-off")))
                         with Horizontal(classes="actions"):
                             yield Button(
                                 "Install / apply", id="apply-setup",
@@ -772,6 +771,10 @@ class ClarpAdminApp(App[None]):
             } | {
                 "backend": backend,
                 "optional-skills": self._selected("optional-skills"),
+                "skipped-skills": [
+                    skill_id for _label, skill_id, _on
+                    in optional_skill_selections()
+                    if skill_id not in self._selected("optional-skills")],
             })
 
     @work(thread=True, exclusive=True, group="local-connection")

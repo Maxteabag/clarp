@@ -33,13 +33,23 @@ def test_skill_health_and_optional_toggle(tmp_path, monkeypatch):
     managed_skills.set_enabled("clarp-core", True)
     rows = {row["id"]: row for row in managed_skills.status()}
     assert rows["clarp-core"]["health"] == "healthy"
-    assert rows["clarp-extra"]["health"] == "inactive"
+    # Absent from the old enabled list is not off: the user never decided, so
+    # it is on and its links are owed (repair-links writes them).
+    assert rows["clarp-extra"]["enabled"] is True
+    assert rows["clarp-extra"]["health"] == "missing"
 
     managed_skills.set_enabled("clarp-extra", True)
     assert next(row for row in managed_skills.status()
                 if row["id"] == "clarp-extra")["health"] == "healthy"
     managed_skills.set_enabled("clarp-extra", False)
-    assert json.loads(state.read_text())["skills"] == ["clarp-core"]
+    saved = json.loads(state.read_text())
+    assert saved["skills"] == ["clarp-core"]
+    assert saved["skills_off"] == ["clarp-extra"]
+    row = next(row for row in managed_skills.status() if row["id"] == "clarp-extra")
+    assert (row["enabled"], row["health"]) == (False, "inactive")
+
+    managed_skills.set_enabled("clarp-extra", True)
+    assert json.loads(state.read_text())["skills_off"] == []
 
 
 def test_modified_user_skill_is_preserved(tmp_path, monkeypatch):
