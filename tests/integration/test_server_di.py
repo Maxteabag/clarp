@@ -3511,8 +3511,14 @@ def test_the_users_stop_starts_his_waiting_message_and_keeps_agents_paused(runni
         text="take this now", trace_id="trace-user-now", client_msg_id="queue-user-now",
         synthesize_audio=False, origin="user", sender_agent_id="")
 
+    turn_queue.enqueue(
+        queue_id="queue-oracle-now", agent_id=agent["agent_id"], session="claude",
+        text="said on a call", trace_id="trace-oracle-now", client_msg_id="queue-oracle-now",
+        synthesize_audio=False, origin="oracle", sender_agent_id="")
+
     status, _ = _post(base + "/stop", {"session": "claude"})
     assert status == 200
+    assert turn_queue.get("queue-oracle-now")["allow_paused"] == 1  # his words on a call too
     assert turn_queue.is_paused(agent["agent_id"]) is True       # the pause holds the rest
     assert turn_queue.get("queue-user-now")["allow_paused"] == 1  # the user's runs past it
     assert turn_queue.get("queue-agent-held")["allow_paused"] == 0

@@ -2774,8 +2774,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         peers, goal wakes), which waits as before for the user's next message."""
         from lib import turn_queue
         try:
+            # The user's own words: typed, or spoken through the Oracle on a call.
             waiting = [row for row in turn_queue.pending(agent_id)
-                       if str(row.get("origin") or "user") == "user"]
+                       if str(row.get("origin") or "user") in ("user", "oracle")]
             released = [row["queue_id"] for row in waiting
                         if turn_queue.allow_paused(str(row["queue_id"]))]
         except Exception as exc:  # noqa: BLE001 - the stop itself already succeeded
