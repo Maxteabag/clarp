@@ -142,10 +142,15 @@ impl Presented {
             .collect()
     }
 
-    /// A row that pushes the turn's place: not its own and sent.
+    /// A row that pushes the turn's place: not its own and sent. The turn's
+    /// own answer that no item stands for (a backend whose live items carry no
+    /// final message) pushes it too: the work goes above its answer.
     fn pushes(&self, row: &Message) -> bool {
-        let own = self.own_rows.contains(&row.id) || (!self.turn_id.is_empty() && row.trace_id == self.turn_id);
-        !own && !row.pending
+        if row.pending || self.own_rows.contains(&row.id) {
+            return false;
+        }
+        let traced = !self.turn_id.is_empty() && row.trace_id == self.turn_id;
+        !traced || (row.role == "assistant" && row.phase == "final" && row.kind != "live")
     }
 }
 
@@ -316,6 +321,18 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
         }
         shown.push(*item);
     }
+    // A cell of the turn's own rows that groups tools the items show (an
+    // exploration cell whose id joins its tools' call ids) is the fold's
+    // work too: it is not shown again on its row beside the fold.
+    let tool_calls: Vec<&str> = items.iter().filter_map(|i| object(i, "tool")).map(|t| text(t, "call_id")).filter(|c| !c.is_empty()).collect();
+    for row in rows.iter().filter(|m| !turn_id.is_empty() && m.trace_id == turn_id) {
+        for cell in &row.display_cells {
+            let id = cell.get("id").and_then(Value::as_str).unwrap_or_default();
+            if !id.is_empty() && !tool_calls.contains(&id) && tool_calls.iter().any(|call| id.contains(call)) {
+                presented.stripped_calls.insert(id.to_owned());
+            }
+        }
+    }
     // A row whose every part an item row shows is not shown again.
     let calls: HashSet<&str> = items.iter().filter_map(|i| object(i, "tool")).map(|t| text(t, "call_id")).collect();
     for id in owned_rows.into_iter().filter(|r| !giving.contains(r)) {
@@ -381,11 +398,32 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
 
     // A settled turn folds its work (§7.6): its reasoning and tools. What
     // failed or stopped and every message, commentary too, stay in view in
-    // their places; the fold sits where the folded work begins.
+    // their places; the fold sits where the folded work begins. Thinking
+    // alone before the turn's first message (the acknowledgment it speaks
+    // first) does not put the fold above that message: the fold then sits
+    // where the work after it begins.
     if settled {
         let stays = |entry: &Entry| matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending") || entry.kind == Kind::Message;
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
-        if let Some(&first) = folded.first() {
+        let first_message = entries.iter().position(|e| e.kind == Kind::Message);
+        // The thinking folded above the first message, when that is all that is.
+        let leading: Vec<usize> = match first_message {
+            // Only an acknowledgment, never the answer itself: a turn of
+            // thinking and its answer keeps the fold above the answer.
+            Some(m) if entries[m].phase != "final" => {
+                let before: Vec<usize> = folded.iter().copied().filter(|&i| i < m).collect();
+                if before.iter().all(|&i| entries[i].kind == Kind::Reasoning) { before } else { Vec::new() }
+            }
+            _ => Vec::new(),
+        };
+        // Where the fold goes, as an index among the entries as they are (it
+        // may be one past the last): after the first message when only
+        // thinking came before it, at the work after it or else right below it.
+        let start = match first_message {
+            Some(m) if !leading.is_empty() => Some(folded.iter().copied().find(|&i| i > m).unwrap_or(m + 1)),
+            _ => folded.first().copied(),
+        };
+        if let Some(first) = start {
             let key = format!("live:fold:{turn_id}");
             let open = options.expanded.contains(&key);
             let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?));
@@ -409,20 +447,28 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
                 expanded: open,
                 ..Entry::default()
             };
-            if open {
-                entries.insert(first, fold);
-            } else {
-                let mut kept = Vec::with_capacity(entries.len());
-                for (i, entry) in entries.into_iter().enumerate() {
-                    if i == first {
-                        kept.push(fold.clone());
-                    }
-                    if !folded.contains(&i) {
-                        kept.push(entry);
-                    }
+            // Opened, the folded rows follow it (the leading thinking too, below
+            // the first message); closed, only the fold stands for them.
+            let mut kept = Vec::with_capacity(entries.len() + 1);
+            let mut moved = Vec::new();
+            let mut placed = false;
+            for (i, entry) in entries.into_iter().enumerate() {
+                if i == first {
+                    kept.push(fold.clone());
+                    kept.append(&mut moved);
+                    placed = true;
                 }
-                entries = kept;
+                if open && leading.contains(&i) {
+                    moved.push(entry);
+                } else if open || !folded.contains(&i) {
+                    kept.push(entry);
+                }
             }
+            if !placed {
+                kept.push(fold);
+                kept.append(&mut moved);
+            }
+            entries = kept;
         }
     }
     entries

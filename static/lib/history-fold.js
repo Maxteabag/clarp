@@ -1,7 +1,8 @@
 // The quiet chat (docs/live-items.md §7.6, as the desktop's history_fold): each settled turn of
 // the /log rows folds its tool work behind one work row, 'Worked for 11s · 3 tools', which opens
 // in place. Built from the Host's turn summaries (log_turn_summary: every row of a turn carries
-// its trace id, its last row `turn` {worked_ms, tool_count}), never from live items. Pure.
+// its trace id, its last row `turn` {worked_ms, tool_count}), never from live items. The label
+// counts the calls the fold opens to, not the summary's tool_count. Pure.
 //
 // Tool activity (a device setting):
 //   grouped    every settled turn folds (the default)
@@ -29,11 +30,13 @@ function foldable(row) {
   return { tools, cells };
 }
 
-/** 'Worked for 11s · 3 tools', '3 tools' without a worked time, 'Working · 2 tools' running. */
+/** 'Worked for 11s · 3 tools', 'Worked for 11s' with none folded, '3 tools' without a worked
+ * time, 'Working · 2 tools' running. */
 export function workLabel({ running = false, worked_ms = null, tool_count = 0 } = {}) {
   const tools = plural(tool_count, 'tool');
   if (running) return `Working · ${tools}`;
-  return worked_ms != null ? `Worked for ${formatDuration(worked_ms)} · ${tools}` : tools;
+  if (worked_ms == null) return tools;
+  return `Worked for ${formatDuration(worked_ms)}` + (tool_count ? ` · ${tools}` : '');
 }
 
 /**
@@ -48,44 +51,47 @@ export function workLabel({ running = false, worked_ms = null, tool_count = 0 } 
 export function foldTurns(rows, { mode = 'grouped', busy = false } = {}) {
   const out = { byRow: new Map(), stripped: new Map(), folds: [] };
   if (mode === 'always' || !Array.isArray(rows) || !rows.length) return out;
-  // Each agent row's turn: the prompt with its trace id, else the last prompt above it.
-  const prompts = [];
-  const turns = new Map();
+  // Each agent row's turn: the last prompt so far with its trace id, else the last prompt above
+  // it. One walk with a trace -> prompt map: a chat of thousands of rows folds in linear time.
+  const promptOfTrace = new Map();
+  const turns = new Map();         // prompt index -> its rows, in prompt order (-1: before any)
   let current = -1;
   rows.forEach((row, index) => {
     if (row.role === 'user') {
-      prompts.push(index);
+      if (row.trace_id) promptOfTrace.set(row.trace_id, index);
       current = index;
       turns.set(index, []);
       return;
     }
     if (row.role !== 'assistant') return;
-    const traced = row.trace_id
-      ? prompts.findLast(p => rows[p].trace_id && rows[p].trace_id === row.trace_id) : undefined;
+    const traced = row.trace_id ? promptOfTrace.get(row.trace_id) : undefined;
     const owner = traced !== undefined ? traced : current;
     if (!turns.has(owner)) turns.set(owner, []);
     turns.get(owner).push(index);
   });
-  const order = [...turns.keys()].sort((a, b) => a - b);
   const settledTurns = [];
-  for (const prompt of order) {
-    const members = turns.get(prompt).map(i => rows[i]);
+  for (const [prompt, indexes] of turns) {
+    const members = indexes.map(i => rows[i]);
     if (!members.length) continue;
     const calls = members.map(row => ({ rowId: row.id, ...foldable(row) }))
       .filter(c => c.tools.length || c.cells.length);
-    const summary = [...members].reverse().find(m => m.turn)?.turn || null;
+    // The label counts what the fold opens to: a failed call stays in its row, so the turn
+    // summary's tool_count (every call) is not used.
     const counted = calls.reduce((n, c) => n + c.tools.length + c.cells.length, 0);
-    if (!counted && !(summary && summary.tool_count)) continue;
-    const later = order.some(p => p > prompt && rows[p] && rows[p].role === 'user');
+    const summary = members.findLast(m => m.turn)?.turn || null;
+    const later = prompt < current;                   // a prompt came after this turn's
     const streaming = members.some(m => m.kind === 'live' || m.optimistic);
     const settled = !streaming && (!!summary || later || !busy);
-    const toolCount = summary && summary.tool_count != null ? Number(summary.tool_count) : counted;
+    // A settled turn whose calls all failed (none folds) still says how long it worked
+    // ('Worked for 11s'); with neither a worked time nor a folded call, or no call at all, no row.
+    const failedOnly = settled && summary && summary.worked_ms != null && Number(summary.tool_count) > 0;
+    if (!counted && !failedOnly) continue;
     const turnId = (prompt >= 0 && rows[prompt].trace_id) || members.find(m => m.trace_id)?.trace_id
       || members[0].id;
     const fold = {
       key: `fold:${turnId}`, running: !settled,
       label: workLabel({ running: !settled, worked_ms: summary ? summary.worked_ms ?? null : null,
-                         tool_count: toolCount }),
+                         tool_count: counted }),
       calls,
     };
     const anchor = prompt >= 0 ? rows[prompt].id : null;

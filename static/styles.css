@@ -3359,6 +3359,32 @@ html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
 .lv-step { line-height: 20px; color: var(--washi-dim); }
 .lv-step.completed { color: var(--washi-low); text-decoration: line-through; }
 .lv-step.in_progress { color: var(--washi); }
+/* Hidden coordination (docs/protocol.md): where messages between agents were left out. */
+.hidden-run {
+  display: flex; align-items: center; gap: 8px; margin: 2px 0; padding: 0 12px; min-height: 26px;
+  color: var(--washi-low); font: 12.5px var(--font-ui);
+}
+.hidden-run-agents { color: var(--washi-low); }
+.hidden-run-show {
+  background: none; border: 0; padding: 0; color: var(--washi-dim); font: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.hidden-run-show:hover { color: var(--washi); }
+.coordination-menu-wrap { position: relative; display: inline-flex; }
+.history-btn.coordination-btn::before { -webkit-mask-image: url('/static/img/icons/chat.png'); mask-image: url('/static/img/icons/chat.png'); }
+.coordination-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 180px; padding: 4px;
+  background: var(--ink-soft-2); border: 1px solid var(--ink-edge); border-radius: 8px;
+  display: flex; flex-direction: column;
+}
+.coordination-menu button {
+  text-align: left; background: none; border: 0; border-radius: 5px; padding: 6px 10px;
+  color: var(--washi-dim); font: 13px var(--font-ui); cursor: pointer;
+}
+.coordination-menu button:hover { background: var(--ink-edge); color: var(--washi); }
+.coordination-menu button.checked { color: var(--washi); }
+.coordination-menu button.checked::before { content: '✓ '; }
+.coordination-menu-hint { color: var(--washi-low); }
 .lv-divider { margin: 6px 12px; color: var(--washi-low); font: 12px var(--font-ui); text-align: center; }
 
 .status-line {

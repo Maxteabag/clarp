@@ -12,6 +12,9 @@
 //           conversation_id → drop_cache + fetch_tail
 //   optimistic user turn keyed `u-<client_msg_id>` → shown until the server
 //   returns a turn with the same id
+//   coordination (feature hidden_coordination) → every /log reads `auto`, a
+//           delta sends the kept copy's visibility as coordination_read; a
+//           chat's own Show reads `show` for that visit and is never cached
 //
 // Every pane reads its own session from here, so two panes never share a
 // transcript and switching back to an agent paints from memory.
@@ -25,7 +28,8 @@ import { AgentState, SSEType } from '@core/protocol.js';
 import { registerModule } from '@core/client-health.js';
 import { clog, instanceId } from '../lib/net.js';
 import { delivery } from './delivery.svelte.js';
-import { liveFor, liveTurnRunning } from './live.svelte.js';
+import { live, liveFor, liveTurnRunning } from './live.svelte.js';
+import { logParams } from '@core/coordination.js';
 import { createTranscriptCache } from '@core/transcript-cache.js';
 import { idbTranscriptStorage } from '../lib/idb-transcripts.js';
 import { confirmFromTurns } from '@core/delivery.js';
@@ -52,6 +56,8 @@ const cache = createTranscriptCache({
 });
 
 function cacheState(session) {
+  // A chat shown for this visit (coordination=show) is never written to the device.
+  if (conversations.bySession[session]?.revealed) return null;
   const sync = syncOf(session);
   return {
     conversationId: sync.conversationId,
@@ -60,6 +66,8 @@ function cacheState(session) {
     hasMore: sync.hasMore,
     cwd: entry(session).cwd,
     turns: sync.order.map(id => sync.turns[id]),
+    coordination: sync.coordination,
+    hiddenAfter: sync.hiddenAfter,
   };
 }
 
@@ -105,6 +113,12 @@ function blank(session) {
     error: '',
     /** Bumped whenever new turns are appended, for scroll pinning. */
     appendSeq: 0,
+    /** The coordination policy the rows were read under ({hidden, source, visibility} or null). */
+    coordination: null,
+    /** The hidden run after the newest visible row (static/lib/coordination.js), or null. */
+    hiddenAfter: null,
+    /** Coordination shown for this visit (read with coordination=show, never cached). */
+    revealed: false,
   };
 }
 
@@ -155,6 +169,8 @@ function project(session, { bump = 'appended', resetActivity = false } = {}) {
   if (sync.latestTs) conv.latestTs = sync.latestTs;
   conv.hasMore = sync.hasMore;
   conv.missing = sync.missing;
+  conv.coordination = sync.coordination;
+  conv.hiddenAfter = sync.hiddenAfter;
   conv.status = 'ready';
   conv.error = '';
   if (resetActivity) conv.activity = [];
@@ -163,7 +179,8 @@ function project(session, { bump = 'appended', resetActivity = false } = {}) {
     conv.appendSeq++;
   }
   confirmFromTurns(delivery, conv.turns);
-  cache.changed(session, () => cacheState(session));
+  // A chat shown for this visit is never written; the copy on the device stays the hidden one.
+  if (!conv.revealed) cache.changed(session, () => cacheState(session));
 }
 
 /** Effects the reducer asked for, outside a running request. */
@@ -183,7 +200,8 @@ function dropCache(session) {
   next.pendingFetch = cur.pendingFetch;
   next.wakeWhileFetching = cur.wakeWhileFetching;
   setSync(session, next);
-  conversations.bySession[session] = blank(session);
+  const revealed = !!conversations.bySession[session]?.revealed;
+  conversations.bySession[session] = { ...blank(session), revealed };
   cache.forget(session);
 }
 
@@ -198,7 +216,15 @@ const inflight = new Map();   // session → Promise
 const wakeTimers = new Map();
 
 async function fetchLog(session, params) {
-  const qs = new URLSearchParams({ session, limit: String(PAGE), include_automated: '0', ...params });
+  const coordination = logParams({
+    feature: live.hiddenCoordination,
+    reveal: !!conversations.bySession[session]?.revealed,
+    echo: syncOf(session).coordination,
+    delta: 'after_revision' in params,
+  });
+  const qs = new URLSearchParams({
+    session, limit: String(PAGE), include_automated: '0', ...coordination, ...params,
+  });
   const r = await fetch('/log?' + qs.toString());
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -270,7 +296,9 @@ function openFromCache(session) {
     const conv = entry(session);
     conv.status = 'loading';
     const t0 = performance.now();
-    const rec = await cache.load(session);
+    let rec = await cache.load(session);
+    // A copy kept before this Host hid coordination holds every row: read the chat again.
+    if (rec && live.hiddenCoordination && !rec.coordination) rec = null;
     if (!rec || !rec.turns.length) {
       try {
         await loadTail(session);
@@ -392,6 +420,16 @@ export function wake(session) {
  */
 export function handleSseEvent(ev) {
   const session = ev && ev.session;
+  if (ev && ev.type === SSEType.AGENT_ROSTER && ev.kind === 'coordination-changed' && !session) {
+    // The Host's setting: every open chat that follows it.
+    for (const [s, conv] of Object.entries(conversations.bySession)) {
+      if (conv.status !== 'ready') continue;
+      const r = onEvent(syncOf(s), ev);
+      setSync(s, r.state);
+      runEffects(s, r.effects);
+    }
+    return;
+  }
   if (!session || !conversations.bySession[session]) return;
   if (ev.type === SSEType.TRANSCRIPT_UPDATED) {
     wake(session);
@@ -400,6 +438,26 @@ export function handleSseEvent(ev) {
   const r = onEvent(syncOf(session), ev);
   setSync(session, r.state);
   runEffects(session, r.effects);
+}
+
+/**
+ * A chat's own Show: read it again with every message between agents, for this visit only.
+ * Nothing of it is cached; concealCoordination (leaving the chat) reads the chat as it was.
+ */
+export function revealCoordination(session) {
+  if (!session || !live.hiddenCoordination) return;
+  const conv = entry(session);
+  if (conv.revealed) return;
+  conv.revealed = true;
+  reload(session).catch(() => {});
+}
+
+/** The visit is over: read the chat under its own setting again. */
+export function concealCoordination(session) {
+  const conv = session && conversations.bySession[session];
+  if (!conv || !conv.revealed) return;
+  conv.revealed = false;
+  reload(session).catch(() => {});
 }
 
 /** Relaunch or fork: the agent keeps its session but the conversation is new. */

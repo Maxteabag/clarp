@@ -227,11 +227,13 @@ const RECONNECTING: &str = "Reconnecting… Your message is saved.";
 
 /// The attempt a live turn waits a moment for, how long it waits, and of how many tries:
 /// when it waits for one. A turn whose launch was refused before its tool was given anything
-/// has the tries of R121 (its own, and eight of one refusal); another, those of a failure
-/// that passes.
+/// has the tries of R121 (its own, and eight of one refusal) or R193 (ten queued handoff
+/// failures). A failure that passes has its own retry limit.
 fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
     let parked = live.parked.as_ref()?;
-    let of = if parked.kind == failures::NOT_STARTED {
+    let of = if live.handoff_retry.is_some() {
+        launch_refused::HANDOFF_GIVE_UP
+    } else if parked.kind == failures::NOT_STARTED {
         launch_refused::PARK_AFTER + 1
     } else {
         recovery::MAX_ATTEMPTS
@@ -239,7 +241,10 @@ fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
     match parked.wait {
         Wait::Retry { until_ms } => Some((
             // Waits for an account are no tries against a bad line.
-            parked.attempts - parked.account.count + 1,
+            live.handoff_retry
+                .map_or(parked.attempts - parked.account.count + 1, |failures| {
+                    failures + 1
+                }),
             until_ms - parked.since_ms,
             of,
         )),
@@ -2126,6 +2131,7 @@ mod tests {
                 tools: Vec::new(),
                 stopping: false,
                 parked: None,
+                handoff_retry: None,
                 held_for_an_account: false,
                 waits_for_its_model: None,
                 failed_attempts: 0,

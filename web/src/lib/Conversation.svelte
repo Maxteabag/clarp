@@ -3,6 +3,7 @@
   // so it stays shared; the shells differ in what surrounds it, not in this.
   import AgentBanner from './AgentBanner.svelte';
   import AgentIdentity from './AgentIdentity.svelte';
+  import ChatCoordinationMenu from './ChatCoordinationMenu.svelte';
   import ConnDot from './ConnDot.svelte';
   import Transcript from './Transcript.svelte';
   import StatusLine from './live/StatusLine.svelte';
@@ -43,6 +44,7 @@
           onclick={() => setExplanationsEnabled(!live.explanations.enabled)}
         >ⓘ</button>
       {/if}
+      {#if live.hiddenCoordination}<ChatCoordinationMenu {session} {active} />{/if}
       <button id={active ? 'historyRefresh' : undefined} class="history-btn" aria-label="Refresh"
               onclick={() => reload(session)}>↻</button>
     </div>
