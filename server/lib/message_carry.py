@@ -651,7 +651,7 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
         elif _norm_text(text) in said:
             if early_traces is None:
                 early_traces = _early_traces(table, old, turns, carry)
-            if not _sent_after_old_turns(table, row, carry, early_traces):
+            if not _sent_after_old_turns(table, row, carry, early_traces, turns):
                 found.add("send_said_before")
     if live_rows:
         replied = None
@@ -778,14 +778,21 @@ def _early_traces(table, old, turns, carry) -> set[str]:
     return found
 
 
-def _sent_after_old_turns(table, row, carry, early_traces) -> bool:
+def _sent_after_old_turns(table, row, carry, early_traces, turns=()) -> bool:
     """Whether a new /send row was sent too late for any old turn's copy to be
-    linked to it, for a trace none of them can name (NEW_SENDS)."""
+    linked to it, for a trace none of them can name (NEW_SENDS). A follow-up
+    steered into a running turn (a trace with no turn row) is timed by its
+    ``sent_at``, as the linker times it (message_import_common._steered_sent):
+    its row is written after the CLI's copy."""
     latest = (carry or {}).get("prefix_latest_ms")
     at = table.at.get("timestamp")
     if latest is None or at is None or (carry or {}).get("prefix_untimed_user") is not False:
         return False
     sent = iso_ms(row[at])
+    trace, sent_at = table.at.get("trace_id"), table.at.get("sent_at")
+    if (trace is not None and sent_at is not None and row[trace] and isinstance(row[sent_at], int)
+            and str(row[trace]) not in {str(turn[0]) for turn in _turn_values(turns)}):
+        sent = int(row[sent_at])
     if sent is None or sent <= int(latest) + _START_SLACK_MS:
         return False
     trace = table.at.get("trace_id")

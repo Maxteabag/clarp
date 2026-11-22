@@ -221,3 +221,61 @@ def _client_provenance(rows) -> dict[str, list[tuple[str, str, str, str]]]:
         provenance.setdefault(key, []).append((
             message_id, origin or "user", sender_agent_id or "", timestamp))
     return provenance
+
+
+# lib.steer_records' keys: a follow-up written into a running turn's stdin and not read yet.
+_STEER_PREFIX = "steer.written."
+
+
+def _pending_steer_rows(database, agent_id, backend_session_id) -> list[tuple[_ClientProvenanceRow, int]]:
+    """The /send rows that follow-ups written into this session's running turn will
+    have, while the CLI has not read them (lib.steer_records): (the row as
+    ``_client_provenance_rows`` will read it, its send time in ms), in send order.
+
+    The CLI writes its copy of such a follow-up into the transcript when it reads
+    it, and the Host writes the row at the CLI's echo, after that. The record is
+    written before the stdin write and removed only after the row's commit, so
+    read before the /send rows, one of the two is always there: an import in
+    between links the copy to the row it will have, as a later one links it to
+    the row. Its timestamp is its send time (a row it cannot know yet); the
+    linker judges a steer by its send time anyway (``_steered_sent``)."""
+    from .clock import iso_from_ms
+    import json
+    found = []
+    for (value,) in database.execute(
+            "SELECT value FROM settings WHERE key LIKE ? ORDER BY key", (_STEER_PREFIX + "%",)):
+        try:
+            entry = json.loads(value or "")
+        except (TypeError, ValueError):
+            continue                    # the next runtime drops it (steer_records.left)
+        if not isinstance(entry, dict) or entry.get("agent_id") != agent_id \
+                or (entry.get("session_id") or backend_session_id) != backend_session_id:
+            continue
+        item = database.execute(
+            """SELECT text, trace_id, client_msg_id, origin, sender_agent_id, enqueued_at
+                 FROM queued_turns WHERE queue_id = ? AND status = 'queued' AND shown_at IS NULL""",
+            (str(entry.get("queue_id") or ""),)).fetchone()
+        if item is None or not item[1] or not isinstance(item[5], int):
+            continue                    # read (its row is written) or settled
+        row = _ClientProvenanceRow(
+            _client_message_id(item[2] or item[1]), item[0], (item[3] or "user").strip() or "user",
+            (item[4] or "").strip() or None, iso_from_ms(item[5]), item[1])
+        found.append((row, int(item[5])))
+    return sorted(found, key=lambda pair: (pair[1], pair[0].message_id))
+
+
+def _steered_sent(database, agent_id, backend_session_id, outcomes, pending=()) -> dict[str, int]:
+    """{/send row id: its send time in ms} for the follow-ups steered into a running
+    turn (a trace with no turn of its own: not in ``outcomes``), the pending ones
+    included. Such a row is written when the CLI echoes it, after the CLI wrote its
+    copy, so the linker judges it by when it was sent (its ``sent_at``), not by when
+    it was written; every other row as before."""
+    sent = {str(row[0]): int(row[1]) for row in database.execute(
+        """SELECT message_id, sent_at, trace_id FROM messages
+            WHERE agent_id = ? AND backend_session_id = ?
+              AND source_file LIKE 'client:%' AND sent_at IS NOT NULL""",
+        (agent_id, backend_session_id))
+        if isinstance(row[1], int) and row[2] and str(row[2]) not in outcomes}
+    for row, sent_ms in pending:
+        sent.setdefault(str(row.message_id), sent_ms)
+    return sent

@@ -258,6 +258,12 @@ def test_a_follow_up_during_a_tool_is_read_into_the_same_turn(world):
     assert _wait(lambda: _row(w, "m2") is not None)            # its row at the echo
     assert _wait(lambda: turn_queue.status("m2") != "queued")
     assert _queued(w) == []
+    # Written at the echo, after the CLI's copy, the row keeps the time it was sent: the
+    # import links that copy to it by when it was sent (message_import_common._steered_sent).
+    from lib import db
+    sent = db.conn().execute("SELECT m.sent_at, q.enqueued_at FROM messages m JOIN queued_turns q"
+                             " ON q.queue_id = 'm2' WHERE m.message_id = 'u-m2'").fetchone()
+    assert sent is not None and sent[0] == sent[1]
     time.sleep(0.5)
     assert _calls(w) == 1                                      # never run as its own turn
     # The steering launch asks for the echo: without it nothing says a follow-up was read,
