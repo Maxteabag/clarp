@@ -268,8 +268,9 @@ pub fn capable(header: Option<&str>, overrides: Option<&BTreeMap<String, i64>>) 
         .is_some_and(|minimum| contract >= minimum)
 }
 
-/// The default v2 minimums: iOS from 87, the web app from 2, and Android from 42.
-pub const DEFAULT_V2_MINIMUMS: &[(&str, i64)] = &[("web", 2), ("android", 42), ("ios", 87)];
+/// The default v2 minimums: iOS from 87, Android from 42, and web and desktop from 2.
+pub const DEFAULT_V2_MINIMUMS: &[(&str, i64)] =
+    &[("web", 2), ("android", 42), ("ios", 87), ("desktop", 2)];
 
 /// The highest catalog the client can draw and answer. V2 also requires V1 capability.
 pub fn client_level(

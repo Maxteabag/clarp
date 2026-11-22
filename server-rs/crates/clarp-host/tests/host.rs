@@ -9048,9 +9048,11 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (status, made) = ask("POST", "/artifacts", ios_v2, Some(&v2));
     assert_eq!(status, 201, "{made}");
     let path = "/artifacts/desktop-v2?representation=flat-v1";
-    let (status, page) = ask("GET", path, ios_v2, None);
-    assert_eq!(status, 200, "{page}");
-    assert_eq!(page["artifact"]["spec"], form["spec"]);
+    for client in [ios_v2, Some("desktop/0.1.0 contract=2")] {
+        let (status, page) = ask("GET", path, client, None);
+        assert_eq!(status, 200, "{client:?}: {page}");
+        assert_eq!(page["artifact"]["spec"], form["spec"], "{client:?}");
+    }
     for client in [desktop, Some("ios/3028 contract=86")] {
         let (status, page) = ask("GET", path, client, None);
         assert_eq!(status, 200, "{client:?}: {page}");
