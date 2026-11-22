@@ -371,8 +371,7 @@ pub struct State {
     pub last_wake_signal_ms: i64,
     /// When the run of interruptions the agent is in began, in seconds: the first turn of
     /// it that was cut off or failed, with no turn of it completed since. Nothing: it is in
-    /// none. An agent is tried again for so long from there, and not from the last heartbeat
-    /// that failed in its turn (the Python Host counts from the last: issue 396 there).
+    /// none. A failed heartbeat does not renew the retry window (R50).
     pub interrupted_since: f64,
 }
 
