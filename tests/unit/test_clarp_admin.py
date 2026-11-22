@@ -77,6 +77,72 @@ def test_skill_manifest_contains_only_agreed_packs():
     assert all(item["id"].startswith("clarp-") for item in manifest["skills"])
 
 
+def test_every_skill_folder_is_in_the_manifest():
+    """Only manifest skills are linked into the backends, so a skill folder the
+    manifest does not name ships in the release and reaches no agent."""
+    manifest = json.loads((ROOT / "skills/manifest.json").read_text())["skills"]
+    listed = [item["id"] for item in manifest]
+    folders = sorted(path.name for path in (ROOT / "skills").iterdir() if path.is_dir())
+    assert len(listed) == len(set(listed))
+    assert sorted(set(folders) - set(listed)) == []
+    assert sorted(set(listed) - set(folders)) == []
+
+
+def _repair_fixture(tmp_path, monkeypatch, state: dict):
+    share = tmp_path / "share"
+    skills = [{"id": "clarp-core", "pack": "core"},
+              {"id": "clarp-new", "pack": "native"},
+              {"id": "clarp-mail", "pack": "messaging", "requires": ["no-such-tool"]},
+              {"id": "clarp-quiet", "pack": "artifacts"}]
+    for item in skills:
+        source = share / "current/skills" / item["id"]
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text(f"---\nname: {item['id']}\n---\n")
+    (share / "current/skills/manifest.json").write_text(json.dumps({"skills": skills}))
+    install_state = tmp_path / "config/install.json"
+    install_state.parent.mkdir()
+    install_state.write_text(json.dumps(state))
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "INSTALL_STATE", install_state)
+    for name in ("claude", "codex"):
+        monkeypatch.setattr(admin, f"{name.upper()}_SKILLS", tmp_path / name)
+    monkeypatch.setenv("CLARP_AGY_SKILLS", str(tmp_path / "gemini/config/skills"))
+    (tmp_path / "gemini/config").mkdir(parents=True)
+    return install_state
+
+
+def test_repair_links_turns_on_every_skill_the_user_never_turned_off(
+    tmp_path, monkeypatch
+):
+    # A Host set up before opt-outs were recorded: its list predates clarp-new
+    # and clarp-mail, and nothing says the user turned them off.
+    install_state = _repair_fixture(tmp_path, monkeypatch, {"skills": ["clarp-core"]})
+    admin.cmd_skills(argparse.Namespace(skills_command="repair-links"))
+    every = ["clarp-core", "clarp-mail", "clarp-new", "clarp-quiet"]
+    for root in ("claude", "codex", "gemini/config/skills"):
+        assert sorted(p.name for p in (tmp_path / root).iterdir()) == every
+    saved = json.loads(install_state.read_text())
+    assert saved["skills"] == every and saved["skills_off"] == []
+
+
+def test_a_skill_turned_off_stays_off_through_updates(tmp_path, monkeypatch):
+    install_state = _repair_fixture(tmp_path, monkeypatch, {"skills": []})
+    admin.cmd_skills(argparse.Namespace(skills_command="repair-links"))
+    admin.cmd_skills(argparse.Namespace(skills_command="remove", skill_ids=["clarp-quiet"]))
+    admin.cmd_skills(argparse.Namespace(skills_command="repair-links"))
+    assert not (tmp_path / "claude/clarp-quiet").exists()
+    assert not (tmp_path / "codex/clarp-quiet").exists()
+    saved = json.loads(install_state.read_text())
+    assert saved["skills_off"] == ["clarp-quiet"]
+    assert "clarp-quiet" not in saved["skills"]
+    with pytest.raises(SystemExit, match="core"):
+        admin.cmd_skills(argparse.Namespace(skills_command="remove", skill_ids=["clarp-core"]))
+    admin.cmd_skills(argparse.Namespace(skills_command="install", skill_ids=["clarp-quiet"]))
+    admin.cmd_skills(argparse.Namespace(skills_command="repair-links"))
+    assert (tmp_path / "codex/clarp-quiet/SKILL.md").is_file()
+    assert json.loads(install_state.read_text())["skills_off"] == []
+
+
 def test_every_managed_skill_ships_the_files_its_instructions_name():
     """Setup links skills/<id> by manifest id; an agent reading SKILL.md is
     sent to its helpers by relative path, so a missing one is a dead end."""
@@ -1031,6 +1097,32 @@ def test_setup_reconciles_deselected_optional_skills(tmp_path, monkeypatch):
     server = __import__("tomllib").loads(config.read_text())["server"]
     assert server["bind_addr"] == "192.0.2.10"
     assert server["port"] == 7000
+
+
+def test_setup_turns_on_every_skill_except_those_turned_off(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config = config_dir / "config.toml"
+    config.write_text('[server]\nport = 7000\n')
+    state = config_dir / "install.json"
+    state.write_text('{"skills": [], "skills_off": ["clarp-a", "clarp-b"]}')
+    monkeypatch.setattr(admin, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    monkeypatch.setattr(admin, "INSTALL_STATE", state)
+    monkeypatch.setattr(admin, "SHARE", tmp_path / "share")
+    monkeypatch.setattr(admin, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(admin, "load_manifest", lambda: {"skills": [
+        {"id": "clarp-core", "pack": "core"}, {"id": "clarp-a", "pack": "native"},
+        {"id": "clarp-b", "pack": "artifacts"}, {"id": "clarp-c", "pack": "messaging"},
+    ]})
+    linked = []
+    monkeypatch.setattr(admin, "link_skill", linked.append)
+    monkeypatch.setattr(admin, "unlink_skill", lambda _skill: None)
+    admin._execute_setup("codex", "apple-only", None, None, ["clarp-a"], "stable",
+                         skipped=["clarp-c"])
+    saved = json.loads(state.read_text())
+    assert saved["skills"] == ["clarp-a", "clarp-core"] == sorted(linked)
+    assert saved["skills_off"] == ["clarp-b", "clarp-c"]
 
 
 def test_setup_post_processing_failure_reactivates_previous_release(

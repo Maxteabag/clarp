@@ -34,26 +34,20 @@ def test_tui_exposes_setup_pairing_and_provider_choices():
             assert app.query_one("#network", Select).value == "tailscale"
             assert app.query_one("#cartesia-key", Input).password is True
             assert app.query_one("#pair-url", Input).value == ""
+            # Every skill the release ships is on unless the user turned it
+            # off: core ones are listed as included, every other one ticked.
+            manifest = json.loads((ROOT / "skills/manifest.json").read_text())["skills"]
             assert set(app.query_one(
                 "#optional-skills", SelectionList).selected) == {
-                    "clarp-calendar", "clarp-location"}
+                    str(item["id"]) for item in manifest if item.get("pack") != "core"}
             included_skills = app.query_one("#included-skills", SelectionList).selected
-            # Every core skill and every artifacts skill not switched off by
-            # default, read from the bundle: a count pinned here broke with each
-            # new skill (35 since #474 added clarp-native-forms).
-            manifest = json.loads((ROOT / "skills/manifest.json").read_text())["skills"]
             assert set(included_skills) == {
-                str(item["id"]) for item in manifest
-                if item.get("pack") == "core" or (
-                    item.get("pack") == "artifacts" and item.get("default_enabled") is not False)}
+                str(item["id"]) for item in manifest if item.get("pack") == "core"}
             assert "clarp-status-fork" in included_skills
             assert "clarp-oracle-contact" in included_skills
             assert "clarp-calls" in included_skills
             assert "clarp-goal" in included_skills
-            assert "clarp-podcast-history" in included_skills
             assert "clarp-avatar-generation" in included_skills
-            assert "clarp-countdown" in included_skills
-            assert "clarp-html-forms" in included_skills
             assert "clarp-janitors" in included_skills
             manual_url = app.query_one("#manual-url-field")
             assert manual_url.display is False
@@ -135,17 +129,12 @@ def test_uninstalled_tui_hides_health_and_pairing_until_setup_succeeds(
 def test_tui_maps_independent_backend_and_skill_selections_to_setup():
     choices = {
         value: selected for _label, value, selected
-        in tui.optional_skill_selections()
+        in tui.optional_skill_selections({"clarp-whatsapp"})
     }
-    assert choices == {
-        "clarp-code-changes": False,
-        "clarp-releases": False,
-        "clarp-calendar": True,
-        "clarp-location": True,
-        "clarp-message-watch": False,
-        "clarp-whatsapp": False,
-        "clarp-email": False,
-    }
+    assert choices["clarp-releases"] is True
+    assert choices["clarp-calendar"] is True
+    assert choices["clarp-whatsapp"] is False
+    assert "clarp-sessions" not in choices
 
     async def inspect() -> None:
         submitted = []
@@ -156,15 +145,18 @@ def test_tui_maps_independent_backend_and_skill_selections_to_setup():
             backends = app.query_one("#backends", SelectionList)
             backends.deselect("codex")
             skills = app.query_one("#optional-skills", SelectionList)
-            skills.select("clarp-whatsapp")
+            skills.deselect("clarp-whatsapp")
             app.on_button_pressed(SimpleNamespace(
                 button=app.query_one("#apply-setup", Button)))
             await pilot.pause()
 
         assert len(submitted) == 1
         assert submitted[0]["backend"] == "claude"
-        assert set(submitted[0]["optional-skills"]) == {
-            "clarp-calendar", "clarp-location", "clarp-whatsapp"}
+        assert "clarp-calendar" in submitted[0]["optional-skills"]
+        assert "clarp-whatsapp" not in submitted[0]["optional-skills"]
+        assert submitted[0]["skipped-skills"] == ["clarp-whatsapp"]
+        assert tui.setup_admin_command(submitted[0])[-2:] == [
+            "--skip-skill", "clarp-whatsapp"]
 
     asyncio.run(inspect())
 
@@ -195,6 +187,7 @@ def test_installed_tui_preserves_saved_setup_choices(tmp_path, monkeypatch):
         "toolchain": "existing",
         "transcription": "faster-whisper:medium",
         "skills": ["clarp-email", "clarp-releases"],
+        "skills_off": ["clarp-email", "clarp-releases"],
     }))
     (config / "config.toml").write_text(
         '[server]\npublic_base_url = "https://clarp.example.test"\n'
@@ -223,9 +216,10 @@ def test_installed_tui_preserves_saved_setup_choices(tmp_path, monkeypatch):
             assert app.query_one("#network", Select).value == "manual"
             assert app.query_one("#public-url", Input).value == (
                 "https://clarp.example.test")
-            assert set(app.query_one(
-                "#optional-skills", SelectionList).selected) == {
-                    "clarp-email", "clarp-releases"}
+            selected = set(app.query_one(
+                "#optional-skills", SelectionList).selected)
+            assert "clarp-calendar" in selected
+            assert not selected & {"clarp-email", "clarp-releases"}
 
     asyncio.run(inspect())
 

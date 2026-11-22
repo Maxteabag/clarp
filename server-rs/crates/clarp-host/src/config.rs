@@ -51,7 +51,7 @@ pub struct Config {
     /// The folder of the releases of the Host that kept this machine's tools before
     /// (`--skills-other-releases`): a link it left into one of them is Clarp's own, outdated.
     pub skills_other_releases: Option<PathBuf>,
-    /// That Host's record of the skills it kept chosen (`--skills-chosen-before`, its
+    /// That Host's record of explicit skill opt-outs (`--skills-chosen-before`, its
     /// `install.json`): read once, at the first start that keeps the tools, and never written.
     pub skills_chosen_before: Option<PathBuf>,
     pub ask_usage: bool,

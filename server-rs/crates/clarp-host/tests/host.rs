@@ -603,7 +603,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 129);
+    assert_eq!(info["contract"]["host"], 130);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
@@ -9223,7 +9223,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 129);
+    assert_eq!(info["contract"]["host"], 130);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -9761,6 +9761,16 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     assert_eq!(code, 1, "{out}");
     let printed: Value = serde_json::from_str(err.trim()).unwrap();
     assert_eq!(printed, refusal("not_open", "/session"));
+    // A metadata refusal is a JSON error string, rather than a render-spec triple.
+    std::fs::write(
+        work.join("metadata.json"),
+        json!({"type": "data", "session": "nobody"}).to_string(),
+    )
+    .unwrap();
+    let (code, out, err) = artifacts(&["publish-render-spec", "metadata.json"]);
+    assert_eq!(code, 1, "{out}");
+    let printed: Value = serde_json::from_str(err.trim()).unwrap();
+    assert_eq!(printed, json!({"error": "unknown agent session"}));
     let payload = form.to_string();
     let (code, out, err) = artifacts(&[
         "create",

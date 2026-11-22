@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 129;
+pub const HOST_CONTRACT: u64 = 130;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -572,14 +572,6 @@ impl ApiError {
         Self {
             body: ErrorBody::Plain,
             ..Self::new(status, text)
-        }
-    }
-
-    /// What is answered under `error`, where it is more than words.
-    pub(crate) fn detail(&self) -> Option<&Value> {
-        match &self.body {
-            ErrorBody::Detail(detail) => Some(detail.as_ref()),
-            _ => None,
         }
     }
 }

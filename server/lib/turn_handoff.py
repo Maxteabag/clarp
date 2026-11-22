@@ -174,7 +174,7 @@ class HandoffMixin:
             state = turn_queue.state(agent_id)
             events.broadcast(self.ctx.stream, events.queue_updated(
                 session=spec.session, agent_id=agent_id, client_msg_id=spec.client_msg_id,
-                queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                queue_depth=state["listed"], queue_paused=state["paused"], queue_started=False,
                 queue_revision=state["revision"]))
         self._retry_handoff(agent_id, due=True)
 
@@ -458,7 +458,7 @@ class HandoffMixin:
             session=spec.session,
             agent_id=spec.agent_id,
             client_msg_id=spec.client_msg_id,
-            queue_depth=queue_state["count"],
+            queue_depth=queue_state["listed"],
             queue_paused=queue_state["paused"],
             queue_started=started,
             queue_revision=queue_state["revision"],
