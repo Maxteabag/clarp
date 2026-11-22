@@ -30,6 +30,8 @@
 //! Everything else `clarp-admin` does belongs to the Python installation: asked for here, it
 //! says that it is not on this Host, and does nothing.
 
+use std::{ffi::OsString, path::Path, time::Duration};
+
 use clarp_backend::SESSION_ENV;
 use clarp_kernel::python;
 use clarp_protocol::requests::SendRequest;
@@ -104,12 +106,48 @@ pub(crate) async fn prompt(
     if from.is_some() && origin.is_some() {
         return ToolAnswer::said(1, "--origin cannot be combined with --from");
     }
-    // A message for later is not built yet. Nothing is sent in its place.
     if parsed
         .option("--delay")
         .is_some_and(|delay| !delay.is_empty())
     {
-        return not_here("prompt --delay");
+        let token = call
+            .env
+            .get(crate::turn_identity::TURN_ENV)
+            .map(String::as_str);
+        if let Some(sender) = from.and_then(|from| app.anyone(from)) {
+            match crate::turn_identity::presented(app, token).await {
+                Ok(Some(own)) if own.record.agent_id != sender.record.agent_id => {
+                    let own = &own.record.session;
+                    return ToolAnswer::said(
+                        4,
+                        format!(
+                            "clarp-admin prompt: this turn belongs to {own}, not the sender {}; use --from {own}; nothing was sent",
+                            sender.record.session
+                        ),
+                    );
+                }
+                Err(why) => {
+                    return ToolAnswer::said(
+                        4,
+                        format!("clarp-admin prompt: {}; nothing was sent", why.message()),
+                    );
+                }
+                _ => {}
+            }
+        }
+        let executable = home().join(".local/share/clarp/bin/clarp-admin");
+        return schedule_prompt(&parsed, &executable, app.clock.now_ms(), async |args| {
+            if !tokio::fs::metadata(&executable)
+                .await
+                .is_ok_and(|file| file.is_file())
+            {
+                return Err(
+                    "could not schedule prompt: the managed clarp-admin wrapper is missing".into(),
+                );
+            }
+            launch_prompt(args).await
+        })
+        .await;
     }
     let request = SendRequest {
         session: parsed.option("--to").unwrap_or_default().to_string(),
@@ -185,6 +223,99 @@ pub(crate) async fn prompt(
             ),
         ),
     }
+}
+
+fn parse_delay(value: &str) -> Result<i64, String> {
+    let (count, scale) = value
+        .strip_suffix('s')
+        .map(|count| (count, 1))
+        .or_else(|| value.strip_suffix('m').map(|count| (count, 60)))
+        .or_else(|| value.strip_suffix('h').map(|count| (count, 3_600)))
+        .filter(|(count, _)| !count.is_empty())
+        .ok_or("delay must look like 30s, 5m, or 2h")?;
+    let seconds = python::int(count)
+        .ok_or_else(|| {
+            format!(
+                "invalid literal for int() with base 10: {}",
+                python::text(count)
+            )
+        })?
+        .checked_mul(scale)
+        .and_then(|seconds| i64::try_from(seconds).ok())
+        .ok_or("delay is out of range")?;
+    Ok(seconds)
+}
+
+async fn schedule_prompt(
+    parsed: &crate::artifact_tool::Parsed,
+    executable: &Path,
+    now_ms: i64,
+    launch: impl AsyncFnOnce(Vec<OsString>) -> Result<(), String>,
+) -> ToolAnswer {
+    let delay = parsed.option("--delay").unwrap_or_default();
+    let to = parsed.option("--to").unwrap_or_default();
+    let text = parsed.option("--text").unwrap_or_default();
+    let args = (|| {
+        let seconds = parse_delay(delay)?;
+        let mut args = vec![
+            OsString::from("--user"),
+            OsString::from("--collect"),
+            OsString::from("--expand-environment=no"),
+            OsString::from(format!("--unit=clarp-prompt-{}", ids::hex(6))),
+        ];
+        if seconds == 0 {
+            args.push("--property=Type=exec".into());
+        } else {
+            let due = seconds
+                .checked_mul(1_000)
+                .and_then(|ms| now_ms.checked_add(ms))
+                .and_then(|at| at.checked_add(999))
+                .ok_or("delay is out of range")?;
+            jiff::Timestamp::from_millisecond(due).map_err(|e| e.to_string())?;
+            args.push(format!("--on-calendar={}", utc(due)).into());
+            args.push("--timer-property=AccuracySec=1s".into());
+        }
+        args.push("--".into());
+        args.push(executable.into());
+        args.extend(["prompt", "--to", to, "--text", text].map(OsString::from));
+        for name in ["--from", "--origin", "--server"] {
+            if let Some(value) = parsed.option(name).filter(|value| !value.is_empty()) {
+                args.extend([name, value].map(OsString::from));
+            }
+        }
+        Ok::<_, String>(args)
+    })();
+    let result = match args {
+        Ok(args) => launch(args).await,
+        Err(why) => Err(why),
+    };
+    match result {
+        Ok(()) => ToolAnswer::printed(0, format!("scheduled prompt to {to} after {delay}")),
+        Err(why) => ToolAnswer::said(1, why),
+    }
+}
+
+async fn launch_prompt(args: Vec<OsString>) -> Result<(), String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new("systemd-run")
+            .args(args)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| "could not confirm the scheduled prompt".to_string())?
+    .map_err(|error| format!("could not schedule prompt: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let error = String::from_utf8_lossy(&output.stderr);
+    let error = error.trim();
+    Err(if error.is_empty() {
+        "could not schedule prompt".into()
+    } else {
+        error.into()
+    })
 }
 
 /// `clarp-admin tell-user --from SESSION --text TEXT`: a note for the user in the agent's own
@@ -2065,6 +2196,76 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn admin_gap_prompt_delay_schedules_the_managed_wrapper() {
+        let argv = [
+            "--to",
+            "oak",
+            "--text",
+            "words with $HOME and %n",
+            "--delay",
+            "2m",
+            "--from",
+            "sender",
+            "--server",
+            "other",
+        ]
+        .map(str::to_string);
+        let parsed = parse(
+            &argv,
+            &["--to", "--text", "--delay", "--from", "--server"],
+            &[],
+            &[],
+        )
+        .unwrap();
+        let path = Path::new("/owner/.local/share/clarp/bin/clarp-admin");
+        let answer = schedule_prompt(&parsed, path, 123, async |args| {
+            assert_eq!(args[0], "--user");
+            assert!(args.iter().any(|arg| arg == "--expand-environment=no"));
+            let unit = args[3]
+                .to_str()
+                .unwrap()
+                .strip_prefix("--unit=clarp-prompt-")
+                .unwrap();
+            assert_eq!(unit.len(), 12);
+            assert!(unit.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            assert_eq!(args[4], "--on-calendar=1970-01-01 00:02:01 UTC");
+            assert_eq!(
+                args[6..],
+                [
+                    "--",
+                    path.to_str().unwrap(),
+                    "prompt",
+                    "--to",
+                    "oak",
+                    "--text",
+                    "words with $HOME and %n",
+                    "--from",
+                    "sender",
+                    "--server",
+                    "other"
+                ]
+            );
+            Ok(())
+        })
+        .await;
+        assert_eq!(answer.exit, 0);
+        assert_eq!(answer.stdout, "scheduled prompt to oak after 2m\n");
+        assert_eq!(parse_delay("30s"), Ok(30));
+        assert_eq!(parse_delay("2h"), Ok(7_200));
+        assert_eq!(parse_delay("1_000s"), Ok(1_000));
+        assert!(parse_delay("5d").is_err());
+        let failed = schedule_prompt(
+            &parsed,
+            path,
+            123,
+            async |_| Err("scheduler refused".into()),
+        )
+        .await;
+        assert_eq!(failed.exit, 1);
+        assert_eq!(failed.stderr, "scheduler refused\n");
+    }
 
     #[test]
     fn what_this_host_does_not_have_of_clarp_admin_says_so() {
