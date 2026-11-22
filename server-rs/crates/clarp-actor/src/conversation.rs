@@ -380,6 +380,21 @@ impl<'a> Reader<'a> {
         if matches!(entry, Entry::Note(_)) {
             return Ok(None);
         }
+        // An imported row carries its audience from its source Host, outside this
+        // agent's turn journal.
+        if let Entry::Imported(imported) = entry {
+            if imported.row["kind"] == clarp_kernel::coordination::NOTE_KIND {
+                return Ok(None);
+            }
+            if imported.row["audience"] == clarp_kernel::coordination::AGENTS {
+                let sender = ["sender_agent_id", "reply_to_agent_id"]
+                    .iter()
+                    .filter_map(|field| imported.row[*field].as_str())
+                    .find(|id| !id.is_empty())
+                    .unwrap_or_default();
+                return Ok(Some(sender.to_owned()));
+            }
+        }
         match item.turn.or(entry.turn()) {
             Some(turn) => self.mark(turn).map(|(sender, _)| sender),
             None => Ok(None),
@@ -657,6 +672,7 @@ struct Counting {
     run: HiddenRun,
     rows: usize,
     turns: BTreeSet<u64>,
+    imported_traces: BTreeSet<String>,
 }
 
 impl Counting {
@@ -681,6 +697,9 @@ impl Counting {
         self.run.messages += usize::from(counted);
         if let Some(turn) = turn {
             self.turns.insert(turn);
+        } else if let Entry::Imported(imported) = entry {
+            let trace = imported.row["trace_id"].as_str().unwrap_or_default();
+            self.imported_traces.insert(trace.to_owned());
         }
         if !sender.is_empty() {
             self.run.senders.insert(sender);
@@ -688,7 +707,7 @@ impl Counting {
     }
 
     fn finish(mut self) -> Option<HiddenRun> {
-        self.run.exchanges = self.turns.len();
+        self.run.exchanges = self.turns.len() + self.imported_traces.len();
         (self.rows > 0).then_some(self.run)
     }
 }
@@ -1113,6 +1132,73 @@ pub(crate) fn delegation_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn imported_coordination_is_hidden_and_counted_by_its_source_trace() {
+        use clarp_kernel::conversation::Imported;
+        use clarp_ports::log::LogEngine;
+        use serde_json::json;
+        use std::path::Path;
+
+        let mut log = clarp_store_mem::MemEngine::new()
+            .open(
+                Path::new("/agents/imported"),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
+            .unwrap();
+        let rows = [
+            (
+                "note",
+                json!({"kind": "note", "audience": "user", "role": "assistant",
+                "text": "For the user", "trace_id": "source-trace"}),
+            ),
+            (
+                "prompt",
+                json!({"audience": "agents", "role": "user", "text": "Question",
+                "trace_id": "source-trace", "sender_agent_id": "ivy"}),
+            ),
+            (
+                "tool",
+                json!({"audience": "agents", "role": "assistant", "tool_name": "Read",
+                "text": "Tool detail", "trace_id": "source-trace"}),
+            ),
+            (
+                "reply",
+                json!({"audience": "agents", "role": "assistant", "text": "Answer",
+                "trace_id": "source-trace", "reply_to_agent_id": "ivy"}),
+            ),
+        ];
+        let items: Vec<_> = rows
+            .into_iter()
+            .map(|(id, row)| {
+                Entry::Imported(Imported {
+                    id: id.to_owned(),
+                    row,
+                })
+                .to_item(0)
+                .unwrap()
+            })
+            .collect();
+        let head = log.append(&items).unwrap() * REVISION_STEP;
+        let span = Span {
+            floor: 0,
+            head_revision: head,
+        };
+        let show = tail(log.as_ref(), &[], span, 4, Which::chat(true)).unwrap();
+        assert_eq!(show.entries.len(), 4);
+        assert_eq!(show.entries[1].entry.id(), "prompt");
+        assert!(show.hidden_after.is_none());
+
+        let hide = Which::chat(true).hide_coordination();
+        let hidden = tail(log.as_ref(), &[], span, 1, hide).unwrap();
+        assert_eq!(hidden.entries.len(), 1);
+        assert_eq!(hidden.entries[0].entry.id(), "note");
+        assert!(!hidden.has_more);
+        let gap = hidden.hidden_after.unwrap();
+        assert_eq!((gap.messages, gap.exchanges, gap.capped), (2, 1, false));
+        assert_eq!(gap.senders, BTreeSet::from(["ivy".to_owned()]));
+    }
 
     #[test]
     #[allow(clippy::unwrap_used)]
