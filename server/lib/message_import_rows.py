@@ -201,6 +201,7 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
     reply_at = ((lambda stamp: turn_index.trace_at(stamp, reply=True))
                 if hasattr(turn_index, "trace_at") else (lambda _: ""))
     running_at = getattr(turn_index, "running_at", lambda _: ("", None))
+    prompt_turns = getattr(turn_index, "prompt_turns", lambda _: None)
     ended_before = getattr(turn_index, "ended_before", None)
     outcomes = getattr(turn_index, "outcomes", {})
     result = {}
@@ -231,7 +232,7 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
                             None, rows, running, began, trace_ids=client_traces, written_at=stamp,
                             ended_before=None if ended_before is None else (
                                 lambda sent, at=stamp: ended_before(sent, at)),
-                            steered_sent=steered_sent)
+                            steered_sent=steered_sent, prompt_traces=prompt_turns(stamp))
                     if rows and own is not None:
                         chosen = copied.take(key, rows, own)
                         current_trace = client_traces.get(chosen[0]) or ""
@@ -608,7 +609,7 @@ class _ClientProvenance:
 
 def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *,
                    trace_ids=None, written_at: Any = None, ended_before=None,
-                   steered_sent=None) -> int | None:
+                   steered_sent=None, prompt_traces=None) -> int | None:
     """Which of several client rows with the same words a transcript turn
     belongs to. ``trace`` and ``began`` are the turn that was running when
     the provider wrote its copy (from the turn index).
@@ -638,6 +639,10 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
     no "sent since its turn began", and of the rows left the oldest is taken.
     None: no row is this copy's, and it is stored as itself.
 
+    ``prompt_traces``: every turn that may be running at the copy's time, earliest
+    start first (TurnIndex.prompt_turns); the row sent for the earliest of them that
+    has one is the copy's. Without it, ``trace`` alone, as before.
+
     A follow-up steered into a running turn (``steered_sent``: its row's send
     time) is judged by when it was sent: its row is written at the CLI's echo,
     after the CLI wrote its copy, and judged by that it was never the copy's own
@@ -654,9 +659,10 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
 
     sent = [sent_trace(row) for row in rows]
     if trace:
-        for index, sent_for in enumerate(sent):
-            if sent_for == trace:
-                return index
+        for running in (prompt_traces or (trace,)):
+            for index, sent_for in enumerate(sent):
+                if sent_for == running:
+                    return index
     copy_at = iso_ms(written_at)
     steered_sent = steered_sent or {}
 
