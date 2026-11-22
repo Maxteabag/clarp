@@ -6,25 +6,36 @@ providers the stored map and the persona lists leave without a voice are filled;
 caller gave is kept. Google and Deepgram need nothing: each has one default voice.
 
 A voice is picked by a walk from sha256(name) through the provider's pool to the first voice no
-active agent and no contact speaks with, and that no built-in contact owns (the persona lists and
-the roster keep their voices for their own names); when every voice is taken, the least shared one
-(in the walk's order). The walk is stable: the same name on the same pool and the same fleet gets
-the same voice, and two agents do not share a voice while the pool has a free one.
+agent (archived ones included: an archived agent can be restored with its voice) and no contact
+speaks with, and that no built-in contact owns (the persona lists and the roster keep their
+voices for their own names). When every voice is taken, the least recently used one is reused:
+the voice whose holders last spoke (their newest clip, else their creation) longest ago, logged
+as voicePoolExhausted. The walk is stable: the same name on the same pool and the same fleet
+gets the same voice, and two agents do not share a voice while the pool has a free one.
 
-Cartesia's default pool is TODAY's catalogue (the last fetch the voice names file records):
-public voices that are not the account's own, in the agent's speech language, so a new agent
-never gets a built-in contact's voice, a voice Cartesia has deleted, a voice the owner cloned or
-a voice of another language; only when no catalogue has been fetched yet, or it has no such
-voice, is it the built-in list. Every pick and the insert that stores it run under
+Cartesia's English pool is the curated list in cartesia_voice_pool.json (built from Cartesia's
+catalogue by scripts/build_cartesia_voice_pool.py: native English accents, no novelty voices,
+one voice per name, spread by gender, country and description), less the voices today's
+catalogue (the last fetch the voice names file records) no longer offers. Another language's
+pool is today's catalogue in that language: public voices that are not the account's own, so
+a new agent never gets a voice Cartesia has deleted, a voice the owner cloned or a voice of
+another language. Only when neither has a voice is it the built-in list.
+
+A helper (role helper) speaks with its parent's voice: it is heard only when the user opens
+its chat, and helpers come and go by the dozen, so giving each its own voice would empty the
+pool within days (archived holders keep theirs). A Janitor gets none: the apps cannot send it
+a message, so it never speaks. Every pick and the insert that stores it run under
 one lock (``assigning()``), so two agents or contacts created at once never get the same voice.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
+import pathlib
 import threading
 from collections import Counter
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 from .voice import CARTESIA, ELEVENLABS, GEMINI, canonical, voice_map
 from .voice_profile import elevenlabs_id_usable, provider_voice
@@ -78,6 +89,35 @@ def _cartesia_catalogue(language: str = "en") -> list[str]:
     return eligible
 
 
+CURATED_PATH = pathlib.Path(__file__).with_name("cartesia_voice_pool.json")
+
+
+@functools.lru_cache(maxsize=1)
+def _curated_rows() -> tuple[dict, ...]:
+    try:
+        data = json.loads(CURATED_PATH.read_text())
+    except (OSError, ValueError):
+        return ()
+    return tuple(row for row in data.get("voices") or () if isinstance(row, dict) and row.get("id"))
+
+
+def curated_names() -> dict[str, str]:
+    """voice id -> name of every voice in the curated Cartesia pool (for voice_label)."""
+    return {str(row["id"]): str(row.get("name") or "") for row in _curated_rows() if row.get("name")}
+
+
+def _cartesia_curated(language: str = "en") -> list[str]:
+    """The curated English pool, less what today's catalogue no longer offers or Cartesia
+    deleted. Empty for another language (its pool is the catalogue)."""
+    if _language(language) != "en":
+        return []
+    from . import voice_names
+    rows = voice_names.catalogue(CARTESIA)
+    gone = voice_names.gone(CARTESIA)
+    return [str(row["id"]) for row in _curated_rows()
+            if str(row["id"]) not in gone and (rows is None or str(row["id"]) in rows)]
+
+
 def reserved(cfg, provider: str) -> set[str]:
     """Voices the built-in contacts keep for their own names (the persona lists, the roster)."""
     if provider == CARTESIA:
@@ -95,7 +135,8 @@ def pool(cfg, provider: str, language: str = "en") -> list[str]:
     if provider == CARTESIA:
         from .config import DEFAULT_CARTESIA_VOICES
         configured = list(getattr(cfg, "cartesia_pool", ()) or ())
-        source = configured or _cartesia_catalogue(language) or list(DEFAULT_CARTESIA_VOICES.values())
+        source = (configured or _cartesia_curated(language) or _cartesia_catalogue(language)
+                  or list(DEFAULT_CARTESIA_VOICES.values()))
         return list(dict.fromkeys(v for v in source if v))
     if provider == ELEVENLABS:
         from .voices import VOICE_CATALOG
@@ -127,10 +168,10 @@ def _speaks(cfg, raw: str, name: str, provider: str) -> str | None:
 
 
 def users(cfg, provider: str, agents: Iterable[Mapping], contacts: Iterable[Mapping]) -> Counter:
-    """How many active agents and contacts speak with each voice of ``provider``."""
+    """How many agents (archived ones included) and contacts speak with each voice of ``provider``."""
     counts: Counter = Counter()
     for agent in agents:
-        if agent.get("archived_at") or agent.get("is_janitor"):
+        if agent.get("is_janitor"):
             continue
         voice = _speaks(cfg, str(agent.get("voice_id") or ""), str(agent.get("persona") or ""), provider)
         if voice:
@@ -142,10 +183,41 @@ def users(cfg, provider: str, agents: Iterable[Mapping], contacts: Iterable[Mapp
     return counts
 
 
+def last_used(cfg, provider: str, agents: Iterable[Mapping], contacts: Iterable[Mapping],
+              spoke: Mapping[str, int] | None = None) -> dict[str, int]:
+    """voice -> when one of its holders last used it (ms): an agent's newest clip, else its
+    creation; a contact's creation. ``spoke``: agent id -> newest clip (read when None)."""
+    if spoke is None:
+        spoke = _last_clips()
+    out: dict[str, int] = {}
+    for agent in agents:
+        if agent.get("is_janitor"):
+            continue
+        voice = _speaks(cfg, str(agent.get("voice_id") or ""), str(agent.get("persona") or ""), provider)
+        if voice:
+            when = int(spoke.get(str(agent.get("agent_id") or "")) or agent.get("created_at") or 0)
+            out[voice] = max(out.get(voice, 0), when)
+    for contact in contacts:
+        voice = _speaks(cfg, str(contact.get("voice_id") or ""), str(contact.get("name") or ""), provider)
+        if voice:
+            out[voice] = max(out.get(voice, 0), int(contact.get("created_at") or 0))
+    return out
+
+
+def _last_clips() -> dict[str, int]:
+    """agent id -> its newest clip's time (ms); one grouped read of the clips index."""
+    try:
+        from .db import conn
+        rows = conn().execute("SELECT agent_id, MAX(created_at) FROM clips GROUP BY agent_id").fetchall()
+    except Exception:  # noqa: BLE001 - recency only orders a reuse; creation times still do
+        return {}
+    return {str(agent_id): int(when or 0) for agent_id, when in rows}
+
+
 def pick(cfg, provider: str, name: str, taken: Counter, *, keep: set[str] | frozenset = frozenset(),
-         active: Counter | None = None, language: str = "en") -> str | None:
+         language: str = "en", recency: Callable[[], Mapping[str, int]] | None = None) -> str | None:
     """The walk. ``keep``: voices never handed out while another is free (built-in contacts'
-    own); ``active``: users that are active agents and custom contacts, for the log line."""
+    own); ``recency``: voice -> last used (ms), read only when every voice is taken."""
     voices = pool(cfg, provider, language)
     if not voices:
         return None
@@ -154,10 +226,12 @@ def pick(cfg, provider: str, name: str, taken: Counter, *, keep: set[str] | froz
     for voice in order:
         if not taken.get(voice):
             return voice
-    least = min(order, key=lambda voice: taken.get(voice, 0))
-    if active is None or all(active.get(voice) for voice in voices):
-        from .log import log
-        log("voicePoolExhausted", f"provider={provider} pool={len(voices)} shared_by={taken.get(least, 0)}")
+    used = dict(recency() if recency else {})
+    # The least recently used voice; among equals the least shared, then the walk's order.
+    least = min(order, key=lambda voice: (used.get(voice, 0), taken.get(voice, 0)))
+    from .log import log
+    log("voicePoolExhausted", f"provider={provider} pool={len(voices)} reused={least} "
+        f"last_used_ms={used.get(least, 0)} shared_by={taken.get(least, 0)}")
     return least
 
 
@@ -169,14 +243,15 @@ def without_placeholders(raw: str | None) -> str:
 
 def assign(cfg, name: str, stored: str | None, *, agents: Iterable[Mapping] | None = None,
            contacts: Iterable[Mapping] | None = None) -> str:
-    """``stored`` (any shape) with a pool voice added for each needed provider it, and the
-    persona lists, leave without one. Reads the fleet once when it must pick."""
+    """``stored`` (any shape) in the one stored shape, with a pool voice added for each needed
+    provider it, and the persona lists, leave without one. Reads the fleet once when it must
+    pick. Always the one shape: the missing providers are judged on it, and a bare Cartesia
+    uuid kept bare would be read as an ElevenLabs id and leave the agent silent."""
     raw = without_placeholders(stored)
     mapping = voice_map(raw)
     missing = [p for p in needed_providers(cfg, name) if not _speaks(cfg, raw, name, p)]
     if not missing:
-        # Nothing to add: the value is kept as it was given (a placeholder only is dropped).
-        return stored if raw == canonical(stored) or not (stored or "").strip() else raw
+        return raw
     if agents is None or contacts is None:
         from . import agents as agents_db, personas
         agents = agents_db.list_agents() if agents is None else agents
@@ -187,7 +262,26 @@ def assign(cfg, name: str, stored: str | None, *, agents: Iterable[Mapping] | No
     for provider in missing:
         voice = pick(cfg, provider, name, users(cfg, provider, agents, contacts),
                      keep=reserved(cfg, provider) | set(users(cfg, provider, [], contacts) - users(cfg, provider, [], custom)),
-                     active=users(cfg, provider, agents, custom), language=language)
+                     language=language,
+                     recency=functools.partial(last_used, cfg, provider, agents, contacts))
+        if voice:
+            mapping[provider] = voice
+    return json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+
+
+def inherited(cfg, name: str, stored: str | None, parent: Mapping | None) -> str:
+    """A helper's stored voice (any shape) in the one shape, with its parent's voice written
+    in for each needed provider it has none for: the voice the parent is heard with (its
+    stored map or its contact's), so the helper sounds like the agent it works for."""
+    raw = without_placeholders(stored)
+    if not parent:
+        return raw
+    mapping = voice_map(raw)
+    parent_raw, parent_name = str(parent.get("voice_id") or ""), str(parent.get("persona") or "")
+    for provider in needed_providers(cfg, name):
+        if _speaks(cfg, raw, name, provider):
+            continue
+        voice = _speaks(cfg, parent_raw, parent_name, provider)
         if voice:
             mapping[provider] = voice
     return json.dumps(mapping, sort_keys=True, separators=(",", ":"))
