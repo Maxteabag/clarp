@@ -576,9 +576,31 @@ struct Goal {
 }
 
 /// A change failed, and nothing changed: the row every app shows, and the event.
-async fn fail(app: &App, member: &crate::fleet::Member, goal: &Goal, why: String) {
+/// What the row every app shows says of why a change failed: a person's words, not the
+/// tool's. What the tool said stays in the event's `error` and the Host's log.
+fn plain_reason(stage: &str, backend: &str, shown: &str) -> String {
+    match stage {
+        "translating" | "translate" | "registering" | "register" if backend == "opencode" => {
+            "the conversation couldn't be imported into OpenCode".to_string()
+        }
+        "translating" | "translate" | "registering" | "register" => {
+            format!("the conversation couldn't be written for {shown}")
+        }
+        "turn_running" => "a turn started".to_string(),
+        "messages_waiting" => "messages are waiting".to_string(),
+        "switching" => "the agent couldn't be switched".to_string(),
+        _ => "something went wrong".to_string(),
+    }
+}
+
+async fn fail(app: &App, member: &crate::fleet::Member, goal: &Goal, stage: &str, why: String) {
+    eprintln!(
+        "clarp-host: moving agent {} to {} failed at {stage}: {why}",
+        member.record.session, goal.backend
+    );
+    let reason = plain_reason(stage, &goal.backend, &goal.shown.backend);
     let row = format!(
-        "Couldn't move to {}: {why}. Still on {} · {}.",
+        "Couldn't move to {}: {reason}. Still on {} · {}.",
         goal.shown.backend, goal.shown.old_backend, goal.shown.old_model
     );
     let at = app.clock.now_ms();
@@ -607,7 +629,7 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
                 let _ = member.agent.note(format!("{TRANSIT_ROW}{at}"), row).await;
                 reach(&app.hub, app.clock.now_ms(), &goal.id, "done", &[]);
             }
-            Err(refusal) => fail(app, member, &goal, refusal.answered().1).await,
+            Err(refusal) => fail(app, member, &goal, "switching", refusal.answered().1).await,
         }
         return;
     }
@@ -633,10 +655,17 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
             } else {
                 "messages are waiting"
             };
-            return fail(app, member, &goal, why.to_string()).await;
+            let stage = if live {
+                "turn_running"
+            } else {
+                "messages_waiting"
+            };
+            return fail(app, member, &goal, stage, why.to_string()).await;
         }
-        Ok(Err(Refused::Failed { why, .. })) => return fail(app, member, &goal, why).await,
-        Err(unavailable) => return fail(app, member, &goal, unavailable.0).await,
+        Ok(Err(Refused::Failed { stage, why })) => {
+            return fail(app, member, &goal, stage, why).await;
+        }
+        Err(unavailable) => return fail(app, member, &goal, "reading", unavailable.0).await,
     };
     // The log has the change: the fleet's record follows it. Should that fail, the agent runs
     // on the new tool all the same, and its record is put right when the Host next opens it.
@@ -725,6 +754,22 @@ mod tests {
         );
         assert_eq!(version_in("codex-cli 0.167.1").as_deref(), Some("0.167.1"));
         assert_eq!(version_in("unknown"), None);
+    }
+
+    #[test]
+    fn a_failure_is_told_in_a_persons_words() {
+        assert_eq!(
+            plain_reason("register", "opencode", "OpenCode"),
+            "the conversation couldn't be imported into OpenCode"
+        );
+        assert_eq!(
+            plain_reason("register", "codex", "Codex"),
+            "the conversation couldn't be written for Codex"
+        );
+        assert_eq!(
+            plain_reason("turn_running", "codex", "Codex"),
+            "a turn started"
+        );
     }
 
     #[test]

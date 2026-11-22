@@ -1,0 +1,206 @@
+{
+ "info": {
+  "id": "ses_2062de200000oN0KuLqkuj1SjL",
+  "slug": "clarp-uj1sjl",
+  "projectID": "global",
+  "directory": "/home/someone/work/repo.x",
+  "path": "home/someone/work/repo.x",
+  "title": "Fix the parser, please.",
+  "version": "clarp",
+  "summary": {
+   "additions": 0,
+   "deletions": 0,
+   "files": 0
+  },
+  "cost": 0,
+  "tokens": {
+   "input": 0,
+   "output": 0,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  },
+  "time": {
+   "created": 1795399996000,
+   "updated": 1795400000000
+  }
+ },
+ "messages": [
+  {
+   "info": {
+    "role": "user",
+    "time": {
+     "created": 1795399996000
+    },
+    "summary": {
+     "diffs": []
+    },
+    "agent": "build",
+    "model": {
+     "providerID": "clarp",
+     "modelID": "imported"
+    },
+    "id": "msg_2062dd260002Gqvq3l5brOhMfk",
+    "sessionID": "ses_2062de200000oN0KuLqkuj1SjL"
+   },
+   "parts": [
+    {
+     "type": "text",
+     "text": "Fix the parser, please.",
+     "id": "prt_2062dd26000391txEMr8XgIGBg",
+     "sessionID": "ses_2062de200000oN0KuLqkuj1SjL",
+     "messageID": "msg_2062dd260002Gqvq3l5brOhMfk"
+    }
+   ]
+  },
+  {
+   "info": {
+    "role": "assistant",
+    "time": {
+     "created": 1795399997000,
+     "completed": 1795399997000
+    },
+    "parentID": "msg_2062dd260002Gqvq3l5brOhMfk",
+    "modelID": "imported",
+    "providerID": "clarp",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/someone/work/repo.x",
+     "root": "/home/someone/work/repo.x"
+    },
+    "cost": 0,
+    "tokens": {
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    },
+    "finish": "stop",
+    "id": "msg_2062dd648004YQErgFnSTpEYiq",
+    "sessionID": "ses_2062de200000oN0KuLqkuj1SjL"
+   },
+   "parts": [
+    {
+     "type": "text",
+     "text": "Done: the parser reads both shapes now.",
+     "id": "prt_2062dd648005VyIkWMApR49fLW",
+     "sessionID": "ses_2062de200000oN0KuLqkuj1SjL",
+     "messageID": "msg_2062dd648004YQErgFnSTpEYiq"
+    }
+   ]
+  },
+  {
+   "info": {
+    "role": "user",
+    "time": {
+     "created": 1795399998000
+    },
+    "summary": {
+     "diffs": []
+    },
+    "agent": "build",
+    "model": {
+     "providerID": "clarp",
+     "modelID": "imported"
+    },
+    "id": "msg_2062dda30006cgwqzVDz8DjldE",
+    "sessionID": "ses_2062de200000oN0KuLqkuj1SjL"
+   },
+   "parts": [
+    {
+     "type": "text",
+     "text": "And the tests?",
+     "id": "prt_2062dda30007e6TbIUxKavFqhS",
+     "sessionID": "ses_2062de200000oN0KuLqkuj1SjL",
+     "messageID": "msg_2062dda30006cgwqzVDz8DjldE"
+    }
+   ]
+  },
+  {
+   "info": {
+    "role": "assistant",
+    "time": {
+     "created": 1795399999000,
+     "completed": 1795399999000
+    },
+    "parentID": "msg_2062dda30006cgwqzVDz8DjldE",
+    "modelID": "imported",
+    "providerID": "clarp",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/someone/work/repo.x",
+     "root": "/home/someone/work/repo.x"
+    },
+    "cost": 0,
+    "tokens": {
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    },
+    "finish": "stop",
+    "id": "msg_2062dde18008lsxjx7yQFdyNej",
+    "sessionID": "ses_2062de200000oN0KuLqkuj1SjL"
+   },
+   "parts": [
+    {
+     "type": "text",
+     "text": "Green.",
+     "id": "prt_2062dde18009Exl6JJo6yTtP7p",
+     "sessionID": "ses_2062de200000oN0KuLqkuj1SjL",
+     "messageID": "msg_2062dde18008lsxjx7yQFdyNej"
+    }
+   ]
+  },
+  {
+   "info": {
+    "role": "assistant",
+    "time": {
+     "created": 1795399999100,
+     "completed": 1795399999100
+    },
+    "parentID": "msg_2062dda30006cgwqzVDz8DjldE",
+    "modelID": "imported",
+    "providerID": "clarp",
+    "mode": "build",
+    "agent": "build",
+    "path": {
+     "cwd": "/home/someone/work/repo.x",
+     "root": "/home/someone/work/repo.x"
+    },
+    "cost": 0,
+    "tokens": {
+     "input": 0,
+     "output": 0,
+     "reasoning": 0,
+     "cache": {
+      "read": 0,
+      "write": 0
+     }
+    },
+    "finish": "stop",
+    "id": "msg_2062dde7c00axoA82hAlzY0M0D",
+    "sessionID": "ses_2062de200000oN0KuLqkuj1SjL"
+   },
+   "parts": [
+    {
+     "type": "text",
+     "text": "Also the docs.",
+     "id": "prt_2062dde7c00blUhu497CkUn7au",
+     "sessionID": "ses_2062de200000oN0KuLqkuj1SjL",
+     "messageID": "msg_2062dde7c00axoA82hAlzY0M0D"
+    }
+   ]
+  }
+ ]
+}

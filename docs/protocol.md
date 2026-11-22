@@ -743,7 +743,9 @@ Persona, voice, goals, jobs and history stay. The Host writes one row into the c
 `role` `system`, `origin` `system`, `kind` `agent-transit`, in the conversation view:
 "Now on <Backend> · <Model>. The conversation came along." (with ", except its oldest N
 turns." when some were left out, "its oldest turn" for one), "Now on <Model>." for a model change, or on failure
-"Couldn't move to <Backend>: <reason>. Still on <Old backend> · <Old model>." On failure
+"Couldn't move to <Backend>: <reason>. Still on <Old backend> · <Old model>." The reason
+is in a person's words ("the conversation couldn't be imported into OpenCode", "a turn
+started"); what the tool itself said is in the event's `error` and the Host's log. On failure
 nothing else changes.
 
 What is carried: the user's words and the agent's answers of each turn of the current

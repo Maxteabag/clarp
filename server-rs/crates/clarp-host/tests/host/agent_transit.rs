@@ -275,8 +275,10 @@ fn nothing_changes_while_a_turn_runs_or_when_the_carry_fails() {
         host.conversation(&session)
             .iter()
             .any(|(role, text)| role == "system"
-                && text.starts_with("Couldn't move to Codex: ")
-                && text.contains(". Still on Claude")),
+                && text.starts_with(
+                    "Couldn't move to Codex: the conversation couldn't be written for Codex. \
+                     Still on Claude"
+                )),
         "{:?}",
         host.conversation(&session)
     );

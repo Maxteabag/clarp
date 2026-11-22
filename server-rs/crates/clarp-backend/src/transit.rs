@@ -757,7 +757,14 @@ impl OpenCodeWriter {
     /// The session `session` as `opencode export` writes one.
     pub fn export(said: &[Said], place: &Place, session: &str) -> Result<Value, Failed> {
         let mut messages = Vec::new();
+        // The user's message an answer answers: OpenCode's import refuses an answer without
+        // one (`parentID`), as every answer of a real export has.
+        let mut asked: Option<String> = None;
         for (index, one) in spoken(said).enumerate() {
+            if one.role == Role::Assistant && asked.is_none() {
+                // An answer before anything was asked has nothing to answer, in OpenCode.
+                continue;
+            }
             let seq = u64::try_from(index).unwrap_or(0) * 2;
             let message = opencode_id("msg", one.at_ms, seq)?;
             let mut info = json!({
@@ -765,17 +772,19 @@ impl OpenCodeWriter {
             });
             match one.role {
                 Role::Assistant => {
+                    info["parentID"] = json!(asked);
                     info["time"] = json!({"created": one.at_ms, "completed": one.at_ms});
                     info["mode"] = json!("build");
                     info["path"] = json!({"cwd": place.cwd, "root": place.cwd});
                     info["cost"] = json!(0);
-                    info["tokens"] = json!({"total": 0, "input": 0, "output": 0, "reasoning": 0,
+                    info["tokens"] = json!({"input": 0, "output": 0, "reasoning": 0,
                                             "cache": {"read": 0, "write": 0}});
                     info["modelID"] = json!("imported");
                     info["providerID"] = json!("clarp");
                     info["finish"] = json!("stop");
                 }
                 Role::User => {
+                    asked = Some(message.clone());
                     info["time"] = json!({"created": one.at_ms});
                     info["summary"] = json!({"diffs": []});
                     info["model"] = json!({"providerID": "clarp", "modelID": "imported"});
@@ -1264,6 +1273,119 @@ mod tests {
         let failed = OpenCodeWriter.write(&said(), &at).unwrap_err();
         assert_eq!(failed.stage(), "register");
         assert!(failed.why().contains("no database"), "{failed}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// What `opencode export` (1.18.33) wrote of a session `opencode import` took: each
+    /// answer names the message it answers (`parentID`), which the import requires.
+    fn genuine_export() -> Value {
+        serde_json::from_str(include_str!(
+            "../tests/fixtures/opencode-1.18.33-export.json"
+        ))
+        .unwrap()
+    }
+
+    fn keys(value: &Value) -> std::collections::BTreeSet<String> {
+        value.as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn an_opencode_export_has_what_a_genuine_one_has_and_each_answer_its_question() {
+        let mut said = said();
+        // An answer before anything was asked, and two answers in a row.
+        said.insert(
+            0,
+            Said {
+                role: Role::Assistant,
+                text: "Before any question.".into(),
+                at_ms: 1_799_999_999_000,
+            },
+        );
+        said.push(Said {
+            role: Role::Assistant,
+            text: "Green.".into(),
+            at_ms: 1_800_000_004_000,
+        });
+        said.push(Said {
+            role: Role::Assistant,
+            text: "Also the docs.".into(),
+            at_ms: 1_800_000_005_000,
+        });
+        let ours = OpenCodeWriter::export(&said, &place(Path::new("/nowhere")), "ses_x").unwrap();
+        let genuine = genuine_export();
+        let ours_messages = ours["messages"].as_array().unwrap();
+        let roles: Vec<&str> = ours_messages
+            .iter()
+            .map(|message| message["info"]["role"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            roles,
+            ["user", "assistant", "user", "assistant", "assistant"]
+        );
+        for role in ["user", "assistant"] {
+            let of = |messages: &Value| {
+                let message = messages
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|message| message["info"]["role"] == role)
+                    .unwrap()
+                    .clone();
+                (keys(&message["info"]), keys(&message["parts"][0]))
+            };
+            let (theirs, their_part) = of(&genuine["messages"]);
+            let (ours, our_part) = of(&ours["messages"]);
+            assert!(
+                theirs.is_subset(&ours),
+                "{role}: {theirs:?} not in {ours:?}"
+            );
+            assert_eq!(their_part, our_part, "{role}");
+        }
+        // Each answer names the user's message before it, there and here.
+        for messages in [&genuine["messages"], &ours["messages"]] {
+            let mut asked = None;
+            for message in messages.as_array().unwrap() {
+                let info = &message["info"];
+                if info["role"] == "user" {
+                    asked = Some(info["id"].clone());
+                } else {
+                    assert_eq!(Some(info["parentID"].clone()), asked, "{info}");
+                }
+            }
+        }
+    }
+
+    /// The real `opencode import` takes what this writer writes, in a home of its own. Run on
+    /// purpose only: `CLARP_TEST_OPENCODE=1`, with `opencode` on the path.
+    #[test]
+    #[ignore = "runs the real opencode"]
+    fn the_real_opencode_imports_what_is_written() {
+        let home = temp("opencode-real");
+        let program = PathBuf::from(
+            std::env::var("CLARP_OPENCODE_PROGRAM").unwrap_or_else(|_| "opencode".into()),
+        );
+        let work = home.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        // Everything OpenCode keeps goes under the test's home, never the machine's.
+        let program_in_home = home.join("opencode-in-home");
+        std::fs::write(
+            &program_in_home,
+            format!(
+                "#!/bin/sh\nexport HOME='{h}' XDG_DATA_HOME='{h}/data' XDG_CONFIG_HOME='{h}/config' \
+                 XDG_CACHE_HOME='{h}/cache' XDG_STATE_HOME='{h}/state'\nexec '{p}' \"$@\"\n",
+                h = home.display(),
+                p = program.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&program_in_home).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        std::fs::set_permissions(&program_in_home, permissions).unwrap();
+        let mut at = place(&home);
+        at.cwd = work.display().to_string();
+        at.program = Some(program_in_home);
+        let written = OpenCodeWriter.write(&said(), &at).unwrap();
+        assert!(written.session.starts_with("ses_"));
         std::fs::remove_dir_all(home).unwrap();
     }
 
