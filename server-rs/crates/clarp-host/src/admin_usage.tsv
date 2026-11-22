@@ -1,0 +1,154 @@
+		usage: clarp-admin [-h] {experience,leader-decision,janitor,trigger,controller-action,setup,skills,transcription,doctor,url,paths,explanations,sessions,oracle,call,onboard,pair,push,network,voice,tts,backup,update,rollback,uninstall,agent,stop,repair,prompt,tell-user,request,reply,bookkeeping,model,client-log,peers,repos,location,calendar,schedule} ...
+janitor		usage: clarp-admin janitor [-h] {list,templates,inspect,runs,configure,attach,enable,pause,remove,release,export,reset-defaults,create,run-context,review,outcome,migrate-pilot} ...
+janitor list		usage: clarp-admin janitor list [-h]
+janitor templates		usage: clarp-admin janitor templates [-h]
+janitor inspect		usage: clarp-admin janitor inspect [-h] session
+janitor runs	--limit	usage: clarp-admin janitor runs [-h] [--limit LIMIT] session
+janitor configure	--expected-revision --config --scope --template --model --effort	usage: clarp-admin janitor configure [-h] [--expected-revision EXPECTED_REVISION] [--dry-run] [--config CONFIG] [--scope SCOPE] [--template TEMPLATE] [--model MODEL] [--effort EFFORT] session
+janitor attach	--expected-revision --config --scope --trigger	usage: clarp-admin janitor attach [-h] [--expected-revision EXPECTED_REVISION] [--dry-run] [--config CONFIG] [--scope SCOPE] --trigger TRIGGER session
+janitor enable	--expected-revision	usage: clarp-admin janitor enable [-h] [--expected-revision EXPECTED_REVISION] [--dry-run] session
+janitor pause	--expected-revision	usage: clarp-admin janitor pause [-h] [--expected-revision EXPECTED_REVISION] [--dry-run] session
+janitor remove	--expected-revision	usage: clarp-admin janitor remove [-h] [--expected-revision EXPECTED_REVISION] [--dry-run] session
+janitor release	--expected-revision --successor --successor-revision	usage: clarp-admin janitor release [-h] [--expected-revision EXPECTED_REVISION] [--dry-run] [--successor SUCCESSOR] [--successor-revision SUCCESSOR_REVISION] session
+janitor export		usage: clarp-admin janitor export [-h] session
+janitor reset-defaults	--expected-revision	usage: clarp-admin janitor reset-defaults [-h] [--expected-revision EXPECTED_REVISION] [--dry-run] session
+janitor create	--agent --name --backend --cwd --template --model --effort --config --scope --request-id	usage: clarp-admin janitor create [-h] [--agent AGENT] [--name NAME] [--backend BACKEND] [--cwd CWD] [--template TEMPLATE] [--model MODEL] [--effort EFFORT] [--config CONFIG] [--scope SCOPE] [--request-id REQUEST_ID] [--paused] [--dry-run]
+janitor run-context		usage: clarp-admin janitor run-context [-h] run_id
+janitor review	--session --state-id --outcome --label --reason	usage: clarp-admin janitor review [-h] --session TARGET_SESSION --state-id OBSERVED_STATE_ID --outcome {changed,same_task,insufficient_context,error} [--label LABEL] --reason REASON [--dry-run] run_id
+janitor outcome	--status --summary	usage: clarp-admin janitor outcome [-h] --status {worked,idle,failed} --summary SUMMARY [--dry-run] run_id
+janitor migrate-pilot	--session --agent-id --pilot-dir --service --cron-id --backup --resume-backup	usage: clarp-admin janitor migrate-pilot [-h] --session SESSION --agent-id AGENT_ID --pilot-dir PILOT_DIR --service SERVICE --cron-id CRON_ID [--backup BACKUP] [--resume-backup RESUME_BACKUP] [--apply | --dry-run]
+trigger		usage: clarp-admin trigger [-h] {list} ...
+trigger list		usage: clarp-admin trigger list [-h]
+controller-action		usage: clarp-admin controller-action [-h] {list,add,update,remove,map,unmap,run,audit} ...
+controller-action list		usage: clarp-admin controller-action list [-h] [--json]
+controller-action add	--title --http-post --body --agent --text	usage: clarp-admin controller-action add [-h] --title TITLE [--http-post URL] [--body BODY] [--agent SESSION] [--text TEXT] [--disabled] action_id
+controller-action update	--title --http-post --body --agent --text	usage: clarp-admin controller-action update [-h] [--title TITLE] [--http-post URL] [--body BODY] [--agent SESSION] [--text TEXT] [--enable] [--disable] action_id
+controller-action remove		usage: clarp-admin controller-action remove [-h] action_id
+controller-action map	--device --button --gesture --action	usage: clarp-admin controller-action map [-h] [--device DEVICE] --button {primary,secondary} --gesture GESTURE --action ACTION
+controller-action unmap	--device --button --gesture	usage: clarp-admin controller-action unmap [-h] [--device DEVICE] --button {primary,secondary} --gesture GESTURE
+controller-action run		usage: clarp-admin controller-action run [-h] action_id
+controller-action audit	--limit	usage: clarp-admin controller-action audit [-h] [--limit LIMIT]
+setup	--backend --transcription --toolchain --tts --tts-fallback --network --public-url --bind --port --optional-skill --skip-skill --channel	usage: clarp-admin setup [-h] [--non-interactive] [--backend {claude,codex,both}] [--transcription TRANSCRIPTION] [--toolchain {managed,existing,none}] [--tts {clarp,cartesia,elevenlabs,deepgram,none}] [--tts-fallback {clarp,cartesia,elevenlabs,deepgram,none}] [--network {tailscale,lan,manual,off}] [--public-url PUBLIC_URL] [--bind BIND] [--port PORT] [--optional-skill SKILL_ID] [--skip-skill SKILL_ID] [--channel {stable,development}]
+skills		usage: clarp-admin skills [-h] {list,repair-links,import,source-add,source-update,install,remove} ...
+skills list		usage: clarp-admin skills list [-h]
+skills repair-links		usage: clarp-admin skills repair-links [-h]
+skills import		usage: clarp-admin skills import [-h] [--replace] path
+skills source-add	--name --ref	usage: clarp-admin skills source-add [-h] [--name NAME] [--ref REF] url
+skills source-update		usage: clarp-admin skills source-update [-h] name
+skills install		usage: clarp-admin skills install [-h] skill_ids [skill_ids ...]
+skills remove		usage: clarp-admin skills remove [-h] skill_ids [skill_ids ...]
+transcription		usage: clarp-admin transcription [-h] {list,test,install,remove,use,import,adapters} ...
+transcription list		usage: clarp-admin transcription list [-h]
+transcription test		usage: clarp-admin transcription test [-h]
+transcription install		usage: clarp-admin transcription install [-h] model_id
+transcription remove		usage: clarp-admin transcription remove [-h] model_id
+transcription use		usage: clarp-admin transcription use [-h] model_id
+transcription import	--provider --model --path --runtime-path	usage: clarp-admin transcription import [-h] --provider {faster-whisper,whisper.cpp} --model MODEL --path PATH [--runtime-path RUNTIME_PATH]
+transcription adapters		usage: clarp-admin transcription adapters [-h] {list,validate,install,test,remove} ...
+transcription adapters list		usage: clarp-admin transcription adapters list [-h]
+transcription adapters validate		usage: clarp-admin transcription adapters validate [-h] path
+transcription adapters install		usage: clarp-admin transcription adapters install [-h] [--replace] path
+transcription adapters test		usage: clarp-admin transcription adapters test [-h] provider
+transcription adapters remove		usage: clarp-admin transcription adapters remove [-h] provider
+doctor		usage: clarp-admin doctor [-h]
+url		usage: clarp-admin url [-h] [--qr] [--json]
+paths		usage: clarp-admin paths [-h]
+explanations		usage: clarp-admin explanations [-h] {stats,learned,revoke} ...
+explanations stats	--window --bucket	usage: clarp-admin explanations stats [-h] [--window {24h,7d,30d}] [--bucket {hour,day}] [--json]
+explanations learned	--limit	usage: clarp-admin explanations learned [-h] [--limit LIMIT]
+explanations revoke		usage: clarp-admin explanations revoke [-h] signature
+sessions		usage: clarp-admin sessions [-h]
+oracle		usage: clarp-admin oracle [-h] {connect} ...
+oracle connect	--principal	usage: clarp-admin oracle connect [-h] [--principal PRINCIPAL] agent
+call		usage: clarp-admin call [-h] {status,start,end,add,remove,hold,resume,switch,transfer,ring,ring-status,ring-cancel,rings} ...
+call status	--call --principal	usage: clarp-admin call status [-h] [--call CALL] [--principal PRINCIPAL]
+call start	--call --principal	usage: clarp-admin call start [-h] [--call CALL] [--principal PRINCIPAL] AGENT [AGENT ...]
+call end	--call --principal	usage: clarp-admin call end [-h] [--call CALL] [--principal PRINCIPAL]
+call add	--call --principal	usage: clarp-admin call add [-h] [--call CALL] [--principal PRINCIPAL] AGENT
+call remove	--call --principal	usage: clarp-admin call remove [-h] [--call CALL] [--principal PRINCIPAL] AGENT
+call hold	--call --principal	usage: clarp-admin call hold [-h] [--call CALL] [--principal PRINCIPAL] AGENT
+call resume	--call --principal	usage: clarp-admin call resume [-h] [--call CALL] [--principal PRINCIPAL] AGENT
+call switch	--call --principal	usage: clarp-admin call switch [-h] [--call CALL] [--principal PRINCIPAL] AGENT
+call transfer	--call --principal	usage: clarp-admin call transfer [-h] [--call CALL] [--principal PRINCIPAL] AGENT
+call ring	--reason --say --agent --context-file	usage: clarp-admin call ring [-h] --reason REASON --say SAY [--agent AGENT] [--wait] [--oracle] [--context-file CONTEXT_FILE] [--listen-first]
+call ring-status		usage: clarp-admin call ring-status [-h] [ring_id]
+call ring-cancel		usage: clarp-admin call ring-cancel [-h] ring_id
+call rings		usage: clarp-admin call rings [-h] {on,off,status}
+onboard	--url --name	usage: clarp-admin onboard [-h] [--url URL] [--name NAME]
+pair		usage: clarp-admin pair [-h] {create,list,revoke} ...
+pair create	--url --name --scope --ttl	usage: clarp-admin pair create [-h] [--url URL] [--relay] [--name NAME] [--scope {full,limited}] [--ttl TTL] [--allow-loopback] [--json]
+pair list		usage: clarp-admin pair list [-h] [--all]
+pair revoke		usage: clarp-admin pair revoke [-h] device_id
+push		usage: clarp-admin push [-h] {list,disable} ...
+push list		usage: clarp-admin push list [-h] [--json]
+push disable	--token-prefix --device	usage: clarp-admin push disable [-h] (--token-prefix TOKEN_PREFIX | --device DEVICE)
+network		usage: clarp-admin network [-h] {status,local,relay,use} ...
+network status		usage: clarp-admin network status [-h]
+network local		usage: clarp-admin network local [-h] {enable,disable,status} ...
+network local enable	--port	usage: clarp-admin network local enable [-h] [--port PORT]
+network local disable		usage: clarp-admin network local disable [-h]
+network local status		usage: clarp-admin network local status [-h]
+network relay		usage: clarp-admin network relay [-h] {configure,status,enable,disable,migrate} ...
+network relay configure	--url --host-id	usage: clarp-admin network relay configure [-h] --url URL --host-id HOST_ID [--key-stdin]
+network relay status		usage: clarp-admin network relay status [-h]
+network relay enable		usage: clarp-admin network relay enable [-h] [--pair]
+network relay disable		usage: clarp-admin network relay disable [-h]
+network relay migrate		usage: clarp-admin network relay migrate [-h] [--pair]
+network use	--url	usage: clarp-admin network use [-h] [--url URL] {tailscale,lan,manual,off}
+voice		usage: clarp-admin voice [-h] {migrate} ...
+voice migrate	--apply	usage: clarp-admin voice migrate [-h] [--apply DIGEST] [--json]
+tts		usage: clarp-admin tts [-h] {status,use,configure,google-collision,adapters} ...
+tts status		usage: clarp-admin tts status [-h]
+tts use	--fallback --voice	usage: clarp-admin tts use [-h] [--fallback FALLBACK] [--voice VOICE] provider
+tts configure		usage: clarp-admin tts configure [-h] [--stdin] {cartesia,elevenlabs,deepgram}
+tts google-collision		usage: clarp-admin tts google-collision [-h] (--report | --resolve-builtin) [--dry-run]
+tts adapters		usage: clarp-admin tts adapters [-h] {list,validate,install,test,remove} ...
+tts adapters list		usage: clarp-admin tts adapters list [-h]
+tts adapters validate		usage: clarp-admin tts adapters validate [-h] path
+tts adapters install		usage: clarp-admin tts adapters install [-h] [--replace] path
+tts adapters test		usage: clarp-admin tts adapters test [-h] provider
+tts adapters remove		usage: clarp-admin tts adapters remove [-h] provider
+backup		usage: clarp-admin backup [-h] {create,verify,restore} ...
+backup create		usage: clarp-admin backup create [-h] [path]
+backup verify		usage: clarp-admin backup verify [-h] path
+backup restore		usage: clarp-admin backup restore [-h] path
+update	--ref	usage: clarp-admin update [-h] [--ref REF] [--allow-older-schema]
+rollback		usage: clarp-admin rollback [-h] [--allow-older-schema] [version]
+uninstall		usage: clarp-admin uninstall [-h] [--purge-data] [--force-network-cleanup]
+agent		usage: clarp-admin agent [-h] {create,fork,helper-state} ...
+agent create	--parent --role --cwd --backend --model --effort --session --voice-id	usage: clarp-admin agent create [-h] [--parent PARENT] [--role {agent,helper}] [--cwd CWD] [--backend BACKEND] [--model MODEL] [--effort EFFORT] [--session SESSION] [--voice-id VOICE_ID] name
+agent fork	--task --task-file --count --spec --worktree --cwd --from --backend --model --effort	usage: clarp-admin agent fork [-h] [--task TASK] [--task-file TASK_FILE] [--count COUNT] [--spec SPEC] [--worktree WORKTREE] [--cwd CWD] [--from FROM_SESSION] [--backend BACKEND] [--model MODEL] [--effort EFFORT] [name]
+agent helper-state	--from	usage: clarp-admin agent helper-state [-h] [--from FROM_SESSION] session [{done,failed,running}]
+stop	--session --reason --from	usage: clarp-admin stop [-h] --session SESSION --reason REASON [--from FROM_SESSION]
+repair	--session --reason --from	usage: clarp-admin repair [-h] --session SESSION --reason REASON [--from FROM_SESSION]
+prompt	--to --from --text --delay --origin --server	usage: clarp-admin prompt [-h] --to TO [--from FROM_SESSION] --text TEXT [--delay DELAY] [--origin {automation,watcher}] [--server SERVER]
+tell-user	--from --text	usage: clarp-admin tell-user [-h] --from FROM_SESSION --text TEXT
+request	--to --from --text --goal --deadline	usage: clarp-admin request [-h] --to TO --from FROM_SESSION --text TEXT [--goal GOAL] [--deadline DEADLINE]
+reply	--request --from --kind --text	usage: clarp-admin reply [-h] --request REQUEST --from FROM_SESSION --kind {result,blocked,progress} --text TEXT
+bookkeeping		usage: clarp-admin bookkeeping [-h] {enable,stop,status} ...
+bookkeeping enable	--principal --delegate --reason	usage: clarp-admin bookkeeping enable [-h] --principal PRINCIPAL --delegate DELEGATE --reason REASON
+bookkeeping stop	--delegation --reason	usage: clarp-admin bookkeeping stop [-h] --delegation DELEGATION --reason REASON
+bookkeeping status	--session	usage: clarp-admin bookkeeping status [-h] --session SESSION
+model	--effort --session	usage: clarp-admin model [-h] [--effort EFFORT] [--session SESSION] [model]
+client-log	--device --since --level --event --limit	usage: clarp-admin client-log [-h] [--device DEVICE] [--since SINCE] [--level LEVEL] [--event EVENT] [--limit LIMIT]
+peers		usage: clarp-admin peers [-h] {list,add,remove} ...
+peers list		usage: clarp-admin peers list [-h]
+peers add	--code --token --device-name	usage: clarp-admin peers add [-h] [--code CODE] [--token-stdin] [--device-name DEVICE_NAME] name [url]
+peers remove		usage: clarp-admin peers remove [-h] name
+repos		usage: clarp-admin repos [-h] {list,clone,health} ...
+repos list		usage: clarp-admin repos list [-h]
+repos clone	--name --ref	usage: clarp-admin repos clone [-h] [--name NAME] [--ref REF] url
+repos health		usage: clarp-admin repos health [-h] name
+location	--session --max-age --timeout	usage: clarp-admin location [-h] --session SESSION [--max-age MAX_AGE] [--timeout TIMEOUT]
+calendar	--session --title --start --end --time-zone --location --notes --url --calendar	usage: clarp-admin calendar [-h] --session SESSION --title TITLE --start START --end END [--time-zone TIME_ZONE] [--location LOCATION] [--notes NOTES] [--url URL] [--calendar CALENDAR] [--all-day]
+schedule		usage: clarp-admin schedule [-h] {list,add,toggle,remove} ...
+schedule list	--session -s	usage: clarp-admin schedule list [-h] [--session SESSION]
+schedule add	--name -n --cron -c --prompt -p	usage: clarp-admin schedule add [-h] --name NAME --cron CRON --prompt PROMPT [--disabled] session
+schedule toggle		usage: clarp-admin schedule toggle [-h] [--enable] [--disable] schedule_id
+schedule remove		usage: clarp-admin schedule remove [-h] schedule_id
+experience	--since	usage: clarp-admin experience [-h] [--since SINCE] [--open] [--json]
+leader-decision		usage: clarp-admin leader-decision [-h] {search,log,apply,user-values} ...
+leader-decision search	--question --tags	usage: clarp-admin leader-decision search [-h] --question QUESTION [--tags TAGS]
+leader-decision log	--question --answer --type --tags --risk --time-horizon --source-trace --source-message-id --source-agent-id	usage: clarp-admin leader-decision log [-h] --question QUESTION --answer ANSWER [--type TYPE] [--tags TAGS] [--risk RISK] [--time-horizon TIME_HORIZON] [--source-trace TRACE] [--source-message-id ID] [--source-agent-id ID]
+leader-decision apply	--decision-id --reason --trace-id	usage: clarp-admin leader-decision apply [-h] --decision-id ID [--reason REASON] [--trace-id TRACE]
+leader-decision user-values	--statement --category --decision-id --tags	usage: clarp-admin leader-decision user-values [-h] [--statement STATEMENT] [--category CATEGORY] [--decision-id ID] [--tags TAGS] [--promote]
