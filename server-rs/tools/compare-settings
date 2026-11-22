@@ -57,6 +57,7 @@ LEGACY = {  # keys left in the Python settings table that the Python Host itself
 CARRIED = (  # keys the import carries into another place on the Rust Host (admin/import_settings.rs)
     "heartbeat.interval_sec", "heartbeat.backoff_strategy", "heartbeat.backoff_cap_sec", "heartbeat.dormant_after_noops",
     "orchestrator.",
+    "controller_actions.registry",  # into the Host's controller-action store; compared by revision in compare()
 )
 SECRET_WORDS = ("key", "token", "secret", "password", "credential", "private", "voip")
 UNREAD_CONFIG = {  # owner config keys the Rust Host does not read (audit 22 Nov 2026), with what that means
@@ -192,7 +193,8 @@ def compare(findings):
         mine = json.loads(options or "{}")
         theirs = by_template.get(template)
         if theirs is None:
-            findings.append(("janitor", template, "enabled" if enabled else "off", "missing"))
+            if enabled:  # an off janitor the Rust Host lacks changes nothing for the owner
+                findings.append(("janitor", template, "enabled", "missing"))
             continue
         if bool(enabled) != bool(theirs.get("enabled")):
             findings.append(("janitor", template, "enabled" if enabled else "off", "enabled" if theirs.get("enabled") else "off"))
@@ -209,6 +211,18 @@ def compare(findings):
         mine = row.get("model") or ""
         if theirs is not None and mine and (theirs.get("model") or "") != mine:
             findings.append(("janitor model", template, mine, theirs.get("model") or "default"))
+    # 2b2. the controller-action registry: the import carries it into the Host's own store (GET /controller-actions)
+    row = py.execute("select value from settings where key='controller_actions.registry'").fetchone()
+    if row and row[0]:
+        try:
+            mine = json.loads(row[0])
+        except ValueError:
+            mine = {}
+        status, theirs = rust("GET", "/controller-actions")
+        theirs = theirs if isinstance(theirs, dict) else {}
+        mine_rev, their_rev = mine.get("revision"), theirs.get("revision")
+        if status != 200 or (mine_rev is not None and their_rev != mine_rev):
+            findings.append(("controller registry", "revision", str(mine_rev), "missing" if status != 200 else str(their_rev)))
     # 2c. peers
     status, listed_peers = rust("GET", "/peers")
     rust_peers = listed_peers.get("peers", listed_peers) if isinstance(listed_peers, dict) else listed_peers
