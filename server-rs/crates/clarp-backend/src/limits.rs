@@ -60,9 +60,7 @@ fn moment(seconds: f64) -> Option<String> {
 
 /// When a window begins anew, as text (`_normalize_time`): a number is seconds since 1970,
 /// and so is a text that is a number; any other text is kept as it is, with `+00:00`
-/// written as `Z`. Nothing where nothing is said. A number no calendar has is no time (the
-/// Python Host's reader breaks on it); a text that is such a number is kept as the text it
-/// is, as there.
+/// written as `Z`. An out-of-range numeric value is no reset time (R49).
 fn time(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
@@ -73,7 +71,7 @@ fn time(value: Option<&Value>) -> String {
             let raw = text.trim();
             match raw.parse::<f64>() {
                 _ if raw.is_empty() => String::new(),
-                Ok(seconds) => moment(seconds).unwrap_or_else(|| raw.replace("+00:00", "Z")),
+                Ok(seconds) => moment(seconds).unwrap_or_default(),
                 Err(_) => raw.replace("+00:00", "Z"),
             }
         }

@@ -118,6 +118,7 @@ impl Desk {
 /// What the heartbeat sees of an agent at a moment.
 struct Seen {
     latest: Latest,
+    interrupted_since_ms: Option<i64>,
     /// A turn of it runs, or one waits.
     busy: bool,
     /// Its queue is held: what the Host sends by itself waits until its user lets it go.
@@ -271,6 +272,7 @@ async fn seen(app: &App, member: &Member) -> Seen {
     }
     Seen {
         latest,
+        interrupted_since_ms: status.interrupted_since_ms,
         busy: status.live.is_some() || !status.waiting.is_empty(),
         held: status.paused,
         last_person_ms: last_person_ms.unwrap_or(0),
@@ -311,6 +313,12 @@ fn caught_up<'a>(book: &'a mut Book, agent_id: &str, seen: &Seen) -> &'a mut rul
         counted.insert(agent_id.to_string(), turn.clone());
     }
     state.woken_by(seen.wake_signal_ms());
+    // The actor folds the whole journal, including failures between heartbeat polls.
+    if seen.latest.interrupted()
+        && let Some(since) = seen.interrupted_since_ms
+    {
+        state.interrupted_since = seconds(since);
+    }
     state
 }
 
@@ -573,6 +581,7 @@ mod due_work_tests {
                 ts_ms: 0.0,
                 detail: Value::Null,
             },
+            interrupted_since_ms: None,
             busy: false,
             held: false,
             last_person_ms: 0,
