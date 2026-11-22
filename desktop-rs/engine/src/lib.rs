@@ -12,8 +12,8 @@
 /// `clarp_core::all_hosts`) is that Host's engine's to answer, under its own
 /// session; one whose Host is not read (any more) gets the default.
 macro_rules! on_peer {
-    ($self:ident . $route:ident ($session:expr), |$engine:ident, $local:ident| $body:expr) => {
-        if let Some(peer) = $self.$route($session) {
+    ($self:ident . $route:ident ($($arg:expr),*), |$engine:ident, $local:ident| $body:expr) => {
+        if let Some(peer) = $self.$route($($arg),*) {
             #[allow(clippy::unit_arg)]
             return peer.map(|($engine, $local)| $body).unwrap_or_default();
         }
