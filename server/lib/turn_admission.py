@@ -316,6 +316,9 @@ class AdmissionMixin:
             database = db.conn()
             database.execute("BEGIN IMMEDIATE")
             try:
+                if turn_queue.client_id_held_elsewhere(database, spec.agent_id, spec.client_msg_id):
+                    # Nothing written; never dropped as another agent's duplicate (R63).
+                    raise DispatchError(409, turn_queue.CLIENT_ID_HELD_ELSEWHERE)
                 request_id = spec.client_msg_id or spec.trace_id
                 if spec.origin == "heartbeat" and request_id.startswith("janitor-demand-"):
                     from .janitor_autonomy import validate_dispatch
