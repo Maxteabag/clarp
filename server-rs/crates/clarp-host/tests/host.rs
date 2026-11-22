@@ -16300,6 +16300,7 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     let script = [
         "#!/bin/sh\nread message\n{\n",
         "echo \"host_token=${CLARP_HOST_TOKEN+given}\"\n",
+        "echo \"host_aliases=${CLARP_HOST_TOKEN_ALIASES+given}\"\n",
         "echo \"push_credential=${CLARP_PUSH_CREDENTIAL+given}\"\n",
         "echo \"tool_token=$CLARP_TOOL_TOKEN\"\n",
         "echo \"script_url=$CLARP_SERVER_URL\"\n",
@@ -16345,8 +16346,47 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
             ("CLARP_QA_PROVIDER_ROOT", "/fixture/provider"),
             ("CLAUDE_PWA_EXTRA", "fixture-setting"),
             ("CLARP_PUSH_CREDENTIAL", "the-relays-credential"),
+            (
+                "CLARP_HOST_TOKEN_ALIASES",
+                " fixture-alias-one, ,fixture-alias-two, ",
+            ),
         ],
     );
+    let owner = host.get("/server-info");
+    let got = [
+        fetch(&host, "fixture-alias-one", "GET", "/server-info", &[], b""),
+        fetch(
+            &host,
+            "",
+            "GET",
+            "/server-info",
+            &[("Cookie", "claude_pwa_token=fixture-alias-two")],
+            b"",
+        ),
+        fetch(
+            &host,
+            "",
+            "GET",
+            "/server-info?token=fixture-alias-one",
+            &[],
+            b"",
+        ),
+    ];
+    for reply in got {
+        assert_eq!(reply.status, 200);
+        let info: Value = serde_json::from_slice(&reply.body).unwrap();
+        assert_eq!(info["default_cwd"], owner["default_cwd"]);
+        assert_eq!(info["contract"], owner["contract"]);
+    }
+    let alias = fetch(&host, "fixture-alias-one", "GET", "/host/start", &[], b"");
+    assert_eq!(alias.status, 200, "administrator-only route");
+    for invalid in ["wrong", ""] {
+        assert_eq!(
+            fetch(&host, invalid, "GET", "/server-info", &[], b"").status,
+            401
+        );
+    }
+
     // An agent that Claude Code runs: its turns are the stand-in above.
     let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
     let agent = made["session"].as_str().unwrap().to_string();
@@ -16377,6 +16417,7 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     );
     assert_eq!(said("turn"), "owned");
     assert_eq!(said("host_token"), "", "{seen}");
+    assert_eq!(said("host_aliases"), "");
     assert_eq!(said("push_credential"), "", "{seen}");
     // What it has instead follows from the administrator's token and is not it, and the
     // agent's tools reach their Host with it.

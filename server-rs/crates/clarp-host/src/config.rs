@@ -4,10 +4,19 @@
 //! stores the logs, the compressor, the store of the files agents publish, the way shims are
 //! started. Changing one is a restart with a different word, not a change of code.
 
-use std::net::SocketAddr;
+use std::{fmt, net::SocketAddr};
 
 use clarp_kernel::address::{Local, on_this_machine};
 use std::path::{Path, PathBuf};
+
+#[derive(Clone, PartialEq, Eq)]
+struct AdministratorAliases(Vec<String>);
+
+impl fmt::Debug for AdministratorAliases {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[redacted]")
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -29,6 +38,7 @@ pub struct Config {
     pub shim: PathBuf,
     /// The administrator's token. Empty: every request is accepted.
     pub auth_token: String,
+    auth_token_aliases: AdministratorAliases,
     /// The web app origins allowed to read the Host identity and roster.
     pub(crate) web_read_origins: std::collections::BTreeSet<String>,
     /// The Host's name, as the apps show it.
@@ -204,8 +214,9 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
 [--push-keys FILE]
 [--static DIR] [--relay-config FILE]
-The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
-the push relay, when it has one, from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
+The administrator's token is read from CLARP_HOST_TOKEN. Additional administrator tokens can
+be listed in CLARP_HOST_TOKEN_ALIASES, separated by commas. The tools use the primary token
+to derive their own credential. This Host's push relay credential is read from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
 over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY. A ring is
 pushed to a phone as an incoming call only where --push-keys names the file that has the owner's
 key at the push service ([apns] key_path, key_id, team_id).
@@ -408,6 +419,10 @@ pub fn stand_in(variable: &str, given: &str, rule: Local) -> Result<String, Stri
 }
 
 impl Config {
+    pub(crate) fn administrator_aliases(&self) -> &[String] {
+        &self.auth_token_aliases.0
+    }
+
     /// Reads the configuration from the command line and the environment.
     pub fn from_args(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
         let data_home = std::env::var_os("XDG_DATA_HOME")
@@ -666,6 +681,15 @@ impl Config {
             launcher,
             shim,
             auth_token: std::env::var("CLARP_HOST_TOKEN").unwrap_or_default(),
+            auth_token_aliases: AdministratorAliases(
+                std::env::var("CLARP_HOST_TOKEN_ALIASES")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| !entry.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ),
             web_read_origins: crate::cross_origin::read_config(
                 &host_config_dir().join("config.toml"),
             ),
