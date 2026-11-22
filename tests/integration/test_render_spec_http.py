@@ -593,3 +593,70 @@ def test_the_route_answers_by_the_configured_per_client_table(host, envelope, mo
     data = {"version": "build-1", "submission_id": "b" * 32, "answers": {"intent": "submit_decision",
                                                                           "state": {"choice": "send"}}}
     assert _request(host, "/artifacts/artifact-spec/submit", data, headers=headers)[0] == (200 if capable else 403)
+
+
+def _v2_envelope():
+    return {"session": "theo", "type": "render_spec", "artifact_id": "artifact-deploy", "title": "Deploy",
+            "payload": json.loads((Path(__file__).parents[1] / "fixtures/render_spec/deploy-v2.json").read_text())}
+
+
+def test_a_v2_button_form_is_published_drawn_and_answered_once(host, monkeypatch):
+    """Issue 673's example over HTTP: the catalog at /2, the form drawn by a client named in the v2
+    table and a plain card for one that is not, a button's answer stored like v1's and the agent's
+    message naming the button before the values."""
+    import dataclasses
+    import urllib.request
+    from lib import config, html_forms
+    from tests.integration.test_attention_questions_http import TOKEN
+    configured = dataclasses.replace(config.load(), render_spec_min_contract={"ios": 74, "android": 30},
+                                     render_spec_v2_min_contract={"ios": 80})
+    monkeypatch.setattr(config, "load", lambda *a, **k: configured)
+    request = urllib.request.Request(host.base + "/artifact-catalogs/clarp.form/2",
+                                     headers={"Authorization": "Bearer " + TOKEN})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        raw = response.read()
+    assert raw == (Path(__file__).parents[2] / "contract/catalogs/clarp.form.v2.json").read_bytes()
+    v2, v1_only, android = ({"X-Clarp-Client": h} for h in
+                            ("ios/1 contract=80", "ios/1 contract=79", "android/1 contract=99"))
+    code, published = _request(host, "/artifacts", _v2_envelope(), headers=v2)
+    assert code == 201 and published["artifact"]["catalog_version"] == 2
+    assert published["artifact"]["catalog_sha256"] == "c1:" + hashlib.sha256(raw).hexdigest()
+    path = "/artifacts/artifact-deploy"
+    assert "spec" in _request(host, path, headers=v2)[1]["artifact"]
+    for plain in (v1_only, android):
+        assert "spec" not in _request(host, path, headers=plain)[1]["artifact"]
+        _, rows = _request(host, "/artifacts?representation=summary-v1", headers=plain)
+        [row] = [x for x in rows["artifacts"] if x["artifact_id"] == "artifact-deploy"]
+        assert "content_omitted" not in row
+    answer = {"submission_id": "deploy-answer-0001", "version": "deploy-7",
+              "answers": {"intent": "button", "state": {"action": "hold", "note": "after lunch"}}}
+    status, refused = _request(host, path + "/submit", answer, headers=v1_only)
+    assert status == 403 and refused["error"] == render_spec.Refusal("client_contract", "").triple()
+    wrong = {**answer, "submission_id": "deploy-answer-0002",
+             "answers": {"intent": "button", "state": {"action": "wait"}}}
+    status, refused = _request(host, path + "/submit", wrong, headers=v2)
+    assert status == 400 and refused["error"] == render_spec.Refusal("state_value", "/answers/state/action").triple()
+    status, receipt = _request(host, path + "/submit", answer, headers=v2)
+    assert status == 200 and receipt["accepted"] is True
+    assert _request(host, path + "/submit", answer, headers=v2) == (200, receipt)   # the retry's receipt
+    again = {**answer, "submission_id": "deploy-answer-0003"}
+    status, refused = _request(host, path + "/submit", again, headers=v2)
+    assert status == 409 and refused["error"]["code"] == "already_answered"
+    opened = _request(host, path, headers=v2)[1]["artifact"]
+    assert opened["status"] == "completed" and opened["submission"]["answers"] == answer["answers"]
+    server_module._deliver_decision_rows(host.ctx)
+    assert html_forms.pending() == []
+    [delivered] = host.deliveries
+    assert 'Action: "Hold" (hold)\nAnswers:\n' + render_spec.canonical(answer["answers"]).decode() in delivered["text"]
+
+
+def test_a_v2_refusal_is_the_same_triple_from_the_route_and_the_pure_validator(host):
+    envelope = _v2_envelope()
+    envelope["payload"]["spec"]["elements"]["lat"]["props"]["series"][1]["points"][0]["x"] = 1
+    try:
+        render_spec.validate(envelope["payload"])
+    except render_spec.Refusal as exc:
+        expected = exc.triple()
+    assert expected["code"] == "chart_x_mixed"
+    assert _request(host, "/artifacts?validate_only=1", envelope) == (400, {"error": expected})
+    assert _request(host, "/artifacts", envelope) == (400, {"error": expected})
