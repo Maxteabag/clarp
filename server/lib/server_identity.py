@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 137  # A compact /log turn keeps its failed tool calls as their own cells and counts only the folded ones (the quiet chat, #653). Every earlier number is a row in docs/compatibility.md.
+HOST_CONTRACT = 138  # An answered render_spec button form's row and summary carry answered_action and answered_label (issue 673). 137: A compact /log turn keeps its failed tool calls as their own cells and counts only the folded ones (the quiet chat, #653). Every earlier number is a row in docs/compatibility.md.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -167,6 +167,7 @@ FEATURES: tuple[str, ...] = (
     "artifact_summary_v1",
     "render_spec",
     "render_spec_v2",
+    "render_spec_answered_button",
     "agent_ring_device_optout",
     "agent_ring_live",
     "tts_google_id_guard",
@@ -319,6 +320,7 @@ FEATURES: tuple[str, ...] = (
 FEATURE_CONTRACTS: dict[str, int] = {feature: 1 for feature in FEATURES}
 FEATURE_CONTRACTS["render_spec"] = 102
 FEATURE_CONTRACTS["render_spec_v2"] = 133  # issue 673
+FEATURE_CONTRACTS["render_spec_answered_button"] = 138  # issue 673
 FEATURE_CONTRACTS["voice_for_helpers"] = 135  # issue 476; next free at merge
 FEATURE_CONTRACTS["agent_goals"] = 5
 FEATURE_CONTRACTS["attention_index"] = 2

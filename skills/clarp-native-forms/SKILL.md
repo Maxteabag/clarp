@@ -90,7 +90,7 @@ so use `"catalog_version": 1` when the user may answer on one of those.
 
 The version 2 components:
 
-- `chart`: `kind` `bar`, `line` or `pie`, up to 6 `series` of `{name, points: [{x, y}]}`;
+- `chart`: `kind` `bar`, `line` or `pie`, up to 6 `series` of `{name, points: [{x, y}]}`, each name its own;
   optional `title`, `x_label`, `y_label`, `unit`. Every x of one chart is a string or every
   x a whole number; within a series no x repeats and numeric x increases. Bar: at most 60
   points per series; pie: one series of up to 12, no y below 0; 600 points in all.

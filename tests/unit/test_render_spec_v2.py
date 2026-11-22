@@ -114,6 +114,11 @@ VECTORS = {
                    ("prop", f"{LAT}/series/0/points/0/y")),
     "a point with another key": (_set(["spec", "elements", "lat", "props", "series", 0, "points", 0, "z"], 1),
                                  ("unknown_key", f"{LAT}/series/0/points/0/z")),
+    "two series of one name": (_set(["spec", "elements", "lat", "props", "series", 1, "name"], "before"),
+                               ("chart_series_duplicate", f"{LAT}/series/1/name")),
+    "a series name before a pie's count": (lambda f: _pie(f, [{"name": "p", "points": _points(1)},
+                                                              {"name": "p", "points": _points(1)}]),
+                                           ("chart_series_duplicate", f"{EL}/share/props/series/1/name")),
     "x mixed in one series": (_set(["spec", "elements", "lat", "props", "series", 0, "points", 1, "x"], 2),
                               ("chart_x_mixed", f"{LAT}/series/0/points/1/x")),
     "x mixed across series": (_set(["spec", "elements", "lat", "props", "series", 1, "points"], _points(2)),
@@ -355,3 +360,22 @@ def test_a_v2_form_follows_the_v2_files_identifier_rule(tmp_path, monkeypatch, f
         assert _verdict(v1) == "ok"
     finally:
         spec._loaded.cache_clear()
+
+
+def test_the_migration_indexes_an_old_databases_submissions_by_artifact(tmp_path):
+    """Schema 138: a database at 137 gains idx_form_submission_artifact, which the answered-button
+    read of every render_spec row uses instead of scanning form_submissions."""
+    import sqlite3
+    from lib import db_migrations, db_schema
+    con = sqlite3.connect(tmp_path / "old.sqlite", isolation_level=None)
+    db_migrations._migrate(con)
+    con.execute("DROP INDEX idx_form_submission_artifact")
+    con.execute("PRAGMA user_version = 137")
+    db_migrations._migrate(con)
+    assert db_schema._SCHEMA_VERSION == 138 and db_migrations._user_version(con) == 138
+    assert [r[2] for r in con.execute("PRAGMA index_info(idx_form_submission_artifact)")] == [
+        "artifact_id", "created_at", "submission_id"]
+    plan = " ".join(r[3] for r in con.execute(
+        "EXPLAIN QUERY PLAN SELECT answers_json FROM form_submissions WHERE artifact_id=? "
+        "ORDER BY created_at, submission_id LIMIT 1", ("a",)))
+    assert "idx_form_submission_artifact" in plan and "TEMP B-TREE" not in plan
