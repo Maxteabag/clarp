@@ -463,16 +463,16 @@
    "debounce_ms": 150,
    "work": "work",
    "model": "gpt-6-sol",
-   "asked": [{"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {"name": "Bash", "command": "make all", "input": {"command": "make all"}}}]}],
-   "learned": [{"signature": "x:make #d5cfedad658f39e039da32e8", "level": 2, "template_text": "Runs make.", "slot_names": [], "program": "make", "action": "execute", "producer": "llm", "parameterised": false, "hits": 0}],
-   "counts": {"template": 2, "learned": 0, "exact_cache": 0, "jev": 0, "llm": 1, "failed": 0, "miss": 0, "disabled": 0},
-   "totals": {"lookups": 3, "hits": 2, "hit_rate": 0.6667, "learned_entries": 1, "learned_parameterised": 0, "learned_exact_only": 1, "learned_by_producer": {"llm": 1}, "learned_hits": 0, "jev_picks": 0, "llm_calls": 1},
+   "asked": [{"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {"name": "Bash", "command": "make all", "input": {"command": "make all"}}}]}, {"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {"name": "Bash", "input": {"cmd": "cd /srv && python3 -c 'print(1)'"}}}]}],
+   "learned": [{"signature": "x:make #d5cfedad658f39e039da32e8", "level": 2, "template_text": "Runs make.", "slot_names": [], "program": "make", "action": "execute", "producer": "llm", "parameterised": false, "hits": 0}, {"signature": "x:python3 #59b92ef86aebed454a45c515", "level": 2, "template_text": "Runs Bash.", "slot_names": [], "program": "python3", "action": "compound", "producer": "llm", "parameterised": false, "hits": 0}],
+   "counts": {"template": 2, "learned": 0, "exact_cache": 0, "jev": 0, "llm": 2, "failed": 0, "miss": 0, "disabled": 0},
+   "totals": {"lookups": 4, "hits": 2, "hit_rate": 0.5, "learned_entries": 2, "learned_parameterised": 0, "learned_exact_only": 2, "learned_by_producer": {"llm": 2}, "learned_hits": 0, "jev_picks": 0, "llm_calls": 2},
    "steps": [
     {"do": "ask", "level": 2, "items": [{"id": "made", "activity": {"name": "Bash", "input": {"command": "cd /srv && make all"}}}, {"id": "listed", "activity": {"name": "Bash", "input": {"cmd": "cd /srv && ls -la"}}}], "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "made", "status": "pending"}, {"id": "listed", "status": "ready", "text": "Looks at the files and folders inside srv.", "source": "scripted", "cached": false}]}, "asked_so_far": 0},
     {"do": "settle", "asked_so_far": 1},
     {"do": "ask", "level": 2, "items": [{"id": "made", "activity": {"name": "Bash", "input": {"command": "cd /srv && make all"}}}, {"id": "listed", "activity": {"name": "Bash", "input": {"cmd": "cd /srv && ls -la"}}}], "provenance": true, "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "made", "status": "ready", "text": "Runs make.", "source": "llm", "cached": true, "provenance": {"template_version": 1, "fallback_reason": "mutating_program"}}, {"id": "listed", "status": "ready", "text": "Looks at the files and folders inside srv.", "source": "scripted", "cached": false, "provenance": {"template_version": 1, "template_id": "list_directory", "parameters": {"directory": "/srv"}, "confidence": 1.0}}]}, "asked_so_far": 1},
-    {"do": "ask", "level": 2, "items": [{"id": "piece", "activity": {"name": "Bash", "input": {"cmd": "cd /srv && python3 -c 'print(1)'"}}}], "fails": "KeyError", "asked_so_far": 1},
-    {"do": "settle", "asked_so_far": 1}
+    {"do": "ask", "level": 2, "items": [{"id": "piece", "activity": {"name": "Bash", "input": {"cmd": "cd /srv && python3 -c 'print(1)'"}}}], "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "piece", "status": "pending"}]}, "asked_so_far": 1},
+    {"do": "settle", "asked_so_far": 2}
    ]
   },
   {
@@ -482,14 +482,14 @@
    "debounce_ms": 150,
    "work": "work",
    "model": "gpt-6-sol",
-   "asked": [],
-   "learned": [],
-   "counts": {"template": 0, "learned": 0, "exact_cache": 0, "jev": 0, "llm": 0, "failed": 0, "miss": 0, "disabled": 0},
-   "totals": {"lookups": 0, "hits": 0, "hit_rate": null, "learned_entries": 0, "learned_parameterised": 0, "learned_exact_only": 0, "learned_by_producer": {}, "learned_hits": 0, "jev_picks": 0, "llm_calls": 0},
+   "asked": [{"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {"name": "Bash", "command": "# only a comment"}}, {"id": "2", "activity": {"name": "Bash", "command": ";"}}, {"id": "3", "activity": {"name": "Bash", "command": "bash -c ''"}}]}],
+   "learned": [{"signature": "x:? #27f4254ccf953a360fcd1a0a", "level": 2, "template_text": "Runs bash.", "slot_names": [], "program": "", "action": "compound", "producer": "llm", "parameterised": false, "hits": 0}, {"signature": "x:? #59f2e22a5c48c664365da84b", "level": 2, "template_text": "Runs ;.", "slot_names": [], "program": "", "action": "compound", "producer": "llm", "parameterised": false, "hits": 0}, {"signature": "x:? #d3b7606bf8ce0598265d0d8d", "level": 2, "template_text": "Runs #.", "slot_names": [], "program": "", "action": "compound", "producer": "llm", "parameterised": false, "hits": 0}],
+   "counts": {"template": 1, "learned": 0, "exact_cache": 0, "jev": 0, "llm": 3, "failed": 0, "miss": 0, "disabled": 0},
+   "totals": {"lookups": 4, "hits": 1, "hit_rate": 0.25, "learned_entries": 3, "learned_parameterised": 0, "learned_exact_only": 3, "learned_by_producer": {"llm": 3}, "learned_hits": 0, "jev_picks": 0, "llm_calls": 3},
    "steps": [
-    {"do": "ask", "level": 2, "items": [{"id": "list", "activity": {"name": "Bash", "command": "ls -la src"}}, {"id": "empty", "activity": {"name": "Bash", "command": "# only a comment"}}], "fails": "IndexError", "asked_so_far": 0},
-    {"do": "ask", "level": 2, "items": [{"id": "empty", "activity": {"name": "Bash", "command": "bash -c ''"}}], "fails": "IndexError", "asked_so_far": 0},
-    {"do": "settle", "asked_so_far": 0}
+    {"do": "ask", "level": 2, "items": [{"id": "list", "activity": {"name": "Bash", "command": "ls -la src"}}, {"id": "comment", "activity": {"name": "Bash", "command": "# only a comment"}}, {"id": "separator", "activity": {"name": "Bash", "command": ";"}}], "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "list", "status": "ready", "text": "Looks at the files and folders inside src.", "source": "scripted", "cached": false}, {"id": "comment", "status": "pending"}, {"id": "separator", "status": "pending"}]}, "asked_so_far": 0},
+    {"do": "ask", "level": 2, "items": [{"id": "empty", "activity": {"name": "Bash", "command": "bash -c ''"}}], "answer": {"model": "gpt-6-sol", "detail_level": 2, "items": [{"id": "empty", "status": "pending"}]}, "asked_so_far": 0},
+    {"do": "settle", "asked_so_far": 1}
    ]
   }
  ]

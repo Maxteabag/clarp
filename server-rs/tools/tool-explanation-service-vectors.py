@@ -167,8 +167,7 @@ SCENES = [
                SETTLE,
                ask(2, [item('search', {'name': 'mcp__files__search', 'input': {'query': 'other notes', 'path': '/var'}}),
                        item('heredoc', bash("python3 - <<'PY'\nprint('another plan')\nPY"))], provenance=True)]},
-    # A shell tool whose command stands only in what it was given. The Python Host's service
-    # fails on one that is a single piece with a `cd` before it (defect R40).
+    # R40: the whole command stays available to the templates even when supplied via input.cmd.
     {'name': 'a shell tool whose command stands only in what it was given',
      'steps': [ask(2, [item('made', {'name': 'Bash', 'input': {'command': 'cd /srv && make all'}}),
                        item('listed', {'name': 'Bash', 'input': {'cmd': 'cd /srv && ls -la'}})]),
@@ -176,10 +175,9 @@ SCENES = [
                ask(2, [item('made', {'name': 'Bash', 'input': {'command': 'cd /srv && make all'}}),
                        item('listed', {'name': 'Bash', 'input': {'cmd': 'cd /srv && ls -la'}})], provenance=True),
                ask(2, [item('piece', {'name': 'Bash', 'input': {'cmd': "cd /srv && python3 -c 'print(1)'"}})]), SETTLE]},
-    # The Python Host's service fails on a request that has a shell command of no word among its
-    # things (defect R39): the whole request, whatever else it asks about.
+    # R39: wordless commands and other rows can be explained in the same request.
     {'name': 'a command of no word among what is asked',
-     'steps': [ask(2, [LIST, item('empty', bash('# only a comment'))]), ask(2, [item('empty', bash("bash -c ''"))]), SETTLE]},
+     'steps': [ask(2, [LIST, item('comment', bash('# only a comment')), item('separator', bash(';'))]), ask(2, [item('empty', bash("bash -c ''"))]), SETTLE]},
 ]
 
 

@@ -860,7 +860,8 @@ class AutonomyJanitors:
             janitors.save_progress(watch.progress_attachment,config['generation'],progress)
             if not ready:continue
             width=max(1,min(int(config['options'].get('max_goals_per_run',5)),6));ready=ready[:width]
-            run=janitor_builtins.begin_run(goal_keeper.ROLE,goal_keeper.request_id(config,ready,now),context={'input_hash':digest(ready),'target_count':len(ready)})
+            # Admitted for this keeper itself: its scope chose the goals (R42).
+            run=janitor_builtins.begin_run(goal_keeper.ROLE,goal_keeper.request_id(config,ready,now),context={'input_hash':digest(ready),'target_count':len(ready)},janitor_agent_id=config['agent_id'])
             if not run or not janitor_builtins.claim_run(run['run_id']):continue
             if self._read_meter is not None: self._read_meter.work()
             full=frozenset(p for p in ready if (progress.get('goals') or {}).get(p,{}).get('catch_up'))
