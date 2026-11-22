@@ -13,7 +13,8 @@ answers with a tap, and the answer arrives as a message you can act on. Not for 
 proposals (use `clarp-html-forms`), not for an approval of a protected action
 (use a decision, `clarp-artifacts`).
 
-The form is written in the catalog `clarp.form`, version 1. Its components:
+The form is written in the catalog `clarp.form`, version 1 (version 2, below,
+adds charts, tables and buttons). Version 1's components:
 `stack`, `card`, `heading`, `text`, `divider`, `text_field`, `toggle`, `choice`.
 The full catalog, with every prop and limit, is at
 `GET /artifact-catalogs/clarp.form/1` on this Host.
@@ -77,10 +78,67 @@ A refusal is printed on standard error as the Host gives it: usually a code and
 the path in your request that caused it, sometimes a sentence (an unknown session). Fix that
 and publish again; nothing was created.
 
+## Version 2: chart, table and buttons
+
+Version 2 (`"catalog_version": 2`, catalog at `GET /artifact-catalogs/clarp.form/2`)
+is version 1 plus three components. Each app is switched on for it separately.
+
+**Drawn by: none yet.** Use `"catalog_version": 1` until an app is listed here. An app
+that does not draw version 2 shows such a form as a plain card that cannot be answered.
+
+The version 2 components:
+
+- `chart`: `kind` `bar`, `line` or `pie`, up to 6 `series` of `{name, points: [{x, y}]}`;
+  optional `title`, `x_label`, `y_label`, `unit`. Every x of one chart is a string or every
+  x a whole number; within a series no x repeats and numeric x increases. Bar: at most 60
+  points per series; pie: one series of up to 12, no y below 0; 600 points in all.
+- `table`: `columns` (1 to 8 of `{key, label, align?}`) and `rows` (up to 200 objects keyed
+  by column keys; a cell is a string, a whole number, true/false or null), at most 1000 cells.
+- `button`: `label`, `action` (an identifier), optional `style` (`primary`, `secondary`,
+  `destructive`) and `confirm` (a question asked before it submits). A tap submits the form.
+
+Numbers are whole numbers, as everywhere in the catalog: no 12.5. For fractions give
+integers and `decimals` (0 to 6, on the chart or on a table column): `y: 125` with
+`"decimals": 1` is drawn as 12.5. Numeric x is never scaled.
+
+A form with buttons has no `submit`. Its `answer_schema` declares `action` as a required
+string whose `enum` is exactly the buttons' actions, and nothing binds `/action`. The
+answer names the button: `Action: "Ship it" (ship)` before the values. A short payload:
+
+```json
+{
+  "version": "deploy-7",
+  "catalog": "clarp.form",
+  "catalog_version": 2,
+  "answer_schema": {
+    "type": "object",
+    "properties": {"action": {"type": "string", "enum": ["ship", "hold"]}},
+    "required": ["action"]
+  },
+  "spec": {
+    "root": "root",
+    "state": {},
+    "elements": {
+      "root": {"type": "stack", "props": {}, "children": ["lat", "row"]},
+      "lat": {"type": "chart", "props": {"kind": "bar", "title": "p95 latency", "unit": "ms",
+        "series": [{"name": "p95", "points": [{"x": "before", "y": 120}, {"x": "after", "y": 80}]}]},
+        "children": []},
+      "row": {"type": "stack", "props": {"axis": "horizontal"}, "children": ["ship", "hold"]},
+      "ship": {"type": "button", "props": {"label": "Ship it", "action": "ship", "style": "primary"}, "children": []},
+      "hold": {"type": "button", "props": {"label": "Hold", "action": "hold", "confirm": "Hold the release?"},
+        "children": []}
+    }
+  }
+}
+```
+
+A fuller one (a line chart, a table, a note and two buttons) is at
+`tests/fixtures/render_spec/deploy-v2.json` in the Clarp repository.
+
 Not every app can draw the form. One that cannot shows a plain card with the
 title and cannot answer it.
 
-Which apps draw forms:
+Which apps draw forms (version 1):
 
 - iOS app: from client contract 74 (TestFlight 2981).
 - Web app (the browser app and the desktop shell that loads it): yes, from its

@@ -465,6 +465,7 @@ class Config:
     openai_realtime_voice: str = "cedar"
     janitor_read_diagnostics: bool = False
     render_spec_min_contract: dict[str, int] | None = None
+    render_spec_v2_min_contract: dict[str, int] | None = None
     oracle_diagnostics: bool = False
     oracle_router_backend: str = "api"
     oracle_delegation_strategy: str = "operator"
@@ -1007,6 +1008,21 @@ def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
         log("config.render_spec_min_contract", "ignored: expected a table of client = number")
     return out or None
 
+def _render_spec_v2_minimums(artifacts: dict) -> dict[str, int] | None:
+    """[artifacts] render_spec_v2_min_contract, the lowest contract per client that draws catalog
+    version 2 (issue 673): ``{ios = 80, android = 31}``. Off for every client the table does not
+    name (the default names none); 0 is off. Read by server_identity.client_minimums, as v1's."""
+    from .log import log
+    table = artifacts.get("render_spec_v2_min_contract")
+    if isinstance(table, dict):
+        from .server_identity import client_minimums, RENDER_SPEC_V2_MIN_CONTRACT
+        return client_minimums(table, setting="config.render_spec_v2_min_contract",
+                               defaults=RENDER_SPEC_V2_MIN_CONTRACT) or None
+    if table is not None:
+        log("config.render_spec_v2_min_contract", "ignored: expected a table of client = number")
+    return None
+
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -1188,6 +1204,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         ).strip() or "cedar",
         janitor_read_diagnostics = (data.get("diagnostics", {}).get("janitor_autonomy_reads") is True),
         render_spec_min_contract = _render_spec_minimums(data.get("artifacts") or {}),
+        render_spec_v2_min_contract = _render_spec_v2_minimums(data.get("artifacts") or {}),
         oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
         oracle_router_backend = str(openai.get("oracle_router_backend", "api")).strip(),
         oracle_delegation_strategy = str(openai.get("oracle_delegation_strategy", "operator")).strip(),

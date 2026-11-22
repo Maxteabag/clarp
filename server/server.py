@@ -539,6 +539,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/goal-ledger/delegations": "_handle_goal_delegations",
         "/artifacts": "_handle_artifacts_list",
         "/artifact-catalogs/clarp.form/1": "_handle_render_spec_catalog",
+        "/artifact-catalogs/clarp.form/2": "_handle_render_spec_catalog_v2",
         "/attention": "_handle_attention",
         "/attention/inbox": "_handle_attention_inbox",
         "/pinned-artifacts": "_handle_pinned_artifacts",
