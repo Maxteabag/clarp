@@ -20,6 +20,7 @@ from typing import Callable, ContextManager
 from . import events, settings_store
 from .intent import classify_intent
 from .log import log, log_exception
+from .voice import has_voice
 
 
 AWAITING_TTL_SEC = 60.0  # how long after /send the addressee gets exclusive right-of-way
@@ -502,7 +503,10 @@ class HeraldManager:
 
     def _synthesize_herald(self, sid: str, info: dict) -> tuple[str, str]:
         persona = (info.get("name") or sid).strip()
-        voice_id = (info.get("voice_id") or "").strip()
+        # An empty map names no voice, like "" (the engine then tries the persona's own; a raw
+        # "{}" would reach ElevenLabs as a voice id and fail there).
+        raw = (info.get("voice_id") or "").strip()
+        voice_id = raw if has_voice(raw) else ""
         text = herald_text(persona)
         try:
             herald_url = self._tts.synthesize_herald(
