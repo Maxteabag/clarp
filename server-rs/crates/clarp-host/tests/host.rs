@@ -32981,11 +32981,11 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         host.send(agent, "sleep 60", id);
         wait_for("the turn to run", || host.state(agent) == "thinking");
     }
-    let later =
-        json!({ "session": gamma, "text": "later", "client_msg_id": "g-2", "queue_if_busy": true });
+    let later = json!({ "session": gamma, "text": "later", "client_msg_id": "g-2",
+                "queue_if_busy": true, "origin": "automation" });
     assert_eq!(host.post("/send", later)["queued"], true);
     for agent in [&gamma, &delta] {
-        host.post("/stop", json!({ "session": agent, "actor": "maintenance" }));
+        host.post("/stop", json!({ "session": agent }));
         wait_for("the stop to end the turn", || {
             host.state(agent) == "interrupted"
         });
