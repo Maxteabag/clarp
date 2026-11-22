@@ -13,6 +13,11 @@ use slint::{ComponentHandle, Model};
 
 use super::{Stage, app_now, check, control, posts, requests, rows, run_stages, shot};
 
+thread_local! {
+    /// The profile's artifacts request before the menu's Artifacts.
+    static ARTIFACTS_BEFORE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
 const AFTER_TAIL: usize = 17; // lseq 16: the command runs
 const AFTER_INTERRUPT: usize = 24; // lseq 23: the turn is over
 const FOLD: &str = "live:fold:tr-1";
@@ -46,7 +51,7 @@ fn setting(app: &crate::App, id: &str) -> Option<crate::SettingRow> {
 }
 
 pub fn quiet_chat_check(out: String) {
-    let (out1, out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("open", Box::new(|app, _window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -223,6 +228,26 @@ pub fn quiet_chat_check(out: String) {
             }
             check(app.engine.borrow().chat_activity_choice("mike").is_none(), "Follow Settings clears Mike's own choice");
             check(app.engine.borrow().settings().get(clarp_core::presentation::CHAT_ACTIVITY_KEY).is_none(), "nothing left stored");
+            // The menu's Artifacts: the agent's profile, at its Artifacts.
+            let app = app_now();
+            let window = crate::window().expect("window");
+            crate::chat_menu::open(&app, &window, &app.active_id());
+            let before = window.global::<crate::ProfileBridge>().get_artifacts_request();
+            ARTIFACTS_BEFORE.with(|b| b.set(before));
+            crate::chat_menu::artifacts(&app, &window);
+            true
+        })),
+        ("artifacts", Box::new(move |_, window, elapsed| {
+            let bridge = window.global::<crate::ProfileBridge>();
+            if bridge.get_info().session != "mike" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.global::<crate::ChatMenu>().get_open().is_empty(), "the menu closed");
+            check(bridge.get_artifacts_request() == ARTIFACTS_BEFORE.with(|b| b.get()) + 1, "the profile was asked to bring its Artifacts into view");
+            let titles: Vec<String> = bridge.get_artifacts().iter().map(|a| a.title.to_string()).collect();
+            check(titles.iter().any(|t| t == "Link"), &format!("Mike's artifacts, as the profile lists them: {titles:?}"));
+            shot(&out6, "quiet-06-artifacts");
+            crate::profile_view::close(&app_now(), window);
             true
         })),
     ];

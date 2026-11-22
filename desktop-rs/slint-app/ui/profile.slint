@@ -101,6 +101,8 @@ export global ProfileBridge {
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
     callback set-agent-messages(int);
+    // Bumped to bring the profile's Artifacts into view.
+    in-out property <int> artifacts-request;
     callback set-tool-activity(int);
     in property <[string]> agent-message-choices: ["Follow Settings", "Show", "Hide"];
     in property <[string]> tool-activity-choices: ["Follow Settings", "Grouped", "Always visible", "Group old", "Hide when done"];
@@ -112,9 +114,16 @@ export global ProfileBridge {
 
 component Card inherits VerticalLayout {
     in property <string> title;
+    // An optional icon before the title (the Artifacts card's, which the
+    // chat's ⋯ menu shares).
+    in property <image> icon;
     padding: 10px;
     spacing: 8px;
-    SectionTitle { text: root.title; }
+    HorizontalLayout {
+        spacing: 6px;
+        if root.icon.width > 0: Image { source: root.icon; width: 12 * Look.unit; height: 12 * Look.unit; colorize: Palette.muted; y: (parent.height - self.height) / 2; }
+        SectionTitle { text: root.title; horizontal-stretch: 1; }
+    }
     @children
 }
 
@@ -204,7 +213,10 @@ export component AgentProfile inherits Modal {
             font-size: 11 * Look.unit;
             wrap: word-wrap;
         }
-        ScrollView {
+        // The chat's ⋯ menu opens the profile at its artifacts (#653).
+        property <int> artifacts-request: ProfileBridge.artifacts-request;
+        changed artifacts-request => { profile-scroll.viewport-y = -artifacts-card.y; }
+        profile-scroll := ScrollView {
             vertical-stretch: 1;
             content-width: self.visible-width;
             content-height: content.preferred-height;
@@ -400,8 +412,9 @@ export component AgentProfile inherits Modal {
                     }
                     if ProfileBridge.media.length == 0: Text { text: "No images in this chat yet"; color: Palette.muted; font-size: 11 * Look.unit; }
                 }
-                Card {
+                artifacts-card := Card {
                     title: "ARTIFACTS";
+                    icon: @image-url("icons/artifacts.svg");
                     for artifact in ProfileBridge.artifacts: Rectangle {
                         border-radius: 2px;
                         background: Palette.raised;

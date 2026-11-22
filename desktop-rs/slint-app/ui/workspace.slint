@@ -40,12 +40,15 @@ export global ChatMenu {
     in property <[ChatChoice]> activity-choices;
     callback opened(string);
     callback pick(string, string);
+    // Opens the chat's agent's artifacts (its profile's Artifacts).
+    callback artifacts();
 }
 
 component ChatMenuItem inherits Rectangle {
     in property <string> text;
     in property <string> value;
     in property <string> id;
+    in property <image> icon;
     callback clicked();
     height: 26px;
     background: touch.has-hover ? Palette.hover : transparent;
@@ -57,6 +60,7 @@ component ChatMenuItem inherits Rectangle {
         padding-left: 10px;
         padding-right: 10px;
         spacing: 8px;
+        if root.icon.width > 0: Image { source: root.icon; width: 12 * Look.unit; height: 12 * Look.unit; colorize: Palette.muted; y: (parent.height - self.height) / 2; }
         Text { text: root.text; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         if root.value != "": Text { text: root.value + "  ›"; color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
     }
@@ -538,6 +542,13 @@ export component Pane inherits Rectangle {
                     text: "Tool activity";
                     value: ChatMenu.activity-label;
                     clicked => { ChatMenu.submenu = "activity"; }
+                }
+                // The agent's artifacts, as its profile's Artifacts shows them.
+                if ChatMenu.submenu == "": ChatMenuItem {
+                    id: "chat-menu-artifacts";
+                    text: "Artifacts";
+                    icon: @image-url("icons/artifacts.svg");
+                    clicked => { ChatMenu.artifacts(); }
                 }
                 if ChatMenu.submenu == "coordination": VerticalLayout {
                     for choice in ChatMenu.coordination-choices: ChatMenuItem {

@@ -3,7 +3,8 @@
 //! global choice) and its messages between agents (the Host's per-chat
 //! choice, `POST /agent-coordination`). Both are in the chat's "⋯" menu on
 //! its pane's frame, each a submenu showing its current value, and in its
-//! profile.
+//! profile. The menu also opens the agent's artifacts (its profile's
+//! Artifacts).
 
 use clarp_engine::Engine;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -89,11 +90,30 @@ pub fn pick(app: &App, window: &AppWindow, submenu: &str, value: &str) {
     close(window);
 }
 
+/// The menu's Artifacts: the chat's profile, at its Artifacts (reports,
+/// forms, files, decision cards, media), for the chat's agent on its own
+/// Host.
+pub fn artifacts(app: &std::rc::Rc<App>, window: &AppWindow) {
+    let session = app.session_of(&window.global::<ChatMenu>().get_open());
+    close(window);
+    if session.is_empty() {
+        return;
+    }
+    crate::profile_view::open(app, window, &session);
+    let bridge = window.global::<crate::ProfileBridge>();
+    bridge.set_artifacts_request(bridge.get_artifacts_request() + 1);
+}
+
 pub fn wire(window: &AppWindow) {
     let menu = window.global::<ChatMenu>();
     menu.on_opened(|pane| {
         if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
             open(&app, &window, &pane);
+        }
+    });
+    menu.on_artifacts(|| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            artifacts(&app, &window);
         }
     });
     menu.on_pick(|submenu, value| {
