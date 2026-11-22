@@ -517,6 +517,10 @@ the daily schedule.
 
 ## Rust-first features
 
+- **Agent activity feature advertisement (feature 156).** The Rust Host
+  advertises `agent_state` to clients that gate on it. Both Hosts already
+  send `agent-state` and `agent-activity` in the base event stream.
+
 - **Stalled live turns (issue 249, Rust contract 149).** When a running tool
   has produced no stdout or stderr for the configured duration and a fresh user
   or Oracle message is waiting, the Rust Host exposes the stall and the existing

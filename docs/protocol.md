@@ -678,6 +678,11 @@ rows. Sending into a pair conversation is not supported.
 
 ### 3. Stay in sync: `GET /events` (SSE)
 
+The Rust Host advertises `agent_state` (feature number 156) in
+`GET /server-info` for the existing `agent-state` and `agent-activity`
+events below. Both event types are part of the base protocol, including on
+older Hosts that omit the feature advertisement.
+
 With `stalled_turn`, the agent row, `activity` and `live_activity` in the
 snapshot and the entering and clearing `agent-activity` events expose
 `stalled_since` and `stalled_action`. From Rust Host contract 157,

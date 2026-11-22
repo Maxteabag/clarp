@@ -130,6 +130,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("diagnostics", 1),
     ("client_events_kept", 146),
     ("stalled_turn", 149),
+    ("agent_state", 156),
     // Pairing codes and devices with tokens of their own.
     ("pairing", 1),
     // Calls: the Host's record of who is in a phone's call, on hold and on the floor

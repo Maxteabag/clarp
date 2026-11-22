@@ -622,6 +622,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let host = place.start();
     let info = host.get("/server-info");
     assert_eq!(info["contract"]["host"], 157);
+    assert_eq!(info["contract"]["features"]["agent_state"], 156);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
@@ -688,6 +689,12 @@ fn a_message_is_answered_and_the_apps_are_told() {
             && heard
                 .iter()
                 .any(|event| event["type"] == "agent-state" && event["kind"] == "done")
+            && heard.iter().any(|event| {
+                event["type"] == "agent-activity"
+                    && event["session"] == session
+                    && event["kind"] == "done"
+                    && event["event_id"].is_u64()
+            })
     });
     let heard = heard.lock().unwrap();
     assert_eq!(heard[0]["type"], "server-version");
