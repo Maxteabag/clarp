@@ -171,6 +171,21 @@ skills once never reached any agent; this rule is what prevents a repeat.
   skill text. A purely internal change, one that adds or alters nothing an agent
   can call, publish, read or set, needs no skill.
 
+## Every issue has an owner and a target date
+
+Peter, 22 Nov 2026, after 30 real issues had lain unowned for weeks: "Hadde vi glemt disse
+GitHub issuene? Hvorfor var de ute?" Found it, filed it, moved on is not allowed.
+
+- When you file an issue, give it an owner and a target date in the same step: the label
+  `owner:<agent session>` (the agent who will fix it, e.g. `owner:maximus-6c37`; all agents act
+  as one GitHub account, so an assignee names no one) and a line `Target: YYYY-MM-DD` in the body.
+  If you can't name an owner, it goes to the area's owner (the Rust Host, iOS, Android, the Rust
+  desktop) and you tell them in the same turn.
+- An issue that won't be done is closed at once, with a one-line reason; not left open.
+- A missed target date is moved, with a comment that says why, or the issue is closed.
+- A daily check messages the owner and the front desk about any open issue without an owner
+  label, or past its target date, for more than 3 days.
+
 ## The web app is deprecated
 
 Peter, 22 Nov 2026: "Web appen er egentlig deprecated." The browser web app (web/ and the
