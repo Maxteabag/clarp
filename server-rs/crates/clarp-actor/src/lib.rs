@@ -3541,6 +3541,7 @@ impl Actor {
         } else {
             None
         };
+        let hold = matches!(&how, Command::Adopt { .. });
         let mut batch = self.recorder.batch();
         for row in rows {
             let ts_ms = row.ts_ms;
@@ -3552,6 +3553,17 @@ impl Actor {
         }
         if let Err(refusal) = batch.command(how, now_ms) {
             return Ok((Err(refusal.to_string()), Outputs::default()));
+        }
+        if hold {
+            // The conversation and its move hold become durable together.
+            batch
+                .command(
+                    Command::Stop {
+                        by: Control::by(clarp_kernel::agent::IMPORT),
+                    },
+                    now_ms,
+                )
+                .map_err(JournalError::Refused)?;
         }
         if let Some(entry) = &binding {
             batch.item(NewItem::new(
@@ -3569,7 +3581,7 @@ impl Actor {
             changed: Changed {
                 conversation: true,
                 status: true,
-                queue: false,
+                queue: hold,
                 ..Changed::default()
             },
             ..Outputs::default()
@@ -4540,7 +4552,7 @@ impl Actor {
                 out.changed.queue |= held.changed.queue;
                 return Ok(());
             }
-            if starting && self.moved().is_none() {
+            if starting && self.moved().is_none() && !self.recorder.agent().import_held() {
                 // The attempt was decided and no shim ever took it. Nothing ran: start it now.
                 return self.start(turn, message_seq, attempt, out);
             }
@@ -4812,7 +4824,7 @@ impl Actor {
     /// When the turn that waits for its next attempt is to be tried again. `None`: no turn
     /// waits for that.
     pub fn retry_at(&self) -> Option<i64> {
-        if self.moved().is_some() {
+        if self.moved().is_some() || self.recorder.agent().import_held() {
             return None;
         }
         match self.recorder.agent().live() {
@@ -5018,6 +5030,9 @@ impl Actor {
             return Ok(out);
         }
         let mut out = Outputs::default();
+        if self.recorder.agent().import_held() {
+            return Ok(out);
+        }
         let Some(Turn::Parked(parked)) = self.recorder.agent().live() else {
             return Ok(out);
         };

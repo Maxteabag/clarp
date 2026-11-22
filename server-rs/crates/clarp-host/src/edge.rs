@@ -2489,10 +2489,7 @@ async fn import_agent(
             return Err(not_to_stay(&app.fleet, session, failed, ApiError::from).await);
         }
     };
-    // It is here, and until its owner says it lives here it is on the other Host too. So it
-    // takes no turn of its own yet: a goal that is due, or anything else that would start by
-    // itself, waits for a resume. What its user says to it runs.
-    let held = member.agent.hold(Control::by("move")).await.is_ok();
+    // The actor put the move hold in the same journal append as the conversation.
     Ok(Json(json!({
         "ok": true,
         "session": member.record.session,
@@ -2500,7 +2497,7 @@ async fn import_agent(
         "imported": imported,
         "artifacts": artifacts,
         "plans": plans,
-        "held": held,
+        "held": true,
     })))
 }
 
