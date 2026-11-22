@@ -8785,6 +8785,9 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         read["artifact"].get("spec").is_some()
     };
     assert!(spec_of("ios/12 contract=74"), "iOS from 74, by default");
+    assert!(spec_of("web/1 contract=1"), "web from 1, by default");
+    assert!(!spec_of("web/1 contract=0"));
+    assert!(!spec_of("Web/1 contract=1"));
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 0\n").unwrap();
     assert!(!spec_of("ios/12 contract=74"), "iOS switched off");
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"80\"\n").unwrap();
@@ -8812,7 +8815,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     // or a value that is no whole number of at least 0, is refused in a line that names it.
     std::fs::write(
         &owner,
-        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Android = 2, Ios = 1, \"a b\" = 1, \"1os\" = 1, \
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Android = 2, Ios = 1, Web = 2, \"a b\" = 1, \"1os\" = 1, \
          android = -1, web = 2.5 }\n",
     )
     .unwrap();
@@ -8827,7 +8830,12 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         !spec_of("android/5 contract=99"),
         "a value below 0 is refused"
     );
-    assert!(!spec_of("web/1 contract=99"), "so is a fraction");
+    assert!(
+        spec_of("web/1 contract=1"),
+        "a fraction is ignored and the default stands"
+    );
+    assert!(!spec_of("Web/1 contract=1"));
+    assert!(spec_of("Web/1 contract=2"));
     let said = |line: &str| {
         host.heard
             .lock()
@@ -8847,7 +8855,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         host.heard.lock().unwrap()
     );
     let line = "config.render_spec_min_contract: 'IOS' (not 'ios'), 'Android' (not 'android'), \
-                'Ios' (not 'ios'): names are matched exactly as clients send them, so each is \
+                'Ios' (not 'ios'), 'Web' (not 'web'): names are matched exactly as clients send them, so each is \
                 another client and leaves the built-in one as it is";
     assert_eq!(said(line), 1, "{line}: {}", host.heard.lock().unwrap());
     assert_eq!(
