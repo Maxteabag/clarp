@@ -1281,7 +1281,9 @@ class _ImportPrelude:
             previous = message_carry.record(previous, **where)
         return message_carry.changed(previous, self.raw_carry_inputs(), rules=rules,
                                      boundary_seq=boundary_seq, witness=witness,
-                                     accepted_tail=accepted_tail, why=why, **where)
+                                     accepted_tail=accepted_tail, why=why, **where,
+                                     steered_sent=(None if self.steered_sent is None
+                                                   else lambda: self.steered_sent))
 
     def for_pass(self) -> _ImportPrelude:
         return _ImportPrelude(
@@ -1352,13 +1354,28 @@ def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
                           steers, steered_sent)
 
 
+def carry_steered_sent(database, agent_id, raw_inputs):
+    """For message_carry.changed: the steered rows' send times as the linker reads them
+    now (_steered_sent), from the raw inputs' turn and /send rows; read once, when asked."""
+    found: dict | None = None
+
+    def read() -> dict:
+        nonlocal found
+        if found is None:
+            turn_rows, client_rows = raw_inputs[0], raw_inputs[1]
+            outcomes = {str(row["trace_id"]) for row in turn_rows if row["trace_id"]}
+            found = _steered_sent(database, agent_id, client_rows, outcomes)
+        return found
+    return read
+
+
 def _steers(database, agent_id, backend_session_id, turn_index, rows, pending):
     """The pending steers whose rows are not among ``rows`` yet, and the send times
     the linker judges steered rows by."""
     written = {row.message_id for row in rows}
     pending = [(row, sent) for row, sent in pending if row.message_id not in written]
     return (tuple(row for row, _sent in pending),
-            _steered_sent(database, agent_id, backend_session_id, turn_index.outcomes, pending))
+            _steered_sent(database, agent_id, rows, turn_index.outcomes, pending))
 
 
 def _sends_and_latest_user(database, agent_id, backend_session_id, message_rows):

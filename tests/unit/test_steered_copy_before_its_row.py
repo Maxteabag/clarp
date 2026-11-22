@@ -6,7 +6,8 @@ between found no row for the copy and stored it as a user row of the running tur
 agent's words drawn as the user's own. A later import never took the row either, because it
 was written more than _START_SLACK_MS after the copy. Now the import links the copy to the row
 the pending steer will have (lib.steer_records, read before the /send rows), and a steered row
-is judged by when it was sent: the same in a tail as in a full import."""
+is judged by when it was sent (its queue item's enqueued_at): the same in a tail as in a full
+import."""
 import json
 import time
 
@@ -61,14 +62,12 @@ class _Agent:
                            origin="agent", sender_agent_id=self.peer)
         steer_records.record(agent_id=self.id, trace_id="steered", queue_id="q-steer", backend="claude",
                              session_id="native", cwd="/tmp")
-        self.sent = at
 
     def echoed(self, at):
-        """The CLI's echo: the row (with the time it was sent), the item shown, the record cleared."""
+        """The CLI's echo: the row (no sent_at: it did not wait), the item shown, the record cleared."""
         self.now[0] = at
         agents.record_user_message(agent_id=self.id, backend_session_id='native', client_msg_id="from-ellis",
-                                   text=WORDS, trace_id="steered", origin="agent", sender_agent_id=self.peer,
-                                   sent_at=self.sent)
+                                   text=WORDS, trace_id="steered", origin="agent", sender_agent_id=self.peer)
         turn_queue.show("q-steer")
         steer_records.clear("steered")
         db.close_local()

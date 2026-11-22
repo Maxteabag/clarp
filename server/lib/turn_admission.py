@@ -855,11 +855,8 @@ class AdmissionMixin:
             if item is not None and item["status"] != "started" and not steered \
                     and str(item["text"] or "").strip():
                 spec = replace(spec, text=str(item["text"]))
-            # A message that waited, or was steered into the running turn, keeps the time
-            # it was sent: a steered row is written at the CLI's echo, after the CLI's copy,
-            # and the import links that copy to it by when it was sent (_steered_sent).
             sent_at = (int(item["enqueued_at"])
-                       if item is not None and (spec.waited or steered) else None)
+                       if item is not None and spec.waited else None)
             appended = self._record_user_message(spec, deferred=deferred, sent_at=sent_at)
             if appended is not None:
                 turn_queue.show(spec.queue_id, con=database)

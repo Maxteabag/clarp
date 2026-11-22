@@ -237,13 +237,15 @@ def _pending_steer_rows(database, agent_id, backend_session_id) -> list[tuple[_C
     written before the stdin write and removed only after the row's commit, so
     read before the /send rows, one of the two is always there: an import in
     between links the copy to the row it will have, as a later one links it to
-    the row. Its timestamp is its send time (a row it cannot know yet); the
+    the row. Its timestamp is its send time (a time it cannot know yet); the
     linker judges a steer by its send time anyway (``_steered_sent``)."""
     from .clock import iso_from_ms
     import json
     found = []
+    low, high = _STEER_PREFIX, _STEER_PREFIX[:-1] + chr(ord(_STEER_PREFIX[-1]) + 1)
+    # A key range, not LIKE: it uses the primary key (settings_store._prefix_range).
     for (value,) in database.execute(
-            "SELECT value FROM settings WHERE key LIKE ? ORDER BY key", (_STEER_PREFIX + "%",)):
+            "SELECT value FROM settings WHERE key >= ? AND key < ? ORDER BY key", (low, high)):
         try:
             entry = json.loads(value or "")
         except (TypeError, ValueError):
@@ -264,18 +266,37 @@ def _pending_steer_rows(database, agent_id, backend_session_id) -> list[tuple[_C
     return sorted(found, key=lambda pair: (pair[1], pair[0].message_id))
 
 
-def _steered_sent(database, agent_id, backend_session_id, outcomes, pending=()) -> dict[str, int]:
+def _steered_sent(database, agent_id, rows, outcomes, pending=()) -> dict[str, int]:
     """{/send row id: its send time in ms} for the follow-ups steered into a running
     turn (a trace with no turn of its own: not in ``outcomes``), the pending ones
     included. Such a row is written when the CLI echoes it, after the CLI wrote its
-    copy, so the linker judges it by when it was sent (its ``sent_at``), not by when
-    it was written; every other row as before."""
-    sent = {str(row[0]): int(row[1]) for row in database.execute(
-        """SELECT message_id, sent_at, trace_id FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?
-              AND source_file LIKE 'client:%' AND sent_at IS NOT NULL""",
-        (agent_id, backend_session_id))
-        if isinstance(row[1], int) and row[2] and str(row[2]) not in outcomes}
+    copy, so the linker judges it by when it was sent, not by when it was written;
+    every other row as before. The send time is its queue item's ``enqueued_at``
+    (the row keeps no ``sent_at``: it did not wait, docs/protocol.md). A started
+    item stays as long as its agent (turn_queue deletes only waiting ones)."""
+    # The item by its client id (indexed): the row's id is _client_message_id of it,
+    # and a send without one used its trace. The item's trace must be the row's.
+    steered: dict[str, str] = {}
+    keys: set[str] = set()
+    for row in rows:
+        trace = str(getattr(row, "trace_id", "") or "")
+        if trace and trace not in outcomes:
+            message_id = str(row.message_id)
+            steered[message_id] = trace
+            keys.update((message_id, message_id[2:], trace))
+    sent: dict[str, int] = {}
+    keys = sorted(keys)
+    by_trace: dict[str, int] = {}
+    for start in range(0, len(keys), 500):
+        chunk = keys[start:start + 500]
+        for trace, enqueued_at in database.execute(
+                "SELECT trace_id, enqueued_at FROM queued_turns WHERE client_msg_id IN ("
+                + ",".join("?" * len(chunk)) + ") AND agent_id = ?", (*chunk, agent_id)):
+            if trace and isinstance(enqueued_at, int):
+                by_trace[str(trace)] = min(enqueued_at, by_trace.get(str(trace), enqueued_at))
+    for message_id, trace in steered.items():
+        if trace in by_trace:
+            sent[message_id] = by_trace[trace]
     for row, sent_ms in pending:
         sent.setdefault(str(row.message_id), sent_ms)
     return sent
