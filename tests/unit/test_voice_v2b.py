@@ -1,5 +1,6 @@
 """V2b (issue 476, ruling M): every creation path ends with a working voice, under the configured
-provider AND its configured fallback; no existing agent changes; helpers, forks and Janitors get none."""
+provider AND its configured fallback; no existing agent changes; a helper speaks with its parent's
+voice, a fork gets its own, a Janitor gets none."""
 from __future__ import annotations
 
 import dataclasses
@@ -122,18 +123,49 @@ def test_a_rename_keeps_the_voice_it_spoke_with(host, tmp_path):
     assert (after["provider"], after["voice_id"]) == (before["provider"], before["voice_id"])
 
 
-# ---------------------------------------------------------------- what V2b does not touch
+# ---------------------------------------------------------------- helpers, and what is not touched
+
+@pytest.mark.parametrize("host", SETUPS, indirect=True)
+def test_a_helper_speaks_with_its_parents_voice_and_takes_none_from_the_pool(host, tmp_path):
+    """A helper is heard only when the user opens its chat; it sounds like the agent it works
+    for, and helpers by the dozen never empty the pool."""
+    service = AgentLifecycleService(_ctx(tmp_path))
+    parent = agents_db.get_by_session(service.create({"name": "Pia", "cwd": str(tmp_path)}).session)
+    helper = agents_db.get_by_session(service.create(
+        {"name": "pia-helper", "cwd": str(tmp_path), "parent": parent["session"], "role": "helper",
+         "voice_id": "{}", "synthesize_audio": False}).session)
+    _works(host, helper)
+    view = voice_profile.HostView.build(host, stored={})
+    assert voice_profile.speech(view, helper)["voice_id"] == voice_profile.speech(view, parent)["voice_id"]
+    for provider in voice_pool.needed_providers(host, "pia-helper"):
+        assert json.loads(helper["voice_id"]).get(provider) == voice_pool._speaks(
+            host, parent["voice_id"], "Pia", provider)
+
 
 @pytest.mark.parametrize("host", [("cartesia", "none")], indirect=True)
-def test_helpers_forks_janitors_and_existing_agents_are_left_alone(host, tmp_path):
-    parent = AgentLifecycleService(_ctx(tmp_path)).create({"name": "Pia", "cwd": str(tmp_path)})
+def test_a_helper_of_a_voiceless_parent_still_gets_a_voice(host, tmp_path):
+    parent = agents_db.create_agent(persona="Mute", voice_id="{}", cwd=str(tmp_path), session="mute")
     helper = AgentLifecycleService(_ctx(tmp_path)).create(
-        {"name": "pia-helper", "cwd": str(tmp_path), "parent": parent.session, "role": "helper",
-         "voice_id": "{}", "synthesize_audio": False})
-    assert agents_db.get_by_session(helper.session)["voice_id"] == "{}"           # V2c: through the parent
+        {"name": "mute-helper", "cwd": str(tmp_path), "parent": parent, "role": "helper"})
+    _works(host, agents_db.get_by_session(helper.session))
+    assert agents_db.get_by_agent_id(parent)["voice_id"] == "{}"                  # the parent untouched
+
+
+@pytest.mark.parametrize("host", [("cartesia", "none")], indirect=True)
+def test_existing_agents_are_left_alone(host, tmp_path):
     existing = agents_db.create_agent(persona="Zed", voice_id="{}", cwd=str(tmp_path), session="zed")
     AgentLifecycleService(_ctx(tmp_path)).create({"name": "Another", "cwd": str(tmp_path)})
     assert agents_db.get_by_agent_id(existing)["voice_id"] == "{}"                # untouched
+
+
+@pytest.mark.parametrize("host", [("cartesia", "none")], indirect=True)
+def test_a_new_agent_given_a_bare_cartesia_uuid_is_stored_in_the_one_shape_and_heard(host, tmp_path):
+    """A bare uuid kept bare reads as an ElevenLabs id, so under Cartesia the agent was silent."""
+    uuid = "0b904166-a29f-4d2e-bb20-41ca302f98e9"
+    row = agents_db.get_by_session(AgentLifecycleService(_ctx(tmp_path)).create(
+        {"name": "Bjorn", "cwd": str(tmp_path), "voice_id": uuid}).session)
+    assert row["voice_id"] == json.dumps({"cartesia": uuid}, separators=(",", ":"))
+    assert voice_profile.speech(voice_profile.HostView.build(host, stored={}), row)["voice_id"] == uuid
 
 
 # ---------------------------------------------------------------- the pool itself
@@ -147,20 +179,30 @@ def test_the_walk_is_stable_and_two_agents_do_not_share_while_a_voice_is_free():
     assert json.loads(second)["cartesia"] != json.loads(first)["cartesia"]
 
 
-def test_an_exhausted_pool_gives_the_least_shared_voice(monkeypatch):
+def test_an_exhausted_pool_reuses_the_least_recently_used_voice_and_logs_it(monkeypatch):
+    """v2 has one holder, v1 two; but v2's holder spoke an hour ago and v1's last holder a day
+    ago: the least recently used voice is v1. An agent without a clip counts from its creation."""
     logged = []
     monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a))
-    cfg = config.Config(tts_provider="cartesia", cartesia_pool=("v1", "v2"))
-    agents = [{"agent_id": "a", "persona": "A", "voice_id": '{"cartesia":"v1"}'},
-              {"agent_id": "b", "persona": "B", "voice_id": '{"cartesia":"v1"}'},
-              {"agent_id": "c", "persona": "C", "voice_id": '{"cartesia":"v2"}'}]
+    hour, day = 3_600_000, 86_400_000
+    monkeypatch.setattr(voice_pool, "_last_clips", lambda: {"a": 10 * day - day, "c": 10 * day - hour})
+    cfg = config.Config(tts_provider="cartesia", cartesia_pool=("v1", "v2"), cartesia_voices={})
+    agents = [{"agent_id": "a", "persona": "A", "voice_id": '{"cartesia":"v1"}', "created_at": 1},
+              {"agent_id": "b", "persona": "B", "voice_id": '{"cartesia":"v1"}', "created_at": 2,
+               "archived_at": 3},
+              {"agent_id": "c", "persona": "C", "voice_id": '{"cartesia":"v2"}', "created_at": 1}]
+    assert json.loads(voice_pool.assign(cfg, "D", "{}", agents=agents, contacts=[]))["cartesia"] == "v1"
+    assert [a[0] for a in logged] == ["voicePoolExhausted"]
+    assert "reused=v1" in logged[0][1] and f"last_used_ms={9 * day}" in logged[0][1]
+    # Without any clip: the voice whose holders were created longest ago.
+    monkeypatch.setattr(voice_pool, "_last_clips", lambda: {})
+    agents[2]["created_at"] = 0
     assert json.loads(voice_pool.assign(cfg, "D", "{}", agents=agents, contacts=[]))["cartesia"] == "v2"
-    assert logged and logged[0][0] == "voicePoolExhausted"
 
 
 def test_given_voices_are_kept_and_nothing_is_added_when_nothing_is_missing():
     cfg = config.Config(tts_provider="cartesia", cartesia_voices={"Ada": "c-ada"})
-    assert voice_pool.assign(cfg, "Ada", "V_ADA", agents=[], contacts=[]) == "V_ADA"
+    assert voice_pool.assign(cfg, "Ada", "V_ADA", agents=[], contacts=[]) == '{"elevenlabs":"V_ADA"}'
     assert json.loads(voice_pool.assign(cfg, "Zed", "V_ZED", agents=[], contacts=[]))["elevenlabs"] == "V_ZED"
 
 
@@ -213,18 +255,23 @@ def test_seventy_new_agents_get_seventy_voices_none_a_built_in_contacts(host, tm
     assert speaks == host.cartesia_voices[owner] and speaks not in given
 
 
-def test_without_a_catalogue_the_built_in_list_and_no_false_alarm(monkeypatch):
-    """No catalogue fetched yet: today's list; the log line only when active agents and
-    custom contacts really use every pool voice."""
+def test_without_a_catalogue_the_curated_pool_and_no_false_alarm(monkeypatch):
+    """No catalogue fetched yet: the curated English pool as it ships; a built-in contact's
+    voice is not handed out while a pool voice is free; no exhaustion."""
     monkeypatch.setattr(voice_pool, "_cartesia_catalogue", lambda language="en": [])
     logged = []
     monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a[0]))
     cfg = config.Config(tts_provider="cartesia")
     builtins = [{"name": n, "builtin": 1, "voice_id": json.dumps({"cartesia": v})}
                 for n, v in cfg.cartesia_voices.items() if v]
-    assert voice_pool.pool(cfg, "cartesia") == [v for v in dict.fromkeys(config.DEFAULT_CARTESIA_VOICES.values()) if v]
-    voice_pool.assign(cfg, "Quentin", "{}", agents=[], contacts=builtins)
+    curated = [row["id"] for row in voice_pool._curated_rows()]
+    assert voice_pool.pool(cfg, "cartesia") == curated
+    picked = json.loads(voice_pool.assign(cfg, "Quentin", "{}", agents=[], contacts=builtins))["cartesia"]
+    assert picked in curated and picked not in set(cfg.cartesia_voices.values())
     assert "voicePoolExhausted" not in logged
+    # A language the curated pool does not cover, with no catalogue: the built-in list.
+    assert voice_pool.pool(cfg, "cartesia", "no") == [
+        v for v in dict.fromkeys(config.DEFAULT_CARTESIA_VOICES.values()) if v]
 
 
 def _slow_users(monkeypatch, delay=0.3):
@@ -274,14 +321,15 @@ def test_a_relaunch_keeps_its_voice(host, tmp_path):
     assert agents_db.get_by_session("zed")["voice_id"] == "{}"
 
 
-def test_contacts_count_as_users_and_archived_agents_do_not():
-    """Finding 3: a contact's voice is taken; an archived agent's is free again."""
+def test_contacts_and_archived_agents_count_as_users():
+    """A contact's voice is taken, and so is an archived agent's: it can be restored with it
+    (issue 476: no two agents may sound the same, archived ones included)."""
     cfg = config.Config(tts_provider="cartesia", cartesia_pool=("v1", "v2"), cartesia_voices={})
     name = _name_starting_at(0, 2)                       # its walk starts at v1
     contact = [{"name": "Cora", "voice_id": '{"cartesia":"v1"}'}]
     assert json.loads(voice_pool.assign(cfg, name, "{}", agents=[], contacts=contact))["cartesia"] == "v2"
     archived = [{"agent_id": "a", "persona": "Old", "voice_id": '{"cartesia":"v1"}', "archived_at": 1}]
-    assert json.loads(voice_pool.assign(cfg, name, "{}", agents=archived, contacts=[]))["cartesia"] == "v1"
+    assert json.loads(voice_pool.assign(cfg, name, "{}", agents=archived, contacts=[]))["cartesia"] == "v2"
 
 
 def test_the_walk_starts_at_the_names_hash():
@@ -359,3 +407,61 @@ def test_real_api_rows_are_picked_and_private_owned_or_unknown_never(tmp_path, m
     voice_pool.pool(cfg, "cartesia", "no")                          # no Norwegian row at all
     assert [a[1] for a in logged if a[0] == "voicePoolNoCatalogueVoice"] == [
         "provider=cartesia language=no eligible=0 total=4"]
+
+
+# ---------------------------------------------------------------- the curated Cartesia pool
+
+def test_the_curated_pool_follows_its_rules():
+    """One voice per id and per name, English, native accents only, no emotion variants."""
+    import pathlib
+    data = json.loads(voice_pool.CURATED_PATH.read_text())
+    rows = data["voices"]
+    assert data["provider"] == "cartesia" and data["language"] == "en" and len(rows) >= 150
+    assert len({r["id"] for r in rows}) == len(rows)
+    assert len({r["name"].casefold() for r in rows}) == len(rows)
+    assert {r["country"] for r in rows} <= {"US", "GB", "AU", "CA", "NZ", "IE", "ZA", "SG", "IN"}
+    assert {r["gender"] for r in rows} >= {"feminine", "masculine"}
+    # Neighbours differ: no long run of one gender.
+    genders = [r["gender"] for r in rows]
+    assert max(len(list(g)) for _, g in __import__("itertools").groupby(genders)) <= 30
+    assert voice_pool.curated_names()[rows[0]["id"]] == rows[0]["name"]
+    assert pathlib.Path(voice_pool.CURATED_PATH).name == "cartesia_voice_pool.json"
+
+
+def test_the_curated_pool_skips_what_todays_catalogue_no_longer_offers(tmp_path, monkeypatch):
+    rows = voice_pool._curated_rows()
+    first, second, third = (str(r["id"]) for r in rows[:3])
+    names_file = tmp_path / "voice-names.json"
+    monkeypatch.setenv("CLARP_VOICE_NAMES", str(names_file))
+    public_en = {"language": "en", "public": True, "owner": False}
+    names_file.write_text(json.dumps({"cartesia": {}, "_format": 2,
+        "_catalogue": {"cartesia": {first: public_en, second: public_en, "other": public_en}},
+        "_gone": {"cartesia": [second]}}))
+    cfg = config.Config(tts_provider="cartesia", cartesia_voices={})
+    assert voice_pool.pool(cfg, "cartesia", "en") == [first]          # third: not offered; second: deleted
+    assert third not in voice_pool.pool(cfg, "cartesia", "en")
+
+
+def test_the_build_script_applies_the_rules():
+    import importlib.util, pathlib
+    path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "build_cartesia_voice_pool.py"
+    spec = importlib.util.spec_from_file_location("build_pool", path)
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    native = [{"accent": "british", "locale": "en-GB", "is_native": True}]
+    base = {"language": "en", "access": "public", "visibility": "all", "is_owner": False,
+            "status": "active", "country": "GB", "accents": native, "gender": "feminine"}
+    rows = [
+        {**base, "id": "1", "name": "Ada", "tagline": "Warm Guide", "description": "Warm", "created_at": "1"},
+        {**base, "id": "2", "name": "Ada", "tagline": "Sad Warm Guide", "description": "Warm", "created_at": "2"},
+        {**base, "id": "3", "name": "Bo", "tagline": "Night Warden", "description": "Deep"},
+        {**base, "id": "4", "name": "Cy", "tagline": "Guide", "description": "x", "country": "IT"},
+        {**base, "id": "5", "name": "Di", "tagline": "Guide", "description": "x", "is_owner": True},
+        {**base, "id": "6", "name": "Ed", "tagline": "Guide", "description": "x", "language": "de"},
+        {**base, "id": "7", "name": "Fa", "tagline": "Guide", "description": "x",
+         "accents": [{"accent": "x", "locale": "es-MX", "is_native": True}]},
+        {**base, "id": "8", "name": "Gil", "tagline": "Calm Guide", "description": "Calm",
+         "gender": "masculine", "country": "US"},
+    ]
+    out = build.build(rows)
+    assert sorted(v["id"] for v in out["voices"]) == ["1", "8"]

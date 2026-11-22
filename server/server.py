@@ -3247,6 +3247,13 @@ def _seed_startup_invariants(ctx: ServerContext) -> None:
     before request threads start so every read model remains read-only."""
     from lib import personas
     personas.ensure_builtins()
+    # Every stored voice in the one shape (issue 476): only rows that sound the same under
+    # every provider are written; the others are logged and left for the owner.
+    try:
+        from lib import voice_migration
+        voice_migration.apply_at_start()
+    except Exception as exc:  # noqa: BLE001 - a stored voice still reads in its old shape
+        log_exception("voiceShapeMigrationFail", exc)
     from lib.janitor_bootstrap import initialize as initialize_janitors
     initialize_janitors(cwd=str(ctx.root))
 

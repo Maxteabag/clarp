@@ -98,6 +98,25 @@ def test_the_report_marks_what_would_sound_different_and_apply_writes_only_the_r
     assert [r["agent_id"] for r in left] == [differs]                    # only the audible row remains
 
 
+def test_at_start_the_rows_that_sound_the_same_are_brought_over_and_the_rest_left(cartesia_host, monkeypatch):
+    """Host start (issue 476): what --apply would write is written, an audible row is left
+    and logged by name, and a second start has nothing to do."""
+    logged = []
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: logged.append(a))
+    same = agents_db.create_agent(persona="Ada", voice_id=ADA, cwd="/tmp", session="ada")
+    differs = agents_db.create_agent(persona="Ada", voice_id=UUID, cwd="/tmp", session="ada-2")
+    result = voice_migration.apply_at_start()
+    assert "agent Ada" in result["written"] and result["refused_audible"] == ["agent Ada"]
+    assert agents_db.get_by_agent_id(same)["voice_id"] == '{"cartesia":"%s"}' % ADA
+    assert agents_db.get_by_agent_id(differs)["voice_id"] == UUID
+    line = next(a[1] for a in logged if a[0] == "voiceShapeMigrated")
+    assert "audible_left=1" in line and "left='agent Ada'" in line
+    logged.clear()
+    again = voice_migration.apply_at_start()
+    assert again is None or again["written"] == []
+    assert all(r["agent_id"] == differs for r in voice_migration.plan()["voices"] if r["kind"] == "agent")
+
+
 def test_a_row_is_audible_when_another_provider_would_hear_it_differently(monkeypatch):
     """Pre-read of V2a, P1: a bare Cartesia uuid on a Host where Cartesia is neither provider
     nor fallback sounds the same today (ElevenLabs refuses it either way), but the day the

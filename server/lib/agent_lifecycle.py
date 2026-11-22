@@ -110,14 +110,18 @@ class AgentLifecycleService:
             )
         if parsed.recommendation:
             log(parsed.recommendation)
-        if (not janitor and not parsed.replace_sid and not parsed.fork_id
-                and parsed.role == "agent"):
-            # V2b: a new agent ends with a working voice under the configured provider and
-            # fallback; a relaunch, a helper and a fork keep theirs (helpers: V2c, through
-            # the parent), and a Janitor stays voiceless.
+        if not janitor and not parsed.replace_sid:
+            # A new agent, fork or helper ends with a working voice under the configured
+            # provider and fallback, in the one stored shape (voice_pool). A helper first
+            # takes its parent's voices; the pool fills only what the parent has none for.
+            # A relaunch keeps its voice, and a Janitor stays voiceless.
             from . import config as app_config, voice_pool
-            parsed = replace(parsed, voice_id=voice_pool.assign(
-                app_config.load(), parsed.persona, parsed.voice_id))
+            cfg = app_config.load()
+            voice = parsed.voice_id
+            if parsed.role == "helper" and parsed.parent_agent_id:
+                voice = voice_pool.inherited(
+                    cfg, parsed.persona, voice, agents_db.get_by_agent_id(parsed.parent_agent_id))
+            parsed = replace(parsed, voice_id=voice_pool.assign(cfg, parsed.persona, voice))
         spec = parsed if parsed.session else replace(
             parsed, session=self._mint_session(parsed.persona))
         resume_session_id = self._fork_or_resume(spec)

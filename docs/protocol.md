@@ -1200,12 +1200,26 @@ A new agent (`POST /agents`, an adopted session, an anonymous launch, an assigne
 contact, the first-install roster) and a new contact (`POST /personas`) end with a voice that
 is heard under the Host's configured provider and under its configured fallback. The Host keeps
 every voice the request gave and adds, for each of those providers it has none for, a free
-voice from its pool (`[cartesia] pool`, by default the distinct built-in Cartesia voices; the
-ElevenLabs and Gemini catalogues). A free voice is one no active agent or contact speaks with;
-when there is none, the least shared. With this feature an app may create an agent or contact
+voice from its pool (`[cartesia] pool` when set; else, for an English agent, the curated list
+in `server/lib/cartesia_voice_pool.json` less the voices Cartesia no longer offers, and for
+another language Cartesia's catalogue in that language; the ElevenLabs and Gemini
+catalogues). A free voice is one no agent (archived ones included) or contact speaks with; when
+there is none, the least recently used (below). With this feature an app may create an agent or contact
 with no voice at all and trust the Host; a phone's `auto-<uuid>` stand-in voice is replaced.
-Existing agents are not changed. A helper or fork, and a Janitor, get no voice from the pool.
-Renaming an agent keeps the voice it spoke with.
+The stored value is always in the one shape (a bare Cartesia uuid on create becomes
+`{"cartesia":"<uuid>"}`). Existing agents are not changed. A Janitor gets no voice: no app can
+send it a message, so it never speaks. Renaming an agent keeps the voice it spoke with.
+
+With feature `voice_for_helpers` (Host contract 135): a helper (`role` `helper`) is created
+with its parent's voice for each provider it has none for, the voice the parent is heard with,
+and takes a pool voice only where the parent has none; a helper is heard only when the user
+opens its chat, and giving each of them a voice of its own would empty the pool within days.
+A fork gets a pool voice like any new agent. When every pool voice is taken, the least recently
+used one is reused (the voice whose holders' newest clip, else their creation, is oldest) and
+the Host logs `voicePoolExhausted`. At start the Host writes every stored voice in the one
+shape where that changes nothing anyone hears under any provider (the rows
+`clarp-admin voice migrate --apply` writes), and logs `voiceShapeMigrated` with the rows it
+left because they would sound different.
 
 ### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
 
