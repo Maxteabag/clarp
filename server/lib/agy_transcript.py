@@ -163,6 +163,7 @@ def _tool_from(ev: dict) -> dict:
 # typed tool step), which is also the step the live stream names `step-<N+1+i>`.
 _RESULT_HEADER_RE = re.compile(r"\A(?:(?:Created|Completed) At:[^\n]*\n)*\n?")
 _EXIT_RE = re.compile(r"exited with code (-?\d+)")
+_OUTPUT_HEADING_RE = re.compile(r"(?im)^(?:command )?output:\n")
 _TASK_RE = re.compile(r"tasks/(task-\d+)\.log")
 
 
@@ -201,8 +202,10 @@ def _settle(tool: dict, content: str, status: str = "") -> None:
     body = _RESULT_HEADER_RE.sub("", content or "", count=1)
     code = _EXIT_RE.search(body[:300])
     tool["exit_code"] = int(code.group(1)) if code else None
-    if "Output:\n" in body:
-        body = body.split("Output:\n", 1)[1]
+    # The output follows its heading: "Output:", or "Command output:" in newer agy (R45).
+    heading = _OUTPUT_HEADING_RE.search(body)
+    if heading:
+        body = body[heading.end():]
     tool["result"] = truncate(body.strip(), 300)
     tool["_output"] = body
     if status.upper() == "RUNNING":
