@@ -180,7 +180,10 @@ fn exercise(source_kind: Source, take_back: bool) {
             assert_eq!(rows[0]["text"], "Moved history");
             // Scripted echoes the first prompt line, which can be the team context header.
             // Match each completed reply to its own send rather than the prompt text.
-            let expected = [("second message", &traces[1]), ("first message", &traces[0])];
+            let expected = [
+                ("second message", &traces[1]),
+                ("first message", &traces[0]),
+            ];
             for (pair, (text, trace)) in rows[1..].chunks_exact(2).zip(expected) {
                 assert_eq!(pair[0]["role"], "user");
                 assert_eq!(pair[0]["text"], text);
