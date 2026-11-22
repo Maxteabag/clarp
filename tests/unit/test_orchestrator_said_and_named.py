@@ -491,8 +491,12 @@ def test_a_failed_completion_is_logged_and_the_answer_still_sent_and_the_run_clo
     send = _sender(service, app=False)
     first = send()
     assert _said(first) == (200, "route", "antoni", "claude")
+    # Its least receipt, with the first answer's decision too (R134, PR 533).
+    assert isinstance(calls[1].get("decision_id"), int)
     assert calls[1] == {"status": "route", "target_agent_id": _agent_id("antoni"), "answer_status": 200,
-                        "answer_dispatch": "claude", "answer_session": "antoni"}     # its least receipt
+                        "answer_dispatch": "claude", "answer_session": "antoni",
+                        "decision_id": calls[1]["decision_id"], "decision_target": "antoni",
+                        "decision_action": ""}
     assert "orchestratorReceiptFail" in capfd.readouterr().err
     assert _said(send()) == (200, "route", "antoni", "claude")      # not pending: the run is closed
 

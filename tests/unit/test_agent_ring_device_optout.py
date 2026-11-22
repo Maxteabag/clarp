@@ -178,13 +178,18 @@ def test_a_rotation_retires_only_the_same_phones_old_token_and_keeps_rings_off(s
     assert senders["alert"] and all(tokens == [T_OTHER] for _, tokens in senders["alert"])
 
 
-def test_a_token_owned_by_another_phone_is_refused_with_no_side_effects(sander):
+def test_a_full_scope_phone_takes_over_a_token_another_pairing_holds(sander, monkeypatch):
+    """R26: the same phone paired again registers its token under its new pairing. The token
+    moves, with one line naming both pairings; the earlier pairing is not revoked."""
+    logged = []
+    monkeypatch.setattr(apns, "log", lambda event, detail="": logged.append((event, detail)))
     apns.register_token(T_PHONE, session="koko", owner=PHONE)
-    apns.register_token(T_OTHER, session="koko", owner=OTHER_PHONE)
-    before = _rows()
-    with pytest.raises(apns.TokenOwnedElsewhere):
-        apns.register_token(T_PHONE, session="koko", owner=OTHER_PHONE)
-    assert _rows() == before
+    apns.register_token(T_PHONE, session="koko", owner=OTHER_PHONE)
+    moved = [d for e, d in logged if e == "deviceTokenOwnerTransferred"]
+    assert len(moved) == 1 and f"from={PHONE}" in moved[0] and f"to={OTHER_PHONE}" in moved[0]
+    assert live.device_ok(PHONE)                                # the earlier pairing still stands
+    rows = _rows()
+    assert rows[T_PHONE]["owner"] == OTHER_PHONE and rows[T_PHONE]["disabled_at"] is None
 
 
 def test_a_non_device_registrant_never_overwrites_an_owned_token(sander):
@@ -204,13 +209,11 @@ def test_legacy_unbound_tokens_are_preserved_never_guessed_or_mass_disabled(sand
     assert rows[T_LEGACY]["disabled_at"] is None and rows[T_LEGACY]["owner"] == ""
 
 
-def test_a_revoked_phone_keeps_provenance_gets_no_ring_alert_and_its_token_passes_only_after_revocation(sander,
+def test_a_revoked_phone_keeps_provenance_gets_no_ring_alert_and_its_token_passes_to_a_new_pairing(sander,
                                                                                                         monkeypatch):
     apns.register_token(T_PHONE, owner=PHONE)
     apns.register_token(T_OTHER, owner=OTHER_PHONE)
     real_ok = live.device_ok
-    with pytest.raises(apns.TokenOwnedElsewhere):               # while PHONE is valid: no transfer
-        apns.register_token(T_PHONE, owner=OTHER_PHONE)
     monkeypatch.setattr(live, "device_ok", lambda principal: principal != PHONE and real_ok(principal))
     assert [t["token"] for t in apns.ring_alert_tokens()] == [T_OTHER]
     assert _rows()[T_PHONE]["owner"] == PHONE                   # provenance kept until someone registers it
@@ -276,14 +279,14 @@ def _raw(token, principal=""):
                       "VALUES (?, 's', 1, 1, ?)", (token, principal))
 
 
-def test_another_phone_cannot_bypass_the_owner_with_an_uppercase_variant(sander):
+def test_an_uppercase_variant_is_the_same_token_for_a_take_over_and_a_refusal(sander):
     apns.register_token(T_PHONE, owner=PHONE)
     before = _rows()
     with pytest.raises(apns.TokenOwnedElsewhere):
-        apns.register_token(T_PHONE.upper(), owner=OTHER_PHONE)
-    with pytest.raises(apns.TokenOwnedElsewhere):
-        apns.register_token(T_PHONE.upper())                     # a non-device registrant either
+        apns.register_token(T_PHONE.upper())                     # a non-device registrant never takes it
     assert _rows() == before
+    apns.register_token(T_PHONE.upper(), owner=OTHER_PHONE)      # a full-scope phone does (R26)
+    assert [r["owner"] for r in _rows().values() if r["disabled_at"] is None] == [OTHER_PHONE]
 
 
 def test_the_same_phone_registering_a_case_variant_is_idempotent(sander):
@@ -307,7 +310,7 @@ def test_inside_a_callers_transaction_registration_never_commits_or_rolls_back_f
     c.execute("BEGIN")
     apns.register_token(T_PHONE, owner=PHONE)
     with pytest.raises(apns.TokenOwnedElsewhere):
-        apns.register_token(T_PHONE, owner=OTHER_PHONE)
+        apns.register_token(T_PHONE)                             # an unbound registrant is refused
     assert c.in_transaction                                      # the caller still owns its transaction
     c.execute("ROLLBACK")
     assert T_PHONE not in _rows()
@@ -329,7 +332,7 @@ def test_distinct_non_hex_tokens_that_differ_only_in_case_keep_their_own_identit
     assert rows["AbG-token"]["disabled_at"] is None and rows["abg-token"]["disabled_at"] is None
     apns.register_token(T_PHONE, owner=PHONE)                    # hex collision still sees case variants
     with pytest.raises(apns.TokenOwnedElsewhere):
-        apns.register_token(T_PHONE.upper(), owner=OTHER_PHONE)
+        apns.register_token(T_PHONE.upper())
 
 
 def test_a_non_hex_token_never_collides_with_another_cases_bound_row(sander):
