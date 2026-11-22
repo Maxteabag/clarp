@@ -147,7 +147,7 @@ Which apps draw forms (version 1):
 - Web app (the browser app and the desktop shell that loads it): from its
   first contract (version 2: see above).
 - Android app: from client contract 41 (release 0.1.0, build 1058); version 2 from 42 (see above).
-- Native desktop app: not yet; it shows the plain card.
+- Native desktop app: from client contract 1, version 1 only (version 2 not yet: it shows a version 2 form as the plain card).
 
 So say in your reply what you are asking, briefly, and do not wait for the form
 alone when the question is urgent. A form is
