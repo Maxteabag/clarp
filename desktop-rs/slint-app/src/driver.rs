@@ -88,6 +88,9 @@ mod explorer_checks;
 // ---- a narrow window: the panes stay inside it
 #[path = "narrow_checks.rs"]
 mod narrow_checks;
+// ---- native forms (render_spec) in the chat
+#[path = "render_spec_checks.rs"]
+mod render_spec_checks;
 // ---- what animating costs the UI thread
 #[path = "budget_checks.rs"]
 mod budget_checks;
@@ -519,6 +522,7 @@ pub fn start_check(name: &str, out: String) {
             artifact_checks::receipts_check(out)
         }
         "form-events" => artifact_checks::form_events_check(out),
+        "render-spec" => render_spec_checks::render_spec_check(out),
         "form-log" => artifact_checks::form_log_check(out),
         "artifact-open" => artifact_checks::artifact_open_check(out),
         "artifact-summary" => artifact_checks::artifact_summary_check(out),

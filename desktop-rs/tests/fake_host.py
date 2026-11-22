@@ -467,6 +467,110 @@ def record(entry):
         handle.write(json.dumps(entry) + "\n")
 
 
+# render_spec (Host feature render_spec, issue 428): the Host draws the kind
+# only for a client its per-client table names at or above its minimum
+# (server_identity.render_spec_capable); /__control/render-spec-clients
+# replaces the table. The form's payload is kept apart from the row, as the
+# Host keeps it; its one accepted submission beside it.
+render_spec_min = {"ios": 74}
+render_spec_submissions = {}
+_CLIENT = re.compile(r"([A-Za-z][A-Za-z0-9_-]{0,31})/[A-Za-z0-9._-]{1,80} contract=([0-9]{1,9})")
+RENDER_SPEC_PAYLOAD = {
+    "version": "preview-1", "catalog": "clarp.form", "catalog_version": 1,
+    "spec": {"root": "root", "elements": {
+        "root": {"type": "stack", "props": {}, "children": ["title", "intro", "verdict", "rule", "details", "pair", "echo_head", "echo"]},
+        "title": {"type": "heading", "props": {"text": "Build 2968", "level": 1}},
+        "intro": {"type": "text", "props": {"text": "The simulator checks passed. Two testers reported a crash in Settings on the last build; it is not confirmed fixed."}},
+        "verdict": {"type": "card", "props": {"title": "Your call"}, "children": ["decision", "reason"]},
+        "decision": {"type": "choice", "props": {"label": "What should happen", "value": {"$bindState": "/decision"}, "options": [
+            {"value": "ship", "label": "Send it to all testers"},
+            {"value": "internal", "label": "Send it to the internal group only"},
+            {"value": "hold", "label": "Hold it until the crash is confirmed fixed"},
+            {"value": "drop", "label": "Drop this build"}]}},
+        "reason": {"type": "text_field", "props": {"label": "Reason", "placeholder": "Why, in a sentence or two", "multiline": True, "value": {"$bindState": "/reason"}}},
+        "rule": {"type": "divider", "props": {}},
+        "details": {"type": "card", "props": {}, "children": ["sub", "testers", "notify", "quiet"]},
+        "sub": {"type": "heading", "props": {"text": "Details", "level": 2}},
+        "testers": {"type": "text_field", "props": {"label": "Tester group", "placeholder": "internal", "value": {"$bindState": "/testers"}}},
+        "notify": {"type": "toggle", "props": {"label": "Tell the testers when it is out", "value": {"$bindState": "/notify"}}},
+        "quiet": {"type": "toggle", "props": {"label": "Skip the release notes", "value": {"$bindState": "/quiet"}}},
+        "pair": {"type": "stack", "props": {"axis": "horizontal"}, "children": ["left", "right"]},
+        "left": {"type": "text", "props": {"text": "Checks: 214 of 214."}},
+        "right": {"type": "text", "props": {"text": "Size: 48 MB."}},
+        "echo_head": {"type": "heading", "props": {"text": "Group as typed", "level": 3}},
+        "echo": {"type": "text", "props": {"text": {"$state": "/testers"}}}},
+        "state": {"notify": True, "testers": "internal"}},
+    "submit": {"intent": "release_call", "label": "Send my call"},
+    "answer_schema": {"type": "object", "required": ["decision", "reason"], "properties": {
+        "decision": {"type": "string", "enum": ["ship", "internal", "hold", "drop"]},
+        "reason": {"type": "string", "minLength": 10, "maxLength": 400},
+        "testers": {"type": "string", "maxLength": 20},
+        "notify": {"type": "boolean"}, "quiet": {"type": "boolean"}}},
+}
+RENDER_SPEC_REASONS = {
+    "client_contract": "This app cannot answer forms on this Host.",
+    "already_answered": "This form was already answered.",
+    "version_mismatch": "The form changed since it was opened.",
+    "missing_key": "An answer the form requires is missing.",
+    "intent_mismatch": "The answer is for another form.",
+    "not_open": "This form is not open.",
+}
+
+
+def render_spec_artifact(artifact_id):
+    return next((a for a in artifacts if a.get("artifact_id") == artifact_id and a.get("type") == "render_spec"), None)
+
+
+def reopen_render_specs():
+    with state_lock:
+        render_spec_submissions.clear()
+        for artifact in artifacts:
+            if artifact.get("type") == "render_spec":
+                artifact["status"] = "ready"
+                artifact["updated_at"] = int(time.time() * 1000)
+
+
+def render_spec_capable(header):
+    found = _CLIENT.fullmatch(header or "")
+    if not found:
+        return False
+    minimum = render_spec_min.get(found.group(1))
+    return isinstance(minimum, int) and minimum >= 1 and int(found.group(2)) >= minimum
+
+
+def spec_canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+
+
+def spec_identity(payload):
+    raw = spec_canonical(payload["spec"])
+    return {"version": payload["version"], "bytes": len(raw), "sha256": "c1:" + hashlib.sha256(raw).hexdigest()}
+
+
+def render_view(row, capable, full):
+    """A render_spec row as the Host projects it (render_spec_store): the
+    plain row for a client without the kind; for one with it, the marker
+    (never the spec), and on the single read the payload flat beside it."""
+    if row.get("type") != "render_spec":
+        return row
+    payload = row.get("render_payload") or RENDER_SPEC_PAYLOAD
+    out = {k: v for k, v in row.items() if k != "render_payload"}
+    if not capable:
+        return out
+    identity = spec_identity(payload)
+    out.update({k: payload[k] for k in ("version", "catalog", "catalog_version")})
+    out["catalog_sha256"] = "c1:fake"
+    out["element_count"] = len(payload["spec"]["elements"])
+    if not full:
+        out["content_omitted"] = {**identity, "updated_at": out.get("updated_at", 0)}
+        return out
+    out.update({k: copy.deepcopy(payload[k]) for k in ("spec", "submit", "answer_schema")})
+    out["content_identity"] = identity
+    if out.get("artifact_id") in render_spec_submissions:
+        out["submission"] = copy.deepcopy(render_spec_submissions[out["artifact_id"]])
+    return out
+
+
 def broadcast(event):
     global event_id
     with state_lock:
@@ -589,6 +693,12 @@ def artifact_fixtures(kind, session, now_ms):
              "target_at": iso_at(now_ms + 3 * day, 2), "time_zone": "Europe/Oslo"},
             {"artifact_id": "cd-broken", "type": "countdown", "status": "active", "session": s, "title": "Someday",
              "target_at": "next tuesday", "time_zone": "UTC"},
+        ]
+    if kind == "render_spec":
+        return [
+            {"artifact_id": "rs-release", "type": "render_spec", "status": "ready", "session": s,
+             "title": "Release check", "summary": "Your call on tonight's build.", "reference_id": "",
+             "source_trace_id": ""},
         ]
     if kind == "html_form":
         form = ("<h1>Trip planner</h1><form><label>Destination <input name=\"destination\" value=\"Bergen\"></label>"
@@ -920,7 +1030,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         record({"method": "GET", "path": url.path, "query": query,
                 "authorization": self.headers.get("Authorization", ""),
-                "last_event_id": self.headers.get("Last-Event-ID", ""), "at": time.time()})
+                "last_event_id": self.headers.get("Last-Event-ID", ""), "client": self.headers.get("X-Clarp-Client", ""),
+                "at": time.time()})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
         failure = failures.get(url.path)
@@ -1013,13 +1124,15 @@ class Handler(BaseHTTPRequestHandler):
             if representation == "summary-v1":
                 if not artifact_summary["on"] or artifact_summary.get("refuse"):
                     return self.reply(400, {"error": "unsupported artifact representation"})
+                capable = render_spec_capable(self.headers.get("X-Clarp-Client"))
                 with state_lock:
-                    rows = [summary_row(represent(a, "flat-v1")) for a in listed_artifacts(int(query.get("limit", "100")))]
+                    rows = [render_view(summary_row(represent(a, "flat-v1")), capable, False) for a in listed_artifacts(int(query.get("limit", "100")))]
                     return self.reply(200, {"artifacts": rows})
             if representation not in ("", "flat-v1") or (representation and not flat_supported):
                 return self.reply(400, {"error": "unsupported artifact representation"})
+            capable = render_spec_capable(self.headers.get("X-Clarp-Client"))
             with state_lock:
-                rows = [represent(a, representation) for a in listed_artifacts(int(query.get("limit", "100")))]
+                rows = [render_view(represent(a, representation), capable, False) for a in listed_artifacts(int(query.get("limit", "100")))]
                 return self.reply(200, {"artifacts": rows})
         if url.path.startswith("/artifacts/") and url.path.count("/") == 2:
             # One artifact: a Host with summary lists honours exactly
@@ -1036,6 +1149,7 @@ class Handler(BaseHTTPRequestHandler):
                 if found is None:
                     return self.reply(404, {"error": "artifact not found"})
                 item = copy.deepcopy(represent(stored(found), "flat-v1" if flat_item else ""))
+                item = render_view(item, render_spec_capable(self.headers.get("X-Clarp-Client")), True)
                 if artifact_summary["corrupt"].get(artifact_id, 0) > 0:
                     artifact_summary["corrupt"][artifact_id] -= 1
                     item["content"] = item.get("content", "") + "<!-- altered -->"
@@ -1217,6 +1331,44 @@ class Handler(BaseHTTPRequestHandler):
             return
         return self.reply(404, {"error": "not found"})
 
+    def render_spec_submit(self, artifact, body):
+        """POST /artifacts/<id>/submit for a render_spec (render_spec.admit,
+        in its order): the client first, a repeat's receipt, then the form's
+        state, version, intent and required answers."""
+        def refuse(status, code, path=""):
+            return self.reply(status, {"error": {"code": code, "path": path, "message": RENDER_SPEC_REASONS.get(code, code)}})
+        if not render_spec_capable(self.headers.get("X-Clarp-Client")):
+            return refuse(403, "client_contract")
+        artifact_id = artifact["artifact_id"]
+        payload = artifact.get("render_payload") or RENDER_SPEC_PAYLOAD
+        answers = body.get("answers") or {}
+        with state_lock:
+            held = render_spec_submissions.get(artifact_id)
+            if held is not None:
+                if held["submission_id"] == body.get("submission_id") and held["answers"] == answers:
+                    return self.reply(200, {"submission_id": held["submission_id"], "artifact_id": artifact_id,
+                                            "version": held["version"], "accepted": True, "delivery_status": held["delivery_status"]})
+                return refuse(409, "already_answered")
+            if artifact.get("status") not in ("ready", "active"):
+                return refuse(409, "not_open")
+            if body.get("version") != payload["version"]:
+                return refuse(409, "version_mismatch", "/version")
+            if answers.get("intent") != payload["submit"]["intent"]:
+                return refuse(400, "intent_mismatch", "/answers/intent")
+            state = answers.get("state") or {}
+            for key in payload["answer_schema"].get("required", []):
+                if key not in state:
+                    return refuse(400, "missing_key", "/answers/state/" + key)
+            now_ms = int(time.time() * 1000)
+            render_spec_submissions[artifact_id] = {
+                "submission_id": body.get("submission_id"), "version": body.get("version"), "answers": answers,
+                "accepted_at": now_ms, "delivery_status": "pending"}
+            artifact["status"] = "completed"
+            artifact["updated_at"] = max(now_ms, int(artifact.get("updated_at") or 0) + 1)
+        announce([artifact_id], artifact.get("session", ""))
+        return self.reply(200, {"submission_id": body.get("submission_id"), "artifact_id": artifact_id,
+                                "version": body.get("version"), "accepted": True, "delivery_status": "pending"})
+
     def do_POST(self):
         global outage_until
         url = urlparse(self.path)
@@ -1246,6 +1398,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(500, {"error": "upload refused"})
             return self.reply(200, {"path": f"/srv/uploads/{name}", "name": name})
         body = json.loads(raw or b"{}")
+        if url.path == "/__control/render-spec-clients":
+            # Test control: the Host's per-client render_spec minimums.
+            global render_spec_min
+            render_spec_min = dict(body.get("minimums", {}))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/render-spec-reset":
+            # Test control: forget the accepted answers and reopen the forms.
+            reopen_render_specs()
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/artifact-summary":
             # Test control: the summary-v1 list and its markers (see
             # `artifact_summary`); the keys given replace the current ones.
@@ -1749,7 +1910,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.in_outage():
             return
         record({"method": "POST", "path": url.path, "body": body,
-                "authorization": self.headers.get("Authorization", "")})
+                "authorization": self.headers.get("Authorization", ""), "client": self.headers.get("X-Clarp-Client", "")})
         if url.path == "/pairing/exchange":
             # Unauthenticated by design: the one-time code is the credential.
             code = body.get("code")
@@ -1878,6 +2039,9 @@ class Handler(BaseHTTPRequestHandler):
             # A form's answers: a receipt echoing the submission, or 409
             # when the form changed since it was opened.
             artifact = url.path.split("/")[2]
+            found = render_spec_artifact(artifact)
+            if found is not None:
+                return self.render_spec_submit(found, body)
             if artifact == "form-stale":
                 return self.reply(409, {"error": "form version changed"})
             return self.reply(200, {"accepted": True, "submission_id": body.get("submission_id"),
