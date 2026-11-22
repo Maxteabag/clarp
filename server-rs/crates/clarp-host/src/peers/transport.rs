@@ -6,8 +6,6 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 use url::Url;
 
-const MAX_BYTES: usize = 4 * 1024 * 1024;
-
 pub(crate) fn normalize_url(asked: &str) -> Option<&str> {
     let text = asked.trim().trim_end_matches('/');
     let (scheme, location) = text.split_once("://")?;
@@ -44,6 +42,7 @@ pub(super) fn fetch(
     path: &str,
     token: Option<&str>,
     seconds: u64,
+    max_bytes: usize,
     body: Option<&Value>,
 ) -> Result<Map<String, Value>, String> {
     let agent = direct_agent(seconds);
@@ -74,10 +73,10 @@ pub(super) fn fetch(
     response
         .body_mut()
         .as_reader()
-        .take(MAX_BYTES as u64 + 1)
+        .take(max_bytes as u64 + 1)
         .read_to_end(&mut raw)
         .map_err(|_| "unreachable")?;
-    if raw.len() > MAX_BYTES {
+    if raw.len() > max_bytes {
         return Err("too_large".to_string());
     }
     let Value::Object(value) = serde_json::from_slice(&raw).map_err(|_| "not_json")? else {

@@ -235,6 +235,15 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 item.sources = format!("{sources} source{}", if sources == 1 { "" } else { "s" }).into();
             }
         }
+        "render_spec" => {
+            // A native form: drawn in the card once read (`spec_fields`).
+            // Drawn in the card once read (`form_view`), when the Host
+            // sent this client the kind (its marker); otherwise a plain card.
+            item.label = "FORM".into();
+            if crate::form_view::drawn(artifact) {
+                item.spec_state = "loading".into();
+            }
+        }
         "html_form" => {
             let report = is_report(artifact);
             item.label = if report { "REPORT" } else { "FORM" }.into();
@@ -667,6 +676,10 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     // Answered in this window, it keeps the line it had, so its height.
     item.keep_line = (item.pending && !item.meta.is_empty()) || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
     item.hints = slint::ModelRc::new(slint::VecModel::from(card_hints(&item, &crate::commands::overrides_of(engine))));
+    if item.kind == "render_spec" && !item.spec_state.is_empty() {
+        let form = engine.render_spec(&item.id);
+        crate::form_view::spec_fields(&mut item, form);
+    }
     item
 }
 

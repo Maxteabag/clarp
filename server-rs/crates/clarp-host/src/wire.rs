@@ -1962,10 +1962,10 @@ pub fn summary(
         "latest_state": state_name(&kind),
         "latest_state_ts": since,
         "turn_started_at": turn_started_at,
-        "last_activity": since / 1_000,
+        "last_activity": since,
         // When a turn last ran to its end: a turn that failed or was stopped since does not
         // take that away.
-        "last_turn_end": status.completed_at_ms.map_or(0, |at| at / 1_000),
+        "last_turn_end": status.completed_at_ms.unwrap_or(0),
         "status_text": (!status.label.is_empty()).then_some(&status.label),
         "activity": activity(record, status),
         "live_activity": live_activity,
@@ -2810,14 +2810,25 @@ mod tests {
                 &later["model"],
                 &later["latest_state"]
             ),
-            (&json!(4), &json!("fable"), &json!("interrupted"))
+            (&json!(4_000), &json!("fable"), &json!("interrupted"))
         );
         assert_eq!(
             (&done["last_turn_end"], &done["turn_started_at"]),
-            (&json!(4), &json!(0))
+            (&json!(4_000), &json!(0))
         );
         assert_eq!(done["live_activity"]["state"], "idle");
         assert!(done["live_activity"]["headline"].is_null());
+    }
+
+    #[test]
+    fn agent_summary_keeps_chat_timestamps_in_epoch_milliseconds() {
+        let completed_at_ms = 1_795_350_123_456;
+        let mut completed = status(None, Some(Outcome::Completed));
+        completed.last.as_mut().unwrap().ended_at_ms = completed_at_ms;
+        completed.completed_at_ms = Some(completed_at_ms);
+        let row = summary(&record(), &completed, "claude", None, None, false);
+        assert_eq!(row["last_activity"], completed_at_ms);
+        assert_eq!(row["last_turn_end"], completed_at_ms);
     }
 
     #[test]

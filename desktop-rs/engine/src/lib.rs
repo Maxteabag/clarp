@@ -42,6 +42,8 @@ pub mod roster_freshness;
 mod teams;
 mod updates;
 mod artifact_summary;
+mod render_spec;
+pub use render_spec::{FormState, FormView};
 pub use artifact_summary::Hydration;
 pub mod workspace;
 
@@ -306,6 +308,7 @@ pub struct Engine {
     // panels
     updates: updates::Updates,
     artifact_summary: artifact_summary::ArtifactSummary,
+    render_specs: render_spec::RenderSpecs,
     teams: teams::Teams,
     profile: profile::Profile,
     avatars: avatars::Avatars,
@@ -447,6 +450,7 @@ impl Engine {
             // panels
             updates: Default::default(),
             artifact_summary: Default::default(),
+            render_specs: Default::default(),
             teams: Default::default(),
             profile: Default::default(),
             avatars: Default::default(),
@@ -891,6 +895,7 @@ impl Engine {
         self.reset_live();
         self.reset_form_events();
         self.reset_artifact_summary();
+        self.reset_render_specs();
         self.api.set_endpoint(endpoint, &self.token);
         self.changes.push(Change::Endpoint);
         self.set_error("");
@@ -1558,7 +1563,7 @@ impl Engine {
         if self.lifecycle_json(tag, object) {
             return;
         }
-        if self.panels_json(tag, object) {
+        if self.render_spec_json(tag, object) || self.panels_json(tag, object) {
             return;
         }
         if tag == "agent-conversations" {
@@ -1659,7 +1664,7 @@ impl Engine {
         if self.lifecycle_failure(tag, message, status) {
             return;
         }
-        if self.panels_failure(tag, message, status) {
+        if self.render_spec_failure(tag, message, status) || self.panels_failure(tag, message, status) {
             return;
         }
         if tag.starts_with("composer-upload:") {
