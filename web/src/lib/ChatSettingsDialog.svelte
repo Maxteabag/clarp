@@ -2,7 +2,7 @@
   // Settings > Chats: how chats look. Kept in localStorage on this device, except 'Show
   // messages between agents', which is the Host's (static/lib/coordination.js).
   import { app, savedHosts } from '../stores/app.svelte.js';
-  import { addHost, hostsState, removeHost, setAllHosts } from '../stores/hosts.svelte.js';
+  import { addHost, hostsState, knownHosts, removeHost, setAllHosts } from '../stores/hosts.svelte.js';
   import {
     prefs, setShowCoordinationLine, setShowHostBadge, setToolActivity,
   } from '../stores/prefs.svelte.js';
@@ -50,12 +50,14 @@
 
       <div class="hosts-list" aria-label="Hosts">
         <div class="hosts-row primary"><span class="hosts-name">{app.hosts[0]?.name || 'This Host'}</span><span class="hosts-state">This Host</span></div>
-        {#each hostsState.saved as h (h.id)}
+        {#each knownHosts() as h (h.id)}
           <div class="hosts-row">
             <span class="hosts-name" title={h.url}>{h.name || h.url}</span>
-            <span class="hosts-state">{hostsState.allHosts ? (STATE_WORDS[hostsState.live[h.id]?.state] || 'Connecting') : 'Not read'}</span>
-            <button class="hosts-remove" type="button" aria-label={`Remove ${h.name || h.url}`} title="Remove"
-                    onclick={() => removeHost(h.id)}>×</button>
+            <span class="hosts-state">{hostsState.allHosts ? (STATE_WORDS[hostsState.live[h.id]?.state] || 'Connecting') : 'Not read'}{#if h.via === 'host'} · via this Host{/if}</span>
+            {#if h.via !== 'host'}
+              <button class="hosts-remove" type="button" aria-label={`Remove ${h.name || h.url}`} title="Remove"
+                      onclick={() => removeHost(h.id)}>×</button>
+            {/if}
           </div>
         {/each}
       </div>
@@ -70,7 +72,8 @@
         </label>
         {#if addError}<p class="start-hint hosts-error" role="alert">{addError}</p>{/if}
         <p class="start-hint">
-          That Host must list this app's origin ({location.origin}) in
+          Hosts this Host is paired with (clarp-admin peers) are listed by themselves, with no token here.
+          For another one, that Host must list this app's origin ({location.origin}) in
           <code>[server] web_read_origins</code>. It then answers this app its chat list and name, and nothing else.
         </p>
         <div class="start-actions">

@@ -531,6 +531,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/server-update": "_handle_server_update_status",
         "/turn-queue": "_handle_turn_queue",
         "/agents/snapshot": "_handle_snapshot",
+        "/peers/snapshot": "_handle_peers_snapshot",
         "/agents/archived": "_handle_archived_agents",
         "/agent-conversations": "_handle_agent_conversations",
         "/identity/prompt-history": "_handle_prompt_history",

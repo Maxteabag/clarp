@@ -544,6 +544,15 @@ class AgentRoutes:
             "application/json",
         )
 
+    def _handle_peers_snapshot(self):
+        """GET /peers/snapshot (feature peer_snapshot): this Host's peers' chat lists, read server
+        to server with the device token this Host keeps for each (lib.peer_reads). Full scope only
+        (a limited device gets 403): a kept peer token may be a full device's, and its snapshot
+        would show a limited device more than it sees here, cwd included. Nothing in the request
+        names a peer or a URL; tokens are never returned."""
+        from lib import peer_reads
+        self._json_ok({"peers": peer_reads.snapshot(), "cache_seconds": int(peer_reads.CACHE_SECONDS)})
+
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard.
 
