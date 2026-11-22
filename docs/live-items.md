@@ -414,7 +414,11 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
    durable row takes over that item's place. Do not delete and re-insert.
 6. Settled turn: fold its work behind `Worked for <worked_ms>`; failed or
    interrupted items and every message (commentary included: text written
-   before a tool call is a reply to the user) stay visible. The fold survives the takeover: the Host
+   before a tool call is a reply to the user) stay visible. The fold sits
+   where the folded work begins, except that thinking alone before the turn's
+   first message (the acknowledgment a spoken turn says first) never puts it
+   above that message. The turn keeps the Host's order: its answer stays below
+   its work also when no live item stands for the answer. The fold survives the takeover: the Host
    lands each tool as its own `/log` row, so while the turn is held keep the
    tool and reasoning rows (one row per tool, inside the fold or, when failed,
    outside it) and do not show those tool rows again as activity; the answer's
