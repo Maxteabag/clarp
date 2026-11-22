@@ -56,7 +56,7 @@ def synth_one(*,
         return False
 
     queue_id = row["queue_id"]
-    if _opening_fenced(row.get("trace_id")):
+    if _opening_fenced(row.get("trace_id"), row.get("agent_id")):
         # A listen-first opening clip that lost its authority (docs/agent-rings.md).
         tts_queue.mark_failed(queue_id, "listen-first opening fenced")
         return True
@@ -456,25 +456,26 @@ def _publish_tts_error(stream: Any | None, row: dict, agent: dict | None, error:
         log_exception("ttsErrorBroadcastFail", e, detail=message)
 
 
-def _opening_fenced(trace_id: str | None) -> bool:
-    """Best effort: skip voicing an opening clip whose authority is gone."""
+def _opening_fenced(trace_id: str | None, agent_id: str | None = None) -> bool:
+    """Best effort: skip voicing an opening clip whose authority is gone. The clip is
+    the agent's turn's: bound by agent and trace at admission (R77)."""
     if not trace_id:
         return False
     try:
         from . import agent_rings
-        return agent_rings.skip_opening_synthesis(trace_id)
+        return agent_rings.skip_opening_synthesis(trace_id, agent_id or "")
     except Exception as exc:  # noqa: BLE001 - never block ordinary speech
         log_exception("ttsWorkerOpeningFenceFail", exc, detail=str(trace_id))
         return False
 
 
-def _opening_tag(trace_id: str | None) -> dict:
-    """``call_id`` + ``opening`` for a clip of a listen-first opening turn."""
+def _opening_tag(trace_id: str | None, agent_id: str | None = None) -> dict:
+    """``call_id`` + ``opening`` for a clip of a listen-first opening turn (R77)."""
     if not trace_id:
         return {}
     try:
         from . import agent_rings
-        return agent_rings.opening_audio(trace_id) or {}
+        return agent_rings.opening_audio(trace_id, agent_id or "") or {}
     except Exception as exc:  # noqa: BLE001 - an untagged clip still plays
         log_exception("ttsWorkerOpeningTagFail", exc, detail=str(trace_id))
         return {}
@@ -517,7 +518,7 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         "text_len": len(row["text"] or ""),
         **fields,
     }
-    tag = _opening_tag(trace_id)
+    tag = _opening_tag(trace_id, (agent or {}).get("agent_id") or row.get("agent_id"))
     meta.update(tag)
     try:
         ts_str = name.split("__", 1)[0].split(".", 1)[0]
