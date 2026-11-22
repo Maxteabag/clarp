@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
 use crate::edge::App;
+use crate::quota::LoginAccount;
 use crate::usage_provider::status_command;
 
 #[derive(Default)]
@@ -166,23 +167,24 @@ pub(super) async fn observe(app: &App, agy: &Mutex<AgyCache>, row: &mut Value) {
     let Some(stamp) = super::digest(&file) else {
         return;
     };
-    if !app.limits.verify_login(app, tool, &home, stamp).await {
-        return;
-    }
-    let Ok(_login) = crate::pool::Service::use_login(app, tool).await else {
-        return;
+    let describe = async {
+        let (account, method) = match tool {
+            "claude" => claude_account().await,
+            _ => codex_account(&file),
+        };
+        LoginAccount { account, method }
     };
-    if super::digest(&file) != Some(stamp) {
+    let Some(account) = app
+        .limits
+        .verify_login(app, tool, &home, stamp, describe)
+        .await
+    else {
         return;
-    }
-    let (account, method) = match tool {
-        "claude" => claude_account().await,
-        _ => codex_account(&file),
     };
     if super::digest(&file) == Some(stamp) {
         row["state"] = json!("valid");
         row["logged_in"] = json!(true);
-        row["account"] = json!(account);
-        row["method"] = json!(method);
+        row["account"] = json!(account.account);
+        row["method"] = json!(account.method);
     }
 }

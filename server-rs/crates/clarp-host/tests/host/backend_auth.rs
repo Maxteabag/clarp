@@ -570,6 +570,7 @@ fn account_status_verifies_current_logins_and_reports_configured_selectors() {
         &claude,
         r#"#!/bin/sh
 [ "$*" = "auth status --json" ] || exit 2
+echo status >> "$HOME/claude-asked"
 echo '{"loggedIn":true,"email":"claude@example.invalid","authMethod":"claude.ai"}'
 "#,
     );
@@ -647,8 +648,21 @@ printf 'gemini-3-flash\tGemini Flash\n'
     drop(following);
 
     let host = launch("select");
-    for _ in 0..2 {
+    for read in 0..2 {
+        let start = Instant::now();
         let account_status = host.get(path);
+        if read == 1 {
+            eprintln!(
+                "cached account status: {:.2} ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+        assert_eq!(row(&account_status, "claude")["method"], "claude.ai");
+        assert_eq!(
+            std::fs::read_to_string(home.join("claude-asked")).unwrap(),
+            "status\n",
+            "reading the same verified credential again must not start Claude",
+        );
         for (tool, account) in [
             ("claude", "claude@example.invalid"),
             ("codex", "codex@example.invalid"),
