@@ -89,7 +89,9 @@ plant(PAST, 'lookup', 'accept an indexed file outside the project store', 'confi
 plant(PAST, 'lookup', 'accept an external fallback beside the index', 'confined("claude", &root, &beside).is_none()', '!beside.is_file()')
 plant(PAST, 'lookup', 'accept an external unindexed transcript', 'confined("claude", &root, &path).is_some()', 'path.is_file()')
 plant(FORK, 'door', 'a refused fork source is reported as missing', 'past::claude_source(&root, &of, &name, true)\n            .map_err(|_| StatusCode::BAD_REQUEST)?', 'past::claude_source(&root, &of, &name, true)\n            .map_err(|_| StatusCode::NOT_FOUND)?')
-plant(AGENT, 'replay', 'adopting a historical binding bypasses validation', 'self.bind_session(backend_session.as_deref());', 'self.backend_session.clone_from(backend_session);')
+plant(AGENT, 'replay', 'adopting a historical binding bypasses validation',
+      'self.bind_session(backend_session.as_deref());\n                self.arrived = true;',
+      'self.backend_session.clone_from(backend_session);\n                self.arrived = true;')
 plant(AGENT, 'replay', 'a historical turn binds a rejected session', 'self.bind_session(Some(backend_session));','self.backend_session = Some(backend_session.clone());')
 plant(AGENT, 'door', 'taking up a historical session bypasses validation', '=> self.bind_session(Some(backend_session)),','=> self.backend_session = Some(backend_session.clone()),')
 if __name__ == '__main__':
