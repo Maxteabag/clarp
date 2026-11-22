@@ -38,17 +38,23 @@ pub(super) fn step(args: &[String]) -> Option<Step> {
             Step::Check("python -m pytest")
         }
         ("swift", Some("test")) => Step::Check("swift test"),
-        ("xcodebuild", _) if has(&["build", "archive", "install", "build-for-testing"]) => Step::Other,
-        ("xcodebuild", _) if has(&["test", "test-without-building"]) => Step::Check("xcodebuild test"),
+        ("xcodebuild", _) if has(&["build", "archive", "install", "build-for-testing"]) => {
+            Step::Other
+        }
+        ("xcodebuild", _) if has(&["test", "test-without-building"]) => {
+            Step::Check("xcodebuild test")
+        }
         ("make", Some("test-critical")) => Step::Check("make test-critical"),
         ("make", Some("test-guards")) => Step::Check("make test-guards"),
         ("final-pass", _) => Step::Check("final-pass"),
         ("build", Some("check")) if host_build => Step::Check("tools/build check"),
         ("build", Some("clippy")) if host_build => Step::Check("tools/build clippy"),
         ("build", Some("test")) if host_build => Step::Check("tools/build test"),
-        ("cargo" | "swift" | "xcodebuild" | "release_build.sh" | "install-host" | "install.sh" | "ssh", _) => {
-            Step::Other
-        }
+        (
+            "cargo" | "swift" | "xcodebuild" | "release_build.sh" | "install-host" | "install.sh"
+            | "ssh",
+            _,
+        ) => Step::Other,
         ("build", _) if host_build => Step::Other,
         _ => return None,
     })
@@ -93,7 +99,9 @@ pub(super) fn observe(
             }
         }
     }
-    let Some((name, elapsed)) = active else { return };
+    let Some((name, elapsed)) = active else {
+        return;
+    };
     let started = job.started_at_ms.max(now.saturating_sub(elapsed));
     let held = now.saturating_sub(started);
     if held > settings.release_hold_ms {
@@ -102,7 +110,9 @@ pub(super) fn observe(
             &job.id,
             format!(
                 "Registered kind {}. Active step {name} has held the release for {} min, since {}.",
-                job.kind, held / 60_000, clock(started, zone),
+                job.kind,
+                held / 60_000,
+                clock(started, zone),
             ),
         );
     }

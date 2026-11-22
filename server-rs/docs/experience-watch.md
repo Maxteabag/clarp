@@ -60,9 +60,10 @@ one notice on open and on clear, from `experience-watch`. A shared recipient
 gets one copy. `wait` and `sends` use the `queue` owner unless assigned
 separately. `app_crash_ios` and the other platform kinds fall back to
 `app_crash`. The front desk gets one summary during the configured local
-`summary_hour`. A missed hour is skipped. Notices and the admin command show the paired device name with its ID and use the Host's
-local timezone, with a UTC offset. JSON output also keeps the original
-epoch-millisecond timestamps.
+`summary_hour`. A missed hour is skipped. Notices and the admin command
+show the paired device name with its ID, or the agent's name and session.
+Timestamps use the Host's local timezone, with a UTC offset. JSON keeps
+the stable subject IDs and original epoch-millisecond timestamps.
 
 A release finding requires a running job registered as `check` or `test`
 and a recognized check step in that job's live worker process tree. Builds,

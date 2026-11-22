@@ -175,7 +175,9 @@ impl Source {
             Principal::Tools => "unknown",
         };
         let client = match principal {
-            Principal::Device { device_id, .. } => app.experience.client_metadata(device_id, headers),
+            Principal::Device { device_id, .. } => {
+                app.experience.client_metadata(device_id, headers)
+            }
             _ => telemetry_client(headers),
         };
         let (platform, build, contract) = match client {

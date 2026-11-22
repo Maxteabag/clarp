@@ -121,7 +121,10 @@ fn cards(seen: &mut Seen, settings: &Settings, directory: &Directory, now: i64) 
             {
                 count += 1;
                 oldest = oldest.max(age);
-                agents.insert(member.record.session.clone());
+                agents.insert(super::book::agent_label(
+                    &member.record.persona,
+                    &member.record.session,
+                ));
             }
         }
     }
@@ -373,7 +376,13 @@ mod tests {
         }))
         .unwrap();
         let command = |line: &str| {
-            release::step(&line.split_whitespace().map(str::to_owned).collect::<Vec<_>>()).unwrap()
+            release::step(
+                &line
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
         };
         let check = command("cargo check");
         let mut seen = Seen::default();
@@ -386,8 +395,12 @@ mod tests {
             "./tools/install-host",
         ] {
             release::observe(
-                &mut seen, settings, &job, &[(command(args), 14 * 60_000), (check, 14 * 60_000)],
-                now, zone,
+                &mut seen,
+                settings,
+                &job,
+                &[(command(args), 14 * 60_000), (check, 14 * 60_000)],
+                now,
+                zone,
             );
         }
         release::observe(&mut seen, settings, &job, &[(check, 60_000)], now, zone);
@@ -396,11 +409,25 @@ mod tests {
         for kind in ["release", "build", "install"] {
             let mut other = job.clone();
             other.kind = kind.into();
-            release::observe(&mut seen, settings, &other, &[(check, 14 * 60_000)], now, zone);
+            release::observe(
+                &mut seen,
+                settings,
+                &other,
+                &[(check, 14 * 60_000)],
+                now,
+                zone,
+            );
         }
         assert!(seen.found.is_empty());
 
-        release::observe(&mut seen, settings, &job, &[(check, 14 * 60_000)], now, zone);
+        release::observe(
+            &mut seen,
+            settings,
+            &job,
+            &[(check, 14 * 60_000)],
+            now,
+            zone,
+        );
         assert_eq!(
             seen.found[&("release".into(), job.id)],
             "Registered kind test. Active step cargo check has held the release for 14 min, since 2026-11-22 16:09 +01:00.",
@@ -431,6 +458,19 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let watched = app
+            .fleet
+            .create(clarp_protocol::requests::CreateAgentRequest {
+                name: "watch proof (test)".into(),
+                session: Some("watch-proof-test".into()),
+                backend: Some("scripted".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let agent_id = &watched.agent_id;
+        let agent_label = "watch proof (test) (watch-proof-test)";
         let directory = app.fleet.directory();
         let config: toml::Value = "enabled = true\nsummary_hour = 17\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\nwindow_minutes = 3\n".parse().unwrap();
         let settings = Settings::from_section(Some(&config));
@@ -540,7 +580,11 @@ mod tests {
         }
         place.clock.advance_ms(240_000);
         let counts = app.experience.relaunches(since, now);
-        assert!(!app.experience.relaunches(now - 180_000, now).contains_key(&proof_phone.device_id));
+        assert!(
+            !app.experience
+                .relaunches(now - 180_000, now)
+                .contains_key(&proof_phone.device_id)
+        );
         assert_eq!(counts[&phone.device_id].foreground_sessions, 2);
         assert_eq!(counts[&phone.device_id].legacy_requests, 0);
         let proof = &counts[&proof_phone.device_id];
@@ -596,7 +640,7 @@ mod tests {
 
         let mut book = Book::default();
         let mut seen = collect(&app, &settings, since, now).await;
-        agent(&mut seen, &settings, "worker", now, &facts, 0);
+        agent(&mut seen, &settings, agent_id, now, &facts, 0);
         book.reconcile(seen, &settings, &directory, &zone, now);
         assert_eq!(book.rows.len(), 3);
         assert_eq!(
@@ -645,7 +689,26 @@ mod tests {
         let wait = book.rows.iter().find(|row| row.kind == "wait").unwrap();
         assert!(wait.detail.contains("1 steered"));
         assert!(wait.detail.contains("1 still waiting"));
-        assert!(book.rows.iter().any(|row| row.kind == "queue"));
+        assert_eq!(&wait.subject, agent_id);
+        assert!(book.owed.iter().any(|owed| {
+            owed.text
+                .contains(&format!("wait opened for {agent_label}"))
+        }));
+        assert!(book.owed.iter().any(|owed| {
+            owed.text
+                .contains(&format!("queue opened for {agent_label}"))
+        }));
+        let mut historical_wait = serde_json::to_value(wait).unwrap();
+        for key in ["agent_id", "agent_name", "agent_session"] {
+            historical_wait.as_object_mut().unwrap().remove(key);
+        }
+        let historical_wait = serde_json::from_value(historical_wait).unwrap();
+        let shown =
+            super::super::render(vec![historical_wait], &settings, &directory, &zone, false);
+        assert!(shown.stdout.contains(agent_label));
+        let wait_json = rows.iter().find(|row| row["kind"] == "wait").unwrap();
+        assert_eq!(wait_json["agent_name"], watched.persona);
+        assert_eq!(wait_json["agent_session"], watched.session);
         assert!(
             book.owed
                 .iter()
@@ -655,13 +718,20 @@ mod tests {
             book.told(owed);
         }
 
-        let mut seen = collect(&app, &settings, settings.window_start(now + 1, now), now + 1).await;
-        agent(&mut seen, &settings, "worker", now + 1, &facts, 0);
+        let mut seen = collect(
+            &app,
+            &settings,
+            settings.window_start(now + 1, now),
+            now + 1,
+        )
+        .await;
+        agent(&mut seen, &settings, agent_id, now + 1, &facts, 0);
         book.reconcile(seen, &settings, &directory, &zone, now + 1);
         assert!(book.rows.iter().all(|row| row.count == 2));
         assert!(book.owed.is_empty());
 
         assert!(app.fleet.revoke(phone.device_id.clone()).await.unwrap());
+        assert!(app.fleet.remove(watched.session.clone()).await.unwrap());
         let directory = app.fleet.directory();
         let later = now + 3_600_000;
         let seen = collect(&app, &settings, settings.window_start(later, later), later).await;
@@ -680,6 +750,10 @@ mod tests {
                 .contains("3 opened, 3 cleared, 0 still open")
         );
         assert_eq!(book.owed.len(), 5);
+        assert!(book.owed.iter().any(|owed| {
+            owed.text
+                .contains(&format!("wait cleared for {agent_label}"))
+        }));
         let cleared = format!("cleared for {label} at 2026-11-22 17:23 +01:00");
         for owed in book
             .owed
@@ -729,24 +803,44 @@ mod tests {
         let broken = "ios/3099 contract=broken";
         for _ in 0..2 {
             assert_eq!(
-                request(Method::GET, "/server-info", &proof_phone.token, broken, None).await,
+                request(
+                    Method::GET,
+                    "/server-info",
+                    &proof_phone.token,
+                    broken,
+                    None
+                )
+                .await,
                 StatusCode::OK,
             );
         }
         let since = settings.window_start(after_hour, after_hour);
         let counts = app.experience.relaunches(since, after_hour);
         let proof = &counts[&proof_phone.device_id];
-        assert_eq!((proof.platform.as_str(), proof.legacy_requests), ("unknown", 2));
-        assert!(collect(&app, &settings, since, after_hour).await.found.is_empty());
+        assert_eq!(
+            (proof.platform.as_str(), proof.legacy_requests),
+            ("unknown", 2)
+        );
+        assert!(
+            collect(&app, &settings, since, after_hour)
+                .await
+                .found
+                .is_empty()
+        );
         let paired = crate::edge::Principal::Device {
             device_id: proof_phone.device_id.clone(),
             scope: crate::pairing::Scope::Limited,
         };
         header.insert("x-clarp-client", broken.parse().unwrap());
         let event = serde_json::json!({"event": "ios.crash", "level": "fatal"});
-        crate::client_events::record(&app, &paired, &header, &[event.clone(), event.clone(), event])
-            .await
-            .unwrap();
+        crate::client_events::record(
+            &app,
+            &paired,
+            &header,
+            &[event.clone(), event.clone(), event],
+        )
+        .await
+        .unwrap();
         let seen = collect(&app, &settings, since, after_hour).await;
         assert!(
             seen.found[&("app_crash_unknown".into(), proof_phone.device_id)]
