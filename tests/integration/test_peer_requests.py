@@ -148,9 +148,10 @@ def test_replies_that_cannot_belong_are_refused(host, tmp_path):
 
 def test_a_user_stop_pause_and_peer_messages(host, tmp_path):
     """Stop pauses the queue to hold its backlog. A plain user message runs
-    past it and leaves it; an explicitly queued agent send and a goal result
-    wait for the user's resume; a plain peer message, like any item that
-    starts with nothing held, ends the pause (and the log says so)."""
+    past it and ends it (the user carries on); after a second Stop an
+    explicitly queued agent send and a goal result wait for the user's resume;
+    a plain peer message, like any item that starts with nothing held, ends the
+    pause (and the log says so)."""
     no_goal = json.loads(cli(host, tmp_path, "request", "--to", "mike", "--from", "rachel",
                              "--text", "Check the build").stdout)["request_id"]
     p = create(host)
@@ -164,7 +165,9 @@ def test_a_user_stop_pause_and_peer_messages(host, tmp_path):
     host.request("/send", {"session": "rachel", "text": "Fresh user words", "client_msg_id": "u-fresh",
                            "synthesize_audio": False})
     host.wait_reply("rachel", "Fresh user words")
-    assert queue()["paused"] is True   # a plain user send does not lift the stop
+    assert queue()["paused"] is False  # the user's fresh message ends the Stop's pause
+    host.request("/stop", {"session": "rachel"})
+    assert queue()["paused"] is True
 
     held = host.request("/send", {"session": "rachel", "text": "Queued correction", "sender": "mike",
                                   "origin": "agent", "queue_if_busy": True,
