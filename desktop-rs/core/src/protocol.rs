@@ -66,6 +66,12 @@ pub struct Agent {
     /// (docs/notification-policy.md, "Quiet agents"). The Host's `quiet`;
     /// a Host older than contract 56 lacks it, so a janitor is quiet there.
     pub quiet: bool,
+    /// The `server_id` of the Host this agent moved to (`moved.to.id`), or
+    /// empty: a merged list leaves the row out when that Host is in it.
+    pub moved_to: String,
+    /// The Host the row belongs to, as a merged chat list names it; empty
+    /// while the list holds one Host's agents (`clarp_core::all_hosts`).
+    pub host: String,
 }
 
 impl Default for Agent {
@@ -115,6 +121,8 @@ impl Default for Agent {
             unread: false,
             janitor: false,
             quiet: false,
+            moved_to: String::new(),
+            host: String::new(),
         }
     }
 }
@@ -181,6 +189,15 @@ impl Agent {
             archived: !matches!(object.get("archived_at"), None | Some(Value::Null)),
             latest_state,
             unread: false,
+            moved_to: object
+                .get("moved")
+                .and_then(|m| m.get("to"))
+                .and_then(|to| to.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
+            host: String::new(),
         }
     }
 
