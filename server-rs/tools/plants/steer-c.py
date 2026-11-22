@@ -34,7 +34,7 @@ PLANTS = [
     (K, "stream", "the wrong field identifies a replay", 'nonempty(&event["uuid"])', 'nonempty(&event["session_id"])'),
     (K, "stream", "results lose their prompt UUIDs", 'event["user_message_uuids"]', 'event["uuid"]'),
     (A, "journal", "the first echo records the same read twice", "join.stage = Stage::Read(*at_ms);", "join.stage = Stage::Pending;"),
-    (A, "journal", "a finished tool still holds its unread follow-ups", "Turn::Settled(ended) => {\n                    self.joins.clear();", "Turn::Settled(ended) => {"),
+    (A, "journal", "a finished tool still holds its unread follow-ups", "                    self.joins.clear();\n                    self.settled += 1;", "                    self.settled += 1;"),
     (J, "journal", "the joined user row is never entered", "self.enter(*turn, join.message_seq, now_ms);", "let _ = (turn, join);"),
     (J, "journal", "the host lets a user edit the text already offered to stdin", "if self.agent.joins().contains_key(&turn) {", "if !self.agent.joins().contains_key(&turn) {"),
     (C, "host", "a different UUID is taken as this echo", "follow.join.uuid == uuid && follow.stage == Stage::Pending", "follow.join.uuid != uuid && follow.stage == Stage::Pending"),
