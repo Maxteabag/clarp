@@ -27,6 +27,7 @@ impl Engine {
     /// The chat's Stop line ("" when none): what the last Stop did, who
     /// stopped it and why.
     pub fn stop_notice(&self, session: &str) -> String {
+        on_peer!(self.peer_ref(session), |engine, local| engine.stop_notice(local));
         let Some((receipt, _)) = self.stops.receipts.get(session) else { return String::new() };
         let name = |s: &str| self.roster.find(s).map(|a| display_name(a).to_owned());
         match receipt.said(&name) {

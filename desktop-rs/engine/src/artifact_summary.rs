@@ -135,6 +135,9 @@ impl Engine {
 
     /// Where the artifact's omitted body stands.
     pub fn artifact_hydration(&self, artifact_id: &str) -> Hydration {
+        if let Some(peer) = self.owner_ref(artifact_id) {
+            return peer.map_or(Hydration::Unknown, |(engine, _)| engine.artifact_hydration(artifact_id));
+        }
         let s = &self.artifact_summary;
         if s.gone.contains(artifact_id) {
             return Hydration::Gone;
@@ -159,6 +162,7 @@ impl Engine {
 
     /// `GET /artifacts/<id>` hydrations sent for this artifact.
     pub fn artifact_hydrations_sent(&self, artifact_id: &str) -> u64 {
+        on_peer!(self.owner_ref(artifact_id), |engine, _local| engine.artifact_hydrations_sent(artifact_id));
         self.artifact_summary.sent.get(artifact_id).copied().unwrap_or(0)
     }
 
@@ -168,6 +172,9 @@ impl Engine {
     /// history): reads what its row left out unless it is already there or
     /// on its way. Asking again after a failure retries.
     pub fn need_artifact(&mut self, artifact_id: &str) -> Hydration {
+        if let Some(peer) = self.owner_mut(artifact_id) {
+            return peer.map_or(Hydration::Unknown, |(engine, _)| engine.need_artifact(artifact_id));
+        }
         if artifact_id.is_empty() {
             return Hydration::Unknown;
         }
@@ -185,6 +192,7 @@ impl Engine {
 
     /// The view that needed it is done with it.
     pub fn release_artifact(&mut self, artifact_id: &str) {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.release_artifact(artifact_id));
         self.artifact_summary.wanted.remove(artifact_id);
         if self.artifact_summary.unpinned.remove(artifact_id).is_some() {
             self.reconcile_artifacts();

@@ -526,6 +526,7 @@ impl Engine {
     }
 
     pub fn release_agent(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.release_agent(local));
         if session.is_empty() {
             return;
         }
@@ -534,20 +535,24 @@ impl Engine {
     }
 
     pub fn set_agent_heartbeat(&mut self, session: &str, enabled: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_agent_heartbeat(local, enabled));
         self.post_agent_setting(session, "/agent-heartbeat", json!({"session": session, "heartbeat_enabled": enabled}));
     }
 
     pub fn set_agent_dreaming(&mut self, session: &str, enabled: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_agent_dreaming(local, enabled));
         self.post_agent_setting(session, "/agent-dreaming", json!({"session": session, "dreaming_enabled": enabled}));
     }
 
     pub fn set_agent_push_muted(&mut self, session: &str, muted: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_agent_push_muted(local, muted));
         self.post_agent_setting(session, "/agent-mute", json!({"session": session, "muted": muted}));
     }
 
     /// Display name only: session and agent ids are stable, so the chat and
     /// every pairing survive a rename.
     pub fn rename_agent(&mut self, session: &str, name: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.rename_agent(local, name));
         let name = name.trim();
         if session.is_empty() || name.is_empty() {
             return;
@@ -556,10 +561,12 @@ impl Engine {
     }
 
     pub fn archive_agent(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.archive_agent(local));
         self.set_agent_archived(session, true);
     }
 
     pub fn set_agent_archived(&mut self, session: &str, archived: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_agent_archived(local, archived));
         self.post_agent_setting(session, "/agent-archive", json!({"session": session, "archived": archived}));
     }
 
@@ -571,20 +578,24 @@ impl Engine {
     }
 
     pub fn set_agent_llm(&mut self, session: &str, model: &str, effort: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_agent_llm(local, model, effort));
         self.post_agent_setting(session, "/agent-llm", json!({"session": session, "model": model, "effort": effort}));
     }
 
     pub fn compact_session(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.compact_session(local));
         self.post_agent_setting(session, "/compact", json!({"session": session}));
     }
 
     pub fn set_agent_mcp(&mut self, session: &str, servers: &[String]) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_agent_mcp(local, servers));
         self.post_agent_setting(session, "/agent-mcp", json!({"session": session, "mcp_servers": servers}));
     }
 
     /// Sends a failed message again under its own id, in place, so the Host
     /// launches it once (or answers a started one without a second turn).
     pub fn retry_failed_message(&mut self, session: &str, message_id: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.retry_failed_message(local, message_id));
         self.resend_failed(session, message_id);
     }
 
@@ -594,8 +605,7 @@ impl Engine {
             return;
         }
         let failed = self
-            .conversations
-            .get(&self.selected)
+            .conversation(&self.selected)
             .and_then(|c| c.rows().iter().rev().find(|r| r.delivery_failed).map(|r| r.id.clone()));
         if let Some(id) = failed {
             let session = self.selected.clone();
@@ -610,6 +620,7 @@ impl Engine {
     }
 
     pub fn load_assignment_contacts(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_assignment_contacts(local));
         self.launch.assignment_session = session.to_owned();
         self.launch.assignment_contacts.clear();
         self.changes.push(Change::Launch);
@@ -618,10 +629,12 @@ impl Engine {
 
     /// Asks the UI to offer contact assignment for a chat.
     pub fn request_contact_assignment(&mut self, session: &str, automatic: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.request_contact_assignment(local, automatic));
         self.changes.push(Change::AssignmentRequested { session: session.to_owned(), automatic });
     }
 
     pub fn assign_contact(&mut self, session: &str, mode: &str, name: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.assign_contact(local, mode, name));
         if session.is_empty() || !self.connected {
             self.set_error("Connect and select an agent before assigning a contact");
             return;
@@ -639,6 +652,7 @@ impl Engine {
 
     /// The agent's working directory on this desktop, when it exists here.
     pub fn local_agent_directory(&self, session: &str) -> Option<std::path::PathBuf> {
+        on_peer!(self.peer_ref(session), |engine, local| engine.local_agent_directory(local));
         let path = self.roster.find(session).map(|a| a.working_directory.clone()).unwrap_or_default();
         let canonical = std::fs::canonicalize(&path).ok().filter(|_| !path.is_empty())?;
         canonical.is_dir().then_some(canonical)
@@ -647,6 +661,7 @@ impl Engine {
     /// Opens the agent's own CLI, resuming its conversation, in the default
     /// terminal; only when this desktop shares the Host's filesystem.
     pub fn open_agent_terminal(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.open_agent_terminal(local));
         if !self.shared_filesystem() {
             self.set_error("The native CLI requires this desktop and Host to share the local filesystem");
             return;
