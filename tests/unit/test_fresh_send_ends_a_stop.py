@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from lib import agents as agents_db
-from lib import turn_queue
+from lib import db, turn_queue
 from lib import turn_dispatch as td
 
 from test_drain_pause_parity import World
@@ -85,15 +85,18 @@ def test_a_stop_with_nothing_after_it_stays_in_force_across_a_restart(tmp_path):
 
 def _shown_row(world, cid, *, turn: str | None):
     """A queue row whose conversation row is written (shown), with a turn under its
-    trace that is ended ('ended'), open ('open') or none."""
+    trace that is ended ('ended'), open ('open') or none. An open turn started just
+    now: one that started long ago with no sign of a backend is a launch that never
+    started, which the R193 repair ends failed (turn_queue.unlaunched_shown)."""
     turn_queue.enqueue(queue_id=cid, agent_id=world.agent, session="mike", text=cid,
                        trace_id=f"t-{cid}", client_msg_id=cid, synthesize_audio=False,
                        origin="agent", sender_agent_id="other-agent", shown=True)
     if turn is not None:
         agents_db.conn().execute(
             "INSERT INTO turns (agent_id, source, trace_id, started_at, ended_at, settled_at, outcome)"
-            " VALUES (?, 'pwa', ?, 1, ?, ?, ?)",
-            (world.agent, f"t-{cid}", 2 if turn == "ended" else None,
+            " VALUES (?, 'pwa', ?, ?, ?, ?, ?)",
+            (world.agent, f"t-{cid}", 1 if turn == "ended" else db.now_ms(),
+             2 if turn == "ended" else None,
              2 if turn == "ended" else None, "completed" if turn == "ended" else None))
 
 
