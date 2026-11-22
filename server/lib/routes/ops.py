@@ -23,17 +23,44 @@ from lib.request_texts import body_text
 
 
 class OpsRoutes:
+    def _client_device(self) -> str:
+        """Who posted, for the client event store: the paired device's id, 'administrator', or
+        'local' (a Host without a token, from this machine)."""
+        principal = str(getattr(self, "_request_principal", "") or "")
+        return principal or ("local" if getattr(self, "_request_is_local", False) else "unknown")
+
+    def _client_triple(self):
+        from lib.server_identity import CLIENT_HEADER, parse_client_header
+        parsed = parse_client_header(self.headers.get(CLIENT_HEADER)) or {}
+        return (str(parsed.get("platform") or ""), str(parsed.get("build") or ""),
+                parsed.get("contract") if parsed else None)
+
+    def _keep_client_events(self, items) -> int:
+        """Every /clog batch and crash report goes into the bounded store, whatever the
+        diagnostics setting says (lib.client_events). 0 when it could not be kept."""
+        from lib import client_events, server_identity
+        try:
+            return client_events.record(items, device=self._client_device(), client=self._client_triple(),
+                                        server_id=server_identity.server_id())
+        except Exception as e:  # noqa: BLE001 - the app keeps its evidence and sends it again
+            log_exception("clientEventsKeepFail", e)
+            return 0
+
     def _handle_clog(self):
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
-        from lib import diagnostics_settings
-        if not diagnostics_settings.accepts_client_uploads():
-            return self._json_ok({"ok": True, "captured": False})
         # Accept either a single event {event, detail, ...} or a batch
         # {events: [...]}. Batched form keeps the PWA from spamming one
         # request per state transition.
         items = data.get("events") if isinstance(data.get("events"), list) else [data]
+        # Kept always, bounded (feature client_events_kept). `captured` says the Host kept the
+        # batch: an app keeps a batch it was refused (captured false) and sends it again.
+        kept = self._keep_client_events(items)
+        captured = kept > 0 or not any(isinstance(it, dict) for it in items)
+        from lib import diagnostics_settings
+        if not diagnostics_settings.accepts_client_uploads():
+            return self._json_ok({"ok": True, "captured": captured, "kept": kept, "full_capture": False})
 
         # Legacy line-based file (humans still read it) — single combined append.
         log_path = pathlib.Path(os.environ.get(
@@ -86,7 +113,23 @@ class OpsRoutes:
                 )
             except Exception as e:
                 log_exception("clogEmitFail", e)
-        self._json_ok({"ok": True})
+        self._json_ok({"ok": True, "captured": True, "kept": kept, "full_capture": True})
+
+    def _handle_client_log(self):
+        """GET /client-log (full scope only): the bounded client event store, newest last.
+        Query: device, since (ms since the epoch, or 30m / 2h / 7d back), level (error includes
+        worse), event, limit (default 200, at most 5000)."""
+        from lib import client_events
+        query = self._query()
+        first = lambda name: (query.get(name, [""])[0] or "").strip()
+        try:
+            since = client_events.parse_since(first("since"))
+            limit = int(first("limit") or 200)
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        rows = client_events.read(device=first("device"), since_ms=since, level=first("level"),
+                                  event=first("event"), limit=limit)
+        return self._json_ok({"events": rows, "count": len(rows)})
 
     def _handle_crash(self):
         """Receive a MetricKit diagnostic payload from the iOS app.
@@ -106,6 +149,10 @@ class OpsRoutes:
             blob = json.dumps(data, indent=2)
             out.write_text(blob)
             counts = diagnostic_counts(data)
+            # A crash report is always kept in the client event store too (its counts and file).
+            self._keep_client_events([{
+                "event": "metrickit_report", "level": "fault" if counts["crashes"] or counts["hangs"] else "info",
+                "detail": {"file": out.name, "bytes": len(blob), **counts}}])
             eventlog.emit(
                 "server",
                 "iosDiagnosticReport",

@@ -531,6 +531,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/server-update": "_handle_server_update_status",
         "/turn-queue": "_handle_turn_queue",
         "/agents/snapshot": "_handle_snapshot",
+        "/client-log": "_handle_client_log",
         "/peers/snapshot": "_handle_peers_snapshot",
         "/agents/archived": "_handle_archived_agents",
         "/agent-conversations": "_handle_agent_conversations",
@@ -1263,7 +1264,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers", "/network/", "/server-terminal",
-        "/oracle/", "/agent-file", "/janitor-runs/", "/calls",
+        "/oracle/", "/agent-file", "/janitor-runs/", "/calls", "/client-log",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
