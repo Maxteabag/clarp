@@ -576,7 +576,8 @@ async fn publish_render_spec(app: &App, call: &ToolCall, rest: &[String]) -> Too
         Err(error) => return failed(unread(&error, file)),
     };
     let validate_only = parsed.flags.contains("--validate-only");
-    match library::posted(app, &bytes, validate_only, false, turn(call)).await {
+    let access = crate::render_spec::Access::default();
+    match library::posted(app, &bytes, validate_only, access, turn(call)).await {
         Ok((_, answer)) => ToolAnswer::printed(0, answer.to_string()),
         Err(error) => {
             let response = error.into_response();
