@@ -82,7 +82,8 @@ from .agent_ring_openings import (  # noqa: E402,F401  (split_apply: agent-rings
     greeting_routed, greeting_admitted, admit_initiative, _admit_after_resolve, claim_initiative,
     release_unsent, authorize_parked_launch, resolve_launch_failure, resolve_stale_claims,
     _recover_one, recover_openings, _retire_where, retire_for_call, retire_for_principal,
-    _announce_opening, _opening_for_trace, opening_audio, skip_opening_synthesis,
+    _announce_opening, _opening_for_clip, opening_audio, skip_opening_synthesis,
+    purge_retired_openings,
 )
 # ---- reads -----------------------------------------------------------------
 

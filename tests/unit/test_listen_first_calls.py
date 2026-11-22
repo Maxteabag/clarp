@@ -762,20 +762,20 @@ def test_opening_audio_is_tagged_and_ordinary_follow_ups_are_not(env):
     rings.admit_initiative(ring["ring_id"])
     _dispatch(ring["ring_id"])
     initiative_trace = _state(ring["ring_id"])["intent"]["trace_id"]
-    tag = rings.opening_audio(initiative_trace)
+    tag = rings.opening_audio(initiative_trace, "a-theo")
     assert tag == {"call_id": op["call_id"], "opening": {
         "ring_id": ring["ring_id"], "token": op["token"], "epoch": 1, "kind": "initiative",
         "admission_id": f"call-open:{ring['ring_id']}:1"}}
-    assert rings.opening_audio("tr-ordinary") is None
-    assert rings.skip_opening_synthesis(initiative_trace) is False
+    assert rings.opening_audio("tr-ordinary", "a-theo") is None
+    assert rings.skip_opening_synthesis(initiative_trace, "a-theo") is False
 
 
 def test_a_greeting_reply_is_tagged_with_its_message_id(env):
     ring, op = _answered()
     _greet(op, client_msg_id="u-hallo", trace_id="tr-greet")
-    tag = rings.opening_audio("tr-greet")
+    tag = rings.opening_audio("tr-greet", "a-theo")
     assert tag["opening"]["kind"] == "greeting_reply" and tag["opening"]["admission_id"] == "u-hallo"
-    assert rings.skip_opening_synthesis("tr-greet") is False
+    assert rings.skip_opening_synthesis("tr-greet", "a-theo") is False
 
 
 def test_initiative_synthesis_is_skipped_once_superseded_or_retired(env):
@@ -784,17 +784,17 @@ def test_initiative_synthesis_is_skipped_once_superseded_or_retired(env):
     _dispatch(ring["ring_id"])
     trace = _state(ring["ring_id"])["intent"]["trace_id"]
     _greet(op, trace_id="tr-after")                         # a greeting arrived after start
-    assert rings.skip_opening_synthesis(trace) is True
-    assert rings.skip_opening_synthesis("tr-after") is False   # ordinary utterance, not an opening
+    assert rings.skip_opening_synthesis(trace, "a-theo") is True
+    assert rings.skip_opening_synthesis("tr-after", "a-theo") is False   # ordinary utterance, not an opening
     calls.end(PHONE)                                         # retire after commit still fences
-    assert rings.skip_opening_synthesis(trace) is True
+    assert rings.skip_opening_synthesis(trace, "a-theo") is True
 
 
 def test_a_retired_greeting_reply_is_skipped_too(env):
     ring, op = _answered()
     _greet(op, trace_id="tr-greet")
     calls.end(PHONE)
-    assert rings.skip_opening_synthesis("tr-greet") is True
+    assert rings.skip_opening_synthesis("tr-greet", "a-theo") is True
 
 
 # ---- the CLI ------------------------------------------------------------------------
@@ -836,7 +836,7 @@ def test_the_tts_worker_tags_opening_clips_and_skips_fenced_ones(env, tmp_path, 
                                  "kind": "greeting_reply", "admission_id": "u-hallo"}
     assert "opening" not in plain and "call_id" not in plain
     calls.end(PHONE)
-    assert tts_worker._opening_fenced("tr-greet") is True and tts_worker._opening_fenced("tr-other") is False
+    assert tts_worker._opening_fenced("tr-greet", "a-theo") is True and tts_worker._opening_fenced("tr-other", "a-theo") is False
 
 
 # ---- §11.H: a withdrawal that affects no row proves nothing -----------------------------
@@ -1845,3 +1845,65 @@ def test_a_reanswer_after_a_failed_compensation_end_adopts_the_live_call(env):
     assert first["state"] == "live" and _stored_ring(ring["ring_id"])["state"] == "ringing"
     out = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
     assert out["call"]["call_id"] == first["call_id"] and len(_calls_of()) == 1
+
+
+# ---- R77/R78: clips bound by agent and turn, retired openings removed -----------------------
+
+def test_a_clip_is_bound_by_agent_and_turn_not_by_the_trace_alone(env):
+    """R77: the Host binds a clip to an opening at admission, by the admitted agent and its
+    turn, and keeps the binding in the opening's record. Another agent's message carrying the
+    same trace is an ordinary clip: untagged and never fenced."""
+    ring, op = _answered()
+    _greet(op, trace_id="tr-shared")
+    assert _state(ring["ring_id"])["clip_bindings"]["greeting_reply"] == {
+        "agent_id": "a-theo", "trace_id": "tr-shared"}
+    assert rings.opening_audio("tr-shared", "a-theo")["opening"]["kind"] == "greeting_reply"
+    assert rings.opening_audio("tr-shared", "a-mike") is None
+    assert rings.skip_opening_synthesis("tr-shared", "a-mike") is False
+    assert rings.opening_audio("tr-shared") is None          # no agent, no binding
+
+
+def test_a_later_binding_of_the_same_trace_neither_takes_nor_loses_the_first(env):
+    from lib import agent_ring_openings as openings
+    ring, op = _answered()
+    _greet(op, trace_id="tr-shared")
+    openings._bind_clip({"agent_id": "a-theo", "ring_id": "ring-later"}, "initiative", "tr-shared")
+    assert rings.opening_audio("tr-shared", "a-theo")["opening"]["ring_id"] == ring["ring_id"]
+
+
+def test_an_ordinary_clip_costs_one_keyed_read(env):
+    """R78: every spoken clip walked all stored openings; an ordinary one now reads one key."""
+    ring, op = _answered()
+    _greet(op, trace_id="tr-greet")
+    calls.end(PHONE)
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        assert rings.opening_audio("tr-ordinary", "a-theo") is None
+        assert rings.skip_opening_synthesis("tr-ordinary", "a-theo") is False
+    finally:
+        db.conn().set_trace_callback(None)
+    assert len(statements) == 2 and all("agent_ring.opening_clip.a-theo:tr-ordinary" in s
+                                        for s in statements), statements
+
+
+def test_a_retired_opening_is_removed_a_day_after_its_call_ended(env):
+    """R78: retired openings stayed in the settings table for good. One whose call has ended
+    is removed RETIRED_KEEP_MS after it retired, with its clip binding; not before, and not
+    while its call is still live."""
+    from lib import agent_ring_openings as openings, settings_store
+    ring, op = _answered()
+    _greet(op, trace_id="tr-old")
+    calls.end(PHONE)
+    assert _state(ring["ring_id"])["retired"]
+    day = openings.RETIRED_KEEP_MS
+    assert rings.purge_retired_openings(env.clock.now + day - 1) == 0
+    assert rings.purge_retired_openings(env.clock.now + day + 1) == 1
+    assert _state(ring["ring_id"]) is None
+    assert settings_store.get(openings.CLIP_KEY + "a-theo:tr-old") is None
+    assert rings.opening_audio("tr-old", "a-theo") is None
+    env.clock.now += 3_600_000                                # past the call-again wait
+    live_ring, _live = _answered()                            # its call is still live
+    rings._retire_where(lambda o: o["ring_id"] == live_ring["ring_id"], "test")
+    assert rings.purge_retired_openings(env.clock.now + 2 * day) == 0
+    assert _state(live_ring["ring_id"]) is not None
