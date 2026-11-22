@@ -898,3 +898,20 @@ def test_only_a_pending_delivery_is_delivered_or_cancelled(tmp_path, monkeypatch
     assert tuple(status(ids[0])) == ("delivered", 5_000_000_000_000)
     assert tuple(status(ids[1])) == ("cancelled", None)
     assert artifacts.DECISION_DELIVERY.decide("pending", "deliver") == "delivered"
+
+
+def test_the_first_wrong_field_refused_follows_the_declared_order():
+    """R103: with two payload fields of the wrong type, the one refused is the one the schema
+    declares first, whatever order the payload gives them in and in every process (it was a set
+    intersection, whose order follows the hash seed)."""
+    import pytest
+    from lib import artifacts as module
+    pairs = [("url", "conclusion"), ("mime_type", "diff"), ("duration_ms", "completed_steps")]
+    for first, second in pairs:
+        bad = {first: 1, second: 1} if first in module._STRING_FIELDS else {first: "x", second: "x"}
+        for payload in (bad, dict(reversed(list(bad.items())))):
+            with pytest.raises(ValueError, match=f"payload {first} must be"):
+                module._payload(payload)
+    # Across the two lists, strings are checked before integers, as before.
+    with pytest.raises(ValueError, match="payload conclusion must be a string"):
+        module._payload({"completed_steps": "x", "conclusion": 1})

@@ -3,7 +3,7 @@
 Call before pagination with one snapshot clock. Receipts are exact-identity scoped.
 Legacy missing purpose preserves visibility until explicitly classified.
 """
-from datetime import datetime
+
 
 def project(row: dict, *, now_ms: int, policy: str | None = None, retention_hours: int | None = None,
             receipts: tuple = (), archives: tuple = ()) -> dict:
@@ -26,9 +26,8 @@ def project(row: dict, *, now_ms: int, policy: str | None = None, retention_hour
         bucket = 'unsupported'
     else:
         try:
-            raw = row['target_at']
-            target = datetime.fromisoformat(raw.replace('Z', '+00:00'))
-            if target.tzinfo is None: raise ValueError('offset required')
+            from .moments import read_moment
+            target = read_moment(row['target_at'])   # the reader publishing uses (R104)
             elapsed = now_ms - int(target.timestamp() * 1000)
         except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
             bucket, phase = 'correction', 'invalid_target'
