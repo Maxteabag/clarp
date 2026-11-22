@@ -168,7 +168,7 @@ with its port (19 Nov 2026).
 
 | What | The Python Host | The Rust Host | Why |
 |---|---|---|---|
-| Default render-spec support for the native desktop | the reference needs a desktop entry in `render_spec_min_contract` | `desktop` gets v1 from client contract 1 | The native desktop can read and answer v1 forms at cut-over. |
+| Default render-spec support for the native desktop | the reference needs desktop entries in `render_spec_min_contract` and `render_spec_v2_min_contract` | `desktop` gets v1 from client contract 1 and v2 from 2 | Each desktop build gets the form versions it supports. |
 | Default render-spec v2 support for iOS | the reference needs an iOS entry in `render_spec_v2_min_contract` | `ios` gets v2 from client contract 87 | iOS build 3028 supports v2. |
 | When an external edit of the voice names file is visible (PR 498) | the next read of the file's metadata can see the change | the Host publishes the names at startup and in the background refresh | The profile reads the published names and content hash together, with no file read on the request path. |
 | An ElevenLabs voice label already fetched by a picker (PR 498) | live picker cache takes precedence over the file | the bundled ElevenLabs picker has no live fetch cache, so the stored names take precedence over bundled labels | Cartesia still overlays its in-memory picker names over disk. |
