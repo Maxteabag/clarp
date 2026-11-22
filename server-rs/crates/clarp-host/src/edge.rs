@@ -2670,7 +2670,10 @@ fn sender_by_id(app: &App, agent_id: &str) -> Option<Sender> {
 /// Who wrote a message that says it comes from another agent.
 pub(crate) fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
     let directory = app.fleet.directory();
-    let name = sender_named(named)?;
+    let name = python::strip(sender_named(named)?);
+    if name.is_empty() {
+        return None;
+    }
     // An agent of the roster, or a janitor: a janitor's own turn may write to an agent.
     let known = directory.anyone(name);
     Some(match known {
@@ -2694,7 +2697,7 @@ async fn send(
     headers: HeaderMap,
     Json(request): Json<SendRequest>,
 ) -> Response {
-    let made = match made_by(&app, &headers, &request).await {
+    let made = match made_by(&app, &principal, &headers, &request).await {
         Ok(made) => made,
         Err(why) => return why.into_response(),
     };
@@ -2705,13 +2708,15 @@ async fn send(
 /// that names itself, and whether it named its trace (the Python Host's PR 482).
 async fn made_by(
     app: &App,
+    principal: &Principal,
     headers: &HeaderMap,
     request: &SendRequest,
 ) -> Result<crate::coordination::Made, ApiError> {
     let named = request.trace_id.as_deref().map(python::strip);
     let trace_named = named.is_some_and(|trace| !trace.is_empty());
     let peer = crate::coordination::from_a_peer(headers);
-    crate::coordination::made(app, turn_of(headers), peer, trace_named).await
+    let owner_token = has_owner_token(app, principal);
+    crate::coordination::made(app, turn_of(headers), peer, trace_named, owner_token).await
 }
 
 /// `POST /orchestrator/route-delegation`: a message the app could not tell the agent of. It
@@ -2723,7 +2728,7 @@ async fn route_delegation(
     Json(mut request): Json<SendRequest>,
 ) -> Response {
     request.orchestrator_fallback = Some(true);
-    let made = match made_by(&app, &headers, &request).await {
+    let made = match made_by(&app, &principal, &headers, &request).await {
         Ok(made) => made,
         Err(why) => return why.into_response(),
     };
@@ -2859,7 +2864,7 @@ async fn sent_from(
         };
         // In a call, nobody but those of the call who can take speech can be meant.
         let only = in_call.as_ref().map(|(_, reachable)| reachable.as_slice());
-        match crate::router::route(app, &request, &trace, &asked, only).await {
+        match crate::router::route(app, &request, &trace, &asked, only, made).await {
             Ok(crate::router::Routed::NotMine) => {}
             Ok(crate::router::Routed::Answered(status, answer)) => {
                 if let (Some((caller, _)), true) = (&in_call, answer.ok) {
@@ -3026,18 +3031,39 @@ async fn send_as(
     // another as its sender; a peer Host forwards only its agents' messages; and an agent
     // waking itself from its own turn is automation.
     let (caller, caller_session) = made.turn.clone().unwrap_or_default();
-    let principal = coordination::principal(
+    let known_sender = sender_known(app, request.sender.as_ref());
+    let provided = sender_named(request.sender.as_ref())
+        .map(python::strip)
+        .filter(|name| !name.is_empty());
+    let foreign = provided.filter(|_| {
+        made.owner_token && made.turn.is_none() && !made.peer && known_sender.is_empty()
+    });
+    let mut principal = coordination::principal(
         &member.record.agent_id,
-        &sender_known(app, request.sender.as_ref()),
+        &known_sender,
         &caller,
         caller_session.as_deref(),
     )
     .map_err(crate::coordination::refused)?;
-    let sender = sender(app, request.sender.as_ref()).or_else(|| {
-        (!principal.sender_agent_id.is_empty())
-            .then(|| sender_by_id(app, &principal.sender_agent_id))
-            .flatten()
-    });
+    let mut claimed = request.sender.as_ref();
+    if caller_session.is_some() && known_sender.is_empty() && provided.is_some() {
+        // A foreign label cannot stand in for a local agent with a verified turn.
+        claimed = None;
+        principal.sender_agent_id.clone_from(&caller);
+    }
+    let sender = if let Some(name) = foreign {
+        Some(Sender {
+            agent_id: String::new(),
+            name: name.to_owned(),
+            session: name.to_owned(),
+        })
+    } else {
+        sender(app, claimed).or_else(|| {
+            (!principal.sender_agent_id.is_empty())
+                .then(|| sender_by_id(app, &principal.sender_agent_id))
+                .flatten()
+        })
+    };
     if let Some(sender) = &sender
         && app
             .fleet
@@ -3072,6 +3098,8 @@ async fn send_as(
             return Err(ApiError::plain(StatusCode::CONFLICT, team::NUDGE_DISABLED));
         }
         LEADER_TICK.to_owned()
+    } else if foreign.is_some() {
+        "agent".to_owned()
     } else {
         coordination::origin(request.origin.as_deref(), &principal, made.peer)
     };
@@ -3122,7 +3150,8 @@ async fn send_as(
     // A message from another agent of this Host never takes a running turn's place either:
     // it waits behind it like one left for later, and a Stop that came before does not hold
     // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).
-    let from_peer = matches!(&origin, Origin::Agent { agent_id } if !agent_id.is_empty());
+    let from_peer = foreign.is_some()
+        || matches!(&origin, Origin::Agent { agent_id } if !agent_id.is_empty());
     let admission = match (request.queue_if_busy.unwrap_or(false), by_a_person) {
         (false, _) if from_peer => Admission::Later,
         (false, _) => Admission::Queue,
@@ -3343,9 +3372,18 @@ async fn select(
 
 // ---- background jobs, and the agents' own tools ----------------------------------------------
 
+fn has_owner_token(app: &App, principal: &Principal) -> bool {
+    matches!(principal, Principal::Administrator) && !app.config.auth_token.is_empty()
+}
+
 /// An agent's own tool, calling its Host.
-async fn run_tool(State(app): State<App>, Json(call): Json<ToolCall>) -> Json<ToolAnswer> {
-    Json(tools::run(&app, &call).await)
+async fn run_tool(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Json(call): Json<ToolCall>,
+) -> Json<ToolAnswer> {
+    let owner_token = has_owner_token(&app, &principal);
+    Json(tools::run(&app, &call, owner_token).await)
 }
 
 /// Every job the Host knows that is worth showing, with the agent it belongs to.
