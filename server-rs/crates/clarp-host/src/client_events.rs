@@ -129,12 +129,33 @@ fn text(value: &Value, field: &str, fallback: &str) -> String {
 
 /// Telemetry also accepts the legacy semicolon separator. Capability
 /// negotiation still uses its own strict header validation.
-pub(crate) fn telemetry_header(header: &str) -> Cow<'_, str> {
+fn telemetry_header(header: &str) -> Cow<'_, str> {
     if let Some((client, contract)) = header.split_once(';') {
         Cow::Owned(format!("{} {}", client.trim_end(), contract.trim_start()))
     } else {
         Cow::Borrowed(header)
     }
+}
+
+pub(crate) struct TelemetryClient {
+    pub platform: String,
+    pub build: String,
+    pub contract: i64,
+}
+
+pub(crate) fn telemetry_client(headers: &HeaderMap) -> Result<Option<TelemetryClient>, ()> {
+    let Some(value) = headers.get("x-clarp-client") else {
+        return Ok(None);
+    };
+    let header = telemetry_header(value.to_str().map_err(|_| ())?);
+    let (platform, contract) = clarp_kernel::client::named(&header).ok_or(())?;
+    let (_, tail) = header.split_once('/').ok_or(())?;
+    let (build, _) = tail.split_once(' ').ok_or(())?;
+    Ok(Some(TelemetryClient {
+        platform: platform.to_ascii_lowercase(),
+        build: build.to_owned(),
+        contract,
+    }))
 }
 
 struct Source {
@@ -153,24 +174,21 @@ impl Source {
             Principal::Device { device_id, .. } => device_id,
             Principal::Tools => "unknown",
         };
-        let header = telemetry_header(crate::render_spec::client(headers).unwrap_or_default());
-        let mut words = header.split_whitespace();
-        let first = words.next().unwrap_or_default();
-        let (client, build) = first.split_once('/').unwrap_or((first, ""));
-        let contract = (!client.is_empty()).then(|| {
-            words
-                .filter_map(|word| word.strip_prefix("contract="))
-                .next_back()
-                .and_then(|raw| raw.parse::<i64>().ok())
-                .unwrap_or_default()
-                .max(0)
-        });
+        let client = match principal {
+            Principal::Device { device_id, .. } => app.experience.client_metadata(device_id, headers),
+            _ => telemetry_client(headers),
+        };
+        let (platform, build, contract) = match client {
+            Ok(Some(client)) => (client.platform, client.build, Some(client.contract)),
+            Ok(None) => (String::new(), String::new(), None),
+            Err(()) => ("unknown".to_owned(), String::new(), None),
+        };
         let cap =
             |text: &str, most| clarp_kernel::python::first(&redact_text(text), most).to_owned();
         Self {
             device: cap(label, 120),
-            client: cap(&client.to_lowercase(), 32),
-            build: cap(if client.is_empty() { "" } else { build }, 80),
+            client: cap(&platform, 32),
+            build: cap(&build, 80),
             contract,
             server_id: cap(&app.server_id, 64),
         }
