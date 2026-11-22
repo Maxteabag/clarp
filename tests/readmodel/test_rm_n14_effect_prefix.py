@@ -1,7 +1,8 @@
 """Effect-bearing prefixes: settled effects admit a frontier, open ones stay full.
 
-Settled: heartbeat and leader-tick turns. Open: sub-agent cells, <team>
-blocks and dream turns.
+Settled: heartbeat and leader-tick turns, Claude's sub-agent cells, <team> blocks
+and dream turns (their effects run only for a row the import writes). Open: other
+sub-agent cells and Agent/Task tools.
 
 Every tick runs a full-replay reference lane next to the incremental
 candidate and compares every product table, side-effect tables included, so
@@ -187,10 +188,31 @@ def test_heartbeat_noop_is_counted_once_across_full_tail_full(tmp_path):
                         "SELECT noop_streak FROM heartbeat_state").fetchall() == [(1,)]
 
 
+def _a_later_dream_run(databases):
+    for database in databases:
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "INSERT INTO dream_runs(run_id, agent_id, session, local_date, timezone,"
+                " timezone_source, status, stage, min_directions, planned_directions,"
+                " planned_rounds, target_tokens, target_minutes, started_at, updated_at)"
+                " VALUES ('run-later', ?, ?, '2026-10-12', 'UTC', 'test', 'active',"
+                " 'fanout', 1, 1, 1, 1, 1, 2, 2)", (corpus.AGENT, corpus.AGENT))
+
+
+def _statuses(databases):
+    out = []
+    for database in databases:
+        with sqlite3.connect(database) as connection:
+            out.append(connection.execute(
+                "SELECT status FROM dream_runs WHERE run_id='run-later'").fetchone()[0])
+    return out
+
+
 @pytest.mark.parametrize("backend", harness.BACKENDS)
-@pytest.mark.parametrize("newer_run", [False, True])
-def test_dream_prefix_stays_full_so_a_replay_acts_as_the_full_import_does(
-        tmp_path, backend, newer_run):
+def test_an_old_dream_turn_admits_a_frontier_and_no_replay_marks_the_run_active_now(tmp_path, backend):
+    """A dream turn's records run for a row the import writes. The old DREAMING_OK, replayed by
+    a full import over its row stored as it is, used to mark whichever run was active now; now a
+    full import does what a tail does with it: nothing, so the prefix admits a frontier."""
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
     transcript.write_bytes(_automation_history(backend, "dreaming"))
@@ -198,33 +220,19 @@ def test_dream_prefix_stays_full_so_a_replay_acts_as_the_full_import_does(
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
             full.tick(0)
             retention = _codes(actual.tick(0), "transcriptTailRetention")
-            assert "effect_bearing_prefix" in retention
-            assert "checkpoint_closed_effects" not in retention
+            assert "checkpoint_closed_effects" in retention and "effect_bearing_prefix" not in retention
             harness.assert_product_equal(reference, candidate)
-            if newer_run:
-                # A later night is running when the old DREAMING_OK is replayed.
-                # What the replay does to it is not this rule's to change.
-                for database in (reference, candidate):
-                    with sqlite3.connect(database) as connection:
-                        connection.execute(
-                            "INSERT INTO dream_runs(run_id, agent_id, session, local_date, timezone,"
-                            " timezone_source, status, stage, min_directions, planned_directions,"
-                            " planned_rounds, target_tokens, target_minutes, started_at, updated_at)"
-                            " VALUES ('run-later', ?, ?, '2026-10-12', 'UTC', 'test', 'active',"
-                            " 'fanout', 1, 1, 1, 1, 1, 2, 2)", (corpus.AGENT, corpus.AGENT))
+            _a_later_dream_run((reference, candidate))         # a later night is running
             _append(transcript, harness.append_bytes(backend, 20))
             full.tick(1)
-            report = actual.tick(1)
-            assert report["apply_mode"] == "full"
-            assert _decision(report).get("reason") == "bootstrap_effect"
+            assert _decision(actual.tick(1))["code"] == "tail_applied"
             harness.assert_product_equal(reference, candidate)
-            if newer_run:
-                statuses = []
-                for database in (reference, candidate):
-                    with sqlite3.connect(database) as connection:
-                        statuses.append(connection.execute(
-                            "SELECT status FROM dream_runs WHERE run_id='run-later'").fetchone()[0])
-                assert statuses[0] == statuses[1]
+            _drop_checkpoint(candidate)                        # and a full import over it
+            _append(transcript, harness.append_bytes(backend, 21))
+            full.tick(2)
+            assert actual.tick(2)["apply_mode"] == "full"
+            harness.assert_product_equal(reference, candidate)
+            assert _statuses((reference, candidate)) == ["active", "active"]
 
 
 @pytest.mark.parametrize("child_found", [True, False])
@@ -388,8 +396,21 @@ def test_a_codex_subagent_prefix_stays_on_the_full_path(tmp_path):
         {"name": "Agent"}]}]) == "open"
 
 
+def _join_a_team(databases):
+    for database in databases:
+        with sqlite3.connect(database) as connection:
+            connection.execute("INSERT INTO teams(team_id, name, created_at, updated_at, communication_enabled)"
+                               " VALUES ('team-later', 'Later', 1, 1, 1)")
+            connection.execute("INSERT INTO team_members(team_id, agent_id, added_at)"
+                               " VALUES ('team-later', ?, 1)", (corpus.AGENT,))
+
+
 @pytest.mark.parametrize("backend", harness.BACKENDS)
-def test_settled_heartbeat_does_not_excuse_a_team_block(tmp_path, backend):
+def test_an_old_team_block_admits_a_frontier_and_is_not_captured_into_a_team_joined_since(
+        tmp_path, backend):
+    """Team capture runs for a row the import writes. A full import replayed every old <team>
+    block and captured it into the teams the agent is in now, so the prefix stayed full; now a
+    full import over its row stored as it is does what a tail does: nothing."""
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
     transcript.write_bytes(_automation_history(backend).replace(
@@ -397,11 +418,19 @@ def test_settled_heartbeat_does_not_excuse_a_team_block(tmp_path, backend):
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
             full.tick(0)
-            bootstrap = actual.tick(0)
-            assert "effect_bearing_prefix" in _codes(bootstrap, "transcriptTailRetention")
+            retention = _codes(actual.tick(0), "transcriptTailRetention")
+            assert "checkpoint_closed_effects" in retention and "effect_bearing_prefix" not in retention
+            harness.assert_product_equal(reference, candidate)
+            _join_a_team((reference, candidate))               # the agent joins a team afterwards
             _append(transcript, harness.append_bytes(backend, 20))
             full.tick(1)
-            report = actual.tick(1)
-            assert report["apply_mode"] == "full"
-            assert _decision(report).get("reason") == "bootstrap_effect"
+            assert _decision(actual.tick(1))["code"] == "tail_applied"
             harness.assert_product_equal(reference, candidate)
+            _drop_checkpoint(candidate)
+            _append(transcript, harness.append_bytes(backend, 21))
+            full.tick(2)
+            assert actual.tick(2)["apply_mode"] == "full"
+            harness.assert_product_equal(reference, candidate)
+            for database in (reference, candidate):
+                with sqlite3.connect(database) as connection:
+                    assert connection.execute("SELECT count(*) FROM team_messages").fetchone()[0] == 0

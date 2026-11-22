@@ -1827,9 +1827,12 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 origin=current_origin, own="heartbeat")
             if skip:
                 text = "Heartbeat check: no action needed."
-            # The probe only transforms; the locked pass records, once.
+            # Only the transform here. What a dream turn records is done below, for a row
+            # this import writes: replayed over a row stored as it is, an old DREAMING_OK
+            # marked whichever run is active now.
+            dream_record = (text, current_origin)
             skip, text = dreaming.process_assistant_text(
-                agent_id, text, live=not database.locked, origin=current_origin)
+                agent_id, text, live=True, origin=current_origin)
             if skip:
                 text = "Dreaming check: no action needed."
             skip, text = origins.ack_for_origin(
@@ -1985,12 +1988,19 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 answers[row.row_trace] = raw
         if role == "assistant" and database.locked:
             trace_id = str(turn.get("trace_id") or "")
-            team_store.capture_assistant_message(
-                agent_id=agent_id,
-                source_message_id=msg_id,
-                trace_id=trace_id,
-                text=text,
-            )
+            if row.written:
+                # The effects that follow a row, for a row this import writes only: a full
+                # replay over rows stored as they are does what a tail does (nothing), so
+                # old <team> blocks and dream turns no longer keep a transcript on full
+                # imports, and an old block is not captured into a team joined since.
+                dreaming.process_assistant_text(
+                    agent_id, dream_record[0], live=False, origin=dream_record[1])
+                team_store.capture_assistant_message(
+                    agent_id=agent_id,
+                    source_message_id=msg_id,
+                    trace_id=trace_id,
+                    text=text,
+                )
             from . import oracle_delegations
             oracle_delegations.complete_for_trace(
                 trace_id=trace_id, message_id=msg_id, text=text)
