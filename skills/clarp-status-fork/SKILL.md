@@ -20,6 +20,19 @@ Agents are matched by session slug, slug prefix or persona name.
 
 ## How it works (keep these properties when changing it)
 
+On a Rust Host, the script selects the agent from the local snapshot, excludes
+moved-away entries, and reads queue, background-job and attention facts over
+loopback. The administrator credential stays inside that HTTP client. If the
+agent still lives on the local Python Host, the script uses the existing Python
+path.
+
+Rust Claude forks use the Host's configured executable, the agent's saved session
+and working directory, and the same guard and preflight described below. Model
+and effort come from the snapshot. Cache reuse can differ from a normal Host turn
+with custom instructions or MCP settings. Rust Codex forks use the Host's
+configured executable and its ephemeral fork command with a read-only sandbox,
+approval policy `never`, and shell, plugins and configured MCP tools disabled.
+
 - **Same argv as the agent's own turns.** It builds the command with
   `ClaudeBackend.build_cmd`, so model, effort, plugin, MCP scope and persona prompt
   match and the fork reuses the agent's prompt cache. Any difference at the start of
@@ -72,7 +85,7 @@ Agents are matched by session slug, slug prefix or persona name.
 
 ## Limits
 
-- Claude-backend agents only. Other backends return an error.
+- Claude on either Host and Codex on the Rust Host. Other backends return an error.
 - The command refuses, launching nothing, when the agent's saved working directory is
   gone, when a local managed policy disables hooks, or (before Claude Code 2.1.295)
   when inherited settings pre-approve a non-read tool. See "What it does not cover".
