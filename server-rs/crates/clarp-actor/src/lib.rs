@@ -669,6 +669,13 @@ struct LiveTurn {
 }
 
 impl LiveTurn {
+    fn open_rows(&self) -> conversation::OpenRows<'_> {
+        conversation::OpenRows {
+            drafts: &self.drafts,
+            calls: &self.calls,
+        }
+    }
+
     fn facts(&self) -> Facts {
         Facts {
             trace_id: self.trace_id.clone(),
@@ -4020,7 +4027,16 @@ impl Actor {
                 reason: STOPPED_FOR_AN_ACCOUNT.to_string(),
             };
             let mut batch = self.recorder.batch();
-            steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, &mut out)?;
+            steering::recover_reads(
+                &mut batch,
+                &self.profile.cwd,
+                self.live
+                    .as_ref()
+                    .map(LiveTurn::open_rows)
+                    .unwrap_or_default(),
+                now_ms,
+                &mut out,
+            )?;
             if let Some(live) = self.live.as_mut() {
                 live.steering.finish_read(&mut batch, now_ms)?;
             }
@@ -4068,7 +4084,16 @@ impl Actor {
             })
             .unwrap_or_default();
         let mut batch = self.recorder.batch();
-        steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, &mut out)?;
+        steering::recover_reads(
+            &mut batch,
+            &self.profile.cwd,
+            conversation::OpenRows {
+                drafts: &unfinished,
+                calls: &calls,
+            },
+            now_ms,
+            &mut out,
+        )?;
         if let Some(live) = self.live.as_mut() {
             live.steering.finish_read(&mut batch, now_ms)?;
         }
@@ -4528,7 +4553,13 @@ impl Actor {
                 ..Facts::default()
             };
             let mut batch = self.recorder.batch();
-            steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, out)?;
+            steering::recover_reads(
+                &mut batch,
+                &self.profile.cwd,
+                conversation::OpenRows::default(),
+                now_ms,
+                out,
+            )?;
             steering::State::default().finish_read(&mut batch, now_ms)?;
             if batch.command(command, now_ms).is_ok()
                 && let Some(end) = closing(&mut batch, turn, &message.id, facts)
@@ -5173,7 +5204,13 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
-                            if steering::recover_reads(&mut batch, &self.profile.cwd, t, out)? {
+                            if steering::recover_reads(
+                                &mut batch,
+                                &self.profile.cwd,
+                                live.open_rows(),
+                                t,
+                                out,
+                            )? {
                                 revealed_at = Some(t);
                             }
                             live.steering.finish_read(&mut batch, t)?;
@@ -5461,14 +5498,21 @@ impl Actor {
                 }
                 if let Some(event) = evidence {
                     let facts = live.facts();
-                    if let Some(sharing) =
-                        live.steering
-                            .observe(&event, &mut batch, facts, &live.last_row, t, out)?
-                    {
+                    let rows = conversation::OpenRows {
+                        drafts: &live.drafts,
+                        calls: &live.calls,
+                    };
+                    if let Some(sharing) = live.steering.observe(
+                        &event,
+                        &mut batch,
+                        facts,
+                        (&live.last_row, rows),
+                        t,
+                        out,
+                    )? {
                         live.speak |= sharing.speak;
                         if sharing.revealed {
                             revealed_at = Some(t);
-                            shown.extend(live.drafts.iter().map(|draft| draft.id.clone()));
                         }
                         out.changed.status = true;
                     }
@@ -5489,7 +5533,13 @@ impl Actor {
             {
                 // The process is gone and its backend did not say how the turn went.
                 let reason = "the tool ended and nothing said how";
-                if steering::recover_reads(&mut batch, &self.profile.cwd, now_ms, out)? {
+                if steering::recover_reads(
+                    &mut batch,
+                    &self.profile.cwd,
+                    live.open_rows(),
+                    now_ms,
+                    out,
+                )? {
                     revealed_at = Some(now_ms);
                 }
                 live.steering.finish_read(&mut batch, now_ms)?;

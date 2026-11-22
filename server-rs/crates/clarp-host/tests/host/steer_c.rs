@@ -79,6 +79,10 @@ if mode == "desk":
     release("release-desk")
     answer("desk-finished", first)
     raise SystemExit(0)
+if mode == "mixed":
+    say("assistant", message={"id": "msg_before_steer", "role": "assistant",
+        "content": [{"type": "text", "text": "before-steer"}]})
+    say("stream_event", event={"type": "message_stop"})
 tool = "tool-" + mode
 if mode in ("writing", "between-tools"):
     if mode == "between-tools":
@@ -133,9 +137,12 @@ elif mode == "ledger":
         "type": "queued_command", "source_uuid": more[0][0]}}) + "\n")
     answer("read-in-the-session-file", first, more[0][0])
 else:
-    returned(tool)
+    if mode != "mixed":
+        returned(tool)
     for uid, _ in more:
         echo(uid)
+    if mode == "mixed":
+        returned(tool)
     (root / ("echoed-" + mode)).touch()
     release("answer-" + mode)
     answer("joined-" + mode, first, *(uid for uid, _ in more))
@@ -235,13 +242,10 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         });
         let hidden = matches!(mode, "mixed" | "relayed").then(|| {
             let filtered = host.get(&format!("/log?session={session}&coordination=hide"));
-            assert!(
-                !filtered["turns"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|row| row["id"] == "u-first")
-            );
+            assert_eq!(filtered["turns"], json!([]), "{filtered}");
+            if mode == "mixed" {
+                assert_eq!(filtered["hidden_after"]["messages"], 2, "{filtered}");
+            }
             let page = host.get(&format!("/log?session={session}"));
             let first = page["turns"]
                 .as_array()
@@ -254,10 +258,7 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
                 host.get(&format!("/live?session={session}"))["turn"]["audience"],
                 "agents"
             );
-            (
-                page["latest_revision"].as_u64().unwrap(),
-                first["sender_agent_id"].clone(),
-            )
+            page["latest_revision"].as_u64().unwrap()
         });
         let mut expected = vec!["u-first".to_owned()];
         let mut traces = Vec::new();
@@ -375,38 +376,58 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             wait_for("each read in the conversation", || {
                 ids(&host, &session) == expected
             });
-            if let Some((cursor, sender)) = &hidden {
+            if let Some(cursor) = hidden {
                 wait_for("the live audience to include the user", || {
                     host.get(&format!("/live?session={session}"))["turn"]["audience"] == "user"
                 });
                 let delta = host.get(&format!(
                     "/log?session={session}&after_revision={cursor}&coordination=hide"
                 ));
-                let prior = delta["turns"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|row| row["id"] == "u-first")
-                    .unwrap();
-                assert_eq!(prior["audience"], "user");
-                assert_eq!(&prior["sender_agent_id"], sender);
-                assert_eq!(prior["origin"], "agent");
-                if relay_token.is_some() {
-                    let relay = delta["turns"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .find(|row| row["id"] == "u-add-relayed-0")
-                        .unwrap();
-                    assert_eq!(relay["origin"], "agent");
-                    assert_eq!(relay["sender_name"], "Desk");
-                    assert_eq!(relay["audience"], "user");
+                let rows = delta["turns"].as_array().unwrap();
+                assert!(rows.iter().all(|row| row["audience"] == "user"), "{delta}");
+                let followup_id = format!("u-add-{mode}-0");
+                let followup = rows.iter().find(|row| row["id"] == followup_id).unwrap();
+                assert!(rows.iter().all(|row| row["id"] != "u-first"), "{delta}");
+                if mode == "mixed" {
+                    assert_eq!(followup["hidden_before"]["messages"], 2, "{delta}");
+                } else {
+                    assert_eq!(followup["origin"], "agent");
+                    assert_eq!(followup["sender_name"], "Desk");
                 }
             }
             mark(&format!("answer-{mode}"));
             collect_answer(&host, &session, &format!("joined-{mode}"));
         }
         wait_for("the agent to finish", || host.state(&session) == "done");
+        if mode == "mixed" {
+            let all = host.get(&format!("/log?session={session}&coordination=show"));
+            let rows = all["turns"].as_array().unwrap();
+            let first = rows.iter().find(|row| row["id"] == "u-first").unwrap();
+            assert_eq!(first["audience"], "agents");
+            assert_eq!(first["origin"], "agent");
+            assert_eq!(first["sender_name"], "sender");
+            let early = rows
+                .iter()
+                .find(|row| row["text"] == "before-steer")
+                .unwrap();
+            assert_eq!(early["audience"], "agents");
+            assert!(
+                rows.iter()
+                    .filter(|row| row["tool_name"] == "Bash")
+                    .all(|row| row["audience"] == "agents"),
+                "{all}"
+            );
+            let visible = host.get(&format!("/log?session={session}&coordination=hide"));
+            let rows = visible["turns"].as_array().unwrap();
+            assert_eq!(rows.len(), 2, "{visible}");
+            assert_eq!(rows[0]["id"], "u-add-mixed-0");
+            assert_eq!(rows[0]["hidden_before"]["messages"], 2);
+            assert_eq!(rows[1]["text"], "joined-mixed");
+            assert!(
+                rows.iter().all(|row| row["audience"] == "user"),
+                "{visible}"
+            );
+        }
         assert_eq!(ids(&host, &session), expected);
         assert_eq!(launches().lines().filter(|text| *text == case).count(), 1);
         let mut revision = 0;
