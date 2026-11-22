@@ -152,11 +152,13 @@ _OTHER_OWNER_SQL = """
                                 OR (q.client_msg_id<>'' AND messages.message_id=
                                     CASE WHEN q.client_msg_id LIKE 'u-%'
                                          THEN q.client_msg_id ELSE 'u-'||q.client_msg_id END))))
-                       -- A user's send that waited as a queue item and was steered into this
-                       -- turn (started, no turn of its own) is this turn's, as it was when a
-                       -- plain send had no queue item (issue 491).
+                       -- A send that waited as a queue item and was steered into this turn
+                       -- (started, no turn of its own) is this turn's, as it was when a plain
+                       -- send had no queue item (issue 491): the user's, and since no send
+                       -- preempts (R7) a watcher's, the Oracle's or an automation's too. A
+                       -- peer's stays subordinate (_causing_user_row).
                        AND NOT (q.status<>'queued' AND q.status<>'claimed' AND q.status<>'parked'
-                                AND COALESCE(NULLIF(TRIM(messages.origin), ''), 'user')='user'
+                                AND COALESCE(NULLIF(TRIM(messages.origin), ''), 'user')<>'agent'
                                 AND NOT EXISTS (SELECT 1 FROM turns o
                                                  WHERE o.agent_id=q.agent_id
                                                    AND o.trace_id=q.trace_id)))
@@ -183,17 +185,21 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
                    FROM messages WHERE {where}"""
     latest = " ORDER BY updated_at DESC, revision DESC, seq DESC LIMIT 1"
     row = db.conn().execute(select + latest, tuple(params)).fetchone()
-    if identified and row is not None and row["origin"] == "agent":
-        # Only peers are subordinate to an eligible user request. Watcher,
-        # Oracle and automation keep their existing order among nonpeers.
+    chatter = notification_policy.AGENT_CHATTER_ORIGINS
+    if identified and row is not None and (row["origin"] or "").strip() in chatter:
+        # A peer's message, a schedule, a heartbeat or a dream steered into an
+        # eligible user request is subordinate to it: it never becomes the cause
+        # that silences the user's own turn (since R7 a steered one is this
+        # turn's row). Watcher, Oracle and automation keep their existing order.
         user = db.conn().execute(
             select + " AND COALESCE(NULLIF(TRIM(origin), ''), 'user')='user'"
             " AND COALESCE(sender_agent_id, '')=''" + latest,
             tuple(params)).fetchone()
         if user is not None:
+            marks = ",".join("?" * len(chatter))
             return db.conn().execute(
-                select + " AND COALESCE(origin, 'user')<>'agent'" + latest,
-                tuple(params)).fetchone()
+                select + f" AND COALESCE(TRIM(origin), 'user') NOT IN ({marks})" + latest,
+                (*params, *sorted(chatter))).fetchone()
     return row
 
 
