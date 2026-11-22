@@ -262,8 +262,10 @@ class ServerContext:
     def speak_announcement(
         self, text: str, voice_id: str | None, session: str | None = None
     ) -> None:
-        """Synthesise a one-off clip. No-op when no api key is configured."""
-        if not voice_id:
+        """Synthesise a one-off clip. No-op when no api key is configured, or for an agent
+        with no voice ("" or "{}")."""
+        from .voice import has_voice
+        if not has_voice(voice_id):
             return
         try:
             self.tts.synthesize(text, voice_id, session=session)
@@ -274,7 +276,8 @@ class ServerContext:
         self, text: str, voice_id: str | None, session: str | None = None
     ) -> None:
         """Synthesise a one-off announcement without blocking the caller's request."""
-        if not voice_id:
+        from .voice import has_voice
+        if not has_voice(voice_id):
             return
         if not self.async_announcements:
             self.speak_announcement(text, voice_id, session=session)

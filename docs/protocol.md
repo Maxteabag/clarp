@@ -1207,7 +1207,10 @@ catalogues). A free voice is one no agent (archived ones included) or contact sp
 there is none, one is reused (below). With this feature an app may create an agent or contact
 with no voice at all and trust the Host; a phone's `auto-<uuid>` stand-in voice is replaced.
 The stored value is always in the one shape (a bare Cartesia uuid on create becomes
-`{"cartesia":"<uuid>"}`). Existing agents are not changed. A Janitor gets no voice: no app can
+`{"cartesia":"<uuid>"}`). A `voice_id` of `{}` means "no voice given", as `""` does: a new
+agent then takes its contact's voice, and a relaunch keeps its own. `POST /personas/update` fills
+a contact stored in the one shape the same way a contact assignment does (a pool voice for each
+of those providers it has none for, an empty map included). Existing agents are not changed. A Janitor gets no voice: no app can
 send it a message, so it never speaks. Renaming an agent keeps the voice it spoke with.
 
 With feature `voice_for_helpers` (Host contract 135): a helper (`role` `helper`) is created
