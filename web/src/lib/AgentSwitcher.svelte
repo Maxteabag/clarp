@@ -4,6 +4,7 @@
     app, isUserNotificationUnread, refreshAgentSnapshot,
     avatarUrl, setSession, shortActivityPhase, statusFor,
   } from '../stores/app.svelte.js';
+  import { movedLine } from '@core/agent-moved.js';
 
   let { open = $bindable() } = $props();
 
@@ -25,7 +26,8 @@
           sid,
           name: info.name,
           cls: isCurrent ? 'current' : isBusy ? 'busy' : isUnread ? 'unread' : '',
-          text: isCurrent ? 'current'
+          text: s.moved ? movedLine(s.moved)
+            : isCurrent ? 'current'
             : isBusy ? (shortActivityPhase(s) || 'working')
             : isUnread ? 'new' : 'idle',
         };

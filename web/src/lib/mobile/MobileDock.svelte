@@ -8,13 +8,14 @@
   import { activityStatusClass } from '../render.js';
   import ConnDot from '../ConnDot.svelte';
   import DockControls from '../DockControls.svelte';
+  import { movedLine } from '@core/agent-moved.js';
 
   let { chatOpen = $bindable(), onTapAgent, onHoldAgent } = $props();
 
   let label = $derived(chipLabel(app.session));
   let status = $derived(statusFor(app.session));
   let activity = $derived(
-    shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
+    movedLine(status.moved) || shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
   let unread = $derived((app.tick, unreadAgentCount()));
 
   // Tap opens the quick switcher, a 600ms hold opens the full overview.
