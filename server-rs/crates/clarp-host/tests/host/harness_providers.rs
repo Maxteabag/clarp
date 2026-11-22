@@ -752,6 +752,29 @@ fn a_harness_is_signed_in_to_its_providers_only_by_the_host_that_keeps_the_tools
 }
 
 #[test]
+fn a_false_opencode_authorize_answer_fails_and_ends_its_server() {
+    let place = Place::new("harness-providers-authorize-false");
+    let machine = Machine::new(&place);
+    std::fs::write(machine.root.join("authorize-false"), "").unwrap();
+    let host = machine.start(&place, &["--accounts", "select"], &[]);
+    let _ = host.get("/harness-providers");
+    wait_for("the methods probe to end", || machine.ended() == 1);
+
+    let (status, failed) = change(
+        &host,
+        "/harness-providers/login",
+        br#"{"provider":"broken","method":0}"#,
+    );
+    assert_eq!(status, 202);
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(failed["error"], "OpenCode did not answer the sign-in");
+    assert_eq!(host.get("/harness-providers")["tasks"]["broken"], failed);
+    wait_for("the malformed sign-in serve to end", || {
+        machine.ended() == 2
+    });
+}
+
+#[test]
 fn opencode_is_asked_its_sign_in_methods_once_however_many_listings_wait_on_its_answer() {
     // OpenCode holds its answer while listings are asked, one after another and together:
     // each is answered at once with what is remembered (nothing yet), and none asks again.
