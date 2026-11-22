@@ -248,3 +248,17 @@ def test_a_command_result_written_as_command_output_drops_its_exit_line(tmp_path
     ran, failed = agy_transcript.parse_turns(p)[1]["tools"]
     assert (ran["status"], ran["result"]) == ("ok", "hi")
     assert (failed["status"], failed["result"]) == ("error", "boom")
+
+
+def test_redaction_blanks_the_credential_after_its_scheme_word():
+    """R46: 'Authorization: Bearer abc123' became 'Authorization=[redacted] abc123': the scheme
+    word was blanked and the token kept."""
+    redact = lambda command: agy_transcript._canonical_tool_input("Bash", {"CommandLine": command})["command"]  # noqa: E731
+    for command in ("curl -H 'Authorization: Bearer abc123' https://example.test/x",
+                    "curl -H 'authorization=Basic dXNlcjpwYXNz' https://example.test/x",
+                    "curl -H 'Authorization: Token abc123' https://example.test/x"):
+        cleaned = redact(command)
+        assert "abc123" not in cleaned and "dXNlcjpwYXNz" not in cleaned, cleaned
+        assert "[redacted]" in cleaned and cleaned.endswith("https://example.test/x"), cleaned
+    assert redact("login --password hunter2 next") == "login --password hunter2 next"   # no ':' or '='
+    assert redact("run token=abc next") == "run token=[redacted] next"                  # as before
