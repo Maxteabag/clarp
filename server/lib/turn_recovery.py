@@ -256,7 +256,7 @@ class RecoveryMixin:
             state = turn_queue.state(row["agent_id"])
             events.broadcast(self.ctx.stream, events.queue_updated(
                 session=row["session"], agent_id=row["agent_id"], client_msg_id=row["client_msg_id"],
-                queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                queue_depth=state["listed"], queue_paused=state["paused"], queue_started=False,
                 queue_revision=state["revision"]))
 
     def _recover_queued_locked(self) -> int:
@@ -471,7 +471,7 @@ class RecoveryMixin:
                 state = turn_queue.state(agent_id)
                 events.broadcast(self.ctx.stream, events.queue_updated(
                     session=row["session"], agent_id=agent_id, client_msg_id=row["client_msg_id"],
-                    queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                    queue_depth=state["listed"], queue_paused=state["paused"], queue_started=False,
                     queue_revision=state["revision"]))
 
     def _end_refused_launch(self, row, backoff: recovery_backoff.Backoff) -> bool:
@@ -490,7 +490,7 @@ class RecoveryMixin:
             state = turn_queue.state(agent_id)
             events.broadcast(self.ctx.stream, events.queue_updated(
                 session=row["session"], agent_id=agent_id, client_msg_id=row["client_msg_id"],
-                queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                queue_depth=state["listed"], queue_paused=state["paused"], queue_started=False,
                 queue_revision=state["revision"]))
         return True
 
@@ -513,7 +513,7 @@ class RecoveryMixin:
             state = turn_queue.state(row["agent_id"])
             events.broadcast(self.ctx.stream, events.queue_updated(
                 session=row["session"], agent_id=row["agent_id"],
-                client_msg_id=row["client_msg_id"], queue_depth=state["count"],
+                client_msg_id=row["client_msg_id"], queue_depth=state["listed"],
                 queue_paused=state["paused"], queue_started=False,
                 queue_revision=state["revision"]))
 

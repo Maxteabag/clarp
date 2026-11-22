@@ -2690,7 +2690,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         return _dispatch_adapters(self.ctx).deliver_pending_decisions()
 
     def _handle_turn_queue(self):
-        from lib import turn_queue
+        from lib import html_forms, turn_queue
         query = self._query()
         session = (query.get("session", [self.ctx.default_session])[0]
                    or self.ctx.default_session).strip()
@@ -2713,7 +2713,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             # into the running turn, or its own turn) and is no longer waiting.
             "status": row["status"] or "queued",
             **turn_queue.item_provenance(row),
-        } for row in turn_queue.waiting_items(agent["agent_id"])]
+        } for row in turn_queue.waiting_items(agent["agent_id"])
+            # A form answer waiting for its agent: the answered card is the user's record (issue 428).
+            if not html_forms.is_answer_delivery(row["client_msg_id"])]
         return self._json_ok({
             "items": items,
             "paused": state["paused"],

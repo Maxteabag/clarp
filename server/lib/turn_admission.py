@@ -331,7 +331,7 @@ class AdmissionMixin:
                     return DispatchResult(
                         session=session, backend=backend,
                         queued=existing_queue_status == "queued",
-                        queue_depth=queue_state["count"],
+                        queue_depth=queue_state["listed"],
                         queue_revision=queue_state["revision"])
                 if prompt_admission is not None:
                     prompt_admission_id = prompt_admissions.record(
@@ -469,7 +469,7 @@ class AdmissionMixin:
             queue_state = turn_queue.state(spec.agent_id)
             return DispatchResult(
                 session=session, backend=backend, queued=True,
-                queue_depth=queue_state["count"],
+                queue_depth=queue_state["listed"],
                 queue_revision=queue_state["revision"])
         spec = replace(spec, bypass_pause=_pause_exempt_on_arrival(
             command, decision.effective))
@@ -494,7 +494,7 @@ class AdmissionMixin:
                 queue_state = turn_queue.state(spec.agent_id)
                 return DispatchResult(
                     session=session, backend=backend, queued=True,
-                    queue_depth=queue_state["count"],
+                    queue_depth=queue_state["listed"],
                     queue_revision=queue_state["revision"])
             if steered:
                 return DispatchResult(session=session, backend=backend)
@@ -518,7 +518,7 @@ class AdmissionMixin:
             queue_state = turn_queue.state(spec.agent_id)
             return DispatchResult(
                 session=session, backend=backend, queued=True,
-                queue_depth=queue_state["count"],
+                queue_depth=queue_state["listed"],
                 queue_revision=queue_state["revision"])
         if not self._call_opening_claimed(spec):
             # A listen-first initiative that a greeting withdrew: never runs.
@@ -547,7 +547,7 @@ class AdmissionMixin:
                 queue_state = turn_queue.state(spec.agent_id)
                 return DispatchResult(
                     session=session, backend=backend, queued=True,
-                    queue_depth=queue_state["count"],
+                    queue_depth=queue_state["listed"],
                     queue_revision=queue_state["revision"])
         turn_id = 0
         launch_entered = False
@@ -812,7 +812,7 @@ class AdmissionMixin:
                 state = turn_queue.state(spec.agent_id)
                 events.broadcast(self.ctx.stream, events.queue_updated(
                     session=spec.session, agent_id=spec.agent_id,
-                    queue_depth=state["count"], queue_paused=state["paused"],
+                    queue_depth=state["listed"], queue_paused=state["paused"],
                     queue_started=False, queue_revision=state["revision"]))
             except Exception as exc:  # noqa: BLE001 - a projection of the durable pause
                 log_exception("queuePauseEndBroadcastFail", exc, detail=spec.session)
