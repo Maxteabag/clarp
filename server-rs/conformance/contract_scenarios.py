@@ -123,7 +123,7 @@ SCENARIOS = [
     },
     {
         'id': 'stop-with-queue',
-        'what': 'the user's Stop starts the user's and Oracle's waiting messages, leaving other work held',
+        "what": "the user's Stop starts the user's and Oracle's waiting messages, leaving other work held",
         'steps': [
             send(SLOW + 'synthetic task to stop', 'first'),
             {'op': 'wait_busy', 'busy': True},
