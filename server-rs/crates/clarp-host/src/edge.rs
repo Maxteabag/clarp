@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 127;
+pub const HOST_CONTRACT: u64 = 128;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -2999,12 +2999,9 @@ async fn send_as(
         );
         return Err(ApiError::plain(StatusCode::PAYLOAD_TOO_LARGE, why));
     }
-    // Who it comes from. A message that names its sender is that agent's, whatever else it
-    // says of itself: on the Python Host a client that names a sender may still say the
-    // message is the user's, and the focus and the queue then treat an agent as a person
-    // (issue 360 of the repository). Without a sender: the origin it names, when that is one
-    // a client may name; otherwise the user. What the Host stamps itself (a janitor, a
-    // leader's tick) nobody may claim.
+    // A resolved sender cannot claim the user's word, even without a turn token (R18).
+    // Without a sender, use the origin the client names if it is allowed, or the user.
+    // Only the Host can stamp an origin such as a janitor or a leader's tick.
     //
     // Who made it decides too (the Python Host's `SendRequest.from_payload`, its PR 482): a
     // send made from another agent's own turn (the token it presents) is that agent's, its
@@ -3059,12 +3056,16 @@ async fn send_as(
         }
         LEADER_TICK.to_owned()
     } else {
-        coordination::origin(request.origin.as_deref(), &principal, made.peer)
+        coordination::origin(
+            request.origin.as_deref(),
+            &principal,
+            made.peer,
+            &member.record.agent_id,
+        )
     };
     // Another agent addressing this one: its turn is marked so, with that agent (none for an
-    // agent of a peer Host). Decided from the origin as it was claimed and who made it, before
-    // this Host maps the origin to its own kinds: the user's word never is, whatever sender it
-    // names (`coordination::is_coordination`).
+    // agent of a peer Host). Decide from the resolved origin before mapping it to the Host's
+    // own kinds (`coordination::is_coordination`).
     let coordination = coordination::is_coordination(
         &member.record.agent_id,
         Some(&named),
@@ -3079,7 +3080,8 @@ async fn send_as(
             "Heartbeats are disabled on this Host",
         ));
     }
-    let origin = match (sender.is_some(), named.as_str()) {
+    let self_wake = named == "automation" && principal.sender_agent_id == member.record.agent_id;
+    let origin = match (sender.is_some() && !self_wake, named.as_str()) {
         (true, _) | (false, "agent") => from_agent(),
         (
             false,
