@@ -15,6 +15,7 @@ import { clog } from '../lib/net.js';
 import { ensureLoaded, reconcileWithSnapshot } from './conversations.svelte.js';
 import { hostBadgeText } from '@core/host-badge.js';
 import { prefs } from './prefs.svelte.js';
+import { hostsState, readHosts } from './hosts.svelte.js';
 
 export const AVATAR_PALETTE = {
   Mike: '#7aa2f7', Rachel: '#f7768e', Domi: '#bb9af7', Bella: '#ff9e64',
@@ -46,8 +47,8 @@ export const app = $state({
   tick: 0,
   /** Computer preference: wear the portrait drawn for the model, when bundled. */
   modelAvatars: false,
-  /** The Hosts whose chats this app reads, [{id, name}] from /server-info. The web app is
-   *  served by one Host and reads only it, so the Host capsule never shows here yet. */
+  /** The Host serving this app, [{id, name}] from /server-info. The user's other Hosts are
+   *  stores/hosts.svelte.js (the all-Hosts list). */
   hosts: [],
 });
 
@@ -300,10 +301,22 @@ export function logState(ev, machine) {
 }
 
 
-/** The capsule naming the Host a chat is on, or '' (static/lib/host-badge.js). */
-export function hostBadgeFor(sid) {
-  const row = app.status[sid] || {};
+/** Every saved Host as [{id: server id, name}], the serving Host first (static/lib/host-badge.js). */
+export function savedHosts() {
+  return [...app.hosts, ...hostsState.saved.map(h => ({ id: h.serverId || h.id, name: h.name || h.url }))];
+}
+
+/** The server ids of the Hosts read now: the serving Host, and the others while all are read. */
+export function listedHostIds() {
+  return [...app.hosts.map(h => h.id), ...readHosts().map(h => h.serverId).filter(Boolean)];
+}
+
+/** The capsule naming the Host a chat is on, or '' (static/lib/host-badge.js). `hostId` is the
+ *  server id of the Host the row came from (the serving Host's when omitted). */
+export function hostBadgeFor(sid, hostId = '', status = null) {
+  const row = status || app.status[sid] || {};
   return hostBadgeText({
-    setting: prefs.showHostBadge, hosts: app.hosts, rowHost: row.host_id || '', moved: row.moved,
+    setting: prefs.showHostBadge, hosts: savedHosts(), listed: listedHostIds(),
+    rowHost: hostId || row.host_id || app.hosts[0]?.id || '', moved: row.moved,
   });
 }

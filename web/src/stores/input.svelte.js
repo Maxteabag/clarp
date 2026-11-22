@@ -65,9 +65,9 @@ function moveChat(delta) {
 
 // Dialogs register their open state here rather than each installing a window
 // listener of its own — competing listeners were part of the old flakiness.
-export function setOverlay(name, open) {
-  if (open) input.overlay = name;
-  else if (input.overlay === name) input.overlay = '';
+/** The dialog that owns the keyboard now ('' none): the topmost one open. */
+export function setTopOverlay(name) {
+  if (input.overlay !== name) input.overlay = name || '';
 }
 
 export function setInsert(on) {
