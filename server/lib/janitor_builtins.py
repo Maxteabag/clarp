@@ -136,13 +136,19 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
     return {role: get_builtin(role) for role in ROLES}
 
 
-def resolve(role: str, *, target_agent_id: str | None = None) -> dict | None:
+def resolve(role: str, *, target_agent_id: str | None = None,
+            janitor_agent_id: str | None = None) -> dict | None:
     """Select an enabled subscriber, including an explicitly configured replacement.
 
     Unscoped input never bypasses a restricted watched scope. Ambiguity or invalid
     execution settings are unavailable, rather than an implicit fallback engine.
+    ``janitor_agent_id``: the caller works for that subscriber itself (a Goal keeper
+    pass over each keeper, whose scope picked the work already, R42): it, if eligible.
     """
     _role(role)
+    if janitor_agent_id:
+        chosen = [config for config in eligible(role) if config["agent_id"] == janitor_agent_id]
+        return chosen[0] if len(chosen) == 1 else None
     target = agents.get_by_agent_id(target_agent_id) if target_agent_id else None
     if target_agent_id and not target:
         return None
@@ -197,7 +203,8 @@ def get_request_run(role: str, request_id: str) -> dict | None:
     return janitors.get_run(_request_run_id(role, request_id))
 
 
-def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str | None = None) -> dict | None:
+def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str | None = None,
+              janitor_agent_id: str | None = None) -> dict | None:
     run_id = _request_run_id(role, request_id)
     metadata = _metadata(context)
     from .janitor_design_policy import effective_chain
@@ -205,7 +212,7 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
     # swapping host that held the write lock 20-50 s (2026-10-10). Resolve
     # first, then admit only if the chosen configuration is still current.
     for _attempt in range(3):
-        config = resolve(role, target_agent_id=target_agent_id)
+        config = resolve(role, target_agent_id=target_agent_id, janitor_agent_id=janitor_agent_id)
         # Most requests (a tool-explanation drain each) find their run, or
         # another, already active. Decide that without the write lock; the
         # lock is taken only to admit, and everything is checked again there.
