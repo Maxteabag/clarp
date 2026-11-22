@@ -852,13 +852,7 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
             let mut found = Vec::new();
             match (&said, call.get("result"), call.get("error")) {
                 (Ok(ours), Some(theirs), _) => {
-                    let mut theirs = theirs.clone();
-                    // The Python Host answers a discard with the row as it read it before:
-                    // it still says pinned when the pin is gone. Here the row is what it is.
-                    if what == "discard" {
-                        theirs[0]["pinned"] = json!(!theirs[0]["pinned_at"].is_null());
-                    }
-                    differences("result", ours, &theirs, &mut found);
+                    differences("result", ours, theirs, &mut found);
                 }
                 (Err(ours), _, Some(theirs)) => {
                     let kind = match ours.why {
