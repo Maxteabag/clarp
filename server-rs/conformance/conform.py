@@ -726,6 +726,11 @@ def settle(value, sessions):
             # then its id, the Rust Host's the roster's.
             item = sorted(item, key=lambda persona: str(persona.get('id')) if isinstance(persona, dict) else '')
         out[key] = settle(item, sessions)
+    if 'server_id' in out and out.get('name') and isinstance(out.get('contract'), dict):
+        number = out['contract'].get('host')
+        # Contract 144 makes the list explicit. Before that, the Host has no previous IDs.
+        if isinstance(number, int) and number < 144:
+            out.setdefault('previous_server_ids', [])
     if 'server_id' in out and 'capabilities' in out and out.get('name'):
         out['name'] = '<name>'  # `GET /server-info`: a Host is called what its machine is called
     return settle_media_cursor(out)

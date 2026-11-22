@@ -90,9 +90,5 @@ fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
         });
         interrupted && started
     });
-    assert!(
-        host.turns(&session)
-            .iter()
-            .any(|turn| turn["id"] == "u-r2")
-    );
+    assert!(host.turns(&session).iter().any(|turn| turn["id"] == "u-r2"));
 }

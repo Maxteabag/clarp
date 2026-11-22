@@ -600,6 +600,7 @@ pub fn limited_refused(method: &str, path: &str) -> bool {
 pub fn limited_server_info(mut info: Value) -> Value {
     const KEYS: &[&str] = &[
         "server_id",
+        "previous_server_ids",
         "name",
         "deployment_mode",
         "version",

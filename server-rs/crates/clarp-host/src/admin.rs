@@ -1,7 +1,7 @@
 //! What the administrator does from the command line, by asking the Host that is running.
 //!
-//! The Host is the one writer of its own tables, so a command never touches them: it asks the
-//! Host over the same door the apps use, with the administrator's token, from this machine.
+//! Commands normally ask the Host over HTTP with the administrator's token. Paired-device
+//! migration is performed against the destination fleet store before the Host starts.
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -11,6 +11,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use crate::ids;
+
+mod import_devices;
 
 pub const PAIR_USAGE: &str =
     "usage: clarp-host pair --url URL | --relay [--name DEVICE] [--scope full|limited] \
@@ -34,6 +36,9 @@ pub const IMPORT_USAGE: &str =
     "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT] [--files]
                          [--files-from ADDR:PORT]
        clarp-host import --back --from ADDR:PORT --session NAME [--host ADDR:PORT]
+       clarp-host import --devices --from-db PATH --data DIR
+For --devices, stop the Python Host first and run the import before starting the Rust Host.
+PATH is the Python state.sqlite and DIR is the Rust Host's --data directory with fleet.db.
 Reads the agent NAME, its conversation, its library, its plans and goals and the files it
 published or shows from the Host at --from and gives them to this Host. With --files only
 the files are given, for an agent that is here already: a move whose files did not all
@@ -738,11 +743,16 @@ fn take_move_back(way: &Way<'_>) -> Result<String, String> {
 }
 
 pub fn import(
-    mut args: impl Iterator<Item = String>,
+    args: impl Iterator<Item = String>,
     source_token: &str,
     token: &str,
     files_token: &str,
 ) -> Result<String, String> {
+    let mut args = args.peekable();
+    if args.peek().is_some_and(|arg| arg == "--devices") {
+        args.next();
+        return import_devices::run(args);
+    }
     let (mut from, mut session, mut only_files, mut back) = (None, None, false, false);
     let mut files_from: Option<String> = None;
     let mut host = "127.0.0.1:7690".to_string();
