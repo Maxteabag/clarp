@@ -9,7 +9,8 @@
 //!
 //! This is the `transit` tool's injectors, rebuilt for the Host (its notes on the formats are
 //! the rules: a Claude assistant row has a list of blocks as its content, never a string; a
-//! Codex rollout begins with `session_meta` and carries the text in `response_item` messages).
+//! Codex rollout begins with `session_meta` and carries the text in `response_item` messages;
+//! a Grok summary names a model; OpenCode is handed its session through its own import).
 //! Antigravity has no writer: its database is never opened while it may run.
 //!
 //! A writer writes and registers, and nothing else: it never runs the tool. What it wrote is
@@ -145,6 +146,8 @@ pub fn writer(backend: &str) -> Option<&'static dyn Writer> {
     match backend {
         "claude" => Some(&ClaudeWriter),
         "codex" => Some(&CodexWriter),
+        "grok" => Some(&GrokWriter),
+        "opencode" => Some(&OpenCodeWriter),
         _ => None,
     }
 }
@@ -160,6 +163,7 @@ pub fn tool_home(backend: &str, home: &Path) -> PathBuf {
     match backend {
         "claude" => from("CLAUDE_CONFIG_DIR", ".claude"),
         "codex" => from("CODEX_HOME", ".codex"),
+        "grok" => crate::past::native_home(clarp_kernel::grok_muse::Tool::Grok, home),
         _ => home.to_path_buf(),
     }
 }
@@ -571,6 +575,326 @@ impl Writer for CodexWriter {
     }
 }
 
+// ---- Grok -----------------------------------------------------------------------------------
+
+/// Grok keeps a session as a directory, `<home>/sessions/<the cwd, URL-encoded>/<id>/`, with
+/// its chat history and a summary it indexes sessions by, and resumes it by its id from that
+/// directory (`grok --resume <id>`).
+pub struct GrokWriter;
+
+/// A path as Grok names its directory: every byte but letters, digits and `_.-~` encoded.
+pub fn url_encoded(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+impl GrokWriter {
+    /// The model Grok's summary names: the agent's, else that of the newest session Grok
+    /// keeps, else the first the Host knows of Grok. Grok refuses a session whose summary
+    /// names none ("Session does not exist").
+    fn model(place: &Place) -> String {
+        if let Some(model) = place.model.clone().filter(|model| !model.is_empty()) {
+            return model;
+        }
+        let mut newest: Option<(String, String)> = None;
+        let sessions = place.tool_home.join("sessions");
+        for dir in std::fs::read_dir(&sessions).into_iter().flatten().flatten() {
+            for session in std::fs::read_dir(dir.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let Ok(text) = std::fs::read_to_string(session.path().join("summary.json")) else {
+                    continue;
+                };
+                let Ok(summary) = serde_json::from_str::<Value>(&text) else {
+                    continue;
+                };
+                let (Some(model), at) = (
+                    summary["current_model_id"]
+                        .as_str()
+                        .filter(|m| !m.is_empty()),
+                    summary["last_active_at"].as_str().unwrap_or_default(),
+                ) else {
+                    continue;
+                };
+                if newest.as_ref().is_none_or(|(when, _)| at > when.as_str()) {
+                    newest = Some((at.to_string(), model.to_string()));
+                }
+            }
+        }
+        newest.map(|(_, model)| model).unwrap_or_else(|| {
+            crate::catalogue::declared("grok")["models"][0]["id"]
+                .as_str()
+                .unwrap_or("grok-build")
+                .to_string()
+        })
+    }
+
+    /// The rows of Grok's chat history for `said`, and how many prompts it holds.
+    pub fn rows(said: &[Said]) -> (Vec<Value>, usize) {
+        let mut rows = Vec::new();
+        let mut prompts = 0usize;
+        for one in spoken(said) {
+            match one.role {
+                Role::User => {
+                    rows.push(json!({
+                        "type": "user",
+                        "prompt_index": prompts,
+                        "content": [{"type": "text", "text": format!("<user_query>\n{}\n</user_query>", one.text)}],
+                    }));
+                    prompts += 1;
+                }
+                Role::Assistant => rows.push(json!({"type": "assistant", "content": one.text})),
+            }
+        }
+        (rows, prompts)
+    }
+}
+
+impl Writer for GrokWriter {
+    fn backend(&self) -> &'static str {
+        "grok"
+    }
+
+    fn write(&self, said: &[Said], place: &Place) -> Result<Written, Failed> {
+        let session = uuid7(place.now_ms)?;
+        let dir = place
+            .tool_home
+            .join("sessions")
+            .join(url_encoded(&place.cwd))
+            .join(&session);
+        let (rows, prompts) = Self::rows(said);
+        let now = iso(place.now_ms);
+        let started = said
+            .first()
+            .map_or_else(|| now.clone(), |one| iso(one.at_ms));
+        let summary = json!({
+            "info": {"id": session, "cwd": place.cwd},
+            "session_summary": title(said, 80),
+            "generated_title": title(said, 80),
+            "created_at": started,
+            "updated_at": now,
+            "last_active_at": now,
+            "num_messages": rows.len(),
+            "num_chat_messages": rows.len(),
+            "next_trace_turn": prompts,
+            "chat_format_version": 1,
+            "current_model_id": Self::model(place),
+            "grok_home": place.tool_home.display().to_string(),
+        });
+        let mut written = Written {
+            session: session.clone(),
+            carried: rows.len(),
+            files: Vec::new(),
+            dirs: vec![dir.clone()],
+            rows: Vec::new(),
+        };
+        let mut put = |name: &str, body: &[u8]| -> Result<(), Failed> {
+            let file = dir.join(name);
+            write_new(&file, body)?;
+            written.files.push(file);
+            Ok(())
+        };
+        let made = put("chat_history.jsonl", &lines(&rows))
+            .and_then(|()| {
+                let body = serde_json::to_vec_pretty(&summary)
+                    .map_err(|why| Failed::Translate(why.to_string()))?;
+                put("summary.json", &body)
+            })
+            .and_then(|()| {
+                for name in [
+                    "chat_history.jsonl.lock",
+                    "rewind_points.jsonl",
+                    "rewind_points.jsonl.lock",
+                    "summary.json.lock",
+                    "updates.jsonl",
+                    "updates.jsonl.lock",
+                ] {
+                    put(name, b"")?;
+                }
+                Ok(())
+            });
+        if let Err(failed) = made {
+            written.undo();
+            return Err(failed);
+        }
+        Ok(written)
+    }
+}
+
+// ---- OpenCode -------------------------------------------------------------------------------
+
+/// OpenCode keeps its sessions in a database of its own. Nothing here writes it: a session is
+/// handed to OpenCode's own `opencode import <file>`, in the shape `opencode export` writes.
+pub struct OpenCodeWriter;
+
+const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/// An OpenCode id: its prefix, twelve hex signs of the moment (so ids sort), fourteen random
+/// signs.
+pub fn opencode_id(prefix: &str, ms: i64, seq: u64) -> Result<String, Failed> {
+    let moment = (u64::try_from(ms.max(0))
+        .unwrap_or(0)
+        .wrapping_mul(4096)
+        .wrapping_add(seq))
+        & 0xFFFF_FFFF_FFFF;
+    let tail: String = random(14)?
+        .iter()
+        .map(|byte| char::from(BASE62[usize::from(*byte) % 62]))
+        .collect();
+    Ok(format!("{prefix}_{moment:012x}{tail}"))
+}
+
+impl OpenCodeWriter {
+    /// The session `session` as `opencode export` writes one.
+    pub fn export(said: &[Said], place: &Place, session: &str) -> Result<Value, Failed> {
+        let mut messages = Vec::new();
+        for (index, one) in spoken(said).enumerate() {
+            let seq = u64::try_from(index).unwrap_or(0) * 2;
+            let message = opencode_id("msg", one.at_ms, seq)?;
+            let mut info = json!({
+                "id": message, "sessionID": session, "role": one.role.name(), "agent": "build",
+            });
+            match one.role {
+                Role::Assistant => {
+                    info["time"] = json!({"created": one.at_ms, "completed": one.at_ms});
+                    info["mode"] = json!("build");
+                    info["path"] = json!({"cwd": place.cwd, "root": place.cwd});
+                    info["cost"] = json!(0);
+                    info["tokens"] = json!({"total": 0, "input": 0, "output": 0, "reasoning": 0,
+                                            "cache": {"read": 0, "write": 0}});
+                    info["modelID"] = json!("imported");
+                    info["providerID"] = json!("clarp");
+                    info["finish"] = json!("stop");
+                }
+                Role::User => {
+                    info["time"] = json!({"created": one.at_ms});
+                    info["summary"] = json!({"diffs": []});
+                    info["model"] = json!({"providerID": "clarp", "modelID": "imported"});
+                }
+            }
+            messages.push(json!({
+                "info": info,
+                "parts": [{
+                    "id": opencode_id("prt", one.at_ms, seq + 1)?,
+                    "sessionID": session, "messageID": message, "type": "text", "text": one.text,
+                }],
+            }));
+        }
+        let started = said.first().map_or(place.now_ms, |one| one.at_ms);
+        let slug: String = session
+            .chars()
+            .rev()
+            .take(6)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        Ok(json!({
+            "info": {
+                "id": session, "slug": format!("clarp-{}", slug.to_ascii_lowercase()),
+                "projectID": "global", "directory": place.cwd, "title": title(said, 80),
+                "version": "clarp", "summary": {"additions": 0, "deletions": 0, "files": 0},
+                "time": {"created": started, "updated": place.now_ms},
+            },
+            "messages": messages,
+        }))
+    }
+}
+
+impl Writer for OpenCodeWriter {
+    fn backend(&self) -> &'static str {
+        "opencode"
+    }
+
+    fn write(&self, said: &[Said], place: &Place) -> Result<Written, Failed> {
+        let program = place
+            .program
+            .clone()
+            .ok_or_else(|| Failed::Register("opencode is not installed".to_string()))?;
+        let session = opencode_id("ses", place.now_ms, 0)?;
+        let export = Self::export(said, place, &session)?;
+        let carried = export["messages"].as_array().map_or(0, Vec::len);
+        let file = std::env::temp_dir().join(format!("clarp-carry-{}.json", uuid4()?));
+        let body = serde_json::to_vec(&export).map_err(|why| Failed::Translate(why.to_string()))?;
+        write_new(&file, &body)?;
+        let ran = run_bounded(
+            std::process::Command::new(&program)
+                .arg("import")
+                .arg(&file)
+                .current_dir(if Path::new(&place.cwd).is_dir() {
+                    place.cwd.as_str()
+                } else {
+                    "/"
+                }),
+            IMPORT_MOST,
+        );
+        let _ = std::fs::remove_file(&file);
+        match ran {
+            Ok(done) if done.status.success() => Ok(Written {
+                session,
+                carried,
+                files: Vec::new(),
+                dirs: Vec::new(),
+                rows: Vec::new(),
+            }),
+            Ok(done) => {
+                let said = String::from_utf8_lossy(&done.stderr);
+                let line = said
+                    .lines()
+                    .rev()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("");
+                Err(Failed::Register(format!(
+                    "opencode import ended with {}: {}",
+                    done.status,
+                    line.chars().take(300).collect::<String>()
+                )))
+            }
+            Err(why) => Err(Failed::Register(format!("opencode import: {why}"))),
+        }
+    }
+}
+
+/// How long OpenCode's import may take.
+const IMPORT_MOST: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Runs a program with nothing on its input and nothing kept of its output but its errors, and
+/// ends it when it takes longer than `most`.
+fn run_bounded(
+    command: &mut std::process::Command,
+    most: std::time::Duration,
+) -> std::io::Result<std::process::Output> {
+    let mut child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let until = std::time::Instant::now() + most;
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if std::time::Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("took longer than {} s", most.as_secs()),
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -843,5 +1167,111 @@ mod tests {
         assert!(written.files()[0].is_file());
         written.undo();
         std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_grok_session_has_its_history_and_a_summary_that_names_a_model() {
+        let home = temp("grok");
+        let mut at = place(&home);
+        at.model = None;
+        // An older session says which model Grok runs.
+        let older = home.join("sessions").join("x").join("older");
+        std::fs::create_dir_all(&older).unwrap();
+        std::fs::write(
+            older.join("summary.json"),
+            r#"{"current_model_id": "grok-build-2", "last_active_at": "2026-11-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        let written = GrokWriter.write(&said(), &at).unwrap();
+        assert_eq!(&written.session[14..15], "7");
+        let dir = home
+            .join("sessions")
+            .join("%2Fhome%2Fsomeone%2Fwork%2Frepo.x")
+            .join(&written.session);
+        let rows = read_lines(&dir.join("chat_history.jsonl"));
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["type"], "user");
+        assert_eq!(rows[0]["prompt_index"], 0);
+        assert_eq!(
+            rows[0]["content"][0]["text"],
+            "<user_query>\nFix the parser, please.\n</user_query>"
+        );
+        assert_eq!(rows[1]["type"], "assistant");
+        assert_eq!(
+            rows[1]["content"],
+            "Done: the parser reads both shapes now."
+        );
+        assert_eq!(rows[2]["prompt_index"], 1);
+        let summary: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("summary.json")).unwrap())
+                .unwrap();
+        assert_eq!(summary["info"]["id"], written.session.as_str());
+        assert_eq!(summary["info"]["cwd"], "/home/someone/work/repo.x");
+        assert_eq!(summary["current_model_id"], "grok-build-2");
+        assert_eq!(summary["next_trace_turn"], 2);
+        assert!(dir.join("updates.jsonl.lock").is_file());
+        written.undo();
+        assert!(!dir.exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn an_opencode_session_goes_through_its_import() {
+        let home = temp("opencode");
+        // A stand-in for OpenCode that keeps what it is asked to import.
+        let program = home.join("opencode");
+        let kept = home.join("imported.json");
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = import ] || exit 2\ncp \"$2\" '{}'\n",
+                kept.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&program).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        std::fs::set_permissions(&program, permissions).unwrap();
+        let mut at = place(&home);
+        at.program = Some(program.clone());
+        let written = OpenCodeWriter.write(&said(), &at).unwrap();
+        assert!(written.session.starts_with("ses_"));
+        assert_eq!(written.session.len(), 4 + 12 + 14);
+        assert!(clarp_kernel::native_session_name(&written.session));
+        let export: Value = serde_json::from_str(&std::fs::read_to_string(&kept).unwrap()).unwrap();
+        assert_eq!(export["info"]["id"], written.session.as_str());
+        assert_eq!(export["info"]["directory"], "/home/someone/work/repo.x");
+        let messages = export["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["info"]["role"], "user");
+        assert_eq!(messages[1]["info"]["role"], "assistant");
+        assert_eq!(messages[1]["parts"][0]["type"], "text");
+        assert_eq!(
+            messages[1]["parts"][0]["text"],
+            "Done: the parser reads both shapes now."
+        );
+        assert_eq!(
+            messages[1]["parts"][0]["messageID"],
+            messages[1]["info"]["id"]
+        );
+        assert_eq!(
+            messages[1]["parts"][0]["sessionID"],
+            written.session.as_str()
+        );
+        written.undo();
+        // An import that fails is said as a failure to register.
+        std::fs::write(&program, "#!/bin/sh\necho 'no database' >&2\nexit 1\n").unwrap();
+        let failed = OpenCodeWriter.write(&said(), &at).unwrap_err();
+        assert_eq!(failed.stage(), "register");
+        assert!(failed.why().contains("no database"), "{failed}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn paths_are_encoded_as_grok_names_its_directories() {
+        assert_eq!(
+            url_encoded("/home/a b/c-d_e.f~"),
+            "%2Fhome%2Fa%20b%2Fc-d_e.f~"
+        );
     }
 }

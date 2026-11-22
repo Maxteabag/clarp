@@ -728,10 +728,11 @@ nothing else changes.
 
 What is carried: the user's words and the agent's answers of each turn of the current
 conversation (since the agent was last started again), in order, from the Host's own record.
-Claude and Codex get a native session written where the tool keeps its sessions; the agent's
-next turn resumes it. Antigravity, Grok and OpenCode get none yet (the Host never opens
-Antigravity's database): the agent's next turn there begins a new conversation that opens with
-the Host's record of the old one (its most recent 60,000 bytes). They are reported available. Not carried: tool calls and what they returned, thinking, attachments and images, the
+Claude, Codex and Grok get a native session written where the tool keeps its sessions, and
+OpenCode one handed to its own `opencode import`; the agent's next turn resumes it.
+Antigravity gets none (the Host never opens its database): the agent's next turn there begins
+a new conversation that opens with the Host's record of the old one (its most recent 60,000
+bytes). Not carried: tool calls and what they returned, thinking, attachments and images, the
 old tool's compaction summaries, system and developer prompts, and sub-agent sessions.
 
 `clarp-admin agent transit --session S --backend B [--model M] [--effort E]` starts a change,
