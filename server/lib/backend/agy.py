@@ -31,8 +31,6 @@ from .stream_json import StreamJsonBackend, make_handle, popen_turn
 from .long_prompt import ARGV_TEXT_LIMIT
 
 _CLEAN_STATUSES = {"SUCCESS"}
-_SECRET_VALUE = re.compile(
-    r"(?i)(authorization|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*[^\s]+")
 
 # Conversation id as agy logs it: "conversation=<uuid>" or
 # "Created conversation <uuid>".
@@ -620,45 +618,10 @@ def _deliver_terminal(st: _TurnState, *, on_result, on_error) -> None:
             log_exception("agyOnErrorFail", error)
 
 
-_TOOL_NAMES = {
-    "run_command": "Bash", "view_file": "Read", "write_to_file": "Write",
-    "replace_file_content": "Edit", "multi_replace_file_content": "Edit",
-    "grep_search": "Grep", "find_by_name": "Glob",
-    "list_dir": "LS", "search_web": "WebSearch",
-    "read_url_content": "WebFetch",
-}
-
-
-def _canonical_tool_name(value: str) -> str:
-    return _TOOL_NAMES.get(value, value or "tool")
-
-
-def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
-    raw = value if isinstance(value, dict) else {}
-
-    def clean(item: Any, limit: int = 180) -> str:
-        text = str(item or "")[:limit]
-        return _SECRET_VALUE.sub(r"\1=[redacted]", text)
-
-    if name == "Bash":
-        return {
-            "command": clean(raw.get("command") or raw.get("CommandLine")),
-            "description": clean(raw.get("description"), 120),
-        }
-    # agy spells its arguments AbsolutePath, TargetFile, Query, SearchPath...
-    if name in {"Read", "Write", "Edit"}:
-        return {"file_path": clean(
-            raw.get("file_path") or raw.get("FilePath") or raw.get("AbsolutePath")
-            or raw.get("TargetFile") or raw.get("path"), 240)}
-    if name in {"Grep", "Glob"}:
-        return {"pattern": clean(raw.get("pattern") or raw.get("Query"), 100),
-                "path": clean(raw.get("path") or raw.get("SearchPath"), 240)}
-    if name == "LS":
-        return {"path": clean(raw.get("path") or raw.get("DirectoryPath"), 240)}
-    if name in {"WebSearch", "WebFetch"}:
-        return {"query": clean(raw.get("query") or raw.get("Query"), 130),
-                "url": clean(raw.get("url") or raw.get("Url"), 180)}
-    return {}
+# How agy's tools read in a transcript: the parser's (agy_transcript), hashed with it.
+_TOOL_NAMES = agy_transcript._TOOL_NAMES
+_canonical_tool_name = agy_transcript._canonical_tool_name
+_canonical_tool_input = agy_transcript._canonical_tool_input
 
 
 class AgyBackend(StreamJsonBackend):
