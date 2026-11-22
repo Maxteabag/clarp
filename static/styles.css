@@ -3485,6 +3485,8 @@ span.lv-fold { cursor: default; }
   color: var(--washi-low);
   margin-bottom: 6px;
 }
+.rs-status { text-transform: none; letter-spacing: .02em; font-size: 11px; color: var(--moss); }
+.rs-status::before { content: '·'; margin: 0 6px; color: var(--washi-low); }
 .rs-title { margin: 0; font: 600 16px/1.3 var(--font-body); color: var(--washi); }
 .rs-summary { margin: 4px 0 0; color: var(--washi-dim); font-size: 13px; }
 .rs-notice { color: var(--washi-dim); font-size: 13px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
