@@ -43,12 +43,6 @@ const CLIENT_HEADER: &str = "x-clarp-client";
 /// written, with a whole number of at least 0; where the table names `ios`, it wins over the
 /// old number. What is refused is named, and what only differs from a known name in its case
 /// is said: each line once.
-fn threshold(app: &App) -> Option<BTreeMap<String, i64>> {
-    let file = OwnerFile::new(app.config.speech_keys.clone()).read_document()?;
-    let artifacts = file.get("artifacts")?.as_table_like()?;
-    Some(minimums(artifacts)).filter(|set| !set.is_empty())
-}
-
 /// What the owner's `[artifacts]` table sets of the minimums, as the Python Host reads it.
 fn minimums(artifacts: &dyn toml_edit::TableLike) -> BTreeMap<String, i64> {
     let mut set = BTreeMap::new();
@@ -83,6 +77,7 @@ fn minimums(artifacts: &dyn toml_edit::TableLike) -> BTreeMap<String, i64> {
 
 const SINGLE_KEY: &str = "render_spec_min_client";
 const TABLE_KEY: &str = "render_spec_min_contract";
+const V2_TABLE_KEY: &str = "render_spec_v2_min_contract";
 
 /// Says a line of the owner's file once in the life of the Host, where the Python Host says it
 /// when it reads its file, since this one reads the owner's file at every request.
@@ -107,14 +102,94 @@ pub(crate) fn client(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
-/// Whether the client of this request can see a spec and answer it.
-pub(crate) fn capable(app: &App, headers: &HeaderMap) -> bool {
+/// The catalog versions the client of this request may draw and answer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Access {
+    pub(crate) v1: bool,
+    v2: bool,
+}
+
+impl Access {
+    pub(crate) fn allows(self, artifact: &Artifact) -> bool {
+        match version(artifact) {
+            1 => self.v1,
+            2 => self.v2,
+            _ => false,
+        }
+    }
+}
+
+pub(crate) fn version(artifact: &Artifact) -> u64 {
+    artifact
+        .payload
+        .get("catalog_version")
+        .map_or(1, |n| n.as_u64().unwrap_or(0))
+}
+
+fn catalog_for(payload: &J) -> Result<Catalog, Unavailable> {
+    match payload.get("catalog_version") {
+        Some(J::Int(2)) => Catalog::embedded_version(2),
+        // The validator uses v1's refusal for an absent or unsupported version.
+        _ => Catalog::embedded(),
+    }
+}
+
+fn thresholds(app: &App) -> Option<(BTreeMap<String, i64>, BTreeMap<String, i64>)> {
+    let file = OwnerFile::new(app.config.speech_keys.clone()).read_document()?;
+    let artifacts = file.get("artifacts")?.as_table_like()?;
+    let v2 = match artifacts
+        .get(V2_TABLE_KEY)
+        .map(toml_edit::Item::as_table_like)
+    {
+        Some(Some(table)) => {
+            let entries = table
+                .iter()
+                .map(|(name, minimum)| (name, minimum.as_integer()));
+            let read = client::minimums(entries, client::BUILT_IN_NAMES);
+            for line in read.lines() {
+                said_once(V2_TABLE_KEY, &line);
+            }
+            read.taken
+        }
+        Some(None) => {
+            said_once(V2_TABLE_KEY, "ignored: expected a table of client = number");
+            BTreeMap::new()
+        }
+        None => BTreeMap::new(),
+    };
+    Some((minimums(artifacts), v2))
+}
+
+pub(crate) fn capable(app: &App, headers: &HeaderMap) -> Access {
     let header = client(headers);
-    header.is_some() && spec::capable(header, threshold(app).as_ref())
+    if header.is_none() {
+        return Access::default();
+    }
+    let (v1, v2) = thresholds(app).unwrap_or_default();
+    let level = spec::client_level(header, Some(&v1), Some(&v2));
+    Access {
+        v1: level >= 1,
+        v2: level >= 2,
+    }
 }
 
 /// What a refusal is answered with, as the Python Host answers it, and the line it logs.
 pub(crate) fn answer(refusal: &Refusal, catalog: Result<&Catalog, Unavailable>) -> ApiError {
+    let fallback = || {
+        [1, 2]
+            .into_iter()
+            .filter_map(|version| Catalog::embedded_version(version).ok())
+            .find(|catalog| !catalog.reason(refusal.code).is_null())
+    };
+    let other;
+    let catalog = if refusal.code != CATALOG_UNAVAILABLE
+        && !catalog.is_ok_and(|known| !known.reason(refusal.code).is_null())
+    {
+        other = fallback();
+        other.as_ref().ok_or(Unavailable)
+    } else {
+        catalog
+    };
     let triple = refusal.triple(catalog);
     let said = |key: &str| triple[key].as_str().unwrap_or_default().to_string();
     let (code, path) = (said("code"), said("path"));
@@ -242,10 +317,10 @@ pub(crate) async fn publish(
     app: &App,
     data: &Obj,
     validate_only: bool,
-    capable: bool,
+    capable: Access,
     turn: Option<&str>,
 ) -> Result<(StatusCode, Value), ApiError> {
-    let catalog = Catalog::embedded();
+    let catalog = catalog_for(data.get("payload").unwrap_or(&J::Null));
     if data.duplicate {
         return Err(no("invalid_object", "", catalog.as_ref().map_err(|e| *e)));
     }
@@ -281,9 +356,9 @@ pub(crate) async fn update(
     app: &App,
     current: &Artifact,
     data: &Obj,
-    capable: bool,
+    capable: Access,
 ) -> Result<Value, ApiError> {
-    let catalog = Catalog::embedded();
+    let catalog = catalog_for(data.get("payload").unwrap_or(&J::Null));
     let catalog = catalog.as_ref().map_err(|e| *e);
     if data.duplicate {
         return Err(no("invalid_object", "", catalog));
@@ -325,10 +400,10 @@ async fn published(
     app: &App,
     envelope: Envelope,
     validate_only: bool,
-    capable: bool,
+    capable: Access,
     turn: Option<&str>,
 ) -> Result<Option<Value>, ApiError> {
-    let catalog = Catalog::embedded();
+    let catalog = catalog_for(&envelope.payload);
     let known = catalog.as_ref().map_err(|e| *e);
     let title = python::strip(&strip_hidden_blocks(&envelope.title)).to_string();
     let status = python::strip(&envelope.status).to_lowercase();
@@ -413,11 +488,11 @@ pub(crate) async fn submit(
     holder: &Member,
     form: &Artifact,
     data: &J,
-    capable: bool,
+    capable: Access,
 ) -> Result<Value, ApiError> {
-    let catalog = Catalog::embedded();
+    let catalog = Catalog::embedded_version(version(form));
     let known = catalog.as_ref().map_err(|e| *e);
-    if !capable {
+    if !capable.allows(form) {
         return Err(no("client_contract", "", known));
     }
     let Ok(catalog) = known else {
@@ -442,7 +517,7 @@ pub(crate) async fn submit(
         artifact_id: form.artifact_id.clone(),
         data: Box::new(data.clone()),
         elsewhere: elsewhere.map(Box::new),
-        catalog: Box::new(catalog.clone()),
+        capable,
     };
     let done = holder.agent.artifact(want).await?;
     let done = done.map_err(|why| refused(why, Ok(catalog)))?;
@@ -453,7 +528,7 @@ pub(crate) async fn submit(
 /// The artifact itself, for a client that can see the spec: the spec, what it is, and once
 /// it was answered the answers.
 pub(crate) fn opened(mut row: Value, artifact: &Artifact) -> Result<Value, ApiError> {
-    let catalog = Catalog::embedded();
+    let catalog = Catalog::embedded_version(version(artifact));
     if catalog.is_err() {
         return Err(no(CATALOG_UNAVAILABLE, "", Err(Unavailable)));
     }
@@ -463,7 +538,15 @@ pub(crate) fn opened(mut row: Value, artifact: &Artifact) -> Result<Value, ApiEr
 
 /// `GET /artifact-catalogs/clarp.form/1`: the catalog's bytes, as both Hosts have them.
 pub(crate) async fn catalog() -> Response {
-    match Catalog::embedded() {
+    served_catalog(1)
+}
+
+pub(crate) async fn catalog_v2() -> Response {
+    served_catalog(2)
+}
+
+fn served_catalog(version: u64) -> Response {
+    match Catalog::embedded_version(version) {
         Ok(catalog) => ([(header::CONTENT_TYPE, "application/json")], catalog.raw).into_response(),
         Err(unavailable) => no(CATALOG_UNAVAILABLE, "", Err(unavailable)).into_response(),
     }

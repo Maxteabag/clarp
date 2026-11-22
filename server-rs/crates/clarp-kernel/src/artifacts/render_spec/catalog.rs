@@ -1,4 +1,4 @@
-//! The catalog `clarp.form` v1: the components a render spec may use, their properties, and
+//! The catalogs `clarp.form` v1 and v2: the components a render spec may use, their properties, and
 //! the words a refusal is told in.
 //!
 //! The two files are the contract's (`contract/catalogs/`) and both Hosts read the same
@@ -25,8 +25,29 @@ pub const REFUSALS: &[u8] = include_bytes!(concat!(
     "/../../../contract/catalogs/clarp.form.v1.refusals.json"
 ));
 
+const CATALOG_V2: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../contract/catalogs/clarp.form.v2.json"
+));
+const REFUSALS_V2: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../contract/catalogs/clarp.form.v2.refusals.json"
+));
+const CODES_V2: &[&str] = &[
+    "submit_with_buttons",
+    "action_schema",
+    "action_bound",
+    "button_action_duplicate",
+    "chart_x_mixed",
+    "chart_x_duplicate",
+    "chart_x_order",
+    "chart_points",
+    "chart_pie",
+    "table_size",
+];
+
 /// The catalog's own schema language: a catalog that uses another keyword is not loaded.
-const SCHEMA_KEYWORDS: [&str; 13] = [
+const SCHEMA_KEYWORDS: [&str; 14] = [
     "type",
     "properties",
     "required",
@@ -40,9 +61,10 @@ const SCHEMA_KEYWORDS: [&str; 13] = [
     "maxItems",
     "minimum",
     "maximum",
+    "anyOf",
 ];
 /// The types the schema language knows.
-pub(crate) const TYPES: [&str; 5] = ["string", "boolean", "integer", "object", "array"];
+pub(crate) const TYPES: [&str; 6] = ["string", "boolean", "integer", "object", "array", "null"];
 /// What a binding may name: a type of the bound key, or the rule of the options' order.
 const BINDINGS: [&str; 4] = ["string", "boolean", "integer", OPTION_ORDER];
 
@@ -91,6 +113,7 @@ pub struct Component {
     pub bindings: Vec<(String, String)>,
     /// Its properties that may read a key of the state, with the shape they read it in.
     pub reads: Vec<(String, String)>,
+    pub(crate) checks: Vec<String>,
 }
 
 /// The catalog as it was loaded.
@@ -101,6 +124,7 @@ pub struct Catalog {
     /// `c1:` and the SHA-256 of its bytes.
     pub sha256: String,
     pub ident: Ident,
+    v1_pointer_ident: Option<Ident>,
     /// Its name and its version, as a payload must name them.
     pub name: J,
     pub version: J,
@@ -158,6 +182,20 @@ fn schemas<'a>(rule: &'a J, found: &mut Vec<&'a Obj>) -> Result<(), Unavailable>
     }
     if let Some(items) = fields.get("items") {
         schemas(items, found)?;
+    }
+    if let Some(extra @ J::Object(_)) = fields.get("additionalProperties") {
+        schemas(extra, found)?;
+    }
+    if let Some(choices) = fields.get("anyOf") {
+        let J::Array(branches) = choices else {
+            return Err(Unavailable);
+        };
+        if fields.len() != 1 || branches.len() < 2 {
+            return Err(Unavailable);
+        }
+        for branch in branches {
+            schemas(branch, found)?;
+        }
     }
     Ok(())
 }
@@ -257,17 +295,38 @@ impl Catalog {
         Self::load(CATALOG, REFUSALS)
     }
 
+    /// Loads one of the catalog versions served by this Host.
+    pub fn embedded_version(version: u64) -> Result<Self, Unavailable> {
+        match version {
+            1 => Self::embedded(),
+            2 => {
+                let mut loaded = Self::load_version(CATALOG_V2, REFUSALS_V2, 2)?;
+                loaded.v1_pointer_ident = Self::embedded().ok().map(|v1| v1.ident);
+                Ok(loaded)
+            }
+            _ => Err(Unavailable),
+        }
+    }
+
     /// Loads a catalog from its bytes and the bytes of its refusals (`render_spec._loaded`
     /// and `_check_catalog`).
     pub fn load(raw: &[u8], refusals: &[u8]) -> Result<Self, Unavailable> {
+        Self::load_version(raw, refusals, 1)
+    }
+
+    fn load_version(raw: &[u8], refusals: &[u8], version: i128) -> Result<Self, Unavailable> {
         let data = json::read(raw).ok_or(Unavailable)?;
         let reasons = json::read(refusals).ok_or(Unavailable)?;
         let data = fields(Some(&data))?;
         let reasons = fields(Some(&reasons))?;
         let named = texts(Some(data.get("schema_keywords").ok_or(Unavailable)?))?;
-        if named
-            .iter()
-            .any(|keyword| !SCHEMA_KEYWORDS.contains(&keyword.as_str()))
+        if !data
+            .get("catalog_version")
+            .is_some_and(|n| python_eq(n, &J::Int(version)))
+            || (version == 2 && CODES_V2.iter().any(|code| !reasons.contains(code)))
+            || named
+                .iter()
+                .any(|keyword| !SCHEMA_KEYWORDS.contains(&keyword.as_str()))
             || CODES.iter().any(|code| !reasons.contains(code))
         {
             return Err(Unavailable);
@@ -316,6 +375,13 @@ impl Catalog {
                     return Err(Unavailable);
                 }
             }
+            let checks = texts(component.get("checks"))?;
+            if checks
+                .iter()
+                .any(|name| !matches!(name.as_str(), "chart" | "table" | "button"))
+            {
+                return Err(Unavailable);
+            }
             components.insert(
                 text(name)?,
                 Component {
@@ -324,6 +390,7 @@ impl Catalog {
                     forbid_descendants,
                     bindings,
                     reads,
+                    checks,
                 },
             );
         }
@@ -365,6 +432,7 @@ impl Catalog {
             raw: raw.to_vec(),
             sha256: format!("c1:{digest}"),
             ident,
+            v1_pointer_ident: None,
             name: data.get("catalog").ok_or(Unavailable)?.clone(),
             version: data.get("catalog_version").ok_or(Unavailable)?.clone(),
             components,
@@ -374,6 +442,11 @@ impl Catalog {
                 .map(|(code, sentence)| (code.lossy(), sentence.to_value()))
                 .collect(),
         })
+    }
+
+    /// Pointers use the first available catalog, even when validating a later version.
+    pub(super) fn pointer_ident(&self) -> &Ident {
+        self.v1_pointer_ident.as_ref().unwrap_or(&self.ident)
     }
 
     /// The sentence of a code.

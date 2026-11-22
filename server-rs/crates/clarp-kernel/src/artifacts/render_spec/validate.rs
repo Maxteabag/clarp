@@ -1,7 +1,7 @@
 //! Whether a payload is a render spec this Host takes (`render_spec.validate`): the first
 //! rule it fails, in the reference's order of stages, as a code and a pointer.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clarp_speech::markup::strip_hidden_blocks;
 
@@ -42,7 +42,7 @@ impl Checks<'_> {
     }
 
     pub(crate) fn step(&self, path: &str, key: &Text) -> String {
-        step(path, key, Some(self.ident()))
+        step(path, key, Some(self.catalog.pointer_ident()))
     }
 
     fn step_str(&self, path: &str, key: &str) -> String {
@@ -50,7 +50,7 @@ impl Checks<'_> {
     }
 
     pub(crate) fn canonical(&self, value: &J, path: &str) -> Result<String, Refusal> {
-        canonical(value, path, Some(self.ident()))
+        canonical(value, path, Some(self.catalog.pointer_ident()))
     }
 
     /// An object with these keys allowed and these required (`render_spec._object`). A key
@@ -119,6 +119,7 @@ fn of_type(value: &J, kind: &str) -> bool {
             | ("integer", J::Int(_))
             | ("object", J::Object(_))
             | ("array", J::Array(_))
+            | ("null", J::Null)
     )
 }
 
@@ -165,6 +166,12 @@ pub(crate) fn fits(value: &J, rule: &Obj, enum_too: bool) -> bool {
         }
         _ => true,
     }
+}
+
+#[derive(Default)]
+struct Elements {
+    bound: BTreeMap<String, String>,
+    buttons: BTreeSet<String>,
 }
 
 impl Checks<'_> {
@@ -310,16 +317,28 @@ impl Checks<'_> {
     fn literal(&self, value: &J, rule: &J, path: &str) -> Result<(), Refusal> {
         let empty = Obj::new();
         let rule = rule.object().unwrap_or(&empty);
+        if let Some(J::Array(branches)) = rule.get("anyOf") {
+            return if branches
+                .iter()
+                .any(|branch| self.literal(value, branch, path).is_ok())
+            {
+                Ok(())
+            } else {
+                Err(Refusal::new("prop", path))
+            };
+        }
         let kind = rule.get("type").and_then(J::str);
         if kind == Some("object") || (rule.get("type").is_none() && rule.contains("properties")) {
             let declared = rule.get("properties").and_then(J::object).unwrap_or(&empty);
-            let closed = rule.get("additionalProperties") == Some(&J::Bool(false));
+            let extra = rule.get("additionalProperties");
+            let closed = extra == Some(&J::Bool(false));
+            let extra = extra.filter(|schema| schema.object().is_some());
             let allows = |key: &Text| !closed || declared.at(key).is_some();
             let required = required_of(&J::Object(rule.clone()));
             let required: Vec<&str> = required.iter().map(String::as_str).collect();
             let fields = self.object(value, path, &allows, &required, "unknown_key")?;
             for key in json::ordered(fields)? {
-                if let Some(inner) = declared.at(key) {
+                if let Some(inner) = declared.at(key).or(extra) {
                     let given = fields.at(key).unwrap_or(&J::Null);
                     self.literal(given, inner, &self.step(path, key))?;
                 }
@@ -414,7 +433,7 @@ impl Checks<'_> {
     /// The elements: one rooted tree of components of the catalog, each with properties as
     /// the catalog says, each key of the state bound by one control at most
     /// (`render_spec._elements`).
-    fn elements(&self, spec: &Obj, schema: &Obj) -> Result<(), Refusal> {
+    fn elements(&self, spec: &Obj, schema: &Obj) -> Result<Elements, Refusal> {
         let path = "/spec/elements";
         let nodes = match spec.get("elements") {
             Some(J::Object(nodes)) if (ELEMENTS_FEWEST..=ELEMENTS_MOST).contains(&nodes.len()) => {
@@ -432,7 +451,7 @@ impl Checks<'_> {
             .get("properties")
             .and_then(J::object)
             .unwrap_or(&empty);
-        let mut bound = BTreeSet::new();
+        let mut elements = Elements::default();
         for name in json::ordered(nodes)? {
             let at = self.step(path, name);
             // An element called `on` was refused as a key `on` before.
@@ -440,9 +459,10 @@ impl Checks<'_> {
                 return Err(Refusal::new("element_id", &at));
             }
             let node = nodes.at(name).unwrap_or(&J::Null);
-            self.element(node, &at, nodes, fields, &mut bound)?;
+            self.element(node, &at, nodes, fields, &mut elements)?;
         }
-        self.tree(nodes, root, path)
+        self.tree(nodes, root, path)?;
+        Ok(elements)
     }
 
     /// One element of the spec.
@@ -452,7 +472,7 @@ impl Checks<'_> {
         at: &str,
         nodes: &Obj,
         fields: &Obj,
-        bound: &mut BTreeSet<String>,
+        elements: &mut Elements,
     ) -> Result<(), Refusal> {
         let node = self.closed(
             node,
@@ -481,7 +501,12 @@ impl Checks<'_> {
             }
         }
         let props = node.get("props").unwrap_or(&J::Null);
-        self.props(props, component, &format!("{at}/props"), fields, bound)
+        let at = format!("{at}/props");
+        self.props(props, component, &at, fields, &mut elements.bound)?;
+        for check in &component.checks {
+            super::v2::component(self, check, props, &at, &mut elements.buttons)?;
+        }
+        Ok(())
     }
 
     /// The properties of an element.
@@ -491,7 +516,7 @@ impl Checks<'_> {
         component: &Component,
         at: &str,
         fields: &Obj,
-        bound: &mut BTreeSet<String>,
+        bound: &mut BTreeMap<String, String>,
     ) -> Result<(), Refusal> {
         let empty = Obj::new();
         let rules = component.props.object().unwrap_or(&empty);
@@ -521,10 +546,10 @@ impl Checks<'_> {
             if let Some(what) = binding(name) {
                 let state_key = self.expression(value, rule, &place, fields)?;
                 let field = fields.get(&state_key).unwrap_or(&J::Null);
-                if bound.contains(&state_key) || !binds(what, field) {
+                if bound.contains_key(&state_key) || !binds(what, field) {
                     return Err(Refusal::new("expression", &place));
                 }
-                bound.insert(state_key);
+                bound.insert(state_key, place);
             } else if let (Some(shape), J::Object(_)) = (reading(name), value) {
                 let shape = self.catalog.shapes.get(shape).unwrap_or(&J::Null);
                 self.expression(value, shape, &place, fields)?;
@@ -639,7 +664,20 @@ fn binds(what: &str, rule: &J) -> bool {
 /// of stages (`render_spec.validate`).
 pub fn validate(catalog: &Catalog, payload: &J) -> Result<(), Refusal> {
     let checks = Checks { catalog };
-    let fields = checks.closed(payload, "", &FIELDS, &FIELDS, "unknown_key")?;
+    let required = [
+        "version",
+        "catalog",
+        "catalog_version",
+        "spec",
+        "answer_schema",
+    ];
+    let v2 = catalog.version == J::Int(2);
+    let required = if v2 {
+        required.as_slice()
+    } else {
+        FIELDS.as_slice()
+    };
+    let fields = checks.closed(payload, "", &FIELDS, required, "unknown_key")?;
     if checks.canonical(payload, "")?.len() > PAYLOAD_MOST {
         return Err(Refusal::new("payload_size", ""));
     }
@@ -670,8 +708,22 @@ pub fn validate(catalog: &Catalog, payload: &J) -> Result<(), Refusal> {
     checks.schema(schema)?;
     let empty = Obj::new();
     let schema = schema.object().unwrap_or(&empty);
-    checks.elements(spec, schema)?;
+    let elements = checks.elements(spec, schema)?;
+    let buttons = !elements.buttons.is_empty();
+    if buttons {
+        super::v2::button_rules(schema, &elements.buttons, &elements.bound)?;
+    }
     checks.state(state, schema, "/spec/state", false)?;
+    if buttons {
+        return if fields.contains("submit") {
+            Err(Refusal::new("submit_with_buttons", "/submit"))
+        } else {
+            Ok(())
+        };
+    }
+    if !fields.contains("submit") {
+        return Err(Refusal::new("missing_key", "/submit"));
+    }
     let submit = checks.closed(
         field("submit"),
         "/submit",

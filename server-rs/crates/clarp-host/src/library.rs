@@ -117,7 +117,7 @@ pub enum Want {
         artifact_id: String,
         data: Box<J>,
         elsewhere: Option<Box<(String, Submission)>>,
-        catalog: Box<Catalog>,
+        capable: render_spec::Access,
     },
 }
 
@@ -388,12 +388,27 @@ pub fn carry_out(
                 artifact_id,
                 data,
                 elsewhere,
-                catalog,
+                capable,
             } => {
                 let elsewhere = elsewhere
                     .as_deref()
                     .map(|(id, before)| (id.as_str(), before));
-                book.spec_submitted(catalog, artifact_id, data, elsewhere, now)
+                let catalog = book
+                    .get(artifact_id)
+                    .filter(|form| form.kind == spec::KIND)
+                    .ok_or_else(|| spec::Refusal::new("not_open", "").refused())
+                    .and_then(|form| {
+                        if !capable.allows(form) {
+                            return Err(spec::Refusal::new("client_contract", "").refused());
+                        }
+                        Catalog::embedded_version(render_spec::version(form)).map_err(|_| {
+                            spec::Refusal::new(spec::CATALOG_UNAVAILABLE, "").refused()
+                        })
+                    });
+                catalog
+                    .and_then(|catalog| {
+                        book.spec_submitted(&catalog, artifact_id, data, elsewhere, now)
+                    })
                     .map(|(form, said, changed)| {
                         receipt = Some(said);
                         (form, changed, None)
@@ -576,12 +591,17 @@ async fn page_of(app: &App, page: &Page) -> Option<String> {
 
 /// A row as it is answered: as a representation asks for it, with its report's page put
 /// back, or named where a list leaves it out.
-pub(crate) async fn shown(app: &App, mut row: Value, representation: &str, capable: bool) -> Value {
+pub(crate) async fn shown(
+    app: &App,
+    mut row: Value,
+    representation: &str,
+    capable: render_spec::Access,
+) -> Value {
     // A render spec's row is the same in every representation: plain, or with what was
     // left out for a client that can see the spec.
     if row["type"] == spec::KIND
-        && capable
         && let Some(artifact) = spec_of(app, row["artifact_id"].as_str().unwrap_or(""))
+        && capable.allows(&artifact)
     {
         spec::marked(&mut row, &artifact);
     }
@@ -602,7 +622,12 @@ pub(crate) async fn shown(app: &App, mut row: Value, representation: &str, capab
 }
 
 /// Rows as they are answered, in their order.
-async fn all_shown(app: &App, rows: Vec<Value>, representation: &str, capable: bool) -> Vec<Value> {
+async fn all_shown(
+    app: &App,
+    rows: Vec<Value>,
+    representation: &str,
+    capable: render_spec::Access,
+) -> Vec<Value> {
     let mut answered = Vec::with_capacity(rows.len());
     for row in rows {
         answered.push(shown(app, row, representation, capable).await);
@@ -784,7 +809,7 @@ async fn get_artifact(
     // A render spec is read whole only by a client that can see it.
     if row["type"] == spec::KIND {
         let opened = match spec_of(&app, rest) {
-            Some(artifact) if render_spec::capable(&app, &headers) => {
+            Some(artifact) if render_spec::capable(&app, &headers).allows(&artifact) => {
                 render_spec::opened(row, &artifact)?
             }
             _ => row,
@@ -795,7 +820,13 @@ async fn get_artifact(
     let flat = query
         .get("representation")
         .is_some_and(|given| given == "flat-v1");
-    let row = shown(&app, row, if flat { "flat-v1" } else { "" }, false).await;
+    let row = shown(
+        &app,
+        row,
+        if flat { "flat-v1" } else { "" },
+        render_spec::Access::default(),
+    )
+    .await;
     Ok(Json(json!({ "artifact": row })).into_response())
 }
 
@@ -1000,7 +1031,7 @@ pub(crate) async fn posted(
     app: &App,
     body: &[u8],
     validate_only: bool,
-    capable: bool,
+    capable: render_spec::Access,
     turn: Option<&str>,
 ) -> Result<(StatusCode, Value), ApiError> {
     // A render spec is read as the Python Host reads it: the rules see what that reader
@@ -1021,7 +1052,7 @@ pub(crate) async fn create(
     data: &Map<String, Value>,
     turn: Option<&str>,
 ) -> Result<Value, ApiError> {
-    made(app, data, false, false, turn).await
+    made(app, data, false, render_spec::Access::default(), turn).await
 }
 
 /// Internal publication to the claimed checker. Public artifact POSTs cannot select a Janitor.
@@ -1064,7 +1095,7 @@ async fn made(
     app: &App,
     data: &Map<String, Value>,
     validate_only: bool,
-    capable: bool,
+    capable: render_spec::Access,
     turn: Option<&str>,
 ) -> Result<Value, ApiError> {
     if let J::Object(fields) = J::of(&Value::Object(data.clone()))
@@ -1173,7 +1204,7 @@ async fn submit(
     app: &App,
     artifact_id: &str,
     body: &[u8],
-    capable: bool,
+    capable: render_spec::Access,
 ) -> Result<Value, ApiError> {
     // Answers to a render spec are read as the Python Host reads them.
     let spec = {
@@ -1236,7 +1267,7 @@ pub(crate) async fn change(
     rest: &str,
     data: Map<String, Value>,
 ) -> Result<Value, ApiError> {
-    changed_as(app, rest, data, false).await
+    changed_as(app, rest, data, render_spec::Access::default()).await
 }
 
 /// The same, with the row as this client is shown it.
@@ -1244,7 +1275,7 @@ async fn changed_as(
     app: &App,
     rest: &str,
     data: Map<String, Value>,
-    capable: bool,
+    capable: render_spec::Access,
 ) -> Result<Value, ApiError> {
     let rest = rest.trim_matches('/');
     let (artifact_id, action) = ["archive", "discard", "pin"]
@@ -1719,7 +1750,7 @@ pub(crate) async fn of_session(app: &App, session: &str) -> Value {
         let fleet = Fleet::scoped(app, &listing.session, &listing.agent_id);
         artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
     };
-    json!({ "artifacts": all_shown(app, rows, "", false).await })
+    json!({ "artifacts": all_shown(app, rows, "", render_spec::Access::default()).await })
 }
 
 /// A request to `/artifacts` or `/decisions` that is not a read, whose body holds half of a
@@ -1798,6 +1829,10 @@ pub fn routes() -> Router<App> {
         .route("/artifacts/{*rest}", get(get_artifact).post(post_artifact))
         .route("/pinned-artifacts", get(pinned_artifacts))
         .route("/artifact-catalogs/clarp.form/1", get(render_spec::catalog))
+        .route(
+            "/artifact-catalogs/clarp.form/2",
+            get(render_spec::catalog_v2),
+        )
         .route("/decisions", post(create_decision))
         .route("/decisions/{*rest}", post(post_decision))
         .route("/attention", get(attention))
