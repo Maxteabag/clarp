@@ -1195,7 +1195,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             if bare.startswith(p):
                 return True
         from lib.request_security import local_request
+        # A cross-origin read (lib.cross_origin: an allowed origin's GET of a read route) is never
+        # local, whatever the peer and the Origin: a listed localhost page on the same machine
+        # must not get the administrator's token taken, or read a Host without a token at all.
         self._request_is_local = (not getattr(self.server, "local_tls", False)
+                                  and not getattr(self, "_cors_headers", None)
                                   and local_request(self.client_address[0], self.headers))
         if not token:
             return self._request_is_local

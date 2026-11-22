@@ -151,3 +151,37 @@ def test_keep_alive_never_carries_the_headers_to_the_next_request(host, listed, 
         conn.close()
     assert first["access-control-allow-origin"] == ORIGIN
     assert _no_cors(second)
+
+
+LOCAL_PAGE = "http://localhost:5173"  # a dev page on the same machine: same-site with the Host
+
+
+@pytest.fixture
+def listed_local(monkeypatch):
+    monkeypatch.setattr(server_module.Handler, "_web_read_origins", lambda self: frozenset({LOCAL_PAGE}))
+
+
+def test_a_listed_localhost_page_is_never_local(host, listed_local, device):
+    """Peer 127.0.0.1, Origin localhost, no Sec-Fetch-Site: local_request() alone would call it
+    local. A cross-origin read never is: the administrator's token is refused."""
+    page = {"Origin": LOCAL_PAGE, "Sec-Fetch-Site": "same-site"}
+    status, headers, _ = _call(host, "GET", "/server-info", {**page, "Authorization": "Bearer isolated-attention-test"})
+    assert status == 401 and headers["access-control-allow-origin"] == LOCAL_PAGE
+    status, _, _ = _call(host, "GET", "/agents/snapshot", {**page, "Authorization": "Bearer isolated-attention-test"})
+    assert status == 401
+    status, _, _ = _call(host, "GET", "/server-info", {**page, "Authorization": "Bearer " + device})
+    assert status == 200
+    # The same administrator token from this machine with no Origin is local, as before.
+    status, headers, _ = _call(host, "GET", "/server-info", {"Authorization": "Bearer isolated-attention-test"})
+    assert status == 200 and _no_cors(headers)
+
+
+def test_a_host_without_a_token_is_not_read_cross_origin(host, listed_local):
+    host.ctx.auth_token = ""
+    for path in ("/server-info", "/agents/snapshot"):
+        status, headers, _ = _call(host, "GET", path, {"Origin": LOCAL_PAGE})
+        assert status == 401, path
+        assert headers["access-control-allow-origin"] == LOCAL_PAGE
+    # A local caller with no Origin still reads a Host without a token, as before.
+    status, headers, _ = _call(host, "GET", "/server-info")
+    assert status == 200 and _no_cors(headers)
