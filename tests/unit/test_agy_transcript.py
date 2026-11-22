@@ -217,3 +217,18 @@ def test_sessions_come_from_agys_catalogue_with_titles_and_folders(tmp_path, mon
     here = agy_transcript.list_sessions("/home/u/proj", brain_root=brain, summaries_file=db)
     assert [(s["id"], s["title"], s["cwd"]) for s in here] == [
         ("proj", "Fix the build", "/home/u/proj")]
+
+
+def test_agys_renamed_file_tools_are_read_write_and_edit_with_their_file(tmp_path):
+    """R44: agy renamed its file tools (read_file, write_file, edit_file) and passes the file
+    as Path; they were shown under their raw names with no file."""
+    p = _write_transcript(tmp_path / "brain", "conv-44", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>edit it</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Editing.", "tool_calls": [
+            {"name": "read_file", "args": {"Path": "/repo/notes.md"}},
+            {"name": "write_file", "args": {"Path": "/repo/new.md"}},
+            {"name": "edit_file", "args": {"Path": "/repo/notes.md"}}]},
+    ])
+    tools = agy_transcript.parse_turns(p)[1]["tools"]
+    assert [(tool["name"], tool["input"]["file_path"]) for tool in tools] == [
+        ("Read", "/repo/notes.md"), ("Write", "/repo/new.md"), ("Edit", "/repo/notes.md")]

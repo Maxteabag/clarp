@@ -44,6 +44,8 @@ _TOOL_NAMES = {
     "grep_search": "Grep", "find_by_name": "Glob",
     "list_dir": "LS", "search_web": "WebSearch",
     "read_url_content": "WebFetch",
+    # The names newer agy releases use for its file tools (R44).
+    "read_file": "Read", "write_file": "Write", "edit_file": "Edit",
 }
 
 
@@ -67,7 +69,7 @@ def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
     if name in {"Read", "Write", "Edit"}:
         return {"file_path": clean(
             raw.get("file_path") or raw.get("FilePath") or raw.get("AbsolutePath")
-            or raw.get("TargetFile") or raw.get("path"), 240)}
+            or raw.get("TargetFile") or raw.get("Path") or raw.get("path"), 240)}
     if name in {"Grep", "Glob"}:
         return {"pattern": clean(raw.get("pattern") or raw.get("Query"), 100),
                 "path": clean(raw.get("path") or raw.get("SearchPath"), 240)}
