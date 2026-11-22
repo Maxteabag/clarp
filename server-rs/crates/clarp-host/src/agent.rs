@@ -4684,6 +4684,7 @@ impl Worker {
                 now,
             );
         }
+        let mut alert_queued = false;
         // A turn ended with an answer: the user is told, once.
         let answered = status
             .last
@@ -4716,6 +4717,7 @@ impl Worker {
                 // A phone that is not listening is pushed to, when the rule says so. With a
                 // sound when the agent still waits for an answer from the user.
                 if told["push"] == true {
+                    alert_queued = true;
                     self.setup.pusher.turn_done(TurnDone {
                         badge: told["badge"] == true,
                         unread: told["unread"] == true,
@@ -4728,6 +4730,19 @@ impl Worker {
                 }
                 hub.publish(told, now);
             }
+        }
+        if !alert_queued
+            && (turn_ended || was_live.is_some_and(working_for_badge)
+                != status.live.as_ref().is_some_and(working_for_badge))
+            && hub.queue_directory().is_some_and(|directory| {
+                badge_chat(&record, &directory)
+                    && directory.push.active().any(|row| {
+                        row.platform == "ios" && row.provider != "fcm"
+                            && directory.can_receive(&row.principal)
+                    })
+            })
+        {
+            self.setup.pusher.refresh_badge();
         }
         // A job changed: the clients are told the job as it now stands, once for each change.
         for event in job_events {
@@ -4831,6 +4846,26 @@ type ToldState = (
 fn waits_for_an_account(live: &clarp_actor::LiveStatus) -> bool {
     let parked = live.parked.as_ref();
     live.held_for_an_account || parked.is_some_and(|parked| parked.wait.is_for_an_account())
+}
+
+/// Account waits and questions to the user leave an otherwise live chat eligible.
+fn working_for_badge(live: &clarp_actor::LiveStatus) -> bool {
+    live.activity != Activity::Waiting && !waits_for_an_account(live)
+}
+
+/// Helpers belong to their root chat, so an archived ancestor rules out the helper too.
+fn badge_chat(record: &AgentRecord, directory: &crate::fleet::Directory) -> bool {
+    let mut current = record;
+    for _ in 0..=directory.members.len() {
+        if current.is_janitor || current.archived_at_ms.is_some() {
+            return false;
+        }
+        let Some(parent) = current.parent_agent_id.as_deref().and_then(|id| directory.by_id(id)) else {
+            return true;
+        };
+        current = &parent.record;
+    }
+    false
 }
 
 /// Passes what the thread of one attempt of a turn says on to the agent's thread.
