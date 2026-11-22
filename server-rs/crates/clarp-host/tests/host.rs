@@ -5869,7 +5869,7 @@ fn a_phone_registers_its_push_token_and_a_revoked_phone_is_sent_nothing() {
         json!({ "ok": false, "error": "device_token_not_found" }),
     );
 
-    // The phone registers its token. It is the phone's from then on: nobody takes it.
+    // A full-scope pairing can take the phone's token, while an unbound caller is refused.
     let registered = host.ask_as(
         &phone,
         "POST",
@@ -5882,12 +5882,27 @@ fn a_phone_registers_its_push_token_and_a_revoked_phone_is_sent_nothing() {
     assert_eq!(registered, (200, json!({ "ok": true })));
     assert_eq!(
         host.ask_as(&tablet, "POST", "/devices", Some(&json!({ "token": a }))),
-        owned_elsewhere
+        (200, json!({ "ok": true }))
     );
+    assert!(
+        rows(&host, &phone).is_empty(),
+        "the previous pairing remains valid"
+    );
+    assert_eq!(live(&rows(&host, &tablet)), vec!["a1a1a1a1a1a1"]);
     assert_eq!(
         host.ask("POST", "/devices", Some(&json!({ "token": a }))),
         owned_elsewhere,
-        "nor the administrator"
+        "the administrator cannot take an owned token"
+    );
+    assert_eq!(
+        host.ask_as(&reader, "POST", "/devices", Some(&json!({ "token": a })))
+            .0,
+        403,
+        "limited scope is refused before registration"
+    );
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&json!({ "token": a }))),
+        (200, json!({ "ok": true }))
     );
     assert_eq!(
         host.ask_as(

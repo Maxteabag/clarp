@@ -1665,16 +1665,16 @@
      "op": "register",
      "at": 1795072802000,
      "args": {
-      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-      "session": "vera",
-      "owner": "device_tablet"
+      "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "environment": "sandbox",
+      "owner": "device_phone"
      },
      "paired": [
       "device_phone",
       "device_tablet"
      ],
      "answer": {
-      "refused": "owned_elsewhere"
+      "ok": null
      },
      "register": [
       {
@@ -1684,6 +1684,21 @@
        "environment": "production",
        "created_at": 1795072801000,
        "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
@@ -1702,9 +1717,30 @@
        "push_grant": "",
        "provider": "apns",
        "owner": "device_phone"
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
       }
      ],
      "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
       {
        "platform": "ios",
        "provider": "apns",
@@ -1722,6 +1758,18 @@
       {
        "platform": "ios",
        "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795072801000,
@@ -1732,156 +1780,11 @@
        "owner_can_receive": true
       }
      ],
-     "note": "refused: the phone owns it"
+     "note": "another token of the first pairing"
     },
     {
      "op": "register",
      "at": 1795072803000,
-     "args": {
-      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-      "session": "vera"
-     },
-     "paired": [
-      "device_phone",
-      "device_tablet"
-     ],
-     "answer": {
-      "refused": "owned_elsewhere"
-     },
-     "register": [
-      {
-       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-       "session": "vera",
-       "platform": "ios",
-       "environment": "production",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
-       "last_push_at": null,
-       "disabled_at": null,
-       "base_url": "",
-       "push_grant": "",
-       "principal": "device_phone",
-       "provider": "apns",
-       "supported_conversation_modes": ""
-      }
-     ],
-     "active": [
-      {
-       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-       "session": "vera",
-       "environment": "production",
-       "base_url": "",
-       "push_grant": "",
-       "provider": "apns",
-       "owner": "device_phone"
-      }
-     ],
-     "shown": [
-      {
-       "platform": "ios",
-       "provider": "apns",
-       "environment": "production",
-       "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
-       "last_push_at": null,
-       "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
-       "owner_can_receive": true
-      }
-     ],
-     "shown_to_phone": [
-      {
-       "platform": "ios",
-       "provider": "apns",
-       "environment": "production",
-       "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
-       "last_push_at": null,
-       "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
-       "owner_can_receive": true
-      }
-     ],
-     "note": "refused: nobody takes an owned token"
-    },
-    {
-     "op": "register",
-     "at": 1795072804000,
-     "args": {
-      "token": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1",
-      "session": "vera",
-      "owner": "device_tablet"
-     },
-     "paired": [
-      "device_phone",
-      "device_tablet"
-     ],
-     "answer": {
-      "refused": "owned_elsewhere"
-     },
-     "register": [
-      {
-       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-       "session": "vera",
-       "platform": "ios",
-       "environment": "production",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
-       "last_push_at": null,
-       "disabled_at": null,
-       "base_url": "",
-       "push_grant": "",
-       "principal": "device_phone",
-       "provider": "apns",
-       "supported_conversation_modes": ""
-      }
-     ],
-     "active": [
-      {
-       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-       "session": "vera",
-       "environment": "production",
-       "base_url": "",
-       "push_grant": "",
-       "provider": "apns",
-       "owner": "device_phone"
-      }
-     ],
-     "shown": [
-      {
-       "platform": "ios",
-       "provider": "apns",
-       "environment": "production",
-       "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
-       "last_push_at": null,
-       "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
-       "owner_can_receive": true
-      }
-     ],
-     "shown_to_phone": [
-      {
-       "platform": "ios",
-       "provider": "apns",
-       "environment": "production",
-       "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
-       "last_push_at": null,
-       "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
-       "owner_can_receive": true
-      }
-     ],
-     "note": "refused in capitals too"
-    },
-    {
-     "op": "register",
-     "at": 1795072805000,
      "args": {
       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
       "session": "vera",
@@ -1915,13 +1818,28 @@
        "session": "vera",
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
        "push_grant": "",
        "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
        "provider": "apns",
        "supported_conversation_modes": ""
       }
@@ -1931,6 +1849,15 @@
        "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
        "session": "vera",
        "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
        "base_url": "",
        "push_grant": "",
        "provider": "apns",
@@ -1952,11 +1879,23 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_tablet",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       },
       {
@@ -1976,6 +1915,18 @@
       {
        "platform": "ios",
        "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795072801000,
@@ -1988,11 +1939,282 @@
      ]
     },
     {
+     "op": "register",
+     "at": 1795072804000,
+     "args": {
+      "token": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1",
+      "session": "vera",
+      "owner": "device_tablet"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072804000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_tablet"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072801000,
+       "updated_at": 1795072804000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "a full-scope device takes the token from a still-valid pairing"
+    },
+    {
+     "op": "register",
+     "at": 1795072805000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "owned_elsewhere"
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072804000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_tablet"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072801000,
+       "updated_at": 1795072804000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "refused: nobody takes an owned token"
+    },
+    {
      "op": "disable",
      "at": 1795072806000,
      "args": {
       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-      "only_owner": "device_tablet"
+      "only_owner": "device_phone"
      },
      "paired": [
       "device_phone",
@@ -2008,12 +2230,12 @@
        "platform": "ios",
        "environment": "production",
        "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "updated_at": 1795072804000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_phone",
+       "principal": "device_tablet",
        "provider": "apns",
        "supported_conversation_modes": ""
       },
@@ -2022,29 +2244,44 @@
        "session": "vera",
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_tablet",
+       "principal": "device_phone",
        "provider": "apns",
        "supported_conversation_modes": ""
       }
      ],
      "active": [
       {
-       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-       "session": "vera",
-       "environment": "production",
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
        "base_url": "",
        "push_grant": "",
        "provider": "apns",
        "owner": "device_phone"
       },
       {
-       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
        "session": "vera",
        "environment": "production",
        "base_url": "",
@@ -2059,23 +2296,35 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_tablet",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072801000,
+       "updated_at": 1795072804000,
        "last_push_at": null,
        "disabled_at": null,
-       "token_prefix": "b2b2b2b2b2b2",
+       "token_prefix": "a1a1a1a1a1a1",
        "owner_can_receive": true
       },
       {
        "platform": "ios",
        "provider": "apns",
        "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
        "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       }
      ],
@@ -2083,24 +2332,24 @@
       {
        "platform": "ios",
        "provider": "apns",
-       "environment": "production",
+       "environment": "sandbox",
        "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       }
      ],
-     "note": "the tablet cannot unregister the phone"
+     "note": "the first pairing can no longer unregister it"
     },
     {
      "op": "disable",
      "at": 1795072807000,
      "args": {
       "owner": "device_tablet",
-      "reason": "unregistered-by-administrator"
+      "reason": "revoked"
      },
      "paired": [
       "device_phone",
@@ -2116,12 +2365,12 @@
        "platform": "ios",
        "environment": "production",
        "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "updated_at": 1795072804000,
        "last_push_at": null,
-       "disabled_at": null,
+       "disabled_at": 1795072807000,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_phone",
+       "principal": "device_tablet",
        "provider": "apns",
        "supported_conversation_modes": ""
       },
@@ -2130,22 +2379,37 @@
        "session": "vera",
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
        "provider": "apns",
        "supported_conversation_modes": ""
       }
      ],
      "active": [
       {
-       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-       "session": "vera",
-       "environment": "production",
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
        "base_url": "",
        "push_grant": "",
        "provider": "apns",
@@ -2158,23 +2422,35 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_tablet",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072801000,
+       "updated_at": 1795072804000,
        "last_push_at": null,
        "disabled_at": 1795072807000,
-       "token_prefix": "b2b2b2b2b2b2",
+       "token_prefix": "a1a1a1a1a1a1",
        "owner_can_receive": true
       },
       {
        "platform": "ios",
        "provider": "apns",
        "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
        "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       }
      ],
@@ -2182,13 +2458,13 @@
       {
        "platform": "ios",
        "provider": "apns",
-       "environment": "production",
+       "environment": "sandbox",
        "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       }
      ]
@@ -2201,7 +2477,7 @@
       "session": "vera"
      },
      "paired": [
-      "device_tablet"
+      "device_phone"
      ],
      "answer": {
       "refused": "owned_elsewhere"
@@ -2213,12 +2489,12 @@
        "platform": "ios",
        "environment": "production",
        "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "updated_at": 1795072804000,
        "last_push_at": null,
-       "disabled_at": null,
+       "disabled_at": 1795072807000,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_phone",
+       "principal": "device_tablet",
        "provider": "apns",
        "supported_conversation_modes": ""
       },
@@ -2227,22 +2503,37 @@
        "session": "vera",
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
        "provider": "apns",
        "supported_conversation_modes": ""
       }
      ],
      "active": [
       {
-       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-       "session": "vera",
-       "environment": "production",
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
        "base_url": "",
        "push_grant": "",
        "provider": "apns",
@@ -2255,41 +2546,53 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_tablet",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072801000,
+       "updated_at": 1795072804000,
        "last_push_at": null,
        "disabled_at": 1795072807000,
-       "token_prefix": "b2b2b2b2b2b2",
-       "owner_can_receive": true
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": false
       },
       {
        "platform": "ios",
        "provider": "apns",
        "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
+       "last_push_at": null,
+       "disabled_at": 1795072804000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": false
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
        "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
-       "owner_can_receive": false
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
       }
      ],
      "shown_to_phone": [
       {
        "platform": "ios",
        "provider": "apns",
-       "environment": "production",
+       "environment": "sandbox",
        "owner": "device_phone",
-       "created_at": 1795072801000,
-       "updated_at": 1795072801000,
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
        "last_push_at": null,
        "disabled_at": null,
-       "token_prefix": "a1a1a1a1a1a1",
-       "owner_can_receive": false
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
       }
      ],
-     "note": "still refused for nobody after the phone was revoked"
+     "note": "still refused for nobody after the tablet was revoked"
     },
     {
      "op": "register",
@@ -2297,10 +2600,10 @@
      "args": {
       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
       "session": "vera",
-      "owner": "device_tablet"
+      "owner": "device_phone"
      },
      "paired": [
-      "device_tablet"
+      "device_phone"
      ],
      "answer": {
       "ok": null
@@ -2317,7 +2620,7 @@
        "disabled_at": null,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_tablet",
+       "principal": "device_phone",
        "provider": "apns",
        "supported_conversation_modes": ""
       },
@@ -2326,18 +2629,42 @@
        "session": "vera",
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_tablet",
        "provider": "apns",
        "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
       }
      ],
      "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
       {
        "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
        "session": "vera",
@@ -2345,7 +2672,7 @@
        "base_url": "",
        "push_grant": "",
        "provider": "apns",
-       "owner": "device_tablet"
+       "owner": "device_phone"
       }
      ],
      "shown": [
@@ -2353,7 +2680,7 @@
        "platform": "ios",
        "provider": "apns",
        "environment": "production",
-       "owner": "device_tablet",
+       "owner": "device_phone",
        "created_at": 1795072801000,
        "updated_at": 1795072809000,
        "last_push_at": null,
@@ -2366,23 +2693,60 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_tablet",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": false
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       }
      ],
-     "shown_to_phone": [],
-     "note": "a device takes over what a revoked device owned"
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "a full-scope device takes over from a revoked pairing"
     },
     {
      "op": "disable",
      "at": 1795072810000,
      "args": {},
      "paired": [
-      "device_tablet"
+      "device_phone"
      ],
      "answer": {
       "refused": "value",
@@ -2400,7 +2764,7 @@
        "disabled_at": null,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_tablet",
+       "principal": "device_phone",
        "provider": "apns",
        "supported_conversation_modes": ""
       },
@@ -2409,18 +2773,42 @@
        "session": "vera",
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_tablet",
        "provider": "apns",
        "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
       }
      ],
      "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
       {
        "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
        "session": "vera",
@@ -2428,7 +2816,7 @@
        "base_url": "",
        "push_grant": "",
        "provider": "apns",
-       "owner": "device_tablet"
+       "owner": "device_phone"
       }
      ],
      "shown": [
@@ -2436,7 +2824,7 @@
        "platform": "ios",
        "provider": "apns",
        "environment": "production",
-       "owner": "device_tablet",
+       "owner": "device_phone",
        "created_at": 1795072801000,
        "updated_at": 1795072809000,
        "last_push_at": null,
@@ -2449,15 +2837,52 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_tablet",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": false
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       }
      ],
-     "shown_to_phone": [],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ],
      "note": "refused: a token or an owner is needed"
     },
     {
@@ -2467,7 +2892,7 @@
       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
      },
      "paired": [
-      "device_tablet"
+      "device_phone"
      ],
      "answer": {
       "ok": 1
@@ -2484,7 +2909,7 @@
        "disabled_at": 1795072811000,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_tablet",
+       "principal": "device_phone",
        "provider": "apns",
        "supported_conversation_modes": ""
       },
@@ -2493,24 +2918,49 @@
        "session": "vera",
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_tablet",
        "provider": "apns",
        "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
       }
      ],
-     "active": [],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
      "shown": [
       {
        "platform": "ios",
        "provider": "apns",
        "environment": "production",
-       "owner": "device_tablet",
+       "owner": "device_phone",
        "created_at": 1795072801000,
        "updated_at": 1795072809000,
        "last_push_at": null,
@@ -2523,15 +2973,52 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_tablet",
-       "created_at": 1795072805000,
-       "updated_at": 1795072805000,
+       "created_at": 1795072803000,
+       "updated_at": 1795072803000,
        "last_push_at": null,
-       "disabled_at": 1795072807000,
+       "disabled_at": 1795072804000,
        "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": false
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
        "owner_can_receive": true
       }
      ],
-     "shown_to_phone": []
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": 1795072811000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1795072802000,
+       "updated_at": 1795072802000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ]
     }
    ]
   },
@@ -4961,7 +5448,7 @@
      "at": 1795245612000,
      "args": {
       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
-      "owner": "device_phone",
+      "owner": "device_tablet",
       "platform": "android",
       "provider": "apns"
      },
@@ -5116,14 +5603,14 @@
        "owner_can_receive": true
       }
      ],
-     "note": "a token stays with its service"
+     "note": "a different provider refuses before changing the owner"
     },
     {
      "op": "register",
      "at": 1795245613000,
      "args": {
       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
-      "owner": "device_phone",
+      "owner": "device_tablet",
       "platform": "android"
      },
      "paired": [
@@ -5175,7 +5662,7 @@
        "disabled_at": null,
        "base_url": "",
        "push_grant": "",
-       "principal": "device_phone",
+       "principal": "device_tablet",
        "provider": "fcm",
        "supported_conversation_modes": ""
       }
@@ -5197,7 +5684,7 @@
        "base_url": "",
        "push_grant": "",
        "provider": "fcm",
-       "owner": "device_phone"
+       "owner": "device_tablet"
       }
      ],
      "shown": [
@@ -5205,7 +5692,7 @@
        "platform": "android",
        "provider": "fcm",
        "environment": "production",
-       "owner": "device_phone",
+       "owner": "device_tablet",
        "created_at": 1795245611000,
        "updated_at": 1795245613000,
        "last_push_at": null,
@@ -5244,8 +5731,156 @@
        "provider": "fcm",
        "environment": "production",
        "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "FCM also passes to another full-scope pairing"
+    },
+    {
+     "op": "register",
+     "at": 1795245614000,
+     "args": {
+      "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+      "owner": "device_phone",
+      "platform": "android"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245614000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "fcm_Token-01",
@@ -5280,7 +5915,7 @@
     },
     {
      "op": "register",
-     "at": 1795245614000,
+     "at": 1795245615000,
      "args": {
       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
       "owner": "device_phone",
@@ -5299,8 +5934,8 @@
        "session": null,
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795245614000,
-       "updated_at": 1795245614000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245615000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
@@ -5332,7 +5967,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_phone",
@@ -5345,7 +5980,7 @@
        "platform": "android",
        "environment": "production",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
@@ -5381,8 +6016,8 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
-       "created_at": 1795245614000,
-       "updated_at": 1795245614000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245615000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "a1a1a1a1a1a1",
@@ -5394,7 +6029,7 @@
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "fcm_Token-01",
@@ -5420,7 +6055,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "token_prefix": "d4d4d4d4d4d4",
        "owner_can_receive": true
       }
@@ -5431,8 +6066,8 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
-       "created_at": 1795245614000,
-       "updated_at": 1795245614000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245615000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "a1a1a1a1a1a1",
@@ -5444,7 +6079,7 @@
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "fcm_Token-01",
@@ -5470,7 +6105,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "token_prefix": "d4d4d4d4d4d4",
        "owner_can_receive": true
       }
@@ -5479,7 +6114,7 @@
     },
     {
      "op": "register",
-     "at": 1795245615000,
+     "at": 1795245616000,
      "args": {
       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
       "owner": "device_phone",
@@ -5499,8 +6134,8 @@
        "session": null,
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795245614000,
-       "updated_at": 1795245615000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245616000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
@@ -5532,7 +6167,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_phone",
@@ -5545,7 +6180,7 @@
        "platform": "android",
        "environment": "production",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
@@ -5581,8 +6216,8 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
-       "created_at": 1795245614000,
-       "updated_at": 1795245615000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245616000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "a1a1a1a1a1a1",
@@ -5594,7 +6229,7 @@
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "fcm_Token-01",
@@ -5620,7 +6255,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "token_prefix": "d4d4d4d4d4d4",
        "owner_can_receive": true
       }
@@ -5631,8 +6266,8 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
-       "created_at": 1795245614000,
-       "updated_at": 1795245615000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245616000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "a1a1a1a1a1a1",
@@ -5644,7 +6279,7 @@
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "fcm_Token-01",
@@ -5670,7 +6305,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "token_prefix": "d4d4d4d4d4d4",
        "owner_can_receive": true
       }
@@ -5679,7 +6314,7 @@
     },
     {
      "op": "register",
-     "at": 1795245616000,
+     "at": 1795245617000,
      "args": {
       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
       "owner": "device_phone",
@@ -5698,8 +6333,8 @@
        "session": null,
        "platform": "ios",
        "environment": "production",
-       "created_at": 1795245614000,
-       "updated_at": 1795245616000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245617000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "http://printer.local:7682/path",
@@ -5731,7 +6366,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "base_url": "",
        "push_grant": "",
        "principal": "device_phone",
@@ -5744,7 +6379,7 @@
        "platform": "android",
        "environment": "production",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "base_url": "",
@@ -5780,8 +6415,8 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
-       "created_at": 1795245614000,
-       "updated_at": 1795245616000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245617000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "a1a1a1a1a1a1",
@@ -5793,7 +6428,7 @@
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "fcm_Token-01",
@@ -5819,7 +6454,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "token_prefix": "d4d4d4d4d4d4",
        "owner_can_receive": true
       }
@@ -5830,8 +6465,8 @@
        "provider": "apns",
        "environment": "production",
        "owner": "device_phone",
-       "created_at": 1795245614000,
-       "updated_at": 1795245616000,
+       "created_at": 1795245615000,
+       "updated_at": 1795245617000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "a1a1a1a1a1a1",
@@ -5843,7 +6478,7 @@
        "environment": "production",
        "owner": "device_phone",
        "created_at": 1795245611000,
-       "updated_at": 1795245613000,
+       "updated_at": 1795245614000,
        "last_push_at": null,
        "disabled_at": null,
        "token_prefix": "fcm_Token-01",
@@ -5869,7 +6504,7 @@
        "created_at": 1795245606000,
        "updated_at": 1795245606000,
        "last_push_at": null,
-       "disabled_at": 1795245614000,
+       "disabled_at": 1795245615000,
        "token_prefix": "d4d4d4d4d4d4",
        "owner_can_receive": true
       }

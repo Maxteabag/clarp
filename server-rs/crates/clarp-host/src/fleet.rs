@@ -9,7 +9,7 @@ pub(crate) mod delegations;
 use clarp_kernel::kept_portraits::Portrait;
 use clarp_kernel::launch_directories::{self as launches, Ledger, Owners};
 const LAUNCH_USAGE: &str = "launch-path-usage";
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -2826,14 +2826,18 @@ impl Fleet {
 
     /// Keeps rows of the push register as a change left them, and publishes the register.
     fn keep_push(&mut self, changed: &[PushRow]) -> Result<(), Unavailable> {
-        for row in changed {
-            let stored =
-                serde_json::to_vec(row).map_err(|error| Unavailable::new(error.to_string()))?;
-            self.store
-                .put(PUSH, &row.token, &stored)
-                .map_err(|error| Unavailable::new(error.to_string()))?;
-        }
         if !changed.is_empty() {
+            let writes = changed
+                .iter()
+                .map(|row| {
+                    let stored = serde_json::to_vec(row)
+                        .map_err(|error| Unavailable::new(error.to_string()))?;
+                    Ok((PUSH.to_owned(), row.token.clone(), Some(stored)))
+                })
+                .collect::<Result<Vec<_>, Unavailable>>()?;
+            self.store
+                .put_together(&writes)
+                .map_err(|error| Unavailable::new(error.to_string()))?;
             self.push.apply(changed);
             self.publish();
         }
@@ -2844,7 +2848,6 @@ impl Fleet {
         &mut self,
         asked: &PushRegistration,
     ) -> Result<Result<(), devices::Refused>, Unavailable> {
-        let devices = &self.devices;
         let registered = self.push.register(
             &devices::Registration {
                 token: &asked.token,
@@ -2857,11 +2860,28 @@ impl Fleet {
                 provider: &asked.provider,
                 modes: &asked.modes,
             },
-            &|owner| can_receive(devices, owner),
             self.works.clock.now_ms(),
         );
         match registered {
-            Ok(changed) => self.keep_push(&changed).map(Ok),
+            Ok(changed) => {
+                let previous: BTreeSet<_> = changed
+                    .iter()
+                    .filter_map(|row| {
+                        let old = self.push.row(&row.token)?;
+                        (!old.principal.is_empty() && old.principal != row.principal)
+                            .then(|| old.principal.clone())
+                    })
+                    .collect();
+                self.keep_push(&changed)?;
+                for old in previous {
+                    let valid = can_receive(&self.devices, &old);
+                    eprintln!(
+                        "clarp-host: deviceTokenOwnerTransferred from={old} to={} previous_valid={valid}",
+                        asked.owner
+                    );
+                }
+                Ok(Ok(()))
+            }
             Err(why) => Ok(Err(why)),
         }
     }
