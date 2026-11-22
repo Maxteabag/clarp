@@ -120,6 +120,10 @@ class OrchestratorOutcome:
     # Internal, never in a payload: the session the decision resolved to, "" for none, which
     # the run's receipt records (R83); None where the answer's session already is it.
     target: str | None = None
+    # Internal, never in a payload: the agent the dispatcher refused, when its refusal
+    # names one (DispatchError.agent_id: an agent that moved). The HTTP adapter answers
+    # that refusal as every door does (server._answer_moved: moved_to, moved_at).
+    refused_agent_id: str = ""
 
 
 # A routing receipt whose dispatch a same-id retry sends again (RTO-07).
