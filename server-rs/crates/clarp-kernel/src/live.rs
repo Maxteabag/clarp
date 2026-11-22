@@ -635,8 +635,7 @@ impl Hub {
         match glimpse {
             Glimpse::Message { id, text, row } => {
                 let phase = row.as_ref().map(|_| "final");
-                let text = clarp_speech::markup::strip_team_blocks(text);
-                self.message_text(id, &text, (phase, row.as_deref()), turn_id, now)
+                self.message_text(id, text, (phase, row.as_deref()), turn_id, now)
             }
             Glimpse::Reasoning { id, text } => self.reasoning_text(id, text, turn_id, now),
             Glimpse::Tool {

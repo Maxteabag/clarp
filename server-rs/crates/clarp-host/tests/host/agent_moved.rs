@@ -365,7 +365,7 @@ fn agent_moved_records_decision_and_form_answers_without_delivering_until_return
             "answers":{"route":"Bridge"},
         })),
     );
-    assert!(matches!(status, 200 | 201 | 202), "{receipt}");
+    assert!(matches!(status, 200..=202), "{receipt}");
     assert!(host.conversation(&session).is_empty());
     assert_eq!(
         host.get(&format!("/turn-queue?session={session}"))["items"],

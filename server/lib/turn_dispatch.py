@@ -83,7 +83,7 @@ def free_stale_slot(agent_id: str) -> str | None:
 
 from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-module)
     DispatchResult, _turn_protocol, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, _stop_holds,
-    _park, _park_at_head, DispatchError, _refuse_oversized, JanitorDispatchError,
+    _park, DispatchError, _refuse_oversized, JanitorDispatchError,
     _LaunchReceiptUnrecorded, UNCONFIRMED_DELIVERY, _LaunchReceiptRefused, DELIVERY_HINT_BUSY_MS,
     _record_launch_attempt, _can_steer, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active,
     _admission_facts, _admit, _validate_janitor_target, _recovered_janitor_run, _janitor_spawn_lock,
@@ -163,6 +163,11 @@ from lib.turn_launcher import LauncherMixin  # noqa: E402  (s3_apply)
 from lib.turn_admission import AdmissionMixin  # noqa: E402  (s3_apply)
 
 
+def _steer_refused(spec: _TurnSpec, reason: str) -> None:
+    """Which condition kept a send to a busy agent from being steered (it then waits)."""
+    log("steerRefused", f"agent={spec.agent_id} trace={spec.trace_id or '-'} reason={reason}")
+
+
 class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixin, RecoveryMixin, RetryMixin, DrainMixin):
     def __init__(self, ctx, *, backend_registry=backends,
                  home: pathlib.Path | None = None,
@@ -207,8 +212,8 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         attached terminal holds every send; a running or starting turn holds a
         user's send (a steerable backend is offered it first, below) and the
         release drain's fence holds every send behind a live turn; a free slot
-        whose process still runs holds it too. A send of another origin to a
-        live turn preempts it and keeps its row at admission, as before. A
+        whose process still runs holds it too. A send of any other origin to a
+        live turn waits as well: no send ends a running turn (R7). A
         second send being admitted for the agent at the same moment leans
         towards waiting: if the agent is idle after all, the item starts at
         once, its row written then. ``slot`` is _slot_snapshot's reading."""
@@ -222,17 +227,13 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         if in_flight:
             if not live:
                 return _SLOTS.fenced          # a stale slot is taken over, unless fenced
-            if (current.startswith(_PROCESS_OWNER_PREFIX) or _slot_is_spawning(agent_id)
-                    or _SLOTS.fenced):
-                return True
-            return spec.origin == "user"
+            return True
         if _SLOTS.admitting_count(agent_id) > 1:
             return True
         return bool(self._running_processes(spec))
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
                         park_id: str, queue_user: list,
-                        preempt: list | None = None,
                         wait_for_start: bool = False) -> tuple[bool, bool]:
         """The decision half of _enqueue_if_busy; the caller holds _TURN_LOCK.
         Returns (parked behind Stop, send waits)."""
@@ -329,20 +330,12 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             if _SLOTS.fenced:
                 # The release drain waits for this turn; never preempt it.
                 return self._hold_for_drain(spec, "behind a live turn")
-            if spec.origin == "user":
-                # Leave the live owner intact. The caller persists a normal
-                # queue receipt outside this lock, then rechecks ownership.
-                queue_user.append(spec.trace_id)
-                return False, True
-            # Take the slot first so the preempted turn's dying callback is
-            # already superseded, then interrupt once the lock is released
-            # (the caller does, see ``preempt``).
-            _SLOTS.claim(agent_id, spec.trace_id)
-            if preempt is not None:
-                preempt.append(current)
-            else:
-                defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
-            return False, False
+            # Every plain send leaves the live owner intact and waits for it, the
+            # user's and any other origin's alike: no send ends a running turn
+            # (issue 360, R7; only the user's Stop does). The caller persists a
+            # normal queue receipt outside this lock, then rechecks ownership.
+            queue_user.append(spec.trace_id)
+            return False, True
         if self._running_processes(spec):
             # The slot is free but a turn process of this agent still runs
             # (the Host took its turn for finished too early). Two processes
@@ -399,6 +392,8 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             active_trace = _INFLIGHT.get(spec.agent_id, "")
             busy = bool(active_trace)
         if not busy or _terminal_live(spec.agent_id):
+            if busy:
+                _steer_refused(spec, "terminal")
             return False
         steer = getattr(self.backends, "steer_turn", None)
         if steer is None or not _can_steer(self.backends, spec.backend):
@@ -406,11 +401,13 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             # no launch attempt is recorded for it, so the send that then waits
             # behind the turn keeps a PENDING receipt and runs from the queue
             # after a Stop or a restart (R120).
+            _steer_refused(spec, "backend")
             return False
         # A claimed slot with no live process is a phantom (a launch that
         # died before the backend started). Steering into it loses the
         # message; fall through so the busy path reclaims the slot instead.
         if not self._has_live_turn(spec):
+            _steer_refused(spec, "no_live_turn")
             return False
         # A steer hands the prompt to the provider too. Raised past the
         # fall-through below: a failed receipt write must not turn into a
@@ -534,8 +531,9 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         ``client_msg_id``, as the handover says it for an item whose turn starts. After
         ``_start_queued_row`` committed and sent the row's own events, and only when the
         item's receipt did start (also after the retry of a failed start): an item whose
-        start failed twice is settled by recovery, and was not started here."""
-        if turn_queue.status(spec.queue_id) == "started":
+        start failed twice is settled by recovery, and was not started here. An item whose
+        joined turn already ended (done, failed, ...) did start too: it is said as well."""
+        if turn_queue.status(spec.queue_id) not in ("", "queued", "claimed", "parked"):
             self._broadcast_queue_state(spec, started=True)
 
     def _steer_unread(self, spec: _TurnSpec) -> None:

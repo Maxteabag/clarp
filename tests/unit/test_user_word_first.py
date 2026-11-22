@@ -198,20 +198,16 @@ def test_agent_messages_still_drain_when_the_user_keeps_writing(tmp_path):
 
 # --- held, fenced, stopped, paused --------------------------------------------
 
-def test_the_users_word_after_a_stop_runs_past_the_pause_and_the_rest_waits(tmp_path):
-    """Fresh user intent already runs past a Stop's pause (docs/protocol.md,
-    send rules); nothing about that changes. The other agents' messages stay
-    held for Resume, in their order."""
+def test_the_users_word_after_a_stop_ends_the_pause_and_the_rest_runs_after_it(tmp_path):
+    """The user's fresh message after a Stop runs past its pause and ends it
+    (docs/protocol.md, send rules): the other agents' messages run after it."""
     world = World(tmp_path)
     _busy_with_peers(world)
     world.stop()
     world.send("u1", queue=True)
     world.settle()
-    assert world.started == ["t0", "u1"]
-    assert turn_queue.is_paused(world.agent)
-    assert _waiting(world) == ["p1", "p2", "p3"]
-    _resume(world)
     assert world.started == ["t0", "u1", "p1", "p2", "p3"]
+    assert not turn_queue.is_paused(world.agent)
 
 
 def test_work_queued_before_a_stop_is_held_with_the_user_first(tmp_path):
@@ -502,18 +498,22 @@ def test_memory_and_durable_order_agree_over_random_sequences(tmp_path, seed):
     texts = world.started              # every launch, across the restarts
     # A row whose own launch failed in an unknown state is never run again
     # (it may have reached the backend): it stays, and is the only kind that may.
-    uncertain = {row["client_msg_id"] for row in turn_queue.pending(world.agent)} - {
-        row["client_msg_id"] for row in turn_queue.pending_for_dispatch()}
+    # ... or, since the stuck-queue fix, started by the recovery pass when its row is
+    # written and a turn under its trace ended (never relaunched, no longer 'queued').
+    uncertain = ({row["client_msg_id"] for row in turn_queue.pending(world.agent)} - {
+        row["client_msg_id"] for row in turn_queue.pending_for_dispatch()}) | {
+        row["client_msg_id"] for row in agents_db.conn().execute(
+            "SELECT * FROM queued_turns WHERE agent_id = ? AND status <> 'queued'",
+            (world.agent,)) if turn_queue._consumed_or_uncertain(row)}
     assert set(_waiting(world)) <= uncertain, (seed, _durable_order(world), uncertain)
     assert sorted(set(texts) | uncertain) == sorted(set(sent) | uncertain), (seed, texts, sent)
     assert len(texts) == len(set(texts)), (seed, texts)
 
 
-def test_resume_puts_held_user_word_ahead_of_a_later_one_that_ran_past_the_pause(tmp_path):
-    """Found by the random sequences (seed 19): a card the user answered was
-    held by a Stop; a later user message waited in memory behind a turn that
-    ran past the pause. On Resume the card is re-admitted and goes first, as
-    the durable order has it: a user's item never overtakes an earlier one."""
+def test_a_held_card_answer_runs_before_the_users_later_message_once_the_pause_ends(tmp_path):
+    """A card the user answered was held by a Stop. The user's next message ends the
+    pause; the held card then runs in the durable order, never overtaken by a later
+    user's message: the earlier user's word first (the case seed 19 found)."""
     world = World(tmp_path)
     world.send("t0")
     world.service.dispatch(
@@ -521,13 +521,11 @@ def test_resume_puts_held_user_word_ahead_of_a_later_one_that_ran_past_the_pause
         synthesize_audio=False, queue_if_busy=True, origin="automation", user_word=True)
     world.send("p1", origin="agent", queue=True)
     world.stop()
-    world.send("u2")                       # runs past the pause
-    world.send("u3", queue=True)           # waits behind u2, in memory
+    world.send("u2")                       # the user carries on: the pause ends
+    world.send("u3", queue=True)           # waits behind u2
     world._collect()
-    assert world.started == ["t0", "u2"]
-    assert turn_queue.set_paused(world.agent, False)
+    assert world.started == ["t0", "u2"] and not turn_queue.is_paused(world.agent)
     world.service.recover_queued()
-    assert _memory(world) == ["c1", "u3", "p1"]
     assert _waiting(world) == ["c1", "u3", "p1"]
     world.settle()
     assert world.started == ["t0", "u2", "c1", "u3", "p1"]
@@ -542,11 +540,9 @@ def test_the_users_word_admitted_during_a_stop_starts_first_and_the_rest_is_held
     _stop_with_arrivals(world, [("u_mid", "user", False)])
     world.service.start_held_work()
     world.settle()
-    assert world.started == ["t0", "u_mid"]
-    assert _waiting(world) == ["p_pre", "p_pre2"]
-    assert turn_queue.is_paused(world.agent)
-    _resume(world)
+    # The user's message admitted during the Stop starts first and ends the pause.
     assert world.started == ["t0", "u_mid", "p_pre", "p_pre2"]
+    assert not turn_queue.is_paused(world.agent)
 
 
 def _fail_before_the_turn_opens(world):

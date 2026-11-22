@@ -763,8 +763,8 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         )
     );
 
-    // THE SEND. The user's own word is never coordination, whatever sender it names.
-    // An empty peer header still leaves it the user's word.
+    // THE SEND. Naming Ivy makes this her message even with a claimed user origin
+    // and an empty peer header (R18).
     let (status, sent) = send(
         &[("X-Clarp-Peer", "")],
         json!({ "session": "oak", "text": "from me", "client_msg_id": "c-2", "sender": "ivy",
@@ -774,11 +774,14 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     wait_for("Oak's second turn", || {
         answered(&host, "oak", &sent["trace_id"])
     });
-    for row in rows_of_trace(&host, "oak", sent["trace_id"].as_str().unwrap()) {
-        assert_eq!(row["audience"], "user", "{row}");
+    let sent_rows = rows_of_trace(&host, "oak", sent["trace_id"].as_str().unwrap());
+    let ivy_message = sent_rows.iter().find(|row| row["id"] == "u-c-2").unwrap();
+    assert_eq!(ivy_message["origin"], "agent", "{ivy_message}");
+    for row in &sent_rows {
+        assert_eq!(row["audience"], "agents", "{row}");
     }
-    let mine = dispatched(&heard, "oak", "c-2");
-    assert_eq!(mine["audience"], "user", "{mine}");
+    let ivy_dispatch = dispatched(&heard, "oak", "c-2");
+    assert_eq!(ivy_dispatch["audience"], "agents", "{ivy_dispatch}");
     // A sender the Host does not know cannot mark another kind of message as coordination.
     let (status, scheduled) = send(
         &[],
@@ -1272,9 +1275,12 @@ fn a_user_can_hide_coordination_globally_or_per_chat_without_rewriting_it() {
     wait_for("the marked turn to begin", || {
         std::fs::read_to_string(tokens.join("oak")).is_ok_and(|t| !t.is_empty() && t != before)
     });
-    let prompt = std::fs::read_to_string(tokens.join("oak.prompt")).unwrap();
+    let input: Value =
+        serde_json::from_slice(&std::fs::read(tokens.join("oak.prompt")).unwrap()).unwrap();
+    let prompt = input["message"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        prompt.contains("Coordination: this turn answers a message from another agent"),
+        prompt.starts_with("--- Clarp team context ---\nCoordination: this turn answers a message from another agent")
+            && prompt.contains("\n--- End Clarp team context ---\n\ncoordination prompt"),
         "{prompt}"
     );
     let token = std::fs::read_to_string(tokens.join("oak")).unwrap();
@@ -1332,7 +1338,7 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
         .replace(
             "read message\n",
             &format!(
-                "read message\nprintf '%s' \"$message\" > '{0}/'\"$CLARP_SESSION.prompt\"\nprintf '%s' \"$CLARP_PROVIDER_TURN\" > '{0}/'\"$CLARP_SESSION\"\n",
+                "read -r message\nprintf '%s' \"$message\" > '{0}/'\"$CLARP_SESSION.prompt\"\nprintf '%s' \"$CLARP_PROVIDER_TURN\" > '{0}/'\"$CLARP_SESSION\"\n",
                 tokens.display()
             )
         )
@@ -1409,8 +1415,14 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
     );
     assert_eq!(hidden["last_activity"], before["last_activity"]);
     assert_eq!(hidden["working_audience"], "agents");
-    let prompt = std::fs::read_to_string(tokens.join("oak.prompt")).unwrap();
-    assert!(prompt.contains("Coordination: this turn answers a message from another agent"));
+    let input: Value =
+        serde_json::from_slice(&std::fs::read(tokens.join("oak.prompt")).unwrap()).unwrap();
+    let prompt = input["message"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        prompt.starts_with("--- Clarp team context ---\nCoordination: this turn answers a message from another agent")
+            && prompt.contains("\n--- End Clarp team context ---\n\n"),
+        "{prompt}"
+    );
 
     assert_eq!(
         hidden["working_with"],

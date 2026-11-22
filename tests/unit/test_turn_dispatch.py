@@ -353,6 +353,7 @@ def test_automation_prompts_append_tagged_user_rows(tmp_path):
         trace_id="trace-heartbeat", synthesize_audio=False, origin="heartbeat",
     )
     assert agents_db.latest_state(agent_id)["detail"]["origin"] == "heartbeat"
+    _backends.spawned[0][1]["on_result"]({"duration_ms": 1})   # no send ends a running turn
     service.dispatch(
         text=team_leader.TICK_PROMPT, requested_session="mike",
         trace_id="trace-leader", synthesize_audio=False, origin="leader_tick",
@@ -650,6 +651,10 @@ def test_queued_completion_keeps_its_own_notification_provenance(
     pytest.param(("user", "watcher"), 2, (1, 1, 1, 1), id="watcher-after-user"),
     pytest.param(("user", "oracle"), 2, (1, 1, 1, 1), id="oracle-after-user"),
     pytest.param(("user", "automation"), 2, (1, 1, 1, 1), id="automation-after-user"),
+    pytest.param(("user", "heartbeat"), 1, (1, 0, 1, 1), id="heartbeat-after-user"),
+    pytest.param(("user", "schedule"), 1, (1, 0, 1, 1), id="schedule-after-user"),
+    pytest.param(("user", "dreaming"), 1, (1, 0, 1, 1), id="dreaming-after-user"),
+    pytest.param(("user", "watcher", "heartbeat"), 2, (1, 1, 1, 1), id="watcher-then-heartbeat"),
     pytest.param(("user", "watcher", "agent"), 2, (1, 1, 1, 1), id="watcher-then-peer"),
     pytest.param(("user", "agent", "watcher"), 3, (1, 1, 1, 1), id="peer-then-watcher"),
     pytest.param(("agent", "agent"), 1, (0, 0, 0, 0), id="pure-peer"),
@@ -996,29 +1001,20 @@ def test_user_queue_handoff_survives_completion_during_persistence(tmp_path, mon
     assert turn_queue.status("u-second") == "started"
 
 
-def test_busy_agent_send_preempts_inflight_turn(tmp_path):
+def test_busy_agent_automation_send_waits_for_the_inflight_turn(tmp_path):
+    """No send ends a running turn (R7): an automation send waits for it."""
     service, backends, agent_id = _make_service(tmp_path)
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
                      synthesize_audio=False)
-    assert len(backends.spawned) == 1      # first turn is running
-    assert backends.interrupted == []      # nothing killed yet
+    result = service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                              origin="automation", synthesize_audio=False)
+    assert result.queued is True
+    assert backends.interrupted == [] and len(backends.spawned) == 1
 
-    # Non-user automation retains its existing legacy preemption path.
-    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
-                     synthesize_audio=False)
-    assert len(backends.interrupted) == 1
-    assert len(backends.spawned) == 2
-    _, second_call = backends.spawned[1]
-
-    # The superseded callback is ignored.
     _, first_call = backends.spawned[0]
     first_call["on_result"]({"duration_ms": 5})
-    assert len(backends.spawned) == 2
-    assert second_call["text"] == "second"
-    assert second_call["trace_id"] == "tB"
-
-    # The new turn completes normally → done.
-    second_call["on_result"]({"duration_ms": 7})
+    assert [call["trace_id"] for _b, call in backends.spawned] == ["tA", "tB"]
+    backends.spawned[1][1]["on_result"]({"duration_ms": 7})
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.DONE
 
 
@@ -1047,115 +1043,10 @@ class _SlowExitBackends(_Backends):
         return [self.process] if self.spawned and self.process.alive else []
 
 
-def test_preemption_does_not_spawn_until_the_old_process_exits(tmp_path, monkeypatch):
-    """TP-01: two CLIs on one native session interleave and corrupt it."""
-    import time
-    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
-    service, backends, agent_id = _make_service(tmp_path)
-    slow = _SlowExitBackends()
-    service.backends = slow
-    service.dispatch(text="first", requested_session="mike", trace_id="tA",
-                     synthesize_audio=False)
-    assert len(slow.spawned) == 1
-
-    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
-                     synthesize_audio=False)
-    assert slow.interrupted == [("claude", agent_id)], "the old turn is preempted"
-    assert len(slow.spawned) == 1, "a second CLI started while the first still runs"
-
-    slow.process.alive = False                  # the SIGTERMed CLI exits
-    deadline = time.monotonic() + 3
-    while len(slow.spawned) < 2 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
-
-
-def _open_rows(agent_id):
-    return [(row["trace_id"], row["status"]) for row in agents_db.conn().execute(
-        "SELECT trace_id, status FROM queued_turns WHERE agent_id = ?", (agent_id,))]
-
-
-def test_a_send_waiting_for_a_preempted_process_survives_a_restart(tmp_path, monkeypatch):
-    """TP-01 review: a preempting send that waits for the old process is
-    acknowledged as queued, so it must not live only in memory."""
-    import time
-    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
-    service, _backends, agent_id = _make_service(tmp_path)
-    slow = _SlowExitBackends()
-    service.backends = slow
-    service.dispatch(text="first", requested_session="mike", trace_id="tA",
-                     client_msg_id="m-first", synthesize_audio=False)
-    result = service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
-                              client_msg_id="m-second", synthesize_audio=False)
-
-    assert result.queued is True
-    assert len(slow.spawned) == 1
-    assert ("tB", "parked") in _open_rows(agent_id), "only memory holds the queued send"
-
-    slow.process.alive = False
-    deadline = time.monotonic() + 3
-    while len(slow.spawned) < 2 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
-    # The park row clears only after the launch returns (a failed launch keeps
-    # it), so it may still be there the moment the spawn is recorded.
-    while ("tB", "parked") in _open_rows(agent_id) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert ("tB", "parked") not in _open_rows(agent_id), "a launched send keeps no park row"
-
-
 def _durable_order(agent_id):
     return [row["trace_id"] for row in agents_db.conn().execute(
         "SELECT trace_id FROM queued_turns WHERE agent_id = ? AND status IN ('queued', 'parked')"
         " ORDER BY queue_seq", (agent_id,))]
-
-
-def test_a_follow_up_behind_a_preempted_process_is_durable_too(tmp_path, monkeypatch):
-    """TP-01 review round 2: every send acknowledged as waiting behind the old
-    process has a durable row, not only the one that preempted it."""
-    import time
-    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
-    service, _backends, agent_id = _make_service(tmp_path)
-    slow = _SlowExitBackends()
-    service.backends = slow
-    service.dispatch(text="first", requested_session="mike", trace_id="tA",
-                     client_msg_id="m-first", synthesize_audio=False)
-    second = service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
-                              client_msg_id="m-second", synthesize_audio=False)
-    third = service.dispatch(text="third", requested_session="mike", trace_id="tC",
-                             client_msg_id="m-third", synthesize_audio=False)
-
-    assert second.queued and third.queued and len(slow.spawned) == 1
-    assert _durable_order(agent_id) == ["tB", "tC"]
-
-    slow.process.alive = False
-    deadline = time.monotonic() + 3
-    while len(slow.spawned) < 2 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert [call["trace_id"] for _b, call in slow.spawned] == ["tA", "tB"]
-    # tB's park row clears only after its launch returns (see above).
-    while _durable_order(agent_id) != ["tC"] and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert _durable_order(agent_id) == ["tC"]
-
-
-def test_the_preempting_send_keeps_its_place_ahead_of_queued_work(tmp_path, monkeypatch):
-    """TP-01 review round 2: the preempting send runs before work that was
-    already queued, in memory and in the durable order a restart recovers."""
-    patch_shared(monkeypatch, _td, "_PROCESS_EXIT_POLL_S", 0.01)
-    service, _backends, agent_id = _make_service(tmp_path)
-    slow = _SlowExitBackends()
-    service.backends = slow
-    service.dispatch(text="first", requested_session="mike", trace_id="tA",
-                     client_msg_id="m-first", synthesize_audio=False)
-    service.dispatch(text="queued", requested_session="mike", trace_id="tC",
-                     client_msg_id="m-queued", synthesize_audio=False, queue_if_busy=True)
-    service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
-                     client_msg_id="m-second", synthesize_audio=False)
-
-    assert [spec.trace_id for spec in _td._SLOTS.queued.get(agent_id, [])] == ["tB", "tC"]
-    assert _durable_order(agent_id) == ["tB", "tC"]
-    slow.process.alive = False
 
 
 class _LeftoverProcessBackends(_SlowExitBackends):
@@ -1241,7 +1132,6 @@ def test_a_send_that_cannot_wait_durably_is_refused(tmp_path, monkeypatch):
         raise RuntimeError("database is locked")
 
     monkeypatch.setattr(_td.turn_queue, "park", locked)
-    monkeypatch.setattr(_td.turn_queue, "park_at_head", locked)
     monkeypatch.setattr(_td.turn_queue, "enqueue", locked)
     with pytest.raises(_td.DispatchError) as refused:
         service.dispatch(text="second", requested_session="mike", trace_id="tB",
@@ -1314,14 +1204,14 @@ def test_paused_queue_holds_automation_but_allows_a_fresh_user_message(tmp_path)
     assert service.recover_queued() == 0
     assert turn_queue.is_paused(agent_id) is True
 
-    # The user carrying on runs this new request, leaving old work parked.
+    # The user carrying on runs this new request first and ends the pause: the
+    # held automation item waits behind it and runs after it.
     sent = service.dispatch(
         text="are you there", requested_session="mike", trace_id="t-user",
         client_msg_id="u-user", synthesize_audio=False, queue_if_busy=True)
     assert sent.queued is not True
-    assert turn_queue.is_paused(agent_id) is True
+    assert turn_queue.is_paused(agent_id) is False
     assert [call[1]["text"] for call in backends.spawned] == ["are you there"]
-    # The parked automation item remains available for explicit queue resume.
     assert turn_queue.get("q-paused") is not None
 
 
@@ -1640,12 +1530,14 @@ def test_busy_codex_send_steers_active_turn_without_interrupting(tmp_path):
     assert [row["synthesize_audio"] for row in turns] == [1]
 
 
-def test_preempted_turn_failure_is_ignored(tmp_path):
+def test_replaced_turn_failure_is_ignored(tmp_path):
     service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
                      synthesize_audio=False)
+    backends.live = False                   # its process died: the next send takes over
     service.dispatch(text="second", requested_session="mike", trace_id="tB", origin="automation",
                      synthesize_audio=False)
+    backends.live = True
     assert len(backends.spawned) == 2
     _, first_call = backends.spawned[0]
     first_call["on_error"]("read ECONNRESET")
@@ -2669,7 +2561,7 @@ def test_host_heartbeat_disable_blocks_dispatch(monkeypatch, tmp_path):
     assert not backends.spawned
 
 @pytest.mark.parametrize('origin', ['user', 'oracle'])
-def test_fresh_intended_send_bypasses_pause_without_draining_old_work(tmp_path, origin):
+def test_fresh_intended_send_ends_the_pause_and_runs_before_old_work(tmp_path, origin):
     from lib import turn_queue
     service, backends, agent_id = _make_service(tmp_path)
     backends.live = False
@@ -2682,10 +2574,11 @@ def test_fresh_intended_send_bypasses_pause_without_draining_old_work(tmp_path, 
                               queue_if_busy=True, synthesize_audio=False)
     assert result.queued is not True
     assert [x[1]['text'] for x in backends.spawned] == ['fresh intended request']
-    assert turn_queue.is_paused(agent_id) is True
+    assert turn_queue.is_paused(agent_id) is False      # the fresh send ends the Stop's hold
     assert turn_queue.get('parked') is not None
+    backends.live = True                                # the fresh turn is running
     service.recover_queued()
-    assert len(backends.spawned) == 1
+    assert len(backends.spawned) == 1                   # the old work waits for the fresh turn
     # Duplicate admission must not replay the fresh request.
     service.dispatch(text='fresh intended request', requested_session='mike',
                      trace_id='fresh', client_msg_id='fresh', origin=origin,
@@ -3278,8 +3171,10 @@ def test_a_replaced_turns_late_session_start_is_refused_and_binds_nothing(tmp_pa
     service, backends, agent_id = _make_service(tmp_path)
     service.dispatch(text="first", requested_session="mike", trace_id="tA",
                      synthesize_audio=False)
+    backends.live = False           # its process died: the next send takes the slot over
     service.dispatch(text="second", requested_session="mike", trace_id="tB",
-                     synthesize_audio=False, origin="agent")       # an agent's message preempts
+                     synthesize_audio=False, origin="agent")
+    backends.live = True
     assert [kw["trace_id"] for _, kw in backends.spawned] == ["tA", "tB"]
     old = backends.spawned[0][1]
     bound, stopped, states = (agents_db.live_backend_session(agent_id),

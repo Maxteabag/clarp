@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-pub use clarp_speech::markup::strip_team_blocks;
 use regex::Regex;
 use sha1::{Digest, Sha1};
 
@@ -37,14 +36,24 @@ pub struct Brief {
 }
 
 impl Brief {
-    pub fn prompt(&self, text: &str) -> String {
-        if self.protocol.is_empty() && self.digest.is_empty() {
-            return text.to_owned();
+    pub fn append_protocol(&mut self, instruction: &str) {
+        if instruction.is_empty() {
+            return;
         }
-        let context = match (self.protocol.is_empty(), self.digest.is_empty()) {
-            (false, false) => format!("{}\n\n{}", self.protocol, self.digest),
-            (false, true) => self.protocol.clone(),
-            _ => self.digest.clone(),
+        if !self.protocol.is_empty() {
+            self.protocol.push_str("\n\n");
+        }
+        self.protocol.push_str(instruction);
+    }
+
+    pub fn prompt(&self, text: &str) -> String {
+        let protocol = python::strip(&self.protocol);
+        let digest = python::strip(&self.digest);
+        let context = match (protocol.is_empty(), digest.is_empty()) {
+            (true, true) => return text.to_owned(),
+            (false, false) => format!("{protocol}\n\n{digest}"),
+            (false, true) => protocol.to_owned(),
+            (true, false) => digest.to_owned(),
         };
         format!("{OPEN}\n{context}\n{CLOSE}\n\n{text}")
     }

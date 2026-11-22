@@ -76,6 +76,27 @@ def _episode(config: dict) -> tuple[str, dict | None, int]:
     return reference, dict(latest), count
 
 
+def _quiet(con, config: dict) -> bool:
+    """Neither failing nor alerted: the latest terminal run did not fail and no alert is
+    open. ``_sync`` then changes nothing whatever the episode is, so its scan of every
+    completed run (and their receipts) is not needed."""
+    latest = con.execute(f"""SELECT status,outcome FROM janitor_runs
+        WHERE agent_id=? AND generation=? AND {_TERMINAL}
+        ORDER BY finished_at DESC,rowid DESC LIMIT 1""",
+        (config["agent_id"], config["generation"])).fetchone()
+    if latest and (latest["status"] == "failed" or latest["outcome"] == "error"):
+        return False
+    return not _open_alerts(con, config)
+
+
+def _open_alerts(con, config: dict) -> list:
+    return list(con.execute("""SELECT artifact_id,reference_id FROM artifacts
+        WHERE agent_id=? AND type='document' AND reference_id LIKE ?
+          AND status='failed' AND deleted_at IS NULL AND json_valid(payload_json)
+          AND json_extract(payload_json,'$.attention_kind')=?""",
+        (config["agent_id"], PREFIX + "%", KIND)))
+
+
 def _description(config, latest, count):
     name = strip_hidden_blocks(str(config["persona"] or config["session"]))[:80]
     labels = config["template_id"] == "task-labels"
@@ -127,6 +148,10 @@ def reconcile() -> int:
     for config in configs:
         active = bool(config["enabled"] and config["is_janitor"] and
                       not config["agent_archived_at"] and not config["agent_deleted_at"])
+        if active and _quiet(con, config):
+            # Nothing failing and nothing open: the episode cannot change a thing.
+            planned.append((config, active, "", None, 0))
+            continue
         reference, latest, count = _episode(config) if active else ("", None, 0)
         planned.append((config, active, reference, latest, count))
     if not any(_sync(con, *plan, write=False) for plan in planned):
@@ -145,11 +170,7 @@ def _sync(con, config: dict, active: bool, reference: str, latest: dict | None, 
           *, write: bool) -> int:
     """Bring one config's alert artifact in line; count the changes (made or needed)."""
     changed = 0
-    open_rows = list(con.execute("""SELECT artifact_id,reference_id FROM artifacts
-        WHERE agent_id=? AND type='document' AND reference_id LIKE ?
-          AND status='failed' AND deleted_at IS NULL AND json_valid(payload_json)
-          AND json_extract(payload_json,'$.attention_kind')=?""",
-        (config["agent_id"], PREFIX + "%", KIND)))
+    open_rows = _open_alerts(con, config)
     for row in open_rows:
         if active and row["reference_id"] == reference:
             continue

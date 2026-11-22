@@ -77,7 +77,10 @@ def _queue(service, trace, text=None, *, origin="agent", client_msg_id=None):
 
 
 def _texts(backends):
-    return [kw["text"] for _, kw in backends.spawned]
+    # The words each turn was given: another agent's message carries the team context
+    # block in front of them (a coordination turn), as the import strips it.
+    from lib.message_text import strip_injected_team_context
+    return [strip_injected_team_context(kw["text"]) for _, kw in backends.spawned]
 
 
 def _lock_once(monkeypatch, target, name):

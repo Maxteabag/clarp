@@ -65,8 +65,12 @@ PLANTS = [
     (K, 'vectors', 'a text is written with quotes', '        Value::String(text) => text.clone(),', '        Value::String(text) => python::text(text),'),
     # The manifest and the ids.
     (K, 'vectors', 'a manifest without a list is empty', '        Some(Value::Array(skills)) => Ok(skills.clone()),\n        _ => Err(Malformed),', '        Some(Value::Array(skills)) => Ok(skills.clone()),\n        _ => Ok(Vec::new()),'),
-    (K, 'vectors', 'an id is taken only as a text', '        .map(py_str)\n        .ok_or(Malformed)', '        .map(|id| id.as_str().unwrap_or("").to_owned())\n        .ok_or(Malformed)'),
-    (K, 'vectors', 'an item without an id has an empty one', '        .map(py_str)\n        .ok_or(Malformed)', '        .map(py_str)\n        .or(Some(String::new()))\n        .ok_or(Malformed)'),
+    (K, 'vectors', 'a non-text manifest id is accepted',
+     '        _ => return Some("has no text id"),',
+     '        Some(value) if !value.is_string() => {}\n        _ => return Some("has no text id"),'),
+    (K, 'vectors', 'a manifest item without an id is accepted',
+     '        _ => return Some("has no text id"),',
+     '        None => {}\n        _ => return Some("has no text id"),'),
     # Requirements.
     (K, 'vectors', 'a false list of requirements is iterated', '    let Some(requires) = requires.filter(|value| !falsy(value)) else {', '    let Some(requires) = requires.filter(|_| true) else {'),
     (K, 'vectors', 'a text of requirements is one requirement', '        Value::String(text) => Ok(text.chars().map(String::from).collect()),', '        Value::String(text) => Ok(vec![text.clone()]),'),

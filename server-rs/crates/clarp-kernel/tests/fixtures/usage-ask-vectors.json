@@ -295,6 +295,43 @@
    }
   }
  ],
+ "agy_activity": [
+  {
+   "active": false,
+   "start": null,
+   "state": null
+  },
+  {
+   "active": true,
+   "start": 1900000000000,
+   "state": null
+  },
+  {
+   "active": true,
+   "start": 1899978400001,
+   "state": null
+  },
+  {
+   "active": false,
+   "start": 1899978400000,
+   "state": null
+  },
+  {
+   "active": false,
+   "start": 1899978399999,
+   "state": null
+  },
+  {
+   "active": false,
+   "start": 1899974800000,
+   "state": 1899978400000
+  },
+  {
+   "active": true,
+   "start": 1899974800000,
+   "state": 1899978400001
+  }
+ ],
  "app_server": [
   {
    "result": {

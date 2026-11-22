@@ -1036,19 +1036,33 @@ def start_receipt(queue_id: str):
 
 
 def start_shown_attempted() -> list[str]:
-    """At a runtime's start: an item still 'queued' whose row is written (shown) and whose
-    launch receipt says the prompt may have left was handed to a backend (an accepted steer,
-    or a launch that crashed before its start was recorded). It is never run again; its
-    receipt is started here so nothing is left 'queued' for good (issue 491, review C5).
-    Returns the queue ids started."""
+    """An item still 'queued' whose row is written (shown) and that a backend already took:
+    its launch receipt says the prompt may have left (an accepted steer, or a launch that
+    crashed before its start was recorded), or a turn under its trace began and has ended
+    and recovery would not launch it again (its launch may have been consumed).
+    It is never run again; its receipt is started here so nothing is left 'queued' for good,
+    and the ended-turn sweep settles it (issue 491, review C5). Run at a runtime's start and
+    on every recovery pass: an item that waits for its own turn (shown at admission, no turn
+    yet, receipt pending) is left as it is. Returns the queue ids started."""
     from . import launch_receipts
     started = []
     rows = db.conn().execute(
-        """SELECT queue_id, trace_id FROM queued_turns
-            WHERE status = 'queued' AND shown_at IS NOT NULL""").fetchall()
+        """SELECT q.*,
+                  EXISTS (SELECT 1 FROM turns t WHERE t.agent_id = q.agent_id
+                            AND t.trace_id = q.trace_id) AS had_turn,
+                  EXISTS (SELECT 1 FROM turns t WHERE t.agent_id = q.agent_id
+                            AND t.trace_id = q.trace_id AND t.ended_at IS NULL
+                            AND t.settled_at IS NULL) AS open_turn
+             FROM queued_turns q
+            WHERE q.status = 'queued' AND q.shown_at IS NOT NULL""").fetchall()
     for row in rows:
         receipt = launch_receipts.get(str(row["trace_id"] or "")) or {}
-        if receipt.get("state") != launch_receipts.ATTEMPTED:
+        # A turn under its trace ran and ended, and recovery would never launch it
+        # again (its launch may have been consumed): only bookkeeping is left. A row
+        # proven unsent (a drain hand-over, a refused launch) is left to recovery.
+        taken_by_ended_turn = (bool(row["had_turn"]) and not row["open_turn"]
+                               and _consumed_or_uncertain(row))
+        if receipt.get("state") != launch_receipts.ATTEMPTED and not taken_by_ended_turn:
             continue
         try:
             moved = start_receipt(str(row["queue_id"]))
@@ -1056,8 +1070,10 @@ def start_shown_attempted() -> list[str]:
             log_exception("shownAttemptedStartFail", exc, detail=str(row["queue_id"]))
             continue
         if moved is not None:
+            # Bookkeeping only: no after_start, which would end a Stop's pause
+            # once nothing else waits. Only the user's fresh message or a
+            # resume ends a pause; a pass of this repair never does.
             started.append(str(row["queue_id"]))
-            after_start(str(row["queue_id"]), moved)
     if started:
         log("shownAttemptedStarted", " ".join(started))
     return started

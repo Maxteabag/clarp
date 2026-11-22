@@ -68,7 +68,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 126;
+pub const HOST_CONTRACT: u64 = 128;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -515,12 +515,18 @@ pub struct Asker {
 pub struct ApiError {
     status: StatusCode,
     error: String,
-    plain: bool,
-    /// What is answered under `error` where it is more than words: a render spec's refusal.
-    detail: Option<Value>,
-    /// Says to the caller that the same request may well be met when it is asked again.
-    retryable: bool,
-    body: Option<Value>,
+    body: ErrorBody,
+}
+
+#[derive(Debug)]
+enum ErrorBody {
+    Message,
+    Plain,
+    Retryable,
+    /// A value under `error`, as in a render spec's refusal.
+    Detail(Box<Value>),
+    /// The complete JSON response, as in a moved-agent refusal.
+    Custom(Box<Value>),
 }
 
 impl ApiError {
@@ -528,10 +534,7 @@ impl ApiError {
         Self {
             status,
             error: error.into(),
-            plain: false,
-            detail: None,
-            retryable: false,
-            body: None,
+            body: ErrorBody::Message,
         }
     }
 
@@ -539,7 +542,7 @@ impl ApiError {
     /// the Python Host answers a turn's identity it could not look up.
     pub(crate) fn retryable(status: StatusCode, error: impl Into<String>) -> Self {
         Self {
-            retryable: true,
+            body: ErrorBody::Retryable,
             ..Self::new(status, error)
         }
     }
@@ -547,7 +550,7 @@ impl ApiError {
     /// An error whose `error` is this value; `error` says it in words, for a tool.
     pub(crate) fn detailed(status: StatusCode, error: impl Into<String>, detail: Value) -> Self {
         Self {
-            detail: Some(detail),
+            body: ErrorBody::Detail(Box::new(detail)),
             ..Self::new(status, error)
         }
     }
@@ -564,18 +567,17 @@ impl ApiError {
 
     pub(crate) fn plain(status: StatusCode, text: impl Into<String>) -> Self {
         Self {
-            status,
-            error: text.into(),
-            plain: true,
-            detail: None,
-            retryable: false,
-            body: None,
+            body: ErrorBody::Plain,
+            ..Self::new(status, text)
         }
     }
 
     /// What is answered under `error`, where it is more than words.
     pub(crate) fn detail(&self) -> Option<&Value> {
-        self.detail.as_ref()
+        match &self.body {
+            ErrorBody::Detail(detail) => Some(detail.as_ref()),
+            _ => None,
+        }
     }
 }
 
@@ -608,7 +610,7 @@ impl From<Unavailable> for ApiError {
             _ => return Self::new(StatusCode::SERVICE_UNAVAILABLE, unavailable.0),
         };
         Self {
-            body: Some(body),
+            body: ErrorBody::Custom(Box::new(body)),
             ..Self::new(StatusCode::CONFLICT, unavailable.0)
         }
     }
@@ -616,18 +618,22 @@ impl From<Unavailable> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        if let Some(body) = self.body {
-            (self.status, Json(body)).into_response()
-        } else if self.plain {
-            let kind = [(header::CONTENT_TYPE, "text/plain")];
-            (self.status, kind, self.error).into_response()
-        } else if let Some(detail) = self.detail {
-            (self.status, Json(json!({ "error": detail }))).into_response()
-        } else if self.retryable {
-            let body = json!({ "error": self.error, "retryable": true });
-            (self.status, Json(body)).into_response()
-        } else {
-            (self.status, Json(json!({ "error": self.error }))).into_response()
+        match self.body {
+            ErrorBody::Message => {
+                (self.status, Json(json!({ "error": self.error }))).into_response()
+            }
+            ErrorBody::Plain => {
+                let kind = [(header::CONTENT_TYPE, "text/plain")];
+                (self.status, kind, self.error).into_response()
+            }
+            ErrorBody::Retryable => {
+                let body = json!({ "error": self.error, "retryable": true });
+                (self.status, Json(body)).into_response()
+            }
+            ErrorBody::Detail(detail) => {
+                (self.status, Json(json!({ "error": *detail }))).into_response()
+            }
+            ErrorBody::Custom(body) => (self.status, Json(*body)).into_response(),
         }
     }
 }
@@ -1724,10 +1730,11 @@ async fn started_again(
 ) -> Result<Result<AgentRecord, NotMade>, (StatusCode, Value)> {
     let unavailable = |why: Unavailable| {
         let why = ApiError::from(why);
-        (
-            why.status,
-            why.body.unwrap_or_else(|| json!({"error":why.error})),
-        )
+        let body = match why.body {
+            ErrorBody::Custom(body) => *body,
+            _ => json!({ "error": why.error }),
+        };
+        (why.status, body)
     };
     let checked = app
         .fleet
@@ -2992,12 +2999,9 @@ async fn send_as(
         );
         return Err(ApiError::plain(StatusCode::PAYLOAD_TOO_LARGE, why));
     }
-    // Who it comes from. A message that names its sender is that agent's, whatever else it
-    // says of itself: on the Python Host a client that names a sender may still say the
-    // message is the user's, and the focus and the queue then treat an agent as a person
-    // (issue 360 of the repository). Without a sender: the origin it names, when that is one
-    // a client may name; otherwise the user. What the Host stamps itself (a janitor, a
-    // leader's tick) nobody may claim.
+    // A resolved sender cannot claim the user's word, even without a turn token (R18).
+    // Without a sender, use the origin the client names if it is allowed, or the user.
+    // Only the Host can stamp an origin such as a janitor or a leader's tick.
     //
     // Who made it decides too (the Python Host's `SendRequest.from_payload`, its PR 482): a
     // send made from another agent's own turn (the token it presents) is that agent's, its
@@ -3052,12 +3056,16 @@ async fn send_as(
         }
         LEADER_TICK.to_owned()
     } else {
-        coordination::origin(request.origin.as_deref(), &principal, made.peer)
+        coordination::origin(
+            request.origin.as_deref(),
+            &principal,
+            made.peer,
+            &member.record.agent_id,
+        )
     };
     // Another agent addressing this one: its turn is marked so, with that agent (none for an
-    // agent of a peer Host). Decided from the origin as it was claimed and who made it, before
-    // this Host maps the origin to its own kinds: the user's word never is, whatever sender it
-    // names (`coordination::is_coordination`).
+    // agent of a peer Host). Decide from the resolved origin before mapping it to the Host's
+    // own kinds (`coordination::is_coordination`).
     let coordination = coordination::is_coordination(
         &member.record.agent_id,
         Some(&named),
@@ -3072,7 +3080,8 @@ async fn send_as(
             "Heartbeats are disabled on this Host",
         ));
     }
-    let origin = match (sender.is_some(), named.as_str()) {
+    let self_wake = named == "automation" && principal.sender_agent_id == member.record.agent_id;
+    let origin = match (sender.is_some() && !self_wake, named.as_str()) {
         (true, _) | (false, "agent") => from_agent(),
         (
             false,
@@ -3090,8 +3099,7 @@ async fn send_as(
         if matches!(name.as_str(), "heartbeat" | "leader_tick" | "dreaming" | "janitor"));
     // Only a person moves the focus: the user, and the Oracle acting on what the user said
     // (the Python Host's `origins.FOCUS_ORIGINS`).
-    let by_a_person =
-        origin_is_user || matches!(&origin, Origin::Trigger { name } if name == "oracle");
+    let by_a_person = origin.is_user_send();
     // A message to an agent that is busy waits its turn, as on the Python Host, in the queue,
     // and enters the conversation when its turn starts, whoever sent it (issue 491). What
     // differs is what is told of it. A plain message was said: it keeps its delivery receipt
@@ -3103,7 +3111,7 @@ async fn send_as(
     // it waits behind it like one left for later, and a Stop that came before does not hold
     // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).
     let from_peer = matches!(&origin, Origin::Agent { agent_id } if !agent_id.is_empty());
-    let admission = match (request.queue_if_busy.unwrap_or(false), origin_is_user) {
+    let admission = match (request.queue_if_busy.unwrap_or(false), by_a_person) {
         (false, _) if from_peer => Admission::Later,
         (false, _) => Admission::Queue,
         (true, true) => Admission::Later,

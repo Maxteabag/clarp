@@ -97,18 +97,13 @@ fn a_clip_belongs_to_the_admitted_agent_and_turn_even_when_traces_repeat() {
 }
 
 #[test]
-fn retention_starts_at_the_later_event_or_at_retirement_if_the_end_is_unknown() {
+fn retention_starts_at_retirement_and_pruning_waits_for_the_call_to_end() {
     use clarp_kernel::rings::binding::CallEnd::{Ended, Live, Unknown};
     const DAY: i64 = 86_400_000;
-    for (story, retired, call, since) in [
-        ("retirement before call end", 100, Ended(5_000), 5_000),
-        (
-            "retirement long after call end",
-            2 * DAY,
-            Ended(100),
-            2 * DAY,
-        ),
-        ("missing call end", 7_000, Unknown, 7_000),
+    for (story, retired, call) in [
+        ("retirement before call end", 100, Ended(5_000)),
+        ("retirement long after call end", 2 * DAY, Ended(100)),
+        ("missing call end", 7_000, Unknown),
     ] {
         assert!(!expired(Some(retired), call, retired), "{story}");
         for (offset, due) in [
@@ -118,7 +113,7 @@ fn retention_starts_at_the_later_event_or_at_retirement_if_the_end_is_unknown() 
             (1, true),
             (1000, true),
         ] {
-            let now = since + DAY + offset;
+            let now = retired + DAY + offset;
             assert_eq!(
                 expired(Some(retired), call, now),
                 due,
@@ -128,4 +123,7 @@ fn retention_starts_at_the_later_event_or_at_retirement_if_the_end_is_unknown() 
             assert!(!expired(Some(retired), Live, now), "call still live");
         }
     }
+    let now = 3 * DAY;
+    assert!(!expired(Some(DAY), Live, now));
+    assert!(expired(Some(DAY), Ended(now), now));
 }

@@ -141,6 +141,34 @@ def test_completed_turn_classification_keeps_row_order(monkeypatch):
         watcher.stop()
 
 
+def test_a_done_row_tells_on_done_its_agent_and_a_failing_callback_breaks_nothing(monkeypatch):
+    """The transcript streamer imports an ended turn when its DONE row is read (R6, R12)."""
+    from lib import apns, user_notifications
+    monkeypatch.setattr(user_notifications, "classify_completed_turn", lambda **kw: {"notify": False})
+    monkeypatch.setattr(apns, "on_user_notification", lambda n: None)
+    working = agents_db.create_agent(persona="Busy", voice_id="V", cwd="/tmp", session="busy")
+    agents_db.record_state(working, "thinking", {"source": "pwa"})
+    first, second = _done_agent("first"), _done_agent("second")
+    told = []
+
+    def on_done(agent_id):
+        told.append(agent_id)
+        if agent_id == first:
+            raise RuntimeError("synthetic streamer failure")
+
+    stream = FakeStream()
+    watcher = StateLogWatcher(stream, on_done=on_done)
+    try:
+        watcher._poll_once()
+        assert watcher.wait_for_notifications(5)
+    finally:
+        watcher.stop()
+    assert told == [first, second]
+    states = [(e["agent_id"], e["kind"]) for e in stream.events if e["type"] == SSEType.AGENT_STATE]
+    assert (working, "thinking") in states
+    assert [agent for agent, kind in states if kind == "done"] == [first, second]
+
+
 def test_state_watcher_stop_joins_notification_worker():
     watcher = StateLogWatcher(FakeStream())
     watcher.INTERVAL_SEC = 10
@@ -189,3 +217,26 @@ def test_state_watcher_broadcasts_status_only_changes_without_state_rows():
     assert stream.events[0]["kind"] == "done"
     assert stream.events[0]["status_text"] == ""
     assert watcher._notify_queue.unfinished_tasks == 0
+
+
+def test_a_poll_reads_nothing_while_nothing_was_committed():
+    """What a poll broadcasts follows new state_log rows and changed agents rows: while the
+    database's change stamp stands it reads neither, and the next commit is seen at once."""
+    from lib import db
+    agent_id = agents_db.create_agent(persona="Quiet", voice_id="V", cwd="/tmp", session="quiet")
+    stream = FakeStream()
+    watcher = StateLogWatcher(stream)
+    watcher.prime()
+    watcher._poll_once()
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        for _ in range(5):
+            watcher._poll_once()
+    finally:
+        db.conn().set_trace_callback(None)
+    assert not [s for s in statements if "FROM state_log" in s or "FROM agents" in s], statements
+    agents_db.record_state(agent_id, "done", {"backend_session_id": "bs"})
+    watcher._poll_once()
+    assert any(e["type"] == SSEType.AGENT_STATE and e.get("agent_id") == agent_id for e in stream.events)
+    watcher.stop()

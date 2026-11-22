@@ -188,7 +188,9 @@ class RecoveryMixin:
                 sender_agent_id=str(item["sender_agent_id"] or "") or None,
                 prompt_admission_id=str(item["prompt_admission_id"] or ""),
                 trace_id=str(item["trace_id"]),
-                sent_at=int(item["enqueued_at"]) if item["enqueued_at"] else None,
+                # No sent_at: it was steered into the running turn, it did not wait
+                # (docs/protocol.md, waited_send_order). The import reads its send time
+                # from the queue item (message_import_common._steered_sent).
                 user_word=bool(item["user_word"]))
             turn_queue.show(queue_id, con=database)
             started = turn_queue.start_receipt(queue_id)
@@ -259,10 +261,20 @@ class RecoveryMixin:
 
     def _recover_queued_locked(self) -> int:
         from . import task_goal_recovery
+        try:
+            # A shown item a backend already took leaves 'queued' on every pass, not
+            # only at a runtime start (it waited there for good until a restart).
+            turn_queue.start_shown_attempted()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("shownAttemptedStartPassFail", exc)
         turn_queue.reconcile_receipts()
         self._rehydrate_once()
         from . import agent_rings
         examined = agent_rings.resolve_stale_claims(db.now_ms() - 30_000)
+        try:
+            agent_rings.purge_retired_openings()     # R78: retired openings do not pile up
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("agentRingOpeningPurgeFail", exc)
         turn_queue.reset_stale_claims(exclude=examined)
         recovered = 0
         deferred = False

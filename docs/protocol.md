@@ -699,15 +699,33 @@ Rules:
   server files the durable user row under that id and ignores a repeated
   request with the same id. Omit it only if you accept the server minting one
   from `trace_id`, in which case you cannot confirm delivery.
-- If the agent is busy, a user's send waits for the running turn (a Codex
-  turn is steered instead) and a `queue-updated` event follows; so does a send
-  with `queue_if_busy`. A send that waits is a queue item until its turn starts
-  and only then a `/log` row (Host contract 115, feature `waited_send_order`).
-  A send of another automatic origin without `queue_if_busy` still preempts the
-  running turn. A message from another agent (`origin: "agent"` with a
-  `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
+- If the agent is busy, a user's send is steered into the running turn when
+  its backend can take it. A Codex turn takes it at once, and its `/log` row
+  follows at once. A Claude turn (Claude Code 2.1.321 or later) takes it while
+  the turn has not ended: the follow-up is written to the running CLI, which
+  reads it at its next boundary, after the running or next tool call, inside
+  the same turn, or right after the turn's result, answering it in the same
+  process. Until the CLI reads it the send answers `queued: true` and is a
+  queue item that can no longer be edited or deleted; its `/log` row appears
+  when it is read, with a `queue-updated` event. A send that cannot be steered
+  (another backend, a Claude turn that has already ended, a terminal session)
+  waits for the running turn and runs as the next turn as soon as it ends; a
+  `queue-updated` event follows, as for a send with `queue_if_busy`. A send
+  that waits is a queue item until its turn starts and only then a `/log` row
+  (Host contract 115, feature `waited_send_order`).
+  A send of another origin (a schedule, an automation, the Oracle) waits in the
+  same way: no send ends a running turn; only the user's Stop does. A message
+  from another agent (`origin: "agent"` with a `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
   queues as if `queue_if_busy` were true. `/stop` pauses the queue to
-  hold its backlog. A plain user send runs past the pause and leaves it.
+  hold its backlog. The user's next fresh message (a plain user or Oracle send,
+  whether it starts a turn or is taken as a follow-up or a steer) ends the
+  pause, and what the Stop held runs again in the queue's order: the user's own
+  messages first, oldest first, then the rest. On an idle agent the fresh
+  message starts at once and the held work follows it; on a busy agent the
+  fresh message waits too and takes its place in that order, behind the user's
+  older held messages. A Send Now of a held item, another
+  agent's message, a goal wake or a schedule does not end it, and a Stop with
+  nothing after it stays in force, across restarts too.
   A peer message, a queued user or Oracle send, and a goal wake the user
   resumed also run past it, but they go through the queue, so when nothing
   else is held each ends the pause as it starts (logged as
@@ -756,8 +774,9 @@ nor `/log` (it was deleted).
 ### 5. Stop: `POST /stop`
 
 `{"session": "rachel"}`. Terminates the running turn, records an
-`interrupted` state, pauses the queue, and broadcasts `agent-state` and
-`queue-updated`. Response: `{"ok": true, "terminated": n}`.
+`interrupted` state, pauses the queue (until the user's next fresh message or a
+resume), and broadcasts `agent-state` and `queue-updated`. Response:
+`{"ok": true, "terminated": n}`.
 
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
 releases one. Each item is `{id, text, enqueued_at, synthesize_audio, client_msg_id,

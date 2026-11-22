@@ -8,6 +8,7 @@ import hashlib
 from typing import Any
 
 from . import agents, db
+from .revisioned_cache import RevisionedCache
 
 ITEM_STATUSES = {
     "pending",
@@ -20,6 +21,105 @@ ITEM_STATUSES = {
 }
 TERMINAL_ITEM_STATUSES = {"completed", "skipped", "deferred", "removed"}
 MAX_PLAN_ITEMS = 500
+
+
+# ---- what the agent scheduler asks of every plan, each tick ---------------------------
+#
+# Every insert, update and delete of task_plans moves a counter and stamps the plan's row in
+# task_plan_versions with it (three triggers, db_schema): whatever code wrote. A plan's summary
+# is kept until its version moves, and the whole index until the counter does, so a tick on
+# plans that did not change reads one row of one small table instead of every plan's goal
+# JSON (about 14 MB for 25 active goals on a busy Host). Read the counter and the versions
+# before the plans: a plan written in between is read newer than its version says, which only
+# means it is read again next time, never that an older plan is kept under a newer version.
+_PLAN_SUMMARIES: RevisionedCache[str, dict] = RevisionedCache("task_plans.summaries", max_entries=8192)
+_PLAN_INDEX: RevisionedCache[str, dict] = RevisionedCache("task_plans.index", max_entries=1)
+CLAIM_SKIP_STATES = frozenset({"blocked", "attention", "not_enrolled"})
+
+
+# The plans the goal tick claims (ready, retry, waiting) are read whole every 15 s: one goal's
+# JSON can be megabytes. The rows are kept by the plan's version, at most this many bytes of
+# goal text in all, so a tick reads one version row per plan instead of the plan.
+CLAIM_ROWS_MAX_BYTES = 32 * 1024 * 1024
+_CLAIM_ROWS: RevisionedCache[str, dict] = RevisionedCache(
+    "task_plans.claim_rows", max_entries=1024, max_weight=CLAIM_ROWS_MAX_BYTES,
+    weight=lambda _key, _version, plan: len(plan["goal_json"] or ""))
+
+
+def claim_row(plan_id: str, database=None) -> dict | None:
+    """The plan's row as ``SELECT *`` gives it, as a dict (callers must not change it),
+    or None. Kept until the plan's version moves; the version is read before the row, so
+    a plan written in between is only read again next time. Inside a transaction it is
+    read and not kept."""
+    database = database if database is not None else db.conn()
+    keep = not database.in_transaction
+    row = database.execute("SELECT version FROM task_plan_versions WHERE plan_id = ?",
+                           (plan_id,)).fetchone()
+    version = None if row is None else int(row[0])
+    if keep and version is not None:
+        hit, plan = _CLAIM_ROWS.get(plan_id, version)
+        if hit:
+            return plan
+    found = database.execute("SELECT * FROM task_plans WHERE plan_id = ?", (plan_id,)).fetchone()
+    if found is None:
+        return None
+    plan = dict(found)
+    if keep and version is not None and len(plan["goal_json"] or "") <= CLAIM_ROWS_MAX_BYTES:
+        _CLAIM_ROWS.put(plan_id, version, plan)
+    return plan
+
+
+def _plan_summary(row) -> dict[str, Any]:
+    """What the scheduler decides a plan by before it reads the whole plan: its status and
+    enrolment, its continuation's state and lease, and the peer request it waits on (as
+    peer_requests.settle_failed_waits asked SQLite for it)."""
+    text = row["goal_json"] or "{}"
+    try:
+        goal = json.loads(text)
+    except (TypeError, ValueError):
+        goal = {}
+    continuation = goal.get("continuation") if isinstance(goal, dict) else None
+    continuation = continuation if isinstance(continuation, dict) else {}
+    key = continuation.get("dependency_key")
+    waiting = continuation.get("state") == "waiting"
+    return {
+        "status": row["status"],
+        "recovery_enabled": int(row["recovery_enabled"] or 0),
+        "state": continuation.get("state"),
+        "lease_until": continuation.get("lease_until") or 0,
+        "peer_wait": key if waiting and '"peer:' in text and isinstance(key, str)
+        and key[:5].lower() == "peer:" else None,
+    }
+
+
+def plan_index(database=None) -> dict[str, dict[str, Any]]:
+    """{plan_id: summary} of every plan. Inside a transaction it is read whole and not kept:
+    the counter would then speak of writes that may still be rolled back."""
+    database = database if database is not None else db.conn()
+    keep = not database.in_transaction
+    row = database.execute("SELECT generation FROM task_plans_clock WHERE singleton = 0").fetchone()
+    generation = int(row[0]) if row else 0
+    if keep:
+        hit, index = _PLAN_INDEX.get("all", generation)
+        if hit:
+            return index
+    versions = database.execute("SELECT plan_id, version FROM task_plan_versions").fetchall()
+    index: dict[str, dict[str, Any]] = {}
+    for plan_id, version in versions:
+        hit, summary = _PLAN_SUMMARIES.get(plan_id, version) if keep else (False, None)
+        if not hit:
+            plan = database.execute(
+                "SELECT status, recovery_enabled, goal_json FROM task_plans WHERE plan_id = ?",
+                (plan_id,)).fetchone()
+            if plan is None:
+                continue
+            summary = _plan_summary(plan)
+            if keep:
+                _PLAN_SUMMARIES.put(plan_id, version, summary)
+        index[plan_id] = summary
+    if keep:
+        _PLAN_INDEX.put("all", generation, index)
+    return index
 
 
 def _id(prefix: str) -> str:

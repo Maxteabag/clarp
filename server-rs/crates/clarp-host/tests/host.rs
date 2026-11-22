@@ -603,7 +603,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 126);
+    assert_eq!(info["contract"]["host"], 128);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
@@ -699,10 +699,26 @@ fn a_message_is_answered_and_the_apps_are_told() {
 }
 
 #[test]
-fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
+fn a_new_user_send_after_stop_runs_then_releases_what_waited() {
+    a_fresh_send_releases_the_held_queue("user", false);
+}
+
+fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
     let place = Place::new("stop");
     let host = place.start();
     let session = host.new_agent("Stopper");
+    let events = host.listen();
+    let queue_event = |paused: bool, from_revision: u64| {
+        events.lock().unwrap().iter().any(|event| {
+            event["type"] == "queue-updated"
+                && event["session"] == session
+                && event["queue_depth"] == 1
+                && event["queue_paused"] == paused
+                && event["queue_revision"]
+                    .as_u64()
+                    .is_some_and(|revision| revision >= from_revision)
+        })
+    };
     host.send(&session, "sleep 60", "m1");
     wait_for("the turn to run", || host.state(&session) == "thinking");
     let queued = host.post(
@@ -753,37 +769,42 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
         "what was left for later is in the queue, not yet in the conversation"
     );
 
-    // The user says something new. It runs although the queue is held, and the hold stays.
-    let now = host.send(&session, "this instead", "m3");
+    let held_revision = held["revision"].as_u64().unwrap();
+    wait_for("the held queue to be broadcast", || {
+        queue_event(true, held_revision)
+    });
+
+    // A fresh send goes first. Once it starts, the older messages can run after it.
+    let now = host.post(
+        "/send",
+        json!({
+            "session": session, "text": "this instead", "client_msg_id": "m3",
+            "origin": origin, "queue_if_busy": later
+        }),
+    );
     assert_eq!(
         (&now["queued"], &now["queue_depth"], &now["queue_revision"]),
         (&json!(false), &json!(0), &json!(0))
     );
-    wait_for("the new message to be answered", || {
-        host.conversation(&session)
-            .contains(&said("assistant", "this instead"))
-    });
-    let held = host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(
-        (&held["paused"], held["items"].as_array().unwrap().len()),
-        (&json!(true), 1),
-        "what was held is still held"
+    wait_for(
+        "the release to be broadcast with the older item still queued",
+        || queue_event(false, held_revision + 1),
     );
-
-    let resumed = host.post("/turn-queue/resume", json!({ "session": session }));
-    assert_eq!(
-        (&resumed["paused"], &resumed["count"]),
-        (&json!(false), &json!(0))
-    );
-    assert!(resumed["revision"].as_u64().unwrap() > held["revision"].as_u64().unwrap());
     wait_for("the held message to be answered", || {
         host.conversation(&session)
             .contains(&said("assistant", "later"))
     });
-    // It entered the conversation when its turn started: after what was said in between.
+    let queue = host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(
+        (&queue["paused"], &queue["items"]),
+        (&json!(false), &json!([]))
+    );
+    assert!(queue["revision"].as_u64().unwrap() > held_revision);
+    // Both messages reached the agent, and the new turn finished before the held one began.
     let conversation = host.conversation(&session);
-    let place = |row: (String, String)| conversation.iter().position(|known| *known == row);
-    assert!(place(said("user", "this instead")) < place(said("user", "later")));
+    let place =
+        |row: (String, String)| conversation.iter().position(|known| *known == row).unwrap();
+    assert!(place(said("assistant", "this instead")) < place(said("user", "later")));
     wait_for("the agent to be done", || host.state(&session) == "done");
 }
 
@@ -5224,7 +5245,8 @@ fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
         let mine = format!("u-{id}");
         let mut row = Value::Null;
         wait_for("the answer", || {
-            let rows = host.turns(&second);
+            let log = host.get(&format!("/log?session={second}&coordination=show"));
+            let rows = log["turns"].as_array().unwrap();
             let Some(at) = rows.iter().position(|row| row["id"] == mine) else {
                 return false;
             };
@@ -5250,8 +5272,14 @@ fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
             (&json!("agent"), &json!(first)),
             "{claimed}"
         );
+        assert_eq!(row["audience"], "agents", "{claimed}");
         assert_eq!(focus(), first_id, "{claimed}");
     }
+    let row = send(json!({ "origin": "user", "sender": second }), "self-wake");
+    assert_eq!(row["origin"], "automation");
+    assert_eq!(row["sender_session"], second);
+    assert_eq!(row["audience"], "user");
+    assert_eq!(focus(), first_id);
     // What runs by itself does not move it either.
     let row = send(json!({ "origin": "schedule" }), "by-itself");
     assert_eq!(row["origin"], "schedule");
@@ -5280,10 +5308,23 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         all.extend_from_slice(args);
         tool(&host, &dir, None, &all)
     };
-    let over = |text: &str| {
-        let reply = said("assistant", text);
-        wait_for("the answer", || host.conversation(&worker).contains(&reply));
-        wait_for("the turn to be over", || host.state(&worker) == "done");
+    let shown = |at: &Host, session: &str| {
+        at.get(&format!("/log?session={session}&coordination=show"))["turns"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let over = |at: &Host, session: &str, trace: &Value| {
+        assert!(trace.as_str().is_some_and(|trace| !trace.is_empty()));
+        // The scripted tool echoes only the first line, which can be Host context.
+        wait_for("an answer on the delivered trace", || {
+            shown(at, session).iter().any(|row| {
+                row["role"] == "assistant"
+                    && row["trace_id"] == *trace
+                    && row["text"].as_str().is_some_and(|reply| !reply.is_empty())
+            })
+        });
+        wait_for("the turn to be over", || at.state(session) == "done");
     };
 
     // One agent hands another something, as the skill tells it to.
@@ -5302,8 +5343,8 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (&sent["ok"], &sent["session"], &sent["queued"]),
         (&json!(true), &json!(worker), &json!(false))
     );
-    over("please look at the build");
-    let rows = host.turns(&worker);
+    over(&host, &worker, &sent["trace_id"]);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (
             &rows[0]["origin"],
@@ -5312,7 +5353,11 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         ),
         (&json!("agent"), &json!(asker), &json!("Asker"))
     );
+    assert_eq!(rows[0]["text"], "please look at the build");
     assert_eq!(rows[1]["origin"], "agent");
+    let hidden = host.get(&format!("/log?session={worker}&coordination=auto"));
+    assert_eq!(hidden["coordination"]["visibility"], "hide");
+    assert!(hidden["turns"].as_array().unwrap().is_empty());
     // The writer is named as the roster has it when the row is read: renamed, the row says the
     // new name, and its revision does not move (a follower learns of it from the roster).
     let revision = rows[0]["revision"].clone();
@@ -5321,7 +5366,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         json!({ "session": asker, "name": "Asker Renamed" }),
     );
     assert_eq!(renamed["name"], "Asker Renamed", "{renamed}");
-    let rows = host.turns(&worker);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (
             &rows[0]["sender_name"],
@@ -5342,7 +5387,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     assert_eq!(host.get("/agents/snapshot")["focus"], focus_before);
 
     // Something that runs by itself writes without a sender.
-    let (code, _, err) = admin(&[
+    let (code, out, err) = admin(&[
         "prompt",
         "--to",
         &worker,
@@ -5352,8 +5397,9 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         "the queue is long",
     ]);
     assert_eq!(code, 0, "{err}");
-    over("the queue is long");
-    let rows = host.turns(&worker);
+    let sent: Value = serde_json::from_str(&out).unwrap();
+    over(&host, &worker, &sent["trace_id"]);
+    let rows = shown(&host, &worker);
     assert_eq!(
         (&rows[2]["origin"], &rows[2]["text"], &rows[2]["automated"]),
         (
@@ -5391,7 +5437,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (stranger.0, stranger.2.as_str()),
         (1, "clarp-admin prompt: unknown or disabled peer: work\n")
     );
-    assert_eq!(host.turns(&worker).len(), 4, "nothing else was sent");
+    assert_eq!(shown(&host, &worker).len(), 4, "nothing else was sent");
 
     // Another Host, which the owner names: an agent here writes to an agent there.
     let elsewhere = Place::new("message-elsewhere");
@@ -5456,11 +5502,9 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     assert_eq!(code, 0, "{err}");
     let sent: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(sent["session"], remote.as_str());
-    let reply = said("assistant", "greetings from the other host");
-    wait_for("the answer on the other Host", || {
-        other.conversation(&remote).contains(&reply)
-    });
-    let rows = other.turns(&remote);
+    over(&other, &remote, &sent["trace_id"]);
+    let rows = shown(&other, &remote);
+    assert_eq!(rows[0]["text"], "greetings from the other host");
     assert_eq!(
         (&rows[0]["origin"], &rows[0]["sender_session"]),
         (&json!("agent"), &json!(asker)),
@@ -5491,7 +5535,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     // so after the Host was started again.
     assert_eq!(host.ask("DELETE", &format!("/agents/{asker}"), None).0, 200);
     let named = |host: &Host| {
-        let rows = host.turns(&worker);
+        let rows = shown(host, &worker);
         (
             rows[0]["sender_name"].clone(),
             rows[0]["sender_session"].clone(),
@@ -9171,7 +9215,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 126);
+    assert_eq!(info["contract"]["host"], 128);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -10300,11 +10344,34 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
          there was nothing to bring. If another Host has it, `clarp-host import --files --from \
          {old} --session {session} --files-from ADDR:PORT` brings it from there.\nIt is heard \
          here as it was there: in no,en, by elevenlabs:scribe_v2, then google:chirp_3.\nIt is \
-         still on the Host at",
+         marked moved on the Host at {old}. Its turn-start doors there now refuse it. It is resumed here.",
         old = old_host.address
     );
     assert!(told.contains(&said_of_it), "{told}");
     assert!(!told.contains("did not arrive"), "{told}");
+    let identity = new_host.get("/pairing/identity");
+    let (status, refused) = old_host.ask(
+        "POST",
+        "/send",
+        Some(&json!({
+            "session": session, "text": "This must run on the destination",
+            "client_msg_id": "after-move-on-source",
+        })),
+    );
+    let moved_at = refused["moved_at"].as_i64().unwrap();
+    assert!(moved_at > 0);
+    assert_eq!(
+        (status, refused),
+        (
+            409,
+            json!({
+                "ok": false, "error": "agent_moved",
+                "moved_to": {"host": identity["name"], "id": identity["server_id"]},
+                "moved_at": moved_at,
+            })
+        )
+    );
+    assert_eq!(old_host.conversation(&session), before);
     let heard_here = new_host.get("/transcription-providers");
     let heard_by_both = |text: &str| json!({(&session):text, (&agent_id):text});
     assert_eq!(
@@ -10377,11 +10444,9 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let waiting = new_host.get("/attention");
     assert_eq!(waiting["count"], 1, "{waiting}");
     assert_eq!(waiting["items"][0]["decision_id"], decision_id.as_str());
-    // It arrived held: until its owner resumes it here, nothing starts by itself, because
-    // until then it is on the first Host too. Its goals are as they were, not paused.
-    assert!(told.contains("Here it is held until then"), "{told}");
+    // Marking the source lets the imported mailbox resume. Its goals are as they were.
     let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
+    assert_eq!(queue["paused"], false, "{queue}");
     assert_eq!(plan_here["status"], "active");
     // And the agent goes on with it here: the next step follows the revision it had.
     let revision = plan_before["revision"].as_i64().unwrap().to_string();
@@ -10574,14 +10639,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         new_host.conversation(&session)[5],
         said("assistant", "and now?")
     );
-    // What its user said ran, and it is still held; a resume lets it go.
-    let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
-    let resumed = new_host.post("/turn-queue/resume", json!({ "session": session }));
-    assert_eq!(resumed["paused"], false, "{resumed}");
-    let queue = new_host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], false, "{queue}");
-    // The first Host was read, not changed; and an agent arrives once.
+    // The source mark leaves its conversation intact. The destination imports it once.
     assert_eq!(old_host.conversation(&session), before);
     let again = third_place
         .host_command()
@@ -10609,7 +10667,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     assert!(
         told.contains(
-            "with the 2 rows of its conversation and the one file it published or shows.\nIt is still"
+            "with the 2 rows of its conversation and the one file it published or shows.\nIt is marked moved"
         ),
         "{told}"
     );
@@ -24051,7 +24109,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     let host = place.start_in("", &[], &world);
     let echo = host.new_agent("Echo");
 
-    // What is read: nothing of the kind is here, said in the Python Host's own fields.
+    // A new agent has no goal. The Host answers in the Python Host's fields.
     let read = |path: &str| host.get(path);
     assert_eq!(
         read(&format!("/agent-goal?session={echo}")),
@@ -24329,17 +24387,14 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         );
     }
 
-    // A change to any of it is refused, and says that it is not built: nothing is taken
-    // and then not done.
-    for (path, body) in [
-        ("/server-update", json!({})),
-        ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
-    ] {
-        let (status, said) = host.ask("POST", path, Some(&body));
-        let why = said["error"].as_str().unwrap_or("");
-        assert_eq!(status, 501, "{path}: {said}");
-        assert!(why.ends_with("not built on this Host yet"), "{path}: {why}");
-    }
+    // An app can read the update screen. Updating the Host is an installer action.
+    assert_eq!(
+        host.ask("POST", "/server-update", Some(&json!({}))),
+        (
+            501,
+            json!({ "error": "Updating this Host from an app is not built on this Host yet" }),
+        )
+    );
 
     // What an agent does by itself is off, and turning it off is done; turning it on is not.
     for (path, field) in [("/agent-dreaming", "dreaming_enabled")] {
@@ -30617,9 +30672,10 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         first["providers"]["codex"]["windows"][0]["used_percentage"],
         82.0
     );
-    assert_eq!(
-        first["providers"]["agy"]["windows"][0]["used_percentage"],
-        75.0
+    assert_eq!(first["providers"]["agy"]["windows"], json!([]));
+    assert!(
+        !agy.with_extension("calls").exists(),
+        "idle AGY stays unqueried"
     );
     assert_eq!(first["limit_events"][0]["kind"], "warning");
     assert_eq!(
@@ -30636,14 +30692,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         first["providers"]["claude"]["windows"][1]["used_percentage"],
         27.0
     );
-    assert_eq!(
-        first["providers"]["agy"]["windows"][0]["scope"],
-        "model_group"
-    );
-    assert_eq!(
-        first["providers"]["agy"]["windows"][0]["label"],
-        "model family"
-    );
+
     assert_eq!(
         first["providers"]["codex"]["source"]["detail"],
         "/wham/usage"
@@ -30660,6 +30709,10 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
     assert_eq!(calls.lock().unwrap().len(), 2);
     assert!(!fallback.with_extension("calls").exists());
     let next = host.get("/backend-usage?refresh=0&refresh=Yes");
+    let agy_window = &next["providers"]["agy"]["windows"][0];
+    assert_eq!(agy_window["used_percentage"], 75.0);
+    assert_eq!(agy_window["scope"], "model_group");
+    assert_eq!(agy_window["label"], "model family");
     assert_eq!(next["providers"]["claude"], first["providers"]["claude"]);
     assert_eq!(
         next["providers"]["codex"]["windows"][0]["used_percentage"],
@@ -30675,7 +30728,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
     );
     assert_eq!(
         std::fs::read_to_string(agy.with_extension("calls")).unwrap(),
-        "/usage\n/usage\n"
+        "/usage\n"
     );
     assert_eq!(next["limit_events"][0]["kind"], "recovered");
     let auth = host.get("/backend-auth");
@@ -38307,8 +38360,8 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     let (status, forbidden) = claim(&host, &other, &fourth_op, "no_mic", "other", json!({}));
     assert_eq!(status, 403);
     assert!(forbidden["opening"].get("token").is_none());
-    // The retired call is old enough to collect, and its public history can
-    // already be absent. Restart prunes its opening and all addressing rows.
+    // An old retirement is collectable even when the call ended recently and
+    // its public history is absent. Restart clears the opening and its indexes.
     drop(db);
     drop(host);
     let mut db = clarp_store_sqlite::SqliteKeyValue
@@ -38318,7 +38371,7 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     let mut kept: Value =
         serde_json::from_slice(&db.get("kept.opening_history", ring_id).unwrap().unwrap()).unwrap();
     let principal = kept["_opening"]["principal"].as_str().unwrap().to_owned();
-    kept["_opening"]["call_ended_at"] = json!(1);
+    kept["_opening"]["call_ended_at"] = json!(now_ms());
     kept["_opening"]["retired"]["at"] = json!(1);
     let mut calls: Vec<Value> =
         serde_json::from_slice(&db.get("kept.call", &principal).unwrap().unwrap()).unwrap();
@@ -41049,6 +41102,10 @@ fn a_call_of_the_oracle_is_told_of_what_agents_finished_and_nobody_wrote_to_sinc
         ("OPENAI_API_KEY", "a-key-of-the-test"),
     ];
     let host = place.start_in(ADMIN, &[], &world);
+    // The scripted tool reads only the first line. Keep the coordination reminder
+    // out of this fixture's prompts so its agent-origin sleep actually holds the turn.
+    let show = json!({"coordination_visibility":"show"});
+    assert_eq!(host.post("/coordination-settings", show.clone()), show);
     let events = host.listen_at(&format!("/events?token={ADMIN}"));
     let names = ["Ida", "Mike", "Zoe", "Theo", "Nora", "Dora", "Rhea", "Ada"];
     let [ida, mike, zoe, theo, nora, dora, rhea, ada] = names.map(|name| host.new_agent(name));

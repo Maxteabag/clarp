@@ -104,7 +104,7 @@ WAITS = [('claude', ''), ('codex', ''), ('claude', 'claude-opus-5-5'), ('claude'
 
 
 # The texts of the two functions `told` was read against (sha256, the first sixteen digits).
-READ = {'_mark_interrupted': '67fc07f0d7ff7499', '_record_failure_row': '5bd7846a4ff13062'}
+READ = {'_mark_interrupted': '8a001448a0b87580', '_record_failure_row': '5bd7846a4ff13062'}
 
 
 def sentences(rules):
@@ -123,7 +123,8 @@ def sentences(rules):
         if isinstance(stmt, ast.Assign) and getattr(stmt.targets[0], 'id', '') == 'human'
         and isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Attribute)
         and stmt.value.func.attr == 'get' and isinstance(stmt.value.func.value, ast.Dict))
-    worded = {getattr(rules, key.attr): compile(ast.Expression(value), 'turn_retry.py', 'eval')
+    worded = {(getattr(rules, key.attr) if isinstance(key, ast.Attribute) else ast.literal_eval(key)):
+              compile(ast.Expression(value), 'turn_retry.py', 'eval')
               for key, value in zip(table.func.value.keys, table.func.value.values)}
     other = ast.literal_eval(table.args[1])
 
@@ -194,6 +195,9 @@ def main() -> int:
     said = [told(rules, sentence, kind, text, model)
              for kind in [*kinds, 'a kind nobody has heard of'] for text in ('', 'something else entirely', long)
              for model in ('', 'gpt-6')]
+    # The move is an explicit continuation outcome, never inferred from a provider error.
+    said += [told(rules, sentence, 'agent_moved', text, '')
+             for text in ('', 'The agent moved to another Host; this turn does not continue here')]
     said += [told(rules, sentence, rules.USAGE_LIMIT, text, 'gpt-6', quota_confirmed=confirmed, switch_pending=pending)
              for text in ('', 'You exceeded your current quota', 'usage limit reached. Your limit will reset at 3pm')
              for confirmed in (None, True, False) for pending in (False, True)]

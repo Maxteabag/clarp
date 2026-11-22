@@ -25,7 +25,7 @@ def run(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import agents, clock, coordination, db, message_previews
+    from lib import agents, clock, coordination, db, message_previews, team_store, turn_command
 
     db.reset_for_tests(root / 'hidden.sqlite')
     names = iter(f'agent-{at}' for at in range(1, 100))
@@ -63,6 +63,26 @@ def run(root):
     coordination.set_chat(ivy, 'default')
     reminder = coordination.reminder(
         agents.get_by_agent_id(ivy), origin='agent', sender_agent_id=boss)
+
+    def prompt_shapes():
+        text = 'synthetic follow-up'
+        protocol = team_store.team_protocol_instruction(ivy, turn_origin='agent')
+        digest, _ = team_store.pending_digest(ivy)
+        return dict(
+            text=text, protocol=protocol, digest=digest,
+            start=turn_command._with_team_context(
+                text, digest=digest, protocol=turn_command._turn_protocol(
+                    ivy, origin='agent', sender_agent_id=boss)),
+            steer=turn_command._with_team_context(text, digest=digest, protocol=protocol),
+        )
+
+    prompts = [prompt_shapes()]
+    team = team_store.create_team('Ops', communication_enabled=True)
+    for member in (ivy, boss):
+        assert team_store.add_member(team['team_id'], member)
+    assert team_store.capture_assistant_message(
+        agent_id=boss, source_message_id='team-reply', text='<team>synthetic update</team>') == 1
+    prompts.append(prompt_shapes())
 
     def gap(which, nearest, tail, *, bounded=False):
         name = f'case-{which}'
@@ -106,7 +126,7 @@ def run(root):
     ))]
     look_back = [gap('hidden-tail', 'm' + 't' * 401 + 'mm', True, bounded=True),
                  gap('hidden-delta', 'm' + 't' * 402, False, bounded=True)]
-    return dict(choices=choices, inputs=invalid, reminder=reminder, counts=counts,
+    return dict(choices=choices, inputs=invalid, reminder=reminder, prompts=prompts, counts=counts,
                 look_back=look_back)
 
 

@@ -209,34 +209,6 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
     return park_id
 
 
-def _park_at_head(spec: _TurnSpec) -> str:
-    """Persist a preempting send ahead of everything its agent has open, as
-    it runs before the work already queued (TP-01)."""
-    park_id = f"preempt-park-{spec.trace_id}"
-    con = db.conn()
-    try:
-        con.execute("BEGIN IMMEDIATE")
-        try:
-            turn_queue.park_at_head(
-                queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
-                text=spec.text, trace_id=spec.trace_id,
-                client_msg_id=spec.client_msg_id,
-                synthesize_audio=spec.synthesize_audio, origin=spec.origin,
-                sender_agent_id=spec.sender_agent_id,
-                prompt_admission_id=spec.prompt_admission_id,
-                user_word=spec.user_word)
-            if spec.bypass_pause:
-                turn_queue.allow_paused_for(park_id)
-            con.execute("COMMIT")
-        except BaseException:
-            con.execute("ROLLBACK")
-            raise
-    except Exception as exc:  # noqa: BLE001 - the caller refuses the send
-        log_exception("preemptParkPersistFail", exc, detail=spec.agent_id)
-        return ""
-    return park_id
-
-
 class DispatchError(RuntimeError):
     def __init__(self, status: int, message: str):
         self.status = status

@@ -145,7 +145,7 @@ def generate(root):
         c.execute('delete from provider_turns')
         c.execute('insert into provider_turns(turn_token,agent_id,provider,started_at,exited_at) values(?,?,?,?,?)',(TOKEN,aid,'claude',NOW-1,NOW))
         db.now_ms=lambda:NOW+age
-        p.reap_exited_turns()
+        p.prune_exited_turns()
         cutoff.append([age,not bool(c.execute('select 1 from provider_turns').fetchone())])
     return json.loads(json.dumps(dict(parser=cases,ids=[[s,bool(p._ID.fullmatch(s)),p.job_id('agent',NATIVE,s)] for s in ids],redaction=[[v,p.safe_text(v)] for v in texts],stories=stories,snapshots=snapshots,mirrors=mirrors,cancel=cancel,retention=cutoff)).replace(ident,'native-fixture').replace(aid,'agent'))
 if __name__=='__main__':

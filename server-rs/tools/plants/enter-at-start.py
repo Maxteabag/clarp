@@ -22,7 +22,7 @@ OUTSIDE = '        let outside = !self.agent.starts_at_once(message.admission);\
 HERE = '        self.moved.is_none()\n'
 AT_ONCE = HERE + ('            && self.live.is_none()\n'
                   '            && !(self.paused && admission == Admission::Background)\n')
-SENT_AT = '                    let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);\n'
+SENT_AT = '                        let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);\n'
 ROW = '                    let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);\n'
 KEYED = '                    item.key = stored.key;\n'
 # NOT PLANTED, each with its reason:
@@ -66,13 +66,13 @@ PLANTS = [
      '            && !(self.paused && admission == Admission::Background)\n'),
     # The row its turn's start writes.
     (J, 'kernel', 'the send time is when the waiting copy was last written', SENT_AT,
-     '                    let sent_at = sent_at.map_or(stored.ts_ms, |_| stored.ts_ms);\n'),
+     '                        let sent_at = sent_at.map_or(stored.ts_ms, |_| stored.ts_ms);\n'),
     (J, 'kernel', 'the send time is when the turn starts', SENT_AT,
-     '                    let sent_at = sent_at.map_or(stored.ts_ms, |_| now_ms);\n'),
-    (J, 'kernel', 'the row keeps no send time', '                    let body = sent(stored.body, sent_at);\n',
-     '                    let body = {\n                        let _ = sent_at;\n                        stored.body\n                    };\n'),
+     '                        let sent_at = sent_at.map_or(stored.ts_ms, |_| now_ms);\n'),
+    (J, 'kernel', 'the row keeps no send time', '                        sent(stored.body, sent_at)\n',
+     '                        let _ = sent_at;\n                        stored.body\n'),
     (J, 'kernel', 'the row stands at its send time', ROW,
-     '                    let mut item = NewItem::new(kind::MESSAGE, sent_at, body).in_turn(turn.0);\n'),
+     '                    let mut item = NewItem::new(kind::MESSAGE, stored.ts_ms, body).in_turn(turn.0);\n'),
     (J, 'kernel', 'the row is in no turn', ROW,
      '                    let mut item = NewItem::new(kind::MESSAGE, now_ms, body);\n'),
     (J, 'kernel', 'the row has no id', KEYED, '                    let _ = &mut item;\n'),

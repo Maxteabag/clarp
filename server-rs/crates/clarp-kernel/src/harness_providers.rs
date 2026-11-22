@@ -541,12 +541,10 @@ pub fn task(task: &Task<'_>) -> Value {
     })
 }
 
-/// OpenCode's answer to the authorize call as a sign-in takes it: an answer of nothing is an
-/// answer that tells nothing. `None`: an answer of another shape, which fails the sign-in and
-/// ends its server (R156: the reference fails on it and leaves the sign-in running for good,
-/// its server never ended; the release owner ruled this answer the rule).
+/// A null authorize response means no instructions. Any other non-object fails the sign-in
+/// and ends its server (R156).
 pub fn authorization(answer: &Value) -> Option<Value> {
-    if !python::truthy(answer) {
+    if answer.is_null() {
         return Some(json!({}));
     }
     answer.is_object().then(|| answer.clone())

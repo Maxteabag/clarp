@@ -54,11 +54,12 @@ def release(name):
         time.sleep(.02)
 
 first, text = prompt()
-# A hidden coordination prompt starts with the Host's reminder. Keep the case label
-# separate, and check that only the two coordination turns receive the reminder.
-reminder, separator, request = text.partition("\n\n")
-has_reminder = bool(separator) and reminder.startswith(
-    "Coordination: this turn answers a message from another agent")
+# An initial hidden coordination prompt carries the reminder inside the team envelope.
+opening = "--- Clarp team context ---\n"
+closing = "\n--- End Clarp team context ---\n\n"
+context, separator, request = text.partition(closing)
+has_reminder = bool(separator) and context.startswith(
+    opening + "Coordination: this turn answers a message from another agent")
 if has_reminder:
     text = request
 assert has_reminder == (text in ("case-mixed", "case-relayed"))
@@ -79,11 +80,21 @@ if mode == "desk":
     answer("desk-finished", first)
     raise SystemExit(0)
 tool = "tool-" + mode
-start(tool, "Task" if mode == "task" else "Bash")
-if mode == "task":
-    start("child", "Bash", tool)
-    returned("child", tool)
-(root / ("tool-" + mode)).touch()
+if mode in ("writing", "between-tools"):
+    if mode == "between-tools":
+        start("previous-tool", "Bash")
+        returned("previous-tool")
+    say("stream_event", event={
+        "type": "content_block_start", "index": 0,
+        "content_block": {"type": "text", "text": ""},
+    })
+    (root / ("writing-" + mode)).touch()
+else:
+    start(tool, "Task" if mode == "task" else "Bash")
+    if mode == "task":
+        start("child", "Bash", tool)
+        returned("child", tool)
+    (root / ("tool-" + mode)).touch()
 if mode == "large":
     release("flood-large")
     for _ in range(96):
@@ -93,6 +104,7 @@ if mode == "large":
 more = []
 for index in range(2 if mode == "double" else 1):
     uid, follow = prompt()
+    assert "Coordination: this turn answers a message from another agent" not in follow
     if mode == "large":
         identifier, _, content = follow.partition(" ")
         assert len(content) == 256 * 1024
@@ -100,12 +112,17 @@ for index in range(2 if mode == "double" else 1):
     more.append((uid, follow))
     (root / ("received-" + follow)).write_text(uid)
 release("release-" + mode)
-if mode == "race":
-    answer("first-race", first)
-    (root / "result-race").touch()
-    release("echo-race")
+if mode in ("race", "writing"):
+    answer("first-" + mode, first)
+    (root / ("result-" + mode)).touch()
+    release("echo-" + mode)
     echo(more[0][0])
-    answer("second-race", more[0][0])
+    answer("second-" + mode, more[0][0])
+elif mode == "between-tools":
+    start("next-tool", "Bash")
+    returned("next-tool")
+    echo(more[0][0])
+    answer("joined-between-tools", first, more[0][0])
 elif mode == "unread":
     answer("first-unread", first)
 elif mode == "ledger":
@@ -411,6 +428,109 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
 }
 
 #[test]
+fn r7_plain_automatic_sends_wait_and_a_joined_oracle_keeps_the_user_notification() {
+    let place = Place::new("r7");
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE);
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let session = "r7";
+    host.post(
+        "/agents",
+        json!({"name":session, "session":session,"backend":"claude"}),
+    );
+    let events = host.listen();
+    wait_for("the event stream", || {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
+    });
+    let sent = host.send(session, "case-r7", "first");
+    assert_eq!(sent["queued"], false);
+    wait_for("the user's active tool", || {
+        place.root.join("tool-r7").exists() && host.state(session) == "tool"
+    });
+
+    let background = ["automation", "schedule", "watcher", "heartbeat", "dreaming"];
+    for origin in background.into_iter().chain(["oracle"]) {
+        let id = format!("add-{origin}");
+        let sent = host.post(
+            "/send",
+            json!({
+                "session":session, "text":id, "client_msg_id":id, "origin":origin,
+                "synthesize_audio":false,
+            }),
+        );
+        assert_eq!(sent["queued"], true, "{origin}: {sent}");
+    }
+    wait_for("the Oracle follow-up to reach the running process", || {
+        place.root.join("received-add-oracle").exists()
+    });
+    let launches = place.root.join("launches");
+    assert_eq!(std::fs::read_to_string(&launches).unwrap(), "case-r7\n");
+    let queue_path = format!("/turn-queue?session={session}");
+    let queue = host.get(&queue_path);
+    let waiting = queue["items"].as_array().unwrap();
+    for origin in background {
+        let id = format!("add-{origin}");
+        assert!(
+            waiting
+                .iter()
+                .any(|row| row["id"] == id && row["status"] == "queued"),
+            "{queue}"
+        );
+    }
+    assert!(
+        waiting
+            .iter()
+            .any(|row| row["id"] == "add-oracle" && row["status"] == "started"),
+        "{queue}"
+    );
+
+    std::fs::write(place.root.join("release-r7"), "").unwrap();
+    wait_for("the Oracle echo in the original turn", || {
+        host.turns(session)
+            .iter()
+            .any(|row| row["id"] == "u-add-oracle")
+    });
+    assert_eq!(std::fs::read_to_string(&launches).unwrap(), "case-r7\n");
+    std::fs::write(place.root.join("answer-r7"), "").unwrap();
+    wait_for("the original user's notification", || {
+        events.lock().unwrap().iter().any(|event| {
+            event["type"] == "user-notification"
+                && event["session"] == session
+                && event["cause_message_id"] == "u-first"
+                && event["origin"] == "user"
+                && event["preview"] == "joined-r7"
+        })
+    });
+    wait_for("the waiting messages to finish", || {
+        let turns = host.turns(session);
+        turns
+            .iter()
+            .any(|row| row["role"] == "assistant" && row["text"] == "separate-add-dreaming")
+            && host.get(&queue_path)["items"] == json!([])
+    });
+    let launched = std::fs::read_to_string(&launches).unwrap();
+    assert_eq!(
+        launched.lines().collect::<Vec<_>>(),
+        [
+            "case-r7",
+            "add-automation",
+            "add-schedule",
+            "add-watcher",
+            "add-heartbeat",
+            "add-dreaming"
+        ]
+    );
+}
+
+#[test]
 fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
     let place = Place::new("queue-item-status");
     let claude = place.root.join("claude");
@@ -516,6 +636,54 @@ fn queue_status_distinguishes_a_steered_message_from_one_still_waiting() {
             .any(|event| { event["type"] == "transcript-updated" && event["session"] == session }),
         "the transcript notification must precede the started event: {events:?}"
     );
+}
+
+#[test]
+fn a_claude_follow_up_can_join_while_no_tool_call_is_open() {
+    for mode in ["writing", "between-tools"] {
+        let place = Place::new(mode);
+        let claude = place.root.join("claude");
+        program(&claude, CLAUDE);
+        let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+        let host = place.start_in("", &[], &world);
+        let session = "open-input";
+        host.post(
+            "/agents",
+            json!({"name":session,"session":session,"backend":"claude"}),
+        );
+
+        let initial = format!("case-{mode}");
+        host.send(session, &initial, "first");
+        wait_for("the model to generate with no tool open", || {
+            place.root.join(format!("writing-{mode}")).exists()
+        });
+        let follow = format!("add-{mode}");
+        assert_eq!(host.send(session, &follow, &follow)["queued"], true);
+        wait_for("the follow-up on the running process's stdin", || {
+            place.root.join(format!("received-{follow}")).exists()
+        });
+        let queue = host.get(&format!("/turn-queue?session={session}"));
+        assert_eq!(queue["items"][0]["id"], follow);
+        assert_eq!(queue["items"][0]["status"], "started");
+        let row_id = format!("u-{follow}");
+        assert!(!host.turns(session).iter().any(|row| row["id"] == row_id));
+
+        std::fs::write(place.root.join(format!("release-{mode}")), "").unwrap();
+        if mode == "writing" {
+            collect_answer(&host, session, "first-writing");
+            assert!(!host.turns(session).iter().any(|row| row["id"] == row_id));
+            std::fs::write(place.root.join("echo-writing"), "").unwrap();
+            collect_answer(&host, session, "second-writing");
+        } else {
+            collect_answer(&host, session, "joined-between-tools");
+        }
+        let rows = host.turns(session);
+        assert_eq!(rows.iter().filter(|row| row["id"] == row_id).count(), 1);
+        assert_eq!(
+            std::fs::read_to_string(place.root.join("launches")).unwrap(),
+            format!("{initial}\n")
+        );
+    }
 }
 
 fn reads(heard: &Mutex<Vec<Value>>, session: &str, id: &str) -> Vec<u64> {

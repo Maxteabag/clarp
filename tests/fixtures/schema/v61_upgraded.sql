@@ -1,4 +1,4 @@
--- user_version 135
+-- user_version 137
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -143,6 +143,9 @@ CREATE INDEX idx_html_form_events_artifact_seq ON html_form_events(artifact_id, 
 
 -- index idx_janitor_attachments_agent on janitor_attachments
 CREATE INDEX idx_janitor_attachments_agent ON janitor_attachments(agent_id, retired_at);
+
+-- index idx_janitor_demand_claims_open on janitor_demand_claims
+CREATE INDEX idx_janitor_demand_claims_open ON janitor_demand_claims(run_id) WHERE finished_at IS NULL;
 
 -- index idx_janitor_runs_agent on janitor_runs
 CREATE INDEX idx_janitor_runs_agent ON janitor_runs(agent_id, created_at DESC);
@@ -655,6 +658,9 @@ CREATE INDEX oracle_threads_owner ON oracle_threads(owner_principal, contact, up
 (implicit);
 
 -- index sqlite_autoindex_task_items_1 on task_items
+(implicit);
+
+-- index sqlite_autoindex_task_plan_versions_1 on task_plan_versions
 (implicit);
 
 -- index sqlite_autoindex_task_plans_1 on task_plans
@@ -2083,6 +2089,12 @@ CREATE TABLE task_items (
     required INTEGER NOT NULL DEFAULT 1
 );
 
+-- table task_plan_versions on task_plan_versions
+CREATE TABLE task_plan_versions (
+    plan_id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL
+);
+
 -- table task_plans on task_plans
 CREATE TABLE task_plans (
     plan_id TEXT PRIMARY KEY,
@@ -2097,6 +2109,12 @@ CREATE TABLE task_plans (
     revision INTEGER NOT NULL DEFAULT 0,
     goal_json TEXT NOT NULL DEFAULT '{}',
     recovery_enabled INTEGER NOT NULL DEFAULT 0
+);
+
+-- table task_plans_clock on task_plans_clock
+CREATE TABLE task_plans_clock (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 0),
+    generation INTEGER NOT NULL
 );
 
 -- table team_inbox on team_inbox
@@ -2506,6 +2524,15 @@ CREATE TRIGGER janitor_demand_trigger_no_delete BEFORE DELETE ON janitor_trigger
 
 -- trigger janitor_demand_trigger_no_update on janitor_trigger_definitions
 CREATE TRIGGER janitor_demand_trigger_no_update BEFORE UPDATE ON janitor_trigger_definitions WHEN OLD.kind='demand' BEGIN SELECT RAISE(ABORT, 'Demand trigger versions are immutable'); END;
+
+-- trigger task_plans_versioned_delete on task_plans
+CREATE TRIGGER task_plans_versioned_delete AFTER DELETE ON task_plans BEGIN INSERT INTO task_plans_clock (singleton, generation) VALUES (0, 1) ON CONFLICT (singleton) DO UPDATE SET generation = generation + 1; DELETE FROM task_plan_versions WHERE plan_id = OLD.plan_id; END;
+
+-- trigger task_plans_versioned_insert on task_plans
+CREATE TRIGGER task_plans_versioned_insert AFTER INSERT ON task_plans BEGIN INSERT INTO task_plans_clock (singleton, generation) VALUES (0, 1) ON CONFLICT (singleton) DO UPDATE SET generation = generation + 1; INSERT INTO task_plan_versions (plan_id, version) VALUES (NEW.plan_id, (SELECT generation FROM task_plans_clock WHERE singleton = 0)) ON CONFLICT (plan_id) DO UPDATE SET version = excluded.version; END;
+
+-- trigger task_plans_versioned_update on task_plans
+CREATE TRIGGER task_plans_versioned_update AFTER UPDATE ON task_plans BEGIN INSERT INTO task_plans_clock (singleton, generation) VALUES (0, 1) ON CONFLICT (singleton) DO UPDATE SET generation = generation + 1; DELETE FROM task_plan_versions WHERE plan_id = OLD.plan_id AND OLD.plan_id IS NOT NEW.plan_id; INSERT INTO task_plan_versions (plan_id, version) VALUES (NEW.plan_id, (SELECT generation FROM task_plans_clock WHERE singleton = 0)) ON CONFLICT (plan_id) DO UPDATE SET version = excluded.version; END;
 
 -- view clip_lifecycle on clip_lifecycle
 CREATE VIEW clip_lifecycle AS SELECT c.clip_id, c.trace_id, c.agent_id, c.path AS clip_url, c.status, c.producer_status, c.created_at, c.broadcast_at, c.queued_at, c.play_started_at, c.played_at, c.completed_at, c.error FROM clips c;

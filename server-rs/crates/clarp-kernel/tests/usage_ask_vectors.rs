@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 use clarp_kernel::{
     quota::{Kept, Login, Tool},
-    usage_ask::{agy_groups, agy_provider, due},
+    usage_ask::{agy_groups, agy_provider, agy_recent_activity, due},
 };
 use serde_json::{Value, json};
 
@@ -11,6 +11,14 @@ fn asks_when_the_reference_does_and_shows_every_model_group_bucket() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/usage-ask-vectors.json")).unwrap();
     let at = fixture["at"].as_i64().unwrap();
+    for case in fixture["agy_activity"].as_array().unwrap() {
+        let activity = case["start"].as_i64().max(case["state"].as_i64());
+        assert_eq!(
+            json!(agy_recent_activity(activity, at)),
+            case["active"],
+            "{case}"
+        );
+    }
     let groups = agy_groups(&fixture["payload"]).unwrap();
     let mut count = 0;
     for case in fixture["cases"].as_array().unwrap() {

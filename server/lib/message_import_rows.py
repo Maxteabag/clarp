@@ -192,7 +192,7 @@ def _shifted_twin(database, agent_id: str, backend_session_id: str,
 
 
 def _parsed_traces(turns, turn_index, provenance, client_traces, *,
-                   start_seq=0, current_trace="", unanswered_key=""):
+                   start_seq=0, current_trace="", unanswered_key="", steered_sent=None):
     """Replay provenance selection without SQL or consuming the writer's rows."""
     copied = (_ClientProvenance(None, "", "", prepared={
         key: list(rows) for key, rows in provenance._by_text.items()})
@@ -230,7 +230,8 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
                         own = _own_turns_row(
                             None, rows, running, began, trace_ids=client_traces, written_at=stamp,
                             ended_before=None if ended_before is None else (
-                                lambda sent, at=stamp: ended_before(sent, at)))
+                                lambda sent, at=stamp: ended_before(sent, at)),
+                            steered_sent=steered_sent)
                     if rows and own is not None:
                         chosen = copied.take(key, rows, own)
                         current_trace = client_traces.get(chosen[0]) or ""
@@ -262,7 +263,8 @@ class _FinalRows:
 
     def __init__(self, database, agent_id: str, backend_session_id: str, *,
                  turns=(), visible_replies=None, start_seq=0, turn_index=None,
-                 client_rows=(), provenance=None, current_trace="", unanswered_key=""):
+                 client_rows=(), provenance=None, current_trace="", unanswered_key="",
+                 steered_sent=None):
         self._database = database
         self._key = (agent_id, backend_session_id)
         self._rows: list[tuple[str, str, str, Any]] | None = None
@@ -278,7 +280,8 @@ class _FinalRows:
         client_traces = {row.message_id: row.trace_id for row in client_rows
                          if hasattr(row, "trace_id")}
         resolved = _parsed_traces(turns, turn_index, provenance, client_traces,
-            start_seq=start_seq, current_trace=current_trace, unanswered_key=unanswered_key)
+            start_seq=start_seq, current_trace=current_trace, unanswered_key=unanswered_key,
+            steered_sent=steered_sent)
         group = None
         for index, turn in enumerate(turns):
             trace = resolved[start_seq+index]
@@ -604,7 +607,8 @@ class _ClientProvenance:
 
 
 def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *,
-                   trace_ids=None, written_at: Any = None, ended_before=None) -> int | None:
+                   trace_ids=None, written_at: Any = None, ended_before=None,
+                   steered_sent=None) -> int | None:
     """Which of several client rows with the same words a transcript turn
     belongs to. ``trace`` and ``began`` are the turn that was running when
     the provider wrote its copy (from the turn index).
@@ -632,7 +636,12 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
     message not yet sent (a row steered in hours later lent itself to an
     earlier typed copy and then showed twice). With no turn running there is
     no "sent since its turn began", and of the rows left the oldest is taken.
-    None: no row is this copy's, and it is stored as itself."""
+    None: no row is this copy's, and it is stored as itself.
+
+    A follow-up steered into a running turn (``steered_sent``: its row's send
+    time) is judged by when it was sent: its row is written at the CLI's echo,
+    after the CLI wrote its copy, and judged by that it was never the copy's own
+    and the copy stood as a user row of the running turn."""
     if ended_before is None and written_at is None and (not trace or len(rows) < 2):
         return 0            # a caller that gives neither bound: as before
 
@@ -649,16 +658,21 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
             if sent_for == trace:
                 return index
     copy_at = iso_ms(written_at)
+    steered_sent = steered_sent or {}
+
+    def sent_ms(index):
+        steered = steered_sent.get(rows[index][0])
+        return steered if steered is not None else iso_ms(rows[index][3])
 
     def could_be(index):
-        sent_at = iso_ms(rows[index][3])
+        sent_at = sent_ms(index)
         if copy_at is not None and sent_at is not None and sent_at > copy_at + _START_SLACK_MS:
             return False
         return not (sent[index] and ended_before is not None and ended_before(sent[index]))
     free = [index for index in range(len(rows)) if could_be(index)]
     if began is not None:           # running_at gives no begin when no turn was running
         for index in free:
-            sent_at = iso_ms(rows[index][3])
+            sent_at = sent_ms(index)
             if sent_at is not None and sent_at > began:
                 return index
     return free[0] if free else None

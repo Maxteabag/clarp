@@ -1119,31 +1119,29 @@
   {
    "manifest": "{\"skills\": [{\"pack\": \"core\"}]}",
    "outcome": [
-    "crash",
-    "KeyError"
+    "unavailable",
+    "Clarp skill manifest is unavailable"
    ]
   },
   {
    "manifest": "{\"skills\": [\"x\"]}",
    "outcome": [
-    "crash",
-    "TypeError"
+    "unavailable",
+    "Clarp skill manifest is unavailable"
    ]
   },
   {
    "manifest": "{\"skills\": [5]}",
    "outcome": [
-    "crash",
-    "TypeError"
+    "unavailable",
+    "Clarp skill manifest is unavailable"
    ]
   },
   {
    "manifest": "{\"skills\": [{\"id\": null}]}",
    "outcome": [
-    "rows",
-    [
-     null
-    ]
+    "unavailable",
+    "Clarp skill manifest is unavailable"
    ]
   },
   {
@@ -1167,6 +1165,57 @@
    "outcome": [
     "unavailable",
     "Clarp skill manifest is unavailable"
+   ]
+  },
+  {
+   "manifest": "{\"skills\": [{\"id\": 7}]}",
+   "outcome": [
+    "unavailable",
+    "Clarp skill manifest is unavailable"
+   ]
+  },
+  {
+   "manifest": "{\"skills\": [{\"id\": \"  \"}]}",
+   "outcome": [
+    "unavailable",
+    "Clarp skill manifest is unavailable"
+   ]
+  },
+  {
+   "manifest": "{\"skills\": [{\"id\": \"a\"}, {\"id\": \"b\", \"requires\": 5}]}",
+   "outcome": [
+    "unavailable",
+    "Clarp skill manifest is unavailable"
+   ]
+  },
+  {
+   "manifest": "{\"skills\": [{\"id\": \"a\", \"requires\": false}]}",
+   "outcome": [
+    "unavailable",
+    "Clarp skill manifest is unavailable"
+   ]
+  },
+  {
+   "manifest": "{\"skills\": [{\"id\": \"a\", \"requires\": \"\"}]}",
+   "outcome": [
+    "unavailable",
+    "Clarp skill manifest is unavailable"
+   ]
+  },
+  {
+   "manifest": "{\"skills\": [{\"id\": \"a\", \"requires\": {}}]}",
+   "outcome": [
+    "unavailable",
+    "Clarp skill manifest is unavailable"
+   ]
+  },
+  {
+   "manifest": "{\"skills\": [{\"id\": \"a\", \"requires\": null}]}",
+   "outcome": [
+    "rows",
+    [
+     "a"
+    ]
    ]
   }
  ],
@@ -3328,7 +3377,7 @@
      ]
     },
     {
-     "id": 7,
+     "id": "7",
      "pack": "core"
     }
    ],
@@ -8612,7 +8661,7 @@
      ]
     },
     {
-     "id": 7,
+     "id": "7",
      "pack": "core",
      "enabled": true,
      "optional": false,
@@ -10783,7 +10832,7 @@
      ]
     },
     {
-     "id": 7,
+     "id": "7",
      "pack": "core"
     }
    ],
@@ -16367,7 +16416,7 @@
      ]
     },
     {
-     "id": 7,
+     "id": "7",
      "pack": "core",
      "enabled": true,
      "optional": false,
@@ -57883,6 +57932,15 @@
      500,
      {
       "error": "system words"
+     }
+    ]
+   ],
+   [
+    "runtime",
+    [
+     503,
+     {
+      "error": "Clarp skill manifest is unavailable"
      }
     ]
    ]

@@ -536,7 +536,7 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
             source_file: str = "", backend_session_id: str = "",
             session_rows: bool = False, witness: dict | None = None,
             pending_tail: dict | None = None, accepted_tail: dict | None = None,
-            why: dict | None = None) -> str:
+            why: dict | None = None, steered_sent=None) -> str:
     """'' when the turns before the boundary would be replayed as they stand.
     Otherwise what stands in the way: fixed words, comma separated, for the
     log (no ids, no text).
@@ -651,7 +651,7 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
         elif _norm_text(text) in said:
             if early_traces is None:
                 early_traces = _early_traces(table, old, turns, carry)
-            if not _sent_after_old_turns(table, row, carry, early_traces):
+            if not _sent_after_old_turns(table, row, carry, early_traces, turns, steered_sent):
                 found.add("send_said_before")
     if live_rows:
         replied = None
@@ -778,17 +778,29 @@ def _early_traces(table, old, turns, carry) -> set[str]:
     return found
 
 
-def _sent_after_old_turns(table, row, carry, early_traces) -> bool:
+def _sent_after_old_turns(table, row, carry, early_traces, turns=(), steered_sent=None) -> bool:
     """Whether a new /send row was sent too late for any old turn's copy to be
-    linked to it, for a trace none of them can name (NEW_SENDS)."""
+    linked to it, for a trace none of them can name (NEW_SENDS). A row with no
+    turn of its own (a follow-up steered into a running turn) is timed as the
+    linker times it: by its queue item's send time when it has one
+    (message_import_common._steered_sent; ``steered_sent`` reads those now, and
+    is recorded nowhere). A caller that gives no ``steered_sent`` lets no such
+    row through: a full import decides it."""
     latest = (carry or {}).get("prefix_latest_ms")
     at = table.at.get("timestamp")
     if latest is None or at is None or (carry or {}).get("prefix_untimed_user") is not False:
         return False
     sent = iso_ms(row[at])
+    trace = table.at.get("trace_id")
+    if (trace is not None and row[trace]
+            and str(row[trace]) not in {str(turn[0]) for turn in _turn_values(turns)}):
+        if steered_sent is None:
+            return False
+        steered = steered_sent().get(str(row[table.at["message_id"]]))
+        if steered is not None:
+            sent = steered
     if sent is None or sent <= int(latest) + _START_SLACK_MS:
         return False
-    trace = table.at.get("trace_id")
     return trace is None or not row[trace] or str(row[trace]) not in early_traces
 
 

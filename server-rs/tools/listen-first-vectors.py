@@ -27,6 +27,23 @@ def record(root):
     host.isolate(root);host.loopback_only();sys.path.insert(0,str(ROOT/'server'))
     from lib import agent_ring_openings as op, turn_queue
 
+    clip_index = {}
+    original_get, original_set = op.settings_store.get, op.settings_store.set_text
+
+    def read_setting(key, *args, **kwargs):
+        if key.startswith(op.CLIP_KEY):
+            return clip_index.get(key)
+        return original_get(key, *args, **kwargs)
+
+    def write_setting(key, value, *args, **kwargs):
+        if key.startswith(op.CLIP_KEY):
+            clip_index[key] = value
+            return
+        return original_set(key, value, *args, **kwargs)
+
+    op.settings_store.get = read_setting
+    op.settings_store.set_text = write_setting
+
     gen={'boot':'boot-one','instance':'host-one'}
     ring={'ring_id':'ring-one','call_id':'call-one','agent_id':'guard','session':'guard-session',
           'persona':'Guard','reason':'Check the pump'}
@@ -51,6 +68,7 @@ def record(root):
         op._open_record(seed,ring,'device_one',capable=capable,host_gen=gen)
         return seed['op']
     def story(name,script):
+        clip_index.clear()
         now[0]=1000
         saved=initial()
         start=copy.deepcopy(saved)
@@ -164,9 +182,9 @@ def record(root):
 
     add('replay or conflicting reuse',{'body':{'request_id':'s'}},{'body':{'request_id':'s'}},
         {'body':{'request_id':'s','reason':'different'}})
-    return {"stories":scripts,**extras(root,op)}
+    return {"stories":scripts,**extras(root,op,clip_index)}
 
-def extras(root, op):
+def extras(root, op, clip_index):
     from lib import group_calls, host_generation as identity
     headers=[]
     clips=[]
@@ -176,13 +194,23 @@ def extras(root, op):
     for state in ('intended','admitted','started','cancelled','unknown'):
         for ended in (True,False):
             for late in (True,False):
-                opening=dict(ring_id='ring',call_id='call',token='opn_test',epoch=2,retired={'reason':'ended'} if ended else None,
+                clip_index.clear()
+                opening=dict(ring_id='ring',call_id='call',agent_id='clip-agent',token='opn_test',
+                             epoch=2,retired={'reason':'ended'} if ended else None,
                              late_greeting={'client_msg_id':'late'} if late else None,
                              intent={'state':state,'trace_id':'intent-trace','admission_id':'call-open:ring:1'},
                              greeting={'client_msg_id':'greet','trace_id':'greet-trace'})
-                op._openings=lambda:[opening]
-                for trace in ('','other','intent-trace','greet-trace'):
-                    clips.append(dict(op=opening,trace=trace,tag=op.opening_audio(trace),skip=op.skip_opening_synthesis(trace)))
+                op._bind_clip(opening, 'initiative', 'intent-trace')
+                op._bind_clip(opening, 'greeting_reply', 'greet-trace')
+                op.opening_state=lambda rid: opening if rid == opening['ring_id'] else None
+                for agent, trace, turn in [
+                    ('clip-agent', '', 0), ('clip-agent', 'other', 3),
+                    ('clip-agent', 'intent-trace', 1), ('clip-agent', 'greet-trace', 2),
+                    ('other-agent', 'intent-trace', 1), ('', 'greet-trace', 2),
+                ]:
+                    clips.append(dict(op=opening, trace=trace, agent=agent, turn=turn,
+                                      tag=op.opening_audio(trace, agent),
+                                      skip=op.skip_opening_synthesis(trace, agent)))
     uuids=[]
     value='f46bf8e2-4219-4ee5-8d9c-874d36c116ef'
     for raw in (value,value+'\n',value.upper(),value+'\n\n',' '+value,value+' ',value.replace('-',''),'.'*36,'x'*65,'',value+'x',value+'a',value[:-1]):
@@ -243,10 +271,10 @@ def extras(root, op):
                     elif action=='parked':result=op.authorize_parked_launch(row_id,trace)
                     else:result=op.resolve_launch_failure(row_id,trace)
                     gates.append(dict(action=action,before=before,status=status,breach=breach,result=result,effects=effects,after=opening))
-    return dict(headers=headers,clips=clips,uuids=uuids,gates=gates,admissions=admissions(op))
+    return dict(headers=headers,clips=clips,uuids=uuids,gates=gates,admissions=admissions(op, clip_index))
 
 
-def admissions(op):
+def admissions(op, clip_index):
     import sqlite3
     from lib import prompt_admissions, turn_queue
     con=sqlite3.connect(':memory:')
@@ -282,6 +310,7 @@ def admissions(op):
                     prompt_admissions.record=lambda *_a,**_kw:effects.append('record') or 'admission'
                     turn_queue.enqueue=lambda **_kw:effects.append('enqueue')
                     turn_queue.allow_paused_for=lambda _:effects.append('allow_paused')
+                    clip_index.clear()
                     result=op.admit_initiative('ring')
                     cases.append(dict(before=before,generation=box['gen'],guard=guard,existing=existing,row=row,result=result,after=opening,effects=effects))
     con.close()
