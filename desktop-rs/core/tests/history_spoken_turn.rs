@@ -68,3 +68,47 @@ fn a_spoken_acknowledgment_stays_above_the_work_and_the_answer_in_history() {
     let in_order = ["u-voice", "live-ack", "live-answer"];
     assert_eq!(turn_order(&folded.folds[0], |id| in_order.iter().position(|i| *i == id)), None);
 }
+
+fn at(seconds: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(1791100000000 + seconds * 1000).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+}
+
+/// A turn without tool calls folds its commentary in history as live does, so the
+/// commentary does not reappear when history takes the turn over from live (#653).
+#[test]
+fn a_turn_without_tools_folds_its_commentary_in_history_as_live_does() {
+    let rows: Vec<Message> = [
+        json!({"id": "u-n", "role": "user", "text": "Is it fine?", "timestamp": at(0), "trace_id": "tr-n"}),
+        json!({"id": "a-note", "role": "assistant", "phase": "commentary", "text": "Let me check.", "timestamp": at(1), "trace_id": "tr-n"}),
+        json!({"id": "a-final", "role": "assistant", "phase": "final", "text": "It is fine.", "timestamp": at(3), "trace_id": "tr-n",
+               "turn": {"turn_id": "tr-n", "status": "completed", "started_at_ms": 1791100000000_i64, "ended_at_ms": 1791100003000_i64,
+                        "worked_ms": 3_000, "tool_count": 0}}),
+    ].iter().map(row).collect();
+    let folded = present(&rows, None, &options(&[]));
+    assert_eq!(folded.folds.len(), 1, "{:?}", folded.folds);
+    assert_eq!(read(&folded.folds[0]), ["Worked for 3s", "row a-final"]);
+    assert!(folded.hidden_rows.contains("a-note"));
+    let open = present(&rows, None, &options(&["live:fold:tr-n"]));
+    assert_eq!(read(&open.folds[0]), ["Worked for 3s", "row a-note", "row a-final"], "it opens in place");
+}
+
+/// Speech is matched in any letter case: a commentary marked `<SPEAK>` was heard and
+/// stays above the work row.
+#[test]
+fn speech_is_recognised_in_any_letter_case() {
+    assert!(clarp_core::text::carries_speech("<SPEAK>On it.</SPEAK>"));
+    assert!(clarp_core::text::carries_speech("<Speak>On it.</Speak>"));
+    assert!(!clarp_core::text::carries_speech("On it."));
+    let rows: Vec<Message> = [
+        json!({"id": "u-s", "role": "user", "text": "Go.", "timestamp": at(0), "trace_id": "tr-s"}),
+        json!({"id": "a-ack", "role": "assistant", "phase": "commentary", "text": "<SPEAK>On it.</SPEAK>", "timestamp": at(1), "trace_id": "tr-s"}),
+        json!({"id": "a-tool", "role": "assistant", "text": "", "timestamp": at(2), "trace_id": "tr-s",
+               "tools": [{"name": "Bash", "summary": "make", "status": "ok", "id": "c-s", "command": "make", "result": "ok"}]}),
+        json!({"id": "a-done", "role": "assistant", "phase": "final", "text": "Done.", "timestamp": at(4), "trace_id": "tr-s",
+               "turn": {"turn_id": "tr-s", "status": "completed", "started_at_ms": 1791100000000_i64, "ended_at_ms": 1791100004000_i64,
+                        "worked_ms": 4_000, "tool_count": 1}}),
+    ].iter().map(row).collect();
+    let folded = present(&rows, None, &options(&[]));
+    assert_eq!(read(&folded.folds[0]), ["row a-ack", "Worked for 4s · 1 tool", "row a-done"]);
+    assert!(!folded.hidden_rows.contains("a-ack"));
+}
