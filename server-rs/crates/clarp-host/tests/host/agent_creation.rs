@@ -252,3 +252,53 @@ fn agent_creation_details_relaunch_updates_picture_and_lineage() {
     assert_eq!(invalid["error"], "invalid avatar");
     assert_eq!(fetch(&host, &host.token, "GET", url, &[], b"").body, image);
 }
+
+#[test]
+fn a_turn_uses_owner_model_and_effort_defaults_when_the_agent_has_no_override() {
+    let place = Place::new("turn-owner-defaults");
+    let owner = place.root.join("owner.toml");
+    let claude = place.root.join("claude");
+    let arguments = place.root.join("arguments");
+    std::fs::write(&owner, "[agents]\n").unwrap();
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.321 (Claude Code)'; exit 0; fi\n\
+         printf '%s\\n' \"$@\" > '{}'\nread message\n{}",
+        arguments.display(),
+        STAND_IN_ANSWERS
+    );
+    program(&claude, &script);
+    let host = place.start_in(
+        "",
+        &["--speech-keys", owner.to_str().unwrap()],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let follows = host.post("/agents", json!({"name": "Default", "backend": "claude"}));
+    let pinned = host.post(
+        "/agents",
+        json!({"name": "Override", "backend": "claude", "model": "claude-opus-4-6", "effort": "low"}),
+    );
+    assert_eq!(follows["agent"]["model"], "");
+    std::fs::write(
+        &owner,
+        "[agents]\nclaude_model = 'claude-sonnet-4-6'\nclaude_effort = ' HIGH '\n",
+    )
+    .unwrap();
+    for (agent, model, effort) in [
+        (follows, "claude-sonnet-4-6", "high"),
+        (pinned, "claude-opus-4-6", "low"),
+    ] {
+        let session = agent["session"].as_str().unwrap();
+        host.send(session, "a fixture turn", session);
+        wait_for("the stand-in turn to finish", || {
+            host.state(session) == "done"
+        });
+        let argv = std::fs::read_to_string(&arguments).unwrap();
+        let argv: Vec<_> = argv.lines().collect();
+        for (flag, value) in [("--model", model), ("--effort", effort)] {
+            assert!(
+                argv.windows(2).any(|pair| pair == [flag, value]),
+                "{argv:?}"
+            );
+        }
+    }
+}

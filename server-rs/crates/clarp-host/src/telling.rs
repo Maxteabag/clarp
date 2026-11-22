@@ -56,6 +56,24 @@ impl Telling {
             .map_or_else(Default::default, |file| owner::personas(&file))
     }
 
+    /// Read only the launch choices from the same owner file used for app defaults.
+    pub(crate) fn launch_defaults(&self, backend: &str) -> clarp_actor::LaunchPreferences {
+        let mut choices = clarp_actor::LaunchPreferences::default();
+        let effort_key = match backend {
+            "agy" => None,
+            "codex" => Some("codex_reasoning_effort".to_owned()),
+            "claude" | "grok" | "deepseek" | "opencode" | "muse" => {
+                Some(format!("{backend}_effort"))
+            }
+            _ => return choices,
+        };
+        if let Some(file) = self.owner.read() {
+            choices.model = owner::text_at(&file, &["agents", &format!("{backend}_model")]);
+            choices.effort = effort_key.and_then(|key| owner::text_at(&file, &["agents", &key]));
+        }
+        choices
+    }
+
     /// What the tool of this agent is told from its next turn on.
     pub fn of(&self, record: &AgentRecord) -> Told {
         let settings = self

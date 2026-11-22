@@ -5202,7 +5202,7 @@ fn a_quiet_listener_keeps_its_heartbeat_without_growing_the_principals_ledger() 
 /// The launch the actor asks for in `out`, where it asks for one.
 fn r121_launch(out: &Outputs) -> Option<&ShimOrder> {
     out.actions.iter().find_map(|action| match action {
-        Action::Launch(order) => Some(order),
+        Action::Launch(order) => Some(order.as_ref()),
         _ => None,
     })
 }
