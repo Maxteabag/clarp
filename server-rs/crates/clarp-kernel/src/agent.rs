@@ -381,6 +381,8 @@ pub struct Agent {
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
     unheld: BTreeSet<TurnId>,
+    /// The user's waiting sends released by Stop, until they start or are read.
+    stop_released: BTreeSet<TurnId>,
     /// The last turn that held the agent and ended.
     last: Option<Settled>,
     interrupted_since_ms: Option<i64>,
@@ -458,6 +460,7 @@ impl Default for Agent {
             live_resumed_session: false,
             selected_takeover: None,
             unheld: BTreeSet::new(),
+            stop_released: BTreeSet::new(),
             last: None,
             interrupted_since_ms: None,
             compaction_owed: None,
@@ -882,7 +885,11 @@ impl Agent {
             }
             Command::Join { turn, join } => {
                 work.agent.require_here()?;
-                if !work.agent.can_join(turn, &join) {
+                // No newer follow-up can jump a waiting send released by Stop. This is
+                // an admission rule, so a log that already recorded a join can still replay.
+                if !work.agent.can_join(turn, &join)
+                    || work.agent.stop_released.range(..turn).next().is_some()
+                {
                     return Err(Refusal::NotWaiting(turn));
                 }
                 work.record(AgentEvent::Joined { turn, join });
@@ -983,8 +990,9 @@ impl Agent {
                         .agent
                         .waiting()
                         .filter(|queued| {
+                            // An offered follow-up remains on the mailbox until its
+                            // read is proved. If unread when the turn ends, let it run.
                             queued.origin.is_user_send()
-                                && !work.agent.joins.contains_key(&queued.id)
                                 && work
                                     .agent
                                     .selected_takeover
@@ -1319,6 +1327,7 @@ impl Agent {
                 join.stage = Stage::Read(*at_ms);
                 self.mailbox.remove(position);
                 self.unheld.remove(turn);
+                self.stop_released.remove(turn);
                 if self.waited.remove(turn) {
                     self.queue_revision += 1;
                 }
@@ -1371,9 +1380,11 @@ impl Agent {
                     self.user_stop_floor = (by == crate::control::USER).then_some(self.next_turn);
                 }
                 self.unheld.clear();
+                self.stop_released.clear();
             }
             AgentEvent::StopReleasedWaiting { turns } => {
                 self.unheld.extend(turns);
+                self.stop_released.extend(turns);
             }
             AgentEvent::Resumed { .. } => {
                 self.paused = false;
@@ -1718,6 +1729,7 @@ impl Agent {
             self.queue_revision += 1;
         }
         self.unheld.remove(&turn);
+        self.stop_released.remove(&turn);
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(ended) => {
                 self.settled += 1;
@@ -2529,6 +2541,53 @@ mod tests {
             }
             assert_eq!(a.started, [1, 3, 4, 5, 2].map(TurnId));
         }
+    }
+
+    #[test]
+    fn issue_719_stop_releases_unread_user_sends_ahead_of_a_new_send() {
+        let mut a = Driven::new();
+        a.user(10);
+        for (turn, seq) in [(2, 11), (3, 12)] {
+            a.user(seq);
+            a.send(Command::Join {
+                turn: TurnId(turn),
+                join: Join {
+                    into: TurnId(1),
+                    uuid: format!("unread-{turn}"),
+                    recovery: None,
+                },
+            })
+            .unwrap();
+        }
+        a.send(Command::StopAndStartWaiting {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        a.finish(1);
+        assert_eq!(
+            a.live(),
+            Some(2),
+            "the oldest unread send starts after Stop"
+        );
+        a.user(13);
+        assert_eq!(a.waiting(), vec![3, 4]);
+        assert_eq!(
+            a.send(Command::Join {
+                turn: TurnId(4),
+                join: Join {
+                    into: TurnId(2),
+                    uuid: "newer".into(),
+                    recovery: None,
+                },
+            }),
+            Err(Refusal::NotWaiting(TurnId(4))),
+            "the new send cannot steer past the second released send"
+        );
+        for turn in [2, 3, 4] {
+            a.finish(turn);
+        }
+        assert_eq!(a.started, [1, 2, 3, 4].map(TurnId));
+        assert!(a.waiting().is_empty());
     }
 
     #[test]
