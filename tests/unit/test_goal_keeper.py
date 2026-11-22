@@ -367,6 +367,34 @@ def test_an_enabled_keeper_runs_one_recorded_batch(owner, helper):
     assert shown["enabled"] is True and shown["last_run_at"] and shown["last_error"] is None
 
 
+@pytest.mark.parametrize("scope", ["agent_ids", "exclude_agent_ids"])
+def test_a_scoped_keeper_runs_its_batch(owner, helper, scope):
+    """R42: the run was admitted for the role's one keeper without a scope, so a keeper given a
+    scope (agents it serves, or agents it leaves out) never ran, and nothing said so. It is
+    admitted for itself, and serves the goals its scope covers."""
+    keeper = _keeper()
+    covered = {"agent_ids": [owner]} if scope == "agent_ids" else {"exclude_agent_ids": [helper]}
+    keeper = janitors.configure(keeper["session"], keeper["revision"], scope={"agent_ids": [], "exclude_agent_ids": [],
+                                                                             **covered})
+    keeper = janitors.set_enabled(keeper["session"], keeper["revision"], True)
+    assert janitor_builtins.eligible("goal-keeper") and janitor_builtins.resolve("goal-keeper") is None
+    plan = _goal()
+    _message(owner, "assistant", "Started the helper", at=db.now_ms() - 400_000, phase="final")
+    db.conn().execute("UPDATE task_plans SET created_at=created_at-500000 WHERE plan_id=?", (plan["plan_id"],))
+    asked = []
+
+    def ask(run, prompt, plan_id):
+        asked.append((run["run_id"], plan_id))
+        return ({"steps": {"harness": {"status": "in_progress"}},
+                 "checkpoint": {"progress": "Helper started", "next_work": "Wait"}}, {}, "gemini-4-hydrogen-low")
+
+    worker = janitor_autonomy.AutonomyJanitors(dispatch=None, notify=None, goal_ask=ask)
+    worker.goal_keeper_once(wait=True)
+    assert [p for _, p in asked] == [plan["plan_id"]]
+    assert janitors.get_run(asked[0][0])["status"] == "completed"
+    assert _item(plan, "harness")["status"] == "in_progress"
+
+
 # ---- agy isolation -------------------------------------------------------------
 
 
