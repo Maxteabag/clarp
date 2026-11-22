@@ -533,7 +533,7 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
             entry.text = crate::text::cleaned_display_text(text(item, "text"), streaming);
             entry.phase = text(item, "phase").to_owned();
             entry.spoken = item.get("spoken").and_then(Value::as_bool).unwrap_or(false)
-                || text(item, "text").contains("<speak");
+                || crate::text::carries_speech(text(item, "text"));
             if status == "interrupted" {
                 entry.meta = "interrupted".into();
             }
