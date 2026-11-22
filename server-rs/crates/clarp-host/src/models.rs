@@ -378,14 +378,40 @@ pub(crate) async fn default_for(app: &App, backend: &str) -> Option<String> {
 /// `GET /agent-model-options`: the tools this Host runs and the models each can run. The Host
 /// that keeps the machine's tools signs them in from an app, and says so of each it can.
 async fn told(State(app): State<App>) -> Json<Value> {
-    let mut told = app.models.told(app.clock.now_ms()).await;
+    let (mut told, auth) = tokio::join!(
+        app.models.told(app.clock.now_ms()),
+        crate::logins::sign_in::rows(&app, true, true),
+    );
+    if let Ok(auth) = auth {
+        for status in auth["backends"].as_array().into_iter().flatten() {
+            let Some(row) = status["id"]
+                .as_str()
+                .and_then(|id| told["providers"].get_mut(id))
+            else {
+                continue;
+            };
+            let authenticated = if status["logged_in"] == true {
+                Some(true)
+            } else if status["installed"] == false
+                || matches!(status["state"].as_str(), Some("signed_out" | "expired"))
+            {
+                Some(false)
+            } else {
+                None
+            };
+            row["authenticated"] = json!(authenticated);
+            row["authentication_source"]["detail"] = json!("backend-auth");
+            if authenticated.is_some() {
+                row["authentication_source"]["kind"] = json!("backend_auth");
+            }
+        }
+    }
     if let Some(providers) = told["providers"].as_object_mut() {
         for (tool, row) in providers {
             let harness = clarp_backend::by_id(tool).and_then(|backend| backend.runs_through());
             row["runs_through"] = json!(harness);
         }
     }
-
     if crate::logins::sign_in::keeps(&app) {
         for tool in clarp_kernel::sign_in::TOOLS {
             if let Some(row) = told["providers"].get_mut(tool) {

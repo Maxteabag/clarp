@@ -419,7 +419,7 @@ pub async fn read(
 }
 
 /// The rows of the tools, as `GET /backend-auth` answers them.
-async fn rows(app: &App, every: bool, verify: bool) -> Result<Value, ApiError> {
+pub(crate) async fn rows(app: &App, every: bool, verify: bool) -> Result<Value, ApiError> {
     let now = app.clock.now_ms();
     let keeps = keeps(app);
     let limits = app.limits.clone();

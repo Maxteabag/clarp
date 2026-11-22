@@ -1950,6 +1950,7 @@ pub fn summary(
         // A quiet agent (a janitor) is never unread and never counted among the agents at work.
         "quiet": record.is_quiet(),
         "archived_at": record.archived_at_ms,
+        "created_at": record.created_at_ms,
         "role": record.role(),
         "is_janitor": record.is_janitor,
         "parent_agent_id": record.parent_agent_id,

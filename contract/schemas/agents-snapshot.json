@@ -19,6 +19,7 @@
           "persona": {"type": "string"},
           "backend": {"type": "string"},
           "cwd": {"type": "string"},
+          "created_at": {"type": "integer", "description": "Agent creation time in epoch milliseconds (agent_api_status)."},
           "model": {"type": "string"},
           "effort": {"type": "string"},
           "voice_id": {"type": "string"},

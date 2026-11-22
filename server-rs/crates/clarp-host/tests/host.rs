@@ -629,6 +629,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     assert_eq!(info["contract"]["features"]["client_events_kept"], 146);
     assert_eq!(info["contract"]["features"]["stalled_turn"], 149);
     assert_eq!(info["contract"]["features"]["helper_state_backend"], 152);
+    assert_eq!(info["contract"]["features"]["agent_api_status"], 154);
     assert_eq!(info["contract"]["features"]["voice_for_helpers"], 135);
     assert_eq!(info["contract"]["features"]["cross_origin_read"], 139);
     assert_eq!(info["contract"]["features"]["previous_server_ids"], 144);

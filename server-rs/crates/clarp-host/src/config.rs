@@ -319,23 +319,21 @@ pub fn directories(asked: &str, home: &Path) -> (String, Vec<String>) {
     (base.display().to_string(), found)
 }
 
-/// The directory an agent works in, by what was asked for it: `~` is the home of whoever
-/// runs this Host, nothing is the Host's own directory for agents, and so is a directory
-/// that is not there. Nothing is refused, as on the Python Host: an app sends `~` when its
-/// user named no directory, and a phone's keyboard misspells a path.
-pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
+/// The directory requested for a new turn profile. An omitted path uses the Host default.
+pub fn requested_working_dir(asked: &str, home: &Path, otherwise: &Path) -> Option<PathBuf> {
     let asked = asked.trim();
     let named = match asked.strip_prefix('~') {
-        _ if asked.is_empty() => otherwise.to_path_buf(),
+        _ if asked.is_empty() => return Some(otherwise.to_path_buf()),
         Some("") => home.to_path_buf(),
         Some(under) if under.starts_with('/') => home.join(under.trim_start_matches('/')),
         _ => PathBuf::from(asked),
     };
-    if named.is_dir() {
-        named
-    } else {
-        otherwise.to_path_buf()
-    }
+    named.is_dir().then_some(named)
+}
+
+/// Internal forks can use the Host default when an old working directory is gone.
+pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
+    requested_working_dir(asked, home, otherwise).unwrap_or_else(|| otherwise.to_path_buf())
 }
 
 /// The model of GPT-Live the owner named in his file (`[openai] live_model`), read once: none

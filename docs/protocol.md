@@ -1064,6 +1064,12 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `DELETE /agents/<session>` — release the agent (soft delete).
 - `POST /agent-mute`, `/agent-archive`, `/agent-heartbeat`, `/agent-dreaming`,
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.
+- On Rust Hosts with `agent_api_status`, a mute or archive change emits
+  `agent-roster` with `kind: "mute-changed"` or `"archive-changed"` and the session.
+  The resulting state and the agent's creation time (`created_at`, epoch milliseconds)
+  are available in `GET /agents/snapshot`. A nonexistent explicit working directory in
+  `POST /agents` is refused with 400 `cwd_not_found`. Model options report
+  `authenticated` when `GET /backend-auth` can establish whether the harness is signed in.
 - `GET /past-sessions?backend=&cwd=` (full scope) — resumable backend conversations for
   the start dialog.
 - `GET /agent-model-options` — the backend catalogue. `providers.<id>` is

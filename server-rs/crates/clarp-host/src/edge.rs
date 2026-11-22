@@ -341,6 +341,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("send_delivery_state", 81),
     ("chat_view", 145),
     ("helper_ended_unreported", 155),
+    ("agent_api_status", 154),
     ("waited_send_order", 115),
     // GET /turn-queue reads the same priority order the mailbox dispatches.
     ("queue_user_first", 118),
@@ -1999,7 +2000,15 @@ pub(crate) async fn make_agent(
             // off, or from a copy of it.
             let said_cwd = request.cwd.as_deref().unwrap_or("");
             let home = crate::config::home();
-            let cwd = crate::config::working_dir(said_cwd, &home, &app.config.default_cwd);
+            let cwd =
+                crate::config::requested_working_dir(said_cwd, &home, &app.config.default_cwd)
+                    .ok_or_else(|| {
+                        refused(
+                            StatusCode::BAD_REQUEST,
+                            "cwd_not_found",
+                            "cwd is not a directory",
+                        )
+                    })?;
             let named_session =
                 |key| plain(key).is_some_and(|id| !clarp_kernel::python::strip(&id).is_empty());
             let forks = named_session("fork_session_id");

@@ -1,6 +1,61 @@
 use super::*;
 
 #[test]
+fn agent_api_refuses_a_missing_directory_and_exposes_roster_changes() {
+    let place = Place::new("agent-api");
+    let host = place.start();
+    let (status, refused) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({"name": "Wrong place", "backend": "scripted", "cwd": place.root.join("absent")})),
+    );
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["error"], "cwd_not_found");
+
+    let session = host.new_agent("Correct place");
+    let read = || {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .unwrap()
+            .clone()
+    };
+    assert!(read()["created_at"].as_i64().is_some_and(|at| at > 0));
+    let events = host.listen();
+    for (route, field, kind) in [
+        ("/agent-mute", "muted", "mute-changed"),
+        ("/agent-archive", "archived", "archive-changed"),
+    ] {
+        for (index, value) in [true, false].into_iter().enumerate() {
+            let mut body = json!({"session": session});
+            body[field] = json!(value);
+            assert_eq!(host.post(route, body)["ok"], true);
+            wait_for(kind, || {
+                events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|event| {
+                        event["type"] == "agent-roster"
+                            && event["kind"] == kind
+                            && event["session"] == session
+                    })
+                    .count()
+                    > index
+            });
+        }
+    }
+    assert_eq!(read()["muted"], false);
+    assert!(read()["archived_at"].is_null());
+    assert_eq!(
+        host.get("/agent-model-options")["providers"]["claude"]["authenticated"],
+        false
+    );
+}
+
+#[test]
 fn agent_creation_followup_uses_cli_model_defaults_and_explicit_session_spelling() {
     let place = Place::new("creation-cli-defaults");
     let codex = place.root.join("fixture-codex");

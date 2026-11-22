@@ -3175,7 +3175,12 @@ impl Fleet {
             asked if asked.is_empty() => before.cwd.clone(),
             asked => {
                 let default_cwd = &self.works.config.default_cwd;
-                let cwd = crate::config::working_dir(&asked, &crate::config::home(), default_cwd);
+                let cwd = crate::config::requested_working_dir(
+                    &asked,
+                    &crate::config::home(),
+                    default_cwd,
+                )
+                .ok_or_else(|| Told::new(400, "cwd_not_found", "cwd is not a directory"))?;
                 cwd.display().to_string()
             }
         };
@@ -3512,7 +3517,8 @@ impl Fleet {
         // Where it works: what was asked for, or this Host's own directory for agents.
         let asked = request.cwd.as_deref().unwrap_or("");
         let default_cwd = &self.works.config.default_cwd;
-        let cwd = crate::config::working_dir(asked, &crate::config::home(), default_cwd);
+        let cwd = crate::config::requested_working_dir(asked, &crate::config::home(), default_cwd)
+            .ok_or_else(|| Told::new(400, "cwd_not_found", "cwd is not a directory"))?;
         let cwd = cwd.display().to_string();
         // One agent has a name at a time: who is written to by name must be one agent.
         if let Some(owner) = self.owner_of_name(&persona, "") {
@@ -3880,6 +3886,13 @@ impl Fleet {
             return Ok(Ok(Amended { record, taken }));
         }
         let renamed = record.persona != before.persona && !assigned;
+        let roster_kind = if record.muted != before.muted {
+            Some("mute-changed")
+        } else if record.archived_at_ms.is_some() != before.archived_at_ms.is_some() {
+            Some("archive-changed")
+        } else {
+            None
+        };
         // An MCP edit to an archived agent changes only its tool selection.
         let put_away = record.archived_at_ms.is_some() && !edits_mcp;
         self.replace(at, record.clone(), took)?;
@@ -3888,6 +3901,9 @@ impl Fleet {
                 wire::roster_renamed(&record.session, &record.persona),
                 self.now_ms(),
             );
+        }
+        if let Some(kind) = roster_kind {
+            self.tell_roster(kind, &record.session);
         }
         if put_away {
             self.abandon_helpers_of(&record.agent_id)?;
