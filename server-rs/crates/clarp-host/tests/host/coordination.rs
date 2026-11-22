@@ -29,14 +29,32 @@ fn an_owner_prompt_names_a_foreign_sender_but_a_local_turn_speaks_as_itself() {
     let (tokens, _, _) = stand_in(&place);
     let host = start_host_as(&place, &[], "fixture-owner-token");
     for (name, session) in [("Oak", "oak"), ("Ivy", "ivy")] {
-        assert_eq!(host.post("/agents", json!({
-            "name": name, "session": session, "backend": "claude",
-        }))["session"], session);
+        assert_eq!(
+            host.post(
+                "/agents",
+                json!({
+                    "name": name, "session": session, "backend": "claude",
+                })
+            )["session"],
+            session
+        );
     }
     let foreign = "remote-helper";
-    let (exit, printed, stderr) = tool(&host, &place.root, None, &[
-        "clarp-admin", "prompt", "--to", "oak", "--from", foreign, "--text", "Check the build.",
-    ]);
+    let (exit, printed, stderr) = tool(
+        &host,
+        &place.root,
+        None,
+        &[
+            "clarp-admin",
+            "prompt",
+            "--to",
+            "oak",
+            "--from",
+            foreign,
+            "--text",
+            "Check the build.",
+        ],
+    );
     assert_eq!(exit, 0, "{stderr}");
     let receipt: Value = serde_json::from_str(&printed).unwrap();
     let trace = receipt["trace_id"].as_str().unwrap();
@@ -51,10 +69,15 @@ fn an_owner_prompt_names_a_foreign_sender_but_a_local_turn_speaks_as_itself() {
     assert_eq!(forwarded["sender_session"], foreign);
     assert_eq!(forwarded["sender_agent_id"], "");
 
-    let (status, _) = asked(&host, "/send", &[], &json!({
-        "session": "oak", "text": "Owner forwarding again.", "client_msg_id": "foreign-http",
-        "sender": foreign, "origin": "user",
-    }));
+    let (status, _) = asked(
+        &host,
+        "/send",
+        &[],
+        &json!({
+            "session": "oak", "text": "Owner forwarding again.", "client_msg_id": "foreign-http",
+            "sender": foreign, "origin": "user",
+        }),
+    );
     assert_eq!(status, 200);
     wait_for("the owner-token HTTP prompt", || {
         rows_of(&host, "oak").contains_key("u-foreign-http")
@@ -70,12 +93,19 @@ fn an_owner_prompt_names_a_foreign_sender_but_a_local_turn_speaks_as_itself() {
         token = std::fs::read_to_string(tokens.join("ivy")).unwrap_or_default();
         !token.is_empty()
     });
-    let (status, _) = asked(&host, "/send", &[("X-Clarp-Turn", &token)], &json!({
-        "session": "oak", "text": "The token decides.", "client_msg_id": "from-ivy",
-        "sender": foreign, "origin": "user",
-    }));
+    let (status, _) = asked(
+        &host,
+        "/send",
+        &[("X-Clarp-Turn", &token)],
+        &json!({
+            "session": "oak", "text": "The token decides.", "client_msg_id": "from-ivy",
+            "sender": foreign, "origin": "user",
+        }),
+    );
     assert_eq!(status, 200);
-    wait_for("Ivy's prompt", || rows_of(&host, "oak").contains_key("u-from-ivy"));
+    wait_for("Ivy's prompt", || {
+        rows_of(&host, "oak").contains_key("u-from-ivy")
+    });
     let row = &rows_of(&host, "oak")["u-from-ivy"];
     assert_eq!(row["origin"], "agent");
     assert_eq!(row["audience"], "agents");
@@ -83,9 +113,14 @@ fn an_owner_prompt_names_a_foreign_sender_but_a_local_turn_speaks_as_itself() {
     assert_eq!(row["sender_session"], "ivy");
     assert_eq!(row["sender_agent_id"], ids_of(&host)["ivy"]);
 
-    let (status, _) = asked(&host, "/send", &[("X-Clarp-Turn", &token)], &json!({
-        "session": "oak", "text": "Claim to be Oak.", "sender": "oak",
-    }));
+    let (status, _) = asked(
+        &host,
+        "/send",
+        &[("X-Clarp-Turn", &token)],
+        &json!({
+            "session": "oak", "text": "Claim to be Oak.", "sender": "oak",
+        }),
+    );
     assert_eq!(status, 403);
 }
 

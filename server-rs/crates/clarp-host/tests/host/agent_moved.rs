@@ -34,6 +34,63 @@ fn refused(mark: &Value) -> (u16, Value) {
 }
 
 #[test]
+fn the_model_router_returns_the_moved_recipients_mark() {
+    let place = Place::new("orchestrator-moved");
+    let (codex, _, asked) = routing_model(
+        &place,
+        &json!([["verify", {
+            "kind": "agent_message", "target_session": "mover",
+            "confidence": 0.95, "addressing": true,
+        }]]),
+    );
+    let host = place.start_in(
+        ADMIN,
+        &[],
+        &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())],
+    );
+    let speaker = host.new_agent("Speaker");
+    let mover = host.new_agent("Mover");
+    let (status, mark) = change(&host, &mover, target());
+    assert_eq!(status, 200);
+    let expected = refused(&mark["moved"]);
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/orchestrator/settings",
+            Some(&json!({
+                "enabled": true, "provider": "codex", "fallback_only": false,
+            }))
+        )
+        .0,
+        200
+    );
+    let request = json!({
+        "session": speaker, "text": "Ask Mover to verify the build",
+        "hands_free": true, "client_msg_id": "routed-moved",
+    });
+    let answer = host.ask("POST", "/send", Some(&request));
+    let first_ask = std::fs::read_to_string(&asked).unwrap();
+    assert!(!first_ask.is_empty());
+    assert_eq!(answer, expected);
+    assert!(host.conversation(&mover).is_empty());
+    let settings = host.get("/orchestrator/settings");
+    let decision = &settings["recent_decisions"][0];
+    assert_eq!(decision["final_action"], "error");
+    assert_eq!(decision["target_session"], mover);
+
+    // The completed 4xx receipt does not dispatch again. As in Python, the
+    // receipt's generic failure still uses the replay envelope.
+    let (status, replay) = host.ask("POST", "/send", Some(&request));
+    assert_eq!(status, 409);
+    assert_eq!(replay["error"], "Message routing failed");
+    assert_eq!(
+        replay["orchestrator"]["decision_id"],
+        decision["decision_id"]
+    );
+    assert_eq!(std::fs::read_to_string(asked).unwrap(), first_ask);
+}
+
+#[test]
 fn agent_moved_fences_turn_entry_and_releases_the_waiting_queue_in_order_on_return() {
     let place = Place::new("moved-queue");
     let host = place.start_with_token(ADMIN);
