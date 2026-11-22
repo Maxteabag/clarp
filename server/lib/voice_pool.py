@@ -210,7 +210,9 @@ def _last_clips() -> dict[str, int]:
     try:
         from .db import conn
         rows = conn().execute("SELECT agent_id, MAX(created_at) FROM clips GROUP BY agent_id").fetchall()
-    except Exception:  # noqa: BLE001 - recency only orders a reuse; creation times still do
+    except Exception as exc:  # noqa: BLE001 - recency only orders a reuse; creation times still do
+        from .log import log_exception
+        log_exception("voicePoolRecencyFail", exc)
         return {}
     return {str(agent_id): int(when or 0) for agent_id, when in rows}
 
