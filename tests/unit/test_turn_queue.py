@@ -18,7 +18,7 @@ def test_durable_turn_queue_round_trip():
     assert turn_queue.pending()[0]["prompt_admission_id"] == "padm-1"
     assert turn_queue.pending_counts() == {"a-1": 1}
     assert turn_queue.pending_count("a-1") == 1
-    assert turn_queue.state("a-1") == {"count": 1, "revision": 1, "paused": False}
+    assert turn_queue.state("a-1") == {"count": 1, "listed": 1, "revision": 1, "paused": False}
     turn_queue.mark_started("u-1")
     assert turn_queue.status("u-1") == "started"
     assert turn_queue.pending() == []
@@ -48,7 +48,7 @@ def test_remove_for_agent_drops_only_that_agents_queue():
     assert [row["queue_id"] for row in turn_queue.pending()] == ["two"]
     assert turn_queue.pending_counts() == {"a-2": 1}
     assert turn_queue.states()["a-1"] == {
-        "count": 0, "revision": before + 1, "paused": False,
+        "count": 0, "listed": 0, "revision": before + 1, "paused": False,
     }
 
 

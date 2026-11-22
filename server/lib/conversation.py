@@ -181,6 +181,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
         limit=limit + 1,
         include_automated=include_automated,
         hide_coordination=bool(policy and policy["hidden"]),
+        hide_form_answers=True,
     )
     has_more = len(turns) > limit
     if has_more:

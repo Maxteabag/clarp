@@ -135,7 +135,7 @@ class DispatchAdapters:
         state = turn_queue.state(row["agent_id"])
         events.broadcast(self.ctx.stream, events.queue_updated(
             session=row["session"], agent_id=row["agent_id"],
-            client_msg_id=row["client_msg_id"], queue_depth=state["count"],
+            client_msg_id=row["client_msg_id"], queue_depth=state["listed"],
             queue_paused=state["paused"], queue_started=False,
             queue_revision=state["revision"],
             **(turn_queue.item_provenance(row) if "origin" in row.keys() else {})))
@@ -195,7 +195,7 @@ class DispatchAdapters:
         try:
             self._dispatch(
                 submission["session"], submission["prompt"], origin=ORIGIN_USER,
-                client_msg_id="html-form-" + submission["submission_id"],
+                client_msg_id=html_forms.delivery_id(submission["submission_id"]),
                 synthesize_audio=bool(submission.get("synthesize_audio", False)),
                 queue_if_busy=True)
             html_forms.mark_delivered(submission["submission_id"])
