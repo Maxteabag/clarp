@@ -300,7 +300,8 @@ def test_the_message_names_the_button_before_the_values(form):
 def test_only_the_web_app_draws_v2_by_default():
     assert server_identity.RENDER_SPEC_V2_MIN_CONTRACT == {"web": 2}
     assert server_identity.render_spec_level("ios/2981 contract=999") == 1
-    assert server_identity.render_spec_level("android/1 contract=999") == 0
+    assert server_identity.render_spec_level("android/1 contract=999") == 1   # v1 from 41, v2 not yet
+    assert server_identity.render_spec_level("android/1 contract=40") == 0
     assert server_identity.render_spec_level("web/0.5.3 contract=2") == 2
     assert server_identity.render_spec_level("web/0.5.3 contract=1") == 1
     assert server_identity.render_spec_level("Web/0.5.3 contract=2") == 0
