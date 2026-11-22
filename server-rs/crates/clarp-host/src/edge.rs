@@ -574,14 +574,6 @@ impl ApiError {
             ..Self::new(status, text)
         }
     }
-
-    /// What is answered under `error`, where it is more than words.
-    pub(crate) fn detail(&self) -> Option<&Value> {
-        match &self.body {
-            ErrorBody::Detail(detail) => Some(detail.as_ref()),
-            _ => None,
-        }
-    }
 }
 
 /// A JSON body field read as text, as in the Python Host's R146 reader.
