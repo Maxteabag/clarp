@@ -315,8 +315,10 @@ def has_active_run(agent_id: str, c=None) -> bool:
 
 
 def pending_demand_claim(agent_id: str, now: int, c=None) -> bool:
-    return bool(_c(c).execute("""SELECT 1 FROM janitor_demand_claims d JOIN janitor_runs r ON r.run_id=d.run_id
-        WHERE r.agent_id=? AND d.finished_at IS NULL
+    # From the open claims (idx_janitor_demand_claims_open, a handful) to their runs; joined the
+    # other way it walked every run of the agent. CROSS JOIN keeps the claims outermost.
+    return bool(_c(c).execute("""SELECT 1 FROM janitor_demand_claims d CROSS JOIN janitor_runs r
+        WHERE d.finished_at IS NULL AND r.run_id=d.run_id AND r.agent_id=?
         AND json_extract(r.configuration_json,'$.expires_at')>? LIMIT 1""", (agent_id, now)).fetchone())
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vectors from the reference's V2b pool and name-preserving rename rules."""
+"""Vectors from the reference's voice pool, creation check, and rename rules."""
 from __future__ import annotations
 
 import importlib.util
@@ -27,7 +27,9 @@ def reference(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import config, log, settings_store, stt_language, voice_names, voice_pool, voice_profile
+    from lib import backends, config, log, personas, settings_store, stt_language, voice_names, voice_pool, voice_profile
+    from lib.agent_lifecycle import AgentLifecycleError
+    from lib.policies.agent_spec import AgentSpec, RosterView, SpecError
 
     picks = []
     for name, candidates, taken, reserved in (
@@ -47,6 +49,19 @@ def reference(root):
 
     def stored(provider, id):
         return json.dumps({provider:id}, separators=(',',':'))
+
+    # The pool can share automatically, but POST /agents checks an explicit duplicate
+    # before calling it. Record both possible owners' voices from the concurrent Host test.
+    creation_collisions = {}
+    for picked in ('c1', 'c2'):
+        pinned = stored(CART, picked)
+        roster = RosterView(agents={'pool-agent': {'name': 'Pool Agent', 'voice_id': pinned}})
+        result = AgentSpec.parse({'name': 'Pinned Duplicate', 'voice_id': pinned},
+                                 backends=backends, roster=roster, personas=personas)
+        assert isinstance(result, SpecError), result
+        refusal = AgentLifecycleError(result.status, result.message,
+                                      message=result.detail or None, extra=dict(result.extra))
+        creation_collisions[picked] = {'status': refusal.status, 'body': refusal.response()}
 
     builtin = {'name':'Built In', 'voice_id':stored(CART,'reserved'), 'builtin':True}
     active = {'persona':'Has Voice', 'voice_id':stored(CART,'c1')}
@@ -131,7 +146,7 @@ def reference(root):
     catalogue = {'file':file,'languages':languages,'ola':ola,'quiet':quiet}
     return {'picks':picks,'assignments':assignments,'pinned':pinned,
             'janitor':janitor,'default_assignment':default['speech']['assignment'],
-            'catalogue':catalogue}
+            'catalogue':catalogue,'creation_collisions':creation_collisions}
 
 
 def main():

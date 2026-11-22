@@ -3,7 +3,7 @@
 
 The Python Host gives every turn's tool a token (`CLARP_PROVIDER_TURN`, sent back as `X-Clarp-Turn`), keeps it
 with its agent while the turn runs (`provider_background_jobs.turn_started`), marks when the turn ended
-(`turn_exited`) and forgets it seven days after that (`reap_exited_turns`, `TURN_RETENTION_MS`). A request that
+(`turn_exited`) and prunes it after seven days (`prune_exited_turns`, `TURN_RETENTION_MS`). A request that
 presents it is that agent's (`lib.turn_identity.caller_agent_id`); a lookup that fails is no answer at all (the
 server turns it into a retryable 503). This runs those functions as they are over turns that run, that ended
 at moments around the seven days, a token never given, a text that is no token, and a store that cannot be
@@ -66,6 +66,8 @@ def run(root) -> dict:
             turns.turn_exited(token, at=NOW - ended_ago)
         given.append((what, ended_ago, env))
     turns.reap_exited_turns()
+    # These cases read the token after the observer's retention sweep.
+    turns.prune_exited_turns()
 
     def outcome(environ: dict) -> str:
         try:

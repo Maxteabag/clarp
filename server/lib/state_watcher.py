@@ -18,6 +18,7 @@ import json
 import queue
 import threading
 import time
+from typing import Callable
 
 from .activity import state_activity_event
 from . import coordination, events
@@ -96,8 +97,11 @@ class StateLogWatcher:
 
     INTERVAL_SEC = SERVER_TIMING.state_watcher_poll_sec
 
-    def __init__(self, stream):
+    def __init__(self, stream, *, on_done: Callable[[str], None] | None = None):
         self.stream = stream
+        # Told the agent of every DONE row as the poll reads it: the transcript streamer
+        # imports the ended turn's transcript then, not after its import window.
+        self._on_done = on_done
         self._last_id = 0
         self._last_status: dict[str, str] = {}
         # agent_id -> (trace_id, read at, its working_with fields): a turn's audience, read again
@@ -107,6 +111,11 @@ class StateLogWatcher:
         # WORKING_TTL_S: a setting change reaches the stream within seconds.
         self._hiding: set[str] = set()
         self._hiding_at = float("-inf")
+        # The database's change stamp at the last whole poll: what a poll broadcasts is
+        # new state_log rows and changed agents rows, so while it stands (no commit by
+        # anyone) a poll has nothing to say. Four polls a second read the agents table
+        # every time otherwise.
+        self._seen_stamp: tuple[int, int] | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         # Completed-turn notification policy settles for up to
@@ -214,6 +223,14 @@ class StateLogWatcher:
 
     def _poll_once(self) -> None:
         from . import db
+        stamp = db.change_stamp()
+        if stamp == self._seen_stamp and stamp[0] >= 0:
+            return
+        self._poll_rows()
+        self._seen_stamp = stamp
+
+    def _poll_rows(self) -> None:
+        from . import db
         c = db.conn()
         cur = c.execute(
             """SELECT s.state_id, s.agent_id, s.ts, s.kind, s.detail,
@@ -251,6 +268,11 @@ class StateLogWatcher:
             ), veil)))
             self._last_status[str(r["agent_id"])] = str(r["custom_status"] or "")
             if r["kind"] == AgentState.DONE:
+                if self._on_done is not None:
+                    try:
+                        self._on_done(str(r["agent_id"]))
+                    except Exception as exc:  # noqa: BLE001 - never break the state stream
+                        log_exception("stateDoneCallbackFail", exc, detail=str(r["agent_id"]))
                 self._ensure_notify_worker()
                 self._notify_queue.put({
                     "agent_id": r["agent_id"],

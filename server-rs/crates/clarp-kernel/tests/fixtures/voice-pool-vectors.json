@@ -626,6 +626,22 @@
       }
     ]
   },
+  "creation_collisions": {
+    "c1": {
+      "body": {
+        "error": "voice_in_use",
+        "message": "That voice is already used by Pool Agent."
+      },
+      "status": 409
+    },
+    "c2": {
+      "body": {
+        "error": "voice_in_use",
+        "message": "That voice is already used by Pool Agent."
+      },
+      "status": 409
+    }
+  },
   "default_assignment": "pool",
   "janitor": {
     "origin": null,

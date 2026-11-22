@@ -21,6 +21,11 @@ from .turn_command import DispatchResult, _with_delivery, _resolve_llm, _TurnSpe
 from .turn_stop import _existing_cwd
 
 
+# How long after the user's fresh message ends a Stop's pause the recovery pass
+# that releases the held work runs: long enough for that message to take the
+# agent's slot first, so the held work runs after it.
+PAUSE_END_RECOVERY_DELAY_SEC = 1.0
+
 class AdmissionMixin:
     def dispatch(self, *, text: str, requested_session: str,
                  trace_id: str, synthesize_audio: bool = True,
@@ -435,6 +440,15 @@ class AdmissionMixin:
                 f"client_msg_id={spec.client_msg_id or spec.trace_id}")
             return DispatchResult(session=session, backend=backend)
 
+        if (command.origin in origins.USER_WORD_ORIGINS and not skip_admission
+                and turn_queue.is_paused(spec.agent_id)):
+            # The user's next fresh message (a plain send, or one taken as a
+            # follow-up or a steer) ends the Stop's pause: the user carries on,
+            # so what the Stop held runs after it, in its queue order (the
+            # user's own first, oldest first). A Send Now of a held item and
+            # automatic work (other agents, goal wakes, schedules) never end it;
+            # a Stop with nothing after it stays in force, across restarts too.
+            self._end_pause_for_fresh_send(spec)
         # The pause is read after the durable receipt, as before; the policy
         # is asked again with that one fact, every other input unchanged.
         decision = _admit(command.origin, agent, request, facts=facts,
@@ -777,6 +791,34 @@ class AdmissionMixin:
         if status == "unknown":
             raise DispatchError(503, UNCONFIRMED_DELIVERY)
         return status == "retryable"
+
+    def _end_pause_for_fresh_send(self, spec: _TurnSpec) -> None:
+        """End the pause for the user's fresh message and hand what it held on:
+        the recovery pass re-admits the held rows behind the running turn (or
+        starts them when the agent is idle), in the queue's order."""
+        try:
+            if not turn_queue.set_paused(spec.agent_id, False):
+                return
+        except Exception as exc:  # noqa: BLE001 - the send itself still runs
+            log_exception("queuePauseEndFail", exc, detail=spec.session)
+            return
+        log("queuePauseEndedByFreshSend",
+            f"agent={spec.agent_id} origin={spec.origin} trace={spec.trace_id or '∅'}")
+        if getattr(self.ctx, "stream", None) is not None:
+            try:
+                state = turn_queue.state(spec.agent_id)
+                events.broadcast(self.ctx.stream, events.queue_updated(
+                    session=spec.session, agent_id=spec.agent_id,
+                    queue_depth=state["count"], queue_paused=state["paused"],
+                    queue_started=False, queue_revision=state["revision"]))
+            except Exception as exc:  # noqa: BLE001 - a projection of the durable pause
+                log_exception("queuePauseEndBroadcastFail", exc, detail=spec.session)
+        try:
+            # A second later, not at once: the fresh send takes the agent's slot
+            # first (in milliseconds), so what the Stop held queues behind it.
+            self.retry_scheduler(PAUSE_END_RECOVERY_DELAY_SEC, self.recover_queued)
+        except Exception as exc:  # noqa: BLE001 - the next recovery pass runs them
+            log_exception("queuePauseEndRecoverFail", exc, detail=spec.session)
 
     def _start_queued_row(self, spec: _TurnSpec, *, steered: bool = False,
                           start_item: bool = False) -> _TurnSpec | None:

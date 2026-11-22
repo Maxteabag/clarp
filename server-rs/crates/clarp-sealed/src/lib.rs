@@ -111,12 +111,19 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_DELEGATION_DIR", "home"),
     ("CLARP_DELEGATION_TOKEN_FILE", "home"),
     ("CLARP_ORACLE_VOICE_CONTEXT_FILE", "home"),
+    // The leader can read a fixture under the sealed HOME/XDG_CONFIG_HOME.
+    // An ambient override could point at the owner's real user-values document.
+    ("CLARP_USER_VALUES_DOC", "home"),
     ("CLARP_QA_PROVIDER_ROOT", "home"),
     ("CLARP_CLAUDE_SKILLS", "home"),
     ("CLARP_CODEX_SKILLS", "home"),
     ("CLARP_AGY_SKILLS", "home"),
     ("USER", "home"),
     ("LOGNAME", "home"),
+    // Claude creation uses the test's settings unless it explicitly supplies a model override.
+    ("ANTHROPIC_MODEL", "model"),
+    // Keep the default team leader quiet threshold unless the fixture chooses another.
+    ("CLAUDE_PWA_TEAM_LEADER_QUIET_PERIOD_SEC", "timing"),
     // A provider's key or credential.
     ("OPENAI_API_KEY", "key"),
     ("GEMINI_API_KEY", "key"),

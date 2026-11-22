@@ -220,6 +220,24 @@ def test_sign_in_that_opencode_refuses_fails_without_leaking_the_body(stores):
     assert serve.closed is True
 
 
+@pytest.mark.parametrize("answer", ["not an object", ["a", "list"], 5, True, [], ""],
+                         ids=["text", "a list", "a number", "true", "an empty list", "empty text"])
+def test_a_sign_in_that_opencode_answers_with_no_object_fails_and_ends_its_server(stores, answer):
+    """R156: an authorize answer that is not an object raised after the task was marked
+    running, so it stayed running and its opencode serve was never ended. It now fails with
+    "OpenCode did not answer the sign-in" and the server is closed."""
+    class Odd:
+        def request(self, *_a, **_kw):
+            return answer
+
+    serve = _FakeServe(Odd())
+    result = hp.start_oauth("opencode", "openai", 1, serve_factory=lambda _exe: serve)
+    assert result["status"] == "failed"
+    assert result["error"] == "OpenCode did not answer the sign-in"
+    assert serve.closed is True
+    assert hp._tasks["openai"]["status"] == "failed"       # not left running
+
+
 def test_catalogue_names_each_opencode_models_provider(stores, monkeypatch):
     hp.save_api_key("opencode", "deepseek", FAKE_KEY)
     row = provider_capabilities._with_model_providers("opencode", {"models": [

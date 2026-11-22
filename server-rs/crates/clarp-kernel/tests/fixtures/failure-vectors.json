@@ -9102,6 +9102,30 @@
   },
   {
    "error": "",
+   "kind": "agent_moved",
+   "message": "The agent moved to another Host",
+   "model": "",
+   "provider_message": "",
+   "quota_confirmed": null,
+   "row": "The agent moved to another Host.",
+   "summary": "The agent moved to another Host. Your message is saved.",
+   "switch_pending": false,
+   "text": ""
+  },
+  {
+   "error": "The agent moved to another Host; this turn does not continue here",
+   "kind": "agent_moved",
+   "message": "The agent moved to another Host",
+   "model": "",
+   "provider_message": "The agent moved to another Host; this turn does not continue here",
+   "quota_confirmed": null,
+   "row": "The agent moved to another Host.\n\nThe agent moved to another Host; this turn does not continue here",
+   "summary": "The agent moved to another Host. Your message is saved.",
+   "switch_pending": false,
+   "text": "The agent moved to another Host; this turn does not continue here"
+  },
+  {
+   "error": "",
    "kind": "usage_limit",
    "message": "Usage limit reached",
    "model": "gpt-6",

@@ -67,10 +67,11 @@ fn the_voice_pool_fills_new_rows_and_keeps_old_roster_voices() {
     });
     let agent_voice = stored(&agent["agent"]);
     let contact_voice = stored(&contact);
-    let c1 = agent_voice["cartesia"].as_str().unwrap();
-    let c2 = contact_voice["cartesia"].as_str().unwrap();
-    assert_ne!(c1, c2);
-    assert!(["c1", "c2"].contains(&c1) && ["c1", "c2"].contains(&c2));
+    let agent_cartesia = agent_voice["cartesia"].as_str().unwrap();
+    let contact_cartesia = contact_voice["cartesia"].as_str().unwrap();
+    assert_ne!(agent_cartesia, contact_cartesia);
+    assert!(["c1", "c2"].contains(&agent_cartesia));
+    assert!(["c1", "c2"].contains(&contact_cartesia));
     assert!(agent_voice["elevenlabs"].is_string() && contact_voice["elevenlabs"].is_string());
     assert!(agent["agent"]["voice_profile"]["speech"]["voice_id"].is_null());
     assert_eq!(
@@ -79,10 +80,26 @@ fn the_voice_pool_fills_new_rows_and_keeps_old_roster_voices() {
     );
     assert_eq!(snapshot()["voice_defaults"]["speech"]["assignment"], "pool");
 
-    let forced = json!({"cartesia":c1}).to_string();
-    create("Pinned Duplicate", &forced);
-    let shared = create("Uses Least Shared", "{}");
-    assert_eq!(stored(&shared["agent"])["cartesia"], c2);
+    let forced = json!({"cartesia":agent_cartesia}).to_string();
+    let (status, refusal) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({"name":"Pinned Duplicate","backend":"scripted","voice_id":forced})),
+    );
+    let vectors: Value = serde_json::from_str(include_str!(
+        "../../../clarp-kernel/tests/fixtures/voice-pool-vectors.json"
+    ))
+    .unwrap();
+    let collision = &vectors["creation_collisions"][agent_cartesia];
+    assert_eq!(json!(status), collision["status"]);
+    assert_eq!(refusal, collision["body"]);
+
+    // Both names start their walk at c2. The first can share it in a tie, then the
+    // second has to pass c2 and take the less-shared c1.
+    let shared = create("Auto Share", "{}");
+    assert_eq!(stored(&shared["agent"])["cartesia"], "c2");
+    let shared = create("Next Auto Share", "{}");
+    assert_eq!(stored(&shared["agent"])["cartesia"], "c1");
 
     let session = agent["session"].as_str().unwrap();
     let helper = host.post(

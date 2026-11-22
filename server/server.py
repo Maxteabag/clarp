@@ -3119,8 +3119,6 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 self.headers.get("X-Transcription-ID"))
         except ValueError as e:
             return self._json_error(400, str(e))
-        fingerprint = transcription_results.request_fingerprint(
-            audio_bytes, ctype, requested_model, hands_free)
         call_scope = None
         if self.headers.get("X-Clarp-Call-Id") is not None:
             # A clip that names its call is validated before anything else,
@@ -3133,6 +3131,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                     (self.headers.get("X-Transcription-Session") or "").strip())
             except group_calls.CallError as exc:
                 return self._json(exc.status, exc.body())
+        # A call clip's id is bound to its principal, call and session (R87).
+        fingerprint = transcription_results.request_fingerprint(
+            audio_bytes, ctype, requested_model, hands_free, call=call_scope)
 
         # A retry can arrive while the original request is still finishing.
         # Serialize equal IDs, then consult the durable result before invoking
@@ -3235,6 +3236,14 @@ def _seed_startup_invariants(ctx: ServerContext) -> None:
     personas.ensure_builtins()
     from lib.janitor_bootstrap import initialize as initialize_janitors
     initialize_janitors(cwd=str(ctx.root))
+
+
+def _transcript_turn_ended(srv: "ContextHTTPServer", agent_id: str) -> None:
+    """A DONE row: the transcript streamer imports the ended turn now (R6, R12)."""
+    workers = getattr(srv, "workers", None)
+    streamer = workers.get("transcript-streamer") if workers is not None else None
+    if streamer is not None:
+        streamer.turn_ended(agent_id)
 
 
 def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
@@ -3446,7 +3455,8 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("bonjour", start_bonjour,
                enabled=lambda: bool(getattr(cfg, "network_advertise_lan", False))),
         # Tail state_log + push every new row as an `agent-state` SSE event.
-        Worker("state-log-watcher", lambda: started(StateLogWatcher(ctx.stream))),
+        Worker("state-log-watcher", lambda: started(StateLogWatcher(
+            ctx.stream, on_done=lambda agent_id: _transcript_turn_ended(srv, agent_id)))),
         Worker("background-job-watcher",
                lambda: started(BackgroundJobWatcher(ctx.stream))),
         Worker("runtime-event-watcher", start_runtime_events, enabled=has_runtime_client),

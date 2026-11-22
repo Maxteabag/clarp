@@ -15,6 +15,11 @@ class BackgroundJobWatcher:
     # minute is plenty and keeps the per-agent scan off the fast tick.
     STALE_WORK_INTERVAL_SEC = 60.0
     PROVIDER_INTERVAL_SEC = 5.0
+    # Failing the jobs nobody runs any more: their timeouts are seconds to minutes,
+    # and a worker stopped by systemctl still drops out within a second. Four
+    # passes a second read every queued and running job and probed each worker's
+    # process for nothing.
+    STALE_JOB_INTERVAL_SEC = 1.0
     # A queue receipt the pass could not decide is looked at again after this
     # long, then after twice that, up to the cap. Deciding one reads the
     # agent's whole state history, and one that stays undecidable (a message
@@ -28,6 +33,7 @@ class BackgroundJobWatcher:
         self.stream = stream
         self._last_id = 0
         self._stale_work_due = 0.0
+        self._stale_jobs_due = 0.0
         self._provider_due = 0.0
         self._voice_due = 0.0
         self._voice_print: str | None = None
@@ -124,7 +130,9 @@ class BackgroundJobWatcher:
     def _tick(self) -> None:
         # Publish managed-job progress before any provider backlog work.
         try:
-            background_jobs.reconcile_stale()
+            if time.monotonic() >= self._stale_jobs_due:
+                self._stale_jobs_due = time.monotonic() + self.STALE_JOB_INTERVAL_SEC
+                background_jobs.reconcile_stale()
             self._poll_once()
         except Exception as exc:
             log_exception("backgroundJobWatcherTickFail", exc)

@@ -309,6 +309,10 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v134(con)
         if version < 135:
             _migrate_to_v135(con)
+        if version < 136:
+            _migrate_to_v136(con)
+        if version < 137:
+            _migrate_to_v137(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1131,6 +1135,59 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v137(con: sqlite3.Connection) -> None:
+    """Open demand claims by themselves (janitor_store.pending_demand_claim): the janitor
+    lanes asked several times a pass whether an agent had one, and the only way there was
+    every run of that agent (over 100,000 on one Host). A claim stays open after its run is
+    cancelled until the provider's process finishes (a release or re-enable waits for it);
+    one whose process died never closed, so the open ones grew. Those of runs that ended and
+    whose expiry has passed (or was never set) are closed here: pending_demand_claim, the
+    only reader of open claims, never counted them. Created if missing and a no-op on rerun.
+    Older code ignores the index and reads those claims as it always did (expired), so a
+    rollback needs no down-step."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_janitor_demand_claims_open"
+                " ON janitor_demand_claims(run_id) WHERE finished_at IS NULL")
+    con.execute("""UPDATE janitor_demand_claims
+        SET finished_at = COALESCE((SELECT r.finished_at FROM janitor_runs r
+                                    WHERE r.run_id = janitor_demand_claims.run_id), claimed_at)
+        WHERE finished_at IS NULL AND run_id IN (
+            SELECT run_id FROM janitor_runs
+             WHERE status NOT IN ('queued', 'running')
+               AND NOT COALESCE(CASE WHEN json_valid(configuration_json)
+                                     THEN json_extract(configuration_json, '$.expires_at') END
+                                > CAST(strftime('%s', 'now') AS INTEGER) * 1000, 0))""")
+
+
+def _migrate_to_v136(con: sqlite3.Connection) -> None:
+    """A version per goal plan (lib.task_plans.plan_index): a counter row and one row per plan,
+    moved by three triggers on every insert, update and delete of task_plans, whatever code
+    wrote. Every existing plan starts at version 0, which no cache holds. Created if missing,
+    so a rerun is a no-op. Older code never reads the tables; the triggers only write their
+    own two tables, so a rollback needs no down-step."""
+    from . import db_schema
+    for statement in _task_plan_version_statements(db_schema._SCHEMA_SQL):
+        con.execute(statement)
+    con.execute("INSERT OR IGNORE INTO task_plan_versions (plan_id, version)"
+                " SELECT plan_id, 0 FROM task_plans")
+
+
+def _task_plan_version_statements(schema_sql: str) -> list[str]:
+    """The CREATE statements of the two tables and three triggers, as the schema has them,
+    each made idempotent."""
+    out, statement = [], ""
+    for line in schema_sql.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            text = statement.strip()
+            if text.startswith(("CREATE TABLE task_plans_clock", "CREATE TABLE task_plan_versions",
+                                "CREATE TRIGGER task_plans_versioned_")):
+                out.append(text.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+                           .replace("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1))
+            statement = ""
+    assert len(out) == 5, out
+    return out
 
 
 def _migrate_to_v135(con: sqlite3.Connection) -> None:

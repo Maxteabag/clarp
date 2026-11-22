@@ -915,7 +915,18 @@ def test_reconciling_limits_with_nothing_expired_takes_no_write_lock():
     assert statements and not [s for s in statements if s.startswith("BEGIN")]
 
 
-def test_antigravity_quota_comes_from_its_own_usage_command(tmp_path, monkeypatch):
+@pytest.fixture
+def agy_worked():
+    """An Antigravity agent with a turn just now: its usage is worth reading."""
+    from lib import agents
+    from lib.protocol import TurnSource
+    agent_id = agents.create_agent(persona="Gem", voice_id="", cwd="/tmp", session="gem", backend="agy")
+    agents.start_runtime(agent_id, "gem")
+    agents.open_turn(agent_id=agent_id, source=TurnSource.PWA, trace_id="agy-turn")
+    return agent_id
+
+
+def test_antigravity_quota_comes_from_its_own_usage_command(tmp_path, monkeypatch, agy_worked):
     import os, pathlib, stat, sys
     fixture = pathlib.Path(__file__).resolve().parents[1] / "fixtures/agy/1.3.0-usage.json"
     fake = tmp_path / "bin/agy"
@@ -941,7 +952,7 @@ def test_antigravity_quota_comes_from_its_own_usage_command(tmp_path, monkeypatc
     assert "agy" not in backend_usage.exhausted_backends()
 
 
-def test_a_failed_antigravity_usage_check_keeps_the_last_reading(tmp_path, monkeypatch):
+def test_a_failed_antigravity_usage_check_keeps_the_last_reading(tmp_path, monkeypatch, agy_worked):
     import os, stat
     fake = tmp_path / "bin/agy"
     fake.parent.mkdir()
@@ -954,7 +965,7 @@ def test_a_failed_antigravity_usage_check_keeps_the_last_reading(tmp_path, monke
     assert "not signed in" in (backend_usage._row("agy") or {}).get("error", "")
 
 
-def test_a_failed_antigravity_usage_check_is_not_rerun_on_every_request(tmp_path, monkeypatch):
+def test_a_failed_antigravity_usage_check_is_not_rerun_on_every_request(tmp_path, monkeypatch, agy_worked):
     import stat
     runs = tmp_path / "runs"
     fake = tmp_path / "bin/agy"
@@ -1003,6 +1014,25 @@ def test_antigravitys_answer_stands_when_a_helper_keeps_its_pipes_open(tmp_path,
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
     assert backend_usage.fetch_agy_usage(timeout=1.0)["groups"]
+
+
+def test_each_antigravity_usage_run_logs_what_its_child_cost(tmp_path, monkeypatch):
+    """The usage check runs agy as a child process, outside the Host's threads: its cost is
+    logged per run (wall time, the child's CPU and storage reads), no ids, no output."""
+    import pathlib, stat
+    from lib import log as log_module
+    fixture = pathlib.Path(__file__).resolve().parents[1] / "fixtures/agy/1.3.0-usage.json"
+    fake = tmp_path / "bin/agy"
+    fake.parent.mkdir()
+    fake.write_text(f"#!/bin/sh\ncat {fixture}\nexit 0\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
+    lines = []
+    monkeypatch.setattr(log_module, "log", lambda event, detail="": lines.append((event, detail)))
+    assert backend_usage.fetch_agy_usage(timeout=5.0)["groups"]
+    [detail] = [d for e, d in lines if e == "agyUsageFetched"]
+    import re
+    assert re.fullmatch(r"ms=\d+ child_cpu_ms=\d+ child_disk_bytes=\d+", detail), detail
 
 
 def _write_codex_auth(codex_home, token: str, account_id: str) -> None:
@@ -1494,3 +1524,34 @@ def test_only_zero_switches_the_usage_refresher_off(monkeypatch, value):
     assert backend_usage.refresh_worker_enabled() is True
     monkeypatch.setenv(backend_usage.REFRESH_WORKER_ENV, " 0 ")
     assert backend_usage.refresh_worker_enabled() is False
+
+
+def test_antigravity_usage_is_read_only_after_antigravity_work_or_when_asked(tmp_path, monkeypatch):
+    """agy /usage runs a 200 MB binary at about 4 CPU-s. With no Antigravity agent at work
+    in the last six hours it is not run on its own schedule; the last answer stands, shown
+    stale. An agy turn, or the app asking for fresh numbers, reads it again."""
+    from lib import agents
+    from lib.protocol import TurnSource
+    runs = []
+    patch_shared(monkeypatch, backend_usage, "_claude_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_codex_needs_refresh", lambda: False)
+    patch_shared(monkeypatch, backend_usage, "_agy_executable", lambda: "/bin/agy")
+    patch_shared(monkeypatch, backend_usage, "fetch_agy_usage", lambda **_k: runs.append(1) or {})
+    for name in ("fetch_claude_usage", "fetch_codex_usage"):     # an explicit refresh forces these too
+        patch_shared(monkeypatch, backend_usage, name, lambda **_k: {})
+    backend_usage.get_backend_usage(refresh_codex=False)
+    assert runs == []                                       # nobody used Antigravity
+    backend_usage.get_backend_usage(force_codex=True)
+    assert runs == [1]                                      # the app asked for fresh numbers
+    agent_id = agents.create_agent(persona="Gem", voice_id="", cwd="/tmp", session="gem", backend="agy")
+    agents.start_runtime(agent_id, "gem")
+    agents.open_turn(agent_id=agent_id, source=TurnSource.PWA, trace_id="agy-turn")
+    backend_usage.get_backend_usage(refresh_codex=False)
+    assert runs == [1, 1]                                   # an agy agent worked just now
+    # A turn that began more than six hours ago and is still running records states.
+    from lib import db
+    db.conn().execute("UPDATE turns SET started_at = ? WHERE agent_id = ?", (db.now_ms() - 7 * 3_600_000, agent_id))
+    db.conn().commit()
+    agents.record_state(agent_id, "thinking", {"source": "pwa"})
+    backend_usage.get_backend_usage(refresh_codex=False)
+    assert runs == [1, 1, 1]

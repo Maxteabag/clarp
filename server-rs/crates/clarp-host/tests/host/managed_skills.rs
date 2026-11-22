@@ -196,6 +196,35 @@ fn row(listed: &Value, id: &str) -> Value {
 }
 
 #[test]
+fn both_managed_skills_routes_refuse_a_malformed_manifest_before_using_it() {
+    let place = Place::new("skills-malformed-manifest");
+    let machine = Machine::new(&place);
+    let host = machine.start(&place, Some("select"));
+    let manifest = json!({"skills": [{"id": "opt2"}, {"id": "other", "requires": false}]});
+    std::fs::write(machine.tree.join("manifest.json"), manifest.to_string()).unwrap();
+
+    let refused = (503, json!({"error": "Clarp skill manifest is unavailable"}));
+    assert_eq!(host.ask("GET", "/managed-skills", None), refused);
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/managed-skills",
+            Some(&json!({"skill_id": "opt2", "enabled": true}))
+        ),
+        refused
+    );
+    assert_eq!(machine.leads("claude", "opt2"), None);
+    wait_for("both bad-manifest log lines", || {
+        host.heard
+            .lock()
+            .unwrap()
+            .matches("managedSkillsManifestBad item=1 requires is not a list")
+            .count()
+            == 2
+    });
+}
+
+#[test]
 fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
     let place = Place::new("skills-kept");
     let machine = Machine::new(&place);

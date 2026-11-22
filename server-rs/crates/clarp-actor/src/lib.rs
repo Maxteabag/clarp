@@ -955,7 +955,17 @@ fn ending_notice(
         id: format!("n-{name}-{code}"),
         turn: Some(turn.0),
         code: code.to_string(),
-        text: reason.to_string(),
+        text: if reason == clarp_kernel::agent_moves::MOVED {
+            failures::told(
+                reason,
+                clarp_kernel::agent_moves::CONTINUATION_ERROR,
+                "",
+                failures::Known::default(),
+            )
+            .row
+        } else {
+            reason.to_string()
+        },
         trace_id,
     })
 }
@@ -1278,8 +1288,7 @@ fn kept(text: String, origin: &Origin) -> String {
 }
 
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, origin: &Origin, live: LiveReply, ts_ms: i64) {
-    let display = clarp_kernel::teams::runtime::strip_team_blocks(&live.text);
-    let text = kept(display.into_owned(), origin);
+    let text = kept(live.text, origin);
     // An answer that is no answer is not shown while it is written.
     if text.is_empty()
         || text == clarp_kernel::heartbeat::NOTHING_TO_DO
@@ -1753,6 +1762,10 @@ impl Actor {
         self.recorder.agent().latest_turn_start()
     }
 
+    pub fn latest_turn_activity(&self) -> Option<i64> {
+        self.recorder.agent().latest_turn_activity()
+    }
+
     pub fn moved(&self) -> Option<&clarp_kernel::agent_moves::Mark> {
         self.recorder.agent().moved()
     }
@@ -1895,12 +1908,45 @@ impl Actor {
             return Ok(None);
         };
         let turn = waiting.id;
-        if waiting.ran {
-            self.ended_outside_the_spool(turn, Command::InterruptMovedRetry { turn }, now_ms)
-                .map(Some)
-        } else {
-            self.hold_unsent_for_move(turn, now_ms).map(Some)
+        if !waiting.ran {
+            return self.hold_unsent_for_move(turn, now_ms).map(Some);
         }
+
+        // A parked attempt has no process to end or spool to drain.
+        let message = self.message_at(waiting.message_seq)?;
+        let mut facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
+        facts.trace_id = message.trace_id;
+        facts.notes = notes_of(self.turn_notes, turn);
+        let notice = ending_notice(
+            turn,
+            turn_name(&message.id),
+            "turn-interrupted",
+            clarp_kernel::agent_moves::MOVED,
+            facts.trace_id.clone(),
+        );
+        let mut batch = self.recorder.batch();
+        batch
+            .command(Command::InterruptMovedRetry { turn }, now_ms)
+            .map_err(JournalError::Refused)?;
+        batch.item(written(&notice, now_ms)?);
+        if let Some(end) = closing(&mut batch, turn, notice.id(), facts) {
+            batch.item(written(&end, now_ms)?);
+        }
+        let effects = batch.commit()?.effects;
+        self.unstored_changes = 0;
+        self.held_for_an_account = false;
+        self.forget_live();
+        let mut out = Outputs {
+            changed: Changed {
+                status: true,
+                conversation: true,
+                queue: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        self.carry_out(effects, &mut out)?;
+        Ok(Some(out))
     }
 
     pub fn status(&self) -> Status {
@@ -3989,16 +4035,6 @@ impl Actor {
                 trace_id: facts.trace_id.clone(),
             })
             .map(|marker| (marker, false)),
-            Command::InterruptMovedRetry { .. } => {
-                let notice = ending_notice(
-                    turn,
-                    &name,
-                    "turn-interrupted",
-                    clarp_kernel::agent_moves::MOVED,
-                    facts.trace_id.clone(),
-                );
-                Some((notice, true))
-            }
             Command::TurnEnded {
                 outcome: RunOutcome::Interrupted { reason },
                 ..
@@ -4198,7 +4234,18 @@ impl Actor {
             prompt
         };
         let told = self.profile.told.as_ref().filter(|_| !bare);
-        let prompt = if self.profile.hides_coordination
+        let mut brief = if let Some(teams) = &self.teams
+            && !bare
+        {
+            teams.brief(
+                &self.profile.agent_id,
+                &self.profile.session,
+                message.origin.name(),
+            )
+        } else {
+            clarp_kernel::teams::runtime::Brief::default()
+        };
+        if self.profile.hides_coordination
             && told.is_some_and(|told| told.coordination_hidden)
             && let Ok(Some(agent_id)) = self.mark(turn.0)
         {
@@ -4215,28 +4262,17 @@ impl Actor {
                 });
             let reminder =
                 clarp_kernel::hidden_coordination::reminder(&self.profile.session, sender);
-            format!("{reminder}\n\n{prompt}")
-        } else {
-            prompt
-        };
-        let prompt = if let Some(teams) = &self.teams
-            && !bare
-        {
-            let brief = teams.brief(
-                &self.profile.agent_id,
-                &self.profile.session,
-                message.origin.name(),
-            );
+            brief.append_protocol(&reminder);
+        }
+        if self.teams.is_some() && !bare {
             let key = clarp_kernel::journal::team_transit::launch_key(turn, attempt);
             if !brief.ids.is_empty() || self.recorder.log().find(&key)?.is_some() {
                 let mut batch = self.recorder.batch();
                 batch.item(record_item(kind::TEAM_PROMPT, key, &brief.ids, 0)?);
                 batch.commit()?;
             }
-            brief.prompt(&prompt)
-        } else {
-            prompt
-        };
+        }
+        let prompt = brief.prompt(&prompt);
         let named_session = self
             .backend
             .binds_at_spawn()
@@ -5250,7 +5286,7 @@ impl Actor {
                             let speak = if let Some(separate) = &live.steering.separate {
                                 reply.turn = separate.turn.0;
                                 reply.trace_id.clone_from(&separate.message.trace_id);
-                                reply.origin = Origin::User;
+                                reply.origin = separate.reply_origin();
                                 separate.message.speak
                             } else {
                                 live.speak
@@ -5296,7 +5332,7 @@ impl Actor {
                             if let Some(separate) = &live.steering.separate {
                                 call.turn = separate.turn.0;
                                 call.trace_id.clone_from(&separate.message.trace_id);
-                                call.origin = Origin::User;
+                                call.origin = separate.reply_origin();
                             }
                             // A call no message carries is a row, and work, when it begins.
                             let known = live.tools.iter().any(|tool| tool.id == call.id);

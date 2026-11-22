@@ -170,7 +170,7 @@ fn the_folders_written_are_the_distinct_usable_ones() {
 #[test]
 fn a_manifest_is_read_or_refused_as_the_reference_reads_it() {
     let cases = vectors();
-    let (mut read, mut unavailable, mut crashed) = (0, 0, 0);
+    let (mut read, mut unavailable) = (0, 0);
     for case in cases["manifests"].as_array().unwrap() {
         let bytes = case["manifest"].as_str().map(str::as_bytes);
         let items = skills::manifest(bytes);
@@ -190,17 +190,10 @@ fn a_manifest_is_read_or_refused_as_the_reference_reads_it() {
                 assert_eq!(json!(ids), outcome[1], "{case}");
                 read += 1;
             }
-            _ => {
-                let items = items.unwrap();
-                assert!(
-                    items.iter().any(|item| skills::skill_id(item).is_err()),
-                    "{case}"
-                );
-                crashed += 1;
-            }
+            other => panic!("unknown manifest outcome {other}: {case}"),
         }
     }
-    assert_eq!((read, unavailable, crashed), (3, 11, 3));
+    assert_eq!((read, unavailable), (3, 21));
 }
 
 #[test]
@@ -356,6 +349,10 @@ fn a_change_is_asked_as_the_reference_reads_its_body() {
     // How the two routes answer a refusal and a failure of the disk.
     assert_eq!(routes["failures"][0][1][0], 409);
     assert_eq!(routes["failures"][1][1][0], 500);
+    assert_eq!(
+        routes["failures"][2][1],
+        json!([503, {"error": skills::UNAVAILABLE}])
+    );
     assert_eq!(
         routes["reads"][1][1],
         json!([503, {"error": skills::UNAVAILABLE}])

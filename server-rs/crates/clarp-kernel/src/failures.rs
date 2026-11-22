@@ -323,6 +323,7 @@ fn sentence(kind: &str, model: &str) -> String {
         CONNECTION => "Connection lost — retries exhausted".to_string(),
         TRANSIENT => "API unavailable (overloaded / rate limited)".to_string(),
         INTERRUPTED => "Turn interrupted".to_string(),
+        crate::agent_moves::MOVED => "The agent moved to another Host".to_string(),
         USAGE_LIMIT => "Usage limit reached".to_string(),
         AUTH => "Sign-in expired — could not refresh the account".to_string(),
         RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),

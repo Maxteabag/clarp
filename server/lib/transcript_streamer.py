@@ -89,6 +89,11 @@ class TranscriptStreamer:
         # agent_id → backend_session_id currently bound to a watcher. Used to
         # detect changes (resume, fork) without re-watching every tick.
         self._bound: dict[str, str] = {}
+        # The database's change stamp at the last full pass, and the agents that pass
+        # wanted bound: while the stamp stands, a pass retries only those not bound yet
+        # (their transcript file had not appeared), without reading agents or runtimes.
+        self._seen_stamp: tuple[int, int] | None = None
+        self._wanted: list[tuple[dict, str]] = []
         # agent_id → its generation at the latest bind (never removed).
         self._bind_generation: dict[str, int] = {}
         # agent_id → the latest change still waiting for its post-import step.
@@ -102,14 +107,39 @@ class TranscriptStreamer:
     # ---- per-agent subscribe ----------------------------------------
 
     def reconcile_once(self) -> None:
-        """Scan agents + runtimes; subscribe/unsubscribe watchers to match."""
+        """Scan agents + runtimes; subscribe/unsubscribe watchers to match.
+
+        The bindings follow the agents and runtimes rows alone, so while the database's
+        change stamp stands (db.change_stamp: no commit by anyone since the last full
+        pass) only the binds still waiting for their transcript file are tried again."""
+        from . import db
+        stamp = db.change_stamp()
+        if stamp == self._seen_stamp and stamp[0] >= 0:
+            for agent, backend_session_id in self._wanted:
+                if self._bound.get(agent["agent_id"]) != backend_session_id:
+                    self._bind(agent, backend_session_id)
+            self._resubmit_unresolved()
+            health.mark_success("transcript_streamer")
+            return
         live = agents_db.list_agents()
         sessions = _live_backend_sessions()
+        if sessions is None:
+            # The runtimes could not be read: no agent is known to be unbound, so
+            # every binding stays, no stamp is recorded, and the next pass is full.
+            self._resubmit_unresolved()
+            return
         live_ids = set()
+        wanted: list[tuple[dict, str]] = []
+        streams: dict[str | None, bool] = {}
         for agent in live:
             agent_id = agent["agent_id"]
             live_ids.add(agent_id)
-            if not backends.capabilities(agent.get("backend")).supports_transcript_streaming:
+            backend = agent.get("backend")
+            if backend not in streams:
+                # The runner's own flag, once per backend a pass: capabilities() also
+                # resolves the CLI's executable, a configuration read per agent.
+                streams[backend] = backends.by_id(backend).supports_transcript_streaming
+            if not streams[backend]:
                 self._unbind(agent_id)
                 continue
             backend_session_id = sessions.get(agent_id)
@@ -118,12 +148,15 @@ class TranscriptStreamer:
                 # Nothing to watch.
                 self._unbind(agent_id)
                 continue
+            wanted.append((agent, backend_session_id))
             if self._bound.get(agent_id) == backend_session_id:
                 continue                    # already correctly bound
             self._bind(agent, backend_session_id)
         # Agents that disappeared (soft-deleted): drop their watchers.
         for stale in set(self._bound) - live_ids:
             self._unbind(stale)
+        self._wanted = wanted
+        self._seen_stamp = stamp
         self._resubmit_unresolved()
         health.mark_success("transcript_streamer")
 
@@ -239,7 +272,29 @@ class TranscriptStreamer:
             self._dirty[agent_id] = intent
         return intent
 
-    def _submit(self, agent: dict, intent: Intent) -> bool:
+    def turn_ended(self, agent_id: str) -> bool:
+        """The agent's turn ended (its DONE row): import its transcript now.
+
+        A change seen while the turn ran waits out the agent's import window
+        (transcript_import_cache._BACKGROUND_MIN_INTERVAL), so a turn that ended
+        within that window of the last import kept the rows written while it ran:
+        its reply had no phase and no tools, and the agent's last completed
+        message was still the user's (R6, R12). The end of a turn is when its
+        transcript is whole, so that import goes first: urgent skips the window,
+        and takes the place of a change already waiting. False when the agent is
+        not bound or the import was refused (the change stays pending)."""
+        with self._dirty_lock:
+            backend_session_id = self._bound.get(agent_id)
+            generation = self._bind_generation.get(agent_id)
+        if not backend_session_id or generation is None:
+            return False
+        agent = agents_db.get_by_agent_id(agent_id)
+        if agent is None:
+            return False
+        intent = self._note_change(agent, backend_session_id, generation)
+        return intent is not None and self._submit(agent, intent, urgent=True)
+
+    def _submit(self, agent: dict, intent: Intent, *, urgent: bool = False) -> bool:
         """Queue the import and its post-import step on the import worker.
         False when refused; the intent stays pending either way."""
         agent_id = agent["agent_id"]
@@ -262,7 +317,8 @@ class TranscriptStreamer:
                 agent_id=agent_id, backend_session_id=intent.bsid)
             return transcript_import_cache.schedule_import(
                 latest, importer, owner=agent_id,
-                after=lambda: self._after_import(agent_id, intent.bsid, intent.gen, intent.seq))
+                after=lambda: self._after_import(agent_id, intent.bsid, intent.gen, intent.seq),
+                urgent=urgent)
         except Exception as e:
             log_exception("transcriptStreamerImportFail", e, detail=agent_id)
             return False
@@ -475,8 +531,9 @@ def _read_timing(line_ts: str | None) -> dict:
     return {"line_ts": line_ts, "read_lag_ms": lag, "ts_status": "ok"}
 
 
-def _live_backend_sessions() -> dict[str, str]:
-    """Most recent live runtime's backend_session_id per agent, in one query.
+def _live_backend_sessions() -> dict[str, str] | None:
+    """Most recent live runtime's backend_session_id per agent, in one query;
+    None when the runtimes could not be read.
 
     The reconcile pass runs every second for every agent; one lookup per agent
     was about a hundred queries a second on a busy host.
@@ -489,7 +546,7 @@ def _live_backend_sessions() -> dict[str, str]:
     except Exception as e:
         health.mark_error("transcript_streamer", e)
         log_exception("transcriptStreamerRuntimeLookupFail", e)
-        return {}
+        return None
     # Later rows started later, so the last write per agent wins.
     return {row["agent_id"]: row["backend_session_id"]
             for row in rows if row["backend_session_id"]}

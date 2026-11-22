@@ -680,8 +680,8 @@ impl Desk {
         Ok(())
     }
 
-    /// Prune from the call's durable end time even after its public history
-    /// has rolled over. Update the ring list and delete lookup keys together.
+    /// Prune after a day of retirement once the call is no longer live, even
+    /// after its public history has rolled over. Remove its lookup keys together.
     pub async fn prune_openings(&self, app: &App) -> Result<(), Unavailable> {
         let _serial = self.opening_turn.lock().await;
         let mut held = self.books.lock().await;

@@ -292,7 +292,9 @@ def get_backend_usage(*, refresh_codex: bool = True,
                 _record_unknown(
                     CODEX, "codex-usage-endpoint",
                     f"direct: {exc}; app-server: {fallback_exc}")
-    if force_codex or _agy_needs_refresh():
+    # Antigravity's numbers are read when someone asks for fresh ones (the app's refresh)
+    # or an Antigravity agent worked lately; otherwise the last answer stands, marked stale.
+    if force_codex or (_agy_needs_refresh() and agy_in_use()):
         if _agy_executable():
             try:
                 fetch_agy_usage()
@@ -469,7 +471,7 @@ class UsageRefreshWorker:
 
 from .backend_usage_agy import (  # noqa: E402,F401  (split_apply: backend-usage)
     AGY_WINDOW_KINDS, _agy_executable, _AGY_FETCH_LOCK, _AGY_LAST_ATTEMPT_MS, fetch_agy_usage,
-    _run_agy_usage, _agy_windows, _agy_needs_refresh,
+    _run_agy_usage, _agy_windows, _agy_needs_refresh, agy_in_use, AGY_IN_USE_MS,
 )
 from .backend_usage_codex import (  # noqa: E402,F401  (split_apply: backend-usage)
     _active_codex_identity, _codex_needs_refresh, _codex_home, _read_codex_auth,
