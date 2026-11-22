@@ -863,10 +863,11 @@ _FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK")], "closed"),
     ([_turn("user", "hi"), _turn("assistant", "LEADER_NOOP")], "closed"),
     # A replayed dream ack acts on whichever run is active now.
-    ([_turn("user", "Deep Dreaming contract: night"), _turn("assistant", "plain")], "open"),
-    ([_turn("user", "hi"), _turn("assistant", "DREAMING_OK")], "open"),
+    # Dream turns and <team> blocks: their effects run only for a row the import writes.
+    ([_turn("user", "Deep Dreaming contract: night"), _turn("assistant", "plain")], "closed"),
+    ([_turn("user", "hi"), _turn("assistant", "DREAMING_OK")], "closed"),
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
-      _turn("user", "Deep Dreaming contract: night"), _turn("assistant", "DREAMING_OK")], "open"),
+      _turn("user", "Deep Dreaming contract: night"), _turn("assistant", "DREAMING_OK")], "closed"),
     # A Claude sub-agent cell: the one thing it reads outside the parent's
     # bytes, the child directory's answer, is recorded with the checkpoint
     # (found or not), so it needs no replay while that answer stands.
@@ -878,13 +879,14 @@ _FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
     ([_turn("user", "hi"), _turn("assistant", "x", cells=[dict(_FOUND_CHILD, ephemeral=False)])],
      "open"),
     ([_turn("user", "hi"), _turn("assistant", "x", tools=[{"name": "Task"}])], "open"),
-    ([_turn("user", "hi"), _turn("assistant", "<team>ship it</team>")], "open"),
+    ([_turn("user", "hi"), _turn("assistant", "<team>ship it</team>")], "closed"),
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
-      _turn("assistant", "<team>go</team>")], "open"),
+      _turn("assistant", "<team>go</team>")], "closed"),
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
       _turn("assistant", "x", cells=[_FOUND_CHILD])], "closed"),
     ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD]),
-      _turn("assistant", "<team>go</team>")], "open"),
+      _turn("assistant", "<team>go</team>")], "closed"),
+    ([_turn("user", "hi"), _turn("assistant", "<team>go</team>", tools=[{"name": "Task"}])], "open"),
 ])
 def test_prefix_effects_keep_only_open_effects_on_the_full_path(prefix, expected):
     assert inc._prefix_effects(prefix) == expected

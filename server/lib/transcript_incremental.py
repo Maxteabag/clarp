@@ -1248,16 +1248,18 @@ def _prefix_effects(turns) -> str:
       (``subagent_children`` in the parser carry): a child that appears,
       goes or is bound to another call refuses the tail.
 
+    - a <team> block and a dream prompt or output: team capture and a dream
+      turn's records run only for a row the import writes (new, changed or
+      moved), so a full replay over their rows stored as they are does what a
+      tail does: nothing. (Replayed before, a block was captured into a team
+      the agent joined since, and an old DREAMING_OK marked the run active now.)
+
     Still open, so still full. Their effects may need retry, or differ on
     replay, even when their message row is unchanged; they cannot be skipped
     merely because bytes or rows were checkpointed:
 
     - any other sub-agent cell or an Agent/Task tool (Codex attaches collab
-      events to the latest assistant turn, wherever it is);
-    - a <team> block: team capture depends on the agent's current teams, which
-      can change after the turn is old;
-    - a dream prompt or dream output: a replayed DREAMING_OK marks whichever
-      run is active now, so skipping it would change what a full import does.
+      events to the latest assistant turn, wherever it is).
     """
     from . import dreaming, heartbeat, team_leader, team_store
     found = ""
@@ -1274,17 +1276,15 @@ def _prefix_effects(turns) -> str:
             return "open"
         text = str(turn.get("text") or "")
         if turn.get("role") == "user":
-            if dreaming.should_skip_dream_prompt(text):
-                return "open"
-            if (heartbeat.should_skip_heartbeat_prompt(text)
+            if (dreaming.should_skip_dream_prompt(text)
+                    or heartbeat.should_skip_heartbeat_prompt(text)
                     or team_leader.should_skip_leader_tick_prompt(text)):
                 found = "closed"
         elif turn.get("role") == "assistant":
             if (team_store.extract_team_blocks(text)
                     or dreaming.process_assistant_text("", text, origin="dreaming", live=True)
-                    != (False, text)):
-                return "open"
-            if heartbeat.HEARTBEAT_OK in text or team_leader.LEADER_NOOP in text:
+                    != (False, text)
+                    or heartbeat.HEARTBEAT_OK in text or team_leader.LEADER_NOOP in text):
                 found = "closed"
     return found
 
