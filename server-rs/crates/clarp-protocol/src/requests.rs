@@ -70,6 +70,10 @@ pub struct StopRequest {
     pub actor: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<Value>,
+    /// What to stop while the agent's conversation fork answers (contract 153): `main` for
+    /// the agent's own turn. Without it, the fork's turn is stopped when one runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 /// `POST /stop`, `POST /select` and the other commands that only name an agent.

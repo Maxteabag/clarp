@@ -64,6 +64,32 @@ pub(crate) async fn stop(app: &App, session: &str, by: Control) -> Result<StopRe
     })
 }
 
+/// `POST /stop` while the agent's conversation fork answers (issue 718, contract 153): the
+/// fork's turn is the one the user talks to, and it is the one stopped. The agent's own turn
+/// and its queue are left as they are; a Stop with `target: "main"` is for those. `None`: no
+/// fork's turn ran.
+pub(crate) async fn stop_fork(
+    app: &App,
+    session: &str,
+    by: &Control,
+) -> Result<Option<StopResponse>, ApiError> {
+    let Some(member) = app.member(session) else {
+        return Ok(None);
+    };
+    if !member.agent.stop_fork().await? {
+        return Ok(None);
+    }
+    Ok(Some(StopResponse {
+        ok: true,
+        stop_actor: Some(by.actor.clone()),
+        stop_actor_verified: Some(by.verified),
+        stop_reason: Some(by.reason.clone()),
+        terminated: 1,
+        queue_paused: Some(false),
+        ..StopResponse::default()
+    }))
+}
+
 /// `POST /repair-slot {session, reason, actor?}`: gives back a turn of an agent that nothing
 /// runs, interrupting nothing and holding or letting go nothing, and keeps a note of who and why
 /// on its state. Nothing on this Host can hold a turn that nothing runs (a turn ends when its

@@ -3486,6 +3486,10 @@ async fn stop(
         request.reason.as_ref(),
     )
     .await?;
+    let main = request.target.as_deref().map(str::trim) == Some("main");
+    if !main && let Some(stopped) = crate::controls::stop_fork(&app, &request.session, &by).await? {
+        return Ok(Json(stopped));
+    }
     Ok(Json(
         crate::controls::stop(&app, &request.session, by).await?,
     ))

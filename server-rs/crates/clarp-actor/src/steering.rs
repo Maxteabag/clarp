@@ -410,7 +410,7 @@ pub(super) fn recover_reads(
     Ok(revealed)
 }
 
-fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, message: &Message) {
+pub(super) fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, message: &Message) {
     out.changed.queue = true;
     let agent = batch.agent();
     let (waiting, listed) = batch.queue_depths();

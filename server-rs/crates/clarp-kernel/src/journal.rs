@@ -94,6 +94,10 @@ pub mod kind {
         const NATIVE_GOAL= 905;
         /// An internal turn reservation, without a synthetic row in the conversation.
         const NATIVE_GOAL_ATTEMPT= 906;
+        /// The agent's conversation fork (issue 718): the short-lived copy of its tool's
+        /// session that answers the user while the agent works for other agents, keyed by
+        /// [`FORK_LANE`]. The newest is the one that counts.
+        const FORK= 907;
 
         /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
         const JOB= 300;
@@ -131,6 +135,8 @@ pub mod kind {
     /// these kinds is where its row stands. What changes a row afterwards is an item of
     /// another kind that names the row: its tools' uses, what followed it, how its turn ended.
     pub const ROWS: Kinds = Kinds::range(MESSAGE, AGENT_NOTE);
+    /// The key of the agent's conversation fork, as it stands now.
+    pub const FORK_LANE: &str = "fork-lane";
 }
 
 const PAGE: usize = 1_000;

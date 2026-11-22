@@ -43,6 +43,7 @@ use clarp_kernel::failures;
 pub mod bookkeeping;
 use clarp_kernel::launch_refused;
 pub mod delegation;
+pub mod fork;
 mod goal_ledger;
 pub mod native_goal;
 mod native_goal_reservation;
@@ -239,6 +240,15 @@ pub enum Action {
     },
     /// Write this accepted follow-up to the same shim's input once.
     Steer { socket: PathBuf, input: String },
+    /// Start a shim for a turn of the agent's conversation fork ([`fork`]), and then follow
+    /// it as [`Action::Launch`] says. Its tool is the agent's own, under the fork's session.
+    Fork(Box<ShimOrder>),
+    /// Follow the shim of a turn of the fork that ran on while the Host was away.
+    ForkFollow {
+        turn: TurnId,
+        attempt: u32,
+        socket: PathBuf,
+    },
 }
 
 /// What is different after a call, for whoever tells the clients.
@@ -691,6 +701,8 @@ struct LiveTurn {
     /// ([`Actor::stop_for_an_account`]): however it ends short of completing, the turn
     /// waits for an account.
     for_account: bool,
+    /// How many tools the attempt has begun, for what is shown of it beside a fork's turn.
+    tool_count: u32,
 }
 
 impl LiveTurn {
@@ -807,6 +819,8 @@ pub struct Actor {
     /// How many notes for the user the newest turn that left one has left: its number and the
     /// count, kept as they are written, for its end ([`TurnEnd::note_count`]).
     turn_notes: (u64, u32),
+    /// The agent's conversation fork, where it has one ([`fork`]).
+    fork: fork::Lane,
 }
 
 /// Which message a trace is of: its id, sender and origin.
@@ -1498,6 +1512,7 @@ impl Actor {
             shown_revision: 0,
             remembered: Remembered::default(),
             turn_notes: (0, 0),
+            fork: fork::Lane::default(),
         };
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
@@ -1589,6 +1604,7 @@ impl Actor {
                 over: true,
                 attempt,
                 for_account: false,
+                tool_count: 0,
             });
         }
         // A compaction whose turn ended and whose outcome an actor before this one did not
@@ -1600,6 +1616,8 @@ impl Actor {
             out.changed.queue |= settled.changed.queue;
             out.changed.conversation |= settled.changed.conversation;
         }
+        // A fork that ran on while the Host was away is followed again.
+        actor.fork_restore(&mut out, now_ms)?;
         Ok((actor, out))
     }
 
@@ -1634,8 +1652,11 @@ impl Actor {
     pub fn shown_whole(&mut self, now_ms: i64) -> serde_json::Value {
         self.show_turn(now_ms);
         match self.shown.snapshot(now_ms) {
-            Some((snapshot, events)) => {
+            Some((mut snapshot, events)) => {
                 self.shown_events.extend(events);
+                if let Some(main) = self.main_turn_beside_fork() {
+                    snapshot["main_turn"] = main;
+                }
                 snapshot
             }
             None => {
@@ -1705,7 +1726,11 @@ impl Actor {
     /// holds the agent is begun for those who watch, one that holds it no longer is ended as
     /// it ended, and a turn that waits for an account says so.
     fn show_turn(&mut self, now_ms: i64) {
+        // While the agent's fork answers, its turn is the one shown: it is what the user talks
+        // to. The agent's own turn is told beside it ([`Actor::shown_whole`]).
+        let forked = self.fork_held();
         let held = match self.recorder.agent().live() {
+            _ if forked.is_some() => forked.as_ref().map(|(turn, at, _)| (*turn, *at)),
             Some(Turn::Starting(turn)) => Some((turn.id, turn.started_at_ms)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.started_at_ms)),
             Some(Turn::Parked(turn)) => Some((turn.id, turn.started_at_ms)),
@@ -1714,13 +1739,28 @@ impl Actor {
         let shown = self.shown_turn.as_ref().map(|(turn, _)| *turn);
         if shown != held.map(|(turn, _)| turn) {
             if let Some(turn) = shown {
-                let (status, error) = self.ended_as(turn);
+                let (status, error) = match self.fork_ended_as(turn) {
+                    Some(status) => (status, None),
+                    None => self.ended_as(turn),
+                };
                 let events = self.shown.end_turn(status, error.as_ref(), now_ms);
                 self.shown_events.extend(events);
                 self.shown_turn = None;
             }
             let followed = self.live.as_ref();
-            if let Some((turn, started_at_ms)) = held
+            if let Some((turn, started_at_ms, name)) = forked {
+                let conversation = self.shown_conversation();
+                let events = self.shown.begin_turn(
+                    &self.profile.session,
+                    &conversation,
+                    &name,
+                    Some(started_at_ms),
+                    clarp_kernel::coordination::USER,
+                    now_ms,
+                );
+                self.shown_events.extend(events);
+                self.shown_turn = Some((turn, name));
+            } else if let Some((turn, started_at_ms)) = held
                 && let Some(live) = followed.filter(|live| live.turn == turn)
             {
                 let name = shown_name(live.trace_id.as_deref(), &live.message_id);
@@ -2405,7 +2445,8 @@ impl Actor {
             Some(Turn::Parked(live)) if live.id.0 == turn && !live.wait.is_for_an_account() => {
                 live.message_seq
             }
-            _ => return Ok(None),
+            // The turn of the agent's fork runs as well, beside the agent's own.
+            _ => return Ok(self.fork_trace(turn)),
         };
         let message = self.message_at(message_seq)?;
         Ok(Some(message.trace_id.unwrap_or_default()))
@@ -2700,25 +2741,7 @@ impl Actor {
             limit,
             which,
         )?;
-        Ok(self.with_sessions(page))
-    }
-
-    /// The session of the agent's tool each row of a page came from (`session_id` of
-    /// `GET /log`): what a reply recorded of itself, and else the session its turn ran in.
-    /// The conversation stays the agent's whatever session its tool runs in.
-    fn with_sessions(&self, mut page: Page) -> Page {
-        for row in &mut page.entries {
-            row.session = match &row.entry {
-                Entry::Reply(reply) if reply.backend_session.is_some() => {
-                    reply.backend_session.clone()
-                }
-                _ => row
-                    .turn_number
-                    .and_then(|turn| self.recorder.turn_session(turn))
-                    .map(str::to_owned),
-            };
-        }
-        page
+        self.with_sessions(page)
     }
 
     /// The newest `limit` things the agent's log has of any of its conversations, also of
@@ -2801,7 +2824,7 @@ impl Actor {
             limit,
             which,
         )?;
-        Ok(self.with_sessions(page))
+        self.with_sessions(page)
     }
 
     /// The agent's background jobs.
@@ -3297,7 +3320,7 @@ impl Actor {
             limit,
             which,
         )?;
-        Ok(Some(self.with_sessions(page)))
+        self.with_sessions(page).map(Some)
     }
 
     /// Takes a message for the agent. When this returns, the message is in the log.
@@ -4162,6 +4185,9 @@ impl Actor {
         reason: &str,
         now_ms: i64,
     ) -> Result<Outputs, ActorError> {
+        if self.fork_follows(turn, attempt) {
+            return self.fork_gone(turn, attempt, reason, now_ms);
+        }
         if !self.follows(turn, attempt) {
             return Ok(Outputs::default());
         }
@@ -4216,6 +4242,10 @@ impl Actor {
         attempt: u32,
         now_ms: i64,
     ) -> Result<Outputs, ActorError> {
+        if self.fork_follows(turn, attempt) {
+            let reason = "the fork's process is gone and did not say how it went";
+            return self.fork_gone(turn, attempt, reason, now_ms);
+        }
         if !self.follows(turn, attempt) {
             return Ok(Outputs::default());
         }
@@ -4610,6 +4640,7 @@ impl Actor {
         } else {
             prompt
         };
+        let fork_note = self.fork_note(turn, bare || opening.is_some(), out)?;
         let told = self.profile.told.as_ref().filter(|_| !bare);
         let mut brief = if let Some(teams) = &self.teams
             && !bare
@@ -4652,6 +4683,11 @@ impl Actor {
             }
         }
         let prompt = brief.prompt(&prompt);
+        // What the agent's fork said and did while this session was busy opens its next turn.
+        let prompt = match fork_note {
+            Some(note) => format!("{note}\n\n{prompt}"),
+            None => prompt,
+        };
         let named_session = self
             .backend
             .binds_at_spawn()
@@ -4767,6 +4803,7 @@ impl Actor {
             over: false,
             attempt,
             for_account: false,
+            tool_count: 0,
         });
         out.actions.push(Action::Launch(Box::new(ShimOrder {
             opening,
@@ -5052,6 +5089,7 @@ impl Actor {
             over: false,
             attempt,
             for_account: false,
+            tool_count: 0,
         });
         out.changed.conversation = true;
         out.actions.push(Action::Follow {
@@ -5353,8 +5391,17 @@ impl Actor {
         Ok(out)
     }
 
-    /// Reads what is new in the live turn's spool and writes what it means to the log.
+    /// Reads on in the spools of the agent's turn and of its fork's, the fork's first: a
+    /// fork that has begun to answer has read its message before the agent's own turn,
+    /// ending, could give the message back.
     fn pump(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
+        self.pump_fork(out, now_ms)?;
+        self.pump_main(out, now_ms)?;
+        self.fork_reconcile(out, now_ms)
+    }
+
+    /// Reads what is new in the live turn's spool and writes what it means to the log.
+    fn pump_main(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
         loop {
             // The turn is shown from before its first record is read, and its end after its
             // last one was.
@@ -5804,6 +5851,9 @@ impl Actor {
                                 && (call.status == ToolStatus::Running || !known)
                             {
                                 follow(&mut batch, &mut live.said, turn, t)?;
+                            }
+                            if !known && call.status == ToolStatus::Running {
+                                live.tool_count = live.tool_count.saturating_add(1);
                             }
                             follow_tool(&mut live.tools, &mut live.calls, &call);
                             Entry::Tool(call)

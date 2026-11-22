@@ -1,11 +1,13 @@
 //! Which agents may answer their user through a conversation fork (issue 718): the owner's
-//! setting, read anew for each answer that tells it, as the experience watcher reads its own.
-//! Off for every agent the setting does not name.
+//! setting, read anew at each message it could apply to, as the experience watcher reads its
+//! own. Off for every agent the setting does not name.
 //!
 //! ```toml
 //! [conversation_forks]
 //! agents = ["hazel-74f6"]
 //! ```
+
+use clarp_kernel::chat_view::View;
 
 /// The agents the owner's setting names, read once for a whole answer.
 pub(crate) struct Named(Option<toml::Value>);
@@ -24,6 +26,11 @@ impl Named {
     }
 }
 
+/// Whether the setting names this agent, by its session or its id.
+pub(crate) fn named(agent_id: &str, session: &str) -> bool {
+    names(Named::read().0.as_ref(), agent_id, session)
+}
+
 fn names(section: Option<&toml::Value>, agent_id: &str, session: &str) -> bool {
     section
         .and_then(|section| section.get("agents"))
@@ -33,6 +40,14 @@ fn names(section: Option<&toml::Value>, agent_id: &str, session: &str) -> bool {
         .filter_map(toml::Value::as_str)
         .map(str::trim)
         .any(|named| !named.is_empty() && (named == session || named == agent_id))
+}
+
+/// Whether a message of the user's to this agent may go to its fork: Claude Code, the chat
+/// seen in Conversation view (Session view is the one session, and is never forked), and the
+/// agent named in the owner's setting. Whether its own turn works for other agents is the
+/// actor's to say ([`clarp_actor::Actor::fork_take`]).
+pub(crate) fn may_fork(backend: &str, view: View, agent_id: &str, session: &str) -> bool {
+    backend == "claude" && view == View::Conversation && named(agent_id, session)
 }
 
 #[cfg(test)]
@@ -59,5 +74,12 @@ mod tests {
             !names(Some(&wrong), "a-1", "hazel-74f6"),
             "a list or nothing"
         );
+    }
+
+    #[test]
+    fn session_view_and_other_tools_never_fork() {
+        // The setting is not read for these: nothing names them on a test machine either.
+        assert!(!may_fork("codex", View::Conversation, "a-1", "x"));
+        assert!(!may_fork("claude", View::Session, "a-1", "x"));
     }
 }

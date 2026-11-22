@@ -603,5 +603,16 @@ reference has neither row field. `conformance/intended.txt` registers their addi
 The agent-row flag `conversation_fork` is true for an eligible agent named in
 `[conversation_forks]` in the Host's `config.toml` and false otherwise. The retired
 Python reference has no such flag. The conformance register covers its boolean addition
-in the snapshot, archived roster and made-agent response. The fork itself is issue
-718's next piece.
+in the snapshot, archived roster and made-agent response.
+
+Conversation forks (issue 718, contract 153, feature `conversation_fork`) are available
+on the Rust Host only, for the agents its owner names in `[conversation_forks] agents` of the
+Host's `config.toml` (read anew at each message and each snapshot; the snapshot says so per
+agent as `conversation_fork`). In Conversation view, a message of the user's to such a Claude
+Code agent while its own turn works for other agents is answered at once by a fork of the
+agent's session (`--resume <session> --fork-session --session-id <fork>`), in the same
+conversation; the next message goes to the same fork, and the agent's own next turn opens with
+a note of what the fork was asked, said and did. `/live` shows the fork's turn, with the agent's
+own as `main_turn`; `POST /stop` stops the fork's turn first (`target: "main"` for the agent's
+own). A fork's tools run with `CLARP_FORK=1`: `clarp-agent-bg job-upsert|job-restart`,
+`clarp-admin agent create|fork` and `clarp-sub-agent start|fork` refuse it (exit 77).

@@ -233,6 +233,10 @@ enum Ask {
         start_waiting: bool,
         answer: Answer<Stopped>,
     },
+    /// Stop the turn of the agent's conversation fork, where one runs: whether one did.
+    StopFork {
+        answer: Answer<bool>,
+    },
     /// A turn nothing runs is looked for and given back, and a note of who and why is kept.
     Repair {
         by: Control,
@@ -838,6 +842,12 @@ impl AgentHandle {
             answer,
         })
         .await
+    }
+
+    /// Stops the turn of the agent's conversation fork, where one runs (issue 718). Answers
+    /// whether one did; the agent's own turn and its queue are left as they are.
+    pub async fn stop_fork(&self) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::StopFork { answer }).await
     }
 
     /// Gives back a turn of the agent that nothing runs, and keeps a note of who and why.
@@ -3070,7 +3080,42 @@ impl Worker {
                     if let Some(c) = &self.setup.hub.capture {
                         c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
                     }
-                    let steer = if sent.queued
+                    // In Conversation view, a message of the user's to an agent whose own turn
+                    // works for other agents is answered at once by its fork (issue 718).
+                    let direct_user = admission == Admission::Queue
+                        && message.origin.is_user_send()
+                        && marks.coordination.is_none();
+                    let forked = if sent.queued
+                        && direct_user
+                        && crate::conversation_forks::may_fork(
+                            &self.setup.record.backend,
+                            self.setup
+                                .hub
+                                .queue_directory()
+                                .as_deref()
+                                .map(|directory| {
+                                    crate::chat_view::preference(
+                                        directory,
+                                        &self.setup.record.agent_id,
+                                    )
+                                })
+                                .unwrap_or_default(),
+                            &self.setup.record.agent_id,
+                            &self.setup.record.session,
+                        ) {
+                        let (taken, fork) = actor.fork_take(turn, now)?;
+                        if taken {
+                            out.actions.extend(fork.actions);
+                            out.changed.status |= fork.changed.status;
+                            out.changed.queue |= fork.changed.queue;
+                        }
+                        taken
+                    } else {
+                        false
+                    };
+                    let steer = if forked {
+                        None
+                    } else if sent.queued
                         && can_offer_steering
                         && let Some(uuid) = message
                             .trace_id
@@ -3083,6 +3128,7 @@ impl Worker {
                     };
                     if let Some(action) = steer {
                         out.actions.push(action);
+                    } else if forked {
                     } else if sent.queued
                         && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
                         && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
@@ -3193,6 +3239,7 @@ impl Worker {
             Ask::Repair { by, answer } => {
                 answered(actor.repair(by, now).map(|out| ((), out)), answer)?
             }
+            Ask::StopFork { answer } => answered(Ok(actor.fork_halt()), answer)?,
             // The mailbox alone: the agent's goals stay as they are, and wait with it.
             Ask::Hold { by, answer } => {
                 if let Err(why) = actor.require_here() {
@@ -4131,10 +4178,58 @@ impl Worker {
                 self.write_followup(socket, input);
                 return;
             }
+            Action::Fork(order) => self.launch_fork(*order, tx),
+            Action::ForkFollow {
+                turn,
+                attempt,
+                socket,
+            } => std::thread::Builder::new()
+                .name(format!("fork-{}", turn.0))
+                .spawn(move || launcher::follow(&socket, &|told| tell(&tx, turn, attempt, told))),
         };
         if let Err(error) = spawned {
             eprintln!("clarp-host: a turn's thread could not be started: {error}");
         }
+    }
+
+    /// Starts a turn of the agent's conversation fork: with the agent's own tool settings, so
+    /// that it reads what the provider cached for the agent's session, and as one of the
+    /// agent's turns for its tools. Nothing waits for an account, a terminal or a permit: the
+    /// fork's message is the agent's own again if it cannot start.
+    fn launch_fork(
+        &mut self,
+        mut order: clarp_actor::ShimOrder,
+        tx: mpsc::Sender<Ask>,
+    ) -> std::io::Result<std::thread::JoinHandle<()>> {
+        if let Some(settings) = self
+            .setup
+            .launcher
+            .claude_settings(&self.setup.record.agent_id)
+        {
+            order.args.extend(["--settings".into(), settings]);
+        }
+        if let Some(token) = self
+            .setup
+            .turns
+            .token(&self.setup.record.agent_id, order.turn.0)
+        {
+            order
+                .env
+                .push((crate::turn_identity::TURN_ENV.to_string(), token));
+        }
+        let launcher = self.setup.launcher.clone();
+        let pool = self.setup.pool().cloned();
+        let (strict, servers) = (self.setup.mcp_strict, self.setup.record.mcp_servers.clone());
+        let (turn, attempt) = (order.turn, order.attempt);
+        std::thread::Builder::new()
+            .name(format!("fork-{}", turn.0))
+            .spawn(move || {
+                if let Some(pool) = pool {
+                    pool.guard_turn(&mut order);
+                }
+                let _mcp = crate::mcp::configure(&mut order, strict, servers.as_deref());
+                launcher.launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told));
+            })
     }
 
     fn write_followup(&mut self, socket: PathBuf, input: String) {
@@ -5153,6 +5248,7 @@ fn refuse_for(
             Ok(Ask::LeaveNote { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Repair { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::StopFork { answer }) => drop(answer.send(Ok(false))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),

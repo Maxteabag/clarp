@@ -1675,9 +1675,9 @@ pub fn log_response(
                     View::Session
                 };
                 fields.insert("view".into(), json!(view));
-                // The session of the agent's tool the row came from, and the conversation,
-                // which stays the agent's whatever session its tool runs in (contract 153). A
-                // session the Host does not know is not said.
+                // Which session of the agent's tool the row came from: its own, or its
+                // conversation fork's (issue 718, contract 153), and the conversation, which a
+                // fork never changes. A session the Host does not know is not said.
                 fields.insert("conversation_id".into(), json!(conversation));
                 if let Some(session) = &version.session {
                     fields.insert("session_id".into(), json!(session));
