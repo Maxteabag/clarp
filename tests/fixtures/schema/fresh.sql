@@ -1,4 +1,4 @@
--- user_version 137
+-- user_version 138
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -104,6 +104,9 @@ CREATE INDEX idx_dream_runs_started ON dream_runs(started_at DESC);
 
 -- index idx_dream_threads_run on dream_threads
 CREATE INDEX idx_dream_threads_run ON dream_threads(run_id, thread_index);
+
+-- index idx_form_submission_artifact on form_submissions
+CREATE INDEX idx_form_submission_artifact ON form_submissions(artifact_id, created_at, submission_id);
 
 -- index idx_form_submission_pending on form_submissions
 CREATE INDEX idx_form_submission_pending ON form_submissions(status, created_at);

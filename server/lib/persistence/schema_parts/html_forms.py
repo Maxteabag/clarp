@@ -14,4 +14,5 @@ SCHEMA = '''CREATE TABLE IF NOT EXISTS form_submissions (
  delivered_at INTEGER,
  synthesize_audio INTEGER NOT NULL DEFAULT 0 CHECK (synthesize_audio IN (0,1))
 );
-CREATE INDEX IF NOT EXISTS idx_form_submission_pending ON form_submissions(status,created_at);'''
+CREATE INDEX IF NOT EXISTS idx_form_submission_pending ON form_submissions(status,created_at);
+CREATE INDEX IF NOT EXISTS idx_form_submission_artifact ON form_submissions(artifact_id,created_at,submission_id);'''
