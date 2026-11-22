@@ -682,3 +682,31 @@ def test_a_delta_after_a_relink_carries_the_new_trace(tmp_path):
     rows = [t for t in delta["turns"] if t.get("id") == "u-c-1"]
     assert [t.get("trace_id") for t in rows] == ["t-second"]
     assert delta["latest_revision"] > before
+
+
+def test_a_compact_turn_keeps_its_failed_calls_and_does_not_count_them(tmp_path):
+    # The quiet chat (#653): a failed call stays in its own row after a reload, as live,
+    # and the folded row counts only the calls it folds.
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [{
+        "id": "with-failure", "role": "assistant", "timestamp": "2026-01-01T00:00:00Z",
+        "text": "", "tools": [{"id": "a", "name": "Bash", "summary": "a"}],
+        "display_cells": [
+            {"id": "ok-1", "kind": "command", "title": "Bash", "lines": [{"text": "x"}]},
+            {"id": "bad", "kind": "command", "title": "Bash", "status": "error", "lines": [{"text": "y"}]},
+            {"id": "ok-2", "kind": "command", "title": "Bash", "lines": [{"text": "z"}]},
+        ],
+    }, {
+        "id": "all-failed", "role": "assistant", "timestamp": "2026-01-01T00:00:01Z",
+        "text": "", "tools": [{"id": "b", "name": "Bash", "summary": "b"}],
+        "display_cells": [
+            {"id": "bad-1", "kind": "command", "title": "Bash", "status": "error", "lines": []},
+            {"id": "bad-2", "kind": "command", "title": "Bash", "status": "error", "lines": []},
+        ],
+    }])
+    compact = _load("reliable", limit=20, include_automated=False, include_tool_details=False)
+    first, second = compact["turns"][0], compact["turns"][1]
+    assert [c["id"] for c in first["display_cells"]] == ["ok-1", "bad"]
+    assert first["display_cells"][0]["detail_count"] == 2      # ok-1 and ok-2, not the failure
+    assert first["display_cells"][1]["status"] == "error"
+    assert [c["id"] for c in second["display_cells"]] == ["bad-1", "bad-2"]
