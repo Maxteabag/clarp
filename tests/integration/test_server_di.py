@@ -1299,7 +1299,7 @@ def test_diagnostics_settings_are_computer_owned_and_validated(running_server):
         failure.value.read())["error"]
 
 
-def test_disabled_client_diagnostics_are_accepted_without_capture(running_server):
+def test_disabled_client_diagnostics_are_kept_bounded_without_full_capture(running_server):
     from lib import diagnostics_settings, telemetry
     base, _ctx, _srv = running_server
     diagnostics_settings.update({"enabled": False, "categories": []})
@@ -1307,7 +1307,8 @@ def test_disabled_client_diagnostics_are_accepted_without_capture(running_server
         "events": [{"event": "ios.performance.frame", "detail": "private"}],
     })
     assert status == 200
-    assert json.loads(body)["captured"] is False
+    # The bounded client event store keeps it (client_events_kept); the fuller capture does not.
+    assert json.loads(body)["captured"] is True and json.loads(body)["full_capture"] is False
     captured = telemetry.conn().execute(
         "SELECT count(*) FROM diagnostic_events "
         "WHERE source='client' AND event='ios.performance.frame'").fetchone()[0]

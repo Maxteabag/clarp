@@ -1041,8 +1041,15 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `GET /dirs?path=` — directory completion for the start dialog. Answers `{"base", "matches"}`: a path that
   ends in a slash lists the visible directories inside it (absolute paths only); any other path completes its last
   name in its parent. At most 20 matches. A directory that is not there answers no matches.
-- `POST /clog` — batched client diagnostics `{"events": [{"event", "detail",
-  "trace_id", "clip_id"}]}`; the server files them next to its own logs.
+- `POST /clog` — batched client diagnostics `{"events": [{"event", "detail", "level",
+  "trace_id", "clip_id"}]}`. Every batch goes into a bounded store whatever the diagnostics
+  setting says (feature `client_events_kept`): events whose level or name says error, crash,
+  exception, fatal, fault or hang are kept up to 7 days with the 30 minutes before them from
+  the same device; others for 30 minutes; at most 50 000 events / 50 MB in total. Secrets are
+  cut first. The answer is `{ok, captured, kept, full_capture}`: `captured` is true when the
+  Host kept the batch (keep it and send it again when false), `full_capture` whether the
+  diagnostics setting also took it into its fuller capture. Agents read the store with
+  `GET /client-log` (full scope) or `clarp-admin client-log`.
 
 ### The sync algorithm
 

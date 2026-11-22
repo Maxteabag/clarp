@@ -60,7 +60,9 @@ def test_bad_json_and_disabled_capture(running_server):
     base, _ctx, _srv = running_server
     assert _post(base, b"[1]") == (400, {"error": "bad json"})
     diagnostics_settings.update({"enabled": False, "categories": []})
-    assert _post(base, b'{"event": "x"}') == (200, {"ok": True, "captured": False})
+    # Kept in the bounded client event store whatever the setting (client_events_kept); the
+    # fuller capture stays off.
+    assert _post(base, b'{"event": "x"}') == (200, {"ok": True, "captured": True, "kept": 1, "full_capture": False})
 
 
 def test_single_event_is_logged_and_emitted(capture):
@@ -68,7 +70,7 @@ def test_single_event_is_logged_and_emitted(capture):
     assert _post(base, json.dumps({
         "event": "ios.tap", "detail": "pressed", "session": "claude", "clip_id": "42",
         "duration_ms": 7, "trace_id": " t1 ", "client_id": "c1"}).encode()) == (
-        200, {"ok": True})
+        200, {"ok": True, "captured": True, "kept": 1, "full_capture": True})
     assert _lines(log_path) == ["client   ios.tap pressed"]
     assert rows == [("ios.tap", {
         "session": "claude", "agent_id": None, "backend_session_id": None, "persona": None,
@@ -82,7 +84,7 @@ def test_batch_events_convert_details_and_clip_ids(capture):
         {"event": "a", "detail": {"k": 1}, "clip_id": "x"},
         {"detail": ""},
         {"event": "c" * 80, "detail": 5},
-    ]}).encode()) == (200, {"ok": True})
+    ]}).encode()) == (200, {"ok": True, "captured": True, "kept": 3, "full_capture": True})
     assert _lines(log_path) == ['client   a {"k":1}', "client   ? ", "client   " + "c" * 80 + " 5"]
     assert [(event, fields["detail"], fields["clip_id"]) for event, fields in rows] == [
         ("a", {"k": 1}, None), ("log", None, None), ("c" * 64, None, None)]
