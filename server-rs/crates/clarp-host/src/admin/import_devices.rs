@@ -1,52 +1,24 @@
 //! Offline migration from the Python Host's paired-device book.
 
 use std::collections::HashSet;
-use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clarp_ports::kv::StoreError;
 use clarp_store_sqlite::SqliteKeyValue;
-use rusqlite::{Connection, OpenFlags};
 use serde_json::json;
 
 use crate::fleet::DEVICES;
 use crate::pairing::{self, Device, Scope};
 
-pub(super) fn run(mut args: impl Iterator<Item = String>) -> Result<String, String> {
-    let (mut source, mut data) = (None, None);
-    while let Some(arg) = args.next() {
-        let path = match arg.as_str() {
-            "--from-db" if source.is_none() => &mut source,
-            "--data" if data.is_none() => &mut data,
-            _ => return Err("device import takes --from-db PATH and --data DIR once each".into()),
-        };
-        *path = Some(PathBuf::from(
-            args.next().ok_or("a device import path is missing")?,
-        ));
-    }
-    let source = source.ok_or("device import requires --from-db PATH")?;
-    let data = data.ok_or("device import requires --data DIR")?;
-    migrate(&source, &data.join("fleet.db"))
+use super::offline_import::{self, Files};
+
+pub(super) fn run(args: impl Iterator<Item = String>) -> Result<String, String> {
+    let files = Files::parse(args, "device import", false)?;
+    migrate(&files.source, &files.target)
 }
 
 fn migrate(source: &Path, target: &Path) -> Result<String, String> {
-    let source = source
-        .canonicalize()
-        .map_err(|_| "the Python state database was not found")?;
-    let before = source
-        .metadata()
-        .map_err(|_| "the Python state database could not be inspected")?;
-    let after = target
-        .metadata()
-        .map_err(|_| "the Rust fleet.db was not found")?;
-    if !before.is_file() || !after.is_file() {
-        return Err("the source and destination must be database files".into());
-    }
-    if (before.dev(), before.ino()) == (after.dev(), after.ino()) {
-        return Err("the Python state database and Rust fleet.db must be different files".into());
-    }
-
-    let (server_id, devices, revoked) = read_source(&source)?;
+    let (server_id, devices, revoked) = read_source(source)?;
     let (imported, previous_id_added) = SqliteKeyValue::update_existing(target, |store| {
         let mut ids = HashSet::new();
         let mut hashes = HashSet::new();
@@ -112,17 +84,7 @@ fn migrate(source: &Path, target: &Path) -> Result<String, String> {
 }
 
 fn read_source(path: &Path) -> Result<(String, Vec<Device>, u64), String> {
-    // The Python Host has stopped. Use an in-memory WAL index rather than
-    // opening or creating its -shm file. Unlike immutable mode, this reads
-    // committed frames that have not been checkpointed into the database.
-    let conn = Connection::open_with_flags_and_vfs(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        "unix-none",
-    )
-    .map_err(|_| "the Python state database could not be opened read-only")?;
-    conn.execute_batch("PRAGMA locking_mode=EXCLUSIVE;")
-        .map_err(|_| "the Python WAL could not be opened without shared memory")?;
+    let conn = offline_import::source(path)?;
     let server_id: String = conn
         .query_row(
             "SELECT value FROM settings WHERE key = 'server_instance_id'",

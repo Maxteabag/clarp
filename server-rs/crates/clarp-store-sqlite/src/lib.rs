@@ -244,18 +244,7 @@ impl SqliteKeyValue {
         path: &Path,
         update: impl FnOnce(&dyn KeyValue) -> Result<(Vec<Write>, T), StoreError>,
     ) -> Result<T, StoreError> {
-        let conn = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(failed)?;
-        let version: i64 = conn
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(failed)?;
-        if version != KV_SCHEMA_VERSION {
-            return Err(StoreError("unexpected fleet store schema".into()));
-        }
-        let tables = SqliteTables { conn };
+        let tables = existing_tables(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         // On any error, closing this connection rolls the transaction back.
         tables
             .conn
@@ -266,6 +255,31 @@ impl SqliteKeyValue {
         tables.conn.execute_batch("COMMIT;").map_err(failed)?;
         Ok(result)
     }
+
+    /// Read one snapshot of an existing fleet store without permitting row updates.
+    pub fn read_existing<T>(
+        path: &Path,
+        read: impl FnOnce(&dyn KeyValue) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let tables = existing_tables(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        tables
+            .conn
+            .execute_batch("PRAGMA query_only=ON; BEGIN;")
+            .map_err(failed)?;
+        read(&tables)
+    }
+}
+
+fn existing_tables(path: &Path, mode: OpenFlags) -> Result<SqliteTables, StoreError> {
+    let conn = Connection::open_with_flags(path, mode | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+        .map_err(failed)?;
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(failed)?;
+    if version != KV_SCHEMA_VERSION {
+        return Err(StoreError("unexpected fleet store schema".into()));
+    }
+    Ok(SqliteTables { conn })
 }
 
 fn failed(error: rusqlite::Error) -> StoreError {

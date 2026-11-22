@@ -59,6 +59,8 @@ mod import_devices;
 mod import_record_move;
 #[path = "host/import_render_specs.rs"]
 mod import_render_specs;
+#[path = "host/import_settings.rs"]
+mod import_settings;
 #[path = "host/installer.rs"]
 mod installer;
 #[path = "host/janitor_attention.rs"]

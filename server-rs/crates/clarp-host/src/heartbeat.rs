@@ -29,6 +29,7 @@ use clarp_kernel::conversation::Entry;
 use clarp_kernel::heartbeat::{self as rules, Counted, Known, Latest, PlanLine, Settings};
 use clarp_kernel::python;
 use clarp_kernel::turn::Outcome;
+use clarp_ports::kv::{KeyValue, StoreError, Write};
 use clarp_protocol::requests::SendRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -60,6 +61,43 @@ struct Book {
     settings: Settings,
     agents: BTreeMap<String, rules::State>,
     counted: BTreeMap<String, String>,
+}
+
+/// Prepare an offline policy import without replacing the destination's heartbeat state.
+pub(crate) fn plan_import_settings(
+    store: &dyn KeyValue,
+    asked: Value,
+) -> Result<(Settings, Option<Write>), StoreError> {
+    let table = crate::fleet::shelf(KIND);
+    let invalid = |_| StoreError("the Rust heartbeat policy could not be read".into());
+    let mut book: serde_json::Map<String, Value> = match store.get(&table, ALL)? {
+        Some(bytes) => serde_json::from_slice(&bytes).map_err(invalid)?,
+        None => serde_json::Map::new(),
+    };
+    let kept = book.entry("settings").or_insert_with(|| json!({}));
+    let previous: Settings = serde_json::from_value(kept.clone()).map_err(invalid)?;
+    let next = previous.changed(&asked).map_err(StoreError)?;
+    if previous == next {
+        return Ok((previous, None));
+    }
+    // Change only known policy fields. Leave runtime and newer fields in the book as they are.
+    let settings = kept
+        .as_object_mut()
+        .ok_or_else(|| StoreError("the Rust heartbeat policy is not an object".into()))?;
+    let writes = [
+        ("interval_sec", json!(next.interval_sec)),
+        ("backoff_strategy", json!(next.backoff_strategy)),
+        ("backoff_cap_sec", json!(next.backoff_cap_sec)),
+        ("dormant_after_noops", json!(next.dormant_after_noops)),
+    ];
+    settings.extend(
+        writes
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value)),
+    );
+    let body = serde_json::to_vec(&book)
+        .map_err(|_| StoreError("the Rust heartbeat policy could not be encoded".into()))?;
+    Ok((previous, Some((table, ALL.to_owned(), Some(body)))))
 }
 
 /// The heartbeat of this Host. `None` until its book was read where it is kept.

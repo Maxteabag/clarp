@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 use crate::ids;
 
 mod import_devices;
+mod import_settings;
+mod offline_import;
 
 pub const PAIR_USAGE: &str =
     "usage: clarp-host pair --url URL | --relay [--name DEVICE] [--scope full|limited] \
@@ -38,7 +40,9 @@ pub const IMPORT_USAGE: &str =
                          [--files-from ADDR:PORT]
        clarp-host import --back --from ADDR:PORT --session NAME [--host ADDR:PORT]
        clarp-host import --devices --from-db PATH --data DIR
-For --devices, stop the Python Host first and run the import before starting the Rust Host.
+       clarp-host import --settings --from-db PATH --data DIR [--dry-run]
+Stop the Python Host before reading its database. Run a writing import before starting the
+Rust Host. --settings --dry-run prints the same plan without updating the destination.
 PATH is the Python state.sqlite and DIR is the Rust Host's --data directory with fleet.db.
 Reads the agent NAME, its conversation, its library, its plans and goals and the files it
 published or shows from the Host at --from and gives them to this Host. With --files only
@@ -816,9 +820,16 @@ pub fn import(
     files_token: &str,
 ) -> Result<String, String> {
     let mut args = args.peekable();
-    if args.peek().is_some_and(|arg| arg == "--devices") {
-        args.next();
-        return import_devices::run(args);
+    match args.peek().map(String::as_str) {
+        Some("--devices") => {
+            args.next();
+            return import_devices::run(args);
+        }
+        Some("--settings") => {
+            args.next();
+            return import_settings::run(args);
+        }
+        _ => {}
     }
     let (mut from, mut session, mut only_files, mut back) = (None, None, false, false);
     let mut files_from: Option<String> = None;
