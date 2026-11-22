@@ -24,19 +24,26 @@ pub(crate) struct TurnQueue {
 impl Engine {
     /// The loaded queue's items when it is `session`'s, else none.
     pub fn turn_queue(&self, session: &str) -> Vec<Value> {
+        on_peer!(self.peer_ref(session), |engine, local| engine.turn_queue(local));
         if session.is_empty() || session != self.queue.session { Vec::new() } else { self.queue.items.clone() }
     }
     /// The chat whose queue is loaded (or loading).
     pub fn turn_queue_session(&self) -> &str {
+        if let Some(session) = self.queue_peer_session() {
+            return session;
+        }
         &self.queue.session
     }
     pub fn turn_queue_paused(&self) -> bool {
+        on_peer!(self.queue_peer_ref(), |engine, _local| engine.turn_queue_paused());
         self.queue.paused
     }
     pub fn turn_queue_loading(&self) -> bool {
+        on_peer!(self.queue_peer_ref(), |engine, _local| engine.turn_queue_loading());
         self.queue.loading
     }
     pub fn turn_queue_error(&self) -> &str {
+        on_peer!(self.queue_peer_ref(), |engine, _local| engine.turn_queue_error());
         &self.queue.error
     }
 
@@ -44,6 +51,8 @@ impl Engine {
         if session.is_empty() {
             return;
         }
+        self.note_queue_host(session);
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_turn_queue(local));
         if self.queue.session != session {
             self.queue.items.clear();
             self.queue.paused = false;
@@ -74,6 +83,7 @@ impl Engine {
     }
 
     pub fn update_queued_turn(&mut self, queue_id: &str, text: &str) {
+        on_peer!(self.queue_peer_mut(), |engine, _local| engine.update_queued_turn(queue_id, text));
         let text = text.trim();
         if !queue_id.is_empty() && !text.is_empty() {
             self.queue_action("PUT", &Self::queue_item_path(queue_id), json!({"text": text}));
@@ -81,6 +91,7 @@ impl Engine {
     }
 
     pub fn delete_queued_turn(&mut self, queue_id: &str) {
+        on_peer!(self.queue_peer_mut(), |engine, _local| engine.delete_queued_turn(queue_id));
         if !queue_id.is_empty() {
             self.queue_action("DELETE", &Self::queue_item_path(queue_id), Value::Null);
         }
@@ -88,6 +99,7 @@ impl Engine {
 
     /// Sends a queued turn now instead of after the running one.
     pub fn send_queued_turn(&mut self, queue_id: &str) {
+        on_peer!(self.queue_peer_mut(), |engine, _local| engine.send_queued_turn(queue_id));
         if !queue_id.is_empty() {
             self.queue_action("POST", &format!("{}/send", Self::queue_item_path(queue_id)), json!({}));
         }

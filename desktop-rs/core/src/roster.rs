@@ -503,6 +503,11 @@ impl Roster {
 
     // ---- queries ---------------------------------------------------------
 
+    /// False after the event stream dropped, until the next snapshot.
+    pub fn transport_available(&self) -> bool {
+        self.transport_available
+    }
+
     pub fn index_of_session(&self, session: &str) -> Option<usize> {
         self.by_session.get(session).copied()
     }

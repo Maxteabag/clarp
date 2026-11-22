@@ -55,17 +55,20 @@ impl Engine {
     /// Whether live items show this chat: the feature is on and the Host
     /// has actually sent it something live.
     pub fn live_active(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.live_active(local));
         self.live_owns(session)
     }
 
     /// The chat's live state, once the feature is on and it was opened.
     pub fn live_view(&self, session: &str) -> Option<&LiveView> {
+        on_peer!(self.peer_ref(session), |engine, local| engine.live_view(local));
         self.live.views.get(session)
     }
 
     /// Whether the Host explains tool items, as the chat's last snapshot
     /// said (on by default, as on the Host).
     pub fn tool_explanations_enabled(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.tool_explanations_enabled(local));
         self.live
             .explanations
             .as_ref()
@@ -136,6 +139,7 @@ impl Engine {
     /// A chat opened: hold a view for it, ask for its snapshot once, and
     /// subscribe the stream to it.
     pub(crate) fn live_chat_opened(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.live_chat_opened(local));
         if !self.live.enabled || session.is_empty() || session.starts_with("pair:") {
             return;
         }

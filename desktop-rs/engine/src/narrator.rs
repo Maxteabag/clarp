@@ -62,27 +62,32 @@ impl Engine {
 
     /// The cached explanation of an activity ("" until the Host has one).
     pub fn explanation_for(&self, session: &str, activity: &Object) -> String {
+        on_peer!(self.peer_ref(session), |engine, local| engine.explanation_for(local, activity));
         self.narrator.borrow_mut().explanation(&with_session(session, activity))
     }
 
     /// The Host could not explain this activity.
     pub fn explanation_failed(&self, session: &str, activity: &Object) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.explanation_failed(local, activity));
         self.narrator.borrow_mut().failed(&with_session(session, activity))
     }
 
     /// Asks for an activity's explanation (one the reader opened).
     pub fn request_explanation(&mut self, session: &str, activity: &Object) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.request_explanation(local, activity));
         let effects = self.narrator.borrow_mut().request(&with_session(session, activity));
         self.narrate(effects);
     }
 
     /// A shown activity keeps its explanation wanted; `owner` names the view.
     pub fn acquire_explanation_view(&mut self, owner: u64, session: &str, activity: &Object) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.acquire_explanation_view(owner, local, activity));
         let effects = self.narrator.borrow_mut().acquire_view(owner, &with_session(session, activity));
         self.narrate(effects);
     }
 
     pub fn release_explanation_view(&mut self, owner: u64) {
+        self.peers_release_explanation_view(owner);
         let effects = self.narrator.borrow_mut().release_view(owner);
         self.narrate(effects);
     }
