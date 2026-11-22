@@ -22,11 +22,13 @@ async fn owner(app: &App) -> Option<(String, u64, Value)> {
         .flatten()
 }
 
+/// Status reports both a configured account selector and a scheduled switcher.
+/// Only a Janitor owner runs the scheduled switcher below.
 pub(super) async fn enabled(app: &App) -> bool {
     if app.config.accounts != Accounts::Select || !app.seats.told() {
         return false;
     }
-    owner(app).await.is_some()
+    app.pools.iter().any(|pool| pool.has_selector()) || owner(app).await.is_some()
 }
 
 pub fn start(app: &App) {

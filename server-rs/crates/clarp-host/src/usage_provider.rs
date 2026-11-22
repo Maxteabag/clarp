@@ -195,6 +195,28 @@ fn child(tool: &str) -> Option<Command> {
     Some(cmd)
 }
 
+/// Read one small status reply. Child diagnostics and raw output stay at the caller.
+pub(crate) async fn status_command(
+    tool: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Option<(bool, String)> {
+    const MAXIMUM: u64 = 64 * 1024;
+    let mut process = child(tool)?.args(args).stdin(Stdio::null()).spawn().ok()?;
+    let _group = Group(process.id()? as i32);
+    let mut output = Vec::new();
+    let mut stdout = process.stdout.take()?.take(MAXIMUM + 1);
+    let read = async {
+        stdout.read_to_end(&mut output).await.ok()?;
+        if output.len() as u64 > MAXIMUM {
+            return None;
+        }
+        Some(process.wait().await.ok()?.success())
+    };
+    let success = tokio::time::timeout(timeout, read).await.ok()??;
+    Some((success, String::from_utf8(output).ok()?))
+}
+
 fn app_server_read(result: &Value) -> Option<Reading> {
     if !clarp_kernel::python::truthy(&result["rateLimits"])
         && !clarp_kernel::python::truthy(&result["rateLimitsByLimitId"])
