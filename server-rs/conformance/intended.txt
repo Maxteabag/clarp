@@ -165,3 +165,21 @@ d8ed2c14cff8  stop-with-queue: turn row 4 has session_rows (#702)
 # Python sends a generic queue-updated after the event that starts golf. It
 # repeats that event's pause state, depth and revision. Rust says them once.
 3e19d6c5eefe  stop-with-queue: Python repeats the paused queue state, depth 2 and revision 6 after golf starts
+
+# Rust's stalled_turn feature (#249, Host contract 149) includes stalled_since
+# and stalled_action in the agent snapshot and activity events, null when a turn
+# is not stalled. The retired Python reference has neither field (45054107427).
+e49c42961ba1  stop-with-queue: null stalled_action on the snapshot activity (#249)
+4fe1034562fd  stop-with-queue: null stalled_since on the snapshot activity (#249)
+6e6a5506c014  stop-with-queue: null stalled_action on the snapshot live activity (#249)
+80279fb979b0  stop-with-queue: null stalled_since on the snapshot live activity (#249)
+fae13a039e74  stop-with-queue: null stalled_action on the agent snapshot row (#249)
+16d16dc3d3dd  stop-with-queue: null stalled_since on the agent snapshot row (#249)
+82e74b0cc8e5  stop-with-queue: null stalled_action on the activity event at lane index 1 (#249)
+2c278d09ad23  stop-with-queue: null stalled_since on the activity event at lane index 1 (#249)
+4b974b3b2909  stop-with-queue: null stalled_action on the activity event at lane index 5 (#249)
+b1ef57890b8a  stop-with-queue: null stalled_since on the activity event at lane index 5 (#249)
+357049bbd780  stop-with-queue: null stalled_action on the activity event at lane index 9 (#249)
+d85cf592dd04  stop-with-queue: null stalled_since on the activity event at lane index 9 (#249)
+c8103eeafa7a  stop-with-queue: null stalled_action on the activity event at lane index 11 (#249)
+847a6a8e729c  stop-with-queue: null stalled_since on the activity event at lane index 11 (#249)
