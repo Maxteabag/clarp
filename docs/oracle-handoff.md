@@ -1,7 +1,8 @@
 # Oracle handoff: putting the user through to an agent
 
-Status: **proposed wire contract, revision 4, agreed, not yet implemented.** Written
-so the iOS owner can agree the wire before either side changes behaviour.
+Status: **wire contract, revision 4, implemented by the Python Host (being retired). The
+Rust Host has not built the Oracle yet**: it answers every `/oracle/` action as not built.
+Written so the iOS owner could agree the wire before either side changed behaviour.
 Host contract 22, feature `oracle_handoff`.
 
 ## What it is
