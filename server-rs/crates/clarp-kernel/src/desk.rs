@@ -26,6 +26,8 @@
 //! This is the Python Host's `hotseat_desk.py` and `hotseat_desk_reading.py` (wire schema
 //! `clarp.hotseat-desk/1`), by that Host's own answers (`tools/desk-vectors.py`).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -896,6 +898,9 @@ pub struct Desk {
     /// How the last read failed; nothing when it worked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     error: Option<Failed>,
+    /// Failures of the last live attempt, even if the desk still shows an older snapshot.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    source_errors: BTreeMap<String, Failed>,
 }
 
 impl Desk {
@@ -981,6 +986,7 @@ impl Desk {
             read["observed_at"] = json!(at);
             read["sources"]["list"] = json!("ok");
             self.error = None;
+            self.source_errors.remove("list");
         }
     }
 
@@ -1034,6 +1040,10 @@ impl Desk {
     /// be. Whether it made a desk: where the tool's own desk did not answer, none is made,
     /// the desk before stays, and how it failed is kept.
     pub fn read(&mut self, seats: &mut Seats, answers: Answers, began_ms: i64) -> bool {
+        self.source_errors = [("tui", &answers.desk), ("list", &answers.list), ("work", &answers.work)]
+            .into_iter()
+            .filter_map(|(source, answer)| answer.as_ref().err().map(|error| (source.to_owned(), *error)))
+            .collect();
         let desk = match answers.desk {
             Ok(desk) => desk,
             Err(how) => {
@@ -1082,6 +1092,37 @@ impl Desk {
         self.read = Some(made);
         self.error = None;
         true
+    }
+
+    fn provider_reads(&self, status: &Value) -> Vec<Value> {
+        let list_error = self.source_errors.get("list");
+        items(&status["providers"])
+            .iter()
+            .filter_map(|provider| {
+                let name = provider["provider"].as_str()?;
+                let failed = list_error.filter(|_| crate::seats::READ_PROVIDERS.contains(&name));
+                let inventory = if failed.is_some() || provider["read_state"] == "failed" { json!("unavailable") } else {
+                    provider["inventory"].clone()
+                };
+                let read_state = if failed.is_some() { json!("failed") } else {
+                    provider["read_state"].clone()
+                };
+                let error_code = match failed {
+                    Some(error) => json!(error),
+                    // A disabled switcher is not a failure to read the desk.
+                    None if provider["error_code"] == "disabled" => {
+                        json!((provider["read_state"] == "failed").then_some("provider_error"))
+                    }
+                    None => provider["error_code"].clone(),
+                };
+                Some(json!({
+                    "provider": name,
+                    "inventory": inventory,
+                    "read_state": read_state,
+                    "error_code": error_code,
+                }))
+            })
+            .collect()
     }
 
     /// The desk as it is kept, said at this moment (`HotseatDesk.payload`). `status`: what
@@ -1143,6 +1184,8 @@ impl Desk {
             "next_refresh_at": self.next_read_at(asked.last_attempt_ms),
             "sources": sources,
             "partial": partial,
+            "source_errors": self.source_errors,
+            "providers": self.provider_reads(status),
             "installed": asked.installed,
             "error": error,
             "switcher": switcher,

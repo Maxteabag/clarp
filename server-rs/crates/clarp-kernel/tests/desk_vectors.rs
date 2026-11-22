@@ -163,7 +163,11 @@ fn the_desk_is_read_kept_and_served_as_the_python_host_does() {
                         last_attempt_ms: host.last_attempt_ms,
                     };
                     let status = host.seats.served(enabled, now);
-                    let body = host.desk.served(&status, &asked);
+                    let mut body = host.desk.served(&status, &asked);
+                    // These desk diagnostics are Rust additions, held by the Host test.
+                    let wire = body.as_object_mut().unwrap();
+                    wire.remove("source_errors");
+                    wire.remove("providers");
                     let mut found = Vec::new();
                     unlike(&body, &step["body"], "", &mut found);
                     assert!(found.is_empty(), "{at}: {found:#?}");

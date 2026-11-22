@@ -783,6 +783,9 @@ def own_particulars(body):
     """`GET /server-info` with what is each Host's own as just that: the list of its features
     (what a Host has is what it advertises there, and the two do not have the same) and its
     version."""
+    # This reference comparison predates the Rust desk-read status fields (contract 148).
+    if isinstance(body, dict) and body.get('schema') == 'clarp.hotseat-desk/1':
+        return {key: value for key, value in body.items() if key not in ('source_errors', 'providers')}
     if not isinstance(body, dict) or 'capabilities' not in body or 'contract' not in body:
         return body
     out = dict(body)
