@@ -26,7 +26,7 @@ create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--versio
 form-events ARTIFACT_ID [--draft-key KEY] [--after N] [--limit N] [--output JSONL] [--overwrite] | \
 report-history ARTIFACT_ID [--version V] [--limit N] [--offset N] | \
 decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | \
-question SESSION TITLE QUESTION JSON_OPTIONS [OPTIONS] | \
+question SESSION TITLE QUESTION JSON_OPTIONS [--no-custom] [OPTIONS] | \
 input SESSION TITLE PROMPT [--hint one_time_code] [--expires-in S] [OPTIONS] | \
 wait ARTIFACT_ID [--timeout S] | \
 attention [--session SESSION] [--include-archived] | withdraw SESSION DECISION_ID | \
@@ -109,7 +109,12 @@ pub(crate) fn parse(
                 return Err(format!("argument {name}: expected one argument"));
             };
             parsed.options.insert(name.to_string(), value);
-        } else if flags.contains(&name) && attached.is_none() {
+        } else if flags.contains(&name) {
+            if let Some(value) = attached {
+                return Err(format!(
+                    "argument {name}: ignored explicit argument '{value}'"
+                ));
+            }
             parsed.flags.insert(name.to_string());
         } else if arg.starts_with("--") {
             return Err(format!("unrecognized arguments: {arg}"));
@@ -195,6 +200,7 @@ fn question_options(given: &str) -> Result<(Vec<Value>, Vec<String>), String> {
 /// `decision`, `question` and `input`: what is asked of the user, as a body for the Host.
 fn ask_body(cmd: &str, args: &[String], now_ms: i64) -> Result<(Map<String, Value>, bool), String> {
     let mut valued: Vec<&str> = ASK_VALUED.to_vec();
+    let mut flags = vec!["--blocks-progress", "--dry-run"];
     valued.push("--expires-in");
     let names: &[&str] = match cmd {
         "decision" => &[
@@ -211,10 +217,11 @@ fn ask_body(cmd: &str, args: &[String], now_ms: i64) -> Result<(Map<String, Valu
         }
         _ => {
             valued.extend(["--recommend", "--payload"]);
+            flags.push("--no-custom");
             &["session", "title", "question", "options_json"]
         }
     };
-    let parsed = parse(args, &valued, &["--blocks-progress", "--dry-run"], names)?;
+    let parsed = parse(args, &valued, &flags, names)?;
     let at = |index: usize| parsed.positional.get(index).map_or("", String::as_str);
     let payload_json = match cmd {
         "decision" => parsed.positional.get(5).map_or("{}", String::as_str),
@@ -287,7 +294,10 @@ fn ask_body(cmd: &str, args: &[String], now_ms: i64) -> Result<(Map<String, Valu
             }
             body.insert("response_type".to_string(), json!("single_choice"));
             body.insert("options".to_string(), json!(options));
-            body.insert("allow_custom_text".to_string(), json!(true));
+            body.insert(
+                "allow_custom_text".to_string(),
+                json!(!parsed.flags.contains("--no-custom")),
+            );
             body.insert("recommended_option_id".to_string(), json!(recommended));
         }
     }
