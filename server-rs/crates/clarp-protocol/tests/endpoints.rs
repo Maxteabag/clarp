@@ -161,8 +161,10 @@ fn a_log_response_reads_as_documented() {
 
 #[test]
 fn server_info_says_what_a_host_can_do() {
-    let text = r#"{"server_id":"s","name":"elitebook","deployment_mode":"systemd","version":"abc","default_cwd":"/home/p",
-        "clarp_version":"0.6.8","min_app_version":"1.0","capabilities":{"version":3,"features":["goal_ledger","live_items"]},
+    // `previous_server_ids` (Rust contract 144) and `hotseat_providers` (Rust contract 147) are
+    // always written, empty included.
+    let text = r#"{"server_id":"s","previous_server_ids":["py"],"name":"elitebook","deployment_mode":"systemd","version":"abc","default_cwd":"/home/p",
+        "clarp_version":"0.6.8","min_app_version":"1.0","capabilities":{"version":3,"features":["goal_ledger","live_items"],"hotseat_providers":["claude"]},
         "contract":{"host":99,"min_ios":1,"features":{"goal_ledger":52,"live_items":60}},
         "client":{"status":"client_outdated","platform":"ios","contract":40,"reason":"update the app"},
         "local_connection":{"enabled":false}}"#;
@@ -173,6 +175,8 @@ fn server_info_says_what_a_host_can_do() {
         "a feature the Host does not list is one it does not have"
     );
     assert_eq!(info.contract.host, 99);
+    assert_eq!(info.previous_server_ids, ["py"]);
+    assert_eq!(info.capabilities.hotseat_providers, ["claude"]);
     assert_eq!(info.contract.features.get("live_items"), Some(&60));
     assert_eq!(
         info.client.as_ref().unwrap().status,
