@@ -99,4 +99,50 @@ describe('the quiet chat: one work row per settled turn', () => {
     expect(out.byRow.has('u2')).toBe(false);
     expect(out.stripped.has('a1')).toBe(false);                 // the failed call stays in its row
   });
+
+  it('folds commentary between tools, never the reply, and keeps spoken commentary above the work row', () => {
+    const rows = [prompt('u1', 't1'),
+      row('a1', 't1', { phase: 'commentary', text: 'Looking at the build.', tools: [tool('c1')] }),
+      row('a2', 't1', { phase: 'commentary', text: '<speak>Found it, fixing now.</speak>', tools: [tool('c2')] }),
+      row('a3', 't1', { phase: 'commentary', text: 'Running the tests.', tools: [tool('c3')] }),
+      row('a4', 't1', { phase: 'final', text: 'Fixed.', turn: { worked_ms: 9000, tool_count: 3 } })];
+    for (const mode of ['grouped', 'hide_done']) {
+      const out = foldTurns(rows, { mode });
+      expect(out.stripped.get('a1').text).toBe('Looking at the build.');
+      expect(out.stripped.get('a2').text).toBe('');                 // spoken: its words stay
+      expect(out.stripped.get('a2').tools.map(t => t.id)).toEqual(['c2']);
+      expect(out.stripped.get('a3').text).toBe('Running the tests.');
+      expect(out.stripped.has('a4')).toBe(false);                   // the reply never folds
+    }
+    const out = foldTurns(rows);
+    expect([...out.byRow.keys()]).toEqual(['a2']);                  // the work row sits below it
+    expect(out.byRow.get('a2').label).toBe('Worked for 9s · 3 tools');
+    expect(out.byRow.get('a2').calls.map(c => [c.rowId, c.text])).toEqual(
+      [['a1', 'Looking at the build.'], ['a2', ''], ['a3', 'Running the tests.']]);
+  });
+
+  it('takes the last text as the reply when rows carry no phase, and folds no commentary without tools', () => {
+    const rows = [prompt('u1', 't1'),
+      row('a1', 't1', { text: 'Checking.', tools: [tool('c1')] }),
+      row('a2', 't1', { text: 'Done.', turn: { worked_ms: 2000, tool_count: 1 } }),
+      prompt('u2', 't2'),
+      row('a3', 't2', { phase: 'commentary', text: 'Thinking aloud.' }),
+      row('a4', 't2', { phase: 'final', text: 'Answer.', turn: { worked_ms: 1000, tool_count: 0 } })];
+    const out = foldTurns(rows);
+    expect(out.stripped.get('a1').text).toBe('Checking.');
+    expect(out.stripped.has('a2')).toBe(false);
+    expect(out.byRow.has('u2')).toBe(false);
+    expect(out.stripped.has('a3')).toBe(false);
+  });
+
+  it('opens a failed-only turn\'s row to its commentary, and has nothing to open without it', () => {
+    const failed = { tools: [tool('c1', 'error')] };
+    const rows = [prompt('u1', 't1'), row('a1', 't1', { ...failed, phase: 'commentary', text: 'Trying the build.' }),
+      row('a2', 't1', { phase: 'final', text: 'It failed.', turn: { worked_ms: 4000, tool_count: 1 } }),
+      prompt('u2', 't2'), row('a3', 't2', { ...failed, phase: 'final', text: 'No luck.', turn: { worked_ms: 4000, tool_count: 1 } })];
+    const out = foldTurns(rows);
+    expect(out.byRow.get('u1').label).toBe('Worked for 4s');
+    expect(out.byRow.get('u1').calls.map(c => c.text)).toEqual(['Trying the build.']);
+    expect(out.byRow.get('u2').calls).toEqual([]);
+  });
 });

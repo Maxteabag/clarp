@@ -3419,3 +3419,5 @@ html:not(.desktop) .history:has(.status-line) .history-jump {
 /* The quiet chat's work row (static/lib/history-fold.js): a settled turn's tool calls, opened in place. */
 .turn.work-row { padding-top: 2px; padding-bottom: 2px; }
 .work-row-calls { margin: 4px 0 2px 14px; }
+.work-row-text { margin: 4px 0; color: var(--washi-dim); }
+span.lv-fold { cursor: default; }
