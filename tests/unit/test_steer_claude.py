@@ -258,12 +258,12 @@ def test_a_follow_up_during_a_tool_is_read_into_the_same_turn(world):
     assert _wait(lambda: _row(w, "m2") is not None)            # its row at the echo
     assert _wait(lambda: turn_queue.status("m2") != "queued")
     assert _queued(w) == []
-    # Written at the echo, after the CLI's copy, the row keeps the time it was sent: the
-    # import links that copy to it by when it was sent (message_import_common._steered_sent).
+    # It did not wait: no sent_at (docs/protocol.md, waited_send_order). The import takes
+    # its send time from the queue item (message_import_common._steered_sent).
     from lib import db
     sent = db.conn().execute("SELECT m.sent_at, q.enqueued_at FROM messages m JOIN queued_turns q"
                              " ON q.queue_id = 'm2' WHERE m.message_id = 'u-m2'").fetchone()
-    assert sent is not None and sent[0] == sent[1]
+    assert sent is not None and sent[0] is None and isinstance(sent[1], int)
     time.sleep(0.5)
     assert _calls(w) == 1                                      # never run as its own turn
     # The steering launch asks for the echo: without it nothing says a follow-up was read,
@@ -428,6 +428,9 @@ def test_a_runtime_that_dies_before_the_echo_settles_the_follow_up_at_its_start(
     if in_session:
         assert _calls(w) == 1                                 # never run
         assert item["status"] != "queued" and item["shown_at"] is not None
+        # Steered, it did not wait: its row has no sent_at (docs/protocol.md).
+        assert db.conn().execute("SELECT sent_at FROM messages WHERE message_id = 'u-m2'"
+                                 ).fetchone()[0] is None
     else:
         assert _wait(lambda: _calls(w) == 2)                  # runs as its own turn
         second = json.loads((w.dir / "call-2.json").read_text())["first"]
