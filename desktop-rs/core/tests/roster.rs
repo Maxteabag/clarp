@@ -404,3 +404,41 @@ fn a_duplicated_session_in_a_snapshot_is_one_row() {
     roster.apply_snapshot(serde_json::json!({"agents": [row("a", 3), row("b", 2), row("c", 1), row("c", 1), row("c", 1)]}).as_object().unwrap());
     assert_eq!(roster.sessions(), vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]);
 }
+
+/// #354: the snapshot's `turn_started_at` reaches the row while a turn runs;
+/// 0, null or absent (an older Host) is None, and a turn that starts or ends
+/// between snapshots starts or stops the clock from the state event.
+#[test]
+fn turn_started_at_follows_the_running_turn() {
+    use clarp_core::protocol::Agent;
+    let parse = |extra: Value| Agent::from_json(&obj(roster_row("a", "a-id", 10, extra)));
+    assert_eq!(parse(json!({"busy": true, "turn_started_at": 5_000})).turn_started_at, Some(5_000));
+    assert_eq!(parse(json!({"busy": true, "turn_started_at": null})).turn_started_at, None);
+    assert_eq!(parse(json!({"busy": false, "turn_started_at": 0})).turn_started_at, None);
+    assert_eq!(parse(json!({"busy": true})).turn_started_at, None);
+
+    let mut h = Harness::new();
+    h.snapshot(json!([roster_row("now", "now-id", 10, json!({"turn_started_at": 0})),
+                      roster_row("old", "old-id", 9, json!({}))]));
+    assert_eq!(h.row("now").turn_started_at, None);
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "now", "kind": "thinking", "ts": 7_000}))));
+    assert_eq!(h.row("now").turn_started_at, Some(7_000), "a turn begun between snapshots counts from its first busy state");
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "now", "kind": "tool", "ts": 9_000}))));
+    assert_eq!(h.row("now").turn_started_at, Some(7_000), "a later state in the same turn keeps its start");
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "now", "kind": "idle", "ts": 12_000}))));
+    assert_eq!(h.row("now").turn_started_at, None, "idle again: no clock");
+
+    let mut old = Harness::new();
+    old.snapshot(json!([roster_row("old", "old-id", 9, json!({}))]));
+    old.with(|r| r.apply_state_event(&obj(json!({"session": "old", "kind": "thinking", "ts": 7_000}))));
+    assert_eq!(old.row("old").turn_started_at, None, "a Host without turn_started_at keeps the last-message time");
+}
+
+#[test]
+fn a_running_turn_reads_in_seconds_minutes_and_hours() {
+    use clarp_core::time_format::turn_elapsed;
+    assert_eq!(turn_elapsed(-3_000), "0s", "a start ahead of the local clock never reads negative");
+    assert_eq!(turn_elapsed(12_400), "12s");
+    assert_eq!(turn_elapsed(399_000), "6m 39s");
+    assert_eq!(turn_elapsed(3_900_000), "1h 05m");
+}

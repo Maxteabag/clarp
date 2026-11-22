@@ -244,6 +244,32 @@ pub(crate) fn stamp(epoch_millis: i64) -> String {
     clarp_core::time_format::chat_stamp(epoch_millis, &chrono::Local::now())
 }
 
+/// A working agent's row shows its turn's running time where the last
+/// message's time stands (#354); idle, or from a Host that does not say when
+/// the turn started, the last message's time.
+pub(crate) fn row_stamp(busy: bool, turn_started_at: Option<i64>, last_activity: i64) -> String {
+    match turn_started_at {
+        Some(started) if busy => clarp_core::time_format::turn_elapsed(chrono::Utc::now().timestamp_millis() - started),
+        _ => stamp(last_activity),
+    }
+}
+
+thread_local! {
+    static TURN_CLOCK: std::cell::RefCell<Option<slint::Timer>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Ticks the running turns' times once a second, rewriting only the rows
+/// whose stamp changed, not the list.
+pub(crate) fn start_turn_clock() {
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), || {
+        if let Some(app) = crate::app() {
+            app.tick_turn_stamps();
+        }
+    });
+    TURN_CLOCK.with(|t| *t.borrow_mut() = Some(timer));
+}
+
 pub(crate) fn initial(name: &str) -> SharedString {
     name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into()
 }
@@ -261,7 +287,7 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
         session: row.session.clone().into(),
         initial: initial(&row.name),
         name: row.name.clone().into(),
-        stamp: stamp(row.last_activity).into(),
+        stamp: row_stamp(row.busy, row.turn_started_at, row.last_activity).into(),
         preview: preview.into(),
         activity: activity.into(),
         depth: depth as i32,

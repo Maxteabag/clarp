@@ -109,6 +109,8 @@ thread_local! {
     static WIDTH_BEFORE: Cell<f32> = const { Cell::new(0.0) };
     // Whether a row showed a Ctrl+J queue number when WIDTH_BEFORE was taken.
     static QUEUED_BEFORE: Cell<bool> = const { Cell::new(false) };
+    // The sidebar check's turn timer as first read, to see it tick.
+    static TURN_STAMP: RefCell<String> = const { RefCell::new(String::new()) };
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
@@ -2272,9 +2274,12 @@ thread_local! {
 
 /// `--check sidebar --out DIR`: search and the Unread scope filter the
 /// chats, finished helpers fold under their parent, an archived agent is
-/// restored, and the pane header says what the agent runs.
+/// restored, and the pane header says what the agent runs. A working
+/// agent's row shows its turn's running time instead of the last message's
+/// time, ticking, and the last message's time again once idle (#354).
 fn sidebar_check(out: String) {
     use slint::platform::Key;
+    let out1 = out.clone();
     let out2 = out.clone();
     let out3 = out.clone();
     let out4 = out.clone();
@@ -2287,6 +2292,44 @@ fn sidebar_check(out: String) {
             if app.engine.borrow().conversation("rachel").is_none_or(|c| c.rows().is_empty()) || names(window).len() != 2 {
                 return false;
             }
+            // Mike's turn started 65 s ago by the Host's clock.
+            let started = chrono::Utc::now().timestamp_millis() - 65_000;
+            let busy = serde_json::json!({"session": "mike", "set": {"busy": true, "latest_state": "thinking", "status_text": "Thinking", "turn_started_at": started}});
+            check(control("/__control/agent", &busy).is_ok(), "Mike starts a turn");
+            true
+        })),
+        ("turn timer", Box::new(move |_, window, _| {
+            let Some(mike) = window.get_chats().iter().find(|r| r.session == "mike") else { return false };
+            let stamp = mike.stamp.to_string();
+            if !mike.busy || !stamp.starts_with("1m ") {
+                return false;
+            }
+            let shape = stamp.len() == 6 && stamp.ends_with('s') && stamp[3..5].chars().all(|c| c.is_ascii_digit());
+            check(shape, &format!("a working row shows its turn's running time where the last message's time was: {stamp}"));
+            check(mike.activity == "Thinking", &format!("the status text stays as it is: {}", mike.activity));
+            TURN_STAMP.with(|t| *t.borrow_mut() = stamp);
+            shot(&out1, "sidebar-00-turn-timer");
+            true
+        })),
+        ("turn ticks", Box::new(|_, window, elapsed| {
+            let Some(mike) = window.get_chats().iter().find(|r| r.session == "mike") else { return false };
+            let first = TURN_STAMP.with(|t| t.borrow().clone());
+            if mike.stamp == first.as_str() && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            check(mike.stamp != first.as_str(), &format!("the timer ticks by itself: {first} then {}", mike.stamp));
+            let idle = serde_json::json!({"session": "mike", "set": {"busy": false, "latest_state": "idle", "status_text": "", "turn_started_at": 0}});
+            check(control("/__control/agent", &idle).is_ok(), "Mike's turn ends");
+            true
+        })),
+        ("turn over", Box::new(|app, window, _| {
+            let Some(mike) = window.get_chats().iter().find(|r| r.session == "mike") else { return false };
+            if mike.busy {
+                return false;
+            }
+            let last = app.engine.borrow().roster().find("mike").map_or(0, |a| a.last_activity);
+            let expected = crate::view::stamp(last);
+            check(mike.stamp == expected.as_str(), &format!("idle again, the row shows the last message's time: {} (expected {expected})", mike.stamp));
             window.invoke_focus_search();
             true
         })),

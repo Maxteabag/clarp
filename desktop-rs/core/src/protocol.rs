@@ -37,6 +37,10 @@ pub struct Agent {
     /// Empty unless the Host says this agent's provider cannot serve a turn.
     pub backend_quota: Object,
     pub latest_state_timestamp: i64,
+    /// When the running turn started (epoch ms, the Host's clock), from the
+    /// snapshot's `turn_started_at`. None while idle, and on a Host too old
+    /// to send it (its 0 or null).
+    pub turn_started_at: Option<i64>,
     pub last_activity: i64,
     pub head_revision: i64,
     /// What the conversation's context holds, in tokens; None while the
@@ -109,6 +113,7 @@ impl Default for Agent {
             team_ids: Vec::new(),
             backend_quota: Object::new(),
             latest_state_timestamp: 0,
+            turn_started_at: None,
             last_activity: 0,
             head_revision: 0,
             context_tokens: None,
@@ -183,6 +188,7 @@ impl Agent {
                 Object::new()
             },
             latest_state_timestamp: i("latest_state_ts"),
+            turn_started_at: object.get("turn_started_at").and_then(Value::as_i64).filter(|t| *t > 0),
             last_activity: i("last_activity"),
             head_revision: i("head_revision"),
             context_tokens: object.get("context_tokens").and_then(Value::as_i64),
