@@ -37,7 +37,7 @@ pub const IMPORT_USAGE: &str =
 Reads the agent NAME, its conversation, its library, its plans and goals and the files it
 published or shows from the Host at --from and gives them to this Host. With --files only
 the files are given, for an agent that is here already: a move whose files did not all
-arrive is finished that way. A file the Host at --from does not have is asked for at
+arrive is finished that way. A file that answers 404 at --from is asked for at
 --files-from: a conversation that came from another Host names files that stayed there.
 With --back, hold the imported agent here and take back the source Host's move mark.
 The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN,
@@ -263,6 +263,9 @@ struct Followed {
     elsewhere: usize,
     /// Named, and not on a Host that was asked: there was nothing to bring.
     absent: usize,
+    /// Deliberately removed on the source Host or on the fallback Host.
+    removed: usize,
+    removed_elsewhere: usize,
     /// Not read there, or not taken here.
     failed: usize,
     /// Why the first of those was not.
@@ -314,6 +317,20 @@ impl Followed {
                 if one { "it" } else { "them" },
             )),
         }
+        for (count, at) in [
+            (self.removed, Some(from)),
+            (
+                self.removed_elsewhere,
+                way.files_from.map(|(other, _)| other),
+            ),
+        ] {
+            let Some(at) = at else { continue };
+            match count {
+                0 => {}
+                1 => more.push_str(&format!("One file was removed on the Host at {at}.\n")),
+                many => more.push_str(&format!("{many} files were removed on the Host at {at}.\n")),
+            }
+        }
         match self.failed {
             0 => {}
             1 => more.push_str(&format!(
@@ -336,27 +353,38 @@ enum Brought {
     /// On the other Host that was asked.
     Elsewhere,
     Nowhere,
+    Removed,
+    RemovedElsewhere,
 }
 
 /// Reads one file from the Host the agent is on, or from the other Host that may be asked,
 /// and gives it to this one under the id it has.
 fn bring(way: &Way<'_>, want: &Wanted) -> Result<Brought, String> {
+    enum FileReply {
+        Available(String, Vec<u8>),
+        Missing,
+        Removed,
+    }
+
     let path = format!("/media/{}", ids::in_a_link(&want.id));
-    let asked = |address: &str, token: &str| -> Result<Option<(String, Vec<u8>)>, String> {
+    let asked = |address: &str, token: &str| -> Result<FileReply, String> {
         match exchange("GET", address, &path, token, &[], &[])? {
-            (200, declared, bytes) => Ok(Some((declared, bytes))),
-            // Named, and no longer there or never a file of that Host.
-            (404, _, _) => Ok(None),
+            (200, declared, bytes) => Ok(FileReply::Available(declared, bytes)),
+            (404, _, _) => Ok(FileReply::Missing),
+            (410, _, _) => Ok(FileReply::Removed),
             (other, _, _) => Err(format!("the Host at {address} answered {other} for it")),
         }
     };
     let (found, declared, bytes) = match asked(way.from, way.source_token)? {
-        Some((declared, bytes)) => (Brought::There, declared, bytes),
-        None => match way.files_from {
+        FileReply::Available(declared, bytes) => (Brought::There, declared, bytes),
+        // A tombstone records a deliberate removal. Do not bring back another copy.
+        FileReply::Removed => return Ok(Brought::Removed),
+        FileReply::Missing => match way.files_from {
             None => return Ok(Brought::Nowhere),
             Some((other, token)) => match asked(other, token)? {
-                Some((declared, bytes)) => (Brought::Elsewhere, declared, bytes),
-                None => return Ok(Brought::Nowhere),
+                FileReply::Available(declared, bytes) => (Brought::Elsewhere, declared, bytes),
+                FileReply::Missing => return Ok(Brought::Nowhere),
+                FileReply::Removed => return Ok(Brought::RemovedElsewhere),
             },
         },
     };
@@ -409,6 +437,8 @@ fn files(way: &Way<'_>, wanted: &[Wanted]) -> Followed {
                 followed.elsewhere += 1;
             }
             Ok(Brought::Nowhere) => followed.absent += 1,
+            Ok(Brought::Removed) => followed.removed += 1,
+            Ok(Brought::RemovedElsewhere) => followed.removed_elsewhere += 1,
             Err(why) => {
                 followed.failed += 1;
                 if followed.why.is_empty() {
@@ -1708,6 +1738,70 @@ mod tests {
         );
         // Asked and not needed: nothing is said of the other Host.
         assert_eq!(all.told(&two).0, "the 9 files it published or shows");
+    }
+
+    #[test]
+    fn a_move_skips_removed_files() {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+
+        let source = TcpListener::bind("127.0.0.1:0").unwrap();
+        let from = source.local_addr().unwrap().to_string();
+        let serve = std::thread::spawn(move || {
+            for (id, status) in [
+                ("removed", "410 Gone"),
+                ("also-removed", "410 Gone"),
+                ("missing", "404 Not Found"),
+            ] {
+                let (stream, _) = source.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = BufReader::new(stream);
+                let mut line = String::new();
+                request.read_line(&mut line).unwrap();
+                assert_eq!(line, format!("GET /media/{id} HTTP/1.1\r\n"));
+                loop {
+                    line.clear();
+                    if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                write!(
+                    request.get_mut(),
+                    "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+                .unwrap();
+            }
+        });
+        let way = Way {
+            from: &from,
+            source_token: "",
+            files_from: None,
+            host: "127.0.0.1:0",
+            token: "",
+            session: "chat",
+        };
+        let wanted = ["removed", "also-removed", "missing"].map(|id| Wanted {
+            id: id.to_string(),
+            ..Wanted::default()
+        });
+        let followed = files(&way, &wanted);
+        serve.join().unwrap();
+
+        assert_eq!(
+            followed,
+            Followed {
+                removed: 2,
+                absent: 1,
+                ..Followed::default()
+            }
+        );
+        let (came, more) = followed.told(&way);
+        assert_eq!(came, "no files");
+        assert!(more.contains(&format!("2 files were removed on the Host at {from}.\n")));
+        assert!(more.contains("One file that it names is not on the Host"));
+        assert!(!more.contains("did not arrive"));
     }
 
     #[test]
