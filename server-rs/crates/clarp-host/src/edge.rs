@@ -1227,13 +1227,14 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
             }
             Some((principal, presented)) => {
                 if let Principal::Device { device_id, .. } = &principal {
-                    if (read && path == "/server-info")
-                        || (request.method() == Method::POST && path == "/devices")
-                    {
-                        let client = crate::render_spec::client(request.headers());
-                        app.experience
-                            .launched(device_id, client, app.clock.now_ms());
-                    }
+                    let startup_endpoint = (read && path == "/server-info")
+                        || (request.method() == Method::POST && path == "/devices");
+                    app.experience.device_request(
+                        device_id,
+                        request.headers(),
+                        startup_endpoint,
+                        app.clock.now_ms(),
+                    );
                     device = Some(device_id.clone());
                 }
                 request.extensions_mut().insert(Asker { source });
@@ -4309,17 +4310,26 @@ mod tests {
         let place = crate::unkept::at_the_port::place("experience-signals");
         let app = place.app().await;
         let now = app.clock.now_ms();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-clarp-client",
+            HeaderValue::from_static("ios/130 contract=125"),
+        );
         for n in 0..27 {
             app.experience
-                .launched("device-a", Some("ios/130 contract=125"), now - n * 4_000);
+                .device_request("device-a", &headers, true, now - n * 4_000);
         }
+        headers.insert(
+            "x-clarp-client",
+            HeaderValue::from_static("android/42 contract=121"),
+        );
         app.experience
-            .launched("device-b", Some("android/42 contract=121"), now);
+            .device_request("device-b", &headers, true, now);
         let launches = app.experience.relaunches(now - 120_000, now);
-        assert_eq!(launches["device-a"].count, 27);
+        assert_eq!(launches["device-a"].legacy_requests, 27);
         assert_eq!(launches["device-a"].build, "130");
         assert_eq!(launches["device-a"].contract, Some(125));
-        assert_eq!(launches["device-b"].count, 1);
+        assert_eq!(launches["device-b"].legacy_requests, 1);
         assert!(app.experience.relaunches(now + 1, now + 60_000).is_empty());
 
         for name in ["Speaker", "Mover"] {
