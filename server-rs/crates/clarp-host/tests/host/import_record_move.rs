@@ -161,8 +161,8 @@ fn exercise(source_kind: Source, take_back: bool) {
             assert_eq!(queue["paused"], true);
             let items = queue["items"].as_array().unwrap();
             assert_eq!(items.len(), 2);
-            assert_eq!(items[0]["text"], "first message");
-            assert_eq!(items[1]["text"], "second message");
+            assert_eq!(items[0]["text"], "second message");
+            assert_eq!(items[1]["text"], "first message");
             assert_eq!(
                 host.conversation("mover"),
                 [said("assistant", "Moved history")]
@@ -177,10 +177,10 @@ fn exercise(source_kind: Source, take_back: bool) {
                 host.conversation("mover"),
                 [
                     said("assistant", "Moved history"),
-                    said("user", "first message"),
-                    said("assistant", "first message"),
                     said("user", "second message"),
                     said("assistant", "second message"),
+                    said("user", "first message"),
+                    said("assistant", "first message"),
                 ]
             );
         }

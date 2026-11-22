@@ -844,11 +844,11 @@ impl Agent {
                 user_word,
             } => {
                 work.agent.require_here()?;
-                // While the source still owns the runtime, all messages keep their place.
-                let (admission, user_word) = if work.agent.import_held {
-                    (Admission::Background, false)
+                // The import hold defers execution without changing mailbox priority.
+                let admission = if work.agent.import_held {
+                    Admission::Background
                 } else {
-                    (admission, user_word)
+                    admission
                 };
                 let turn = TurnId(work.agent.next_turn);
                 let (queued, mut accepted) =
@@ -862,9 +862,8 @@ impl Agent {
                 } = &mut accepted
                 {
                     *mark = coordination;
-                    // Queued::accept grants priority to user messages by default.
-                    if user_word || work.agent.import_held {
-                        *priority = Some(user_word);
+                    if user_word {
+                        *priority = Some(true);
                     }
                 }
                 work.record(AgentEvent::Turn {
