@@ -1587,8 +1587,14 @@ fn seen_end(last: &Settled) -> Option<TurnSeen> {
 }
 
 /// What of an artifact a client is told when it changes: when it was last changed, what its
-/// user did with it, and where its request stands.
-type ToldArtifact = (i64, [Option<i64>; 3], Option<(i64, bool)>);
+/// user did with it, and where its request or latest HTML form answer stands.
+#[derive(PartialEq, Eq)]
+struct ToldArtifact {
+    updated_at: i64,
+    by_user: [Option<i64>; 3],
+    request: Option<(i64, bool)>,
+    latest_html_answer: Option<(usize, bool)>,
+}
 
 fn told_artifact(artifact: &Artifact) -> ToldArtifact {
     let request = artifact
@@ -1600,7 +1606,15 @@ fn told_artifact(artifact: &Artifact) -> ToldArtifact {
         artifact.archived_at,
         artifact.deleted_at,
     ];
-    (artifact.updated_at, by_user, request)
+    let latest_html_answer = artifact
+        .latest_html_submission()
+        .map(|answer| (artifact.submissions.len(), answer.delivered_at.is_some()));
+    ToldArtifact {
+        updated_at: artifact.updated_at,
+        by_user,
+        request,
+        latest_html_answer,
+    }
 }
 
 fn kept_goal(change: &GoalChange) -> Kept<'_> {

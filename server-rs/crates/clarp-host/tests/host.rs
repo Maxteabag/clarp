@@ -19623,6 +19623,17 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
         "{err}"
     );
 
+    let heard = host.listen();
+    let form_events = || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event["type"] == "artifact-updated" && event["artifact_id"] == "form-plan"
+            })
+            .count()
+    };
     // The form: made once, shown with its page and its schema, and never changed.
     let (code, out, err) = artifacts(&form);
     assert_eq!(code, 0, "{out}{err}");
@@ -19727,6 +19738,13 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
     );
     assert!(host.conversation(&maker).is_empty(), "nothing was told yet");
 
+    wait_for("the form publication event", || form_events() == 1);
+    assert!(
+        host.get("/artifacts/form-plan")["artifact"]
+            .get("latest_submission")
+            .is_none()
+    );
+
     // Answers that fit: a receipt, and the agent is told them as what its user said.
     let given = json!({ "when": "now", "budget": 12.5 });
     let (status, receipt) = send(&host, "form-plan", &answers(first, given.clone()));
@@ -19742,6 +19760,15 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
     let rows = host.turns(&maker);
     assert_eq!(rows[0]["role"], "assistant");
     assert!(rows[0]["text"].as_str().unwrap().contains("it's time"));
+    wait_for("an artifact event for the new form receipt", || {
+        form_events() >= 2
+    });
+    let opened = host.get("/artifacts/form-plan?representation=flat-v1");
+    let mut delivered = receipt;
+    delivered["delivery_status"] = json!("delivered");
+    assert_eq!(opened["artifact"]["latest_submission"], delivered);
+    assert_eq!(opened["artifact"]["status"], "ready");
+    assert_eq!(opened["artifact"]["updated_at"], made["updated_at"]);
     // Sent again, they are the same answers: answered as told, and told once.
     let (status, again) = send(&host, "form-plan", &answers(first, given.clone()));
     assert_eq!(
@@ -19763,6 +19790,10 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
     // After the Host was killed the form, its page and what was answered are all there.
     host.kill();
     let host = place.start_with_token(token);
+    assert_eq!(
+        host.get("/artifacts/form-plan")["artifact"]["latest_submission"],
+        delivered
+    );
     let (status, again) = send(&host, "form-plan", &answers(first, given));
     assert_eq!(
         (status, &again["delivery_status"]),
