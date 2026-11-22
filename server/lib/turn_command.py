@@ -214,8 +214,11 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
 
 
 class DispatchError(RuntimeError):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, *, agent_id: str = ""):
         self.status = status
+        # The agent the refusal is about, when admission knows it (an agent that moved:
+        # the answer names where it went, also for a send the Host routed itself).
+        self.agent_id = agent_id
         super().__init__(message)
 
 
