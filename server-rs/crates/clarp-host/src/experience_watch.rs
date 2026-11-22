@@ -6,7 +6,7 @@ mod settings;
 
 pub(crate) use checks::AgentFacts;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Mutex;
 
 use crate::fleet::Directory;
@@ -16,6 +16,7 @@ use book::{Book, Row};
 use jiff::{Zoned, tz::TimeZone};
 use settings::Settings;
 
+use axum::http::{HeaderMap, HeaderValue};
 use clarp_protocol::requests::SendRequest;
 use clarp_protocol::responses::SendResponse;
 use serde_json::json;
@@ -29,7 +30,8 @@ const KEEP_MS: i64 = 24 * 60 * 60 * 1_000;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Relaunches {
-    pub count: usize,
+    pub foreground_sessions: usize,
+    pub legacy_requests: usize,
     pub platform: String,
     pub build: String,
     pub contract: Option<i64>,
@@ -42,15 +44,18 @@ struct Event<T> {
 }
 
 #[derive(Default)]
+struct Launches {
+    foreground: BTreeSet<String>,
+    events: VecDeque<Event<Relaunches>>,
+}
+
+#[derive(Default)]
 pub struct Signals {
-    launches: Mutex<VecDeque<Event<Relaunches>>>,
+    launches: Mutex<Launches>,
     refusals: Mutex<VecDeque<Event<()>>>,
 }
 
-fn append<T>(ring: &Mutex<VecDeque<Event<T>>>, at: i64, subject: &str, detail: T) {
-    let Ok(mut ring) = ring.lock() else {
-        return;
-    };
+fn append<T>(ring: &mut VecDeque<Event<T>>, at: i64, subject: &str, detail: T) {
     while ring
         .front()
         .is_some_and(|first| first.at < at.saturating_sub(KEEP_MS) || ring.len() >= MAX_EVENTS)
@@ -65,42 +70,76 @@ fn append<T>(ring: &Mutex<VecDeque<Event<T>>>, at: i64, subject: &str, detail: T
 }
 
 impl Signals {
-    /// Count a launch request the Host served for an authenticated device.
-    pub(crate) fn launched(&self, device_id: &str, client: Option<&str>, now: i64) {
-        let detail = client
+    /// A marked foreground observation starts a session once per device until a
+    /// request reports background. Unmarked startup requests are weaker evidence.
+    pub(crate) fn device_request(
+        &self,
+        device_id: &str,
+        headers: &HeaderMap,
+        startup_endpoint: bool,
+        now: i64,
+    ) {
+        let state = headers.get("x-clarp-app-state").map(HeaderValue::as_bytes);
+        if state.is_none() && !startup_endpoint {
+            return;
+        }
+        let Ok(mut launches) = self.launches.lock() else {
+            return;
+        };
+        let foreground_session = match state {
+            Some(b"foreground") => {
+                if !launches.foreground.insert(device_id.to_owned()) {
+                    return;
+                }
+                true
+            }
+            Some(b"background") => {
+                launches.foreground.remove(device_id);
+                return;
+            }
+            None => false,
+            Some(_) => return,
+        };
+        let mut detail = crate::render_spec::client(headers)
             .and_then(|header| {
                 let header = crate::client_events::telemetry_header(header);
                 let (platform, contract) = clarp_kernel::client::named(&header)?;
                 let (_, tail) = header.split_once('/')?;
                 let (build, _) = tail.split_once(' ')?;
                 Some(Relaunches {
-                    count: 0,
                     platform: platform.to_ascii_lowercase(),
                     build: build.to_owned(),
                     contract: Some(contract),
+                    ..Relaunches::default()
                 })
             })
             .unwrap_or_default();
-        append(&self.launches, now, device_id, detail);
+        detail.foreground_sessions = usize::from(foreground_session);
+        detail.legacy_requests = usize::from(!foreground_session);
+        append(&mut launches.events, now, device_id, detail);
     }
 
     pub(crate) fn refused(&self, agent_id: &str, now: i64) {
-        if !agent_id.is_empty() {
-            append(&self.refusals, now, agent_id, ());
+        if !agent_id.is_empty()
+            && let Ok(mut ring) = self.refusals.lock()
+        {
+            append(&mut ring, now, agent_id, ());
         }
     }
 
     pub fn relaunches(&self, since: i64, now: i64) -> BTreeMap<String, Relaunches> {
         let mut result: BTreeMap<String, Relaunches> = BTreeMap::new();
-        let Ok(events) = self.launches.lock() else {
+        let Ok(launches) = self.launches.lock() else {
             return result;
         };
-        for event in events
+        for event in launches
+            .events
             .iter()
             .filter(|event| in_window(event.at, since, now))
         {
             let row = result.entry(event.subject.clone()).or_default();
-            row.count += 1;
+            row.foreground_sessions += event.detail.foreground_sessions;
+            row.legacy_requests += event.detail.legacy_requests;
             if event.detail.contract.is_some() {
                 row.platform.clone_from(&event.detail.platform);
                 row.build.clone_from(&event.detail.build);

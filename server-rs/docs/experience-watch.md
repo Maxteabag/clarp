@@ -39,11 +39,13 @@ release_hold_minutes = 10
 findings even while the watcher is off. It reports late reads (steered,
 waited, or still waiting), paused or stuck queues, client crash signals, failed
 or refused user sends, unhealthy release skill links, old decision cards,
-and long-running jobs that hold a release. The watcher counts requests to
-`POST /devices` and `GET /server-info` by authenticated device and includes
-the latest reported app build and contract. These endpoints also serve
-push-triggered background sync and reconnects. The request count is context
-only. An app-crash finding requires a crash-kind client event or a MetricKit
+and long-running jobs that hold a release. An authenticated device sending
+`X-Clarp-App-State: foreground` counts as one observed foreground session
+until the Host sees `background` from that device. Background requests and
+repeated foreground requests add no launches. If a client sends no marker,
+requests to `POST /devices` and `GET /server-info` are shown separately as
+unmarked context. These endpoints also serve background sync and reconnects.
+An app-crash finding requires a crash-kind client event or a MetricKit
 report with a nonzero crash count. The HTTP counters keep at most
 32,768 recent events per signal and restart with the Host. Send history
 is rebuilt from the actor journals. The Rust queue has no separate

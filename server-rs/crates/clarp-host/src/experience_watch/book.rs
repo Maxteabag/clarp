@@ -85,18 +85,20 @@ pub(super) struct Book {
 impl Row {
     pub fn refresh_device_name(&mut self, directory: &Directory) {
         if self.kind.starts_with("app_crash_")
-            && let Some(device) = directory.devices.values().find(|device| {
-                device.device_id == self.subject && !device.name.trim().is_empty()
-            })
+            && let Some(device) = directory
+                .devices
+                .values()
+                .find(|device| device.device_id == self.subject && !device.name.trim().is_empty())
         {
             self.device_name = Some(device.name.clone());
         }
     }
 
     pub fn subject_label(&self) -> String {
-        self.device_name
-            .as_ref()
-            .map_or_else(|| self.subject.clone(), |name| format!("{name} ({})", self.subject))
+        self.device_name.as_ref().map_or_else(
+            || self.subject.clone(),
+            |name| format!("{name} ({})", self.subject),
+        )
     }
 }
 
@@ -133,7 +135,11 @@ impl Book {
                 row.cleared_at = Some(now);
                 let text = format!(
                     "Experience watch: {} cleared for {} at {} (open since {}, seen {}x).",
-                    row.kind, row.subject_label(), clock(now, zone), clock(row.first_seen, zone), row.count,
+                    row.kind,
+                    row.subject_label(),
+                    clock(now, zone),
+                    clock(row.first_seen, zone),
+                    row.count,
                 );
                 for to in settings.recipients(&row.kind) {
                     self.owed.push(Owed {
@@ -162,7 +168,10 @@ impl Book {
             row.refresh_device_name(directory);
             let text = format!(
                 "Experience watch: {} opened for {} at {}. {} (clarp-admin experience --open)",
-                row.kind, row.subject_label(), clock(now, zone), row.detail,
+                row.kind,
+                row.subject_label(),
+                clock(now, zone),
+                row.detail,
             );
             for to in settings.recipients(&row.kind) {
                 self.owed.push(Owed {
@@ -189,9 +198,9 @@ impl Book {
 
     fn daily(&mut self, settings: &Settings, zone: &TimeZone, now: i64) {
         let day = summary_day(settings, zone, now);
-        self.owed.retain(|owed| {
-            !matches!(&owed.notice, Notice::Summary(date) if day.as_ref() != Some(date))
-        });
+        self.owed.retain(
+            |owed| !matches!(&owed.notice, Notice::Summary(date) if day.as_ref() != Some(date)),
+        );
         let Some(day) = day else { return };
         if self.summary_date == day
             || self
