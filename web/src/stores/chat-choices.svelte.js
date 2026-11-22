@@ -28,8 +28,14 @@ export function chatChoicesReady(session) {
   return !!keyOf(session);
 }
 
+/** Each chat's quiet mode before it was set to Always visible (key -> mode), for the toggle back. */
+const lastQuiet = new Map();
+
 export function setChatToolActivity(session, mode) {
-  setChatToolActivityByKey(keyOf(session), mode);
+  const key = keyOf(session);
+  const before = chatToolChoice(prefs.chatToolActivity, key);
+  if (key && mode === 'always' && before !== FOLLOW && before !== 'always') lastQuiet.set(key, before);
+  setChatToolActivityByKey(key, mode);
 }
 
 /** This chat's own 'Messages between agents': 'default' (Follow Settings), 'show' or 'hide'. */
@@ -45,7 +51,8 @@ export function setChatCoordinationChoice(session, choice) {
 
 /**
  * The header's tools button: every tool call in view, or back to the quiet mode. It changes the
- * chat's own choice when the chat has one, else the device's setting, as before.
+ * chat's own choice when the chat has one (back to that chat's own quiet mode), else the
+ * device's setting, as before.
  */
 export function toggleToolsFor(session) {
   const own = chatToolActivity(session);
@@ -53,5 +60,6 @@ export function toggleToolsFor(session) {
     setToolActivity(prefs.toolActivity === 'always' ? (prefs.lastQuietMode || 'grouped') : 'always');
     return;
   }
-  setChatToolActivity(session, own === 'always' ? (prefs.lastQuietMode || 'grouped') : 'always');
+  const quiet = lastQuiet.get(keyOf(session)) || prefs.lastQuietMode || 'grouped';
+  setChatToolActivity(session, own === 'always' ? quiet : 'always');
 }
