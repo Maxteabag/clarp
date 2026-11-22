@@ -366,6 +366,11 @@ pub struct Member {
     pub agent: AgentHandle,
 }
 
+pub(crate) struct Adopted {
+    pub member: Arc<Member>,
+    pub cwd_created: bool,
+}
+
 /// The fleet as a whole, as it was when it last changed.
 #[derive(Default)]
 pub struct Directory {
@@ -745,7 +750,7 @@ enum Ask {
     /// An agent that comes from another Host, as it was known there.
     Adopt {
         record: AgentRecord,
-        answer: Answer<Result<Arc<Member>, String>>,
+        answer: Answer<Result<Adopted, String>>,
     },
     StoredAgent {
         id: String,
@@ -1129,10 +1134,10 @@ impl FleetHandle {
 
     /// Adds an agent that comes from another Host, under the identity it had there. The inner
     /// error says why it cannot be taken.
-    pub async fn adopt(
+    pub(crate) async fn adopt(
         &self,
         record: AgentRecord,
-    ) -> Result<Result<Arc<Member>, String>, Unavailable> {
+    ) -> Result<Result<Adopted, String>, Unavailable> {
         self.ask(|answer| Ask::Adopt { record, answer }).await
     }
 
@@ -4121,7 +4126,7 @@ impl Fleet {
         Ok(())
     }
 
-    fn adopt(&mut self, mut record: AgentRecord) -> Result<Arc<Member>, String> {
+    fn adopt(&mut self, mut record: AgentRecord) -> Result<Adopted, String> {
         if record.agent_id.trim().is_empty() || record.session.trim().is_empty() {
             return Err("an agent that arrives needs its id and its session name".to_string());
         }
@@ -4141,14 +4146,21 @@ impl Fleet {
                 record.session
             ));
         }
-        if !Path::new(&record.cwd).is_dir() {
-            return Err(format!("{} is not a directory on this machine", record.cwd));
-        }
         if record.conversation_id.trim().is_empty() {
             record.conversation_id = ids::uuid();
         }
         record.deleted_at_ms = None;
         let setup = setup(&self.works, &self.delegation_desk, &self.versions, &record)?;
+        let cwd = Path::new(&record.cwd);
+        let cwd_created = match std::fs::metadata(cwd) {
+            Ok(metadata) if metadata.is_dir() => false,
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound && cwd.is_absolute() => {
+                std::fs::create_dir_all(cwd)
+                    .map_err(|why| format!("cannot create working directory {}: {why}", cwd.display()))?;
+                true
+            }
+            _ => return Err(format!("{} is not a directory on this machine", record.cwd)),
+        };
         self.put(&record)?;
         self.gone.remove(&record.agent_id);
         let member = Arc::new(Member {
@@ -4160,7 +4172,7 @@ impl Fleet {
         self.works
             .hub
             .publish(wire::roster_created(&record), self.now_ms());
-        Ok(member)
+        Ok(Adopted { member, cwd_created })
     }
 
     fn remember_owner(&mut self, record: &AgentRecord) {

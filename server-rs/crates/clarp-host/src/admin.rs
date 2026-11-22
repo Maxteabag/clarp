@@ -1119,6 +1119,9 @@ pub fn import(
         .as_str()
         .or(avatar_not_carried.as_deref())
         .map_or_else(String::new, |why| format!("avatar not carried: {why}\n"));
+    let cwd_created = answer["cwd_created"]
+        .as_str()
+        .map_or_else(String::new, |cwd| format!("created working directory: {cwd}\n"));
     // The agent is here. Its files follow: one that does not arrive does not undo the move.
     let followed = files(&way, &wants);
     let (came, more) = followed.told(&way);
@@ -1127,7 +1130,7 @@ pub fn import(
     let handoff = finish_handoff(&way, &agent["agent_id"], answer["held"] == true, &followed);
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {came}.\n\
-         {avatar_not_carried}{skipped}{more}{heard}{handoff}"
+         {avatar_not_carried}{cwd_created}{skipped}{more}{heard}{handoff}"
     ))
 }
 
