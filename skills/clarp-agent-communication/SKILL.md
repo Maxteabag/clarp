@@ -78,3 +78,15 @@ when that is so). To tell the user something from any turn, run
 `clarp-admin tell-user --from "$ME" --text "..."`: it puts a note in your own
 chat that is always shown and notifies the user. It works only from your own
 running turn. Decision cards and artifacts are shown as always.
+
+## When the user reads the chat in Conversation view
+
+The user can read an agent's chat in Conversation view (Host feature `chat_view`,
+Rust Host contract 145; the Host adds one line to each turn's prompt when your chat is
+in it). There they see their own messages, your notes, cards, forms and
+artifacts, and the final reply of each turn once the turn has ended. Your text in
+between and your tool work are folded into "Show work" and are not read. To be
+heard mid-turn, post: `clarp-admin tell-user --from "$ME" --text "..."` (a note,
+shown at once and notified). Your final reply always reaches them, so end every
+turn with one that stands on its own. In Session view, the default, everything
+is shown as before.

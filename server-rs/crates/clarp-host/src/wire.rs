@@ -1646,6 +1646,20 @@ pub fn log_response(
             if row.is_object() && (!hides || row.get("audience").is_none()) {
                 row["audience"] = json!(coordination::USER);
             }
+            if let Some(fields) = row.as_object_mut() {
+                use clarp_kernel::chat_view::View;
+                let view = if fields.get("audience").and_then(Value::as_str) != Some(coordination::AGENTS)
+                    && clarp_actor::conversation::is_conversation(&version.entry, version.session_rows)
+                {
+                    View::Conversation
+                } else {
+                    View::Session
+                };
+                fields.insert("view".into(), json!(view));
+                if let Some(count) = version.session_rows {
+                    fields.insert("session_rows".into(), json!(count));
+                }
+            }
             row
         }).collect::<Vec<_>>(),
         "latest_revision": page.latest_revision,
@@ -2341,7 +2355,10 @@ mod tests {
                     ..version(reply("r-quiet", "", &[&reading]), 5 << 20, None)
                 },
                 version(Entry::Tool(alone), 6 << 20, None),
-                version(reply("r-1", "One file.", &[]), 7 << 20, Some(end)),
+                Versioned {
+                    session_rows: Some(3),
+                    ..version(reply("r-1", "One file.", &[]), 7 << 20, Some(end))
+                },
             ],
             latest_revision: 7 << 20,
             has_more: true,
@@ -2434,13 +2451,17 @@ mod tests {
         // Every row has the same fields, whatever it is: a decoder can count on them.
         let fields = |turn: &Value| {
             let mut keys: Vec<String> = turn.as_object().unwrap().keys().cloned().collect();
-            keys.retain(|key| key != "turn");
+            keys.retain(|key| key != "turn" && key != "session_rows");
             keys
         };
         for turn in turns {
             assert_eq!(fields(&turns[0]), fields(turn), "{}", turn["id"]);
         }
-        assert_eq!(fields(&turns[0]).len(), 21);
+        assert_eq!(fields(&turns[0]).len(), 22);
+        assert_eq!(turns[0]["view"], "conversation");
+        assert_eq!(turns[1]["view"], "session");
+        assert_eq!(turns[4]["view"], "conversation");
+        assert_eq!(turns[4]["session_rows"], 3);
         assert_eq!(turns[0]["trace_id"], "t-1");
         // None of them is of a turn another agent began: each is the user's.
         assert!(turns.iter().all(|turn| turn["audience"] == "user"));

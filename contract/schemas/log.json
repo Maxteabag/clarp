@@ -8,6 +8,7 @@
   "required": ["turns", "latest_revision", "has_more", "missing", "conversation_id"],
   "properties": {
     "conversation_id": {"type": "string"},
+    "view": {"enum": ["conversation", "session"], "description": "chat_view: the view this answer was read under when requested."},
     "turns": {
       "type": "array",
       "items": {
@@ -35,6 +36,8 @@
           "automation_kind": {"type": ["string", "null"]},
           "hidden_before": {"type": "object", "properties": {"messages": {"type": "integer"}, "exchanges": {"type": "integer"}, "agents": {"type": "array"}, "capped": {"type": "boolean", "description": "true: the run goes on beyond what was counted (at most 100 messages, nearest the row)"}}, "description": "hidden_coordination: rows left out since the previous visible row of the chat."},
           "audience": {"enum": ["user", "agents"], "description": "Host contract 108: 'agents' for a row of a turn another agent's message started (coordination between agents); a note (kind 'note') is always 'user'."},
+          "view": {"enum": ["conversation", "session"], "description": "chat_view: the view this row belongs to."},
+          "session_rows": {"type": "integer", "minimum": 0, "description": "chat_view: on a settled turn's anchor, the number of rows omitted by Conversation view."},
           "trace_id": {"type": "string"},
           "phase": {"enum": ["commentary", "final", null]},
           "sent_at": {"type": "string", "description": "Host contract 115, feature waited_send_order: on a user row that waited for a running turn, when it was sent; its timestamp is when its own turn started."},

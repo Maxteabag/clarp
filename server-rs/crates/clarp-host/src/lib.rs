@@ -23,6 +23,7 @@ pub mod audio;
 mod bookkeeping;
 pub mod calendar;
 pub mod calls;
+mod chat_view;
 pub(crate) mod child;
 pub mod chip;
 mod cli_version;

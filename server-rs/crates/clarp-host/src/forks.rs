@@ -385,6 +385,7 @@ mod tests {
             live: false,
             turn_number: None,
             turn: None,
+            session_rows: None,
             tools,
             commentary: false,
             coordination: None,

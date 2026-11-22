@@ -844,6 +844,12 @@ enum Ask {
         choice: Option<clarp_kernel::hidden_coordination::Visibility>,
         answer: Answer<clarp_kernel::hidden_coordination::Visibility>,
     },
+    SetChatView {
+        agent: String,
+        session: String,
+        view: clarp_kernel::chat_view::View,
+        answer: Answer<bool>,
+    },
     /// Something small is left with the Host under a key, in the table of its kind, or
     /// taken away (`None`).
     Keep {
@@ -1348,6 +1354,21 @@ impl FleetHandle {
         self.ask(|answer| Ask::SetCoordination {
             chat,
             choice,
+            answer,
+        })
+        .await
+    }
+
+    pub(crate) async fn set_chat_view(
+        &self,
+        agent: String,
+        session: String,
+        view: clarp_kernel::chat_view::View,
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::SetChatView {
+            agent,
+            session,
+            view,
             answer,
         })
         .await
@@ -2261,6 +2282,14 @@ impl Fleet {
                 } => {
                     let _ = answer.send(self.set_coordination(chat, choice));
                 }
+                Ask::SetChatView {
+                    agent,
+                    session,
+                    view,
+                    answer,
+                } => {
+                    let _ = answer.send(self.set_chat_view(&agent, &session, view));
+                }
                 Ask::Keep {
                     kind,
                     key,
@@ -2798,6 +2827,28 @@ impl Fleet {
         }
         self.works.hub.publish(event, self.now_ms());
         Ok(effective)
+    }
+
+    fn set_chat_view(
+        &mut self,
+        agent: &str,
+        session: &str,
+        view: clarp_kernel::chat_view::View,
+    ) -> Result<bool, Unavailable> {
+        if self.place_of_any(agent).is_none() {
+            return Ok(false);
+        }
+        self.set(vec![(
+            clarp_kernel::chat_view::setting_key(agent),
+            view.word().to_owned(),
+        )])?;
+        self.works.hub.publish(
+            serde_json::json!({
+                "type": "agent-roster", "kind": "chat_view", "session": session, "chat_view": view
+            }),
+            self.now_ms(),
+        );
+        Ok(true)
     }
 
     /// Keeps rows of the push register as a change left them, and publishes the register.

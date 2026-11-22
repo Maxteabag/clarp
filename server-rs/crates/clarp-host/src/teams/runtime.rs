@@ -57,6 +57,10 @@ impl clarp_actor::teams::Runtime for TurnTeams {
             }),
             digest,
             ids,
+            chat_view: directory
+                .as_deref()
+                .map(|directory| crate::chat_view::preference(directory, agent))
+                .unwrap_or_default(),
         }
     }
 
