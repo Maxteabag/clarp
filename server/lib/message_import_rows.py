@@ -855,6 +855,10 @@ class _Upserted(NamedTuple):
     unchanged: bool
     revision: int
     changed: bool          # an adopted occupant was parked out of the slot
+    # The import wrote the row (new, changed, or moved to this slot). Effects that
+    # follow a row (team capture, dream records) run only then: a replay over rows
+    # stored as they are does nothing, as a tail that leaves them alone.
+    written: bool = True
 
 
 def _upsert_row(database, *, agent_id: str, backend_session_id: str,
@@ -952,4 +956,5 @@ def _upsert_row(database, *, agent_id: str, backend_session_id: str,
     else:
         # The row now carries this transcript's source_file, not final:.
         final_rows.discard((msg_id,))
-    return _Upserted(timestamp, tools, display_cells, row_trace, unchanged, revision, changed)
+    return _Upserted(timestamp, tools, display_cells, row_trace, unchanged, revision, changed,
+                     written=bool(rewrite))
