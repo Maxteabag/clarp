@@ -7654,8 +7654,13 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     let session = host.new_agent("Echo");
     let server_id = host.get("/server-info")["server_id"].clone();
     // The push of a turn that ended on this, when it is the newest the relay was sent.
+    let alerts = || {
+        relay.taken().into_iter()
+            .filter(|(_, _, body)| body["notifications"][0]["pushType"] == "alert")
+            .collect::<Vec<_>>()
+    };
     let pushed = |text: &str| {
-        relay.taken().last().is_some_and(|(_, _, body)| {
+        alerts().last().is_some_and(|(_, _, body)| {
             body["notifications"][0]["payload"]["aps"]["alert"]["body"] == text
         })
     };
@@ -7673,7 +7678,7 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     wait_for("the push for the first turn", || {
         pushed("the build is green")
     });
-    let taken = relay.taken();
+    let taken = alerts();
     assert_eq!(taken.len(), 1);
     let (path, sent_as, body) = &taken[0];
     assert_eq!(path, "/v1/push/send");
@@ -7714,6 +7719,20 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
         json!({ "session": session, "text": "asked at the desk", "client_msg_id": "m2", "client": "desktop" }),
     );
     answered(&host, "asked at the desk");
+    let sync = || {
+        relay.taken().into_iter().find_map(|(_, _, body)| {
+            let notification = &body["notifications"][0];
+            (notification["pushType"] == "background").then(|| notification.clone())
+        })
+    };
+    wait_for("a silent badge refresh for a quiet turn", || sync().is_some());
+    let sync = sync().unwrap();
+    assert_eq!(sync["priority"], "5");
+    assert_eq!(sync["collapseId"], "badge-sync");
+    assert_eq!(sync["payload"], json!({
+        "aps": {"content-available": 1}, "kind": "sync", "server_instance_id": server_id,
+    }));
+    assert_eq!(alerts().len(), 1);
     let desk = |sequence: u64, active: bool| {
         host.ask(
             "POST",
@@ -7748,7 +7767,7 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     wait_for("the push after the desk was left", || {
         pushed("the desk is left")
     });
-    assert_eq!(relay.taken().len(), 2, "nothing was pushed in between");
+    assert_eq!(alerts().len(), 2, "no alert went out in between");
 
     // An agent asks its user something: the phone is told at once, with a sound, and the
     // answer can be typed from the banner.
@@ -7768,7 +7787,7 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     wait_for("the push for the request", || {
         pushed("Which code did the bank send?")
     });
-    let request = relay.taken().last().unwrap().2["notifications"][0].clone();
+    let request = alerts().last().unwrap().2["notifications"][0].clone();
     assert_eq!(request["collapseId"], format!("decision-{decision_id}"));
     let payload = &request["payload"];
     assert_eq!(payload["aps"]["sound"], "default");
@@ -7791,7 +7810,7 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     wait_for("the push for a reply while a request is open", || {
         pushed("still waiting for the code")
     });
-    let payload = relay.taken().last().unwrap().2["notifications"][0]["payload"].clone();
+    let payload = alerts().last().unwrap().2["notifications"][0]["payload"].clone();
     assert_eq!(
         (&payload["needs_response"], &payload["aps"]["sound"]),
         (&json!(true), &json!("default"))
@@ -7806,7 +7825,7 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     wait_for("the row to be stopped", || {
         !row(&host)["disabled_at"].is_null()
     });
-    let sent_so_far = relay.taken().len();
+    let sent_so_far = alerts().len();
     host.send(&session, "to nobody", "m7");
     answered(&host, "to nobody");
 
@@ -7820,7 +7839,7 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
         !row(&host)["disabled_at"].is_null()
     });
     assert_eq!(
-        relay.taken().len(),
+        alerts().len(),
         sent_so_far + 1,
         "one more push was tried, and none for the turn in between"
     );

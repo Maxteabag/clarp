@@ -84,6 +84,15 @@ pub fn turn_done(told: &Told<'_>) -> Value {
     payload
 }
 
+/// A silent wake that lets an app recompute its icon badge from device-local unread state.
+pub fn badge_wake(server_id: &str) -> Value {
+    json!({
+        "aps": { "content-available": 1 },
+        "kind": "sync",
+        "server_instance_id": server_id,
+    })
+}
+
 /// A request to the user, as a phone is told of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Asked<'a> {

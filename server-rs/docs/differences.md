@@ -526,3 +526,12 @@ Its `POST /clog` acknowledges successful storage regardless of the diagnostics
 setting and adds `kept` and `full_capture`. The Python Host's diagnostic capture
 still controls its `/clog` acknowledgement. `GET /client-log` is implemented on
 the Rust Host.
+
+Issue 272. The Rust Host wakes registered iPhones silently when a chat starts or
+finishes work or crosses an account or user wait that can change its badge.
+The app refreshes the roster and applies the unread rule to its device-local
+read state. The Host coalesces these background pushes, with at least a minute
+between wakes and at most three wakes per hour. iOS decides whether to deliver
+each wake. Reply alerts continue to request a refresh through
+`content-available`, and the Host leaves `aps.badge` unset because it cannot
+compute the phone's unread count.

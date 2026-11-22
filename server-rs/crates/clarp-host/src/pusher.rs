@@ -15,7 +15,12 @@
 //! ([`crate::direct`]); the alert follows only where that reached no phone, and never for a
 //! ring held as a live voice call (`agent_rings._deliver`).
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::Duration;
+
+use tokio::sync::watch;
+use tokio::time::Instant;
 
 use clarp_kernel::alert_routes::{Path, Routes};
 use clarp_kernel::devices::PushRow;
@@ -127,6 +132,7 @@ enum Job {
     /// A finished turn, and who waits to hear what became of its push.
     Turn(TurnDone, Option<tokio::sync::oneshot::Sender<Rang>>),
     Request(Requested),
+    BadgeWake,
     /// A ring, and who waits to hear what became of its pushes.
     Ring(Box<Rung>, Option<tokio::sync::oneshot::Sender<Rang>>),
 }
@@ -136,6 +142,7 @@ enum Job {
 pub struct Pusher {
     live: mpsc::Sender<Rung>,
     tx: mpsc::Sender<Job>,
+    badge_wake: watch::Sender<()>,
 }
 
 impl Pusher {
@@ -153,6 +160,11 @@ impl Pusher {
 
     pub fn requested(&self, asked: Requested) {
         let _ = self.tx.send(Job::Request(asked));
+    }
+
+    /// The phone's local unread list may count this chat differently now.
+    pub(crate) fn refresh_badge(&self) {
+        self.badge_wake.send_modify(|_| {});
     }
 
     fn android_ring(&self, ring: &Rung) {
@@ -182,13 +194,20 @@ impl Pusher {
 pub struct Waiting {
     live: mpsc::Receiver<Rung>,
     rx: mpsc::Receiver<Job>,
+    badge_wake: watch::Receiver<()>,
+    badge_jobs: mpsc::Sender<Job>,
 }
 
 /// A pusher, and what waits for its thread.
 pub fn pusher() -> (Pusher, Waiting) {
     let (tx, rx) = mpsc::channel();
     let (live, waiting) = mpsc::channel();
-    (Pusher { tx, live }, Waiting { rx, live: waiting })
+    let (badge_wake, wakes) = watch::channel(());
+    let badge_jobs = tx.clone();
+    (
+        Pusher { tx, live, badge_wake },
+        Waiting { rx, live: waiting, badge_wake: wakes, badge_jobs },
+    )
 }
 
 /// What the pusher's thread works with.
@@ -216,6 +235,7 @@ pub struct Works {
 impl Waiting {
     /// Starts the pusher's thread.
     pub fn run(self, works: Works) -> Result<(), String> {
+        works.runtime.spawn(badge_wakes(self.badge_wake, self.badge_jobs));
         let android = works.clone();
         std::thread::Builder::new()
             .name("android-live-rings".into())
@@ -227,6 +247,10 @@ impl Waiting {
                 let mut lanes = android_lanes::Lanes::default();
                 let works = Arc::new(works);
                 for job in self.rx {
+                    if matches!(job, Job::BadgeWake) {
+                        deliver(&works, &job, Targets::Apple);
+                        continue;
+                    }
                     let (job, told) = match job {
                         Job::Ring(rung, told) => (Job::Ring(rung, None), told),
                         Job::Turn(done, told) => (Job::Turn(done, None), told),
@@ -277,6 +301,34 @@ impl Waiting {
             })
             .map(|_| ())
             .map_err(|error| format!("the pusher's thread could not be started: {error}"))
+    }
+}
+
+/// The wake reloads the whole roster, so one pending wake covers every chat. Give quick
+/// transitions a moment to join and keep a trailing wake when the background budget is spent.
+async fn badge_wakes(mut changes: watch::Receiver<()>, jobs: mpsc::Sender<Job>) {
+    const HOUR: Duration = Duration::from_secs(3600);
+    const SPACING: Duration = Duration::from_secs(60);
+    const COALESCE: Duration = Duration::from_secs(2);
+    let mut sent: VecDeque<Instant> = VecDeque::new();
+    while changes.changed().await.is_ok() {
+        let now = Instant::now();
+        sent.retain(|when| now.duration_since(*when) < HOUR);
+        let mut due = now + COALESCE;
+        if let Some(last) = sent.back() {
+            due = due.max(*last + SPACING);
+        }
+        if sent.len() == 3 && let Some(first) = sent.front() {
+            due = due.max(*first + HOUR);
+        }
+        tokio::time::sleep_until(due).await;
+        drop(changes.borrow_and_update());
+        if jobs.send(Job::BadgeWake).is_err() {
+            break;
+        }
+        let now = Instant::now();
+        sent.retain(|when| now.duration_since(*when) < HOUR);
+        sent.push_back(now);
     }
 }
 
@@ -372,6 +424,7 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
             }),
             &asked.decision_id,
         ),
+        Job::BadgeWake => (push::badge_wake(server_id), "badge-sync"),
         Job::Ring(rung, _) => (
             push::ring(&push::Rung {
                 ring_id: &rung.ring.ring_id,
@@ -481,9 +534,10 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
     // The agent it is about: what the address of its own picture carries, when it has one,
     // and the picture this Host ships for it. A push for nobody by name shows no face.
     let (session, persona) = match job {
-        Job::Turn(told, _) => (&told.session, &told.persona),
-        Job::Request(asked) => (&asked.session, &asked.persona),
-        Job::Ring(rung, _) => (&rung.ring.session, &rung.ring.persona),
+        Job::Turn(told, _) => (told.session.as_str(), told.persona.as_str()),
+        Job::Request(asked) => (asked.session.as_str(), asked.persona.as_str()),
+        Job::Ring(rung, _) => (rung.ring.session.as_str(), rung.ring.persona.as_str()),
+        Job::BadgeWake => ("", ""),
     };
     let about = directory.by_session(session).map(|member| &member.record);
     let own = about.and_then(|record| record.avatar.as_deref());
@@ -504,7 +558,8 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
     };
     // A user who sits at a desk with the app open sees it there. A ring goes to the phones
     // all the same: an agent calling is the interruption its user chose to allow.
-    let at_a_desk = !matches!(job, Job::Ring(..))
+    let desk_can_suppress = matches!(job, Job::Turn(..) | Job::Request(_));
+    let at_a_desk = desk_can_suppress
         && works
             .desks
             .lock()
@@ -528,7 +583,8 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         .active()
         .filter(|row| directory.can_receive(&row.principal))
         .filter(|row| match targets {
-            Targets::Apple => routes.enabled() && row.provider != "fcm",
+            Targets::Apple => routes.enabled() && row.provider != "fcm"
+                && (!matches!(job, Job::BadgeWake) || row.platform == "ios"),
             Targets::Android(named) => {
                 android
                     && row.provider == "fcm"
@@ -554,7 +610,7 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         {
             continue;
         }
-        if !matches!(job, Job::Ring(..))
+        if desk_can_suppress
             && works
                 .desks
                 .lock()
@@ -571,12 +627,13 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         if matches!(targets, Targets::Live(_)) {
             payload["conversation_mode"] = serde_json::json!("agent_live_v1");
         }
-        let collapse_id = push::collapse_id(&payload);
+        let background = matches!(job, Job::BadgeWake);
+        let collapse_id = if background { "badge-sync".into() } else { push::collapse_id(&payload) };
         let push = Push {
             payload: &payload,
             collapse_id: &collapse_id,
-            push_type: "alert",
-            priority: "10",
+            push_type: if background { "background" } else { "alert" },
+            priority: if background { "5" } else { "10" },
         };
         let delivery = if row.provider == "fcm" {
             let mut context = serde_json::json!({"agent_id":agent_id});
