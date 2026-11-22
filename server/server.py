@@ -2599,7 +2599,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                     queue_state = turn_queue.state(agent_id)
                     events.broadcast(self.ctx.stream, events.queue_updated(
                         session=session, agent_id=agent_id,
-                        queue_depth=queue_state["count"],
+                        queue_depth=queue_state["listed"],
                         queue_paused=queue_state["paused"],
                         queue_started=False,
                         queue_revision=queue_state["revision"]))
@@ -2748,7 +2748,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         self._broadcast_turn_queue(agent["agent_id"], session)
         state = turn_queue.state(agent["agent_id"])
         return self._json_ok({"session": session, "paused": state["paused"],
-                              "count": state["count"], "revision": state["revision"]})
+                              "count": state["listed"], "revision": state["revision"]})
 
     def _broadcast_turn_queue(self, agent_id: str, session: str, *,
                               client_msg_id: str = "", change: str = "",
@@ -2762,7 +2762,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         state = turn_queue.state(agent_id)
         event = events.queue_updated(
             session=session, agent_id=agent_id,
-            queue_depth=state["count"], queue_paused=state["paused"],
+            queue_depth=state["listed"], queue_paused=state["paused"],
             queue_started=False, queue_revision=state["revision"],
             **({"client_msg_id": client_msg_id} if client_msg_id else {}),
             **({"queue_change": change} if change else {}),
