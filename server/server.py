@@ -417,6 +417,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         # (e.g. 401 before the handler ever touched rfile).
         self._body_consumed = False
         self._json_read = None      # the body, once read (lib.request_texts reads it first)
+        # CORS headers for this response (lib.cross_origin), set only for an allowed origin's GET
+        # of a cross-origin read route; per request, so keep-alive never carries them over.
+        self._cors_headers = None
         # The request clock starts here. handle_one_request() blocks in
         # readline() for the next request on a keep-alive connection, so a
         # clock started there counts idle socket time as handler latency
@@ -826,6 +829,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             started = getattr(self, "_request_started_wall", None)
             if started is not None and getattr(self, "command", None):
                 self._log_http(code, started)
+
+    def end_headers(self):
+        for name, value in (getattr(self, "_cors_headers", None) or {}).items():
+            self.send_header(name, value)
+        super().end_headers()
 
     def send_response(self, code, message=None):
         self._status_code = code
@@ -1331,10 +1339,39 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     # --- GET dispatch ----------------------------------------------------
 
+    def _web_read_origins(self) -> frozenset:
+        from lib import config
+        try:
+            return config.load().web_read_origins
+        except Exception:  # noqa: BLE001 - an unreadable configuration allows no origin
+            return frozenset()
+
+    def do_OPTIONS(self):
+        """A CORS preflight for the web app's all-Hosts list (lib.cross_origin): answered for an
+        origin on `[server] web_read_origins` asking to GET a cross-origin read route with only
+        Authorization and X-Clarp-Client; every other OPTIONS is refused, with no CORS header.
+        A preflight carries no credentials, so it is answered before authentication and says
+        nothing but the policy."""
+        from lib import cross_origin
+        path = self.path.split("?", 1)[0]
+        allowed = cross_origin.preflight(self.headers, path, self._web_read_origins())
+        if allowed is None:
+            return self._send(403, b"", "text/plain")
+        return self._send(204, b"", "text/plain", extra_headers=allowed)
+
     def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        from lib import cross_origin
+        origin = cross_origin.allowed_origin(self.headers.get("Origin"), path, "GET", self._web_read_origins())
+        if origin:
+            # Before authentication, so a refusal (401, 403) reaches the page as one too.
+            self._cors_headers = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
         if not self._authorized():
             return self._reject_unauthorized()
-        path = self.path.split("?", 1)[0]
+        if origin and getattr(self, "_request_auth_source", "") not in ("header", ""):
+            # A cross-origin read is taken with the token in the Authorization header only,
+            # never a cookie or a URL token (no credentials mode; lib.cross_origin).
+            return self._json_error(401, "send the token in the Authorization header")
         if self._oracle_auth_missing(path):
             return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "GET"):
