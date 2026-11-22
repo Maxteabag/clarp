@@ -58,7 +58,13 @@ pub(super) async fn current(app: &App, run: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn models(app: &App, tool: &str, now: i64, base: i64) -> (Vec<String>, Vec<String>) {
+fn models(
+    app: &App,
+    tool: &str,
+    now: i64,
+    base: i64,
+    default_model: &str,
+) -> (Vec<String>, Vec<String>) {
     if tool != "claude" {
         return (vec![], vec![]);
     }
@@ -72,7 +78,7 @@ fn models(app: &App, tool: &str, now: i64, base: i64) -> (Vec<String>, Vec<Strin
     {
         let view = m.agent.view();
         let status = &view.status;
-        let model = &m.record.model;
+        let model = model_or_default(&m.record.model, default_model);
         let live = status.live.as_ref();
         let runs = live.is_some_and(|t| !waits_for_an_account(t));
         let recent = stopped(status).is_some_and(|(cause, at)| {
@@ -82,13 +88,21 @@ fn models(app: &App, tool: &str, now: i64, base: i64) -> (Vec<String>, Vec<Strin
         if !model.is_empty()
             && (live.is_some() || !status.paused && !status.waiting.is_empty() || recent)
         {
-            needed.push(model.clone());
+            needed.push(model.to_owned());
             if runs {
-                running.push(model.clone());
+                running.push(model.to_owned());
             }
         }
     }
     (needed, running)
+}
+
+fn model_or_default<'a>(model: &'a str, default_model: &'a str) -> &'a str {
+    if model.is_empty() {
+        default_model
+    } else {
+        model
+    }
 }
 
 async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str) {
@@ -178,7 +192,14 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
         .as_ref()
         .map(|body| seat_switch::parse(tool, body))
         .unwrap_or_default();
-    let (required, running) = models(app, tool, now, base);
+    let default_model = if claude {
+        crate::models::default_for(app, tool)
+            .await
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let (required, running) = models(app, tool, now, base, &default_model);
     let decision = seat_switch::decide(
         &accounts,
         Demand {
@@ -339,7 +360,7 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
         && let Some(pool) = app.pools.iter().find(|p| p.tool() == tool)
         && account.remaining.unwrap_or(0) > 0
     {
-        pool.available(|model| !claude || account.serves(model));
+        pool.available(|model| !claude || account.serves(model_or_default(model, &default_model)));
     }
     if notify && let Some(member) = app.fleet.directory().janitor(id) {
         app.pusher.turn_done(crate::pusher::TurnDone {

@@ -1856,46 +1856,6 @@ fn creation_backend(backend: &str) -> String {
     }
 }
 
-async fn creation_default_model(app: &App, backend: &str) -> Option<String> {
-    let key = format!("{backend}_model");
-    if let Some(model) = crate::owner::text_at(&app.mouth.owners(), &["agents", &key]) {
-        return Some(model);
-    }
-    let backend = backend.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let home = crate::config::home();
-        match backend.as_str() {
-            "claude" => {
-                let config = std::env::var_os("CLAUDE_CONFIG_DIR")
-                    .filter(|directory| !directory.is_empty())
-                    .map_or_else(|| home.join(".claude"), std::path::PathBuf::from);
-                let settings = std::fs::read_to_string(config.join("settings.json")).ok()?;
-                let settings: Value = serde_json::from_str(&settings).ok()?;
-                std::env::var("ANTHROPIC_MODEL")
-                    .ok()
-                    .filter(|model| !model.is_empty())
-                    .or_else(|| settings["model"].as_str().map(str::to_owned))
-            }
-            "codex" => {
-                let config = crate::past::codex_home(&home).join("config.toml");
-                let config = std::fs::read_to_string(config).ok()?;
-                let config: toml::Table = config.parse().ok()?;
-                let profile = crate::owner::text_at(&config, &["profile"]);
-                profile
-                    .as_deref()
-                    .and_then(|profile| {
-                        crate::owner::text_at(&config, &["profiles", profile, "model"])
-                    })
-                    .or_else(|| crate::owner::text_at(&config, &["model"]))
-            }
-            _ => None,
-        }
-    })
-    .await
-    .ok()
-    .flatten()
-}
-
 /// Makes an agent from what a request said: `POST /agents`, and `clarp-admin agent create`.
 /// Answers what the Python Host answers: the new agent's session, its name and its row, or
 /// why it was not made. With `replace_sid` the agent of that session is started again in
@@ -1997,7 +1957,7 @@ pub(crate) async fn make_agent(
         return Err(refused(StatusCode::BAD_REQUEST, code, message));
     }
     let default_model = if model.is_empty() && (replaces.is_none() || request.model.is_some()) {
-        creation_default_model(app, backend).await
+        crate::models::default_for(app, backend).await
     } else {
         None
     };
