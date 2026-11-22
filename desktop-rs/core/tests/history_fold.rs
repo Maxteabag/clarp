@@ -490,3 +490,25 @@ fn commentary_in_history_folds_and_opens_in_place() {
     assert_eq!(read(&open.folds[0]), ["1 tool", "row a1", "Ran make build", "row a2"]);
     assert!(!open.hidden_rows.contains("a1"));
 }
+
+/// A spoken acknowledgment (its row's `<speak>` block) stays above the
+/// work row, Hide when done too; plain commentary folds (#653).
+#[test]
+fn a_spoken_acknowledgment_in_history_stays_above_the_work_row() {
+    let commentary = |id: &str, at: &str, text: &str| of_turn(text_row(id, at, text), "t1", Some("commentary"));
+    let rows = turn(&[
+        prompt("u1", "2026-10-03T10:00:00Z", "t1"),
+        commentary("a0", "2026-10-03T10:00:01Z", "<speak>On it, checking the build.</speak>"),
+        of_turn(tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "ok"), "t1", None),
+        commentary("a2", "2026-10-03T10:00:03Z", "Looking at the build log now."),
+        of_turn(tool_row("a3", "2026-10-03T10:00:04Z", "c2", "make test", "ok"), "t1", None),
+        summed(of_turn(text_row("a4", "2026-10-03T10:00:06Z", "All green."), "t1", Some("final")), "t1", "completed", 6_000, 2),
+        prompt("u2", "2026-10-03T10:00:30Z", "t2"),
+    ]);
+    let quiet = Options { fold_commentary: true, ..options(&[]) };
+    let folded = present(&rows, None, &quiet);
+    assert_eq!(read(&folded.folds[0]), ["row a0", "Worked for 6s · 2 tools", "row a4"]);
+    assert!(folded.hidden_rows.contains("a2") && !folded.hidden_rows.contains("a0"));
+    let hidden = present(&rows, None, &Options { hide_settled: true, ..quiet });
+    assert_eq!(read(&hidden.folds[0]), ["row a0", "row a4"], "Hide when done keeps the words heard");
+}

@@ -45,7 +45,7 @@ fn setting(app: &crate::App, id: &str) -> Option<crate::SettingRow> {
 }
 
 pub fn quiet_chat_check(out: String) {
-    let (out1, out2, out3) = (out.clone(), out.clone(), out.clone());
+    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("open", Box::new(|app, _window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -129,10 +129,65 @@ pub fn quiet_chat_check(out: String) {
                 return false;
             }
             check(live_row("live:cl:msg_01:1").is_some(), "Always visible shows the commentary in its place");
+            // A finished turn in Mike's /log: a spoken acknowledgment, a
+            // tool, plain commentary, a tool, the reply (#653).
+            app_now().engine.borrow_mut().set_activity_mode(clarp_core::presentation::GROUPED);
+            check(control("/__control/turn-summary", &json!({"on": true})).is_ok(), "the Host sums turns up in /log");
+            check(control("/__control/upsert", &json!({"session": "mike", "turns": heard_rows()})).is_ok(), "Mike's turn lands");
+            app_now().engine.borrow_mut().reconnect();
+            true
+        })),
+        ("heard", Box::new(move |app, _window, elapsed| {
+            if !app.engine.borrow().log_turn_summary() {
+                return false;
+            }
+            if app.engine.borrow().selected_session() != "mike" {
+                app.engine.borrow_mut().select("mike");
+                return false;
+            }
+            let ids = shown_ids();
+            if !ids.iter().any(|id| id == "h-final") || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let at = |id: &str| ids.iter().position(|i| i == id);
+            let fold = live_row("live:fold:t-heard").unwrap_or_default();
+            check(fold.live.title == "Worked for 6s · 2 tools", &format!("the work row counts the two folded calls: {:?}", fold.live.title));
+            check(at("h-ack").is_some() && at("h-ack") < at("live:fold:t-heard") && at("live:fold:t-heard") < at("h-final"), &format!("the acknowledgment heard, then the work row, then the reply: {ids:?}"));
+            check(at("h-note").is_none() && at("h-tool1").is_none() && at("h-tool2").is_none(), &format!("the plain commentary and the tools fold: {ids:?}"));
+            app_now().focus_transcript();
+            shot(&out4, "quiet-04-heard");
+            app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::HIDE_WHEN_DONE);
+            true
+        })),
+        ("heard, hidden when done", Box::new(move |_, _window, elapsed| {
+            if live_row("live:fold:t-heard").is_some() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let ids = shown_ids();
+            let at = |id: &str| ids.iter().position(|i| i == id);
+            check(at("h-ack").is_some() && at("h-ack") < at("h-final"), &format!("Hide when done keeps the acknowledgment and the reply: {ids:?}"));
+            check(at("h-note").is_none(), "and leaves the plain commentary folded away");
             true
         })),
     ];
     run_stages(stages);
+}
+
+/// Mike's finished turn: a spoken acknowledgment, a tool, plain
+/// commentary, a tool, the reply with the Host's summary; then his next prompt.
+fn heard_rows() -> serde_json::Value {
+    let tool = |id: &str, at: &str, call: &str, command: &str| json!({"id": id, "role": "assistant", "timestamp": at, "text": "", "trace_id": "t-heard",
+        "tools": [{"name": "Bash", "summary": command, "status": "ok", "id": call, "command": command, "result": "ok"}]});
+    json!([
+        {"id": "u-heard", "role": "user", "text": "Is the build green?", "origin": "user", "timestamp": "2026-12-01T10:00:00Z", "trace_id": "t-heard"},
+        {"id": "h-ack", "role": "assistant", "text": "<speak>On it, checking the build.</speak>", "phase": "commentary", "timestamp": "2026-12-01T10:00:01Z", "trace_id": "t-heard"},
+        tool("h-tool1", "2026-12-01T10:00:02Z", "call-h1", "make build"),
+        {"id": "h-note", "role": "assistant", "text": "Looking at the build log now.", "phase": "commentary", "timestamp": "2026-12-01T10:00:03Z", "trace_id": "t-heard"},
+        tool("h-tool2", "2026-12-01T10:00:04Z", "call-h2", "make test"),
+        {"id": "h-final", "role": "assistant", "text": "All green.", "phase": "final", "timestamp": "2026-12-01T10:00:06Z", "trace_id": "t-heard",
+         "turn": {"turn_id": "t-heard", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 7_000, "worked_ms": 6_000, "tool_count": 2}},
+        {"id": "u-heard-next", "role": "user", "text": "Thanks.", "origin": "user", "timestamp": "2026-12-01T10:01:00Z", "trace_id": "t-heard-next"},
+    ])
 }
 
 /// The rows of a run between agents, then the user's own turn after it.

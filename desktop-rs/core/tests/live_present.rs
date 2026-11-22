@@ -683,3 +683,51 @@ fn a_durable_commentary_row_hides_with_its_fold() {
     let open = present(&view, std::slice::from_ref(&note), &opts);
     assert!(!open.hidden_rows.contains(&"r-note".to_owned()) && open.entries.iter().any(|e| e.row == "r-note"), "opened, the row shows in its place");
 }
+
+/// A settled turn: a spoken acknowledgment (after a first tool), a tool,
+/// plain commentary, a tool, the reply.
+fn heard_turn() -> LiveView {
+    let message = |id: &str, ordinal: i64, phase: &str, text: &str| {
+        json!({"id": id, "kind": "message", "rev": 1, "conv": "c-1", "turn_id": "tr-h", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000, "phase": phase, "text": text})
+    };
+    let tool = |call: &str, ordinal: i64, command: &str| {
+        json!({"id": format!("cl:{call}"), "kind": "tool", "rev": 1, "conv": "c-1", "turn_id": "tr-h", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000,
+            "tool": {"name": "Bash", "call_id": call, "category": "exec", "group": null, "label": command, "command": command}})
+    };
+    let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": 20_000,
+        "activity": {"state": "idle", "turn_id": "tr-h"},
+        "turn": {"turn_id": "tr-h", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 9_000, "worked_ms": 8_000, "tool_count": 3},
+        "items": [
+            tool("h0", 1, "git status"),
+            message("cl:h:ack", 2, "commentary", "<speak>On it, checking the build.</speak>"),
+            tool("h1", 3, "make build"),
+            message("cl:h:note", 4, "commentary", "Looking at the build log now."),
+            tool("h2", 5, "make test"),
+            message("cl:h:final", 6, "final", "All green."),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    view
+}
+
+/// Commentary the user heard (#653) stays in view above the work row in
+/// every mode, Hide when done too; plain commentary folds; the count is
+/// still the folded calls.
+#[test]
+fn a_spoken_acknowledgment_stays_above_the_work_row() {
+    let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
+    let mut opts = options(&[], 0);
+    opts.fold_commentary = true;
+    let p = present(&heard_turn(), &[], &opts);
+    assert_eq!(read(&p), ["On it, checking the build.", "3 tools", "All green."], "the words heard, the work row, the reply");
+    assert!(p.entries[0].spoken);
+    opts.hide_settled = true;
+    assert_eq!(read(&present(&heard_turn(), &[], &opts)), ["On it, checking the build.", "All green."], "Hide when done keeps it");
+    opts.hide_settled = false;
+    opts.expanded.insert("live:fold:tr-h".to_owned());
+    let open = present(&heard_turn(), &[], &opts);
+    assert_eq!(read(&open), ["On it, checking the build.", "3 tools", "Ran git status", "Ran make build", "Looking at the build log now.", "Ran make test", "All green."], "opened, the rest in place");
+    assert!(clarp_core::text::has_speech("Sure. <speak>On it.</speak>") && !clarp_core::text::has_speech("<speak> </speak>") && !clarp_core::text::has_speech("speak plainly"));
+}

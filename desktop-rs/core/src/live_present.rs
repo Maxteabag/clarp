@@ -67,6 +67,9 @@ pub struct Entry {
     /// A message's Markdown.
     pub text: String,
     pub phase: String,
+    /// A message that carried speech (a `<speak>` block the user heard):
+    /// commentary that did stays in view, above the work row (#653).
+    pub spoken: bool,
     pub expandable: bool,
     pub expanded: bool,
     /// The items' revisions summed: a row changes only when this does.
@@ -439,7 +442,7 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
     // and thinking, running ones too, under `Working · N tools`.
     if settled || options.fold_running {
         let stays = |entry: &Entry| {
-            (entry.kind == Kind::Message && !(options.fold_commentary && entry.phase == "commentary"))
+            (entry.kind == Kind::Message && !(options.fold_commentary && entry.phase == "commentary" && !entry.spoken))
                 || matches!(entry.status.as_str(), "failed" | "interrupted")
                 || (settled && matches!(entry.status.as_str(), "running" | "pending"))
         };
@@ -476,20 +479,23 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
             // Hide when done: a finished turn's work row goes, and what it
             // stood for with it.
             let shows_fold = !(settled && options.hide_settled);
-            if open {
-                entries.insert(first, fold);
-            } else {
-                let mut kept = Vec::with_capacity(entries.len());
-                for (i, entry) in entries.into_iter().enumerate() {
-                    if i == first && shows_fold {
+            // Commentary the user heard (#653) stays in view above the work
+            // row, whatever came before it: the words the user heard first.
+            let heard: Vec<usize> = (first + 1..entries.len()).filter(|i| entries[*i].kind == Kind::Message && entries[*i].spoken && entries[*i].phase == "commentary").collect();
+            let mut slots: Vec<Option<Entry>> = entries.into_iter().map(Some).collect();
+            let mut kept = Vec::with_capacity(slots.len() + 1);
+            for i in 0..slots.len() {
+                if i == first {
+                    kept.extend(heard.iter().filter_map(|j| slots[*j].take()));
+                    if shows_fold {
                         kept.push(fold.clone());
                     }
-                    if !folded.contains(&i) {
-                        kept.push(entry);
-                    }
                 }
-                entries = kept;
+                if open || !folded.contains(&i) {
+                    kept.extend(slots[i].take());
+                }
             }
+            entries = kept;
         }
     }
     entries
@@ -549,6 +555,7 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
             let streaming = matches!(status.as_str(), "running" | "pending" | "");
             entry.text = crate::text::cleaned_display_text(text(item, "text"), streaming);
             entry.phase = text(item, "phase").to_owned();
+            entry.spoken = crate::text::has_speech(text(item, "text"));
             if status == "interrupted" {
                 entry.meta = "interrupted".into();
             }

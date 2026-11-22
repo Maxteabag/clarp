@@ -311,6 +311,8 @@ fn turn(
         let item = item.as_object().cloned().unwrap_or_default();
         let mut entry = live_present::item_entry(&item, &live_options);
         entry.row = row.id.clone();
+        // The row's own text says whether it was spoken (its `<speak>` block).
+        entry.spoken = crate::text::has_speech(&row.text);
         rows_of.insert(format!("log:{}", row.id), entry);
         items.push(item);
     };

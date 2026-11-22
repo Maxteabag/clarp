@@ -241,6 +241,20 @@ fn drop_vox_for_display(text: &str) -> String {
     s.into_iter().collect()
 }
 
+/// Whether a row's raw text carried speech: a `<speak>` block with words
+/// in it, which the Host speaks to the user (#653: such a commentary row
+/// stays in view). Read from the markup itself, never guessed from words.
+pub fn has_speech(text: &str) -> bool {
+    static SPEAK_BLOCK: LazyLock<Regex> = LazyLock::new(|| re(r"(?is)<speak\b[^>]*>(.*?)(?:</speak\s*>|$)"));
+    static ANY_TAG: LazyLock<Regex> = LazyLock::new(|| re(r"<[^>]*>"));
+    if !text.contains('<') {
+        return false;
+    }
+    SPEAK_BLOCK.captures_iter(text).filter_map(Result::ok).any(|c| {
+        c.get(1).is_some_and(|words| !replace_all(&ANY_TAG, words.as_str(), "").trim().is_empty())
+    })
+}
+
 /// The written form of a reply: voice markup removed, and the gaps a spoken
 /// pause or filler leaves closed only where they were. A still-streaming
 /// reply also hides a voice tag that has not finished arriving.
