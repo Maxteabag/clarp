@@ -41,18 +41,20 @@ PROVIDER_COLLECTORS = (CLAUDE, CODEX)
 
 
 def _iso_from_epoch_seconds(value: Any) -> str:
+    """Epoch seconds as ISO time, or "" for no usable time. A value outside the
+    calendar (milliseconds, inf, nan) is no reset time, never an error that
+    breaks the whole limits record (issue 360, R49)."""
     try:
         ts = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return ""
-    if ts <= 0:
+    if not ts > 0:                          # also nan
         return ""
-    return (
-        _dt.datetime.fromtimestamp(ts, tz=_dt.UTC)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    try:
+        moment = _dt.datetime.fromtimestamp(ts, tz=_dt.UTC)
+    except (OverflowError, OSError, ValueError):
+        return ""
+    return moment.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _normalize_time(value: Any) -> str:
@@ -64,9 +66,11 @@ def _normalize_time(value: Any) -> str:
     if not raw:
         return ""
     try:
-        return _iso_from_epoch_seconds(float(raw))
+        number = float(raw)
     except ValueError:
-        pass
+        number = None
+    if number is not None:
+        return _iso_from_epoch_seconds(number)
     # Keep already-readable ISO timestamps from Claude. Normalize trailing UTC
     # marker only; do not reject future Claude variants with offsets.
     return raw.replace("+00:00", "Z")
