@@ -141,3 +141,22 @@ fn voice_names_follow_the_reference_age_merge_and_lookup_rules() {
         (11, 10, 12, 100)
     );
 }
+
+#[test]
+fn curated_cartesia_labels_are_used_until_a_catalogue_names_the_voice() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/voice-names-vectors.json")).unwrap();
+    let shipped = clarp_kernel::voice_profile::shipped_labels();
+    assert_eq!(json!(shipped["cartesia"]), fixture["curated"]);
+    for case in fixture["labels"].as_array().unwrap() {
+        let mut labels = shipped.clone();
+        for layer in ["saved", "picker"] {
+            voice_names::merge(
+                &mut labels,
+                serde_json::from_value(json!({"cartesia": case[layer]})).unwrap(),
+            );
+        }
+        let id = case["id"].as_str().unwrap();
+        assert_eq!(json!(labels["cartesia"][id]), case["result"], "{case}");
+    }
+}

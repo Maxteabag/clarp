@@ -144,9 +144,12 @@ fn the_owner_makes_changes_and_removes_personas_as_on_the_python_host() {
                     name: contact["name"].as_str().unwrap(),
                     stored: contact["voice_id"].as_str().unwrap(),
                     builtin: contact["builtin"] == true,
+                    archived: false,
+                    agent_id: None,
+                    created_at_ms: book.created_at(contact["id"].as_str().unwrap()),
                 })
                 .collect();
-            pool.assign(name, voice, &users).stored
+            pool.assign(name, voice, &users, Default::default).stored
         };
         let mut book = Book::default();
         for (at, step) in room["steps"].as_array().unwrap().iter().enumerate() {

@@ -46,7 +46,7 @@ CHANGES = [
             '        state = turn_queue.state(agent_id)\n'
             '        event = events.queue_updated(\n'
             '            session=session, agent_id=agent_id,\n'
-            '            queue_depth=state["count"], queue_paused=state["paused"],\n'
+            '            queue_depth=state["listed"], queue_paused=state["paused"],\n'
             '            queue_started=False, queue_revision=state["revision"],\n'
             '            **({"client_msg_id": client_msg_id} if client_msg_id else {}),\n'
             '            **({"queue_change": change} if change else {}),\n'

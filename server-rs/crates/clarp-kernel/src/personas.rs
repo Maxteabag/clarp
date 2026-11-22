@@ -411,6 +411,14 @@ impl Book {
         Self { made, looks }
     }
 
+    /// A custom contact's creation time. Built-in contacts have no stored creation time.
+    pub fn created_at(&self, id: &str) -> i64 {
+        self.made
+            .iter()
+            .find(|contact| contact.persona_id == id)
+            .map_or(0, |contact| contact.created_at_ms)
+    }
+
     /// Apply a reviewed migration to a saved contact.
     pub fn set_stored_voice(&mut self, id: &str, voice: &str) -> Option<&Made> {
         let contact = self
