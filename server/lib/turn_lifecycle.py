@@ -921,6 +921,26 @@ class TurnStateMachine:
         return int(cursor.lastrowid or 0)
 
     @staticmethod
+    def reopen_turn(*, agent_id: str, source: str, trace_id: str,
+                    synthesize_audio: bool = True) -> int:
+        """A queue hand-off tried again after its launch failed before the backend
+        started: the trace's unsettled row opens again rather than a new row per try
+        (one turn row per trace, R92; an hour of tries once left 4448, R193). A trace
+        with no such row opens one."""
+        with _critical_write():
+            row = conn().execute(
+                """SELECT turn_id FROM turns WHERE agent_id = ? AND trace_id = ?
+                     AND settled_at IS NULL ORDER BY turn_id DESC LIMIT 1""",
+                (agent_id, trace_id)).fetchone()
+            if row is not None:
+                conn().execute(
+                    "UPDATE turns SET ended_at = NULL, started_at = ? WHERE turn_id = ?",
+                    (now_ms(), row["turn_id"]))
+                return int(row["turn_id"])
+        return TurnStateMachine.open_turn(agent_id=agent_id, source=source, trace_id=trace_id,
+                                     synthesize_audio=synthesize_audio)
+
+    @staticmethod
     def open_turn_once(*, agent_id: str, source: str, trace_id: str,
                        synthesize_audio: bool = True) -> int | None:
         """Open ``trace_id``'s turn row unless the trace already has one: ONE turn row per trace
@@ -1118,6 +1138,12 @@ def open_turn(*, agent_id: str, source: str, trace_id: str,
     return MACHINE.open_turn(agent_id=agent_id, source=source,
                              trace_id=trace_id,
                              synthesize_audio=synthesize_audio)
+
+
+def reopen_turn(*, agent_id: str, source: str, trace_id: str,
+                synthesize_audio: bool = True) -> int:
+    return MACHINE.reopen_turn(agent_id=agent_id, source=source, trace_id=trace_id,
+                               synthesize_audio=synthesize_audio)
 
 
 def open_turn_once(*, agent_id: str, source: str, trace_id: str,
