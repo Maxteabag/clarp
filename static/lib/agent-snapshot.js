@@ -6,6 +6,7 @@
 // paint from the same source.
 
 import { ActivityStatus, AgentState } from './protocol.js';
+import { normalizeMoved } from './agent-moved.js';
 
 function toSeconds(value) {
   const n = Number(value || 0);
@@ -113,6 +114,12 @@ function normalizeAgent(row) {
     last_tokens_out: Number(row.last_tokens_out) || 0,
     last_cost_usd: row.last_cost_usd == null ? null : Number(row.last_cost_usd),
     last_duration_ms: Number(row.last_duration_ms) || 0,
+    // Contract 125: where the agent moved, or null (static/lib/agent-moved.js).
+    moved: normalizeMoved(row.moved),
+    // Contract 120: the chat's effective coordination visibility ('show' | 'hide', '' from a Host
+    // without it) and its own choice (null: it follows the Host).
+    coordination_visibility: String(row.coordination_visibility || ''),
+    coordination_override: row.coordination_override ? String(row.coordination_override) : null,
   };
 }
 

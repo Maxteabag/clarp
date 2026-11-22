@@ -2,7 +2,8 @@
   // Desktop composer: a permanent prompt line inside the dock row. No
   // open/close state and no visual-viewport tracking — there is no soft
   // keyboard to dodge, which is most of what the mobile one does.
-  import { app } from '../../stores/app.svelte.js';
+  import { app, statusFor } from '../../stores/app.svelte.js';
+  import { movedLine } from '@core/agent-moved.js';
   import { unlockAudio } from '../../stores/audio.svelte.js';
   import { composerRef } from '../../stores/composer.svelte.js';
   import { send, sendText } from '../../stores/send.svelte.js';
@@ -10,6 +11,9 @@
   import { setInsert } from '../../stores/input.svelte.js';
 
   let value = $state('');
+  // An agent that moved to another Host takes no turn here: the composer is held, the chat
+  // stays readable (contract 125).
+  let held = $derived((app.tick, movedLine(statusFor(app.session).moved)));
   let inputEl = $state(null);
 
   // Registered rather than bound, because the click-anywhere-refocuses
@@ -57,6 +61,9 @@
 </script>
 
 <div id="chatBar" class="chat-bar">
+  {#if held}
+    <div class="chat-row"><div class="chat-held" role="status">{held}. It takes no messages here.</div></div>
+  {:else}
   <div class="chat-row">
     <input
       id="chatInput"
@@ -75,4 +82,5 @@
       </svg>
     </button>
   </div>
+  {/if}
 </div>

@@ -177,6 +177,7 @@ class RuntimeClient:
             raise DispatchError(
                 int(response.get("status") or 503),
                 str(response.get("error") or "agent runtime rejected the request"),
+                agent_id=str(response.get("agent_id") or ""),
             )
         result = response.get("result") or {}
         return DispatchResult(
@@ -301,6 +302,7 @@ class RuntimeClient:
             raise DispatchError(
                 int(response.get("status") or 502),
                 str(response.get("error") or "runtime stop failed"),
+                agent_id=str(response.get("agent_id") or ""),
             )
         result = response.get("result") or {}
         return StopLease(
@@ -335,7 +337,8 @@ class RuntimeClient:
         if not response.get("ok"):
             from .turn_dispatch import DispatchError
             raise DispatchError(int(response.get("status") or 502),
-                                str(response.get("error") or "Maintenance cancellation failed"))
+                                str(response.get("error") or "Maintenance cancellation failed"),
+                                agent_id=str(response.get("agent_id") or ""))
         return dict(response.get("result") or {})
 
     def release_agent(self, agent_id: str) -> int:

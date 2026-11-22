@@ -4,18 +4,21 @@
   // full overview — the same gesture the dock's session button carries, kept
   // on both so desktop still has it after the dock drops its identity block.
   import {
-    AVATAR_PALETTE, app, avatarUrl, chipLabel, shortActivityText, statusFor,
+    AVATAR_PALETTE, app, avatarUrl, chipLabel, hostBadgeFor, shortActivityText, statusFor,
     unreadAgentCount,
   } from '../stores/app.svelte.js';
   import { activityStatusClass } from './render.js';
+  import { movedLine } from '@core/agent-moved.js';
+  import HostBadge from './HostBadge.svelte';
 
   let { session = app.session, onTap, onHold } = $props();
 
   let label = $derived(chipLabel(session));
   let status = $derived(statusFor(session));
   let activity = $derived(
-    shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
+    movedLine(status.moved) || shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
   let unread = $derived((app.tick, unreadAgentCount()));
+  let host = $derived((app.tick, hostBadgeFor(session)));
 
   let holdTimer = null;
   let holdFired = false;
@@ -63,6 +66,6 @@
     <span
       class="history-agent-status {activityStatusClass(status.activity_status)}"
       title={activity}
-    >{activity}</span>
+    >{#if host}<HostBadge name={host} /> · {/if}{activity}</span>
   </span>
 </button>

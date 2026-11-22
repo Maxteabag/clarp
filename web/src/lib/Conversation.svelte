@@ -3,6 +3,7 @@
   // so it stays shared; the shells differ in what surrounds it, not in this.
   import AgentBanner from './AgentBanner.svelte';
   import AgentIdentity from './AgentIdentity.svelte';
+  import ChatCoordinationMenu from './ChatCoordinationMenu.svelte';
   import ConnDot from './ConnDot.svelte';
   import Transcript from './Transcript.svelte';
   import StatusLine from './live/StatusLine.svelte';
@@ -24,9 +25,10 @@
       <button
         id={active ? 'historyToolsToggle' : undefined}
         class="history-btn"
-        class:active={!prefs.hideTools}
+        class:active={prefs.toolActivity === 'always'}
         aria-label="Toggle tools"
-        title="Show/hide tool calls"
+        title={prefs.toolActivity === 'always' ? 'Every tool call in view (Tool activity in Chat settings)'
+          : 'Tool calls grouped (Tool activity in Chat settings)'}
         onclick={toggleTools}
       >⚙</button>
       {#if live.explanationSetting}
@@ -42,6 +44,7 @@
           onclick={() => setExplanationsEnabled(!live.explanations.enabled)}
         >ⓘ</button>
       {/if}
+      {#if live.hiddenCoordination}<ChatCoordinationMenu {session} {active} />{/if}
       <button id={active ? 'historyRefresh' : undefined} class="history-btn" aria-label="Refresh"
               onclick={() => reload(session)}>↻</button>
     </div>

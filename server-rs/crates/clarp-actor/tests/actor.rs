@@ -3,11 +3,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use clarp_actor::conversation::Which;
+use clarp_actor::conversation::{Versioned, Which};
 use clarp_actor::{
     Action, Actor, ImportedRow, Marks, Noted, Outputs, Profile, ShimOrder, TRACE_TAKEN, TraceTaken,
     TurnFate,
@@ -20,7 +20,8 @@ use clarp_kernel::conversation::{Entry, Message, ToolStatus};
 use clarp_kernel::journal::kind;
 use clarp_kernel::spoken::{CUT_OFF, KEPT_FOR_MS, LineState, Said};
 use clarp_kernel::turn::{Admission, Origin, Outcome, TurnId};
-use clarp_ports::log::LogEngine;
+use clarp_ports::codec::CodecSet;
+use clarp_ports::log::{AgentLog, Kinds, LogEngine, LogError};
 use clarp_spool::{Entry as Line, Record, ShimEvent, SpoolWriter};
 use clarp_store_mem::MemEngine;
 use serde_json::json;
@@ -191,11 +192,11 @@ fn message(id: &str, text: &str) -> Message {
 
 /// A conversation as a client would show it: each thing's id with what it says.
 fn shown(actor: &Actor) -> Vec<(String, String)> {
-    actor
-        .tail(1_000)
-        .unwrap()
-        .entries
-        .into_iter()
+    shown_rows(&actor.tail(1_000).unwrap().entries)
+}
+
+fn shown_rows(rows: &[Versioned]) -> Vec<(String, String)> {
+    rows.iter()
         .map(|version| {
             let says = match &version.entry {
                 Entry::Message(message) => format!("user: {}", message.text),
@@ -1640,8 +1641,32 @@ struct Crash {
     down_for: usize,
 }
 
+/// The schedule's storage port sees both agents' disks, but only this agent may be opened.
+struct DayLogEngine {
+    inner: MemEngine,
+    owned: PathBuf,
+}
+
+impl LogEngine for DayLogEngine {
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+
+    fn open(&self, agent_dir: &Path, codecs: CodecSet) -> Result<Box<dyn AgentLog>, LogError> {
+        assert_eq!(
+            agent_dir,
+            self.owned.as_path(),
+            "only this agent's log is opened"
+        );
+        self.inner.open(agent_dir, codecs)
+    }
+}
+
 struct Day {
     conversation: Vec<(String, String)>,
+    changes: Vec<Versioned>,
+    checkpoints: Vec<[u64; 2]>,
+    caught_up: Vec<Versioned>,
     took: Vec<u64>,
     last_outcome: Option<Outcome>,
     backend_session: Option<String>,
@@ -1651,6 +1676,27 @@ struct Day {
 
 fn live_through(events: &[Event], crash: Option<Crash>) -> Day {
     let mut world = World::new("day");
+    let engine = MemEngine::new();
+    let mut other = engine
+        .open(&world.root.join("agents/a2"), standard_set("zstd").unwrap())
+        .unwrap();
+    // Both agents can have a turn 1 and a message u-1, each with its own words.
+    let foreign = Entry::Message(message("u-1", "only in the other chat"))
+        .to_item(1_000)
+        .unwrap()
+        .in_turn(1);
+    other.append(&[foreign]).unwrap();
+    let foreign = other.read_after(0, Kinds::ALL, usize::MAX).unwrap();
+    world.engine = Box::new(DayLogEngine {
+        inner: engine,
+        owned: world.profile.dir.clone(),
+    });
+    let journal = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let mut checkpoints = vec![[0; 2]; events.len()];
+    let mut saved = None;
     let mut actor = Some(world.open());
     let mut down_left = 0usize;
     for (at, event) in events.iter().enumerate() {
@@ -1689,22 +1735,23 @@ fn live_through(events: &[Event], crash: Option<Crash>) -> Day {
                 actor.map(|actor| actor.spool_changed(now).unwrap())
             }
         };
-        match (asked, crash_here) {
-            (Some(_), Some(crash)) if crash.before_acting => {
-                // The log has it; nothing that was decided was done.
-                actor = None;
-                down_left = crash.down_for;
-            }
-            (Some(out), crash) => {
-                if let Some(actor) = actor.as_mut() {
-                    world.carry_out(actor, out);
-                }
-                if let Some(crash) = crash {
-                    actor = None;
-                    down_left = crash.down_for;
-                }
-            }
-            (None, _) => {}
+        let Some(out) = asked else {
+            continue;
+        };
+        let running = actor.as_mut().unwrap();
+        let before = running.head_revision();
+        if !crash_here.is_some_and(|crash| crash.before_acting) {
+            world.carry_out(running, out);
+        }
+        let after = running.head_revision();
+        checkpoints[at] = [after, before];
+        if let Some(crash) = crash_here {
+            // Read what the client and the journal hold before dropping the actor.
+            let seq = journal.last_seq().unwrap();
+            let prefix = journal.read_after(0, Kinds::ALL, usize::MAX).unwrap();
+            saved = Some((running.head_revision(), seq, prefix));
+            actor = None;
+            down_left = crash.down_for;
         }
     }
     let actor = match actor {
@@ -1712,8 +1759,74 @@ fn live_through(events: &[Event], crash: Option<Crash>) -> Day {
         None => world.open(),
     };
     let status = actor.status();
+    let records = journal.read_tail(Kinds::ALL, usize::MAX).unwrap();
+    let head = journal.last_seq().unwrap();
+    assert!(
+        records.iter().map(|item| item.seq).eq(1..=head),
+        "{crash:?}: the journal positions are consecutive through its head"
+    );
+    let messages: Vec<_> = records
+        .iter()
+        .filter(|item| item.kind == kind::MESSAGE)
+        .map(|item| (item.turn, item.key.as_deref()))
+        .collect();
+    assert_eq!(
+        messages,
+        [(Some(1), Some("u-1")), (Some(2), Some("u-2"))],
+        "{crash:?}: each message has one row in its owner's log"
+    );
+    assert_eq!(
+        other.read_after(0, Kinds::ALL, usize::MAX).unwrap(),
+        foreign,
+        "{crash:?}: the other agent's log was untouched"
+    );
+
+    let mut changes = actor.tail(1_000).unwrap().entries;
+    let conversation = shown_rows(&changes);
+    changes.sort_by_key(|row| row.revision);
+    assert!(
+        changes
+            .windows(2)
+            .all(|pair| pair[0].revision < pair[1].revision),
+        "{crash:?}: final rows have distinct, increasing revisions"
+    );
+    let mut caught_up = Vec::new();
+    if let Some((revision, seq, prefix)) = saved {
+        let (kept, newer) = records.split_at(usize::try_from(seq).unwrap());
+        assert_eq!(kept, prefix, "{crash:?}: restart preserved every old event");
+        assert_eq!(
+            journal.read_after(seq, Kinds::ALL, usize::MAX).unwrap(),
+            newer,
+            "{crash:?}: journal catch-up returns exactly the events after the saved position"
+        );
+        let page = actor.after(revision, 1_000).unwrap();
+        let first_new = changes.partition_point(|row| row.revision <= revision);
+        assert!(!page.has_more, "{crash:?}: the catch-up page is complete");
+        assert_eq!(
+            page.latest_revision,
+            actor.head_revision(),
+            "{crash:?}: the client's cursor reaches the head"
+        );
+        // History places a standalone tool row at its first timestamp. Catch-up can see
+        // only the later version, so check the version and its payload apart from placement.
+        let versions = |rows: &[Versioned]| {
+            rows.iter()
+                .cloned()
+                .map(|row| Versioned { ts_ms: 0, ..row })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            versions(&page.entries),
+            versions(&changes[first_new..]),
+            "{crash:?}: client catch-up returns the newer rows in revision order"
+        );
+        caught_up = page.entries;
+    }
     Day {
-        conversation: shown(&actor),
+        conversation,
+        changes,
+        checkpoints,
+        caught_up,
         took: world.took.clone(),
         last_outcome: status.last.map(|turn| turn.outcome),
         backend_session: status.backend_session,
@@ -1750,6 +1863,35 @@ fn a_day_without_a_restart_is_what_it_should_be() {
     );
 }
 
+/// What the client sees on either day, apart from each run's clock and revision numbers.
+fn day_contents(rows: &[Versioned]) -> Vec<Versioned> {
+    fn clear_tool_times(tool: &mut clarp_kernel::conversation::ToolCall) {
+        tool.started_at_ms = 0;
+        tool.ended_at_ms = tool.ended_at_ms.map(|_| 0);
+    }
+
+    let mut rows = rows.to_vec();
+    for row in &mut rows {
+        row.revision = 0;
+        row.ts_ms = 0;
+        match &mut row.entry {
+            Entry::Message(message) => message.sent_at_ms = message.sent_at_ms.map(|_| 0),
+            Entry::Tool(tool) => clear_tool_times(tool),
+            _ => {}
+        }
+        for tool in &mut row.tools {
+            clear_tool_times(tool);
+        }
+        if let Some(end) = &mut row.turn {
+            end.started_at_ms = end.started_at_ms.map(|_| 0);
+            end.ended_at_ms = 0;
+        }
+    }
+    rows
+}
+
+// Rule 3: the schedule checks message ownership across two logs. It has no other fact stores.
+// Rule 5: the storage port checks access scope, while this fixed-size day cannot measure scaling.
 #[test]
 fn a_restart_at_any_point_of_the_day_loses_nothing_and_repeats_nothing() {
     let events = a_working_day();
@@ -1771,6 +1913,17 @@ fn a_restart_at_any_point_of_the_day_loses_nothing_and_repeats_nothing() {
                 assert_eq!(
                     day.took, calm.took,
                     "{crash:?}: every turn ran, and ran once"
+                );
+                // Revisions and timestamps can differ when recovery drains several spool
+                // records together. Compare the visible changes from the same step of each day.
+                let calm_revision = calm.checkpoints[at][usize::from(before_acting)];
+                let first_new = calm
+                    .changes
+                    .partition_point(|row| row.revision <= calm_revision);
+                assert_eq!(
+                    day_contents(&day.caught_up),
+                    day_contents(&calm.changes[first_new..]),
+                    "{crash:?}: client catch-up shows the same changes as on the calm day"
                 );
                 assert_eq!(day.last_outcome, calm.last_outcome, "{crash:?}");
                 assert_eq!(day.backend_session, calm.backend_session, "{crash:?}");
@@ -5071,11 +5224,12 @@ fn r121_a_send_refused_every_time_is_tried_as_the_python_host_tries_it_and_its_s
             0, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 124_000
         ]
     );
-    // The next is tried when it is over, on a count of its own: its first try is counted.
+    // The queued handoff is tried when it is over. R193 counts its first failure and ends at ten.
     assert_eq!(
         of(2),
         [
-            124_000, 125_000, 127_000, 131_000, 139_000, 155_000, 187_000, 247_000
+            124_000, 125_000, 127_000, 131_000, 139_000, 155_000, 187_000, 247_000, 307_000,
+            367_000
         ]
     );
     let status = actor.status();
@@ -5084,8 +5238,109 @@ fn r121_a_send_refused_every_time_is_tried_as_the_python_host_tries_it_and_its_s
         status.last.unwrap().outcome,
         Outcome::not_started("claude: not found".to_string())
     );
-    let never = r121_never_run("claude: not found");
-    assert_eq!(r121_told(&actor), [never.clone(), never]);
+    assert_eq!(
+        r121_told(&actor),
+        [
+            r121_never_run("claude: not found"),
+            clarp_kernel::launch_refused::notice(10, "claude: not found"),
+        ]
+    );
+}
+
+#[test]
+fn r193_a_queued_handoff_keeps_its_deadline_and_turn_across_restarts() {
+    let mut world = World::new("r193-handoff");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "first", Admission::Queue);
+    let queued = Message {
+        trace_id: Some("handoff-trace".into()),
+        ..message("u-2", "second")
+    };
+    let now = world.tick();
+    let (sent, _) = actor.send(&queued, Admission::Queue, now).unwrap();
+    assert!(sent.queued);
+    world.exits(1, Some(0), None);
+    let start = world.tick();
+    let out = actor.spool_changed(start).unwrap();
+    let mut order = r121_launch(&out).unwrap().clone();
+    let schedule = [
+        0, 1_000, 3_000, 7_000, 15_000, 31_000, 63_000, 123_000, 183_000, 243_000,
+    ];
+    for (attempt, elapsed) in schedule.into_iter().enumerate() {
+        assert_eq!(order.turn, TurnId(2));
+        assert_eq!(order.attempt, u32::try_from(attempt + 1).unwrap());
+        let at = start + elapsed;
+        world.now_ms = at;
+        let out = if attempt % 2 == 0 {
+            r121_no_shim(&mut actor, &order, at)
+        } else {
+            r121_no_tool(&mut actor, &order, at)
+        };
+        let Some(next) = schedule.get(attempt + 1) else {
+            assert_eq!(r121_launch(&out).unwrap().turn, TurnId(3));
+            break;
+        };
+        let due = start + next;
+        assert_eq!(actor.retry_at(), Some(due));
+        assert!(out.actions.is_empty());
+        if attempt == 0 {
+            drop(actor);
+            actor = world.open();
+            let (_, out) = actor
+                .send(&message("u-3", "third"), Admission::Queue, world.now_ms)
+                .unwrap();
+            assert!(
+                out.actions.is_empty(),
+                "a new send cannot wake the backing-off handoff"
+            );
+        }
+        assert_eq!(actor.retry_at(), Some(due));
+        assert!(actor.retry_due(due - 1).unwrap().actions.is_empty());
+        let out = actor.retry_due(due).unwrap();
+        order = r121_launch(&out).unwrap().clone();
+    }
+    let failed = actor.status().last.unwrap();
+    assert_eq!(failed.id, TurnId(2));
+    assert!(failed.never_ran);
+    assert_eq!(
+        failed.outcome,
+        Outcome::not_started("claude: not found".into())
+    );
+    assert_eq!(
+        r121_told(&actor),
+        [clarp_kernel::launch_refused::notice(
+            10,
+            "claude: not found"
+        )]
+    );
+    assert_eq!(
+        actor
+            .tail(100)
+            .unwrap()
+            .entries
+            .iter()
+            .filter(|row| row.entry.id() == "u-2")
+            .count(),
+        1
+    );
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let records = log
+        .read_after(0, Kinds::only(kind::AGENT_EVENT), 100)
+        .unwrap();
+    let started = records.iter().filter(|record| {
+        record.turn == Some(2)
+            && matches!(
+                serde_json::from_slice::<clarp_kernel::agent::AgentEvent>(&record.body).unwrap(),
+                clarp_kernel::agent::AgentEvent::Turn {
+                    change: clarp_kernel::turn::TurnEvent::Started { .. },
+                    ..
+                }
+            )
+    });
+    assert_eq!(started.count(), 1, "the handoff's retries reuse its turn");
 }
 
 #[test]
