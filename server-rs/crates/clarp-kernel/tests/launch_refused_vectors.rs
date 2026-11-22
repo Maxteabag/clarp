@@ -3,7 +3,7 @@
 //! `recovery_backoff.signature`, `_brief`, `RecoveryBackoff.failed`, `turn_queue.REFUSED_LAUNCH_NOTICE`, and whole
 //! stories on `TurnDispatchService` with a backend that refuses).
 //!
-//! The stories are told again here by this Host's rule: a send's own try, a second, then the counted tries with their
+//! The R121 stories exercise the ordinary launch-refusal policy: a send's own try, a second, then the counted tries with their
 //! waits, the eighth of one refusal ending the turn, and the next turn on a count of its own. Where the Python Host
 //! tries a later send at once, ahead of one that waits (its own try when it is sent, while the first waits), this Host
 //! does not: a turn that waits is the agent's turn, and nothing behind it overtakes (`docs/differences.md`).
@@ -11,7 +11,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_kernel::launch_refused::{
-    FIRST_WAIT_MS, Next, PARK_AFTER, REFUSED_IN_ALL, Refusals, brief, notice, signature, wait_ms,
+    FIRST_WAIT_MS, HANDOFF_GIVE_UP, Next, PARK_AFTER, REFUSED_IN_ALL, Refusals,
+    after_handoff_failure, brief, notice, signature, wait_ms,
 };
 use serde_json::Value;
 
@@ -227,4 +228,31 @@ fn the_stories_of_the_python_host_are_told_again_by_this_hosts_rule() {
     assert!(failed);
     assert_eq!(ended(olga, "olga-1"), "failed");
     never_run(olga, "olga-1");
+}
+
+#[test]
+fn a_queued_handoff_backs_off_then_ends_as_in_the_python_host() {
+    let vectors = vectors();
+    let handoff = &vectors["handoff"];
+    let attempts = handoff["attempts"].as_array().unwrap();
+    assert_eq!(handoff["give_up"], HANDOFF_GIVE_UP);
+    assert_eq!(attempts.len(), HANDOFF_GIVE_UP as usize);
+    assert_eq!(handoff["ownerless_launched"], false);
+    assert_eq!(handoff["turn_rows"], 1);
+    assert_eq!(handoff["closed"], true);
+    assert_eq!(handoff["status"], "failed");
+    for (index, pair) in attempts.windows(2).enumerate() {
+        let failures = u32::try_from(index + 1).unwrap();
+        assert_eq!(
+            after_handoff_failure(failures),
+            Next::Wait {
+                ms: ms(&pair[1]) - ms(&pair[0])
+            }
+        );
+    }
+    assert_eq!(after_handoff_failure(HANDOFF_GIVE_UP), Next::End);
+    assert_eq!(
+        notice(HANDOFF_GIVE_UP, text(&handoff["error"])),
+        text(&handoff["notice"])
+    );
 }
