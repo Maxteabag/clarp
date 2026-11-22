@@ -256,7 +256,9 @@ Rules:
   or a fork's source), else `null`. `role` is `agent`, `helper` or `janitor`.
   `helper_state` is `null` unless `role` is `helper`; then it is `running`,
   `reported` (its report reached the parent, or its own session sat idle
-  past `[agents] helper_idle_after_minutes`, 30 by default), `done` (the parent or the user
+  past `[agents] helper_idle_after_minutes`, 30 by default), `ended-unreported`
+  (Rust feature `helper_ended_unreported`, its last turn settled without a report
+  and it has no queued or background work), `done` (the parent or the user
   accepted it), `failed` or `abandoned` (the parent was deleted or archived;
   helpers are flagged, never deleted with it). `child_count` counts live
   agents whose parent is this one and `running_children` those still

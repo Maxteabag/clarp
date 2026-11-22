@@ -621,7 +621,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 149);
+    assert_eq!(info["contract"]["host"], 155);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
     assert_eq!(info["contract"]["features"]["voice_profile"], 109);
@@ -9532,7 +9532,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 149);
+    assert_eq!(info["contract"]["host"], 155);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
     assert_eq!(info["contract"]["features"]["render_spec_v2"], 133);
     assert_eq!(
@@ -11574,6 +11574,45 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
         json!(["Real", false, null, "claude-haiku-5-5", "low"])
     );
     assert_eq!(kept(&other), json!(["Other", false, null, "", ""]));
+}
+
+#[test]
+fn a_finished_helper_with_no_report_is_marked_for_its_maker() {
+    let place = Place::new("unreported-helper");
+    let host = place.start_with("", &["--helpers-checked-every-ms", "50"]);
+    let maker = host.new_agent("Maker");
+    let helper = host.post(
+        "/agents",
+        json!({
+            "name": "Slice", "backend": "scripted", "role": "helper", "parent": maker,
+        }),
+    );
+    let helper = helper["session"].as_str().unwrap();
+    let state =
+        || host.get(&format!("/agent-helper-state?session={helper}"))["helper_state"].clone();
+    let events = host.listen();
+    host.send(helper, "Do this work.", "first");
+    wait_for("the settled helper with no report", || {
+        state() == "ended-unreported"
+    });
+    wait_for("the helper state roster event", || {
+        events.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-roster"
+                && event["kind"] == "helper-state"
+                && event["session"] == helper
+        })
+    });
+    assert_eq!(
+        host.post(
+            "/send",
+            json!({
+                "session": maker, "text": "Here is my report.", "origin": "agent",
+                "sender": helper, "client_msg_id": "late-report"
+            })
+        )["ok"],
+        true
+    );
+    assert_eq!(state(), "reported");
 }
 
 #[test]
