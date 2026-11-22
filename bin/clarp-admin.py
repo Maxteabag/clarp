@@ -2355,16 +2355,59 @@ def cmd_prompt(args) -> int:
         except urllib.error.HTTPError as error:
             if not 400 <= error.code < 500:
                 raise
-            detail = error.read().decode(errors="replace")
+            raw = error.read().decode(errors="replace")
+            detail = raw
             try:
-                detail = json.loads(detail).get("error") or detail
+                body = json.loads(raw)
+                detail = body.get("error") or raw
             except (ValueError, AttributeError):
-                pass
+                body = {}
+            if error.code == 409 and detail == "agent_moved":
+                return _prompt_moved_agent(args, body)
             print(f"clarp-admin prompt: the Host refused it (HTTP {error.code}): {detail}",
                   file=sys.stderr)
             return 4
     print(json.dumps(result, indent=2))
     return 0
+
+
+RUST_HOST_CONFIG = Path.home() / ".config" / "clarp-host" / "config.toml"
+RUST_HOST_TOOL = Path.home() / ".local" / "share" / "clarp-host" / "tools" / "clarp-admin"
+
+
+def _local_rust_host_id() -> str:
+    """The server id of the Rust Host installed on this machine ('' when there is none):
+    its config names where it listens, and /pairing/identity answers without a token."""
+    try:
+        import tomllib
+        server = tomllib.loads(RUST_HOST_CONFIG.read_text()).get("server") or {}
+        if server.get("kind") != "clarp-host":
+            return ""
+        url = f"http://{server.get('bind_addr') or '127.0.0.1'}:{int(server['port'])}/pairing/identity"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            return str(json.load(response).get("server_id") or "")
+    except Exception as exc:  # noqa: BLE001 - no local Rust Host means no forwarding
+        print(f"clarp-admin prompt: no local Rust Host found ({exc.__class__.__name__})",
+              file=sys.stderr)
+        return ""
+
+
+def _prompt_moved_agent(args, body: dict) -> int:
+    """The target moved to another Host. When that Host is the Rust Host installed on this
+    machine, the same prompt is sent there with its own tool; any other destination stays
+    a refusal that names it. Nothing is sent twice: the Python Host wrote nothing."""
+    moved_to = body.get("moved_to") if isinstance(body.get("moved_to"), dict) else {}
+    host = str(moved_to.get("host") or "another Host")
+    dest = str(moved_to.get("id") or "")
+    if dest and RUST_HOST_TOOL.is_file() and dest == _local_rust_host_id():
+        command = [str(RUST_HOST_TOOL), "prompt", "--to", args.to, "--text", args.text]
+        if args.from_session: command += ["--from", args.from_session]
+        if args.origin: command += ["--origin", args.origin]
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PWA_CONFIG"}
+        print(f"clarp-admin prompt: {args.to} moved to {host}; sending it there", file=sys.stderr)
+        return subprocess.run(command, env=env).returncode
+    print(f"clarp-admin prompt: {args.to} moved to {host}; nothing was sent", file=sys.stderr)
+    return 4
 
 
 def cmd_tell_user(args) -> int:

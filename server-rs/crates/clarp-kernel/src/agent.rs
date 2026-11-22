@@ -362,6 +362,8 @@ pub struct Agent {
     waited: BTreeSet<TurnId>,
     /// The live turn came through the queue.
     live_from_queue: bool,
+    /// Confirmed pre-spawn failures of a queued handoff, rebuilt from its parked events.
+    handoff_launch_failures: u32,
     live_takeover: Option<crate::takeover::Start>,
     /// Whether the live turn started with an existing provider session to continue.
     live_resumed_session: bool,
@@ -440,6 +442,7 @@ impl Default for Agent {
             stop_generation: 0,
             waited: BTreeSet::new(),
             live_from_queue: false,
+            handoff_launch_failures: 0,
             live_takeover: None,
             live_resumed_session: false,
             selected_takeover: None,
@@ -578,6 +581,16 @@ impl Agent {
     /// Whether the live turn came through the queue: it had to wait, or it was left for later.
     pub fn live_from_queue(&self) -> bool {
         self.live.is_some() && self.live_from_queue
+    }
+
+    /// The failure count while a queued turn has yet to reach its tool (R193).
+    pub fn handoff_launch_failures(&self) -> Option<u32> {
+        let never_ran = match self.live.as_ref()? {
+            Turn::Starting(turn) => !turn.ran_before,
+            Turn::Parked(turn) => !turn.ran,
+            _ => false,
+        };
+        (self.live_from_queue && never_ran).then_some(self.handoff_launch_failures)
     }
 
     pub fn live_takeover(&self) -> Option<&crate::takeover::Start> {
@@ -1614,7 +1627,14 @@ impl Agent {
                     ) {
                         self.interrupted_since_ms = None;
                     }
-                    if matches!(next, Turn::Parked(_)) {
+                    if let Turn::Parked(parked) = &next {
+                        if self.live_from_queue
+                            && !parked.ran
+                            && matches!(change, TurnEvent::Parked { kind, .. } if kind == crate::failures::NOT_STARTED)
+                        {
+                            self.handoff_launch_failures =
+                                self.handoff_launch_failures.saturating_add(1);
+                        }
                         self.joins.clear();
                     }
                     self.live = Some(next);
@@ -1664,6 +1684,7 @@ impl Agent {
                 }
                 self.live = Some(next);
                 self.live_from_queue = waited;
+                self.handoff_launch_failures = 0;
                 // A turn runs: what the agent rested in before is over.
                 self.resting = None;
             }
