@@ -64,7 +64,7 @@ PLANTS = [
     (C, 'counts', 'a counted message beyond the row cap does not say capped',
      'self.run.capped |= counted;', 'self.run.capped |= counted && self.rows < COUNT_ROW_CAP;'),
     (C, 'counts', 'the exchange count forgets the turn keys',
-     'self.run.exchanges = self.turns.len();', 'self.run.exchanges = self.run.messages;'),
+     'self.run.exchanges = self.turns.len() + self.imported_traces.len();', 'self.run.exchanges = self.run.messages + self.imported_traces.len();'),
     (C, 'counts', 'the sender set excludes the known sender',
      'if !sender.is_empty() {', 'if sender.is_empty() {'),
     (C, 'host', 'only delta pages have tail counts',
