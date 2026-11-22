@@ -4,14 +4,16 @@
 The fork reuses Clarp's exact launch argv so it hits the agent's own prompt
 cache, is limited to reads by a PreToolUse guard (a tool-call boundary with the
 limits listed in SKILL.md), and is not persisted, so the agent itself is never
-interrupted, queued behind, or changed. Claude-backend agents only for now.
+interrupted, queued behind, or changed. Supports Claude and Rust Host Codex agents.
 
   clarp-status-fork pebble [hobbles ...] [--question TEXT] [--json]
 """
 import argparse
 import concurrent.futures
+import importlib.util
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -22,6 +24,9 @@ SHARE = Path(os.environ.get("CLARP_SHARE_DIR", Path.home() / ".local/share/clarp
 DB = Path(os.environ.get("CLAUDE_PWA_DB", SHARE / "state.sqlite"))
 CODE_ROOT = Path(os.environ.get("CLARP_CODE_ROOT", SHARE / "current"))
 GUARD = Path(__file__).resolve().with_name("read_only_guard.py")
+_rust_spec = importlib.util.spec_from_file_location("status_fork_rust_host", GUARD.with_name("rust_host.py"))
+rust_host = importlib.util.module_from_spec(_rust_spec)
+_rust_spec.loader.exec_module(rust_host)
 DEFAULT_QUESTION = (
     "STATUS SNAPSHOT REQUEST from the user, answered by a read-only fork of you. "
     "Do not continue any work and do not call tools. In max 8 short lines: what you "
@@ -220,8 +225,8 @@ class Refused(Exception):
     """The fork cannot be guaranteed read-only here; nothing was launched."""
 
 
-def claude_version(binary):
-    proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=30)
+def claude_version(binary, env=None):
+    proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=30, env=env)
     parts = proc.stdout.split()[0].split(".") if proc.stdout.split() else []
     try:
         return tuple(int(p) for p in parts[:3])
@@ -253,17 +258,18 @@ def guard_settings(version):
                        "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [hook]}]}})
 
 
-def _settings_files(cwd, alias=None):
+def _settings_files(cwd, alias=None, env=None):
     """Settings files the fork inherits, by layer: managed first.
 
     `cwd` is the resolved launch directory. Project settings are taken from every
     ancestor of it, and also of the unresolved `alias` path when it differs, so a
     symlinked path cannot hide settings on either side.
     """
-    managed = Path(os.environ.get("CLARP_STATUS_FORK_MANAGED_DIR", "/etc/claude-code"))
+    env = os.environ if env is None else env
+    managed = Path(env.get("CLARP_STATUS_FORK_MANAGED_DIR", "/etc/claude-code"))
     files = [("managed", managed / "managed-settings.json"),
              *(("managed", p) for p in sorted((managed / "managed-settings.d").glob("*.json")))]
-    user = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")).expanduser()
+    user = Path(env.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")).expanduser()
     files += [("user", user / "settings.json"), ("user", user / "settings.local.json")]
     folders = []
     for start in (Path(cwd), Path(alias) if alias else None):
@@ -279,11 +285,11 @@ def _settings_files(cwd, alias=None):
     return files
 
 
-def preflight(binary, cwd, alias=None):
+def preflight(binary, cwd, alias=None, env=None):
     """Refuse (raise Refused) unless the read-only guard is guaranteed to hold."""
     if not os.access(GUARD, os.R_OK):
         raise Refused(f"the read-only guard {GUARD} is missing or unreadable")
-    version = claude_version(binary)
+    version = claude_version(binary) if env is None else claude_version(binary, env)
     if version < MIN_CLAUDE:
         raise Refused(f"Claude Code {'.'.join(map(str, version))} is older than "
                       f"{'.'.join(map(str, MIN_CLAUDE))}, the oldest verified with the guard")
@@ -294,7 +300,7 @@ def preflight(binary, cwd, alias=None):
         got = json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else None
         if probe.returncode != 0 or got != verdict:
             raise Refused(f"the read-only guard failed its self-test on {tool}")
-    for layer, path in _settings_files(cwd, alias):
+    for layer, path in _settings_files(cwd, alias, env):
         try:
             data = json.loads(path.read_text())
         except FileNotFoundError:
@@ -340,26 +346,88 @@ def fork_argv(cmd, question, version):
                   "--no-session-persistence", "--output-format", "json", question]
 
 
+def rust_fork_argv(agent, question, binary, env):
+    saved, cwd = launch_dir(agent["cwd"])
+    native = agent.get("native_id") or ""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", native):
+        raise Refused("the agent has no usable native conversation ID")
+    model, effort = agent.get("model"), agent.get("effort")
+    if agent["backend"] == "claude":
+        cmd = [binary, "-p", "--dangerously-skip-permissions", "--strict-mcp-config"]
+        if model:
+            cmd += ["--model", model]
+        if effort:
+            cmd += ["--effort", effort]
+        if persona := (agent.get("persona") or "").strip():
+            cmd += ["--append-system-prompt", f"You are {persona}."]
+        cmd += ["--resume", native]
+        version = preflight(binary, cwd, alias=saved, env=env)
+        return fork_argv(cmd, question, version), cwd
+
+    # Codex has a native ephemeral fork. Keep the filesystem sandbox read-only
+    # and remove shell, plugins and configured MCP tools at the request boundary.
+    cmd = [binary, "-a", "never", "exec", "--sandbox", "read-only", "fork",
+           "--ephemeral", "--ignore-user-config", "--ignore-rules",
+           "--disable", "shell_tool", "--disable", "plugins",
+           "-c", "mcp_servers={}", "-c", 'web_search="disabled"',
+           "--skip-git-repo-check", "--json"]
+    if model:
+        cmd += ["--model", model]
+    if effort:
+        cmd += ["-c", "model_reasoning_effort=" + json.dumps(effort)]
+    return cmd + [native, "-"], cwd
+
+
 def fork_status(agent, question):
-    if agent["backend"] != "claude":
-        return {**agent, "ok": False,
-                "error": f"backend {agent['backend']} not supported yet (Claude only)"}
+    rust = agent.get("source") == "rust"
+    if agent["backend"] not in ({"claude", "codex"} if rust else {"claude"}):
+        return {**agent, "ok": False, "error": f"unsupported fork backend {agent['backend']}"}
     started = time.monotonic()
     env = {k: v for k, v in os.environ.items() if k not in (
         "CLAUDE_PWA_SESSION", "CLARP_SESSION", "CLAUDE_CODE_SESSION_ID",
-        "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION")}
+        "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLARP_PROVIDER_TURN",
+        "CLARP_HOST_TOKEN", "CLARP_PUSH_CREDENTIAL", "CLARP_SOURCE_TOKEN", "CLARP_PEER_TOKEN")}
+    codex = agent["backend"] == "codex"
     try:
-        argv, cwd = clarp_fork_argv(agent, question)
-    except Refused as exc:
+        if rust:
+            binary, turn_environment = rust_host.program_for(agent["backend"])
+            env.update(turn_environment)
+            argv, cwd = rust_fork_argv(agent, question, binary, env)
+        else:
+            argv, cwd = clarp_fork_argv(agent, question)
+    except (Refused, rust_host.HostError, OSError, subprocess.SubprocessError) as exc:
         return {**agent, "ok": False, "seconds": 0.0, "error": f"refused, nothing launched: {exc}"}
     try:
-        # Exactly the directory preflight() examined; never the caller's.
         proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True,
-                              timeout=300)
+                              input=question if codex else None, timeout=300)
     except subprocess.TimeoutExpired:
         return {**agent, "ok": False, "seconds": round(time.monotonic() - started, 1),
                 "error": "the fork did not answer within 300 s"}
-    return {**agent, **fork_result(proc), "seconds": round(time.monotonic() - started, 1)}
+    except OSError as exc:
+        return {**agent, "ok": False, "error": f"could not start the fork: {exc}"}
+    result = codex_result(proc) if codex else fork_result(proc)
+    return {**agent, **result, "seconds": round(time.monotonic() - started, 1)}
+
+
+def codex_result(proc):
+    answer, usage = "", None
+    for line in proc.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = event.get("item", {})
+        if event.get("type") == "item.completed" and item.get("type") == "agent_message":
+            answer = item.get("text", "")
+        elif event.get("type") == "turn.completed":
+            usage = event.get("usage", {})
+        elif event.get("type") == "turn.failed":
+            usage = None
+    if proc.returncode != 0 or usage is None or not answer.strip():
+        return {"ok": False, "error": f"Codex fork ended without an answer (exit {proc.returncode})"}
+    reused = usage.get("cached_input_tokens", 0)
+    return {"ok": True, "status": answer, "reused_tokens": reused,
+            "new_tokens": max(0, usage.get("input_tokens", 0) - reused)}
 
 
 def fork_result(proc):
@@ -402,9 +470,22 @@ def main(argv=None):
     ap.add_argument("--no-facts", action="store_true", help="skip the live fact sheet")
     ap.add_argument("--show-facts", action="store_true", help="print the fact sheet only")
     args = ap.parse_args(argv)
-    agents = [resolve(a) for a in args.agents]
-    for a in agents:
-        a["facts"] = "" if args.no_facts else live_facts(a)
+    try:
+        host, roster = rust_host.RustHost.discover()
+        agents = []
+        for name in args.agents:
+            agent = rust_host.resolve(name, roster)
+            if agent is None:
+                if host is not None and not rust_host.running("clarp.service"):
+                    raise rust_host.HostError(f"no local Rust Host agent matches {name!r}")
+                agent = resolve(name)
+            if args.show_facts or not args.no_facts:
+                agent["facts"] = rust_host.live_facts(host, roster, agent) if agent.get("source") == "rust" else live_facts(agent)
+            else:
+                agent["facts"] = ""
+            agents.append(agent)
+    except (rust_host.HostError, KeyError, OSError, subprocess.SubprocessError) as exc:
+        ap.exit(2, f"clarp-status-fork: {exc}\n")
     if args.show_facts:
         for a in agents:
             print(f"## {a['persona']}\n{a['facts']}\n")
