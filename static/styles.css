@@ -1000,13 +1000,6 @@ body.chat-open .status { display: none !important; }
   gap: 8px;
   margin-left: auto;
 }
-.history-body.hide-tools .tool { display: none; }
-/* Hiding the tools inside a turn is not enough when the turn is nothing but
-   tools: the wrapper keeps its margin, its padding and the height
-   content-visibility assumes for it, so a run of tool-only turns leaves a
-   column of blank space between two replies. Drop the wrapper too. Activity
-   rows are their own live feed and are not part of this toggle. */
-.history-body.hide-tools .turn:not(.has-body):not(.activity) { display: none; }
 .history-body {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -3399,7 +3392,6 @@ html:not(.desktop) .history:has(.status-line) .history-body {
 html:not(.desktop) .history:has(.status-line) .history-jump {
   bottom: calc(env(safe-area-inset-bottom) + 118px);
 }
-.history-body.hide-tools .tool-cell { display: none; }
 .turn .tool-cell { padding-left: 0; }
 /* The transcript anchors its own prepends (Transcript.svelte); the browser's
    scroll anchoring would compensate a second time where it exists. */
@@ -3423,3 +3415,7 @@ html:not(.desktop) .history:has(.status-line) .history-jump {
   white-space: nowrap;
   vertical-align: 1px;
 }
+
+/* The quiet chat's work row (static/lib/history-fold.js): a settled turn's tool calls, opened in place. */
+.turn.work-row { padding-top: 2px; padding-bottom: 2px; }
+.work-row-calls { margin: 4px 0 2px 14px; }
