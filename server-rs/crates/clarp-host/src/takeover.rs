@@ -31,7 +31,6 @@ pub(super) fn plan(
     backend: &str,
     home: &Path,
     cwd: &str,
-    agent: &str,
     offer: &Offer,
 ) -> Option<(String, Input)> {
     let known = offer.session.as_deref();
@@ -44,11 +43,7 @@ pub(super) fn plan(
                 Some(Err(_)) => return None,
                 Some(Ok(None)) | None => None,
             };
-            let drops_turn = offer
-                .first_trace
-                .as_deref()
-                .and_then(takeover::prompt_uuid)
-                .unwrap_or_else(|| takeover::untraced_uuid(agent, offer.from.0));
+            let drops_turn = offer.first_prompt_uuid.clone()?;
             let facts = takeover::claude_facts(text.as_deref(), &drops_turn);
             let input =
                 takeover::claude_input(facts, offer.first_turn, offer.first.clone(), drops_turn)?;

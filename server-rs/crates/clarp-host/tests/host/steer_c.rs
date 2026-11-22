@@ -729,3 +729,60 @@ fn collect_answer(host: &Host, session: &str, answer: &str) {
             .any(|(role, text)| role == "assistant" && text == answer)
     });
 }
+
+#[test]
+fn claude_attempt_fails_when_its_input_is_completed_without_starting() {
+    let place = Place::new("claude-skipped-input");
+    let claude = place.root.join("claude");
+    program(
+        &claude,
+        r#"#!/usr/bin/env python3
+import json, sys
+
+if "--version" in sys.argv:
+    print("2.1.999")
+    raise SystemExit(0)
+
+def say(**fields):
+    print(json.dumps(fields), flush=True)
+
+prompt = json.loads(sys.stdin.readline())
+uid = prompt["uuid"]
+text = prompt["message"]["content"][0]["text"]
+if text == "skip the input":
+    say(type="user", isReplay=True, uuid=uid, message=prompt["message"])
+    say(type="command_lifecycle", command_uuid=uid, state="completed")
+    sys.stdin.read()
+else:
+    say(type="command_lifecycle", command_uuid="unrelated", state="completed")
+    say(type="command_lifecycle", command_uuid=uid, state="started")
+    say(type="command_lifecycle", command_uuid=uid, state="completed")
+    say(type="assistant", message={"id":"msg_next", "role":"assistant",
+                                   "content":[{"type":"text","text":"next ran"}]})
+    say(type="result", subtype="success", is_error=False, result="next ran")
+"#,
+    );
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let session = "skip-check";
+    host.post(
+        "/agents",
+        json!({"name":"Skip check","session":session,"backend":"claude"}),
+    );
+    host.send(session, "skip the input", "skipped");
+    wait_for("the skipped input to fail", || {
+        let rows = host.turns(session);
+        rows.iter()
+            .any(|row| row["id"] == "u-skipped" && row["turn"]["status"] == "failed")
+            && rows.iter().any(|row| {
+                row["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("without starting it"))
+            })
+    });
+    host.send(session, "try another", "next");
+    collect_answer(&host, session, "next ran");
+}

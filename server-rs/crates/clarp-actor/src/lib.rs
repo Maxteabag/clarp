@@ -4406,6 +4406,7 @@ impl Actor {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
             turn: turn.0,
+            attempt,
             trace_id: message.trace_id.clone(),
             takeover: takeover.map(|start| start.input),
             cwd: self.profile.cwd.clone(),
@@ -4465,11 +4466,14 @@ impl Actor {
             None => (message.id.clone(), None, None, None, None),
         };
         self.live = Some(LiveTurn {
-            steering: steering::State::for_prompt(
-                &self.profile.agent_id,
-                turn,
-                message.trace_id.as_deref(),
-            ),
+            steering: steering::State::for_prompt((self.backend.id() == "claude").then(|| {
+                clarp_kernel::takeover::attempt_prompt_uuid(
+                    &self.profile.agent_id,
+                    turn.0,
+                    message.trace_id.as_deref(),
+                    attempt,
+                )
+            })),
             opening: opening.is_some(),
             managed_model: message.managed_model.clone(),
             turn,
@@ -4615,8 +4619,22 @@ impl Actor {
         let mut calls = Vec::new();
         let mut first_written = HashMap::new();
         let mut signals = Vec::new();
-        let mut steering =
-            steering::State::for_prompt(&self.profile.agent_id, turn, message.trace_id.as_deref());
+        // Attach to the UUID actually sent to this process, including attempts
+        // launched by an older Host before each retry had its own name.
+        let uuid = if self.backend.id() == "claude" {
+            std::fs::read(self.profile.stdin_path_of(turn, attempt))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .and_then(|line| {
+                    line["uuid"]
+                        .as_str()
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_owned)
+                })
+        } else {
+            None
+        };
+        let mut steering = steering::State::for_prompt(uuid);
         steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
         let mut offset = 0;
         // Those who watch are shown the turn as it stands: its items are made again from the
@@ -4731,6 +4749,7 @@ impl Actor {
             self.shown_revision = draft.revision;
         }
         let speak = message.speak || steering.joined_speech;
+        let input_skipped = steering.input_skipped;
         self.live = Some(LiveTurn {
             steering,
             opening: opening_message(&message),
@@ -4773,7 +4792,7 @@ impl Actor {
             attempt,
             socket: self.profile.socket_path_of(turn, attempt),
         });
-        if self.recorder.agent().stopping().is_some() {
+        if input_skipped || self.recorder.agent().stopping().is_some() {
             // The stop was decided; whether the shim ever heard it is not known. Telling it
             // twice does no harm.
             out.actions.push(Action::Stop {
@@ -5120,7 +5139,15 @@ impl Actor {
                 if after_stop(record, batch.agent().stopping_since_ms()) {
                     continue;
                 }
+                let input_skipped = live.steering.input_skipped;
                 let evidence = live.steering.record(&record.entry);
+                if !input_skipped && live.steering.input_skipped {
+                    out.actions.push(Action::Stop {
+                        turn,
+                        socket: self.profile.socket_path_of(turn, live.attempt),
+                        grace_ms: self.profile.stop_grace_ms,
+                    });
+                }
                 let doing = told_activity(batch.agent());
                 // What the shim says about the process means the same for every backend. A
                 // command the agent refuses is about a turn that is no longer live: late news.
@@ -5233,6 +5260,15 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
+                            let outcome = if live.steering.input_skipped {
+                                RunOutcome::Failed {
+                                    reason:
+                                        "Claude completed the input command without starting it"
+                                            .into(),
+                                }
+                            } else {
+                                outcome
+                            };
                             if steering::recover_reads(
                                 &mut batch,
                                 &self.profile.cwd,

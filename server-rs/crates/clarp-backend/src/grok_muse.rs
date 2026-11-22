@@ -413,6 +413,7 @@ mod tests {
                     agent_id: "a".into(),
                     session: "my-session".into(),
                     turn: 1,
+                    attempt: 1,
                     trace_id: None,
                     takeover: None,
                     cwd: "/example".into(),

@@ -429,6 +429,7 @@ mod tests {
             agent_id: "a1".to_string(),
             session: "maximus".to_string(),
             turn: 1,
+            attempt: 1,
             trace_id: None,
             takeover: None,
             cwd: std::path::PathBuf::from("/work"),

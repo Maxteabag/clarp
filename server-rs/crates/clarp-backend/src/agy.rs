@@ -905,6 +905,7 @@ mod tests {
             agent_id: "a1".to_string(),
             session: "rachel".to_string(),
             turn: 3,
+            attempt: 1,
             trace_id: None,
             takeover: None,
             cwd: PathBuf::from("/work"),

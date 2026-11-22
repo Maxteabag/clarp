@@ -17,7 +17,7 @@ pub struct Offer {
     pub socket: PathBuf,
     pub session: Option<String>,
     pub first: String,
-    pub first_trace: Option<String>,
+    pub first_prompt_uuid: Option<String>,
     /// A first turn in a fresh conversation may have no provider file yet.
     pub first_turn: bool,
 }
@@ -33,6 +33,7 @@ impl Actor {
         if !agent.can_take_over(live.turn, into, live.attempt)
             || agent.selected_takeover().is_some()
             || live.opening
+            || live.steering.input_skipped
             || live.over
             || live.message_id != live.last_row
             || !live.drafts.is_empty()
@@ -57,7 +58,7 @@ impl Actor {
             socket: self.profile.socket_path_of(live.turn, live.attempt),
             session: agent.backend_session().map(str::to_owned),
             first: first.text,
-            first_trace: first.trace_id,
+            first_prompt_uuid: live.steering.prompt_uuid().map(str::to_owned),
             first_turn: agent.fresh_first_turn(),
         }))
     }

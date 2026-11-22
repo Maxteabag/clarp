@@ -3478,7 +3478,6 @@ impl Worker {
                         &self.setup.record.backend,
                         &crate::config::home(),
                         &self.setup.record.cwd,
-                        &self.setup.record.agent_id,
                         &offer,
                     )
                 } else {

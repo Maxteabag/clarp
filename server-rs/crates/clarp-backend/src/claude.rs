@@ -151,11 +151,12 @@ impl Backend for Claude {
         if first.is_none() {
             texts.extend(reminder.as_deref());
         }
-        let uuid = spec
-            .trace_id
-            .as_deref()
-            .and_then(takeover::prompt_uuid)
-            .unwrap_or_else(|| takeover::untraced_uuid(&spec.agent_id, spec.turn));
+        let uuid = takeover::attempt_prompt_uuid(
+            &spec.agent_id,
+            spec.turn,
+            spec.trace_id.as_deref(),
+            spec.attempt,
+        );
         let message = takeover::claude_user_line(&uuid, &texts);
         let mut stdin = message.to_string().into_bytes();
         stdin.push(b'\n');
@@ -1782,6 +1783,7 @@ mod tests {
             agent_id: "a1".to_string(),
             session: "maximus".to_string(),
             turn: 1,
+            attempt: 1,
             trace_id: Some("trace-one".to_string()),
             takeover: None,
             cwd: PathBuf::from("/work"),
@@ -1830,6 +1832,57 @@ mod tests {
             "a Host that tells nothing sends the user's words and no more"
         );
         assert!(!fresh.args.iter().any(|arg| arg == "--append-system-prompt"));
+
+        let attempt_uuid = |attempt| {
+            let launch = Claude::new().launch(&TurnSpec {
+                attempt,
+                backend_session: Some("sess-1".into()),
+                ..spec.clone()
+            });
+            assert!(
+                launch
+                    .args
+                    .windows(2)
+                    .any(|pair| pair == ["--resume", "sess-1"])
+            );
+            let line: Value = serde_json::from_slice(&launch.stdin).unwrap();
+            line["uuid"].as_str().unwrap().to_owned()
+        };
+        let second = attempt_uuid(2);
+        assert_ne!(second, sent["uuid"]);
+        assert_ne!(attempt_uuid(3), second);
+        assert_eq!(
+            attempt_uuid(2),
+            second,
+            "a retry keeps its name across restart"
+        );
+        let history = [
+            json!({"type":"user","uuid":sent["uuid"]}).to_string(),
+            json!({"type":"assistant","uuid":"prior-answer"}).to_string(),
+            json!({"type":"user","uuid":second}).to_string(),
+        ]
+        .join("\n");
+        let facts = takeover::claude_facts(Some(&history), &second);
+        assert!(facts.found && !facts.answered);
+        let takeover =
+            takeover::claude_input(facts, false, "first".into(), second.clone()).unwrap();
+        let launch = Claude::new().launch(&TurnSpec {
+            backend_session: Some("sess-1".into()),
+            takeover: Some(takeover),
+            ..spec.clone()
+        });
+        assert!(
+            launch
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--resume-session-at", "prior-answer"])
+        );
+        assert!(
+            launch
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--resume-drops-turn", &second])
+        );
 
         // Who the agent is goes where it holds for the whole conversation; what holds for
         // this turn goes after the user's words, marked as the Host's.

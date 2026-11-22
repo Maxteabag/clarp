@@ -58,14 +58,33 @@ pub fn untraced_uuid(agent: &str, turn: u64) -> String {
     named_uuid(&format!("untraced:{agent}:{turn}"))
 }
 
+const PROMPT_NAMESPACE: [u8; 16] = [
+    0x5f, 0x0e, 0x7c, 0x52, 0x9a, 0x5b, 0x4d, 0x9e, 0x8f, 0x53, 0x2f, 0x0b, 0x9b, 0x1d, 0x49, 0x10,
+];
+
+/// Every launch gets its own Claude input identity. Keep attempt one's ID as
+/// the original trace ID's UUID, which is also used when steering that prompt.
+pub fn attempt_prompt_uuid(agent: &str, turn: u64, trace: Option<&str>, attempt: u32) -> String {
+    let first = trace
+        .and_then(prompt_uuid)
+        .unwrap_or_else(|| untraced_uuid(agent, turn));
+    if attempt <= 1 {
+        return first;
+    }
+    // A separate namespace keeps retry names distinct from arbitrary trace names.
+    let mut namespace = PROMPT_NAMESPACE;
+    namespace[15] ^= 1;
+    uuid_in(namespace, &format!("{first}:{attempt}"))
+}
+
 fn named_uuid(trace: &str) -> String {
-    const NAMESPACE: [u8; 16] = [
-        0x5f, 0x0e, 0x7c, 0x52, 0x9a, 0x5b, 0x4d, 0x9e, 0x8f, 0x53, 0x2f, 0x0b, 0x9b, 0x1d, 0x49,
-        0x10,
-    ];
+    uuid_in(PROMPT_NAMESPACE, trace)
+}
+
+fn uuid_in(namespace: [u8; 16], name: &str) -> String {
     let mut hash = Sha1::new();
-    hash.update(NAMESPACE);
-    hash.update(trace.as_bytes());
+    hash.update(namespace);
+    hash.update(name.as_bytes());
     let hash = hash.finalize();
     let mut uuid: [u8; 16] = [0; 16];
     uuid.copy_from_slice(&hash[..16]);

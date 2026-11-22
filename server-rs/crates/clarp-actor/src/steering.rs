@@ -22,6 +22,8 @@ pub(super) struct State {
     owner: Option<InputOwner>,
     stream: steering::Stream,
     primary_uuid: Option<String>,
+    primary_started: bool,
+    pub(super) input_skipped: bool,
     parent: Option<(RunOutcome, Facts, String)>,
     /// The process is answering another user message past its first result.
     pub(super) separate: Option<Separate>,
@@ -54,13 +56,41 @@ impl Separate {
 }
 
 impl State {
-    pub(super) fn for_prompt(agent: &str, turn: TurnId, trace: Option<&str>) -> Self {
-        let uuid = trace
-            .and_then(takeover::prompt_uuid)
-            .unwrap_or_else(|| takeover::untraced_uuid(agent, turn.0));
+    pub(super) fn for_prompt(primary_uuid: Option<String>) -> Self {
         Self {
-            primary_uuid: Some(uuid),
+            primary_uuid,
             ..Self::default()
+        }
+    }
+
+    pub(super) fn prompt_uuid(&self) -> Option<&str> {
+        self.primary_uuid.as_deref()
+    }
+
+    fn observe_start(&mut self, event: &Value) {
+        let Some(uuid) = self.primary_uuid.as_deref() else {
+            return;
+        };
+        if event["parent_tool_use_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+        {
+            return;
+        }
+        match event["type"].as_str() {
+            Some("command_lifecycle") if event["command_uuid"] == uuid => {
+                if event["state"] == "started" {
+                    self.primary_started = true;
+                } else if event["state"] == "completed" && !self.primary_started {
+                    self.input_skipped = true;
+                }
+            }
+            Some("system") if event["subtype"] == "init" => self.primary_started = true,
+            Some("assistant" | "result") => self.primary_started = true,
+            Some("stream_event") if event["event"]["type"] == "message_start" => {
+                self.primary_started = true;
+            }
+            _ => {}
         }
     }
 
@@ -83,7 +113,13 @@ impl State {
                     projects: projects.clone(),
                 });
             }
-            Line::Out(line) if self.owner.is_some() => return serde_json::from_str(line).ok(),
+            Line::Out(line) if self.primary_uuid.is_some() || self.owner.is_some() => {
+                let event = serde_json::from_str(line).ok()?;
+                self.observe_start(&event);
+                if self.owner.is_some() {
+                    return Some(event);
+                }
+            }
             _ => {}
         }
         None
@@ -411,7 +447,8 @@ impl Actor {
         };
         if self.backend.id() != "claude"
             || !live.steering.stream.can_join()
-            || live.steering.primary_uuid.as_deref() == Some(uuid.as_str())
+            || live.steering.input_skipped
+            || live.steering.prompt_uuid() == Some(uuid.as_str())
             || live.opening
             || live.origin.name() == COMPACTION
             || text.trim().is_empty()
