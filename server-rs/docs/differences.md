@@ -124,6 +124,14 @@ No route for dreaming, which was left out by the owner's decision of
 
 ## Differences that are registered one by one
 
+**Conversation views and Stop queue notices.** The Rust Host's conversation
+views (#702, Host contract 145) add `chat_view` to the agent snapshot and
+`view` and `session_rows` to conversation rows. The retired Python reference
+has no such fields. In `stop-with-queue` it sends a generic `queue-updated`
+after the event that starts golf, repeating the paused state, depth 2 and
+revision 6. Rust emits the start event with that state once. The ten observed
+differences are registered in `conformance/intended.txt` from run 45051582445.
+
 Each has its id in `../conformance/intended.txt`. The id is a hash of the place and both values:
 it covers that exact difference and nothing else.
 

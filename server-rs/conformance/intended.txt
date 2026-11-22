@@ -148,3 +148,20 @@ a15f230cf4b5  rings: the same, on the second ring
 7418a8c7d119  delivery-of-a-held-send: stopped receipt after the user's Stop
 683fc84686b8  delivery-of-a-held-send: handed-over receipt after resume
 17a6dcfd2347  delivery-of-a-held-send: the same handed-over receipt on the user row
+
+# Rust conversation views (#702, Host contract 145) add chat_view to the agent row
+# and view and session_rows to the conversation. The retired Python reference
+# has no conversation-view fields. Recorded in run 45051582445.
+ea401fc7c4eb  stop-with-queue: the snapshot has chat_view (Rust conversation views, #702)
+1d448c2b7fc6  stop-with-queue: turn row 0 has session_rows (#702)
+8f5ecb51efad  stop-with-queue: turn row 0 has view (#702)
+1e2d2421ac89  stop-with-queue: turn row 1 has view (#702)
+edfd8f50c601  stop-with-queue: turn row 2 has session_rows (#702)
+bcec433cc0f4  stop-with-queue: turn row 2 has view (#702)
+26d5fab2be5b  stop-with-queue: turn row 3 has view (#702)
+d8ed2c14cff8  stop-with-queue: turn row 4 has session_rows (#702)
+6a222c16126c  stop-with-queue: turn row 4 has view (#702)
+
+# Python sends a generic queue-updated after the event that starts golf. It
+# repeats that event's pause state, depth and revision. Rust says them once.
+3e19d6c5eefe  stop-with-queue: Python repeats the paused queue state, depth 2 and revision 6 after golf starts
