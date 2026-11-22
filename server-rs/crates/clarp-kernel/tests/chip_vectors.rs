@@ -94,6 +94,24 @@ fn an_agent_is_shown_by_the_name_and_the_line_the_python_host_gives_it() {
 }
 
 #[test]
+fn a_read_without_a_target_has_no_placeholder_in_its_headline() {
+    let mut activity = json!({"state": "tool", "tool": {"name": "Read"}});
+    assert_eq!(chip::headline(&activity), "Reading");
+    for label in [
+        Value::Null,
+        json!(""),
+        json!("   "),
+        json!("null"),
+        json!("None"),
+    ] {
+        activity["tool"]["label"] = label;
+        assert_eq!(chip::headline(&activity), "Reading", "{activity}");
+    }
+    activity["tool"]["label"] = json!("src/null");
+    assert_eq!(chip::headline(&activity), "Reading null");
+}
+
+#[test]
 fn the_chip_says_of_a_fleet_what_the_python_host_says() {
     let vectors = vectors();
     let fleets = vectors["fleets"].as_array().unwrap();

@@ -84,15 +84,18 @@ fn tool_of(activity: &Value) -> Option<&Value> {
 }
 
 fn tool_headline(tool: &Value) -> String {
-    let (name, mut label) = (text(&tool["name"]), text(&tool["label"]));
+    let name = text(&tool["name"]);
+    let supplied = text(&tool["label"]);
+    let mut label = python::strip(&supplied);
     let category = match &tool["category"] {
         category if truthy(category) => text(category),
         _ => tools::describe(&name, &json!({})).category.to_string(),
     };
+    let placeholder = label.eq_ignore_ascii_case("null") || label.eq_ignore_ascii_case("none");
     let of_a_path = matches!(category.as_str(), "read" | "edit" | "write" | "list");
     if of_a_path && label.contains('/') {
         let whole = label.trim_end_matches('/');
-        label = whole.rsplit('/').next().unwrap_or(whole).to_string();
+        label = whole.rsplit('/').next().unwrap_or(whole);
     }
     let verb = match category.as_str() {
         "exec" => "Running",
@@ -106,7 +109,11 @@ fn tool_headline(tool: &Value) -> String {
         "agent" => "Delegating",
         _ => "Calling",
     };
-    let what = if label.is_empty() { &name } else { &label };
+    // A path tool with no target can still say what it is doing.
+    if placeholder || (of_a_path && label.is_empty()) {
+        return verb.to_string();
+    }
+    let what = if label.is_empty() { &name } else { label };
     if what.is_empty() {
         return "Using a tool".to_string();
     }
