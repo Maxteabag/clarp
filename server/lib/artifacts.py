@@ -54,6 +54,17 @@ def _agent(session: str) -> dict:
     return row
 
 
+# The typed payload fields, in their declared order (R103).
+_STRING_FIELDS = ("url", "thumbnail_url", "mime_type", "file_name", "content",
+                  "target_at", "source_url", "commit", "branch", "repository", "subject",
+                  "starts_at", "ends_at", "time_zone", "location", "notes",
+                  "version", "build", "environment", "diff", "path_label", "asset_id",
+                  "root", "relative_path", "provider", "run_id", "run_url",
+                  "workflow_name", "current_step", "conclusion")
+_INTEGER_FIELDS = ("duration_ms", "size_bytes", "row_count", "source_count",
+                   "files_changed", "additions", "deletions", "total_steps", "completed_steps")
+
+
 def _payload(value: Any, *, preserve_html: bool = False) -> dict:
     if value is None:
         return {}
@@ -69,20 +80,14 @@ def _payload(value: Any, *, preserve_html: bool = False) -> dict:
         raise ValueError("payload must contain finite JSON values") from exc
     if len(encoded.encode()) > (4 * 1024 * 1024 if "answer_schema" in value else 131072):
         raise ValueError("artifact payload too large")
-    string_fields = {"url", "thumbnail_url", "mime_type", "file_name", "content",
-                     "target_at", "source_url", "commit", "branch", "repository", "subject",
-                     "starts_at", "ends_at", "time_zone", "location", "notes",
-                     "version", "build", "environment", "diff", "path_label", "asset_id",
-                     "root", "relative_path", "provider", "run_id", "run_url",
-                     "workflow_name", "current_step", "conclusion"}
-    integer_fields = {"duration_ms", "size_bytes", "row_count", "source_count",
-                      "files_changed", "additions", "deletions", "total_steps", "completed_steps"}
-    for key in string_fields & value.keys():
+    # In the schema's declared order (R103): with two fields of the wrong type, the first
+    # one refused is the same in every process, not whichever a set's hash order gives.
+    for key in (key for key in _STRING_FIELDS if key in value):
         if not isinstance(value[key], str): raise ValueError(f"payload {key} must be a string")
         value = dict(value)
         if not (preserve_html and key == "content"):
             value[key] = strip_hidden_blocks(value[key])
-    for key in integer_fields & value.keys():
+    for key in (key for key in _INTEGER_FIELDS if key in value):
         if isinstance(value[key], bool) or not isinstance(value[key], int):
             raise ValueError(f"payload {key} must be an integer")
         if value[key] < 0 or value[key] > 9223372036854775807:
@@ -116,17 +121,15 @@ def _require_payload(type: str, payload: dict, artifact_id: str, session: str = 
         if payload.get(field):
             _safe_url(str(payload[field]), field=field, allow_relative=field == "thumbnail_url")
     if type == "countdown":
-        from datetime import datetime
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        from .moments import read_moment
         target = payload.get("target_at")
         zone = payload.get("time_zone")
         if not isinstance(target, str) or not re.fullmatch(
                 r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", target):
             raise ValueError("countdown target_at must be an ISO 8601 timestamp with offset")
         try:
-            instant = datetime.fromisoformat(target.replace("Z", "+00:00"))
-            if instant.tzinfo is None or instant.utcoffset() is None:
-                raise ValueError("offset required")
+            read_moment(target)        # the one reader Updates uses too (R104)
         except ValueError as exc:
             raise ValueError("countdown target_at requires a valid date/time and explicit UTC offset") from exc
         if not isinstance(zone, str) or not zone.strip():

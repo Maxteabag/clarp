@@ -70,16 +70,16 @@ c0a2b172559d  send-after-stop: the agent's model after the turn that followed a 
 # beside pinned_at null: reference defect R15).
 23ad255cb543  library: pinned in the answer to the discard of a pinned artifact
 
-# A reply is given once to a client that catches up by revision (the Python Host writes the
-# reply that closed a turn again when the next message arrives, so its revision moves past a
-# cursor the client already holds: reference defect R16).
+# Former difference R16: the Python Host stamped a finished reply again on the next send.
+# Closed on issue 360 (comment 7072009553). Conformance run 44964832095 against
+# 5b06b5b1 (through PR 612) no longer showed it. The historical ids are kept below.
 d9328e5ae3d4  roster-edits: the second reply, which no cursor after its turn is older than
 e174da59f1c5  router: the second reply of the second agent, written again when the next message routed to it arrived (run 44461872880: both recordings of the reference)
 88363440f226  router: its third reply, the same
 
-# After a turn that completed, an agent's row says what it is doing: at rest, since when, after
-# which turn (the Python Host leaves `live_activity` empty after an agent's first turn until its
-# next one, in three recordings of four: reference defect R17).
+# Former difference R17: the Python Host left live_activity empty after the first turn.
+# Closed on issue 360 (comment 7072009553). Conformance run 44964832095 against
+# 5b06b5b1 (through PR 612) no longer showed it. The historical ids are kept below.
 dab2f73f0779  roster-edits: live_activity of the renamed agent, after its first turn
 ddf864060396  roster-edits: the same, in the snapshot with the agent put away
 b552ef3283ca  roster-edits: the same, in the snapshot asked for in another word
@@ -174,11 +174,9 @@ f2e33660afbe  live-items: the block's done and thinking status do not precede th
 c11b0fc86f48  live-items: the commentary patch precedes done and has one revision fewer
 33a57035c697  live-items: the reply's done follows the first tool's input
 
-# Defect R19 of the reference: in the first streamed turn of a conversation, the row the answer
-# was written into while it grew is not the row the conversation keeps. Its live item and its
-# notification then name a row that is not there, and no row carries the turn's summary. It
-# does so in some recordings and not in others; where both recordings of a run have it, these
-# are the places. The last two: the same of what the agent said before its first tool.
+# Former difference R19: in the first streamed turn, the live item and notification could
+# name a row the transcript did not keep, and the turn summary could go missing.
+# Fixed by PR 411 (issue 360, comment 6967327324). The historical ids are kept below.
 6f3877dbaa97  live-items: the row that closes the turn carries the turn's summary
 f357d30076fb  live-items: the answer's live item names the row the conversation has
 90d4d0c6acaf  live-items: the same, where the item is first sent
@@ -228,12 +226,10 @@ f85f0a1fc780  past-sessions: its file, with a message after
 # it from then on (docs/differences.md, registered one by one).
 d90e2215ebd4  oracle-delegations: the answer to the delegation, before the agent's first turn
 
-# A reply that the Python Host stores twice (reference defect R89: a reply left as a live row
-# beside its imported final row). It shows or does not, from run to run, on the same tree: run
-# 44424594522 had it in both recordings of the reference, runs 44425653605 and 44426289871 on the
-# same tree did not. Where it shows, the conversation has one row more there and what names the
-# last message follows it. This Host stores the reply once. Registered as a defect of the
-# reference, by the release owner's word of 19 Nov 2026, not as something meant.
+# Former difference R89: a live reply sometimes stood beside its imported final row.
+# All parts merged in PRs 446, 447, 448 (R91) and 451 (R92). Closed on issue 360
+# (comment 7072009553): Conformance run 44964832095 against 5b06b5b1 (through PR 612)
+# no longer showed it. The historical ids are kept below.
 edc09f29e363  the-apps-own-ids: one row more in the conversation (shows or does not, from run to run)
 ccbe384d767a  the-apps-own-ids: the row that follows, which has its turn here (shows or does not)
 4b93f4c845e3  the-apps-own-ids: the agent's last message id at rest (shows or does not)
