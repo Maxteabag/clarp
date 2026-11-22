@@ -151,21 +151,25 @@ constants disagree; keep them in step in the same commit.
 
 ## A feature agents can use ships with its skill
 
-Peter, 22 Nov 2026, of every feature he asks for: anything an agent could use
-(an endpoint, a CLI command, an artifact kind, a catalog element, a setting an
-agent may change, an app that starts drawing something) ships with the matching
-Clarp skill under `skills/` added or updated in the same pull request, so agents
-know about it the day it lands.
+Anything an agent could use (an endpoint, a CLI command, an artifact kind, a
+catalog element, a setting an agent may change, an app that starts drawing
+something) ships with the matching Clarp skill under `skills/` added or updated
+in the same pull request, so agents know about it the day it lands. Nine release
+skills once never reached any agent; this rule is what prevents a repeat.
 
 - The skill says what exists now and where it works: which apps draw it, which
   Host contract or setting it needs. An agent must never publish something no
   app can show, or call something no Host has.
 - A feature that is switched off, or that no app draws yet, is either left out
   of the skill or described as not usable yet, with what to use instead.
+- When the feature lives in another repository (the iOS app), the skill change
+  is its own pull request here, linked from the app's, and merged no later than
+  the app's release. The app's reviewer refuses the app change without that link.
 - A new skill gets its line in `skills/manifest.json` in the same change, so
   every Host links it for every backend.
 - A reviewer refuses a change that adds or alters such a feature without the
-  skill text. A purely internal change needs no skill.
+  skill text. A purely internal change, one that adds or alters nothing an agent
+  can call, publish, read or set, needs no skill.
 
 ## The Host in Rust (`server-rs/`)
 
