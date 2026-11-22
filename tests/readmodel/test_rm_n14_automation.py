@@ -115,13 +115,15 @@ def test_a_session_an_automation_was_sent_to_is_imported_by_its_tail(tmp_path, b
                 assert _decision(actual.tick(tick)) == "tail_applied"
                 harness.assert_product_equal(reference, candidate)
 
-            # The automation is sent again, with the same words as before.
-            # Its /send row is new, so that import is a full one (the rows the
-            # frontier was published with changed); the one after it is a tail.
+            # The automation is sent again, with the same words as before. Its
+            # /send row is new and its words were said before, but it was sent
+            # after every turn before the boundary, for a trace none of them
+            # has: no old copy can be linked to it, so that import is a tail too
+            # (message_carry.NEW_SENDS), and equal to the full replay.
             _sent(both, kind, 1, at_ordinal=8)
             _append(transcript, _turn(backend, 8, kind))
             full.tick(3)
-            assert _decision(actual.tick(3)) == "full_carry_inputs_changed"
+            assert _decision(actual.tick(3)) == "tail_applied"
             harness.assert_product_equal(reference, candidate)
             _append(transcript, _turn(backend, 9))
             full.tick(4)
