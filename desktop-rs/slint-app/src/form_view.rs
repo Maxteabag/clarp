@@ -261,12 +261,18 @@ pub fn spec_fields(item: &mut ArtifactItem, view: Option<FormView>) {
     }
 }
 
+/// A render_spec row the Host drew for this client: a list row's marker,
+/// or the single read's catalog (an event's read replaces the list row).
+/// Any other row of the kind is the plain row of a client without forms.
+pub fn drawn(artifact: &serde_json::Value) -> bool {
+    artifact.get("type").and_then(|t| t.as_str()) == Some("render_spec")
+        && (artifact.get("content_omitted").is_some() || artifact.get("catalog").is_some())
+}
+
 /// Asks the engine to read every form among `artifacts` its card shows.
 pub fn want(app: &App, artifacts: &[serde_json::Value]) {
     let mut engine = app.engine.borrow_mut();
-    // Only a row the Host drew for this client (its marker) has a spec to read.
-    let drawn = |a: &&serde_json::Value| a.get("type").and_then(|t| t.as_str()) == Some("render_spec") && a.get("content_omitted").is_some();
-    for artifact in artifacts.iter().filter(drawn) {
+    for artifact in artifacts.iter().filter(|a| drawn(a)) {
         let id = artifact.get("artifact_id").and_then(|v| v.as_str()).unwrap_or_default();
         let updated = artifact.get("updated_at").and_then(serde_json::Value::as_i64).unwrap_or(0);
         engine.want_render_spec(id, updated);

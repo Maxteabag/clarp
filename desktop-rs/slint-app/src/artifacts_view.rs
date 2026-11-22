@@ -240,7 +240,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             // Drawn in the card once read (`form_view`), when the Host
             // sent this client the kind (its marker); otherwise a plain card.
             item.label = "FORM".into();
-            if artifact.get("content_omitted").is_some() || artifact.get("catalog").is_some() {
+            if crate::form_view::drawn(artifact) {
                 item.spec_state = "loading".into();
             }
         }
