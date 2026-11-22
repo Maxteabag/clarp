@@ -124,7 +124,17 @@ class AgentLifecycleService:
         self._reject_owned_backend_session(
             backend=spec.backend, backend_session_id=resume_session_id,
             session=spec.session)
+        replaced = agents_db.get_by_session(spec.replace_sid) if spec.replace_sid else None
+        if replaced:
+            # Started again in place: its running turn ends first, so its answer never
+            # goes into the conversation this ends (R51).
+            from . import turn_dispatch
+            turn_dispatch.stop_for_restart(
+                self.ctx, replaced["agent_id"], backends.normalize(replaced.get("backend")),
+                session=spec.replace_sid)
         self._persist(spec, agents, resume_session_id)
+        if replaced:
+            self._run_waiting(replaced["agent_id"], spec.session)
         should_generate_avatar = (
             not janitor
             and spec.avatar_raw is None
@@ -137,6 +147,21 @@ class AgentLifecycleService:
             spec.backend,
         )
         return result, spec, should_generate_avatar
+
+    def _run_waiting(self, agent_id: str, session: str) -> None:
+        """What waited behind the stopped turn runs in the new conversation."""
+        from . import turn_queue
+        if not turn_queue.pending_count(agent_id):
+            return
+        runtime_client = getattr(self.ctx, "runtime_client", None)
+        try:
+            if runtime_client is not None:
+                runtime_client.recover_queued()
+            else:
+                from .turn_dispatch import TurnDispatchService
+                TurnDispatchService(self.ctx).recover_queued()
+        except Exception as exc:  # noqa: BLE001 - the next recovery pass runs it
+            log_exception("restartQueueRecoverFail", exc, detail=session)
 
     @staticmethod
     def _roster_view(agents: dict) -> RosterView:

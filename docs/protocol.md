@@ -948,7 +948,11 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   `role` is `agent` (default) or `helper`; a helper needs a parent, and a
   fork without `parent` records its source agent. Self-parenting and cycles
   answer 409 (`self_parent`, `parent_cycle`); an unknown parent 404.
-  Answers `{"session", "persona", …}` and broadcasts `agent-roster`.
+  Answers `{"session", "persona", …}` and broadcasts `agent-roster`. A
+  relaunch of an agent whose turn is running stops that turn first (its
+  `agent-state` is `interrupted`, detail `source: "restart"`), so its answer
+  never goes into the conversation the relaunch ends; unlike a Stop it holds
+  nothing, and what waited behind the turn runs in the new conversation.
 - `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
   "by"?}` marks a helper. `by` is the marking agent and must be the helper's
   parent; without it the mark is the user's. An agent-origin `/send` from a
