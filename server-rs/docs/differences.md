@@ -168,6 +168,7 @@ with its port (19 Nov 2026).
 
 | What | The Python Host | The Rust Host | Why |
 |---|---|---|---|
+| Default render-spec support for the native desktop | the reference needs a desktop entry in `render_spec_min_contract` | `desktop` gets v1 from client contract 1 | The native desktop can read and answer v1 forms at cut-over. |
 | When an external edit of the voice names file is visible (PR 498) | the next read of the file's metadata can see the change | the Host publishes the names at startup and in the background refresh | The profile reads the published names and content hash together, with no file read on the request path. |
 | An ElevenLabs voice label already fetched by a picker (PR 498) | live picker cache takes precedence over the file | the bundled ElevenLabs picker has no live fetch cache, so the stored names take precedence over bundled labels | Cartesia still overlays its in-memory picker names over disk. |
 | Cartesia settings at clip synthesis (R168) | reads transcription settings when Cartesia is about to speak, logs a settings read error and uses English | resolves with the fleet's published settings and the existing startup language default | Fleet settings are read before they're published to speech. Malformed settings values use the same parser as hearing. |

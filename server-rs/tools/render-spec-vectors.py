@@ -711,12 +711,12 @@ def clients():
     # Each client by its own name, matched exactly (its PR 474): another platform, one written in
     # another case, one whose name only begins as iOS's.
     headers += ['android/5 contract=74', 'android/5 contract=30',
-                'android/1058 contract=40', 'android/1058 contract=41', 'Android/1058 contract=41', 'desktop/1 contract=200',
+                'android/1058 contract=40', 'android/1058 contract=41', 'Android/1058 contract=41', 'other/1 contract=200',
                 'web/1 contract=0', 'web/1 contract=1', 'web/1 contract=99', 'Web/1 contract=1',
                 'Watch/1 contract=99', 'IOS/12 contract=74', 'Ios/12 contract=74', 'ios2/12 contract=74']
     # A single number is iOS's minimum; a table, the owner's, laid over the default (0: never).
     minimums = [None, -1, 0, 1, 74, 75, 999999999, 1000000000,
-                {}, {'ios': 80}, {'ios': 0}, {'android': 30}, {'android': 0}, {'desktop': 1, 'web': 5}, {'web': 0},
+                {}, {'ios': 80}, {'ios': 0}, {'android': 30}, {'android': 0}, {'other': 1, 'web': 5}, {'web': 0},
                 {'Watch': 1, 'ios': 74}, {'IOS': 1}]
     # A table that names each unusual platform above by its own name: whether the header's form
     # is one a client may send decides then, not the want of a minimum.
@@ -825,7 +825,7 @@ def form_v2(rs, identity, refusal):
             ('web/1 contract=1', None, None),
             ('web/1 contract=2', None, None),
             ('web/1 contract=2', {'web': 1}, {'web': 0}),
-            ('desktop/1 contract=2', None, {'desktop': 2}),
+            ('other/1 contract=2', None, {'other': 2}),
             ('android/1058 contract=40', None, None),
             ('android/1058 contract=41', None, None),
             ('android/1058 contract=41', None, {'android': 41}),
