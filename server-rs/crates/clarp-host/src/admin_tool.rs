@@ -2138,6 +2138,36 @@ async fn client_log(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// Installed Rust Host paths. Its runtime is part of the same service, reached over HTTP.
+fn paths(data: &Path) -> ToolAnswer {
+    let from_env = |name| {
+        std::env::var_os(name)
+            .filter(|path| !path.is_empty())
+            .map(std::path::PathBuf::from)
+    };
+    let share = from_env("CLARP_SHARE_DIR").unwrap_or_else(|| {
+        from_env("XDG_DATA_HOME")
+            .unwrap_or_else(|| home().join(".local/share"))
+            .join("clarp-host")
+    });
+    let config = crate::config::host_config_dir();
+    let service = config
+        .with_file_name("systemd")
+        .join("user/clarp-host.service");
+    shown(&json!({
+        "platform": std::env::consts::OS,
+        "share": share,
+        "config": config.join("config.toml"),
+        "database": data.join("fleet.db"),
+        "cache": from_env("CLARP_CACHE_DIR").unwrap_or_else(|| share.join("cache")),
+        "logs": from_env("CLAUDE_PWA_LOG_DIR").unwrap_or_else(|| share.join("logs")),
+        "service": service,
+        "runtime_service": service,
+        "runtime_socket": null,
+        "toolchain": share.join("tools"),
+    }))
+}
+
 /// Usage lines and value-taking flags from the Python argparse tree, with the
 /// Rust commands added. Reading help never dispatches the command.
 fn help(args: &[String]) -> Option<ToolAnswer> {
@@ -2208,6 +2238,10 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
         Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
         Some((command, _)) if command == "sessions" => sessions(app),
+        Some((command, rest)) if command == "paths" => match parse(rest, &[], &[], &[]) {
+            Ok(_) => paths(&app.config.data_dir),
+            Err(why) => ToolAnswer::said(2, why),
+        },
         Some((command, rest)) if command == "model" => model(app, call, rest).await,
         Some((command, rest)) if command == "request" => {
             request_tool::request(
@@ -2248,6 +2282,29 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admin_gap_paths_names_the_rust_installation() {
+        let answer = paths(Path::new("/fixture/rust-data"));
+        assert_eq!(answer.exit, 0);
+        let paths: Value = serde_json::from_str(&answer.stdout).unwrap();
+        assert_eq!(paths["platform"], std::env::consts::OS);
+        assert_eq!(paths["database"], "/fixture/rust-data/fleet.db");
+        let config = paths["config"].as_str().unwrap();
+        assert!(config.ends_with("/clarp-host/config.toml"), "{config}");
+        let service = paths["service"].as_str().unwrap();
+        assert!(
+            service.ends_with("/systemd/user/clarp-host.service"),
+            "{service}"
+        );
+        assert_eq!(paths["runtime_service"], paths["service"]);
+        assert_eq!(paths.get("runtime_socket"), Some(&Value::Null));
+        assert_eq!(
+            paths["toolchain"],
+            format!("{}/tools", paths["share"].as_str().unwrap())
+        );
+        assert!(paths["cache"].is_string() && paths["logs"].is_string());
+    }
 
     #[test]
     fn admin_gap_help_reports_the_selected_command_without_dispatching() {
