@@ -12,7 +12,7 @@
 
 {#if line}
   <div class="turn hidden-run" role="note">
-    <span class="hidden-run-text">{line}{#if agents}<span class="hidden-run-agents"> {agents}</span>{/if}</span>
+    <span class="hidden-run-text">{line}{#if agents}<span class="hidden-run-agents">{' ' + agents}</span>{/if}</span>
     <button class="hidden-run-show" type="button" onclick={onShow}>Show</button>
   </div>
 {/if}
