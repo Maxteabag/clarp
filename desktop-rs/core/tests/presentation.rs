@@ -155,7 +155,7 @@ fn hidden_activity_keeps_prose_without_tool_rows_or_cards() {
             ..Message::default()
         },
     ];
-    let mut settings = Settings { activity_mode: HIDDEN, ..Settings::default() };
+    let mut settings = Settings { activity_mode: HIDE_WHEN_DONE, ..Settings::default() };
 
     let presented = present(&rows, &mut settings, None);
 

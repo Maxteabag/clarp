@@ -16,6 +16,57 @@ export global DraftMirror {
     in-out property <int> set;
 }
 
+// A choice in the chat's "⋯" menu (#653): its value, its words, and
+// whether it is the chat's choice now.
+export struct ChatChoice {
+    value: string,
+    label: string,
+    current: bool,
+}
+
+// The chat's "⋯" menu on its pane's frame (#653): the chat's own Tool
+// activity (this device's) and, on a Host that offers it, its own choice
+// for messages between agents (the Host's), each a submenu that shows its
+// current value. Filled when it opens.
+export global ChatMenu {
+    // The pane whose menu is open ("" for none), and its open submenu
+    // ("", "activity" or "coordination").
+    in-out property <string> open;
+    in-out property <string> submenu;
+    in property <bool> coordination-shown;
+    in property <string> coordination-label;
+    in property <string> activity-label;
+    in property <[ChatChoice]> coordination-choices;
+    in property <[ChatChoice]> activity-choices;
+    callback opened(string);
+    callback pick(string, string);
+    // Opens the chat's agent's artifacts (its profile's Artifacts).
+    callback artifacts();
+}
+
+component ChatMenuItem inherits Rectangle {
+    in property <string> text;
+    in property <string> value;
+    in property <string> id;
+    in property <image> icon;
+    callback clicked();
+    height: 26px;
+    background: touch.has-hover ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-id: root.id;
+    accessible-label: root.value != "" ? root.text + ": " + root.value : root.text;
+    accessible-action-default => { root.clicked(); }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        if root.icon.width > 0: Image { source: root.icon; width: 12 * Look.unit; height: 12 * Look.unit; colorize: Palette.muted; y: (parent.height - self.height) / 2; }
+        Text { text: root.text; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
+        if root.value != "": Text { text: root.value + "  ›"; color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
 // One pane of the workspace: where it sits (fractions of the workspace),
 // the chat it shows, and that chat's composer state. The counters ask the
 // pane to act (focus its composer or transcript, jump to the latest) when
@@ -393,7 +444,7 @@ export component Pane inherits Rectangle {
 
     // A click anywhere but the composer makes the pane active.
     TouchArea {
-        clicked => { root.activate(); }
+        clicked => { ChatMenu.open = ""; root.activate(); }
     }
     VerticalLayout {
         padding: 2px;
@@ -445,7 +496,76 @@ export component Pane inherits Rectangle {
             // In vim mode the title says the mode, as Vim's last line does.
             key: root.pane.active && Focus.mode == "composer" ? (VimBridge.mode != "" ? "esc" : "ctrl+h") : "h";
             label: "Chat";
+            right-room: root.pane.session != "" && !root.pane.pair ? 22px : 0px;
             active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+          // The chat's "⋯" menu (#653), at the right end of the frame.
+          if root.pane.session != "" && !root.pane.pair: Rectangle {
+            x: parent.width - 10px - self.width;
+            y: 0;
+            width: 20px;
+            height: 14px;
+            background: root.background;
+            accessible-role: button;
+            accessible-id: "chat-menu:" + root.pane.id;
+            accessible-label: "Chat menu";
+            accessible-action-default => { ChatMenu.opened(root.pane.id); }
+            Text {
+                text: "⋯";
+                color: menu-touch.has-hover || ChatMenu.open == root.pane.id ? Palette.accent : Palette.muted;
+                font-size: 13 * Look.unit;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            menu-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatMenu.opened(root.pane.id); } }
+          }
+          if ChatMenu.open == root.pane.id: Rectangle {
+            x: parent.width - self.width - 10px;
+            y: 16px;
+            width: 280px;
+            height: menu-list.preferred-height;
+            border-radius: 2px;
+            border-width: 1px;
+            border-color: Palette.border;
+            background: Palette.window;
+            // Clicks inside stay inside.
+            TouchArea { }
+            menu-list := VerticalLayout {
+                padding: 3px;
+                if ChatMenu.submenu == "" && ChatMenu.coordination-shown: ChatMenuItem {
+                    id: "chat-menu-coordination";
+                    text: "Messages between agents";
+                    value: ChatMenu.coordination-label;
+                    clicked => { ChatMenu.submenu = "coordination"; }
+                }
+                if ChatMenu.submenu == "": ChatMenuItem {
+                    id: "chat-menu-activity";
+                    text: "Tool activity";
+                    value: ChatMenu.activity-label;
+                    clicked => { ChatMenu.submenu = "activity"; }
+                }
+                // The agent's artifacts, as its profile's Artifacts shows them.
+                if ChatMenu.submenu == "": ChatMenuItem {
+                    id: "chat-menu-artifacts";
+                    text: "Artifacts";
+                    icon: @image-url("icons/artifacts.svg");
+                    clicked => { ChatMenu.artifacts(); }
+                }
+                if ChatMenu.submenu == "coordination": VerticalLayout {
+                    for choice in ChatMenu.coordination-choices: ChatMenuItem {
+                        id: "chat-menu-coordination:" + choice.value;
+                        text: (choice.current ? "✓  " : "     ") + choice.label;
+                        clicked => { ChatMenu.pick("coordination", choice.value); }
+                    }
+                }
+                if ChatMenu.submenu == "activity": VerticalLayout {
+                    for choice in ChatMenu.activity-choices: ChatMenuItem {
+                        id: "chat-menu-activity:" + choice.value;
+                        text: (choice.current ? "✓  " : "     ") + choice.label;
+                        clicked => { ChatMenu.pick("activity", choice.value); }
+                    }
+                }
+            }
+          }
         }
         // Live items' one status line (docs/live-items.md §7.4): what runs
         // and for how long by the Host's clock, and the key that stops it

@@ -1337,6 +1337,9 @@ pub fn take_return() -> bool {
     RETURN_TO_CHAT.with(|r| r.replace(false))
 }
 
+/// The key of the quiet line where agent messages were (`hidden_coordination`).
+pub const COORDINATION_PREFIX: &str = "live:coordination:";
+
 /// A live item row or another agent's prompt: O (or a click) opens and
 /// folds it.
 fn toggles(id: &str) -> bool {
@@ -1347,6 +1350,14 @@ fn toggles(id: &str) -> bool {
 /// by its key.
 pub fn toggle_live(app: &App, key: &str) {
     *app.artifact_cursor.borrow_mut() = key.to_owned();
+    // The quiet line where agent messages were (#653): opening it reads the
+    // chat again with them shown, in place, for this visit.
+    if key.starts_with(COORDINATION_PREFIX) {
+        let session = app.active_session();
+        app.engine.borrow_mut().show_coordination(&session);
+        app.refresh(&[Change::Conversation(session)]);
+        return;
+    }
     {
         let mut expanded = app.expanded.borrow_mut();
         if !expanded.remove(key) {

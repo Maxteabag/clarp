@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use clarp_core::live::LiveView;
-use clarp_core::live_present::{Kind, Options, Presented, present, status_line};
+use clarp_core::live_present::{Kind, Options, Presented, present, status_line, work_title};
 use clarp_core::protocol::Message;
 use serde_json::{Value, json};
 
@@ -40,7 +40,7 @@ fn row(value: Value) -> Message {
 }
 
 fn options(expanded: &[&str], host_now_ms: i64) -> Options {
-    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, hide_activity: false }
+    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, fold_running: false, hide_settled: false, show_commentary: false }
 }
 
 fn titles(presented: &Presented) -> Vec<String> {
@@ -89,17 +89,56 @@ fn items_read_as_rows_in_ordinal_order() {
     assert_eq!(tool.more, "+762 earlier lines");
 }
 
+/// Grouped (#653): the running turn's work folds into one row that counts
+/// its calls so far, its commentary with it; opened, every row shows in place.
 #[test]
-fn hidden_activity_keeps_only_live_messages() {
+fn a_running_turn_folds_into_one_working_row_when_grouped() {
     let view = turn_full(after(17));
     let mut opts = options(&[], 1759480008200);
-    opts.hide_activity = true;
+    opts.fold_running = true;
 
     let presented = present(&view, &[], &opts);
 
-    assert_eq!(presented.entries.len(), 1);
-    assert_eq!(presented.entries[0].kind, Kind::Message);
-    assert_eq!(presented.entries[0].text, "Let me look at the parser and its tests.");
+    let kinds: Vec<Kind> = presented.entries.iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, [Kind::Fold, Kind::Tool], "{:?}", titles(&presented));
+    assert_eq!(presented.entries[0].title, "Working · 2 tools", "the calls it folds so far: the explore group's two; the failed command keeps its row");
+    assert_eq!(presented.entries[0].status, "running");
+    assert!(presented.entries[0].items.contains(&"cl:msg_01:1".to_owned()), "the commentary folds into it");
+    assert_eq!(presented.entries[1].status, "failed", "a failed tool stays in view");
+    opts.expanded.insert("live:fold:tr-1".to_owned());
+    let open = present(&view, &[], &opts);
+    assert_eq!(open.entries.len(), 5, "the work row and every row again: {:?}", titles(&open));
+    assert!(open.entries[0].expanded);
+    // Always visible and Group old: the running turn's rows as they come.
+    opts.fold_running = false;
+    assert_eq!(present(&view, &[], &opts).entries.len(), 4);
+}
+
+/// Hide when done (#653): the work row shows while the turn runs and goes
+/// when it has finished; messages and what failed or stopped stay.
+#[test]
+fn hide_when_done_shows_the_work_row_only_while_the_turn_runs() {
+    let mut opts = options(&[], 1759480008200);
+    opts.fold_running = true;
+    opts.hide_settled = true;
+    let running = present(&turn_full(after(17)), &[], &opts);
+    assert_eq!(running.entries[0].title, "Working · 2 tools");
+    let settled = present(&turn_full(after(23)), &[], &opts);
+    assert!(settled.entries.iter().all(|e| e.kind != Kind::Fold), "{:?}", titles(&settled));
+    assert_eq!(titles(&settled), ["Ran npm test", "", "Stopped npm test"], "the reply and what failed or stopped; the commentary went with the row");
+}
+
+#[test]
+fn the_work_row_says_worked_time_and_tools_in_the_spec_s_words() {
+    let title = |running, worked, calls| work_title(running, worked, calls);
+    assert_eq!(title(false, Some(11_000), 3).as_deref(), Some("Worked for 11s · 3 tools"));
+    assert_eq!(title(false, None, 3).as_deref(), Some("3 tools"));
+    assert_eq!(title(false, None, 1).as_deref(), Some("1 tool"));
+    assert_eq!(title(false, Some(11_000), 1).as_deref(), Some("Worked for 11s · 1 tool"));
+    assert_eq!(title(false, Some(11_000), 0).as_deref(), Some("Worked for 11s"), "no folded call: the time alone");
+    assert_eq!(title(false, None, 0), None, "neither a time nor a folded call: no work row");
+    assert_eq!(title(true, None, 2).as_deref(), Some("Working · 2 tools"));
+    assert_eq!(title(true, None, 1).as_deref(), Some("Working · 1 tool"));
 }
 
 #[test]
@@ -244,8 +283,10 @@ fn commentary_between_tools_folds_into_the_work_row_and_opens_in_place() {
     assert_eq!(p.entries[0].items, ["cl:m:0", "cl:c1", "cl:c2", "cl:m:1", "cl:c3"]);
     let open = present(&view, &[], &options(&["live:fold:tr-c"], 0));
     assert_eq!(read(&open), ["Worked for 12s · 3 tools", "Building it first.", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
-    let hidden = present(&view, &[], &Options { hide_activity: true, ..options(&[], 0) });
-    assert_eq!(read(&hidden), ["All green."], "activity hidden: the folded commentary goes with the work");
+    let hidden = present(&view, &[], &Options { hide_settled: true, ..options(&[], 0) });
+    assert_eq!(read(&hidden), ["All green."], "Hide when done: the folded commentary goes with the work row");
+    let always = present(&view, &[], &Options { show_commentary: true, ..options(&[], 0) });
+    assert_eq!(read(&always), ["Building it first.", "Worked for 12s · 3 tools", "Built. Now the tests.", "All green."], "Always visible keeps the commentary in its place");
 }
 
 /// The real Host's settled turn (tests/fixtures/live-real-settled-turn.json):
@@ -608,6 +649,77 @@ fn a_live_item_never_goes_above_a_row_written_before_it_started() {
     assert!(place("u-stale-second") < place("live:cl:msg_b1:0"), "{order:?}");
 }
 
+/// A durable row carrying folded commentary is not shown on its own; one
+/// that also carries the final reply is the reply and never folds.
+#[test]
+fn a_durable_commentary_row_hides_with_its_fold() {
+    let mut view = commentary_turn();
+    let mut snapshot = serde_json::json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 2, "server_now_ms": 20_000,
+        "activity": {"state": "idle", "turn_id": "tr-c"},
+        "turn": {"turn_id": "tr-c", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 13_000, "worked_ms": 12_000, "tool_count": 3},
+        "items": view.items().iter().map(|i| Value::Object((*i).clone())).collect::<Vec<_>>()});
+    for item in snapshot["items"].as_array_mut().unwrap() {
+        if item["id"] == "cl:m:0" {
+            item["row_id"] = json!("r-note");
+        }
+    }
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    let note = row(json!({"id": "r-note", "role": "assistant", "text": "Building it first.", "revision": 3}));
+    let mut opts = options(&[], 0);
+    let p = present(&view, std::slice::from_ref(&note), &opts);
+    assert!(p.hidden_rows.contains(&"r-note".to_owned()), "folded: {:?}", p.hidden_rows);
+    opts.expanded.insert("live:fold:tr-c".to_owned());
+    let open = present(&view, std::slice::from_ref(&note), &opts);
+    assert!(!open.hidden_rows.contains(&"r-note".to_owned()) && open.entries.iter().any(|e| e.row == "r-note"), "opened, the row shows in its place");
+}
+
+/// A settled turn: a spoken acknowledgment (after a first tool), a tool,
+/// plain commentary, a tool, the reply.
+fn heard_turn() -> LiveView {
+    let message = |id: &str, ordinal: i64, phase: &str, text: &str| {
+        json!({"id": id, "kind": "message", "rev": 1, "conv": "c-1", "turn_id": "tr-h", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000, "phase": phase, "text": text})
+    };
+    let tool = |call: &str, ordinal: i64, command: &str| {
+        json!({"id": format!("cl:{call}"), "kind": "tool", "rev": 1, "conv": "c-1", "turn_id": "tr-h", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000,
+            "tool": {"name": "Bash", "call_id": call, "category": "exec", "group": null, "label": command, "command": command}})
+    };
+    let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": 20_000,
+        "activity": {"state": "idle", "turn_id": "tr-h"},
+        "turn": {"turn_id": "tr-h", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 9_000, "worked_ms": 8_000, "tool_count": 3},
+        "items": [
+            tool("h0", 1, "git status"),
+            message("cl:h:ack", 2, "commentary", "<speak>On it, checking the build.</speak>"),
+            tool("h1", 3, "make build"),
+            message("cl:h:note", 4, "commentary", "Looking at the build log now."),
+            tool("h2", 5, "make test"),
+            message("cl:h:final", 6, "final", "All green."),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    view
+}
+
+/// Commentary the user heard (#653) stays in view above the work row in
+/// every mode, Hide when done too; plain commentary folds; the count is
+/// still the folded calls.
+#[test]
+fn a_spoken_acknowledgment_stays_above_the_work_row() {
+    let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
+    let mut opts = options(&[], 0);
+    let p = present(&heard_turn(), &[], &opts);
+    assert_eq!(read(&p), ["On it, checking the build.", "Worked for 8s · 3 tools", "All green."], "the words heard, the work row, the reply");
+    assert!(p.entries[0].spoken);
+    opts.hide_settled = true;
+    assert_eq!(read(&present(&heard_turn(), &[], &opts)), ["On it, checking the build.", "All green."], "Hide when done keeps it");
+    opts.hide_settled = false;
+    opts.expanded.insert("live:fold:tr-h".to_owned());
+    let open = present(&heard_turn(), &[], &opts);
+    assert_eq!(read(&open), ["On it, checking the build.", "Worked for 8s · 3 tools", "Ran git status", "Ran make build", "Looking at the build log now.", "Ran make test", "All green."], "opened, the rest in place");
+    assert!(clarp_core::text::has_speech("Sure. <speak>On it.</speak>") && !clarp_core::text::has_speech("<speak> </speak>") && !clarp_core::text::has_speech("speak plainly"));
+}
+
 const SPOKEN_STARTED: i64 = 1791100000000;
 
 fn iso(ms: i64) -> String {
@@ -668,8 +780,8 @@ fn a_spoken_acknowledgment_stays_above_the_work_and_the_answer_while_live_holds_
     assert_eq!(order.first().map(String::as_str), Some("u-voice"));
     assert_eq!(order[1], "live:oc:ack");
     assert_eq!(order.last().map(String::as_str), Some("live-answer"));
-    // Activity hidden: the acknowledgment, then the answer.
-    let hidden = present(&view, &rows, &Options { hide_activity: true, ..options(&[], 0) });
+    // Hide when done: the acknowledgment, then the answer.
+    let hidden = present(&view, &rows, &Options { hide_settled: true, ..options(&[], 0) });
     assert_eq!(shown_order(&hidden, &rows), ["u-voice", "live:oc:ack", "live-answer"]);
 }
 
