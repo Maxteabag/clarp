@@ -502,6 +502,13 @@ the daily schedule.
 
 ## Rust-first features
 
+- **Stalled live turns (issue 249, Rust contract 149).** When a running tool
+  has produced no stdout or stderr for the configured duration and a fresh user
+  or Oracle message is waiting, the Rust Host exposes the stall and the existing
+  Stop action. Activity events show both transitions. The Python Host does
+  not project this state.
+
+
 The bounded client log (issue 707, contract 146) is available on the Rust Host.
 Its `POST /clog` acknowledges successful storage regardless of the diagnostics
 setting and adds `kept` and `full_capture`. The Python Host's diagnostic capture

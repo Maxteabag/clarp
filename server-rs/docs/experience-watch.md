@@ -28,6 +28,7 @@ release = "SESSION"
 [experience_watch.thresholds]
 wait_seconds = 60
 wait_count = 1
+stalled_turn_minutes = 10
 queue_stuck_seconds = 600
 crash_events = 10
 window_minutes = 15
@@ -71,3 +72,9 @@ A release finding requires a running job registered as `check` or `test`
 and a recognized check step in that job's live worker process tree. Builds,
 releases, installs and opaque remote commands are excluded. The detail
 shows the registered kind, active step and Host-local step start time.
+
+The Host marks a stalled turn after `stalled_turn_minutes` without tool
+output while a user or Oracle message waits. It reads this threshold at
+startup. Clients can offer Stop through the stall fields even when this
+watcher's notices are disabled. With notices on, the queue owner and
+front desk are told about stall findings by the watcher.

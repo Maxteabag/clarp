@@ -531,10 +531,23 @@ pub(crate) mod at_the_port {
         seeded_place(name, |_| {}, None).unwrap()
     }
 
+    pub(crate) fn place_with_shim(name: &str, shim: PathBuf) -> Place {
+        open_place(name, |_| {}, None, Some(shim)).unwrap()
+    }
+
     fn seeded_place(
         name: &str,
         seed: impl FnOnce(&mut dyn KeyValue),
         refuse: Option<String>,
+    ) -> Result<Place, String> {
+        open_place(name, seed, refuse, None)
+    }
+
+    fn open_place(
+        name: &str,
+        seed: impl FnOnce(&mut dyn KeyValue),
+        refuse: Option<String>,
+        shim: Option<PathBuf>,
     ) -> Result<Place, String> {
         let dir = std::env::temp_dir().join(format!("clarp-unkept-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -543,6 +556,7 @@ pub(crate) mod at_the_port {
         let mut config = Config::from_args(config.into_iter()).unwrap();
         config.whisper_python.clear();
         config.speech_keys = Some(dir.join("absent.toml"));
+        config.stalled_turn_ms = 600_000;
         let config = Arc::new(config);
         let clock = Arc::new(clarp_ports::clock::ManualClock::starting_at(
             1_795_000_000_000,
@@ -563,7 +577,10 @@ pub(crate) mod at_the_port {
             config: config.clone(),
             engine: Arc::new(MemEngine::new()),
             codecs: clarp_codec::standard_set("zstd").unwrap(),
-            launcher: Arc::new(Launcher::by_name("direct", dir.join("unused-shim")).unwrap()),
+            launcher: Arc::new(
+                Launcher::by_name("direct", shim.unwrap_or_else(|| dir.join("unused-shim")))
+                    .unwrap(),
+            ),
             clock: clock.clone(),
             hub: hub.clone(),
             revisions: Arc::default(),

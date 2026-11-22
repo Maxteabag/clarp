@@ -47,6 +47,7 @@ webpki-roots.workspace = true
 
 [dev-dependencies]
 clarp-sealed.workspace = true
+clarp-spool.workspace = true
 proc-macro2 = "1"
 syn = { version = "2", features = ["full", "visit"] }
 

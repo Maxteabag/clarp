@@ -111,7 +111,7 @@ impl Row {
 
         if self.agent_id.is_none() {
             self.agent_id = match self.kind.as_str() {
-                "wait" | "queue" | "sends" => Some(self.subject.clone()),
+                "wait" | "queue" | "sends" | "stall" => Some(self.subject.clone()),
                 "release" => directory
                     .members
                     .iter()

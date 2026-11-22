@@ -26,6 +26,20 @@ use serde_json::json;
 use crate::coordination::Made;
 use crate::edge::{self, ApiError, App};
 
+/// This setting also applies when periodic finding notices are disabled.
+pub(crate) fn stalled_after_ms(path: &std::path::Path) -> i64 {
+    crate::owner::OwnerFile::new(Some(path.to_owned()))
+        .read()
+        .as_ref()
+        .and_then(|table| table.get("experience_watch"))
+        .and_then(|section| section.get("thresholds"))
+        .and_then(|thresholds| thresholds.get("stalled_turn_minutes"))
+        .and_then(toml::Value::as_integer)
+        .filter(|minutes| *minutes > 0)
+        .unwrap_or(10)
+        .saturating_mul(60_000)
+}
+
 const SENDER: &str = "experience-watch";
 const MAX_EVENTS: usize = 32_768;
 const KEEP_MS: i64 = 24 * 60 * 60 * 1_000;

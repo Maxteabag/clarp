@@ -81,6 +81,7 @@ pub struct Config {
     pub logins_checked_every_ms: u64,
     /// How often an agent with running background jobs looks whether somebody still runs them.
     pub jobs_checked_every_ms: u64,
+    pub stalled_turn_ms: i64,
     /// How often the schedules are looked at for what is due.
     pub schedules_checked_every_ms: u64,
     /// How often the heartbeat looks which agent is due.
@@ -721,6 +722,9 @@ impl Config {
             skills_chosen_before,
             logins_checked_every_ms,
             jobs_checked_every_ms,
+            stalled_turn_ms: crate::experience_watch::stalled_after_ms(
+                &host_config_dir().join("config.toml"),
+            ),
             schedules_checked_every_ms,
             heartbeats_checked_every_ms,
             janitors_checked_every_ms,

@@ -273,6 +273,12 @@ pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64
         if view.broken.is_some() {
             seen.unavailable_kinds.insert("release");
         }
+        if let Some(since) = view.stalled_since {
+            seen.add("stall", id, format!(
+                "The running tool has gone silent with a user message queued. Stalled since {}. Use Stop to release the turn.",
+                super::clock(since, &jiff::tz::TimeZone::system()),
+            ));
+        }
         for job in &view.jobs {
             release::collect(&mut seen, settings, job, now);
         }
@@ -574,6 +580,175 @@ mod tests {
             assert_eq!(live.reads.len(), usize::from(counts), "{id} live journal");
             assert_eq!(live.reads, replayed.reads, "{id} after replay");
         }
+    }
+
+    #[tokio::test]
+    async fn a_silent_tool_with_queued_user_words_marks_and_clears_the_live_stall() {
+        use axum::extract::ConnectInfo;
+        use clarp_kernel::conversation::Message;
+        use clarp_ports::clock::{Clock, SystemClock};
+        use clarp_protocol::requests::CreateAgentRequest;
+        use clarp_spool::{Entry, ShimEvent, SpoolReader};
+
+        let shim = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("clarp-shim");
+        let place = crate::unkept::at_the_port::place_with_shim("stalled-turn", shim);
+        let mut app = place.app().await;
+        std::sync::Arc::make_mut(&mut app.config).auth_token.clear();
+        place
+            .clock
+            .advance_ms(SystemClock.now_ms() - app.clock.now_ms());
+        let worker = app
+            .fleet
+            .create(CreateAgentRequest {
+                name: "Silent Worker".into(),
+                backend: Some("scripted".into()),
+                ..CreateAgentRequest::default()
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let handle = app
+            .fleet
+            .directory()
+            .by_id(&worker.agent_id)
+            .unwrap()
+            .agent
+            .clone();
+        let (_, mut events) = app.hub.subscribe(None);
+        handle
+            .send(
+                Message {
+                    id: "u-blocking".into(),
+                    text: "sleep 4".into(),
+                    ..Message::default()
+                },
+                Admission::Queue,
+            )
+            .await
+            .unwrap();
+
+        let spool = app
+            .config
+            .data_dir
+            .join("agents")
+            .join(&worker.agent_id)
+            .join("spool/1.jsonl");
+        let started_at = tokio::time::timeout(Duration::from_secs(2), async {
+            let reader = SpoolReader::new(&spool);
+            loop {
+                let running = handle
+                    .view()
+                    .status
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| !live.starting);
+                if running
+                    && let Ok(window) = reader.read_window(0, u64::MAX, 4096)
+                    && let Some(first) = window.records.iter().find(|record| {
+                        matches!(record.entry, Entry::Shim(ShimEvent::Spawned { .. }))
+                    })
+                {
+                    break first.t;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let due = started_at + app.config.stalled_turn_ms;
+        place.clock.advance_ms(due - 120 - app.clock.now_ms());
+        handle
+            .send(
+                Message {
+                    id: "u-followup".into(),
+                    text: "Please come back".into(),
+                    origin: Origin::Trigger {
+                        name: "oracle".into(),
+                    },
+                    ..Message::default()
+                },
+                Admission::Later,
+            )
+            .await
+            .unwrap();
+        assert!(handle.view().stalled_since.is_none());
+        place.clock.advance_ms(120);
+
+        let entered = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event: Value =
+                    serde_json::from_str(&events.recv().await.unwrap().json).unwrap();
+                if event["type"] == "agent-activity" && event["stalled_since"] == due {
+                    break event;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(entered["stalled_action"], "stop");
+        let request = Request::builder()
+            .uri("/agents/snapshot")
+            .extension(ConnectInfo(
+                "127.0.0.1:24000".parse::<std::net::SocketAddr>().unwrap(),
+            ))
+            .body(Body::empty())
+            .unwrap();
+        let response = crate::edge::router(app.clone())
+            .oneshot(request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let snapshot: Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 512 * 1024)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let row = snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["agent_id"] == worker.agent_id)
+            .unwrap();
+        for shown in [row, &row["activity"], &row["live_activity"]] {
+            assert_eq!(shown["stalled_since"], due);
+            assert_eq!(shown["stalled_action"], "stop");
+        }
+        let settings = Settings::from_section(Some(
+            &toml::from_str("front_desk = 'desk'\n[owners]\nqueue = 'queue-owner'\n").unwrap(),
+        ));
+        let seen = collect(&app, &settings, started_at, due).await;
+        assert!(
+            seen.found
+                .contains_key(&("stall".into(), worker.agent_id.clone()))
+        );
+        assert_eq!(settings.recipients("stall"), ["queue-owner", "desk"]);
+
+        let cleared = tokio::time::timeout(Duration::from_secs(7), async {
+            loop {
+                let event: Value =
+                    serde_json::from_str(&events.recv().await.unwrap().json).unwrap();
+                if event["type"] == "agent-activity"
+                    && event["agent_id"] == worker.agent_id
+                    && event.get("stalled_since") == Some(&Value::Null)
+                {
+                    break event;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(cleared["stalled_action"].is_null());
+        assert!(handle.view().stalled_since.is_none());
+        let seen = collect(&app, &settings, started_at, due).await;
+        assert!(!seen.found.contains_key(&("stall".into(), worker.agent_id)));
     }
 
     #[tokio::test]

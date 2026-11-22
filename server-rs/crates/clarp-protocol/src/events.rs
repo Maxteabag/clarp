@@ -153,6 +153,10 @@ pub struct AgentActivity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stalled_since: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stalled_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released_trace: Option<String>,
 }
 

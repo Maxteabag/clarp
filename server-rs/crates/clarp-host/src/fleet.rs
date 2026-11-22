@@ -1788,6 +1788,7 @@ fn setup(
         hub: works.hub.clone(),
         revisions: works.revisions.clone(),
         jobs_checked_every: std::time::Duration::from_millis(works.config.jobs_checked_every_ms),
+        stalled_turn_ms: works.config.stalled_turn_ms,
         pusher: works.pusher.clone(),
         blobs: works.blobs.clone(),
         speaks: works.speaks.clone(),

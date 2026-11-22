@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 146;
+pub const HOST_CONTRACT: u64 = 149;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -129,6 +129,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("provider_background_tasks", 24),
     ("diagnostics", 1),
     ("client_events_kept", 146),
+    ("stalled_turn", 149),
     // Pairing codes and devices with tokens of their own.
     ("pairing", 1),
     // Calls: the Host's record of who is in a phone's call, on hold and on the floor
@@ -1460,6 +1461,11 @@ pub(crate) fn agent_row(
         view.ended.as_ref(),
         focused,
     );
+    wire::mark_stall(&mut row, view.stalled_since);
+    wire::mark_stall(&mut row["activity"], view.stalled_since);
+    if row["live_activity"].is_object() {
+        wire::mark_stall(&mut row["live_activity"], view.stalled_since);
+    }
     row["moved"] = json!(view.status.moved);
     row["goal"] = json!(
         view.native_goal

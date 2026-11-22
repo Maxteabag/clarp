@@ -103,7 +103,7 @@ impl Settings {
     pub(super) fn recipients(&self, kind: &str) -> Vec<String> {
         let family = if kind.starts_with("app_crash_") {
             "app_crash"
-        } else if matches!(kind, "wait" | "sends") {
+        } else if matches!(kind, "wait" | "sends" | "stall") {
             "queue"
         } else {
             ""

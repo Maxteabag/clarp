@@ -597,6 +597,14 @@ struct Written {
 }
 
 /// The turn that holds the agent, as the actor follows it.
+fn note_output(latest: &mut Option<i64>, record: &Record) {
+    if matches!(&record.entry, Line::Out(text) | Line::Err(text) if !text.is_empty())
+        || matches!(&record.entry, Line::Shim(ShimEvent::Spawned { .. }))
+    {
+        *latest = Some(latest.map_or(record.t, |at| at.max(record.t)));
+    }
+}
+
 struct LiveTurn {
     steering: steering::State,
     opening: bool,
@@ -648,6 +656,8 @@ struct LiveTurn {
     interpreter: Box<dyn Interpreter>,
     /// How far the turn's spool has been read. Never behind the position in the log.
     offset: u64,
+    /// The latest tool stdout/stderr, or the shim's confirmation that it started.
+    last_output_ms: Option<i64>,
     /// The replies being written, oldest first.
     drafts: Vec<Draft>,
     /// The tool calls that run, oldest first.
@@ -1553,6 +1563,7 @@ impl Actor {
                 cost: None,
                 cost_before: actor.cost_before(turn)?,
                 offset: 0,
+                last_output_ms: None,
                 drafts: Vec::new(),
                 tools: Vec::new(),
                 calls: Vec::new(),
@@ -4187,6 +4198,23 @@ impl Actor {
         Ok(out)
     }
 
+    /// The silence of the running tool itself. An unlaunched, stopping or parked
+    /// turn has no live tool on which to offer this remedy.
+    pub fn running_silence_since(&self) -> Option<i64> {
+        let Turn::Running(running) = self.recorder.agent().live()? else {
+            return None;
+        };
+        let live = self
+            .live
+            .as_ref()
+            .filter(|live| live.turn == running.id && !live.over)?;
+        self.recorder
+            .agent()
+            .stopping()
+            .is_none()
+            .then(|| live.last_output_ms.unwrap_or(running.started_at_ms))
+    }
+
     /// The live turn's spool may have grown.
     pub fn spool_changed(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
         let mut out = Outputs::default();
@@ -4503,6 +4531,7 @@ impl Actor {
             cost_before,
             interpreter,
             offset: 0,
+            last_output_ms: None,
             drafts: Vec::new(),
             tools: Vec::new(),
             calls: Vec::new(),
@@ -4637,6 +4666,7 @@ impl Actor {
         let mut steering = steering::State::for_prompt(uuid);
         steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
         let mut offset = 0;
+        let mut last_output_ms = None;
         // Those who watch are shown the turn as it stands: its items are made again from the
         // same records, with the times the records have. What that sends is for nobody: no
         // client of this run of the Host has seen any of it.
@@ -4665,6 +4695,7 @@ impl Actor {
                 if after_stop(record, stopped_at) {
                     continue;
                 }
+                note_output(&mut last_output_ms, record);
                 let evidence = steering.record(&record.entry);
                 interpreter.on_record(record, &mut signals);
                 for signal in signals.drain(..) {
@@ -4778,6 +4809,7 @@ impl Actor {
             cost_before: self.cost_before(turn)?,
             interpreter,
             offset,
+            last_output_ms,
             drafts,
             tools,
             calls,
@@ -5139,6 +5171,7 @@ impl Actor {
                 if after_stop(record, batch.agent().stopping_since_ms()) {
                     continue;
                 }
+                note_output(&mut live.last_output_ms, record);
                 let input_skipped = live.steering.input_skipped;
                 let evidence = live.steering.record(&record.entry);
                 if !input_skipped && live.steering.input_skipped {

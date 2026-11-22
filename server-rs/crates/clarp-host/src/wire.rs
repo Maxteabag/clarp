@@ -503,6 +503,12 @@ pub fn stopped(record: &AgentRecord, status: &Status, ended: Option<&TurnEnd>) -
     }))
 }
 
+/// The same state is sent in snapshots and activity transitions, including a clear.
+pub(crate) fn mark_stall(object: &mut Value, since: Option<i64>) {
+    object["stalled_since"] = json!(since);
+    object["stalled_action"] = json!(since.map(|_| "stop"));
+}
+
 /// What an agent is doing, as a line a client can show. The same object is the snapshot's
 /// `activity` and, with its number, the `agent-activity` event.
 pub fn activity(record: &AgentRecord, status: &Status) -> Value {

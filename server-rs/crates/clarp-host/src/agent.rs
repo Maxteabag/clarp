@@ -539,6 +539,7 @@ pub struct View {
     pub(crate) native_goal: Option<clarp_kernel::agent_goal::Goal>,
     pub latest_turn_start: i64,
     pub(crate) latest_turn_activity: Option<i64>,
+    pub(crate) stalled_since: Option<i64>,
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
     pub newest: Option<Versioned>,
@@ -591,6 +592,7 @@ pub struct Setup {
     pub revisions: Arc<Revisions>,
     /// How often an agent that has running jobs looks whether somebody still runs them.
     pub jobs_checked_every: Duration,
+    pub stalled_turn_ms: i64,
     /// The way to the phones that are not listening.
     pub pusher: Pusher,
     /// Where the pages of the agent's reports are kept.
@@ -1402,6 +1404,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         native_goal: None,
         latest_turn_start: 0,
         latest_turn_activity: None,
+        stalled_since: None,
         status: idle,
         newest: None,
         visible_previews: Default::default(),
@@ -1458,6 +1461,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         speech: Arc::default(),
         artifacts_told: BTreeMap::new(),
         clock_seen: (Instant::now(), now_ms),
+        stall: Stall::default(),
     };
     let name = format!("agent-{}", worker.setup.record.session);
     let spawned = std::thread::Builder::new()
@@ -1546,6 +1550,15 @@ struct Worker {
     artifacts_told: BTreeMap<String, ToldArtifact>,
     /// The two clocks as they were read together last: what tells a sleep of the machine.
     clock_seen: (Instant, i64),
+    stall: Stall,
+}
+
+#[derive(Default)]
+struct Stall {
+    queue_revision: Option<u64>,
+    oldest_user: Option<i64>,
+    due: Option<i64>,
+    since: Option<i64>,
 }
 
 /// The id of the message a goal's owner is woken with, from the wake's own id: it is a
@@ -1783,6 +1796,10 @@ impl Worker {
                     Instant::now() + Duration::from_millis(wait)
                 });
             let helper_due = self.helper_due();
+            let stall_due = self.stall.due.and_then(|due| {
+                let wait = u64::try_from(due.saturating_sub(self.now_ms())).unwrap_or(0);
+                Instant::now().checked_add(Duration::from_millis(wait))
+            });
             let due = [
                 helper_due,
                 self.transcript_due,
@@ -1791,6 +1808,7 @@ impl Worker {
                 requests_due,
                 retry_due,
                 shown_due,
+                stall_due,
             ]
             .into_iter()
             .flatten()
@@ -1824,6 +1842,9 @@ impl Worker {
                     }
                     if looked.is_ok() && retry_due.is_some_and(|due| due <= now) {
                         looked = self.retry_turn();
+                    }
+                    if looked.is_ok() && stall_due.is_some_and(|due| due <= now) {
+                        looked = self.check_stall();
                     }
                     if let Err(error) = looked {
                         eprintln!(
@@ -2177,6 +2198,7 @@ impl Worker {
         }
         self.native.record = actor.native_goal().map_err(|error| error.to_string())?;
         self.actor = Some(actor);
+        self.stall = Stall::default();
         if let (Some(pool), Some(actor)) = (self.setup.pool(), self.actor.as_mut()) {
             actor.pooled(pool.of(&self.setup.record.agent_id));
             // A turn that waited for an account when the Host last stopped waits on, in
@@ -4211,6 +4233,47 @@ impl Worker {
         finished.map(Arc::new)
     }
 
+    fn check_stall(&mut self) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        if let Some(actor) = self.actor.as_mut() {
+            // A receipt may be waiting in the mailbox while output is already on disk.
+            let out = actor.spool_changed(now)?;
+            self.after(out);
+        }
+        Ok(())
+    }
+
+    fn refresh_stall(&mut self) -> bool {
+        let now = self.now_ms();
+        let Some(actor) = &self.actor else {
+            return false;
+        };
+        let at = actor.running_silence_since().and_then(|quiet| {
+            let queue = actor.queue_state();
+            if self.stall.queue_revision != Some(queue.revision) {
+                let waiting = actor.queue().ok()?;
+                self.stall.oldest_user = waiting
+                    .iter()
+                    .filter(|row| {
+                        row.status != clarp_actor::QueueItemStatus::Started
+                            && clarp_kernel::experience::is_user_wait(
+                                &row.origin,
+                                &row.client_id,
+                                row.sender_agent_id.is_some(),
+                            )
+                    })
+                    .map(|row| row.accepted_at_ms)
+                    .min();
+                self.stall.queue_revision = Some(queue.revision);
+            }
+            let oldest = self.stall.oldest_user?;
+            Some(quiet.saturating_add(self.setup.stalled_turn_ms).max(oldest))
+        });
+        self.stall.due = at.filter(|at| *at > now);
+        let since = at.filter(|at| *at <= now);
+        std::mem::replace(&mut self.stall.since, since) != since
+    }
+
     fn publish_view(&self) {
         let Some(actor) = &self.actor else {
             return;
@@ -4260,6 +4323,7 @@ impl Worker {
             native_goal: self.native.goal(),
             latest_turn_start: actor.latest_turn_start(),
             latest_turn_activity: actor.latest_turn_activity(),
+            stalled_since: self.stall.since,
             status,
             newest: self.listed_preview.clone(),
             newest_is_form_answer: self
@@ -4310,8 +4374,17 @@ impl Worker {
         let by_hand = std::mem::take(&mut self.let_go_by_hand);
         let queue_edit = self.queue_edit.take();
         let passed = std::mem::take(&mut self.passed);
-        if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
+        let stall_changed = self.refresh_stall();
+        if !(changed.conversation
+            || changed.status
+            || changed.queue
+            || changed.jobs
+            || stall_changed)
+        {
             return;
+        }
+        if stall_changed {
+            self.publish_view();
         }
         let tell_read = changed.conversation && !joined_reads.is_empty();
         if changed.conversation {
@@ -4574,12 +4647,12 @@ impl Worker {
             let of = stood.live.as_ref().map(|live| live.turn);
             let in_order = of.is_some() && (live_now.is_none() || live_now == of);
             if in_order && last_told != Some(told_state(stood)) {
-                tell_work(&hub, actor, &record, stood, backend, None, now);
+                tell_work(&hub, actor, &record, stood, backend, (None, None), now);
                 last_told = Some(told_state(stood));
             }
         }
         // What the agent is doing changed: its state, and the line that describes it.
-        if last_told != Some(told_state(&status)) {
+        if last_told != Some(told_state(&status)) || stall_changed {
             if turn_ended {
                 // The agent as it stood when the turn had ended and the next had not begun.
                 let rested = Status {
@@ -4605,7 +4678,7 @@ impl Worker {
                 &record,
                 &status,
                 backend,
-                self.ended.as_ref(),
+                (self.ended.as_ref(), self.stall.since),
                 now,
             );
         }
@@ -4704,6 +4777,7 @@ impl Worker {
     fn show_broken(&self, why: &str) {
         let mut view = (**self.view.borrow()).clone();
         view.broken = Some(why.to_string());
+        view.stalled_since = None;
         self.view.send_replace(Arc::new(view));
     }
 }
@@ -4812,11 +4886,12 @@ fn tell_work(
     record: &AgentRecord,
     status: &Status,
     backend: &str,
-    ended: Option<&TurnEnd>,
+    (ended, stalled_since): (Option<&TurnEnd>, Option<i64>),
     now: i64,
 ) {
     let mut state = wire::state(record, status, backend, ended);
     let mut activity = wire::activity(record, status);
+    wire::mark_stall(&mut activity, stalled_since);
     if let Some(live) = &status.live
         && matches!(
             state["kind"].as_str(),
@@ -5013,6 +5088,7 @@ mod mailbox_tests {
             native_goal: None,
             latest_turn_start: 0,
             latest_turn_activity: None,
+            stalled_since: None,
             status: never_ran(),
             newest: None,
             visible_previews: Default::default(),

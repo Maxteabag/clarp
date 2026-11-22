@@ -58,6 +58,10 @@ pub struct AgentSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub busy: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stalled_since: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stalled_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focused: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_state: Option<String>,

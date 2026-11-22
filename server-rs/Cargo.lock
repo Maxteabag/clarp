@@ -209,6 +209,7 @@ dependencies = [
  "clarp-sealed",
  "clarp-shim",
  "clarp-speech",
+ "clarp-spool",
  "clarp-store-files",
  "clarp-store-mem",
  "clarp-store-sqlite",
