@@ -382,6 +382,74 @@ fn shown(value: &Value) -> ToolAnswer {
     }
 }
 
+const RESUME_USAGE: &str = "usage: clarp-admin resume [-h] --session SESSION [--from FROM_SESSION]";
+const STOP_RESUME: &str =
+    "Use clarp-admin resume --session SESSION [--from FROM_SESSION] to resume the queue.";
+
+pub(crate) fn stop_resume_help(args: &[String]) -> Option<ToolAnswer> {
+    let (command, args) = args.split_first()?;
+    if !matches!(command.as_str(), "stop" | "resume") {
+        return None;
+    }
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--" => break,
+            "--session" | "--from" | "--reason" => {
+                args.next();
+            }
+            "-h" | "--help" if command == "resume" => {
+                return Some(ToolAnswer::printed(0, RESUME_USAGE));
+            }
+            "-h" | "--help" => {
+                return Some(ToolAnswer::printed(
+                    0,
+                    format!(
+                        "usage: clarp-admin stop [-h] --session SESSION --reason REASON [--from FROM_SESSION]\n{STOP_RESUME}"
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+async fn resume(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let usage = |why| {
+        ToolAnswer::said(
+            2,
+            format!("{RESUME_USAGE}\nclarp-admin resume: error: {why}"),
+        )
+    };
+    let parsed = match parse(args, &["--session", "--from"], &[], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(why),
+    };
+    let Some(session) = parsed.option("--session") else {
+        return usage("the following arguments are required: --session".to_string());
+    };
+    let claimed = parsed
+        .option("--from")
+        .filter(|from| !from.is_empty())
+        .map_or(Value::Null, |from| json!(format!("agent:{from}")));
+    let token = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(String::as_str);
+    let by = match crate::controls::control_of(app, false, token, Some(&claimed), None).await {
+        Ok(by) => by,
+        Err(why) => return ToolAnswer::said(1, why.message()),
+    };
+    let asked = json!({"id": session, "kind": "clarp", "action": "unpause"});
+    let (status, answer) = crate::seats::resume_as(app, &asked, &by.actor).await;
+    if status == 200 {
+        ToolAnswer::printed(0, python_indented(&answer))
+    } else {
+        refused_by_host(status, &answer)
+    }
+}
+
 /// `clarp-admin stop` and `clarp-admin repair` (`--session --reason [--from]`): an agent stops
 /// another's turn, or gives back a turn of another that nothing runs, saying who acts (`--from`,
 /// recorded as `agent:<it>`; the user where it is not given) and why. Asked with the token of the
@@ -2270,6 +2338,7 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
         Some((command, rest)) if command == "trigger" => trigger(app, rest).await,
         Some((command, rest)) if command == "location" => location(app, rest).await,
         Some((command, rest)) if command == "calendar" => calendar(app, rest),
+        Some((command, rest)) if command == "resume" => resume(app, call, rest).await,
         Some((command, rest)) if command == "stop" || command == "repair" => {
             control(app, call, command, rest).await
         }
