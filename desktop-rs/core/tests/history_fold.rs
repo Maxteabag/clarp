@@ -402,4 +402,3 @@ fn retained_final_stays_between_prompts_sent_during_and_after_its_reply() {
         assert_eq!(rows[2].id, "u-after");
     }
 }
-
