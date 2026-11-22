@@ -26,6 +26,7 @@ pub mod limits;
 pub mod opencode;
 pub mod past;
 pub mod scripted;
+pub mod transit;
 
 /// R111: this provider process belongs to a managed Rust Claude turn.
 pub use clarp_child::MANAGED_CLAUDE_ENV;
