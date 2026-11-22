@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# The one final pass before the Rust Host is installed (issue 704; Peter's rule of 22 Nov 2026: "skip long checks in
+# iOS and all other things"). A fixed list of focused tests of what Peter touches, each run once, under one hard time
+# budget. The list is here and nowhere else, so nothing an agent adds can extend the pass.
+#
+# A failing check blocks the install. A pass that runs over its budget blocks it too, and names the check that ran
+# over, to be moved to the post-release job. The release build and the install are outside the budget: they are the
+# build, not checks. The conformance run, the planted rules, the whole Rust suite and the Python Host's critical tests
+# and guards run after the release, as a job someone starts by hand that the install never waits for; what they find
+# ships as a follow-up.
+#
+#   server-rs/tools/final-pass
+#
+# Runs on the checkout's HEAD through server-rs/tools/build (its environment settings apply). Exit 0: every check
+# passed within the budget. Exit 1: a check failed. Exit 2: the pass ran over its budget.
+set -u
+here="$(cd "$(dirname "$0")/.." && pwd)"
+checks=(stop paused delivery snapshot render_spec pair)
+budget_seconds=600
+
+start=$(date +%s)
+deadline=$((start + budget_seconds))
+echo "final pass on $(git -C "$here" rev-parse HEAD) from $(date +%H:%M:%S): ${checks[*]}; budget ${budget_seconds} s"
+for check in "${checks[@]}"; do
+    left=$((deadline - $(date +%s)))
+    if [ "$left" -le 0 ]; then
+        echo "over budget before '$check': move a check to the post-release job; the install is blocked"
+        exit 2
+    fi
+    began=$(date +%s)
+    timeout --kill-after=30 "$left" "$here/tools/build" test "$check"
+    code=$?
+    took=$(($(date +%s) - began))
+    echo "check=$check exit=$code seconds=$took"
+    if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+        echo "over budget in '$check' after ${took} s: move it to the post-release job; the install is blocked"
+        exit 2
+    fi
+    if [ "$code" != 0 ]; then
+        echo "'$check' failed: the install is blocked"
+        exit 1
+    fi
+done
+echo "final pass green in $(($(date +%s) - start)) s"
