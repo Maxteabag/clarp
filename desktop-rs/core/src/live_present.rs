@@ -362,18 +362,22 @@ fn counted(turn: &Object, shown: &[&Object]) -> Object {
     summary
 }
 
-/// The work row's title (#653): "Worked for 11s · 3 tools", "3 tools"
-/// when the turn has no worked time, "Working · 2 tools" while it runs.
-pub fn work_title(running: bool, worked_ms: Option<i64>, tools: usize) -> String {
-    let count = (tools > 0).then(|| plural(tools, "tool", "tools"));
-    match (running, worked_ms, count) {
+/// The work row's title (#653, Arnie's ruling for every client): the count
+/// is the calls the row folds (failed or killed ones keep their own rows
+/// and are not counted), the time the /log summary's worked_ms.
+/// "Worked for 11s · 3 tools", "Worked for 11s" with no folded call,
+/// "3 tools" without a worked time, "Working · 2 tools" while it runs.
+/// None: neither a worked time nor a folded call, so no work row.
+pub fn work_title(running: bool, worked_ms: Option<i64>, calls: usize) -> Option<String> {
+    let count = (calls > 0).then(|| plural(calls, "tool", "tools"));
+    Some(match (running, worked_ms, count) {
         (true, _, Some(count)) => format!("Working · {count}"),
         (true, _, None) => "Working".to_owned(),
         (false, Some(ms), Some(count)) => format!("Worked for {} · {count}", worked(ms)),
         (false, Some(ms), None) => format!("Worked for {}", worked(ms)),
         (false, None, Some(count)) => count,
-        (false, None, None) => "Worked".to_owned(),
-    }
+        (false, None, None) => return None,
+    })
 }
 
 /// A turn's item rows: one entry per item (an entry in `rows_of` stands
@@ -423,17 +427,23 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
             entry.kind == Kind::Message || matches!(entry.status.as_str(), "failed" | "interrupted") || (settled && matches!(entry.status.as_str(), "running" | "pending"))
         };
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
-        if let Some(&first) = folded.first() {
+        // The calls the row opens to: a tool, each member of an explore group.
+        let calls: usize = folded
+            .iter()
+            .map(|i| match entries[*i].kind {
+                Kind::Tool => 1,
+                Kind::Explore => entries[*i].items.len(),
+                _ => 0,
+            })
+            .sum();
+        let worked_ms = if settled { int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?)) } else { None };
+        // Where the work begins: the first folded row; a settled turn whose
+        // every call failed still says how long it worked, above them.
+        let first = folded.first().copied().or_else(|| if settled && worked_ms.is_some() { entries.iter().position(|e| e.kind != Kind::Message) } else { None });
+        let title = work_title(!settled, worked_ms, calls);
+        if let (Some(first), Some(title)) = (first, title) {
             let key = format!("live:fold:{turn_id}");
-            let open = options.expanded.contains(&key) && !(settled && options.hide_settled);
-            let title = if settled {
-                let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?));
-                work_title(false, worked_ms, int(turn, "tool_count").unwrap_or(0).max(0) as usize)
-            } else {
-                // The count so far: the turn's tool items, explore members each.
-                let tools = shown.iter().filter(|i| text(i, "kind") == "tool").count();
-                work_title(true, None, tools)
-            };
+            let open = !folded.is_empty() && options.expanded.contains(&key) && !(settled && options.hide_settled);
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
                 rev: folded.iter().map(|i| entries[*i].rev).sum(),
@@ -442,7 +452,7 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
                 kind: Kind::Fold,
                 status: if settled { text(turn, "status").to_owned() } else { "running".to_owned() },
                 title,
-                expandable: true,
+                expandable: !folded.is_empty(),
                 expanded: open,
                 ..Entry::default()
             };

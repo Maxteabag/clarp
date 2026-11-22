@@ -101,7 +101,7 @@ fn a_running_turn_folds_into_one_working_row_when_grouped() {
 
     let kinds: Vec<Kind> = presented.entries.iter().map(|e| e.kind).collect();
     assert_eq!(kinds, [Kind::Fold, Kind::Message, Kind::Tool], "{:?}", titles(&presented));
-    assert_eq!(presented.entries[0].title, "Working · 3 tools", "every tool so far, the failed one too");
+    assert_eq!(presented.entries[0].title, "Working · 2 tools", "the calls it folds so far: the explore group's two; the failed command keeps its row");
     assert_eq!(presented.entries[0].status, "running");
     assert_eq!(presented.entries[1].text, "Let me look at the parser and its tests.");
     assert_eq!(presented.entries[2].status, "failed", "a failed tool stays in view");
@@ -122,7 +122,7 @@ fn hide_when_done_shows_the_work_row_only_while_the_turn_runs() {
     opts.fold_running = true;
     opts.hide_settled = true;
     let running = present(&turn_full(after(17)), &[], &opts);
-    assert_eq!(running.entries[0].title, "Working · 3 tools");
+    assert_eq!(running.entries[0].title, "Working · 2 tools");
     let settled = present(&turn_full(after(23)), &[], &opts);
     assert!(settled.entries.iter().all(|e| e.kind != Kind::Fold), "{:?}", titles(&settled));
     assert_eq!(titles(&settled), ["", "Ran npm test", "", "Stopped npm test"]);
@@ -130,12 +130,15 @@ fn hide_when_done_shows_the_work_row_only_while_the_turn_runs() {
 
 #[test]
 fn the_work_row_says_worked_time_and_tools_in_the_spec_s_words() {
-    assert_eq!(work_title(false, Some(11_000), 3), "Worked for 11s · 3 tools");
-    assert_eq!(work_title(false, None, 3), "3 tools");
-    assert_eq!(work_title(false, None, 1), "1 tool");
-    assert_eq!(work_title(false, Some(11_000), 1), "Worked for 11s · 1 tool");
-    assert_eq!(work_title(true, None, 2), "Working · 2 tools");
-    assert_eq!(work_title(true, None, 1), "Working · 1 tool");
+    let title = |running, worked, calls| work_title(running, worked, calls);
+    assert_eq!(title(false, Some(11_000), 3).as_deref(), Some("Worked for 11s · 3 tools"));
+    assert_eq!(title(false, None, 3).as_deref(), Some("3 tools"));
+    assert_eq!(title(false, None, 1).as_deref(), Some("1 tool"));
+    assert_eq!(title(false, Some(11_000), 1).as_deref(), Some("Worked for 11s · 1 tool"));
+    assert_eq!(title(false, Some(11_000), 0).as_deref(), Some("Worked for 11s"), "no folded call: the time alone");
+    assert_eq!(title(false, None, 0), None, "neither a time nor a folded call: no work row");
+    assert_eq!(title(true, None, 2).as_deref(), Some("Working · 2 tools"));
+    assert_eq!(title(true, None, 1).as_deref(), Some("Working · 1 tool"));
 }
 
 #[test]
@@ -186,7 +189,7 @@ fn without_explanations_the_second_line_is_the_command() {
 fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     let view = turn_full(after(23));
     let p = present(&view, &[], &options(&[], 1759480012000));
-    assert_eq!(titles(&p), ["5 tools", "", "Ran npm test", "", "Stopped npm test"], "no /log summary yet: no worked time from /live");
+    assert_eq!(titles(&p), ["3 tools", "", "Ran npm test", "", "Stopped npm test"], "no /log summary yet: no worked time from /live");
     assert_eq!(p.entries[0].kind, Kind::Fold);
     assert_eq!(p.entries[0].key, "live:fold:tr-1");
     assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
@@ -235,7 +238,7 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
     // The row carries both messages: it shows once, where the first is.
-    assert_eq!(titles(&p), ["5 tools", "", "Ran npm test", "Stopped npm test"]);
+    assert_eq!(titles(&p), ["3 tools", "", "Ran npm test", "Stopped npm test"]);
     assert_eq!(p.entries[1].row, "live-abc", "the row shows where its first message was");
     assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
@@ -297,7 +300,7 @@ const REAL_ANSWER_ROW: &str = "live-783d39d132789c798a9a";
 fn the_real_hosts_settled_turn_folds_after_its_rows_take_over() {
     let (view, rows) = real_turn();
     let p = present(&view, &rows, &options(&[], 0));
-    assert_eq!(titles(&p), ["Worked for 16s · 2 tools", "Ran sleep 60", ""]);
+    assert_eq!(titles(&p), ["Worked for 16s · 1 tool", "Ran sleep 60", ""]);
     let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
     assert_eq!(kinds, [Kind::Fold, Kind::Tool, Kind::Message]);
     let fold = &p.entries[0];
@@ -322,7 +325,7 @@ fn the_real_hosts_settled_turn_folds_after_its_rows_take_over() {
     assert_eq!(
         titles(&open),
         [
-            "Worked for 16s · 2 tools",
+            "Worked for 16s · 1 tool",
             "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th",
             "Ran sleep 60",
             "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa",
