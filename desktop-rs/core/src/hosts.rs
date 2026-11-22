@@ -1,7 +1,7 @@
 //! The Hosts this desktop has connected to, so one can switch between them.
 //! Kept in settings under `connection/hosts`, most recently used first, as
-//! `[{"url": …, "name": …}]`. Device tokens stay in the keyring (per Host
-//! URL); none is ever written here.
+//! `[{"url": …, "name": …, "server_id": …}]`. Device tokens stay in the
+//! keyring (per Host URL); none is ever written here.
 
 use serde_json::{Value, json};
 
@@ -16,6 +16,8 @@ pub struct SavedHost {
     pub url: String,
     /// The Host's own name from `/server-info`; empty until it answered.
     pub name: String,
+    /// The Host's `server_id` from `/server-info`; empty until it answered.
+    pub server_id: String,
 }
 
 impl SavedHost {
@@ -43,14 +45,20 @@ pub fn list(settings: &Settings) -> Vec<SavedHost> {
         if hosts.iter().any(|h| h.url == url) {
             continue;
         }
-        let name = item.get("name").and_then(Value::as_str).unwrap_or("").trim().to_owned();
-        hosts.push(SavedHost { url, name });
+        let text = |key: &str| item.get(key).and_then(Value::as_str).unwrap_or("").trim().to_owned();
+        hosts.push(SavedHost { url, name: text("name"), server_id: text("server_id") });
     }
     hosts
 }
 
 fn store(settings: &mut Settings, hosts: &[SavedHost]) {
-    let rows: Vec<Value> = hosts.iter().map(|h| json!({"url": h.url, "name": h.name})).collect();
+    let rows: Vec<Value> = hosts
+        .iter()
+        .map(|h| match h.server_id.as_str() {
+            "" => json!({"url": h.url, "name": h.name}),
+            id => json!({"url": h.url, "name": h.name, "server_id": id}),
+        })
+        .collect();
     settings.set(KEY, Value::Array(rows));
 }
 
@@ -64,15 +72,35 @@ pub fn remember(settings: &mut Settings, url: &str, name: &str) {
     let before = list(settings);
     let mut rest = before.clone();
     let old = rest.iter().position(|h| h.url == url).map(|i| rest.remove(i));
+    let server_id = old.as_ref().map(|h| h.server_id.clone()).unwrap_or_default();
     let name = match name.trim() {
         "" => old.map(|h| h.name).unwrap_or_default(),
         name => name.to_owned(),
     };
-    let mut next = vec![SavedHost { url, name }];
+    let mut next = vec![SavedHost { url, name, server_id }];
     next.extend(rest);
     next.truncate(MAX);
     if next != before {
         store(settings, &next);
+    }
+}
+
+/// A saved Host's name and `server_id` as it answered, in its place (the
+/// order is the user's switching, which reading it does not change). An
+/// empty value keeps the saved one; a Host not in the list is not added.
+pub fn set_identity(settings: &mut Settings, url: &str, name: &str, server_id: &str) {
+    let url = normalized_base_url(url);
+    let mut hosts = list(settings);
+    let Some(host) = hosts.iter_mut().find(|h| h.url == url) else { return };
+    let before = host.clone();
+    if !name.trim().is_empty() {
+        host.name = name.trim().to_owned();
+    }
+    if !server_id.trim().is_empty() {
+        host.server_id = server_id.trim().to_owned();
+    }
+    if *host != before {
+        store(settings, &hosts);
     }
 }
 

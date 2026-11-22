@@ -6,7 +6,18 @@
   import CellRow from './live/CellRow.svelte';
   import TurnNotice from './live/TurnNotice.svelte';
 
-  let { turn } = $props();
+  // `strip`: the tool calls, cells and commentary the turn's work row took
+  // (static/lib/history-fold.js).
+  let { turn: row, strip = null } = $props();
+  let turn = $derived(strip ? {
+    ...row,
+    text: strip.text ? '' : row.text,
+    tools: (row.tools || []).filter(t => !strip.tools.includes(t)),
+    display_cells: (row.display_cells || []).filter(c => !strip.cells.includes(c)),
+  } : row);
+  // A row whose only content went into the work row shows nothing.
+  let empty = $derived(!!strip && !String(turn.text || '').trim() && !turn.tools.length
+    && !turn.display_cells.length && !turn.failed);
 
   // Backend-neutral activity rows the Host already rendered (Codex commands,
   // explorations, patches). Keyed on the revision like the body.
@@ -31,7 +42,8 @@
 
 <!-- .turn carries content-visibility in styles.css, so an off-screen row
      costs no layout or paint. -->
-{#if notice}
+{#if empty}
+{:else if notice}
 <div class="turn notice"><TurnNotice message={notice.message} detail={notice.detail} /></div>
 {:else}
 <div

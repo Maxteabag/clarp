@@ -116,6 +116,10 @@ class _TurnSpec:
     # Launches of this spec that failed before the backend started; spaces
     # out the retries of a queued handoff (see _requeue_failed_handoff).
     handoff_failures: int = 0
+    # When the next handoff of a spec whose launch failed before its backend
+    # started is due (time.monotonic()): nothing but its own retry, or an
+    # explicit repair, starts it sooner (R193).
+    handoff_retry_at: float = 0.0
     # Whether a Stop pause could not hold this request when it arrived (a
     # normal send, fresh user intent, an explicit send-now). The release drain
     # writes it to the durable row so the next runtime honours it too.
@@ -210,8 +214,11 @@ def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
 
 
 class DispatchError(RuntimeError):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, *, agent_id: str = ""):
         self.status = status
+        # The agent the refusal is about, when admission knows it (an agent that moved:
+        # the answer names where it went, also for a send the Host routed itself).
+        self.agent_id = agent_id
         super().__init__(message)
 
 

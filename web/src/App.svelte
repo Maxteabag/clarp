@@ -9,6 +9,7 @@
 
   import AgentSwitcher from './lib/AgentSwitcher.svelte';
   import OrchestratorDialog from './lib/OrchestratorDialog.svelte';
+  import ChatSettingsDialog from './lib/ChatSettingsDialog.svelte';
   import QuickSwitch from './lib/QuickSwitch.svelte';
   import Overview from './lib/Overview.svelte';
   import StartDialog from './lib/StartDialog.svelte';
@@ -47,6 +48,7 @@
   let startOpen = $state(false);
   let voiceOpen = $state(false);
   let orchestratorOpen = $state(false);
+  let chatSettingsOpen = $state(false);
   let quickOpen = $state(false);
 
   let startName = $state('');
@@ -73,6 +75,7 @@
       else if (name === 'start') startOpen = false;
       else if (name === 'voice') voiceOpen = false;
       else if (name === 'orchestrator') orchestratorOpen = false;
+      else if (name === 'chats') chatSettingsOpen = false;
       else if (name === 'quick') quickOpen = false;
     },
   });
@@ -81,7 +84,8 @@
   // register as a dependency and the context would go stale.
   $effect(() => {
     const open = { switcher: switcherOpen, overview: overviewOpen, start: startOpen,
-                   voice: voiceOpen, orchestrator: orchestratorOpen, quick: quickOpen };
+                   voice: voiceOpen, orchestrator: orchestratorOpen, quick: quickOpen,
+                   chats: chatSettingsOpen };
     for (const [name, isOpen] of Object.entries(open)) setOverlay(name, isOpen);
   });
 
@@ -142,7 +146,7 @@
     if (!isDesktop) return;
     if (!composerRef.isVisible()) return;
     if (e.target.closest && e.target.closest(FOCUS_KEEPERS)) return;
-    if (startOpen || voiceOpen || orchestratorOpen) return;
+    if (startOpen || voiceOpen || orchestratorOpen || chatSettingsOpen) return;
     // Don't yank focus mid-selection — that would collapse the highlight.
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
@@ -241,6 +245,7 @@
   onRelaunch={(name, sid) => openStart(name, sid)}
   onVoice={openVoice}
   onOrchestrator={() => orchestratorOpen = true}
+  onChatSettings={() => chatSettingsOpen = true}
 />
 
 <AgentSwitcher bind:open={switcherOpen} />
@@ -260,6 +265,7 @@
 />
 
 <OrchestratorDialog bind:open={orchestratorOpen} />
+<ChatSettingsDialog bind:open={chatSettingsOpen} />
 
 <QuickSwitch
   bind:open={quickOpen}

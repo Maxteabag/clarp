@@ -68,7 +68,12 @@ fn not_here(what: &str) -> ToolAnswer {
 
 /// `clarp-admin prompt`: a message to an agent of this Host, from an agent (`--from`) or
 /// from something that runs by itself (`--origin`).
-pub(crate) async fn prompt(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+pub(crate) async fn prompt(
+    app: &App,
+    call: &ToolCall,
+    args: &[String],
+    owner_token: bool,
+) -> ToolAnswer {
     let valued = [
         "--to", "--from", "--text", "--delay", "--origin", "--server",
     ];
@@ -155,7 +160,7 @@ pub(crate) async fn prompt(app: &App, call: &ToolCall, args: &[String]) -> ToolA
         .env
         .get(crate::turn_identity::TURN_ENV)
         .map(String::as_str);
-    let sent = match crate::coordination::made(app, token, false, false).await {
+    let sent = match crate::coordination::made(app, token, false, false, owner_token).await {
         Ok(made) => edge::send_from(app, request, &made).await,
         Err(failed) => Err(failed),
     };
@@ -1974,7 +1979,7 @@ async fn voice_migrate(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
-pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
+pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
     match call.argv.split_first() {
         Some((command, rest)) if command == "leader-decision" => {
             crate::teams::leader_memory::run(app, call, rest).await
@@ -1984,7 +1989,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         }
         Some((command, rest)) if command == "voice" => voice_migrate(app, rest).await,
         Some((command, rest)) if command == "bookkeeping" => bookkeeping(app, rest).await,
-        Some((command, rest)) if command == "prompt" => prompt(app, call, rest).await,
+        Some((command, rest)) if command == "prompt" => prompt(app, call, rest, owner_token).await,
         Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
         Some((command, _)) if command == "sessions" => sessions(app),

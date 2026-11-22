@@ -111,6 +111,10 @@ pub struct AgentRow {
     pub background_job_count: i32,
     pub sub_agent_count: i32,
     pub process_count: i32,
+    /// The Host's name in a merged list of several Hosts, else empty.
+    pub host: String,
+    /// "Moved to <Host>" for an agent that moved (Host contract 125).
+    pub moved: String,
 }
 
 pub type Op = ListOp<AgentRow, Role, Signal>;
@@ -138,6 +142,16 @@ impl Roster {
     /// The archive view: only archived agents, never created ones.
     pub fn archived() -> Self {
         Self { archived_only: true, ..Self::default() }
+    }
+
+    /// A list built from agents already merged (`clarp_core::all_hosts`):
+    /// their order is kept, and each row's state is its own Host's.
+    pub fn from_agents(agents: Vec<Agent>) -> Self {
+        let mut roster = Self { transport_available: true, ..Self::default() };
+        roster.running_helpers_by_parent = Self::running_map(&agents);
+        roster.agents = agents;
+        roster.rebuild_index();
+        roster
     }
 
     pub fn take_ops(&mut self) -> Vec<Op> {
@@ -199,6 +213,8 @@ impl Roster {
             background_job_count: if live { counts.total } else { 0 },
             sub_agent_count: if live { counts.sub_agents } else { 0 },
             process_count: if live { self.running_work(agent) } else { 0 },
+            host: agent.host.clone(),
+            moved: crate::all_hosts::moved_line(agent),
         }
     }
 
@@ -489,6 +505,11 @@ impl Roster {
     }
 
     // ---- queries ---------------------------------------------------------
+
+    /// False after the event stream dropped, until the next snapshot.
+    pub fn transport_available(&self) -> bool {
+        self.transport_available
+    }
 
     pub fn index_of_session(&self, session: &str) -> Option<usize> {
         self.by_session.get(session).copied()

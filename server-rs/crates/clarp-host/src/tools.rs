@@ -103,12 +103,12 @@ impl ToolAnswer {
 pub const NOT_HERE: i32 = 69;
 
 /// Answers a tool.
-pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
+pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
     match call.tool.as_str() {
         "clarp-agent-bg" => agent_bg(app, call).await,
         "clarp-goal" | "clarp-agent-tasks" => goal(app, call).await,
         "clarp-agent-artifacts" => artifact_tool::run(app, call).await,
-        "clarp-admin" => admin_tool::run(app, call).await,
+        "clarp-admin" => admin_tool::run(app, call, owner_token).await,
         other => ToolAnswer::said(
             NOT_HERE,
             format!("{other}: not available on this Host yet (the Rust Host). Nothing was done."),

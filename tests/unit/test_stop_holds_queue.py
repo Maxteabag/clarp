@@ -194,7 +194,7 @@ def test_a_database_error_while_holding_loses_no_queued_work(tmp_path, monkeypat
     monkeypatch.setattr(turn_queue, "get", flaky_get)
     _stop_with_arrivals(world, [("m_mid", "agent", False)])
     assert failed == ["p_pre2"]
-    world.service._retry_handoff(world.agent)   # the scheduled retry
+    world.service._retry_handoff(world.agent, due=True)   # the scheduled retry
     world.settle()
     assert world.started == ["t0", "m_mid"]
     assert _waiting(world) == ["p_pre", "p_pre2"]

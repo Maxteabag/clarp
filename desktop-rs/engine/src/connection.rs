@@ -37,6 +37,7 @@ impl Engine {
         self.sse.stop();
         self.reset_live();
         self.base_url = normalized.clone();
+        self.cache_key = normalized.clone();
         self.server_name.clear();
         self.server_version.clear();
         let empty = serde_json::Map::from_iter([("agents".to_owned(), Value::Array(Vec::new()))]);
@@ -51,6 +52,9 @@ impl Engine {
         }
         self.settings.set("connection/baseUrl", normalized);
         self.changes.extend([Change::Roster, Change::Archive, Change::Rooms, Change::ServerInfo]);
+        // Another primary: the Host it was may be read as a peer now, and
+        // the one it is no longer.
+        self.restart_peers();
     }
 
     /// Connects with `token`, or without one the stored device token (then
