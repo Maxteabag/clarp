@@ -8,7 +8,7 @@ use super::*;
 /// waits of 1, 2, 4 ... s. Meanwhile it is the agent's turn: the apps are told it reconnects
 /// (which try comes after how long, of the nine it can have), its row shows it handed over (its
 /// launch was attempted, as the Python Host's receipt says from then on), and a send behind it
-/// waits, pending its launch. The user's Stop ends it at once.
+/// waits, pending its launch. The user's Stop ends the refused turn and starts the next send.
 #[test]
 fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
     let place = Place::new("launch-refused");
@@ -69,12 +69,30 @@ fn a_send_whose_shim_cannot_be_started_waits_reconnecting_and_a_stop_ends_it() {
         .unwrap();
     assert_eq!(waiting["delivery"]["state"], "pending_launch", "{log}");
 
-    // The user's Stop ends the wait at once, and nothing of it is tried again.
+    // A Stop of the parked turn is announced to the apps. The next send starts even
+    // though its own shim will also fail to launch.
+    let before_stop = heard.lock().unwrap().len();
     host.post("/stop", json!({ "session": session }));
-    wait_for("the agent to be free", || {
-        host.state(&session) != "thinking"
+    wait_for("the parked turn to stop and its successor to start", || {
+        let events = heard.lock().unwrap();
+        let mut ours = events[before_stop..]
+            .iter()
+            .filter(|event| event["session"] == session);
+        let interrupted = ours.clone().any(|event| {
+            event["type"] == "agent-state"
+                && event["kind"] == "interrupted"
+                && event["detail"]["source"] == "user_stop"
+        });
+        let started = ours.any(|event| {
+            event["type"] == "queue-updated"
+                && event["client_msg_id"] == "r2"
+                && event["queue_started"] == true
+        });
+        interrupted && started
     });
-    let tries = reconnects().len();
-    std::thread::sleep(std::time::Duration::from_millis(2_500));
-    assert_eq!(reconnects().len(), tries, "nothing is tried after the Stop");
+    assert!(
+        host.turns(&session)
+            .iter()
+            .any(|turn| turn["id"] == "u-r2")
+    );
 }
