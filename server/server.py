@@ -2812,6 +2812,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         from lib import agent_moves
         if exc.status != 409 or str(exc) != agent_moves.AGENT_MOVED:
             return False
+        # The agent admission refused, first: a send the Host routed (a name in a hands-free
+        # send) went to another agent than the requested session's.
+        agent_id = getattr(exc, "agent_id", "") or agent_id
         if not agent_id and session:
             agent_id = str((identity.lookup(session) or {}).get("agent_id") or "")
         mark = agent_moves.moved(agent_id) or {}

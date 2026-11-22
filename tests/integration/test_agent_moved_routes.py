@@ -94,6 +94,18 @@ def test_send_to_a_moved_agent_answers_agent_moved_with_where(running_server):
     assert body["moved_to"] == {"host": "rust-host", "id": "r-1"} and body["moved_at"] > 0
 
 
+def test_a_send_the_host_routes_itself_answers_where_too(running_server):
+    """A hands-free send from one chat that names another agent goes where the Host routes it.
+    When that agent had moved, the refusal named no Host: the mark was looked up by the
+    requested session (this chat's agent, which did not move), not by the agent refused."""
+    base, _ctx, _srv = running_server
+    assert _call(base, "POST", "/agent-moved", MOVE)[0] == 200
+    status, body = _call(base, "POST", "/send", {"text": "Mike, check the build", "session": "rachel",
+                                                 "hands_free": True, "client_msg_id": "c-routed"})
+    assert status == 409 and body["error"] == "agent_moved"
+    assert body["moved_to"] == {"host": "rust-host", "id": "r-1"} and body["moved_at"] > 0
+
+
 def test_a_limited_device_may_not_and_a_full_device_may(running_server):
     from lib import device_pairing
     base, ctx, srv = running_server
