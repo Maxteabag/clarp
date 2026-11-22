@@ -44,6 +44,17 @@ The lead gathers the evidence below once, in one full test pass when he consider
 He fixes what the pass finds before putting the Host in front of Peter or installing it on a machine Peter
 uses.
 
+Peter's rule, given through Hazel on 22 Nov 2026:
+
+> skip long checks in iOS and all other things
+
+That one pass was run; for every install since, the pass before it is one short round: the focused tests of what
+Peter will touch, run once. Anything that would hold a build or an install for more than a few minutes, any second
+round, and the broad sweeps (the conformance run, the planted rules, the Python Host's critical tests and guards)
+run after the build is installed; what they find ships as a follow-up. An install is built from the commit it
+names: `server-rs/tools/install-host` installs whatever `server-rs/dist` holds and compiles nothing, so build the
+release of that commit first and check `dist/COMMIT`.
+
 Done means three kinds of evidence, in this order:
 
 1. **Conformance.** One suite for the core client contract (`contract/` schemas and fixtures, the replay corpus of
