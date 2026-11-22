@@ -80,3 +80,47 @@ def test_a_tail_with_nothing_to_write_and_the_import_after_it(tmp_path, backend,
             # the locked pass's re-read, and the frontier's read inside the final transaction.
             assert after["session_reads"]["every_row"] == (3 if other_writer else 2)
             harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("other_writer", [True, False], ids=["another writer commits", "nobody else"])
+@BACKENDS
+def test_a_full_import_whose_checkpoint_is_refused_publishes_it_by_recertification(
+        tmp_path, backend, other_writer):
+    """A full import that finds every row there already writes only its checkpoint, from its
+    probe pass, and another writer's commit makes SQLite refuse that ('database is locked').
+    That refusal was taken as a failed publication, so the checkpoint was not certified again
+    and the import after it was full once more (publication_not_written). A lock or busy
+    refusal leaves the recertification to run once: a fresh read, the inputs compared, a write
+    of its own. Any other error still fails it."""
+    reference, candidate, transcript = _world(tmp_path, backend, records=40)
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as first:
+            full.tick(0)
+            first.tick(0)
+        with sqlite3.connect(candidate) as store:          # the store has lost its pair
+            store.execute("DELETE FROM transcript_import_frontiers")
+            store.execute("DELETE FROM transcript_import_checkpoints")
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(1)
+            report = actual.tick(1, faults={"commit_before_checkpoint": other_writer})
+            assert _decision(report) == "full_no_frontier(missing_unknown)"
+            assert report.get("probe_commits", []) == ([True] if other_writer else [])
+            if other_writer:
+                with sqlite3.connect(reference) as other:
+                    other.execute("INSERT INTO settings(key, value, updated_at) "
+                                  "VALUES ('lane.other_writer', '1', 0)")
+            harness.assert_product_equal(reference, candidate)
+            assert _frontiers(candidate) == 1
+            _append(transcript, backend, 40)
+            full.tick(2)
+            assert _decision(actual.tick(2)) == "tail_applied"
+            harness.assert_product_equal(reference, candidate)
+
+
+def test_only_a_lock_or_busy_refusal_leaves_the_publication_to_recertification():
+    from lib import message_writes
+    assert message_writes._lock_refusal(sqlite3.OperationalError("database is locked"))
+    assert message_writes._lock_refusal(sqlite3.OperationalError("database table is locked"))
+    assert not message_writes._lock_refusal(sqlite3.OperationalError("no such table: transcript_import_frontiers"))
+    assert not message_writes._lock_refusal(sqlite3.IntegrityError("UNIQUE constraint failed"))
+    assert not message_writes._lock_refusal(ValueError("database is locked"))

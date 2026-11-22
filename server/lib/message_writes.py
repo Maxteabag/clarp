@@ -813,8 +813,13 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             nonlocal checkpoint_published, checkpoint_failed
             try:
                 result = original_publish(current_database, carry)
-            except BaseException:
-                checkpoint_failed = True
+            except BaseException as exc:
+                # SQLite refusing the probe's snapshot a write (another writer committed
+                # since it began: 'database is locked') is not a failed publication: the
+                # recertification below takes a fresh read and a write of its own, once.
+                # It was the cause of nearly every unwritten checkpoint after a full import,
+                # and the next import was full again. Any other error still fails it.
+                checkpoint_failed = not _lock_refusal(exc)
                 raise
             checkpoint_published = result is True
             return result
@@ -885,6 +890,18 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
         if database.in_transaction:
             database.execute("ROLLBACK")
         raise
+
+
+def _lock_refusal(exc: BaseException) -> bool:
+    """Whether SQLite refused a write for a lock (SQLITE_BUSY, SQLITE_LOCKED), not an error."""
+    import sqlite3
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    code = getattr(exc, "sqlite_errorcode", None)
+    if isinstance(code, int):
+        return code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    text = str(exc).lower()
+    return "database is locked" in text or "database is busy" in text or "database table is locked" in text
 
 
 class _CheckpointCleanupUncertain(RuntimeError):
