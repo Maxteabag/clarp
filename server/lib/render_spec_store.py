@@ -18,7 +18,22 @@ def public_row(item):
     stored = json.loads(item.pop("payload_json"))
     meta = {k: stored[k] for k in ("version", "catalog", "catalog_version", "catalog_sha256",
                                     "content_identity", "element_count")}
+    item.update(answered_button(item, stored))
     return PublicRow(item, meta)
+
+
+def answered_button(item, stored):
+    """An answered button form's chosen button, for every row and summary (issue 673):
+    answered_action and answered_label. Nothing for an open form or one without buttons."""
+    labels = contract.buttons_of(stored)
+    if item.get("status") != "completed" or not labels:
+        return {}
+    found = db.conn().execute("SELECT answers_json FROM form_submissions WHERE artifact_id=? "
+                              "ORDER BY created_at, submission_id LIMIT 1", (item["artifact_id"],)).fetchone()
+    action = (json.loads(found["answers_json"]).get("state") or {}).get(contract.ACTION_KEY) if found else None
+    if action not in labels:
+        return {}
+    return {"answered_action": action, "answered_label": labels[action]}
 
 
 def drawable(row, capable):

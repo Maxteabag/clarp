@@ -69,6 +69,8 @@ describe('reading clarp.form v2', () => {
   });
 
   it('checks a chart as the Host does', () => {
+    const twin = [{ name: 'a', points: [{ x: 'Mon', y: 1 }] }, { name: 'a', points: [{ x: 'Mon', y: 2 }] }];
+    expect(chart({ series: twin })).toEqual({ kind: 'unreadable', pointer: '/spec/elements/lat/props/series/1/name' });
     expect(chart({ series: [{ name: 'a', points: [{ x: 'Mon', y: 1 }, { x: 2, y: 1 }] }] }).kind).toBe('unreadable');  // x mixed
     expect(chart({ series: [{ name: 'a', points: [{ x: 'Mon', y: 1 }, { x: 'Mon', y: 2 }] }] }).kind).toBe('unreadable');  // x twice
     expect(chart({ series: [{ name: 'a', points: [{ x: 2, y: 1 }, { x: 1, y: 2 }] }] }).kind).toBe('unreadable');  // x falls

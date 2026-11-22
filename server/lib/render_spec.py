@@ -30,7 +30,7 @@ CODES = frozenset({
 # Version 2's codes besides version 1's; its refusals file gives each a sentence.
 CODES_V2 = CODES | frozenset({
     "submit_with_buttons", "action_schema", "action_bound", "button_action_duplicate", "chart_x_mixed",
-    "chart_x_duplicate", "chart_x_order", "chart_points", "chart_pie", "table_size"})
+    "chart_x_duplicate", "chart_series_duplicate", "chart_x_order", "chart_points", "chart_pie", "table_size"})
 VERSIONS = (1, 2)
 # A button form's answer: the intent every button submits with and the state key naming the button.
 BUTTON_INTENT, ACTION_KEY = "button", "action"
@@ -413,10 +413,15 @@ def _binds(match, rule):
 
 
 def _check_chart(props, pp, buttons, ident):
-    """What a chart's schema cannot say, in this order: a pie's one series, the total, then per
+    """What a chart's schema cannot say, in this order: series names unique, a pie's one series, the total, then per
     series in order the bar and pie point counts, then per point in order the x kind (one kind for
     the whole chart), x unique within the series, numeric x strictly increasing, a pie's y >= 0."""
     kind, series, sp = props["kind"], props["series"], pp + "/series"
+    names = set()
+    for i, one in enumerate(series):
+        if one["name"] in names:
+            raise Refusal("chart_series_duplicate", f"{sp}/{i}/name")
+        names.add(one["name"])
     if kind == "pie" and len(series) != 1:
         raise Refusal("chart_pie", sp)
     if sum(len(s["points"]) for s in series) > 600:

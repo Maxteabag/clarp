@@ -42,5 +42,6 @@
   "chart_points": "The chart has too many points: at most 60 per bar series and 600 in all.",
   "chart_pie": "A pie chart has one series of 1 to 12 points, none below zero.",
   "table_size": "The table has more than 1000 cells (rows times columns).",
+  "chart_series_duplicate": "Each series of a chart needs its own name.",
   "catalog_unavailable": "The form catalog is not available on this Host."
 }
