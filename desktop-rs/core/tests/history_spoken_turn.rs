@@ -35,7 +35,7 @@ fn spoken_rows() -> Vec<Message> {
     let iso = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     [
         json!({"id": "u-voice", "role": "user", "text": "Add the other host too", "timestamp": iso(s), "trace_id": "tr-voice", "revision": 9}),
-        json!({"id": "live-ack", "role": "assistant", "kind": "commentary", "phase": "commentary", "text": "On it, let me look.",
+        json!({"id": "live-ack", "role": "assistant", "kind": "commentary", "phase": "commentary", "text": "<speak>On it, let me look.</speak>",
             "timestamp": iso(s + 2_000), "trace_id": "tr-voice", "revision": 12, "activity_count": 2,
             "display_cells": [{"id": "exploration-call-1-call-2", "kind": "exploration", "title": "Explored", "lines": []}]}),
         json!({"id": "live-answer", "role": "assistant", "kind": "final_answer", "phase": "final", "text": "Which host do you mean?",

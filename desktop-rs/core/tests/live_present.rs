@@ -150,20 +150,19 @@ fn without_explanations_the_second_line_is_the_command() {
 fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     let view = turn_full(after(23));
     let p = present(&view, &[], &options(&[], 1759480012000));
-    // The thinking before the commentary does not put the fold above it: the
-    // commentary first, then the fold where the work after it begins.
-    assert_eq!(titles(&p), ["", "Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"]);
-    assert_eq!(p.entries[1].kind, Kind::Fold);
-    assert_eq!(p.entries[1].key, "live:fold:tr-1");
-    assert_eq!(p.entries[1].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
-    assert_eq!(p.entries[0].text, "Let me look at the parser and its tests.", "the commentary stays in view, first");
-    assert_eq!(p.entries[3].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
-    assert_eq!(p.entries[3].status, "interrupted");
-    assert_eq!(p.entries[4].meta, "interrupted");
+    // The commentary (not spoken) folds with the reasoning and the tools (#653); the
+    // row counts the calls it opens to, never the summary's tool count.
+    assert_eq!(titles(&p), ["Worked for 12s · 3 tools", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(p.entries[0].kind, Kind::Fold);
+    assert_eq!(p.entries[0].key, "live:fold:tr-1");
+    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:msg_01:1", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning, the commentary and the tools fold");
+    assert_eq!(p.entries[2].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
+    assert_eq!(p.entries[2].status, "interrupted");
+    assert_eq!(p.entries[3].meta, "interrupted");
     let open = present(&view, &[], &options(&["live:fold:tr-1"], 1759480012000));
-    assert_eq!(open.entries.len(), 1 + 7, "the fold opened shows every row again");
-    assert_eq!(open.entries[0].kind, Kind::Message, "the commentary still first");
-    assert!(open.entries.iter().any(|e| e.kind == Kind::Fold && e.expanded));
+    assert_eq!(open.entries.len(), 1 + 7, "the fold opened shows every row again, in place");
+    assert!(open.entries[0].kind == Kind::Fold && open.entries[0].expanded);
+    assert_eq!(open.entries[2].text, "Let me look at the parser and its tests.", "the commentary opens in its place");
 }
 
 #[test]
@@ -201,11 +200,11 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let tools: Vec<Value> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id})).collect();
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
-    // The row carries both messages: it shows once, where the first is, and
-    // the thinking before that message does not put the fold above it.
-    assert_eq!(titles(&p), ["", "Worked for 12s · 5 tools", "Ran npm test", "Stopped npm test"]);
-    assert_eq!(p.entries[0].row, "live-abc", "the row shows where its first message was");
-    assert_eq!(p.entries[1].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
+    // The row carries both messages, the answer among them: it shows once and
+    // never folds, below the work row.
+    assert_eq!(titles(&p), ["Worked for 12s · 3 tools", "", "Ran npm test", "Stopped npm test"]);
+    assert_eq!(p.entries[1].row, "live-abc", "the row that holds the answer stays in view");
+    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
 }
 
@@ -237,14 +236,16 @@ fn commentary_turn() -> LiveView {
 }
 
 #[test]
-fn commentary_between_tools_stays_visible() {
+fn commentary_between_tools_folds_into_the_work_row_and_opens_in_place() {
     let view = commentary_turn();
     let p = present(&view, &[], &options(&[], 0));
     let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
-    assert_eq!(read(&p), ["Building it first.", "Worked for 12s · 3 tools", "Built. Now the tests.", "All green."], "every message in its place, the fold where the work begins");
-    assert_eq!(p.entries[1].items, ["cl:c1", "cl:c2", "cl:c3"], "only the tools fold");
+    assert_eq!(read(&p), ["Worked for 12s · 3 tools", "All green."], "the commentary folds; the answer never does");
+    assert_eq!(p.entries[0].items, ["cl:m:0", "cl:c1", "cl:c2", "cl:m:1", "cl:c3"]);
     let open = present(&view, &[], &options(&["live:fold:tr-c"], 0));
-    assert_eq!(read(&open), ["Building it first.", "Worked for 12s · 3 tools", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
+    assert_eq!(read(&open), ["Worked for 12s · 3 tools", "Building it first.", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
+    let hidden = present(&view, &[], &Options { hide_activity: true, ..options(&[], 0) });
+    assert_eq!(read(&hidden), ["All green."], "activity hidden: the folded commentary goes with the work");
 }
 
 /// The real Host's settled turn (tests/fixtures/live-real-settled-turn.json):
@@ -265,7 +266,7 @@ const REAL_ANSWER_ROW: &str = "live-783d39d132789c798a9a";
 fn the_real_hosts_settled_turn_folds_after_its_rows_take_over() {
     let (view, rows) = real_turn();
     let p = present(&view, &rows, &options(&[], 0));
-    assert_eq!(titles(&p), ["Worked for 16s · 2 tools", "Ran sleep 60", ""]);
+    assert_eq!(titles(&p), ["Worked for 16s · 1 tool", "Ran sleep 60", ""], "the folded calls: the failed one stays out");
     let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
     assert_eq!(kinds, [Kind::Fold, Kind::Tool, Kind::Message]);
     let fold = &p.entries[0];
@@ -290,7 +291,7 @@ fn the_real_hosts_settled_turn_folds_after_its_rows_take_over() {
     assert_eq!(
         titles(&open),
         [
-            "Worked for 16s · 2 tools",
+            "Worked for 16s · 1 tool",
             "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th",
             "Ran sleep 60",
             "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa",
@@ -629,7 +630,7 @@ fn spoken_turn() -> (LiveView, Vec<Message>) {
             {"id": "oc:think", "kind": "reasoning", "rev": 2, "conv": "c-voice", "turn_id": "tr-voice", "status": "completed", "ordinal": 1,
              "started_at_ms": s + 500, "ended_at_ms": s + 1_500, "title": "Plan the lookup", "text": "Plan the lookup"},
             {"id": "oc:ack", "kind": "message", "rev": 3, "conv": "c-voice", "turn_id": "tr-voice", "status": "completed", "ordinal": 2,
-             "started_at_ms": s + 1_900, "ended_at_ms": s + 2_000, "phase": "commentary", "row_id": "live-ack", "text": "On it, let me look."},
+             "started_at_ms": s + 1_900, "ended_at_ms": s + 2_000, "phase": "commentary", "row_id": "live-ack", "text": "<speak>On it, let me look.</speak>"},
             tool("oc:t1", "call-1", 3, 2_100),
             tool("oc:t2", "call-2", 4, 3_100),
         ]});
@@ -642,7 +643,7 @@ fn spoken_rows() -> Vec<Message> {
     let s = SPOKEN_STARTED;
     vec![
         row(json!({"id": "u-voice", "role": "user", "text": "Add the other host too", "timestamp": iso(s), "trace_id": "tr-voice", "revision": 9})),
-        row(json!({"id": "live-ack", "role": "assistant", "kind": "commentary", "phase": "commentary", "text": "On it, let me look.",
+        row(json!({"id": "live-ack", "role": "assistant", "kind": "commentary", "phase": "commentary", "text": "<speak>On it, let me look.</speak>",
             "timestamp": iso(s + 2_000), "trace_id": "tr-voice", "revision": 12, "activity_count": 2,
             "display_cells": [{"id": "exploration-call-1-call-2", "kind": "exploration", "title": "Explored", "lines": []}]})),
         row(json!({"id": "live-answer", "role": "assistant", "kind": "final_answer", "phase": "final", "text": "Which host do you mean?",
@@ -694,4 +695,32 @@ fn a_turn_of_thinking_and_its_answer_keeps_the_fold_above_the_answer() {
         assert_eq!(kinds.first(), Some(&Kind::Fold), "the fold first: {:?}", titles(&p));
         assert_eq!(kinds.last(), Some(&Kind::Message), "the answer last: {:?}", titles(&p));
     }
+}
+
+/// The work row counts the calls it opens to (Arnie's ruling for every client): every
+/// call failed, it says the time alone; no time and no folded call, there is no row.
+#[test]
+fn the_work_row_counts_folded_calls_and_says_its_time() {
+    let s = SPOKEN_STARTED;
+    let failed = |id: &str, call: &str, ordinal: i64| json!({"id": id, "kind": "tool", "rev": 2, "conv": "c-n", "turn_id": "tr-n",
+        "status": "failed", "ordinal": ordinal, "started_at_ms": s + ordinal * 100, "ended_at_ms": s + ordinal * 100 + 50,
+        "tool": {"name": "bash", "call_id": call, "category": "exec", "group": null, "label": "ls /gone"}});
+    let view = |turn: Value, items: Vec<Value>| {
+        let snapshot = json!({"conv": "c-n", "session": "rachel", "agent_id": "agent-1", "epoch": "boot-n", "lseq": 5, "server_now_ms": s + 20_000,
+            "activity": {"state": "idle", "turn_id": "tr-n"}, "turn": turn, "items": items});
+        let mut view = LiveView::new();
+        view.apply_snapshot(snapshot.as_object().unwrap());
+        view
+    };
+    let answer = json!({"id": "oc:a", "kind": "message", "rev": 1, "conv": "c-n", "turn_id": "tr-n", "status": "completed", "ordinal": 9,
+        "started_at_ms": s + 900, "ended_at_ms": s + 950, "phase": "final", "text": "It is gone."});
+    // Every call failed: the time, no count, nothing to open; the failed calls in their rows.
+    let timed = json!({"turn_id": "tr-n", "status": "completed", "started_at_ms": s, "ended_at_ms": s + 11_000, "worked_ms": 11_000, "tool_count": 2});
+    let p = present(&view(timed, vec![failed("oc:f1", "f1", 1), failed("oc:f2", "f2", 2), answer.clone()]), &[], &options(&[], 0));
+    assert_eq!(titles(&p), ["Worked for 11s", "Ran ls /gone", "Ran ls /gone", ""]);
+    assert!(!p.entries[0].expandable);
+    // Neither a time nor a folded call: no row.
+    let untimed = json!({"turn_id": "tr-n", "status": "completed", "tool_count": 2});
+    let p = present(&view(untimed, vec![failed("oc:f1", "f1", 1), answer]), &[], &options(&[], 0));
+    assert!(p.entries.iter().all(|e| e.kind != Kind::Fold), "{:?}", titles(&p));
 }
