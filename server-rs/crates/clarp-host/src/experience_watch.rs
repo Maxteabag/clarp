@@ -10,6 +10,7 @@ pub(crate) use checks::AgentFacts;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Mutex;
 
+use crate::client_events::{self, TelemetryClient};
 use crate::fleet::Directory;
 use crate::kept::{Found, Key, Kind};
 use crate::tools::ToolAnswer;
@@ -54,6 +55,7 @@ struct Launches {
 pub struct Signals {
     launches: Mutex<Launches>,
     refusals: Mutex<VecDeque<Event<()>>>,
+    malformed_clients: Mutex<BTreeSet<String>>,
 }
 
 fn append<T>(ring: &mut VecDeque<Event<T>>, at: i64, subject: &str, detail: T) {
@@ -84,6 +86,7 @@ impl Signals {
         if state.is_none() && !startup_endpoint {
             return;
         }
+        let client = self.client_metadata(device_id, headers);
         let Ok(mut launches) = self.launches.lock() else {
             return;
         };
@@ -101,23 +104,41 @@ impl Signals {
             None => false,
             Some(_) => return,
         };
-        let mut detail = crate::render_spec::client(headers)
-            .and_then(|header| {
-                let header = crate::client_events::telemetry_header(header);
-                let (platform, contract) = clarp_kernel::client::named(&header)?;
-                let (_, tail) = header.split_once('/')?;
-                let (build, _) = tail.split_once(' ')?;
-                Some(Relaunches {
-                    platform: platform.to_ascii_lowercase(),
-                    build: build.to_owned(),
-                    contract: Some(contract),
-                    ..Relaunches::default()
-                })
-            })
-            .unwrap_or_default();
+        let mut detail = match client {
+            Ok(Some(client)) => Relaunches {
+                platform: if checks::platform(&client.platform) {
+                    client.platform
+                } else {
+                    "unknown".to_owned()
+                },
+                build: client.build,
+                contract: Some(client.contract),
+                ..Relaunches::default()
+            },
+            Ok(None) => Relaunches::default(),
+            Err(()) => Relaunches {
+                platform: "unknown".to_owned(),
+                ..Relaunches::default()
+            },
+        };
         detail.foreground_sessions = usize::from(foreground_session);
         detail.legacy_requests = usize::from(!foreground_session);
         append(&mut launches.events, now, device_id, detail);
+    }
+
+    pub(crate) fn client_metadata(
+        &self,
+        device_id: &str,
+        headers: &HeaderMap,
+    ) -> Result<Option<TelemetryClient>, ()> {
+        let client = client_events::telemetry_client(headers);
+        if client.is_err()
+            && let Ok(mut devices) = self.malformed_clients.lock()
+            && devices.insert(device_id.to_owned())
+        {
+            eprintln!("clarp-host: experience-watch: device {device_id:?} sent a malformed X-Clarp-Client header; platform unknown");
+        }
+        client
     }
 
     pub(crate) fn refused(&self, agent_id: &str, now: i64) {
@@ -138,10 +159,13 @@ impl Signals {
             .iter()
             .filter(|event| in_window(event.at, since, now))
         {
-            let row = result.entry(event.subject.clone()).or_default();
+            let row = result.entry(event.subject.clone()).or_insert_with(|| Relaunches {
+                platform: "unknown".to_owned(),
+                ..Relaunches::default()
+            });
             row.foreground_sessions += event.detail.foreground_sessions;
             row.legacy_requests += event.detail.legacy_requests;
-            if event.detail.contract.is_some() {
+            if !event.detail.platform.is_empty() {
                 row.platform.clone_from(&event.detail.platform);
                 row.build.clone_from(&event.detail.build);
                 row.contract = event.detail.contract;
@@ -225,9 +249,9 @@ async fn save(app: &App, book: &Book) -> Result<(), String> {
         .map_err(|why| why.0)
 }
 
-async fn pass(app: &App, settings: &Settings, now: i64) -> Result<(), String> {
+async fn pass(app: &App, settings: &Settings, previous: i64, now: i64) -> Result<(), String> {
     let mut book = load(app).await?;
-    let seen = checks::collect(app, settings, now).await;
+    let seen = checks::collect(app, settings, settings.window_start(now, previous), now).await;
     let directory = app.fleet.directory();
     let zone = TimeZone::system();
     book.reconcile(seen, settings, &directory, &zone, now);
@@ -266,14 +290,18 @@ pub fn run(app: &App) {
     let app = app.clone();
     tokio::spawn(async move {
         let mut settings = Settings::read();
+        let mut previous = app.clock.now_ms();
         loop {
             tokio::time::sleep(settings.interval).await;
             settings = Settings::read();
+            let now = app.clock.now_ms();
             if settings.enabled
-                && let Err(why) = pass(&app, &settings, app.clock.now_ms()).await
+                && let Err(why) = pass(&app, &settings, previous, now).await
             {
                 eprintln!("clarp-host: experience-watch pass: {why}");
+                continue;
             }
+            previous = now;
         }
     });
 }

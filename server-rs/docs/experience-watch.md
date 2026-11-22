@@ -2,7 +2,8 @@
 
 The Rust Host measures the user's experience from its own state. It reads
 a single time window across the checks and never runs a test or calls a
-model. A failed read is logged and does not clear findings for that source.
+model. The effective window covers at least the configured pass interval
+and stretches to the preceding pass when a pass is delayed. A failed read is logged and does not clear findings for that source.
 
 Set this section in the Rust Host's `config.toml`. The watcher is off by
 default. The first pass waits one interval, and subsequent passes reread
@@ -46,8 +47,10 @@ repeated foreground requests add no launches. If a client sends no marker,
 requests to `POST /devices` and `GET /server-info` are shown separately as
 unmarked context. These endpoints also serve background sync and reconnects.
 An app-crash finding requires a crash-kind client event or a MetricKit
-report with a nonzero crash count. The HTTP counters keep at most
-32,768 recent events per signal and restart with the Host. Send history
+report with a nonzero crash count. A malformed `X-Clarp-Client` records
+an unknown platform and is logged once per paired device per Host run.
+The HTTP counters keep the last 24 hours, up to 32,768 events per signal,
+and restart with the Host. Send history
 is rebuilt from the actor journals. The Rust queue has no separate
 `launch_unknown` status. Recent unconfirmed interruptions count in sends.
 

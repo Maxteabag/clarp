@@ -77,11 +77,10 @@ impl Settings {
                         .collect()
                 },
             );
+        let interval_seconds = number(field("interval_seconds"), 300).max(30);
         Self {
             enabled: field("enabled").and_then(toml::Value::as_bool) == Some(true),
-            interval: Duration::from_secs(
-                u64::try_from(number(field("interval_seconds"), 300).max(30)).unwrap_or(300),
-            ),
+            interval: Duration::from_secs(u64::try_from(interval_seconds).unwrap_or(300)),
             summary_hour: i8::try_from(number(field("summary_hour"), 9))
                 .ok()
                 .filter(|n| *n < 24)
@@ -92,12 +91,18 @@ impl Settings {
             wait_count: count("wait_count", 1),
             stuck_ms: thresholds("queue_stuck_seconds", 600).saturating_mul(SECOND),
             crash_events: count("crash_events", 10),
-            window_ms: thresholds("window_minutes", 15).saturating_mul(MINUTE),
+            window_ms: thresholds("window_minutes", 15)
+                .saturating_mul(MINUTE)
+                .max(interval_seconds.saturating_mul(SECOND)),
             failed_sends: count("failed_sends", 1),
             card_age_ms: thresholds("card_age_hours", 24).saturating_mul(HOUR),
             release_hold_ms: thresholds("release_hold_minutes", 10).saturating_mul(MINUTE),
             release_kinds,
         }
+    }
+
+    pub(super) fn window_start(&self, now: i64, previous: i64) -> i64 {
+        now.saturating_sub(self.window_ms).min(previous)
     }
 
     pub(super) fn recipients(&self, kind: &str) -> Vec<String> {

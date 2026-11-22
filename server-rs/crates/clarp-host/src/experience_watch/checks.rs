@@ -164,7 +164,7 @@ fn crash_count(row: &CrashCandidate) -> u64 {
     ))
 }
 
-fn platform(value: &str) -> bool {
+pub(super) fn platform(value: &str) -> bool {
     matches!(value, "ios" | "android" | "desktop" | "web")
 }
 
@@ -190,12 +190,14 @@ fn app_crashes(
         let launch = launches.get(&row.device);
         let client = if platform(&row.client) {
             row.client.as_str()
+        } else if !row.client.is_empty() {
+            "unknown"
         } else if row.event == "metrickit_report" {
             "ios"
-        } else if let Some(launch) = launch.filter(|launch| platform(&launch.platform)) {
-            launch.platform.as_str()
         } else {
-            continue;
+            launch
+                .filter(|launch| platform(&launch.platform))
+                .map_or("unknown", |launch| launch.platform.as_str())
         };
         let crash = crashes.entry((row.device, client.to_owned())).or_default();
         crash.count = crash.count.saturating_add(count);
@@ -235,8 +237,7 @@ fn app_crashes(
     }
 }
 
-pub(super) async fn collect(app: &App, settings: &Settings, now: i64) -> Seen {
-    let since = now.saturating_sub(settings.window_ms);
+pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64) -> Seen {
     let directory = app.fleet.directory();
     let mut seen = Seen::default();
     let refusals = app.experience.refusals(since, now);
@@ -305,6 +306,7 @@ pub(super) async fn collect(app: &App, settings: &Settings, now: i64) -> Seen {
                 "app_crash_android",
                 "app_crash_desktop",
                 "app_crash_web",
+                "app_crash_unknown",
             ]);
             eprintln!("clarp-host: experience-watch could not read crash signals: {why}");
         }
@@ -430,9 +432,12 @@ mod tests {
             .unwrap()
             .unwrap();
         let directory = app.fleet.directory();
-        let config: toml::Value = "enabled = true\nsummary_hour = 17\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\n".parse().unwrap();
+        let config: toml::Value = "enabled = true\nsummary_hour = 17\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\nwindow_minutes = 3\n".parse().unwrap();
         let settings = Settings::from_section(Some(&config));
         release_steps(&settings, &zone, now);
+        let since = settings.window_start(now, now);
+        assert_eq!(since, now - 300_000);
+        assert_eq!(settings.window_start(now, now - 360_000), now - 360_000);
         let router = crate::edge::router(app.clone());
         let request = |method: Method, path, token: &str, client, state| {
             let body = if method == Method::POST {
@@ -519,6 +524,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let old_ios = "ios/3099;contract=87";
+        place.clock.advance_ms(-240_000);
         for _ in 0..6 {
             assert_eq!(
                 request(
@@ -532,7 +538,9 @@ mod tests {
                 StatusCode::OK,
             );
         }
-        let counts = app.experience.relaunches(now - 60_000, now);
+        place.clock.advance_ms(240_000);
+        let counts = app.experience.relaunches(since, now);
+        assert!(!app.experience.relaunches(now - 180_000, now).contains_key(&proof_phone.device_id));
         assert_eq!(counts[&phone.device_id].foreground_sessions, 2);
         assert_eq!(counts[&phone.device_id].legacy_requests, 0);
         let proof = &counts[&proof_phone.device_id];
@@ -549,7 +557,7 @@ mod tests {
             serde_json::json!({"event": "ios.push.background-sync", "level": "error"}),
             serde_json::json!({"event": "metrickit_report", "level": "fault", "detail": {"crashes": 0, "hangs": 12}}),
         ]).await.unwrap();
-        let seen = collect(&app, &settings, now).await;
+        let seen = collect(&app, &settings, since, now).await;
         assert!(
             !seen
                 .found
@@ -587,7 +595,7 @@ mod tests {
         };
 
         let mut book = Book::default();
-        let mut seen = collect(&app, &settings, now).await;
+        let mut seen = collect(&app, &settings, since, now).await;
         agent(&mut seen, &settings, "worker", now, &facts, 0);
         book.reconcile(seen, &settings, &directory, &zone, now);
         assert_eq!(book.rows.len(), 3);
@@ -647,7 +655,7 @@ mod tests {
             book.told(owed);
         }
 
-        let mut seen = collect(&app, &settings, now + 1).await;
+        let mut seen = collect(&app, &settings, settings.window_start(now + 1, now), now + 1).await;
         agent(&mut seen, &settings, "worker", now + 1, &facts, 0);
         book.reconcile(seen, &settings, &directory, &zone, now + 1);
         assert!(book.rows.iter().all(|row| row.count == 2));
@@ -656,7 +664,7 @@ mod tests {
         assert!(app.fleet.revoke(phone.device_id.clone()).await.unwrap());
         let directory = app.fleet.directory();
         let later = now + 3_600_000;
-        let seen = collect(&app, &settings, later).await;
+        let seen = collect(&app, &settings, settings.window_start(later, later), later).await;
         book.reconcile(seen, &settings, &directory, &zone, later);
         assert!(book.rows.iter().all(|row| row.cleared_at == Some(later)));
         let summaries = book
@@ -715,5 +723,35 @@ mod tests {
             delayed.owed.is_empty(),
             "a retry expires after the summary hour"
         );
+
+        // A broken header is still counted, but only crashes can open a finding.
+        place.clock.advance_ms(after_hour - now);
+        let broken = "ios/3099 contract=broken";
+        for _ in 0..2 {
+            assert_eq!(
+                request(Method::GET, "/server-info", &proof_phone.token, broken, None).await,
+                StatusCode::OK,
+            );
+        }
+        let since = settings.window_start(after_hour, after_hour);
+        let counts = app.experience.relaunches(since, after_hour);
+        let proof = &counts[&proof_phone.device_id];
+        assert_eq!((proof.platform.as_str(), proof.legacy_requests), ("unknown", 2));
+        assert!(collect(&app, &settings, since, after_hour).await.found.is_empty());
+        let paired = crate::edge::Principal::Device {
+            device_id: proof_phone.device_id.clone(),
+            scope: crate::pairing::Scope::Limited,
+        };
+        header.insert("x-clarp-client", broken.parse().unwrap());
+        let event = serde_json::json!({"event": "ios.crash", "level": "fatal"});
+        crate::client_events::record(&app, &paired, &header, &[event.clone(), event.clone(), event])
+            .await
+            .unwrap();
+        let seen = collect(&app, &settings, since, after_hour).await;
+        assert!(
+            seen.found[&("app_crash_unknown".into(), proof_phone.device_id)]
+                .contains("3 crash events"),
+        );
+        assert_eq!(app.experience.malformed_clients.lock().unwrap().len(), 1);
     }
 }
