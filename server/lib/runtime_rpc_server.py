@@ -21,6 +21,15 @@ from .runtime_bridge import (
 )
 
 
+
+def _refusal(exc) -> dict:
+    """A DispatchError as the HTTP Host rebuilds it (runtime_bridge), with the agent it is
+    about when admission knows it (an agent that moved: the answer names where it went)."""
+    answer = {"ok": False, "status": exc.status, "error": str(exc)}
+    if getattr(exc, "agent_id", ""):
+        answer["agent_id"] = exc.agent_id
+    return answer
+
 class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
     def finish(self) -> None:
         try:
@@ -222,7 +231,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                     self.dispatch_service.ctx, str(params.get("run_id") or ""),
                     backend_registry=self.dispatch_service.backends)
             except turn_dispatch.DispatchError as exc:
-                return {"ok": False, "status": exc.status, "error": str(exc)}
+                return _refusal(exc)
             return {"ok": True, "result": result}
         if method == "status":
             return {"ok": True, "result": {
@@ -459,8 +468,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         except Exception as exc:
             from .turn_dispatch import DispatchError
             if isinstance(exc, DispatchError):
-                return {"ok": False, "status": exc.status,
-                        "error": str(exc)}
+                return _refusal(exc)
             raise
         payload = dataclasses.asdict(result)
         if payload.get("delivery") is not None:
