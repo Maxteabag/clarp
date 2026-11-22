@@ -251,7 +251,7 @@ pub fn agents(engine: &Engine, query: &str) -> Vec<Item> {
                 kind: Kind::Agent,
                 target: agent.session.clone(),
                 label: display_name(agent).to_owned(),
-                detail: format!("{} · {state}", agent.backend),
+                detail: if agent.host.is_empty() { format!("{} · {state}", agent.backend) } else { format!("{} · {} · {state}", agent.host, agent.backend) },
                 key: String::new(),
                 group: "agent",
                 description: String::new(),
