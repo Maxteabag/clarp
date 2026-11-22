@@ -29,6 +29,16 @@ fn words(value: &Value) -> Vec<String> {
         .collect()
 }
 
+fn user(row: &Value) -> User<'_> {
+    User {
+        name: row["persona"].as_str().unwrap_or_else(|| text(row, "name")),
+        stored: text(row, "voice_id"),
+        builtin: row["builtin"] == true,
+        agent_id: row["agent_id"].as_str(),
+        created_at_ms: row["created_at"].as_i64().unwrap_or_default(),
+    }
+}
+
 #[test]
 fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
     let vectors: Value =
@@ -38,8 +48,13 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
         let pool = words(&case["pool"]);
         let taken = serde_json::from_value(case["taken"].clone()).unwrap();
         let keep = serde_json::from_value(case["keep"].clone()).unwrap();
-        let pick = voice_pool::pick(text(case, "name"), &pool, &taken, &keep);
-        assert_eq!(json!(pick), case["result"], "{case}");
+        let read = std::cell::Cell::new(false);
+        let pick = voice_pool::pick(text(case, "name"), &pool, &taken, &keep, || {
+            read.set(true);
+            serde_json::from_value(case["used"].clone()).unwrap()
+        });
+        assert_eq!(json!(pick.map(|pick| pick.id)), case["result"], "{case}");
+        assert_eq!(json!(read.get()), case["read_recency"], "{case}");
     }
 
     let assignments = vectors["assignments"].as_array().unwrap();
@@ -63,10 +78,7 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
             ..Default::default()
         };
         let configured = words(&settings["cartesia_pool"]);
-        let known = Snapshot::from_file(&json!({"_catalogue": {"cartesia":
-            words(&case["catalogue"]).into_iter().map(|id| (id, json!({"language":"en","public":true,"owner":false})))
-                .collect::<serde_json::Map<String, Value>>()
-        }}));
+        let known = Snapshot::from_file(&case["names"]);
         let roster = pairs(&settings["roster"]);
         let pool = Pool {
             host: &view,
@@ -78,19 +90,13 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|a| a["archived_at"].is_null() && a["is_janitor"].is_null())
-            .map(|a| User {
-                name: text(a, "persona"),
-                stored: text(a, "voice_id"),
-                builtin: false,
-            });
-        let contacts = case["contacts"].as_array().unwrap().iter().map(|a| User {
-            name: text(a, "name"),
-            stored: text(a, "voice_id"),
-            builtin: a["builtin"] == true,
-        });
+            .filter(|a| a["is_janitor"].is_null())
+            .map(user);
+        let contacts = case["contacts"].as_array().unwrap().iter().map(user);
         let users: Vec<_> = agents.chain(contacts).collect();
-        let actual = pool.assign(text(case, "name"), text(case, "stored"), &users);
+        let actual = pool.assign(text(case, "name"), text(case, "stored"), &users, || {
+            serde_json::from_value(case["spoke"].clone()).unwrap()
+        });
         let logs: Vec<_> = actual
             .exhausted
             .iter()
@@ -98,8 +104,8 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
                 json!([
                     "voicePoolExhausted",
                     format!(
-                        "provider={} pool={} shared_by={}",
-                        note.provider, note.size, note.shared_by
+                        "provider={} pool={} reused={} last_used_ms={} shared_by={}",
+                        note.provider, note.size, note.reused, note.last_used_ms, note.shared_by
                     )
                 ])
             })
@@ -107,7 +113,7 @@ fn the_voice_pool_walk_and_occupied_counts_match_the_reference() {
         assert_eq!(actual.stored, case["result"], "{case}");
         assert_eq!(json!(logs), case["logs"], "{case}");
     }
-    assert_eq!((picks.len(), assignments.len()), (9, 18));
+    assert_eq!((picks.len(), assignments.len()), (10, 21));
 
     let view = HostView {
         voices: Voices {
@@ -177,7 +183,7 @@ fn cartesia_selection_uses_public_non_owner_catalogue_voices_in_the_agents_langu
         catalogue: &catalogue,
         roster: &[],
     };
-    let ola = pool.assign("Ola", "{}", &[]);
+    let ola = pool.assign("Ola", "{}", &[], Default::default);
     assert_eq!(ola.stored, case["ola"]);
     assert!(ola.catalogue_miss.is_none());
 
@@ -189,7 +195,35 @@ fn cartesia_selection_uses_public_non_owner_catalogue_voices_in_the_agents_langu
         host: &other_languages,
         ..pool
     };
-    let fallback = pool.assign("Fixture", "{}", &[]);
+    let fallback = pool.assign("Fixture", "{}", &[], Default::default);
     assert_ne!(fallback.stored, "{}");
     assert_eq!(json!(fallback.catalogue_miss), case["languages"][4]["miss"]);
+}
+
+#[test]
+fn a_helper_inherits_the_parents_own_voices_before_using_the_pool() {
+    let vectors: Value =
+        serde_json::from_str(include_str!("fixtures/voice-pool-vectors.json")).unwrap();
+    let view = HostView {
+        voices: Voices {
+            provider: "cartesia".into(),
+            fallback: "elevenlabs".into(),
+            cartesia_voices: vec![("Parent".into(), "parent-contact".into())],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let candidates = ["c1".into(), "c2".into()];
+    let pool = Pool {
+        host: &view,
+        configured_cartesia: &candidates,
+        catalogue: &Snapshot::default(),
+        roster: &[],
+    };
+    for case in vectors["inheritance"].as_array().unwrap() {
+        let inherited = pool.inherited("Helper", text(case, "stored"), &user(&case["parent"]));
+        assert_eq!(inherited, case["inherited"], "{case}");
+        let assigned = pool.assign("Helper", &inherited, &[], Default::default);
+        assert_eq!(assigned.stored, case["assigned"], "{case}");
+    }
 }

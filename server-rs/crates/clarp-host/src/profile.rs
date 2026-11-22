@@ -56,6 +56,35 @@ pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory, owners: &toml::Ta
     view
 }
 
+/// Rewrite only voice shapes the speaker resolves identically, before the Host serves requests.
+pub async fn migrate_at_start(app: &crate::edge::App) {
+    let directory = app.fleet.directory();
+    let owners = app.mouth.owners_from(&directory);
+    let profile = view(&app.mouth, &app.ears, &directory, &owners);
+    let result = app
+        .fleet
+        .migrate_voices(profile, crate::fleet::VoiceMigration::AtStart)
+        .await;
+    let report = match result {
+        Ok(Ok(report)) => report,
+        Ok(Err(why)) | Err(crate::agent::Unavailable(why, _)) => {
+            eprintln!("voiceShapeMigrationFail {why}");
+            return;
+        }
+    };
+    let written = report["written"].as_array().map_or(0, Vec::len);
+    let left = report["refused_audible"].as_array();
+    let audible_left = left.map_or(0, Vec::len);
+    if written != 0 || audible_left != 0 {
+        let names: String = left
+            .into_iter()
+            .flatten()
+            .map(|name| format!(" left={}", clarp_kernel::python::repr(name)))
+            .collect();
+        eprintln!("voiceShapeMigrated written={written} audible_left={audible_left}{names}");
+    }
+}
+
 /// A version of everything the Host-wide part of a profile is made from: the owner's
 /// settings of speech, the keys, the names of voices, how the Host hears. Another version:
 /// re-read the agents. The same inputs, the same version.

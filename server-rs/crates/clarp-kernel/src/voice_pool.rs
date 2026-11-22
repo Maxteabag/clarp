@@ -1,6 +1,7 @@
 //! The deterministic voice assignment for a new agent or contact (V2b).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
 
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -17,17 +18,21 @@ pub struct Pool<'a> {
     pub roster: &'a [(String, String)],
 }
 
-/// Active agents and custom contacts are distinguished from the built-in contacts.
+/// An agent or contact that holds a voice.
 pub struct User<'a> {
     pub name: &'a str,
     pub stored: &'a str,
     pub builtin: bool,
+    pub agent_id: Option<&'a str>,
+    pub created_at_ms: i64,
 }
 
 pub struct Exhausted {
     pub provider: &'static str,
     pub size: usize,
     pub shared_by: usize,
+    pub reused: String,
+    pub last_used_ms: i64,
 }
 
 #[derive(serde::Serialize)]
@@ -49,6 +54,52 @@ fn canonical(stored: &str) -> Map<String, Value> {
         .into_iter()
         .map(|(provider, id)| (provider, Value::String(id)))
         .collect()
+}
+
+/// The checked-in catalogue subset in the reference's order.
+static CURATED: LazyLock<Vec<(String, String)>> = LazyLock::new(|| {
+    let file: Value =
+        serde_json::from_str(include_str!("cartesia_voice_pool.json")).unwrap_or_default();
+    file["voices"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let id = row["id"].as_str().filter(|id| !id.is_empty())?;
+            let name = row["name"].as_str().unwrap_or_default();
+            Some((id.to_owned(), name.to_owned()))
+        })
+        .collect()
+});
+
+pub fn curated_names() -> BTreeMap<String, String> {
+    CURATED
+        .iter()
+        .filter(|(_, name)| !name.is_empty())
+        .cloned()
+        .collect()
+}
+
+fn curated_voices(snapshot: &Snapshot, language: &str) -> Vec<String> {
+    if languages::primary(language) != "en" {
+        return Vec::new();
+    }
+    let catalogue = snapshot.catalogue.get(CARTESIA);
+    let gone = snapshot.gone.get(CARTESIA);
+    CURATED
+        .iter()
+        .filter(|(id, _)| {
+            catalogue.is_none_or(|rows| rows.contains_key(id))
+                && gone.is_none_or(|gone| !gone.contains(id))
+        })
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+fn without_placeholders(stored: &str) -> Map<String, Value> {
+    let mut mapping = canonical(stored);
+    mapping.retain(|_, id| !id.as_str().is_some_and(|id| id.starts_with("auto-")));
+    mapping
 }
 
 /// Voices that can be assigned from today's Cartesia catalogue.
@@ -126,6 +177,10 @@ impl Pool<'_> {
                 Some(who),
                 &self.host.language,
             );
+            let curated = curated_voices(self.catalogue, language);
+            if !curated.is_empty() {
+                return (curated, None);
+            }
             let (live, miss) = language_voices(self.catalogue, language);
             let source = if live.is_empty() {
                 said::BUILT_IN_CARTESIA_VOICES
@@ -183,57 +238,75 @@ impl Pool<'_> {
         choice.voice
     }
 
-    pub fn assign(&self, name: &str, stored: &str, users: &[User<'_>]) -> Assignment {
-        let mut mapping = canonical(stored);
-        let without_placeholders = mapping.len();
-        mapping.retain(|_, id| !id.as_str().is_some_and(|id| id.starts_with("auto-")));
+    pub fn inherited(&self, name: &str, stored: &str, parent: &User<'_>) -> String {
+        let mut mapping = without_placeholders(stored);
         let raw = sorted_ascii(&Value::Object(mapping.clone()));
-        let missing: Vec<_> = self
+        for provider in self.needed(name) {
+            if self.speaks(&raw, name, provider).is_none()
+                && let Some(voice) = self.speaks(parent.stored, parent.name, provider)
+            {
+                mapping.insert(provider.into(), Value::String(voice));
+            }
+        }
+        sorted_ascii(&Value::Object(mapping))
+    }
+
+    pub fn assign(
+        &self,
+        name: &str,
+        stored: &str,
+        users: &[User<'_>],
+        newest_clips: impl FnOnce() -> BTreeMap<String, i64>,
+    ) -> Assignment {
+        let mut mapping = without_placeholders(stored);
+        let raw = sorted_ascii(&Value::Object(mapping.clone()));
+        let missing = self
             .needed(name)
             .into_iter()
-            .filter(|provider| self.speaks(&raw, name, provider).is_none())
-            .collect();
-        if missing.is_empty() {
-            let kept = if mapping.len() == without_placeholders {
-                stored.to_owned()
-            } else {
-                raw
-            };
-            return Assignment {
-                stored: kept,
-                exhausted: Vec::new(),
-                catalogue_miss: None,
-            };
-        }
-
+            .filter(|provider| self.speaks(&raw, name, provider).is_none());
+        let newest_clips = std::cell::LazyCell::new(newest_clips);
         let mut exhausted = Vec::new();
         let mut catalogue_miss = None;
         for provider in missing {
             let (candidates, miss) = self.candidates(provider, name);
             catalogue_miss = catalogue_miss.or(miss);
             let mut reserved = self.reserves(provider);
-            let mut active = BTreeMap::<String, usize>::new();
             let mut taken = BTreeMap::<String, usize>::new();
+            let mut holders = Vec::new();
             for user in users {
                 if let Some(voice) = self.speaks(user.stored, user.name, provider) {
                     *taken.entry(voice.clone()).or_default() += 1;
                     if user.builtin {
-                        reserved.insert(voice);
-                    } else {
-                        *active.entry(voice).or_default() += 1;
+                        reserved.insert(voice.clone());
                     }
+                    holders.push((voice, user));
                 }
             }
-            if let Some(picked) = pick(name, &candidates, &taken, &reserved) {
-                let shared_by = taken.get(picked).copied().unwrap_or_default();
-                if shared_by > 0 && candidates.iter().all(|id| active.contains_key(id)) {
+            let recency = || {
+                let clips = &*newest_clips;
+                let mut used = BTreeMap::<String, i64>::new();
+                for (voice, user) in holders {
+                    let at = user
+                        .agent_id
+                        .and_then(|id| clips.get(id).copied())
+                        .filter(|at| *at != 0)
+                        .unwrap_or(user.created_at_ms);
+                    let last = used.entry(voice).or_default();
+                    *last = (*last).max(at);
+                }
+                used
+            };
+            if let Some(picked) = pick(name, &candidates, &taken, &reserved, recency) {
+                if let Some(last_used_ms) = picked.last_used_ms {
                     exhausted.push(Exhausted {
                         provider,
                         size: candidates.len(),
-                        shared_by,
+                        shared_by: taken.get(picked.id).copied().unwrap_or_default(),
+                        reused: picked.id.to_owned(),
+                        last_used_ms,
                     });
                 }
-                mapping.insert(provider.to_owned(), Value::String(picked.to_owned()));
+                mapping.insert(provider.to_owned(), Value::String(picked.id.to_owned()));
             }
         }
         Assignment {
@@ -257,12 +330,19 @@ impl Pool<'_> {
     }
 }
 
+pub struct Pick<'a> {
+    pub id: &'a str,
+    /// Set when there was no free choice.
+    pub last_used_ms: Option<i64>,
+}
+
 pub fn pick<'a>(
     name: &str,
     candidates: &'a [String],
     taken: &BTreeMap<String, usize>,
     reserved: &BTreeSet<String>,
-) -> Option<&'a str> {
+    recency: impl FnOnce() -> BTreeMap<String, i64>,
+) -> Option<Pick<'a>> {
     let size = candidates.len();
     if size == 0 {
         return None;
@@ -275,8 +355,19 @@ pub fn pick<'a>(
     let start = usize::try_from(start).ok()?;
     let order = candidates[start..].iter().chain(&candidates[..start]);
     let unreserved = order.clone().any(|voice| !reserved.contains(voice));
-    order
-        .filter(|voice| !unreserved || !reserved.contains(*voice))
-        .min_by_key(|voice| taken.get(*voice).copied().unwrap_or_default())
-        .map(String::as_str)
+    let order = order.filter(|voice| !unreserved || !reserved.contains(*voice));
+    let count = |voice: &str| taken.get(voice).copied().unwrap_or_default();
+    if let Some(id) = order.clone().find(|voice| count(voice) == 0) {
+        return Some(Pick {
+            id,
+            last_used_ms: None,
+        });
+    }
+    let used = recency();
+    let at = |voice: &str| used.get(voice).copied().unwrap_or_default();
+    let id = order.min_by_key(|voice| (at(voice), count(voice)))?;
+    Some(Pick {
+        id,
+        last_used_ms: Some(at(id)),
+    })
 }
