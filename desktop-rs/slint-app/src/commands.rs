@@ -838,7 +838,14 @@ fn close_picker(app: &App, window: &AppWindow) {
 /// and why (both empty while it is current).
 pub fn roster_note(engine: &clarp_engine::Engine) -> (String, String) {
     let state = engine.roster_freshness();
-    (state.note(clarp_engine::roster_freshness::local_clock), state.detail())
+    let (note, detail) = (state.note(clarp_engine::roster_freshness::local_clock), state.detail());
+    // Paired Hosts that cannot be reached: their rows stay from cache.
+    let unreachable = engine.unreachable_hosts_note();
+    match (note.is_empty(), unreachable.is_empty()) {
+        (_, true) => (note, detail),
+        (true, false) => (unreachable, "Its chats show as last read; the desktop keeps trying.".into()),
+        (false, false) => (format!("{note} · {unreachable}"), detail),
+    }
 }
 
 /// Rebuilds the results (a query typed, or the roster changed while open).

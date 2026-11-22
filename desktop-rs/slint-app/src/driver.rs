@@ -67,6 +67,9 @@ mod customize_checks;
 // ---- the chat's own zoom
 #[path = "zoom_checks.rs"]
 mod zoom_checks;
+// ---- chats from all paired Hosts
+#[path = "all_hosts_checks.rs"]
+mod all_hosts_checks;
 // ---- vim mode: the keyboard without Ctrl
 #[path = "vim_checks.rs"]
 mod vim_checks;
@@ -542,6 +545,7 @@ pub fn start_check(name: &str, out: String) {
         "mention" => search_checks::mention_check(out),
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
+        "all-hosts" => all_hosts_checks::all_hosts_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
         "explorer" => explorer_checks::explorer_check(out),
         "frame-budget" => budget_checks::frame_budget_check(out),

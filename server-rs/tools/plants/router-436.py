@@ -31,7 +31,7 @@ REFUSED_START = '''            Done::Refused {
 SAID_THEN_TOLD = '''                    if let Some(words) = &outcome.say {
                         say(app, words).await;
                     }
-                    outcome
+                    (outcome, moved)
                 }
             }
         }
@@ -39,7 +39,7 @@ SAID_THEN_TOLD = '''                    if let Some(words) = &outcome.say {
     if let Some(told) = &outcome.told {
         app.hub.publish(told.clone(), app.clock.now_ms());
     }'''
-TOLD_THEN_SAID = '''                    outcome
+TOLD_THEN_SAID = '''                    (outcome, moved)
                 }
             }
         }

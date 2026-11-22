@@ -1105,6 +1105,43 @@ def start_shown_attempted() -> list[str]:
     return started
 
 
+UNLAUNCHED_SHOWN_GRACE_MS = 10 * 60 * 1000
+
+
+def unlaunched_shown(*, now_ms: int | None = None) -> list[dict]:
+    """Items still 'queued' whose row is written (shown) and whose every launch failed
+    before a backend started (R193): the trace has turn rows, none of them younger than
+    UNLAUNCHED_SHOWN_GRACE_MS or ever completed or interrupted, no backend ever started
+    for it (no dispatched 'thinking' state, the post-spawn signature
+    agents._receipt_attempt_status reads) and it has no agent row; and its receipt does
+    not say the prompt may have left. Nothing else ever settles one: GET /turn-queue
+    does not list a shown item and DELETE refuses it, while it stayed 'queued'. The
+    caller ends them failed (never ran)."""
+    from . import launch_receipts
+    stale = int(now_ms if now_ms is not None else db.now_ms()) - UNLAUNCHED_SHOWN_GRACE_MS
+    rows = db.conn().execute(
+        """SELECT q.*, (SELECT COUNT(*) FROM turns t WHERE t.agent_id = q.agent_id
+                              AND t.trace_id = q.trace_id) AS attempts
+             FROM queued_turns q
+            WHERE q.status = 'queued' AND q.shown_at IS NOT NULL AND q.trace_id <> ''
+              AND EXISTS (SELECT 1 FROM turns t WHERE t.agent_id = q.agent_id
+                            AND t.trace_id = q.trace_id)
+              AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.agent_id = q.agent_id
+                                AND t.trace_id = q.trace_id
+                                AND (t.started_at > ? OR t.outcome IN ('completed', 'interrupted')))
+              AND NOT EXISTS (SELECT 1 FROM state_log s WHERE s.agent_id = q.agent_id
+                                AND s.kind = 'thinking'
+                                AND json_extract(s.detail, '$.trace_id') = q.trace_id
+                                AND json_type(s.detail, '$.dispatch') = 'text'
+                                AND length(json_extract(s.detail, '$.dispatch')) > 0)
+              AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.agent_id = q.agent_id
+                                AND m.trace_id = q.trace_id AND m.role = 'assistant')
+            ORDER BY q.queue_seq""", (stale,)).fetchall()
+    return [dict(row) for row in rows
+            if (launch_receipts.get(str(row["trace_id"])) or {}).get("state")
+            != launch_receipts.ATTEMPTED]
+
+
 def started_unshown() -> list[dict]:
     """Items started (or claimed) whose conversation row was never written, with their
     words: a Host that died between a launch on a session with no backend id and the

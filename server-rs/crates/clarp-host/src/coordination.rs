@@ -10,6 +10,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use clarp_actor::Noted;
 use clarp_kernel::coordination::{self as rules, Caller, Refusal};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::edge::{ApiError, App};
@@ -19,13 +20,15 @@ use crate::ids;
 pub const PEER_HEADER: &str = "x-clarp-peer";
 
 /// Who made a send, beyond what its body says of itself.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Made {
     /// The agent of the turn whose token the send presents (any turn of it, whatever became of
     /// it since), with that agent's session when this Host still has the agent.
     pub turn: Option<(String, Option<String>)>,
     /// A peer Host sent it: it forwards only its agents' messages.
     pub peer: bool,
+    /// Authenticated with this Host's administrator token.
+    pub owner_token: bool,
     /// The caller named the send's trace itself (else the Host names one).
     pub trace_named: bool,
 }
@@ -67,6 +70,7 @@ pub(crate) async fn made(
     token: Option<&str>,
     peer: bool,
     trace_named: bool,
+    owner_token: bool,
 ) -> Result<Made, ApiError> {
     let turn = token_of(app, token).await?.map(|(agent_id, _)| {
         let session = session_of(app, &agent_id);
@@ -76,6 +80,7 @@ pub(crate) async fn made(
         turn,
         peer,
         trace_named,
+        owner_token,
     })
 }
 

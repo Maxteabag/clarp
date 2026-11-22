@@ -5,7 +5,8 @@
   // viewport, so a bar fixed to the bottom ends up underneath it. Tracking
   // that offset is the whole reason this is a separate component from the
   // desktop one.
-  import { app } from '../../stores/app.svelte.js';
+  import { app, statusFor } from '../../stores/app.svelte.js';
+  import { movedLine } from '@core/agent-moved.js';
   import { unlockAudio } from '../../stores/audio.svelte.js';
   import { send, sendText } from '../../stores/send.svelte.js';
   import { Timing } from '@core/protocol.js';
@@ -51,6 +52,9 @@
     inputEl?.blur();
   }
 
+  // An agent that moved to another Host takes no turn here (contract 125).
+  let held = $derived((app.tick, movedLine(statusFor(app.session).moved)));
+
   function submit() {
     const text = value.trim();
     if (!text) { close(); return; }
@@ -67,6 +71,12 @@
 </script>
 
 <div id="chatBar" class="chat-bar" class:hidden={!open} bind:this={barEl}>
+  {#if held}
+    <div class="chat-row">
+      <button class="chat-close" aria-label="Close" onclick={close}>✕</button>
+      <div class="chat-held" role="status">{held}. It takes no messages here.</div>
+    </div>
+  {:else}
   <div class="chat-row">
     <button id="chatClose" class="chat-close" aria-label="Close" onclick={close}>✕</button>
     <input
@@ -84,4 +94,5 @@
       </svg>
     </button>
   </div>
+  {/if}
 </div>

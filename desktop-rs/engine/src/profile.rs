@@ -83,6 +83,7 @@ impl Engine {
     /// Opens an agent's profile: its plan, heartbeat and prompts load, and
     /// with them the updates (artifacts) and teams it shows.
     pub fn load_agent_profile(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_agent_profile(local));
         if session.is_empty() {
             return;
         }
@@ -107,6 +108,7 @@ impl Engine {
 
     /// The first page of prompts, or (`load_more`) the next one.
     pub fn load_prompt_history(&mut self, session: &str, load_more: bool) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_prompt_history(local, load_more));
         if session.is_empty()
             || (load_more && (session != self.profile.session || !self.profile.prompts_have_more || self.profile.prompt_cursor.is_empty()))
         {
@@ -136,6 +138,7 @@ impl Engine {
     /// What the profile shows about an agent; None when it is not in the
     /// roster.
     pub fn agent_details(&mut self, session: &str) -> Option<Value> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.agent_details(local));
         let agent = self.roster.find(session)?.clone();
         let shared = self.shared_filesystem();
         let workspace = self.profile.workspace.describe(&agent.working_directory, shared);
@@ -158,6 +161,7 @@ impl Engine {
     /// The `file://` URL the UI opens for the agent's files; None (and the
     /// error shown) when the directory is not on this desktop.
     pub fn agent_files_url(&mut self, session: &str) -> Option<String> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.agent_files_url(local));
         let url = self.local_agent_directory(session).and_then(|dir| url::Url::from_file_path(dir).ok()).map(|u| u.to_string());
         if url.is_none() {
             self.agent_files_open_failed();
@@ -185,6 +189,7 @@ impl Engine {
     }
 
     pub fn load_voices(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_voices(local));
         if session.is_empty() {
             return;
         }
@@ -195,6 +200,7 @@ impl Engine {
     }
 
     pub fn choose_voice(&mut self, session: &str, voice_id: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.choose_voice(local, voice_id));
         if session.is_empty() || voice_id.is_empty() {
             return;
         }
@@ -204,6 +210,7 @@ impl Engine {
     /// Asks the Host to speak a greeting in the voice; the clip arrives
     /// like any other and the UI plays it.
     pub fn preview_voice(&mut self, session: &str, name: &str, voice_id: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.preview_voice(local, name, voice_id));
         if session.is_empty() || voice_id.is_empty() {
             return;
         }
@@ -254,6 +261,7 @@ impl Engine {
     }
     /// The chat's media assets (`asset_id`, `mime_type`, `url`, …).
     pub fn media_for_session(&self, session: &str) -> &[Value] {
+        on_peer!(self.peer_ref(session), |engine, local| engine.media_for_session(local));
         self.profile.media_assets.get(session).map_or(&[][..], Vec::as_slice)
     }
     /// The cached image's `file://` URL; None until it arrives.
@@ -270,6 +278,7 @@ impl Engine {
     }
 
     pub fn load_media(&mut self, session: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_media(local));
         if session.is_empty() {
             return;
         }

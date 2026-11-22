@@ -468,6 +468,10 @@ impl App {
     fn header(&self, engine: &Engine, view: &mut PaneView, session: &str) {
         let agent = engine.roster().find(session);
         view.name = if session.is_empty() { SharedString::new() } else { engine.chat_name(session).into() };
+        // The status line starts with the Host badge, then a moved agent's
+        // "Moved to …" (#651, Host contract 125).
+        view.host = engine.host_badge(session).into();
+        view.moved = agent.map(clarp_core::all_hosts::moved_line).unwrap_or_default().into();
         view.pair = session.starts_with("pair:");
         view.model = agent.map(|a| a.model.clone()).unwrap_or_default().into();
         view.effort = agent.map(|a| a.effort.clone()).unwrap_or_default().into();
@@ -839,6 +843,21 @@ impl App {
         use clarp_core::history_fold::Piece;
         for fold in &history.folds {
             let position = |fresh: &Vec<Shown>, id: &str| fresh.iter().position(|(row, ..)| row.message.id == id);
+            // The turn's rows in its order, in the places they hold.
+            if let Some((places, sources)) = clarp_core::history_fold::turn_order(fold, |id| position(&*fresh, id)) {
+                let mut taken: Vec<(usize, (Shown, MessageRow))> = Vec::new();
+                let mut by_index: Vec<usize> = sources.clone();
+                by_index.sort_unstable_by(|a, b| b.cmp(a));
+                for index in by_index {
+                    taken.push((index, (fresh.remove(index), rows.remove(index))));
+                }
+                for (place, source) in places.into_iter().zip(sources) {
+                    let at = taken.iter().position(|(index, _)| *index == source).expect("a taken row");
+                    let (_, (shown, row)) = taken.swap_remove(at);
+                    fresh.insert(place, shown);
+                    rows.insert(place, row);
+                }
+            }
             let first_row = fold.pieces.iter().find_map(|p| if let Piece::Row(id) = p { position(fresh, id) } else { None });
             let mut at = fold
                 .prompt

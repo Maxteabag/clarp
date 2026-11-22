@@ -172,14 +172,14 @@ fn turn(session: &str, i: usize, turns: &mut Vec<Value>) {
             turns.push(reply(format!("> {}\n\n> Keep the main checkout untouched.\n\nAnd {}", LOREM.repeat(size), LOREM)));
         }
         4 => {
-            // A turn that works: tool calls fold behind "Worked for", the note stays.
+            // A turn that works: tool calls fold behind "Worked for", the spoken note stays (#653).
             turns.push(user(format!("Run the tests for {i}.")));
             for n in 0..1 + size % 3 {
                 turns.push(json!({"id": id(&format!("tool{n}")), "role": "assistant", "timestamp": at, "text": "", "origin": "agent", "trace_id": trace,
                     "tools": [{"name": "Bash", "summary": format!("cargo test -p part{n}"), "status": "ok", "id": format!("call-{i}-{n}"), "command": format!("cargo test -p part{n}"),
                                "result": (0..4 + n).map(|m| format!("test case_{m} ... ok")).collect::<Vec<_>>().join("\n")}]}));
             }
-            turns.push(json!({"id": id("note"), "role": "assistant", "timestamp": at, "text": "Tests pass; writing it up.", "origin": "agent", "trace_id": trace, "phase": "commentary"}));
+            turns.push(json!({"id": id("note"), "role": "assistant", "timestamp": at, "text": "<speak>Tests pass; writing it up.</speak>", "origin": "agent", "trace_id": trace, "phase": "commentary"}));
             let mut done = reply(format!("Ran the tests for {i}: all green. {}", LOREM.repeat(size / 2)));
             done["turn"] = json!({"turn_id": trace, "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 9_000, "worked_ms": 8_000, "tool_count": 1 + size % 3});
             turns.push(done);

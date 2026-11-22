@@ -64,6 +64,7 @@ impl Engine {
 
     /// The agent's cached portrait (`file://`), requesting it when missing.
     pub fn avatar_source(&mut self, session: &str) -> Option<String> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.avatar_source(local));
         let agent = self.roster.find(session)?;
         let url = clarp_core::media::avatar_url(&agent.avatar_url, clarp_core::protocol::display_name(agent));
         let avatars = &mut self.avatars;

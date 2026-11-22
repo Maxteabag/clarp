@@ -34,8 +34,8 @@ pub struct Options<'a> {
     /// Hide when done (#653): a settled turn's work row is left out; its
     /// rows fold as ever, so its tools do not show either.
     pub hide_settled: bool,
-    /// Commentary folds into the work row (every mode but Always visible).
-    pub fold_commentary: bool,
+    /// Always visible: commentary stays in its place (#653).
+    pub show_commentary: bool,
     /// A cached explanation of a `/log` tool call (never asks for one).
     pub explain: Option<&'a dyn Fn(&Object) -> String>,
 }
@@ -114,6 +114,23 @@ pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> 
     folded
 }
 
+/// The fold's rows in the fold's order, in the places they hold among the
+/// chat's rows: `(places, rows)`, where the row now at `rows[i]` goes to
+/// `places[i]` (both indexes into the chat's rows as they are). `None` when
+/// they are in order already. The chat's own order can differ from the
+/// Host's (a row inserted before one whose revision rose meanwhile); a
+/// settled turn still reads as the Host wrote it, and no row moves past a
+/// row of another turn.
+pub fn turn_order(fold: &Fold, position: impl Fn(&str) -> Option<usize>) -> Option<(Vec<usize>, Vec<usize>)> {
+    let rows: Vec<usize> = fold.pieces.iter().filter_map(|piece| match piece {
+        Piece::Row(id) => position(id),
+        Piece::Entry(_) => None,
+    }).collect();
+    let mut places = rows.clone();
+    places.sort_unstable();
+    (places != rows).then_some((places, rows))
+}
+
 /// A new live turn can arrive before the previous reply's /log delta. Keep
 /// its already displayed completed messages until their exact durable ids
 /// arrive; no transcript row is created or changed by this projection.
@@ -121,7 +138,7 @@ fn retain_unfiled_messages(rows: &[Message], live: Option<&LiveView>, options: &
     let Some(live) = live else { return };
     let known: HashSet<&str> = rows.iter().filter(|row| row.kind != "live" && !row.pending)
         .map(|row| row.id.as_str()).collect();
-    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, fold_commentary: options.fold_commentary };
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, show_commentary: options.show_commentary };
     for (turn, items) in live.retired_turns() {
         let trace = turn.get("turn_id").and_then(Value::as_str).unwrap_or_default();
         // A matching prompt admits this retained turn into this transcript.
@@ -305,14 +322,15 @@ fn turn(
     let mut rows_of: HashMap<String, Entry> = HashMap::new();
     let mut emitted = HashSet::new();
     let mut unexplained: Vec<(String, Object)> = Vec::new();
-    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, fold_commentary: options.fold_commentary };
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, show_commentary: options.show_commentary };
     let mut message = |items: &mut Vec<Object>, row: &Message, phase: &str| {
-        let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id});
+        // The row's text as written says whether it was spoken (a `<speak>` block); the
+        // shown text has the markup taken out.
+        let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id,
+            "spoken": crate::text::has_speech(&row.text)});
         let item = item.as_object().cloned().unwrap_or_default();
         let mut entry = live_present::item_entry(&item, &live_options);
         entry.row = row.id.clone();
-        // The row's own text says whether it was spoken (its `<speak>` block).
-        entry.spoken = crate::text::has_speech(&row.text);
         rows_of.insert(format!("log:{}", row.id), entry);
         items.push(item);
     };
@@ -359,9 +377,9 @@ fn turn(
     }
     flush(&mut items, &mut reasoning, None);
 
-    // The turn as the Host summed it up in /log, never as /live saw it
-    // (#653); without it, no worked time.
-    let summary = match logged {
+    // The turn as the Host summed it up in /log (#653), else as the live
+    // view saw it; without either, no worked time.
+    let summary = match logged.or(retired.map(|(turn, _)| turn)) {
         Some(turn) => turn.clone(),
         None => json!({"turn_id": turn_id, "status": "completed", "tool_count": tool_count}).as_object().cloned().unwrap_or_default(),
     };

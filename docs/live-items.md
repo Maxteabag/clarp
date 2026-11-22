@@ -412,13 +412,20 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
 5. When a `/log` row arrives whose `id` equals a message item's `row_id`, or whose
    `tools[].id` / `display_cells[].id` equals a tool item's `tool.call_id`, the
    durable row takes over that item's place. Do not delete and re-insert.
-6. Settled turn: fold its work behind `Worked for <worked_ms>`; failed or
-   interrupted items and every message (commentary included: text written
-   before a tool call is a reply to the user) stay visible. The fold survives the takeover: the Host
-   lands each tool as its own `/log` row, so while the turn is held keep the
-   tool and reasoning rows (one row per tool, inside the fold or, when failed,
-   outside it) and do not show those tool rows again as activity; the answer's
-   durable row shows in the answer's place.
+6. Settled turn (one rule for every client, #653): fold its work into one row:
+   its reasoning, its tools and the commentary between them; opened, they show
+   in their places. The final answer never folds, and what failed or was stopped
+   stays in its row. A commentary that carried speech (it held a `<speak>` block:
+   the user heard it) stays visible, above the work row, in every Tool activity
+   mode, Hide when done included. The row reads `Worked for <worked_ms> · N tools`,
+   N the calls it opens to (failed and stopped calls not counted, never the
+   summary's `tool_count`); every call failed: `Worked for <worked_ms>` with no
+   count; no time: `Used N tools`; no time and no folded call: no row. The fold
+   survives the takeover: the Host lands each tool as its own `/log` row, so while
+   the turn is held keep the tool and reasoning rows (one row per tool, inside the
+   fold or, when failed, outside it) and do not show those tool rows again as
+   activity; the answer's durable row shows in the answer's place, below its work
+   also when no live item stands for the answer.
 7. Ignore unknown kinds, ops and fields.
 
 ## 8. Live Activity pushes (feature `live_activity_push`, Host contract 45)

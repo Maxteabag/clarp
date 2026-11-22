@@ -600,6 +600,10 @@ def run(root) -> dict:
                     unheard_audio_sessions=(), dispatch=dispatch, fallback_request=bool(one.get('fallback')),
                     only_sessions=tuple(one['only']) if one.get('only') else None)
                 answered = dataclasses.asdict(outcome) if outcome is not None else None
+                if answered is not None:
+                    # The HTTP adapter uses the refused agent's id to attach a move mark.
+                    # It is internal to the Host and absent from the kernel routing outcome.
+                    answered.pop('refused_agent_id', None)
             except Exception as broke:  # noqa: BLE001 - told by its kind: the Python Host breaks here
                 answered = {'broke': type(broke).__name__, 'said': str(broke)[:200]}
             decisions = [dict(row) for row in db.conn().execute(

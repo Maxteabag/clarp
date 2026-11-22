@@ -71,6 +71,14 @@ pub struct Agent {
     /// it follows the Host).
     pub coordination_visibility: String,
     pub coordination_override: String,
+    /// The `server_id` of the Host this agent moved to (`moved.to.id`), or
+    /// empty: a merged list leaves the row out when that Host is in it.
+    pub moved_to: String,
+    /// That Host's name (`moved.to.host`): where the agent lives now.
+    pub moved_to_host: String,
+    /// The Host the row belongs to, as a merged chat list names it; empty
+    /// while the list holds one Host's agents (`clarp_core::all_hosts`).
+    pub host: String,
 }
 
 impl Default for Agent {
@@ -122,6 +130,9 @@ impl Default for Agent {
             quiet: false,
             coordination_visibility: String::new(),
             coordination_override: String::new(),
+            moved_to: String::new(),
+            moved_to_host: String::new(),
+            host: String::new(),
         }
     }
 }
@@ -190,6 +201,23 @@ impl Agent {
             unread: false,
             coordination_visibility: object.get("coordination_visibility").and_then(Value::as_str).unwrap_or_default().to_owned(),
             coordination_override: object.get("coordination_override").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            moved_to: object
+                .get("moved")
+                .and_then(|m| m.get("to"))
+                .and_then(|to| to.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
+            moved_to_host: object
+                .get("moved")
+                .and_then(|m| m.get("to"))
+                .and_then(|to| to.get("host"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
+            host: String::new(),
         }
     }
 

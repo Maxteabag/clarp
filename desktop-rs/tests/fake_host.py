@@ -5,7 +5,7 @@ Serves /server-info, /agents/snapshot, /log, /select, /send, /stop,
 /agent-model-options and an /events SSE stream. A /send files the user row
 under u-<client_msg_id>, appends an assistant reply, bumps the revision and
 pushes transcript-updated. Every request is appended to --log as JSON lines.
-Usage: fake_host.py --port-file PATH --log PATH [--roster N]
+Usage: fake_host.py --port-file PATH --log PATH [--roster N] [--peer]
 
 --roster N fills the roster to N agents like a real Host's: a quarter are
 helpers under a parent, some work, some wait, a few have attention items or
@@ -164,6 +164,8 @@ UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
 # /server-info's server_id; /__control/server-id changes it (another Host).
 server_id = "fake-host-1"
+# /server-info's name; --peer answers as another Host.
+host_name = "Fake Host"
 CLOSE = object()
 # Live items (docs/live-items.md): off until /__control/live turns the
 # feature on. The recorded streams in contract/live/ are replayed as `live`
@@ -974,7 +976,7 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("log_turn_summary")
             if coordination["on"]:
                 features.append("hidden_coordination")
-            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
+            info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
                 features.append("artifact_summary_v1")
@@ -2111,14 +2113,47 @@ class Server(ThreadingHTTPServer):
                          + " / ".join(traceback.format_exc().strip().splitlines()[-3:]) + "\n")
 
 
+def become_peer():
+    """--peer: a second Host for the all-hosts check, with its own server id,
+    name and agents: Nova and Tia, a Rachel that moved to the first fake Host
+    (fake-host-1), and a Wanderer that moved to a Host never paired."""
+    global server_id, host_name
+    server_id, host_name = "fake-host-2", "Peer Host"
+    moved_here = {"to": {"host": "Fake Host", "id": "fake-host-1"}, "at": "2026-11-22T09:00:00Z"}
+    moved_away = {"to": {"host": "Gone Host", "id": "gone-host"}, "at": "2026-11-22T09:00:00Z"}
+    agents[:] = [
+        {"agent_id": "p-rachel", "session": "rachel", "persona": "Rachel (moved)", "backend": "claude", "latest_state": "idle",
+         "alive": True, "last_activity": 3000, "conversation_id": "c-p-rachel", "head_revision": 1, "moved": moved_here},
+        {"agent_id": "p-wanderer", "session": "wanderer", "persona": "Wanderer", "backend": "claude", "latest_state": "idle",
+         "alive": True, "last_activity": 2500, "conversation_id": "c-wanderer", "head_revision": 1, "moved": moved_away},
+        {"agent_id": "p-nova", "session": "nova", "persona": "Nova", "backend": "codex", "latest_state": "idle",
+         "alive": True, "last_activity": 1500, "conversation_id": "c-nova", "head_revision": 2},
+        {"agent_id": "p-tia", "session": "tia", "persona": "Tia", "backend": "claude", "latest_state": "idle",
+         "alive": True, "last_activity": 1000, "conversation_id": "c-tia", "head_revision": 1},
+    ]
+    stamp = "2026-11-22T09:00:00Z"
+    turns.clear()
+    turns.update({
+        "rachel": [{"id": "pr1", "role": "assistant", "text": "Rachel's old home", "revision": 1, "timestamp": stamp}],
+        "wanderer": [{"id": "w1", "role": "assistant", "text": "Wandering", "revision": 1, "timestamp": stamp}],
+        "nova": [{"id": "n1", "role": "user", "text": "Hi Nova", "revision": 1, "timestamp": stamp},
+                 {"id": "n2", "role": "assistant", "text": "Nova here, on the peer Host", "revision": 2, "timestamp": stamp}],
+        "tia": [{"id": "t1", "role": "assistant", "text": "Tia here", "revision": 1, "timestamp": stamp}],
+    })
+    attention[:] = []
+
+
 def main():
     global log_path
     parser = argparse.ArgumentParser()
     parser.add_argument("--port-file", required=True)
     parser.add_argument("--log", required=True)
     parser.add_argument("--roster", type=int, default=0)
+    parser.add_argument("--peer", action="store_true")
     args = parser.parse_args()
     log_path = args.log
+    if args.peer:
+        become_peer()
     fill_roster(args.roster)
     server = Server(("127.0.0.1", 0), Handler)
     with open(args.port_file, "w") as handle:

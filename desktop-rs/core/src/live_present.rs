@@ -96,10 +96,10 @@ pub struct Options {
     /// Leave a settled turn's work row out (Hide when done): its messages,
     /// and what failed or stopped, stay.
     pub hide_settled: bool,
-    /// Commentary (the agent's lines between tools, phase `commentary`)
-    /// folds into the work row as a working detail (#653): every mode but
-    /// Always visible. The final reply never folds.
-    pub fold_commentary: bool,
+    /// Always visible (#653): commentary (the agent's lines between tools,
+    /// phase `commentary`) stays in its place instead of folding into the
+    /// work row as a working detail. The final reply never folds.
+    pub show_commentary: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -153,10 +153,15 @@ impl Presented {
             .collect()
     }
 
-    /// A row that pushes the turn's place: not its own and sent.
+    /// A row that pushes the turn's place: not its own and sent. The turn's
+    /// own answer that no item stands for (a backend whose live items carry no
+    /// final message) pushes it too: the work goes above its answer.
     fn pushes(&self, row: &Message) -> bool {
-        let own = self.own_rows.contains(&row.id) || (!self.turn_id.is_empty() && row.trace_id == self.turn_id);
-        !own && !row.pending
+        if row.pending || self.own_rows.contains(&row.id) {
+            return false;
+        }
+        let traced = !self.turn_id.is_empty() && row.trace_id == self.turn_id;
+        !traced || (row.role == "assistant" && row.phase == "final" && row.kind != "live")
     }
 }
 
@@ -316,22 +321,38 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             presented.stripped_calls.insert(text(tool, "call_id").to_owned());
         }
         if text(item, "kind") == "message" && giving.contains(row) {
-            // The row's text holds every message it carries: it shows once.
-            if placed.insert(row) {
+            // The row's text holds every message it carries: it shows once. Where it
+            // holds the answer it stands in the answer's place (and keeps the answer's
+            // row there when it lands): it is the answer, it never folds (#653);
+            // otherwise in its first message's place, spoken when one of them was.
+            let carried: Vec<&Object> = items.iter().copied()
+                .filter(|other| text(other, "kind") == "message" && owner_of(*other) == Some(row))
+                .collect();
+            let stands_for = carried.iter().copied()
+                .find(|other| item_entry(*other, options).phase != "commentary")
+                .or_else(|| carried.first().copied());
+            if stands_for.is_some_and(|chosen| text(chosen, "id") == text(item, "id")) && placed.insert(row) {
                 let mut entry = item_entry(item, options);
                 entry.row = row.to_owned();
-                // A row that also carries the final reply is the reply: it
-                // never folds as commentary.
-                let carries_final = items.iter().any(|i| text(i, "kind") == "message" && text(i, "phase") == "final" && owner_of(i) == Some(row));
-                if carries_final {
-                    entry.phase = "final".to_owned();
-                }
+                entry.spoken = entry.spoken || carried.iter().any(|other| item_entry(*other, options).spoken);
                 rows_of.insert(text(item, "id"), entry);
                 shown.push(*item);
             }
             continue;
         }
         shown.push(*item);
+    }
+    // A cell of the turn's own rows that groups tools the items show (an
+    // exploration cell whose id joins its tools' call ids) is the fold's
+    // work too: it is not shown again on its row beside the fold.
+    let tool_calls: Vec<&str> = items.iter().filter_map(|i| object(i, "tool")).map(|t| text(t, "call_id")).filter(|c| !c.is_empty()).collect();
+    for row in rows.iter().filter(|m| !turn_id.is_empty() && m.trace_id == turn_id) {
+        for cell in &row.display_cells {
+            let id = cell.get("id").and_then(Value::as_str).unwrap_or_default();
+            if !id.is_empty() && !tool_calls.contains(&id) && tool_calls.iter().any(|call| id.contains(call)) {
+                presented.stripped_calls.insert(id.to_owned());
+            }
+        }
     }
     // A row whose every part an item row shows is not shown again.
     let calls: HashSet<&str> = items.iter().filter_map(|i| object(i, "tool")).map(|t| text(t, "call_id")).collect();
@@ -348,11 +369,12 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     presented.hidden_rows = rows.iter().filter(|m| m.kind == "live" && claimed.contains(m.id.as_str())).map(|m| m.id.clone()).collect();
 
     let rows_of = rows_of.into_iter().map(|(id, entry)| (id.to_owned(), entry)).collect();
-    // A settled turn's work row reads the Host's /log summary of it (the
-    // turn's last row), never /live's (#653); before it lands, the tools.
+    // A settled turn's work row takes its time from the Host's /log summary
+    // (the turn's last row) once it has landed (#653), and from the live
+    // turn until then, so the row does not lose its time meanwhile.
     let live_turn = turn.expect("a turn");
-    let summary = if settled { Some(logged_summary(rows, &turn_id).cloned().unwrap_or_else(|| counted(live_turn, &shown))) } else { None };
-    presented.entries = arrange(&turn_id, summary.as_ref().unwrap_or(live_turn), settled, &shown, rows_of, options);
+    let summary = if settled { logged_summary(rows, &turn_id) } else { None };
+    presented.entries = arrange(&turn_id, summary.unwrap_or(live_turn), settled, &shown, rows_of, options);
     // A durable row whose commentary the work row folds is not shown in
     // the chat either; opened, it shows in its place again.
     let placed_rows: HashSet<&str> = presented.entries.iter().map(|e| e.row.as_str()).collect();
@@ -368,16 +390,6 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
 /// of its last `/log` row.
 pub(crate) fn logged_summary<'a>(rows: &'a [Message], turn_id: &str) -> Option<&'a Object> {
     rows.iter().rev().filter(|m| !turn_id.is_empty() && m.trace_id == turn_id).find_map(|m| m.turn.as_ref())
-}
-
-/// A summary without a worked time: the turn's status and its tools.
-fn counted(turn: &Object, shown: &[&Object]) -> Object {
-    let tools = shown.iter().filter(|i| text(i, "kind") == "tool").count();
-    let mut summary = Object::new();
-    summary.insert("turn_id".into(), Value::from(text(turn, "turn_id")));
-    summary.insert("status".into(), Value::from(text(turn, "status")));
-    summary.insert("tool_count".into(), Value::from(tools));
-    summary
 }
 
 /// The work row's title (#653, Arnie's ruling for every client): the count
@@ -435,35 +447,36 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
         }
     }
 
-    // A settled turn folds its work (§7.6): its reasoning and tools. What
-    // failed or stopped and every message, commentary too, stay in view in
-    // their places; the fold sits where the folded work begins. A running
-    // turn folds the same way when the reader groups it (#653): its tools
-    // and thinking, running ones too, under `Working · N tools`.
+    // A settled turn folds its work (§7.6, Arnie's ruling for every client, #653): its
+    // reasoning, its tools and the commentary between them, opened in place with the
+    // rest. What failed or stopped stays in its row, and the answer never folds. A
+    // commentary that carried speech (it held a <speak> block: the user heard it) stays
+    // too, above the work row. The row counts the calls it opens to, never the
+    // summary's tool count; with no time and no folded call there is no row. A running
+    // turn folds the same way when the reader groups it: `Working · N tools`, the
+    // calls so far. Always visible keeps commentary in its place.
     if settled || options.fold_running {
+        let spoken = |entry: &Entry| entry.kind == Kind::Message && entry.spoken && entry.phase == "commentary";
         let stays = |entry: &Entry| {
-            (entry.kind == Kind::Message && !(options.fold_commentary && entry.phase == "commentary" && !entry.spoken))
-                || matches!(entry.status.as_str(), "failed" | "interrupted")
+            matches!(entry.status.as_str(), "failed" | "interrupted")
                 || (settled && matches!(entry.status.as_str(), "running" | "pending"))
+                || (entry.kind == Kind::Message && (entry.phase != "commentary" || entry.spoken || options.show_commentary))
         };
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
-        // The calls the row opens to: a tool, each member of an explore group.
-        let calls: usize = folded
-            .iter()
-            .map(|i| match entries[*i].kind {
-                Kind::Tool => 1,
-                Kind::Explore => entries[*i].items.len(),
-                _ => 0,
-            })
-            .sum();
+        let calls: usize = folded.iter().map(|&i| match entries[i].kind {
+            Kind::Tool => 1,
+            Kind::Explore => entries[i].items.len(),
+            _ => 0,
+        }).sum();
+        let had_calls = entries.iter().any(|e| matches!(e.kind, Kind::Tool | Kind::Explore));
         let worked_ms = if settled { int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?)) } else { None };
-        // Where the work begins: the first folded row; a settled turn whose
-        // every call failed still says how long it worked, above them.
-        let first = folded.first().copied().or_else(|| if settled && worked_ms.is_some() { entries.iter().position(|e| e.kind != Kind::Message) } else { None });
-        let title = work_title(!settled, worked_ms, calls);
-        if let (Some(first), Some(title)) = (first, title) {
+        // A row when there is folded work with a time or a call, or when every call
+        // failed and the time is known; never for a turn that used nothing. A
+        // running turn has one while it has folded work.
+        let has_work = !folded.is_empty() || (settled && had_calls);
+        if let Some(title) = work_title(!settled, worked_ms, calls).filter(|_| has_work) {
             let key = format!("live:fold:{turn_id}");
-            let open = !folded.is_empty() && options.expanded.contains(&key) && !(settled && options.hide_settled);
+            let open = options.expanded.contains(&key) && !folded.is_empty() && !(settled && options.hide_settled);
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
                 rev: folded.iter().map(|i| entries[*i].rev).sum(),
@@ -479,22 +492,25 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
             // Hide when done: a finished turn's work row goes, and what it
             // stood for with it.
             let shows_fold = !(settled && options.hide_settled);
-            // Commentary the user heard (#653) stays in view above the work
-            // row, whatever came before it: the words the user heard first.
-            let heard: Vec<usize> = (first + 1..entries.len()).filter(|i| entries[*i].kind == Kind::Message && entries[*i].spoken && entries[*i].phase == "commentary").collect();
-            let mut slots: Vec<Option<Entry>> = entries.into_iter().map(Some).collect();
-            let mut kept = Vec::with_capacity(slots.len() + 1);
-            for i in 0..slots.len() {
-                if i == first {
-                    kept.extend(heard.iter().filter_map(|j| slots[*j].take()));
-                    if shows_fold {
-                        kept.push(fold.clone());
-                    }
-                }
-                if open || !folded.contains(&i) {
-                    kept.extend(slots[i].take());
+            // Above the row: what came before the work and every spoken commentary.
+            // Below it, in their places: what stays and, opened, the folded rows too.
+            let first_work = folded.first().copied()
+                .or_else(|| entries.iter().position(|e| matches!(e.kind, Kind::Tool | Kind::Explore)))
+                .unwrap_or(entries.len());
+            let mut kept: Vec<Entry> = Vec::with_capacity(entries.len() + 1);
+            let mut below: Vec<Entry> = Vec::new();
+            for (i, entry) in entries.into_iter().enumerate() {
+                let folds = folded.contains(&i);
+                if i < first_work || (!folds && spoken(&entry)) {
+                    kept.push(entry);
+                } else if open || !folds {
+                    below.push(entry);
                 }
             }
+            if shows_fold {
+                kept.push(fold);
+            }
+            kept.append(&mut below);
             entries = kept;
         }
     }
@@ -555,7 +571,8 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
             let streaming = matches!(status.as_str(), "running" | "pending" | "");
             entry.text = crate::text::cleaned_display_text(text(item, "text"), streaming);
             entry.phase = text(item, "phase").to_owned();
-            entry.spoken = crate::text::has_speech(text(item, "text"));
+            entry.spoken = item.get("spoken").and_then(Value::as_bool).unwrap_or(false)
+                || crate::text::has_speech(text(item, "text"));
             if status == "interrupted" {
                 entry.meta = "interrupted".into();
             }

@@ -19,6 +19,7 @@ import {
   requestLiveSnapshot,
 } from '@core/live-items.js';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { COORDINATION_FEATURE } from '@core/coordination.js';
 import { clog } from '../lib/net.js';
 
 export const LIVE_FEATURE = 'live_items';
@@ -32,6 +33,8 @@ export const live = $state({
   enabled: false,
   /** The Host lets clients switch tool explanations (Host contract 43). */
   explanationSetting: false,
+  /** The Host hides coordination between agents and counts it (Host contract 120). */
+  hiddenCoordination: false,
   /** The Host's tool-explanation setting (§6). */
   explanations: { enabled: true, detail_level: 2, loaded: false },
 });
@@ -84,6 +87,7 @@ export function setServerFeatures(features = []) {
   const list = Array.isArray(features) ? features : [];
   const on = list.includes(LIVE_FEATURE);
   live.explanationSetting = list.includes(EXPLANATION_SETTING_FEATURE);
+  live.hiddenCoordination = list.includes(COORDINATION_FEATURE);
   if (on === live.enabled) return;
   live.enabled = on;
   if (!on) {

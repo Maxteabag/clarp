@@ -156,14 +156,14 @@ PLANTS = [
     (HA, 'host', 'an agent sent to hides its turns without the key', '                self.setup.turns.has_key(),', '                true,'),
     (HE, 'host', 'a page hides the rows of an agent without the key', '        app.turns.has_key(),\n    );\n    let directory = app.fleet.directory()', '        true,\n    );\n    let directory = app.fleet.directory()'),
     # What a send presents (the Host's edge).
-    (HE, 'host', "a send's turn token is not read", '    crate::coordination::made(app, turn_of(headers), peer, trace_named).await', '    crate::coordination::made(app, None, peer, trace_named).await'),
+    (HE, 'host', "a send's turn token is not read", '    crate::coordination::made(app, turn_of(headers), peer, trace_named, owner_token).await', '    crate::coordination::made(app, None, peer, trace_named, owner_token).await'),
     (HE, 'host', 'a trace the caller named is not looked at', '    let trace_named = named.is_some_and(|trace| !trace.is_empty());', '    let trace_named = false;'),
-    (HE, 'host', "a turn's agent may name another as its sender", '    .map_err(crate::coordination::refused)?;\n    let sender = sender(app, request.sender.as_ref()).or_else(|| {', '    .unwrap_or_default();\n    let sender = sender(app, request.sender.as_ref()).or_else(|| {'),
-    (HE, 'host', "a send from a turn has not that turn's agent as sender", '            .then(|| sender_by_id(app, &principal.sender_agent_id))', '            .then(|| None)'),
+    (HE, 'host', "a turn's agent may name another as its sender", '    .map_err(crate::coordination::refused)?;\n    let mut claimed = request.sender.as_ref();', '    .unwrap_or_default();\n    let mut claimed = request.sender.as_ref();'),
+    (HE, 'host', "a send from a turn has not that turn's agent as sender", '                .then(|| sender_by_id(app, &principal.sender_agent_id))', '            .then(|| None)'),
     (HE, 'host', 'the origin a send claimed is kept whoever made it', '        coordination::origin(request.origin.as_deref(), &principal, made.peer)',
      '        coordination::origin(request.origin.as_deref(), &coordination::Principal::default(), false)'),
     (HE, 'host', "a send is marked by the Host's own origin", '        Some(&named),\n        Some(&principal.sender_agent_id),', '        Some("agent"),\n        Some(&principal.sender_agent_id),'),
-    (HE, 'host', "a sender the Host does not know is another agent's", '        &sender_known(app, request.sender.as_ref()),', '        sender_named(request.sender.as_ref()).unwrap_or_default(),'),
+    (HE, 'host', "a sender the Host does not know is another agent's", '        &known_sender,\n        &caller,', '        sender_named(request.sender.as_ref()).unwrap_or_default(),\n        &caller,'),
     (HE, 'host', 'a trace taken is answered as a send', '        Err(clarp_actor::TraceTaken) => {\n            drop(guard);\n            return Err(ApiError::new(\n                StatusCode::CONFLICT,', '        Err(clarp_actor::TraceTaken) => {\n            drop(guard);\n            return Err(ApiError::new(\n                StatusCode::BAD_REQUEST,'),
     (HE, 'host', 'there is no route of a note', '        .route("/agent-notes", post(crate::coordination::agent_note))\n', ''),
     # The note at the edge, and its tool.

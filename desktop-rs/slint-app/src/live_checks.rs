@@ -545,9 +545,9 @@ pub fn live_check(out: String) {
             }
             check(status() == "■ Interrupted", &format!("the status line says Interrupted: {:?}", status()));
             check(!view().live_busy, "and the agent is no longer busy");
-            check(titles() == ["3 tools", "", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds its reasoning and tools; every message and what failed or stopped stays: {:?}", titles()));
+            check(titles() == ["Worked for 12s · 3 tools", "", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds its reasoning and tools, counting the calls it opens to; under Always visible the commentary, the answer and what failed or stopped stay: {:?}", titles()));
             let commentary = live_row("live:cl:msg_01:1").unwrap_or_default();
-            check(message_text(&commentary) == "Let me look at the parser and its tests.", &format!("the commentary stays, in its place: {:?}", message_text(&commentary)));
+            check(message_text(&commentary) == "Let me look at the parser and its tests.", &format!("Always visible keeps the commentary in its place: {:?}", message_text(&commentary)));
             let stopped = live_row("live:cl:msg_02:0").unwrap_or_default();
             check(message_text(&stopped) == "The failure came from an off-by-one", &format!("the stopped answer stays: {:?}", message_text(&stopped)));
             check(stopped.live.meta == "interrupted", "and says it was interrupted");
@@ -595,10 +595,10 @@ pub fn live_check(out: String) {
             if !landed || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            check(titles() == ["3 tools", "Ran npm test", "Stopped npm test"], &format!("the turn keeps its fold and what failed or stopped: {:?}", titles()));
+            check(titles() == ["Worked for 12s · 3 tools", "Ran npm test", "Stopped npm test"], &format!("the turn keeps its fold and what failed or stopped: {:?}", titles()));
             let shown = rows(&crate::window().expect("window"));
             let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);
-            check(at("live-abc").is_some_and(|i| at("live:fold:tr-1") == Some(i - 1) && at("live:cl:toolu_03") == Some(i + 1)), "the durable row, carrying both messages, is where its first message was");
+            check(at("live-abc").is_some_and(|i| at("live:fold:tr-1") == Some(i - 2) && at("live:cl:toolu_03") == Some(i - 1)), "the durable row, carrying the answer, stays in view where the answer was, below the work row");
             check(shown.iter().all(|r| !r.id.starts_with("row-toolu")), "the tool rows show as the item rows, not again as activity");
             let (_, inserted_before) = *before2.borrow();
             let (_, inserted) = crate::view::sync_stats();
@@ -815,10 +815,7 @@ pub fn live_check(out: String) {
             if !open || live_row(REAL_FOLD).is_none() || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            let titles_now = titles();
-            // The work row reads /log's summary once the answer row carries it, never /live's.
-            let fold_ok = titles_now.first().is_some_and(|t| t == "1 tool" || t == "Worked for 16s · 1 tool");
-            check(fold_ok && titles_now[1..] == ["Ran sleep 60", ""], &format!("settled, before its rows land: the fold, the failed tool, the answer: {titles_now:?}"));
+            check(titles() == ["Worked for 16s · 1 tool", "Ran sleep 60", ""], &format!("settled, before its rows land: the fold, the failed tool, the answer: {:?}", titles()));
             // The next message, sent after the turn settled.
             control("/__control/upsert", &json!({"session": "anchor", "turns": [{"id": ANCHOR_NEXT, "role": "user", "text": "And now the next step.", "timestamp": "2026-10-03T11:49:30.000Z", "trace_id": ANCHOR_TURN}]})).is_ok()
         })),

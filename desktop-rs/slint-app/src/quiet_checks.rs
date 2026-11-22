@@ -2,7 +2,7 @@
 //! Grouped (the default) a running turn reads as one work row,
 //! `Working · 2 tools` (the calls it folds; a failed one keeps its row and
 //! is not counted), that shimmers and opens in place; settled, its time is
-//! the Host's /log summary's (none here yet: `3 tools`, no time from /live). Hide when done leaves the finished turn's work row out and keeps
+//! the Host's /log summary's once it lands, the live turn's until then. Hide when done leaves the finished turn's work row out and keeps
 //! its messages and what failed or stopped. Driven by the fake Host
 //! replaying the recorded `turn-full` stream, as `--check live` is.
 
@@ -106,8 +106,8 @@ pub fn quiet_chat_check(out: String) {
                 return false;
             }
             let titles = titles();
-            check(titles.first().map(String::as_str) == Some("3 tools"), &format!("settled without a /log summary yet: the 3 folded calls (the failed and the stopped one keep their rows), no time from /live: {titles:?}"));
-            check(titles == ["3 tools", "Ran npm test", "", "Stopped npm test"], &format!("the commentary stays folded; the reply and what failed or stopped show: {titles:?}"));
+            check(titles.first().map(String::as_str) == Some("Worked for 12s · 3 tools"), &format!("settled: the 3 folded calls (the failed and the stopped one keep their rows), the time the live turn's until /log sums it up: {titles:?}"));
+            check(titles == ["Worked for 12s · 3 tools", "Ran npm test", "", "Stopped npm test"], &format!("the commentary stays folded; the reply and what failed or stopped show: {titles:?}"));
             check(live_row("live:cl:msg_01:1").is_none() && live_row("live:cl:msg_02:0").is_some(), "the final reply never folds");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::HIDE_WHEN_DONE);
             true

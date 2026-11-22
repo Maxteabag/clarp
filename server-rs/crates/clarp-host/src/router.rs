@@ -49,9 +49,11 @@ use clarp_kernel::router::packet::{Came, InView, Member, Said, State as Doing, i
 use clarp_kernel::router::{self as rules, JOB, POLICY};
 use clarp_protocol::requests::SendRequest;
 use clarp_protocol::responses::SendResponse;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::agent::Unavailable;
+use crate::coordination::Made;
 use crate::edge::{self, ApiError, App};
 use crate::fleet::{AgentRecord, Member as Fellow};
 use crate::{ids, logins, once, wire};
@@ -343,10 +345,11 @@ fn not_a_tool(provider: &str) -> String {
 /// Gives a message to the agent the router found for it: a send like any other, said to be
 /// for that agent, as the message came in. A held message goes as it came in then, under
 /// its own id.
-async fn give(app: &App, give: &Give) -> Done {
+async fn give(app: &App, give: &Give) -> (Done, Option<ApiError>) {
     let came = give.came.as_ref();
-    let kept = came.and_then(|came| serde_json::from_str::<SendRequest>(&came.kept).ok());
-    let mut request = kept.unwrap_or_default();
+    let KeptSend { mut request, made } = came
+        .and_then(|came| KeptSend::read(&came.kept))
+        .unwrap_or_default();
     if request.client_msg_id.is_none() {
         request.client_msg_id = came.map(|came| came.client_id.clone());
     }
@@ -360,15 +363,23 @@ async fn give(app: &App, give: &Give) -> Done {
         call_id: None,
         ..request
     };
-    match edge::send_message(app, request).await {
-        Ok(sent) => Done::Given {
-            session: sent.session,
-            backend: sent.dispatch,
-        },
-        Err(refused) => Done::NotGiven {
-            status: refused.status().as_u16(),
-            error: refused.message().to_string(),
-        },
+    match edge::send_from(app, request, &made).await {
+        Ok(sent) => (
+            Done::Given {
+                session: sent.session,
+                backend: sent.dispatch,
+            },
+            None,
+        ),
+        Err(refused) => {
+            let done = Done::NotGiven {
+                status: refused.status().as_u16(),
+                error: refused.message().to_string(),
+            };
+            let moved = refused.status() == StatusCode::CONFLICT
+                && refused.message() == clarp_kernel::agent_moves::MOVED;
+            (done, moved.then_some(refused))
+        }
     }
 }
 
@@ -440,11 +451,11 @@ async fn start(app: &App, start: &Start) -> Done {
 
 /// Does what a decision asks of the Host, in its order. Answers what came of the one thing
 /// that can fail in a way the router keeps: a message given, or an agent started.
-async fn carry_out(app: &App, effects: &[Effect]) -> Done {
-    let mut done = Done::Fine;
+async fn carry_out(app: &App, effects: &[Effect]) -> (Done, Option<ApiError>) {
+    let mut result = (Done::Fine, None);
     for effect in effects {
         match effect {
-            Effect::Give(message) => done = give(app, message).await,
+            Effect::Give(message) => result = give(app, message).await,
             Effect::Say(words) => say(app, words).await,
             Effect::Repeat { session, or } => {
                 let directory = app.fleet.directory();
@@ -468,10 +479,10 @@ async fn carry_out(app: &App, effects: &[Effect]) -> Done {
                     let _ = agent.agent.stop("user".to_string()).await;
                 }
             }
-            Effect::Start(agent) => done = start(app, agent).await,
+            Effect::Start(agent) => result = (start(app, agent).await, None),
         }
     }
-    done
+    result
 }
 
 // ---- a message's way ---------------------------------------------------------------------------
@@ -497,9 +508,28 @@ fn disabled(trace_id: &str) -> Routed {
     Routed::Answered(StatusCode::OK, Box::new(answer))
 }
 
+/// The router's private receipt for delivering a fresh or held send.
+#[derive(Default, Deserialize, Serialize)]
+struct KeptSend {
+    request: SendRequest,
+    made: Made,
+}
+
+impl KeptSend {
+    fn read(kept: &str) -> Option<Self> {
+        serde_json::from_str(kept).ok().or_else(|| {
+            // A request stored before the router retained its authenticated provenance.
+            serde_json::from_str(kept).ok().map(|request| Self {
+                request,
+                made: Made::default(),
+            })
+        })
+    }
+}
+
 /// How a message came in, as the router keeps it: the id its sender gave it (its trace
 /// where it gave none), who sent it, and the request whole, for the day it is given.
-fn came_of(app: &App, request: &SendRequest, trace_id: &str) -> Came {
+fn came_of(app: &App, request: &SendRequest, trace_id: &str, made: &Made) -> Came {
     let minted = request.client_msg_id.as_deref().map(python::strip);
     let minted = minted.filter(|minted| !minted.is_empty());
     let sender = edge::sender(app, request.sender.as_ref());
@@ -513,7 +543,15 @@ fn came_of(app: &App, request: &SendRequest, trace_id: &str) -> Came {
         client_id: minted.unwrap_or(trace_id).to_string(),
         origin,
         sender_agent_id: sender.map(|sender| sender.agent_id).unwrap_or_default(),
-        kept: serde_json::to_string(request).unwrap_or_default(),
+        kept: serde_json::to_string(&KeptSend {
+            request: request.clone(),
+            made: Made {
+                // The router assigns the dispatch trace, as before.
+                trace_named: false,
+                ..made.clone()
+            },
+        })
+        .unwrap_or_default(),
     }
 }
 
@@ -526,6 +564,7 @@ pub(crate) async fn route(
     trace_id: &str,
     requested: &str,
     only: Option<&[String]>,
+    made: &Made,
 ) -> Result<Routed, ApiError> {
     let desk = app.router.clone();
     let asked_for = request.orchestrator_fallback == Some(true);
@@ -536,7 +575,7 @@ pub(crate) async fn route(
             Routed::NotMine
         }
     };
-    let came = came_of(app, request, trace_id);
+    let came = came_of(app, request, trace_id, made);
     // Most messages meet no router: it is off, and they were not routed before. That is
     // seen before anything is read of any agent.
     let run = flow::request_id(Some(&came), trace_id);
@@ -564,15 +603,15 @@ pub(crate) async fn route(
     };
     let began = Instant::now();
     let begun = desk.step(app, &agents, |book, around| book.begin(&message, around));
-    let outcome = match begun.await? {
+    let (outcome, moved) = match begun.await? {
         Begun::NotMine => return Ok(not_mine()),
-        Begun::Answered(outcome) => outcome,
+        Begun::Answered(outcome) => (outcome, None),
         Begun::Again(again) => {
-            let done = give(app, &again.give).await;
+            let (done, moved) = give(app, &again.give).await;
             let kept = desk.step(app, &agents, |book, around| {
                 book.given_again(&again, done, around)
             });
-            kept.await?
+            (kept.await?, moved)
         }
         Begun::Ask(mut routing) => {
             let first = ask(app, &routing, "initial").await;
@@ -598,7 +637,7 @@ pub(crate) async fn route(
                 next = answered.await?;
             }
             match next {
-                Next::Answered(outcome) => *outcome,
+                Next::Answered(outcome) => (*outcome, None),
                 Next::AskAgain | Next::Decided => {
                     let latency = i64::try_from(began.elapsed().as_millis()).unwrap_or(i64::MAX);
                     let hold_as = ids::uuid();
@@ -606,7 +645,7 @@ pub(crate) async fn route(
                         book.apply(&routing, &hold_as, around)
                     });
                     let plan = planned.await?;
-                    let done = carry_out(app, &plan.effects).await;
+                    let (done, moved) = carry_out(app, &plan.effects).await;
                     let finished = desk.step(app, &agents, |book, around| {
                         book.finish(&routing, plan, done, latency, around)
                     });
@@ -616,13 +655,17 @@ pub(crate) async fn route(
                     if let Some(words) = &outcome.say {
                         say(app, words).await;
                     }
-                    outcome
+                    (outcome, moved)
                 }
             }
         }
     };
     if let Some(told) = &outcome.told {
         app.hub.publish(told.clone(), app.clock.now_ms());
+    }
+    // Admission already supplied the mark of the recipient it refused.
+    if let Some(refused) = moved {
+        return Err(refused);
     }
     if outcome.action == flow::FALLBACK && !asked_for {
         // The router had nothing to say: the message goes where it was said to.
