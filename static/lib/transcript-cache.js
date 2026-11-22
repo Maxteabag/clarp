@@ -13,7 +13,8 @@ export const WRITE_COOLDOWN_MS = 10000;
 const BUSY_RECHECK_MS = 2000;
 
 /** The record kept for a chat: the reducer's cursor and its newest durable turns. */
-export function cacheRecord(session, { conversationId, cursor, latestTs, hasMore, cwd, turns }) {
+export function cacheRecord(session, { conversationId, cursor, latestTs, hasMore, cwd, turns,
+                                       coordination = null, hiddenAfter = null }) {
   const durable = (turns || []).filter(t => t && t.id && !t.optimistic && t.kind !== 'live');
   const kept = durable.slice(-CACHE_TURNS);
   return {
@@ -24,6 +25,9 @@ export function cacheRecord(session, { conversationId, cursor, latestTs, hasMore
     // Older turns than the kept page exist when the page was cut here.
     has_more: !!hasMore || durable.length > kept.length,
     cwd: cwd || '',
+    // The policy the rows were read under, sent back as coordination_read (static/lib/coordination.js).
+    coordination: coordination || null,
+    hidden_after: hiddenAfter || null,
     turns: kept,
     saved_at: Date.now(),
   };
@@ -45,9 +49,12 @@ export function createTranscriptCache({ storage, isBusy = () => false } = {}) {
     entry.timer = null;
     if (isBusy(session)) { arm(session, BUSY_RECHECK_MS); return; }
     pending.delete(session);
+    // `read` answers null when the chat must not be kept now (shown for one visit).
+    const state = entry.read();
+    if (!state) return;
     lastWrite.set(session, Date.now());
     try {
-      await storage.put(cacheRecord(session, entry.read()));
+      await storage.put(cacheRecord(session, state));
     } catch (_) {
       // Quota or a private-mode refusal: the cache is an optimisation.
     }

@@ -677,7 +677,8 @@ class OrchestratorService:
             log_exception("orchestratorRetryDispatchFail", e, detail=trace_id)
             return OrchestratorOutcome(
                 handled=True, ok=False, session=recipient["session"], trace_id=trace_id,
-                action=FINAL_ERROR, error=str(e), status=e.status)
+                action=FINAL_ERROR, error=str(e), status=e.status,
+                refused_agent_id=getattr(e, "agent_id", "") or "")
         # Routing context gets the message once, under the routed request's
         # trace: a later same-id retry is answered by turn_dispatch's dedup
         # and must not add it again (lead, RTO-07 amendment).
@@ -803,6 +804,7 @@ class OrchestratorService:
         error = decision.error
         dispatch_result = None
         dispatch_status = 0
+        refused_agent_id = ""
         # Voice requests are answered aloud; an app's request (a failed name delegation asking for
         # a recipient) never is, whichever sentence it would be (issue 360, R84).
         aloud = not fallback_request
@@ -988,6 +990,7 @@ class OrchestratorService:
             error = str(e)
             final_action = FINAL_ERROR
             dispatch_status = e.status
+            refused_agent_id = getattr(e, "agent_id", "") or ""
         except Exception as e:  # noqa: BLE001
             log_exception("orchestratorApplyFail", e, detail=trace_id)
             error = str(e)
@@ -1044,6 +1047,7 @@ class OrchestratorService:
             error=error,
             status=(dispatch_status or 500) if final_action == FINAL_ERROR else 200,
             retry_dispatch=dispatch_status >= 500,
+            refused_agent_id=refused_agent_id,
         )
 
     def _command_check(self, decision: OrchestratorDecision, settings: OrchestratorSettings,
