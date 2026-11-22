@@ -7,19 +7,25 @@
   // is too narrow to expand, so the toggle is disabled rather than hidden and
   // the control does not move.
   import {
-    AVATAR_PALETTE, app, avatarUrl, hostBadgeFor, isUserNotificationUnread, setSession,
+    AVATAR_PALETTE, app, avatarUrl, hostBadgeFor, isUserNotificationUnread, listedHostIds, setSession,
     shortActivityPhase, shortActivityText, statusFor,
   } from '../../stores/app.svelte.js';
   import { orderChats } from '../chat-order.js';
   import { movedLine } from '@core/agent-moved.js';
+  import { resolveAvatarUrl } from '@core/avatar.js';
+  import { mergeChats, PRIMARY, unreachable, unreachableLine } from '@core/all-hosts.js';
+  import { hostsState, openOnHost, readHosts } from '../../stores/hosts.svelte.js';
   import HostBadge from '../HostBadge.svelte';
-  import { input, setRegion } from '../../stores/input.svelte.js';
+  import { input, orderedSessions, setRegion } from '../../stores/input.svelte.js';
 
   let { collapsed = false, forced = false, onToggle, onOpenOverview } = $props();
 
   // Which row the keyboard is on, or -1 when the rail does not have it. Read
   // at the top level so the tracking sees both fields.
-  let selected = $derived(input.region === 'sidebar' ? input.chatIndex : -1);
+  // The keyboard walks this Host's chats (stores/input.svelte.js), so the highlight follows the
+  // session it is on, wherever the merged list puts that row.
+  let selectedSid = $derived((app.tick, input.region === 'sidebar' ? orderedSessions()[input.chatIndex] || '' : ''));
+  let selected = $derived(selectedSid ? chats.findIndex(c => !c.remote && c.sid === selectedSid) : -1);
   let listEl = $state(null);
 
   // Keep the keyboard selection on screen; a rail taller than the window would
@@ -29,25 +35,51 @@
     listEl.children[selected]?.scrollIntoView({ block: 'nearest' });
   });
 
+  // The other Hosts read now (the all-Hosts list, stores/hosts.svelte.js), in saved order.
+  let others = $derived(readHosts());
+
   let chats = $derived.by(() => {
     app.tick;
     // Ordering lives in chat-order.js so it can be tested without a live
-    // roster — see tests/state/chat-order.test.js.
-    return orderChats(app.agentsBySession, app.status, app.availableSessions)
-      .map(row => {
-        const s = statusFor(row.sid);
-        return {
-          ...row,
-          current: row.sid === app.session,
-          busy: !!s.busy,
-          host: hostBadgeFor(row.sid),
-          unread: isUserNotificationUnread(row.sid),
-          // A moved agent's row says where it went (contract 125).
-          line: movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
-                || (s.busy ? 'Working' : 'Idle'),
-        };
-      });
+    // roster — see tests/state/chat-order.test.js. With other Hosts read, their rows join
+    // by the rules every client shares (@core/all-hosts.js).
+    const own = orderChats(app.agentsBySession, app.status, app.availableSessions)
+      .map(row => ({ ...row, moved: statusFor(row.sid).moved || null }));
+    const groups = [{ hostId: PRIMARY, rows: own },
+      ...others.map(h => ({ hostId: h.id, rows: hostsState.live[h.id]?.rows || [] }))];
+    return mergeChats(groups, new Set(listedHostIds())).map(row => {
+      const remote = row.hostId === PRIMARY ? null : others.find(h => h.id === row.hostId);
+      const s = remote ? row.status : statusFor(row.sid);
+      return {
+        ...row,
+        remote,
+        current: !remote && row.sid === app.session,
+        busy: !!s.busy,
+        host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
+        unread: !remote && isUserNotificationUnread(row.sid),
+        // Another Host's portraits need that Host's sign-in; the bundled ones are this app's.
+        avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
+        // A moved agent's row says where it went (contract 125).
+        line: movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
+              || (s.busy ? 'Working' : 'Idle'),
+      };
+    });
   });
+
+  // '<Host> unreachable', quiet, only while more than one Host is read (@core/all-hosts.js).
+  let down = $derived.by(() => {
+    const ids = [PRIMARY, ...others.map(h => h.id)];
+    const states = Object.fromEntries(others.map(h => [h.id, hostsState.live[h.id]?.state]));
+    return unreachable(ids, states).map(id => {
+      const h = others.find(x => x.id === id);
+      return { id, text: unreachableLine(hostsState.live[id]?.name || h?.name || h?.url || 'A Host') };
+    });
+  });
+
+  function open(chat) {
+    if (chat.remote) openOnHost(chat.remote, chat.sid);
+    else setSession(chat.sid);
+  }
 </script>
 
 <aside class="sidebar" class:collapsed>
@@ -68,21 +100,28 @@
     </button>
   </header>
 
+  {#if !collapsed}
+    {#each down as line (line.id)}
+      <div class="side-unreachable" role="status">{line.text}</div>
+    {/each}
+  {/if}
   <nav class="sidebar-list" aria-label="Conversations" bind:this={listEl}>
-    {#each chats as chat, i (chat.sid)}
+    {#each chats as chat, i (chat.key)}
       <button
         class="side-row"
         class:current={chat.current}
         class:selected={i === selected}
         onpointerenter={() => { if (input.region === 'sidebar') setRegion('panes'); }}
-        title={collapsed ? `${chat.name} — ${chat.line}` : chat.line}
-        onclick={() => setSession(chat.sid)}
+        class:remote={!!chat.remote}
+        title={(collapsed ? `${chat.name} — ${chat.line}` : chat.line)
+               + (chat.remote ? ` · opens on ${chat.remote.name || chat.remote.url}` : '')}
+        onclick={() => open(chat)}
       >
         <span
           class="side-avatar"
-          style="background-color:{AVATAR_PALETTE[chat.name] || 'var(--ochre)'};background-image:url('{avatarUrl(chat.name, chat.sid)}')"
+          style="background-color:{AVATAR_PALETTE[chat.name] || 'var(--ochre)'};background-image:url('{chat.avatar}')"
         >
-          {#if !avatarUrl(chat.name, chat.sid)}
+          {#if !chat.avatar}
             <span class="avatar-letter">{chat.name.slice(0, 1)}</span>
           {/if}
           <span class="side-dot" class:busy={chat.busy} class:unread={chat.unread}></span>
@@ -186,6 +225,13 @@
 .sidebar .side-row:hover { background: var(--ink-soft-2); color: var(--washi); }
 /* Where the keyboard is in the rail. Distinct from .current, which is the
    conversation actually open: you walk the list before choosing. */
+.side-unreachable {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  font: 400 11px/1.3 var(--font-ui);
+  color: var(--washi-low);
+  border-bottom: 1px solid var(--ink-edge);
+}
 .sidebar .side-row.selected {
   outline: 1px solid var(--accent-blue);
   outline-offset: -1px;

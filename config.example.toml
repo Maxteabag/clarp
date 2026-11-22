@@ -15,6 +15,12 @@ port      = 7682
 # can't carry headers, like iOS Shortcuts) on every endpoint.
 auth_token = ""
 
+# Your own web app origins that may read this Host's chat list from another Host's web app
+# (Settings > Chats > Hosts, the all-Hosts list). Only GET /server-info and /agents/snapshot,
+# with a paired device's token in the Authorization header; no cookies, no writes. Exact
+# origins only (scheme://host[:port]); empty allows nothing cross-origin.
+# web_read_origins = ["https://studio.example.ts.net"]
+
 # App session the client picks when no session has been selected yet.
 default_session = "claude"
 

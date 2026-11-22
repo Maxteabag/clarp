@@ -1,10 +1,15 @@
 <script>
+  import HostBadge from './HostBadge.svelte';
   // Quick-switch popup: one tap on the identity block, active agents only.
   import {
     app, isUserNotificationUnread, refreshAgentSnapshot,
     avatarUrl, setSession, shortActivityPhase, statusFor,
   } from '../stores/app.svelte.js';
   import { movedLine } from '@core/agent-moved.js';
+  import { resolveAvatarUrl } from '@core/avatar.js';
+  import { PRIMARY, mergeChats } from '@core/all-hosts.js';
+  import { listedHostIds, hostBadgeFor } from '../stores/app.svelte.js';
+  import { hostsState, openOnHost, readHosts } from '../stores/hosts.svelte.js';
 
   let { open = $bindable() } = $props();
 
@@ -15,27 +20,38 @@
 
   let items = $derived.by(() => {
     app.tick;
-    return Object.entries(app.agentsBySession)
+    const own = Object.entries(app.agentsBySession)
       .filter(([sid, info]) => info && info.name && app.availableSessions.includes(sid))
-      .map(([sid, info]) => {
-        const s = statusFor(sid);
-        const isCurrent = sid === app.session;
-        const isBusy = !!s.busy;
-        const isUnread = isUserNotificationUnread(sid);
-        return {
-          sid,
-          name: info.name,
-          cls: isCurrent ? 'current' : isBusy ? 'busy' : isUnread ? 'unread' : '',
-          text: s.moved ? movedLine(s.moved)
-            : isCurrent ? 'current'
-            : isBusy ? (shortActivityPhase(s) || 'working')
-            : isUnread ? 'new' : 'idle',
-        };
-      });
+      .map(([sid, info]) => ({
+        sid, name: info.name, lastActivity: Number(statusFor(sid).last_activity) || 0,
+        moved: statusFor(sid).moved || null,
+      }));
+    // The other Hosts read now join by the shared rules (@core/all-hosts.js).
+    const others = readHosts();
+    const groups = [{ hostId: PRIMARY, rows: own },
+      ...others.map(h => ({ hostId: h.id, rows: hostsState.live[h.id]?.rows || [] }))];
+    return mergeChats(groups, new Set(listedHostIds())).map(row => {
+      const remote = row.hostId === PRIMARY ? null : others.find(h => h.id === row.hostId);
+      const s = remote ? row.status : statusFor(row.sid);
+      const isCurrent = !remote && row.sid === app.session;
+      const isBusy = !!s.busy;
+      const isUnread = !remote && isUserNotificationUnread(row.sid);
+      return {
+        key: row.key, sid: row.sid, name: row.name, remote,
+        avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
+        host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
+        cls: isCurrent ? 'current' : isBusy ? 'busy' : isUnread ? 'unread' : '',
+        text: s.moved ? movedLine(s.moved)
+          : isCurrent ? 'current'
+          : isBusy ? (shortActivityPhase(s) || 'working')
+          : isUnread ? 'new' : 'idle',
+      };
+    });
   });
 
-  function pick(sid) {
-    setSession(sid);
+  function pick(item) {
+    if (item.remote) openOnHost(item.remote, item.sid);
+    else setSession(item.sid);
     open = false;
   }
 
@@ -56,15 +72,15 @@
 
 {#if open}
   <div class="agent-switcher" role="menu" aria-label="Quick switch agent">
-    {#each items as item, i (item.sid)}
-      <button class="switcher-item" style="animation-delay:{i * 35}ms" onclick={() => pick(item.sid)}>
+    {#each items as item, i (item.key)}
+      <button class="switcher-item" style="animation-delay:{i * 35}ms" onclick={() => pick(item)}>
         <span class="switcher-avatar {item.cls}"
-              style="background-image:url('{avatarUrl(item.name, item.sid)}')">
-          {#if !avatarUrl(item.name, item.sid)}
+              style="background-image:url('{item.avatar}')">
+          {#if !item.avatar}
             <span class="avatar-letter">{item.name.slice(0, 1)}</span>
           {/if}
         </span>
-        <span class="switcher-name">{item.name}</span>
+        <span class="switcher-name">{item.name}{#if item.host}<HostBadge name={item.host} />{/if}</span>
         <span class="switcher-state {item.cls}">{item.text}</span>
       </button>
     {/each}
