@@ -1111,7 +1111,12 @@ fn asked(request: &Request) -> (bool, String) {
 
 /// Who is asking, by the token the request carries: in its header, in its cookie, or, from
 /// this machine, in its address.
-fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presented)> {
+fn who(
+    app: &App,
+    request: &Request,
+    local: bool,
+    header_only: bool,
+) -> Option<(Principal, Presented)> {
     let expected = &app.config.auth_token;
     if expected.is_empty() {
         // A Host without a token is open to this machine, and to nobody else.
@@ -1121,8 +1126,8 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
         // The administrator's token opens the Host only from the machine it runs on, and so
         // does what a turn was given for its agent's tools. From anywhere else a device
         // presents a token of its own, which can be taken away again.
-        if local && same_token(token, expected) {
-            return Some(Principal::Administrator);
+        if same_token(token, expected) {
+            return local.then_some(Principal::Administrator);
         }
         if local && same_token(token, &crate::tool_token(expected)) {
             return Some(Principal::Tools);
@@ -1138,6 +1143,9 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
     let text = |name| headers.get(name).and_then(|value| value.to_str().ok());
     if let Some(principal) = text(header::AUTHORIZATION).and_then(bearer).and_then(known) {
         return Some((principal, Presented::Header));
+    }
+    if header_only {
+        return None;
     }
     if let Some(principal) = text(header::COOKIE).and_then(cookie).and_then(known) {
         return Some((principal, Presented::Cookie));
@@ -1155,16 +1163,26 @@ fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presente
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     // Scope is decided on the raw path before route parameters are decoded.
     let path = request.uri().path().to_string();
+    let origins = &app.config.web_read_origins;
+    if request.method() == Method::OPTIONS {
+        return crate::cross_origin::preflight(&path, request.headers(), origins);
+    }
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
     let read = request.method() == Method::GET;
     let open = path == EXCHANGE || (read && (path == PAIRING_IDENTITY || picture));
     let (local, source) = asked(&request);
+    let listed = crate::cross_origin::from_listed_origin(request.headers(), origins);
+    let origin = if read && crate::cross_origin::read_path(&path) {
+        crate::cross_origin::response_origin(request.headers(), origins)
+    } else {
+        None
+    };
     let mut device = None;
     let mut response = if open {
         request.extensions_mut().insert(Asker { source });
         next.run(request).await
     } else {
-        match who(&app, &request, local) {
+        match who(&app, &request, local && !listed, listed) {
             None => {
                 let too_many = app
                     .door
@@ -1213,6 +1231,9 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
         .headers_mut()
         .entry(header::CACHE_CONTROL)
         .or_insert(HeaderValue::from_static("no-store"));
+    if let Some(origin) = origin {
+        crate::cross_origin::allow(response.headers_mut(), origin);
+    }
     response
 }
 

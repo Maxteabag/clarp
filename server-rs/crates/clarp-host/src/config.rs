@@ -29,6 +29,8 @@ pub struct Config {
     pub shim: PathBuf,
     /// The administrator's token. Empty: every request is accepted.
     pub auth_token: String,
+    /// The web app origins allowed to read the Host identity and roster.
+    pub(crate) web_read_origins: std::collections::BTreeSet<String>,
     /// The Host's name, as the apps show it.
     pub name: String,
     /// Where a new agent works when nobody says.
@@ -655,6 +657,13 @@ impl Config {
             launcher,
             shim,
             auth_token: std::env::var("CLARP_HOST_TOKEN").unwrap_or_default(),
+            web_read_origins: crate::cross_origin::read_config(
+                &std::env::var_os("XDG_CONFIG_HOME")
+                    .map(PathBuf::from)
+                    .filter(|path| path.is_absolute())
+                    .unwrap_or_else(|| home().join(".config"))
+                    .join("clarp-host/config.toml"),
+            ),
             name,
             default_cwd,
             keep_spools,

@@ -33,6 +33,7 @@ pub mod connector;
 pub mod contacts;
 pub mod controls;
 pub mod coordination;
+mod cross_origin;
 pub mod diagnostics;
 pub mod direct;
 pub mod edge;
