@@ -15,7 +15,6 @@ use super::{Stage, app_now, check, control, posts, requests, rows, run_stages, s
 
 thread_local! {
     /// The profile's artifacts request before the menu's Artifacts.
-    static SAID: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static ARTIFACTS_BEFORE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
 
@@ -118,6 +117,8 @@ pub fn quiet_chat_check(out: String) {
             check(titles == ["Worked for 12s · 3 tools", "Ran npm test", "", "Stopped npm test"], &format!("the commentary stays folded; the reply and what failed or stopped show: {titles:?}"));
             check(live_row("live:cl:msg_01:1").is_none() && live_row("live:cl:msg_02:0").is_some(), "the final reply never folds");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::HIDE_WHEN_DONE);
+            // Set on the engine directly: apply it now, no Host event will.
+            crate::pump();
             true
         })),
         ("hidden when done", Box::new(move |app, _window, elapsed| {
@@ -130,22 +131,20 @@ pub fn quiet_chat_check(out: String) {
             check(live_row("live:cl:msg_02:0").is_some(), "the reply stays");
             shot(&out3, "quiet-03-hidden-when-done");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
+            // Set on the engine directly: apply it now, no Host event will.
+            crate::pump();
             true
         })),
-        ("always visible", Box::new(move |app, _window, elapsed| {
+        ("always visible", Box::new(move |_, _window, elapsed| {
             if live_row(FOLD).is_none() || elapsed < Duration::from_millis(300) {
-                if elapsed > Duration::from_secs(3) && !SAID.with(|s| s.replace(true)) {
-                    let engine = app.engine.borrow();
-                    let turn = engine.live_view("rachel").and_then(|v| v.turn().cloned());
-                    check(true, &format!("diag always visible: mode {} live_active {} lseq {:?} turn {:?} titles {:?} ids {:?}",
-                        engine.chat_activity_mode("rachel"), engine.live_active("rachel"), lseq(), turn, titles(), shown_ids()));
-                }
                 return false;
             }
             check(live_row("live:cl:msg_01:1").is_some(), "Always visible shows the commentary in its place");
             // A finished turn in Mike's /log: a spoken acknowledgment, a
             // tool, plain commentary, a tool, the reply (#653).
             app_now().engine.borrow_mut().set_activity_mode(clarp_core::presentation::GROUPED);
+            // Set on the engine directly: apply it now, no Host event will.
+            crate::pump();
             check(control("/__control/turn-summary", &json!({"on": true})).is_ok(), "the Host sums turns up in /log");
             check(control("/__control/upsert", &json!({"session": "mike", "turns": heard_rows()})).is_ok(), "Mike's turn lands");
             app_now().engine.borrow_mut().reconnect();
@@ -171,6 +170,8 @@ pub fn quiet_chat_check(out: String) {
             app_now().focus_transcript();
             shot(&out4, "quiet-04-heard");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::HIDE_WHEN_DONE);
+            // Set on the engine directly: apply it now, no Host event will.
+            crate::pump();
             true
         })),
         ("heard, hidden when done", Box::new(move |_, _window, elapsed| {
@@ -186,6 +187,8 @@ pub fn quiet_chat_check(out: String) {
             let app = app_now();
             let window = crate::window().expect("window");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::GROUPED);
+            // Set on the engine directly: apply it now, no Host event will.
+            crate::pump();
             let pane = app.active_id().to_string();
             crate::chat_menu::open(&app, &window, &pane);
             let menu = window.global::<crate::ChatMenu>();
