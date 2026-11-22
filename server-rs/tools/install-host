@@ -675,7 +675,7 @@ EOF
 # A Python reinstall writes these same marked wrappers back.
 if [ "$(systemctl --user is-active clarp-runtime.service 2>/dev/null || true)" = inactive ] &&
    [ "$(systemctl --user is-enabled clarp-runtime.service 2>/dev/null || true)" = disabled ]; then
-    for bin_dir in "$HOME/.local/bin" "$HOME/.local/share/clarp/bin"; do
+    for bin_dir in "$HOME/.local/bin" "$python_share/bin"; do
         python3 - "$bin_dir" "$share/tools" "$own_config" "${rust_tools[@]}" <<'PYTHON'
 from pathlib import Path
 import os
