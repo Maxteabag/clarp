@@ -32,6 +32,7 @@ use axum::http::request::Parts;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tokio::time::Instant;
 
 /// The largest message that is taken on a socket, as the Python Host's connector takes one.
 pub const MESSAGE_MOST: usize = clarp_kernel::connector::MESSAGE_MOST;
@@ -196,7 +197,14 @@ impl Carried {
 /// How a route takes its socket: the line that came with the request, or the upgrade of a
 /// request at the door. A request that asks for no socket has none, and its route says so
 /// in its own words: the Python Host's routes do not all say it alike.
-pub struct Socket(Option<Asked>);
+pub struct Socket(Option<Asked>, Option<Heartbeat>);
+
+/// Liveness for routes that keep a process open on a direct WebSocket.
+#[derive(Clone, Copy)]
+pub(crate) struct Heartbeat {
+    pub ping_every: Duration,
+    pub idle: Duration,
+}
 
 enum Asked {
     Door(Box<WebSocketUpgrade>),
@@ -209,16 +217,17 @@ impl<S: Send + Sync> FromRequestParts<S> for Socket {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let carried = parts.extensions.get::<Carried>().and_then(Carried::take);
         if let Some(line) = carried {
-            return Ok(Self(Some(Asked::Carried(line))));
+            return Ok(Self(Some(Asked::Carried(line)), None));
         }
         // At the door a socket is asked for as the Python Host reads a request for one,
         // and is there when the connection can become one.
         if !clarp_kernel::socket::asked_for(&crate::edge::headers_of(&parts.headers)) {
-            return Ok(Self(None));
+            return Ok(Self(None, None));
         }
         let upgrade = WebSocketUpgrade::from_request_parts(parts, state).await;
         Ok(Self(
             upgrade.ok().map(|upgrade| Asked::Door(Box::new(upgrade))),
+            None,
         ))
     }
 }
@@ -227,6 +236,12 @@ impl Socket {
     /// Whether the request asked for a socket.
     pub fn asked(&self) -> bool {
         self.0.is_some()
+    }
+
+    /// A relay stream has no WebSocket control frames. Its connector owns disconnects.
+    pub(crate) fn with_heartbeat(mut self, heartbeat: Heartbeat) -> Self {
+        self.1 = Some(heartbeat);
+        self
     }
 
     /// Opens the socket and has `serve` serve it; the answer says that it was opened. The
@@ -241,7 +256,7 @@ impl Socket {
                 let upgrade = upgrade.max_message_size(MESSAGE_MOST);
                 upgrade.on_upgrade(move |socket| async move {
                     let (line, carrier) = Line::new();
-                    tokio::join!(carried_at_the_door(socket, carrier), serve(line));
+                    tokio::join!(carried_at_the_door(socket, carrier, self.1), serve(line));
                 })
             }
             Some(Asked::Carried(line)) => {
@@ -267,11 +282,28 @@ pub fn refused(status: StatusCode, words: &str) -> Response {
 /// Carries a line over a WebSocket at the door: what the client says goes to the route,
 /// what the route tells goes to the client, until one of them is gone or the route closes
 /// the socket.
-async fn carried_at_the_door(mut socket: WebSocket, carrier: Carrier) {
+async fn carried_at_the_door(
+    mut socket: WebSocket,
+    carrier: Carrier,
+    heartbeat: Option<Heartbeat>,
+) {
     let Carrier { heard, mut told } = carrier;
+    let mut last_read = Instant::now();
+    let mut ping_at = heartbeat.map(|policy| last_read + policy.ping_every);
     let last = loop {
+        let idle_at = heartbeat.map(|policy| last_read + policy.idle);
         tokio::select! {
+            () = sleep_to(idle_at) => break closing(1001, "terminal idle timeout"),
+            () = sleep_to(ping_at) => {
+                ping_at = heartbeat.map(|policy| Instant::now() + policy.ping_every);
+                if !send_before(&mut socket, Message::Ping(Vec::new().into()), idle_at).await {
+                    return;
+                }
+            }
             said = socket.recv() => {
+                if matches!(said, Some(Ok(_))) {
+                    last_read = Instant::now();
+                }
                 let said = match said {
                     Some(Ok(Message::Text(text))) => Heard::Text(text.as_str().to_string()),
                     Some(Ok(Message::Binary(bytes))) => Heard::Bytes(bytes.to_vec()),
@@ -293,21 +325,38 @@ async fn carried_at_the_door(mut socket: WebSocket, carrier: Carrier) {
                 }
             }
             said = told.recv() => {
-                let sent = match said {
-                    Some(Told::Text(text)) => socket.send(Message::Text(text.into())).await,
-                    Some(Told::Bytes(bytes)) => socket.send(Message::Binary(bytes.into())).await,
+                let message = match said {
+                    Some(Told::Text(text)) => Message::Text(text.into()),
+                    Some(Told::Bytes(bytes)) => Message::Binary(bytes.into()),
                     Some(Told::Close(code, reason)) => break closing(code, &reason),
                     // The route is done: the socket is closed as one that ended well.
                     None => break closing(ENDED_WELL, ""),
                 };
-                if sent.is_err() {
+                if !send_before(&mut socket, message, idle_at).await {
                     return;
                 }
             }
         }
     };
+    // Let the route clean up its program even if the close frame takes time to send.
+    drop((heard, told));
     let closes = socket.send(Message::Close(Some(last)));
     let _ = tokio::time::timeout(CLOSES_WITHIN, closes).await;
+}
+
+async fn sleep_to(at: Option<Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn send_before(socket: &mut WebSocket, message: Message, at: Option<Instant>) -> bool {
+    let sent = socket.send(message);
+    match at {
+        Some(at) => matches!(tokio::time::timeout_at(at, sent).await, Ok(Ok(()))),
+        None => sent.await.is_ok(),
+    }
 }
 
 fn closing(code: u16, reason: &str) -> CloseFrame {

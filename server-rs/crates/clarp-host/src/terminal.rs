@@ -39,7 +39,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::agent::TerminalLease;
 use crate::edge::{ApiError, App};
-use crate::line::{self, ENDED_WELL, Heard, Line, Socket, Told};
+use crate::line::{self, ENDED_WELL, Heard, Heartbeat, Line, Socket, Told};
 
 /// How much of what a program printed goes to the client in one message.
 const PRINTED_MOST: usize = 64 * 1024;
@@ -47,6 +47,11 @@ const PRINTED_MOST: usize = 64 * 1024;
 const SIZE: (u16, u16) = (80, 24);
 /// How long a program is given to end when it is asked to, before it is killed.
 const ENDS_WITHIN: Duration = Duration::from_secs(1);
+/// An attached direct client can stay quiet as long as it answers control frames.
+const HEARTBEAT: Heartbeat = Heartbeat {
+    ping_every: Duration::from_secs(20),
+    idle: Duration::from_secs(45),
+};
 /// What a request that asks for no socket is told, by the routes of terminals.
 const NO_SOCKET: &str = "upgrade required (websocket)";
 /// The shell of a machine that names none.
@@ -265,7 +270,9 @@ async fn of_the_host(State(app): State<App>, socket: Socket) -> Response {
         env: Vec::new(),
         _agent: None,
     };
-    socket.open(move |line| serve(line, program))
+    socket
+        .with_heartbeat(HEARTBEAT)
+        .open(move |line| serve(line, program))
 }
 
 /// What an agent's tool is started as in a terminal: its program on this machine, and
@@ -333,7 +340,9 @@ async fn of_an_agent(
         env: facts.env,
         _agent: Some(lease),
     };
-    socket.open(move |line| serve(line, program))
+    socket
+        .with_heartbeat(HEARTBEAT)
+        .open(move |line| serve(line, program))
 }
 
 pub fn routes() -> Router<App> {
@@ -347,6 +356,83 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    #[tokio::test]
+    async fn a_terminal_pings_and_reaps_its_pty_after_the_client_goes_silent() {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let heartbeat = Heartbeat {
+            ping_every: Duration::from_millis(50),
+            idle: Duration::from_millis(600),
+        };
+        let ended = std::sync::Arc::new(tokio::sync::Notify::new());
+        let serving = ended.clone();
+        let router = Router::new().route(
+            "/terminal",
+            get(move |socket: Socket| async move {
+                socket
+                    .with_heartbeat(heartbeat)
+                    .open(move |line| async move {
+                        serve(
+                            line,
+                            Program {
+                                called: "test".into(),
+                                argv: vec![
+                                    "/bin/sh".into(),
+                                    "-c".into(),
+                                    "printf '%s\n' \"$$\"; exec sleep 60".into(),
+                                ],
+                                cwd: std::env::temp_dir(),
+                                env: Vec::new(),
+                                _agent: None,
+                            },
+                        )
+                        .await;
+                        serving.notify_one();
+                    })
+            }),
+        );
+        let door = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = door.local_addr().unwrap();
+        let host = tokio::spawn(async move { axum::serve(door, router).await.unwrap() });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}/terminal"))
+            .await
+            .unwrap();
+
+        let mut printed = Vec::new();
+        let mut pinged = false;
+        let active_for = heartbeat.idle + heartbeat.ping_every;
+        let observing = async {
+            loop {
+                match client.next().await.unwrap().unwrap() {
+                    Message::Ping(_) => pinged = true,
+                    Message::Binary(bytes) => printed.extend_from_slice(&bytes),
+                    other => panic!("terminal ended while the client answered pings: {other:?}"),
+                }
+            }
+        };
+        assert!(tokio::time::timeout(active_for, observing).await.is_err());
+        assert!(pinged, "the terminal should probe the WebSocket");
+        let pid: u32 = std::str::from_utf8(&printed)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let stamp = crate::process::start_token(pid);
+        assert!(crate::process::is_alive(pid, &stamp));
+
+        // Leave the TCP connection open without polling messages or answering pings.
+        tokio::time::timeout(Duration::from_secs(4), ended.notified())
+            .await
+            .unwrap();
+        assert!(
+            !crate::process::is_alive(pid, &stamp),
+            "the PTY child was reaped"
+        );
+        drop(client);
+        host.abort();
+    }
 
     #[test]
     fn a_tool_this_host_does_not_run_has_no_terminal_here() {
