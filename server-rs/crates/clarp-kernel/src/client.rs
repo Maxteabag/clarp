@@ -43,7 +43,7 @@ pub struct Minimums {
 }
 
 /// Client names used by the built-in apps, including those without a render-spec default.
-pub const BUILT_IN_NAMES: &[&str] = &["ios", "android"];
+pub const BUILT_IN_NAMES: &[&str] = &["ios", "android", "web"];
 
 impl Minimums {
     /// The reference's diagnostics, one for refused keys and one for case variants.

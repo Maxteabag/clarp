@@ -427,7 +427,7 @@ PLANTS = [
      'let (key, name) = (as_said(name), as_said(key));'),
     (CL, 'host', 'a key in other letters is not said', 'if !self.cased.is_empty() {', 'if false {'),
     (CL, 'host', 'Android is not a known client name for diagnostics',
-     'pub const BUILT_IN_NAMES: &[&str] = &["ios", "android"];', 'pub const BUILT_IN_NAMES: &[&str] = &["ios"];'),
+     'pub const BUILT_IN_NAMES: &[&str] = &["ios", "android", "web"];', 'pub const BUILT_IN_NAMES: &[&str] = &["ios", "web"];'),
     (H, 'host', 'diagnostics name keys in alphabetical order',
      'let entries = table.iter().map(|(key, value)| (key, value.as_integer()));',
      'let mut entries: Vec<_> = table.iter().map(|(key, value)| (key, value.as_integer())).collect();\n            entries.sort_by_key(|(key, _)| *key);'),
