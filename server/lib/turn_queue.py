@@ -297,6 +297,31 @@ def _row_shown(con, client_msg_id: str, trace_id: str) -> bool:
     ).fetchone() is not None
 
 
+CLIENT_ID_HELD_ELSEWHERE = "client_msg_id is held by another agent"
+
+
+def client_id_held_elsewhere(con, agent_id: str, client_msg_id: str) -> bool:
+    """Whether another agent already holds this app id: a queue item, a user row
+    (u-<id>) or an admission. The Host keeps one such id per Host (the queue's key
+    and the user row's id are Host-wide), so a second agent's send under it would
+    be dropped as a duplicate of the first; /send refuses it instead (R63). The
+    apps mint a fresh id per message, so only a client bug meets this."""
+    from .message_import_common import _client_message_id
+    cid = (client_msg_id or "").strip()
+    if not cid:
+        return False
+    return con.execute(
+        """SELECT 1 FROM queued_turns
+            WHERE (queue_id = ? OR client_msg_id = ?) AND agent_id != ?
+           UNION ALL
+           SELECT 1 FROM messages WHERE message_id = ? AND agent_id != ?
+           UNION ALL
+           SELECT 1 FROM prompt_admissions WHERE client_admission_id = ? AND agent_id != ?
+           LIMIT 1""",
+        (cid, cid, agent_id, _client_message_id(cid), agent_id, cid, agent_id),
+    ).fetchone() is not None
+
+
 def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
             trace_id: str, client_msg_id: str, synthesize_audio: bool,
             origin: str, sender_agent_id: str,
