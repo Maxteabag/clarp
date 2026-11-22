@@ -91,7 +91,28 @@ def _manifest() -> list[dict]:
     skills = value.get("skills") if isinstance(value, dict) else None
     if not isinstance(skills, list):
         raise RuntimeError("Clarp skill manifest is unavailable")
+    for index, item in enumerate(skills):
+        problem = _item_problem(item)
+        if problem:
+            # R155: a malformed item makes the whole manifest unavailable (503 from both
+            # routes), said once in the log, never a request left without an answer.
+            from .log import log
+            log("managedSkillsManifestBad", f"item={index} {problem}")
+            raise RuntimeError("Clarp skill manifest is unavailable")
     return skills
+
+
+def _item_problem(item) -> str:
+    """Why a manifest item cannot be read, or "": an object with a non-empty text id and,
+    when present, a list of requirements."""
+    if not isinstance(item, dict):
+        return "is not an object"
+    if not isinstance(item.get("id"), str) or not item["id"].strip():
+        return "has no text id"
+    requires = item.get("requires")
+    if requires is not None and not isinstance(requires, list):
+        return "requires is not a list"
+    return ""
 
 
 def _source(skill_id: str) -> Path:
