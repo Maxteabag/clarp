@@ -464,7 +464,7 @@
    "work": "work",
    "model": "gpt-6-sol",
    "asked": [{"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {"name": "Bash", "command": "make all", "input": {"command": "make all"}}}]}, {"level": 2, "how": "rule", "requests": [{"id": "1", "activity": {"name": "Bash", "input": {"cmd": "cd /srv && python3 -c 'print(1)'"}}}]}],
-   "learned": [{"signature": "x:make #d5cfedad658f39e039da32e8", "level": 2, "template_text": "Runs make.", "slot_names": [], "program": "make", "action": "execute", "producer": "llm", "parameterised": false, "hits": 0}, {"signature": "x:python3 #59b92ef86aebed454a45c515", "level": 2, "template_text": "Runs Bash.", "slot_names": [], "program": "python3", "action": "compound", "producer": "llm", "parameterised": false, "hits": 0}],
+   "learned": [{"signature": "x:make #d5cfedad658f39e039da32e8", "level": 2, "template_text": "Runs make.", "slot_names": [], "program": "make", "action": "execute", "producer": "llm", "parameterised": false, "hits": 0}, {"signature": "x:python3 #59b92ef86aebed454a45c515", "level": 2, "template_text": "Runs Bash.", "slot_names": [], "program": "python3", "action": "execute", "producer": "llm", "parameterised": false, "hits": 0}],
    "counts": {"template": 2, "learned": 0, "exact_cache": 0, "jev": 0, "llm": 2, "failed": 0, "miss": 0, "disabled": 0},
    "totals": {"lookups": 4, "hits": 2, "hit_rate": 0.5, "learned_entries": 2, "learned_parameterised": 0, "learned_exact_only": 2, "learned_by_producer": {"llm": 2}, "learned_hits": 0, "jev_picks": 0, "llm_calls": 2},
    "steps": [
