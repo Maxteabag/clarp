@@ -2881,6 +2881,22 @@ impl Fleet {
         &mut self,
         asked: &PushRegistration,
     ) -> Result<Result<(), devices::Refused>, Unavailable> {
+        // A phone already registered under this pairing can retry without rewriting
+        // its row. A new pairing must still pass through the ownership transfer.
+        if !asked.owner.is_empty()
+            && asked.platform.trim() == "ios"
+            && devices::provider_for("ios", &asked.provider) == "apns"
+        {
+            let token = devices::canonical_token(&asked.token);
+            if self.push.row(&token).is_some_and(|row| {
+                row.principal == asked.owner
+                    && row.disabled_at.is_none()
+                    && row.platform == "ios"
+                    && (row.provider == "apns" || row.provider.is_empty())
+            }) {
+                return Ok(Ok(()));
+            }
+        }
         let registered = self.push.register(
             &devices::Registration {
                 token: &asked.token,
