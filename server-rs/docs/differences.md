@@ -526,6 +526,15 @@ the daily schedule.
 
 ## Rust-first features
 
+- **A turn whose model the account's plan does not offer (issue 720).** The Python
+  coordinator ends such a turn after three answers of the owner's selector that leave its
+  model out (`PLAN_CHECKS`, about three minutes). The Rust Host ends it on the first
+  (`PLAN_CHECKS_HERE`), with the same `account_plan` failure and words. That is a shorter
+  wait, not proof that no saved account has the model: an answer says only what the account
+  it made active serves. While it waits, its state and live activity say it waits for an
+  account that serves its model, not for usage. Usage and sign-in waits are unchanged. The
+  account-pool vectors still hold the Python count.
+
 - **Moving an agent to another backend (issue 720, Rust contract 158).** `POST /agent-transit`,
   `GET /agent-transit`, the `agent-transit` event and `clarp-admin agent transit` move an agent to
   another tool with its conversation, rebuilt from the `transit` tool's writers: the Host writes

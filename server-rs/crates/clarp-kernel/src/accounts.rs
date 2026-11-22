@@ -44,6 +44,11 @@ pub const QUIET_MS: i64 = 600_000;
 pub const MAX_RELAPSES: u32 = 5;
 /// How many answers without its model a turn parked for its plan hears before it ends.
 pub const PLAN_CHECKS: u32 = 3;
+/// The same on the Rust Host: the first answer of the selector that leaves the turn's model
+/// out ends it. That is a choice of how long to wait, not proof that no account has the model
+/// (an answer says only what the account it made active serves); waiting three minutes on
+/// it left a turn shown as waiting for usage it did not lack (issue 720, `docs/differences.md`).
+pub const PLAN_CHECKS_HERE: u32 = 1;
 /// How long a recovery that a starting Host takes up waits for its turns to come back.
 pub const CARRIED_WAIT_MS: i64 = 120_000;
 /// How often it looks for them meanwhile.
@@ -333,11 +338,22 @@ pub struct Pool {
     /// Turns let go at their half hour while others still waited for their model: each is
     /// the trial of whether the account now active serves that model again.
     trials: BTreeMap<Key, (String, i64)>,
+    /// How many answers without its model a turn parked for its plan hears before it ends,
+    /// where it is not [`PLAN_CHECKS`].
+    plan_checks: Option<u32>,
 }
 
 impl Pool {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A pool whose turns parked for their plan end after `checks` answers without their
+    /// model (at least one).
+    #[must_use]
+    pub fn ending_plans_after(mut self, checks: u32) -> Self {
+        self.plan_checks = Some(checks.max(1));
+        self
     }
 
     fn at(&self, agent: &str) -> Option<usize> {
@@ -916,7 +932,8 @@ impl Pool {
                     if let Some(at) = self.at(&attempt.agent) {
                         self.attempts[at].unserved_checks = attempt.unserved_checks;
                     }
-                    if attempt.ends && attempt.unserved_checks >= PLAN_CHECKS {
+                    let most = self.plan_checks.unwrap_or(PLAN_CHECKS);
+                    if attempt.ends && attempt.unserved_checks >= most {
                         ended.push(attempt.clone());
                     }
                 }
@@ -1145,6 +1162,40 @@ mod tests {
         );
         assert!(pool.checking());
         pool
+    }
+
+    #[test]
+    fn on_this_host_a_turn_parked_for_its_plan_ends_on_the_first_answer_without_its_model() {
+        let parked = |checks: Option<u32>| {
+            let mut pool = match checks {
+                Some(checks) => Pool::new().ending_plans_after(checks),
+                None => Pool::new(),
+            };
+            assert!(!pool.register(starting("a", "t-a"), 0).0);
+            assert!(pool.request("a", "t-a", true, true, 0).0);
+            let stopping = pool.fired(Timer::Recovery, 0);
+            assert!(stopping.contains(&stop("a")), "{stopping:?}");
+            let asked = pool.stopped("a", 500);
+            assert!(
+                asked
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::Ask { .. })),
+                "{asked:?}"
+            );
+            pool
+        };
+        let ends = |effects: &[Effect]| {
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::End { agent } if agent == "a"))
+        };
+        let mut here = parked(Some(PLAN_CHECKS_HERE));
+        let answered = here.answered(Verdict::NoAccount, 1_000);
+        assert!(ends(&answered), "{answered:?}");
+        // The Python coordinator's count waits for three such answers.
+        let mut there = parked(None);
+        let answered = there.answered(Verdict::NoAccount, 1_000);
+        assert!(!ends(&answered), "{answered:?}");
     }
 
     #[test]

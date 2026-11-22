@@ -1785,9 +1785,14 @@ impl Actor {
                     self.recorder.agent().live(),
                     Some(Turn::Parked(parked)) if matches!(parked.wait, Wait::Account { .. })
                 );
-            let events = self
-                .shown
-                .account_recovery(waits.then_some(ACCOUNT_WAIT), now_ms);
+            // One that waits for its model says so, as its state does.
+            let plan = self.parked_for_its_plan().then(|| {
+                let model = self.turn_model().unwrap_or_default();
+                let model = Some(model.as_str()).filter(|model| !model.is_empty());
+                failures::account_wait_message(self.backend.id(), model)
+            });
+            let said = plan.as_deref().unwrap_or(ACCOUNT_WAIT);
+            let events = self.shown.account_recovery(waits.then_some(said), now_ms);
             self.shown_events.extend(events);
         }
     }
@@ -5230,8 +5235,18 @@ impl Actor {
     }
 
     fn model_waited_for(&self) -> Option<String> {
-        self.for_its_model
+        (self.for_its_model || self.parked_for_its_plan())
             .then(|| self.turn_model().unwrap_or_default())
+    }
+
+    /// The turn waits for an account because the provider said the active one's plan does not
+    /// offer its model: it waits for that model, not for usage.
+    fn parked_for_its_plan(&self) -> bool {
+        matches!(
+            self.recorder.agent().live(),
+            Some(Turn::Parked(parked))
+                if parked.wait.is_for_an_account() && parked.kind == failures::ACCOUNT_PLAN
+        )
     }
 
     /// The turn that waits for an account, and since when it has, where one does.

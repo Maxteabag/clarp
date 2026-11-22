@@ -2191,6 +2191,9 @@ fn a_turn_the_pool_holds_for_its_plan_waits_and_ends_with_what_the_provider_said
     );
     assert_eq!(actor.status().last, None);
     assert_eq!(shown(&actor), vec![pair("u-1", "user: go")]);
+    // It waits for its model, not for usage: so its state says from the first (issue 720).
+    let live = actor.status().live.expect("the turn waits");
+    assert!(live.waits_for_its_model.is_some(), "{live:?}");
 
     // No account's plan offers the model, the pool finds: the turn ends, with what the
     // provider said of its own.

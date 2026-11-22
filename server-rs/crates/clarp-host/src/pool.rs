@@ -61,7 +61,7 @@ impl Service {
             login_lock,
             tool,
             command,
-            pool: Mutex::new(Pool::new()),
+            pool: Mutex::new(Pool::new().ending_plans_after(accounts::PLAN_CHECKS_HERE)),
             clock,
             fleet: OnceLock::new(),
             selector_most: SELECTOR_MOST,
