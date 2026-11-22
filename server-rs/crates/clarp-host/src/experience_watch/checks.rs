@@ -4,8 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use clarp_actor::{QueueItemStatus, Waiting};
-use clarp_kernel::experience::Window;
-use clarp_kernel::turn::Origin;
+use clarp_kernel::experience::{Window, is_user_wait};
 use clarp_store_sqlite::client_events::CrashCandidate;
 use futures_util::{StreamExt as _, stream};
 use serde_json::Value;
@@ -40,7 +39,10 @@ fn agent(
     for row in facts
         .queue
         .iter()
-        .filter(|row| row.origin == Origin::User && row.status != QueueItemStatus::Started)
+        .filter(|row| {
+            row.status != QueueItemStatus::Started
+                && is_user_wait(&row.origin, &row.client_id, row.sender_agent_id.is_some())
+        })
     {
         let waited = now.saturating_sub(row.accepted_at_ms);
         if waited > settings.wait_ms {
@@ -358,7 +360,7 @@ mod tests {
         http::{Method, Request, StatusCode, header},
     };
     use clarp_kernel::experience::Read;
-    use clarp_kernel::turn::{Admission, TurnId};
+    use clarp_kernel::turn::{Admission, Origin, TurnId};
     use tower::ServiceExt as _;
 
     fn release_steps(settings: &Settings, zone: &jiff::tz::TimeZone, now: i64) {
@@ -434,6 +436,81 @@ mod tests {
         );
     }
 
+    fn wait_provenance(settings: &Settings, now: i64) {
+        use clarp_kernel::agent::Command;
+        use clarp_kernel::conversation::{Message, Sender};
+        use clarp_kernel::journal::{Incoming, Recorder};
+        use clarp_kernel::turn::RunOutcome;
+        use clarp_ports::log::LogEngine as _;
+
+        let cases = [
+            ("user", Origin::User, false, true),
+            ("oracle", Origin::Trigger { name: "oracle".into() }, false, true),
+            ("agent", Origin::Agent { agent_id: "sender".into() }, true, false),
+            ("watcher", Origin::Agent { agent_id: String::new() }, true, false),
+            ("html-form-fixture", Origin::User, false, false),
+            ("mislabeled", Origin::User, true, false),
+            ("schedule", Origin::Trigger { name: "schedule".into() }, false, false),
+        ];
+        for (id, origin, has_sender, counts) in cases {
+            let engine = clarp_store_mem::MemEngine::new();
+            let open = || engine.open(std::path::Path::new("watch-wait"), clarp_codec::standard_set("none").unwrap()).unwrap();
+            let mut recorder = Recorder::open(open()).unwrap();
+            let first = recorder.accept(serde_json::to_vec(&Message::default()).unwrap(), Origin::User, now - 180_000).unwrap().turn.unwrap();
+            let message = Message {
+                id: format!("u-{id}"),
+                text: "Fixture".into(),
+                origin: origin.clone(),
+                sender: has_sender.then(|| Sender {
+                    agent_id: "sender".into(),
+                    name: "Sender".into(),
+                    session: "sender".into(),
+                }),
+                ..Message::default()
+            };
+            let at = now - 120_000;
+            let second = recorder.accept_message(Incoming {
+                key: Some(message.id.clone()),
+                body: serde_json::to_vec(&message).unwrap(),
+                origin: origin.clone(),
+                admission: Admission::Later,
+                coordination: None,
+                user_word: false,
+            }, at).unwrap().turn.unwrap();
+
+            let facts = AgentFacts {
+                queue: vec![Waiting {
+                    turn: second,
+                    message_id: message.id.clone(),
+                    client_id: message.client_id().into(),
+                    told_id: message.told_id().into(),
+                    text: message.text,
+                    speak: false,
+                    accepted_at_ms: at,
+                    admission: Admission::Later,
+                    status: QueueItemStatus::Queued,
+                    origin,
+                    sender_agent_id: message.sender.map(|sender| sender.agent_id),
+                }],
+                parked: None,
+                paused: false,
+                window: Window::default(),
+            };
+            let mut seen = Seen::default();
+            agent(&mut seen, settings, "receiver", now, &facts, 0);
+            assert_eq!(seen.found.contains_key(&("wait".into(), "receiver".into())), counts, "{id} in mailbox");
+
+            let mut batch = recorder.batch();
+            batch.command(Command::TurnEnded { turn: first, outcome: RunOutcome::Completed }, now - 30_000).unwrap();
+            batch.command(Command::TurnStarted { turn: second }, now).unwrap();
+            batch.commit().unwrap();
+            let live = recorder.experience_window(at, now).unwrap();
+            let replayed = Recorder::open(open()).unwrap().experience_window(at, now).unwrap();
+            assert_eq!(live.reads.len(), usize::from(counts), "{id} live journal");
+            assert_eq!(live.reads, replayed.reads, "{id} after replay");
+        }
+    }
+
     #[tokio::test]
     async fn experience_watch_findings_open_clear_and_summarize_once() {
         let place = crate::unkept::at_the_port::place("experience-watch-pass");
@@ -475,6 +552,7 @@ mod tests {
         let config: toml::Value = "enabled = true\nsummary_hour = 17\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\nwindow_minutes = 3\n".parse().unwrap();
         let settings = Settings::from_section(Some(&config));
         release_steps(&settings, &zone, now);
+        wait_provenance(&settings, now);
         let since = settings.window_start(now, now);
         assert_eq!(since, now - 300_000);
         assert_eq!(settings.window_start(now, now - 360_000), now - 360_000);

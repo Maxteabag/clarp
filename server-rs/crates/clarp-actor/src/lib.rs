@@ -2463,8 +2463,12 @@ impl Actor {
             .collect()
     }
 
-    pub fn experience_window(&self, since: i64, now: i64) -> clarp_kernel::experience::Window {
-        self.recorder.experience_window(since, now)
+    pub fn experience_window(
+        &self,
+        since: i64,
+        now: i64,
+    ) -> Result<clarp_kernel::experience::Window, ActorError> {
+        Ok(self.recorder.experience_window(since, now)?)
     }
 
     /// The item a user can edit or withdraw while it is waiting.
