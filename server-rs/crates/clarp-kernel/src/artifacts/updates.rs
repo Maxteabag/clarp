@@ -1,6 +1,6 @@
 //! Updates: what agents made that their user may want to look at, a page at a time.
 //!
-//! The apps show it as one list: what failed first, then what is ready to be looked at, then
+//! The apps show it as one list: what blocks first, then what is ready to be looked at, then
 //! what is being worked on, each the oldest first. A page ends with a cursor that goes on
 //! from where it ended, as long as nothing that is shown has changed since: the cursor names
 //! the list it was cut from, and a list that is another is asked for from its beginning.
@@ -44,10 +44,9 @@ pub const INDEX_VERSION: u64 = 1;
 /// The most a page holds.
 const MOST: i64 = 200;
 
-/// Where an artifact stands for its user: `blocking` when it failed, `review` when it is
-/// ready or done, `working` while it is being made. `None` when it is not shown: a kind
-/// that has a list of its own, a draft, what was called off or ran out, what was thrown
-/// away.
+/// Where an artifact stands for its user: `blocking` when it failed or is an unanswered
+/// native form, `review` when it is ready to look at or done, `working` while it is being made.
+/// A kind with its own list, a draft, a cancelled or expired artifact, or a deleted one is omitted.
 pub fn bucket(artifact: &Artifact, now: i64) -> Option<&'static str> {
     if !TYPES.contains(&artifact.kind.as_str()) || artifact.deleted_at.is_some() {
         return None;
@@ -67,6 +66,8 @@ pub fn bucket(artifact: &Artifact, now: i64) -> Option<&'static str> {
     match artifact.status.as_str() {
         "failed" => Some("blocking"),
         "active" => Some("working"),
+        // Opening the chat must leave the form waiting for an answer.
+        "ready" if artifact.kind == "render_spec" => Some("blocking"),
         "ready" | "completed" => Some("review"),
         _ => None,
     }
@@ -79,7 +80,7 @@ struct Shown<'a> {
     bucket: &'static str,
 }
 
-/// The list: what failed, what is ready, what is in the making, each the oldest first.
+/// The list: what blocks, what is ready, what is in the making, each the oldest first.
 fn shown<'a>(shelves: &'a [Shelf<'a>], now: i64) -> Vec<Shown<'a>> {
     let mut shown: Vec<Shown<'a>> = shelves
         .iter()

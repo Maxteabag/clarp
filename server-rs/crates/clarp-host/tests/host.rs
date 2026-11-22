@@ -8915,6 +8915,18 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         Some(&envelope("artifact-spec")),
     );
     assert_eq!(status, 201, "{made}");
+    let attention_bucket = || {
+        let (status, page) = ask("GET", "/attention/inbox", capable, None);
+        assert_eq!(status, 200, "{page}");
+        page["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["artifact_id"] == "artifact-spec")
+            .unwrap()["attention_bucket"]
+            .clone()
+    };
+    assert_eq!(attention_bucket(), "blocking");
     let mark = made["artifact"]["content_omitted"].clone();
     assert_eq!(made["artifact"]["element_count"], 6);
     assert_eq!(made["artifact"]["catalog_sha256"], json!(catalog.sha256));
@@ -9015,6 +9027,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     assert_eq!(answered["submission_id"], json!("a".repeat(32)));
     assert_eq!(answered["answers"], submission["answers"]);
     assert_eq!(read["artifact"]["status"], "completed");
+    assert_eq!(attention_bucket(), "review");
     assert!(answered["accepted_at"].as_i64().is_some());
     let (_, listed) = ask("GET", "/artifacts?search=Decide", capable, None);
     assert!(!listed.to_string().contains("submit_decision"));
