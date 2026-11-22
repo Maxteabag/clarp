@@ -182,17 +182,21 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
                    FROM messages WHERE {where}"""
     latest = " ORDER BY updated_at DESC, revision DESC, seq DESC LIMIT 1"
     row = db.conn().execute(select + latest, tuple(params)).fetchone()
-    if identified and row is not None and row["origin"] == "agent":
-        # Only peers are subordinate to an eligible user request. Watcher,
-        # Oracle and automation keep their existing order among nonpeers.
+    chatter = notification_policy.AGENT_CHATTER_ORIGINS
+    if identified and row is not None and (row["origin"] or "").strip() in chatter:
+        # A peer's message, a schedule, a heartbeat or a dream steered into an
+        # eligible user request is subordinate to it: it never becomes the cause
+        # that silences the user's own turn (since R7 a steered one is this
+        # turn's row). Watcher, Oracle and automation keep their existing order.
         user = db.conn().execute(
             select + " AND COALESCE(NULLIF(TRIM(origin), ''), 'user')='user'"
             " AND COALESCE(sender_agent_id, '')=''" + latest,
             tuple(params)).fetchone()
         if user is not None:
+            marks = ",".join("?" * len(chatter))
             return db.conn().execute(
-                select + " AND COALESCE(origin, 'user')<>'agent'" + latest,
-                tuple(params)).fetchone()
+                select + f" AND COALESCE(TRIM(origin), 'user') NOT IN ({marks})" + latest,
+                (*params, *sorted(chatter))).fetchone()
     return row
 
 
