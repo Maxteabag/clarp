@@ -1,2 +1,2 @@
-b23756a87bbc8f0f3b01b8be5fce6741d6590485
-The merge of the Python Host's PR 701 (it holds every merge through PR 701 in main's order: everything through 700 as before; 701 ported, an unanswered render_spec is attention_bucket blocking and a completed one stays review, the Host contract 143): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
+10b7547dd6c981b0f3ed6041404cd5ccdb255c2f
+The merge of the Python Host's PR 708 (it holds every merge through PR 708 in main's order: everything through 701 as before; 705 ported, peer reads take 15 s and 16 MiB and ask /agents/snapshot?include_archived=0; 708 no port, a Python test that reads no peers.json of the machine): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
