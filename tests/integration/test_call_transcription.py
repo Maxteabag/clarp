@@ -77,6 +77,29 @@ def test_a_present_call_header_is_validated_before_any_stt(host):
     assert (status, body["error"], body["reason"]) == (409, "call ended", "ended")
 
 
+def test_a_call_clips_id_is_bound_to_its_principal_call_and_session(host):
+    """R87: a transcription id reused with the same audio returned the result cached for
+    another call, another participant or a chat clip. A call clip's request now binds whose
+    it is, which call and which session; another scope's reuse of the id is 409."""
+    status, started = call(host, "POST", "/calls", {"agents": ["rachel", "mike"]})
+    assert status == 200, started
+    call_id = started["call"]["call_id"]
+    rachel = {"X-Clarp-Call-Id": call_id, "X-Transcription-Session": "rachel"}
+    status, first = transcribe(host, "tx-bound", rachel)
+    assert status == 200 and first["text"] == "QA voice prompt"
+    status, again = transcribe(host, "tx-bound", rachel)
+    assert status == 200 and again.get("cached") is True          # the same scope: its own result
+    for other in ({"X-Transcription-Session": "rachel"},           # the same id from chat
+                  {**rachel, "X-Transcription-Session": "mike"}):  # another participant
+        status, body = transcribe(host, "tx-bound", other)
+        assert (status, body.get("error")) == (409, "transcription id reused for different audio"), (other, body)
+    # And the other way: an id first used by a chat clip is not a call clip's.
+    status, _ = transcribe(host, "tx-chat-first", {"X-Transcription-Session": "rachel"})
+    assert status == 200
+    status, body = transcribe(host, "tx-chat-first", rachel)
+    assert (status, body.get("error")) == (409, "transcription id reused for different audio")
+
+
 def test_the_settings_read_back_unset_by_default(host):
     status, body = call(host, "GET", "/server-info", token="qa-host-test")
     assert "call_transcription_policy" in body["capabilities"]["features"]
