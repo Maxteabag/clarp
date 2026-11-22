@@ -133,7 +133,8 @@ class Part:
     def template_activity(self):
         """The part as the scripted templates classify it, with its `cd` context."""
         if self.cwd and self.activity.get("name") == "Bash":
-            command = f"cd {shlex.quote(self.cwd)} && {self.activity['command']}"
+            # The call's own command, also when it is only under input.cmd (R40).
+            command = f"cd {shlex.quote(self.cwd)} && {_shell_command(self.activity)}"
             return {**self.activity, "command": command, "input": {"command": command}}
         return self.activity
 
@@ -551,6 +552,10 @@ def _shell_parts(command, depth=0):
         if operator in {"|", "|&"} and PurePosixPath(first).name not in _FILTERS:
             return [_exact(_bash(command), command, "opaque", whole)]
         parsed.append((_unmark(text), operator, cleaned))
+    if not parsed:
+        # No word to run (a lone comment, ";", an empty `bash -c ''`, R39). Inside `bash -c`
+        # nothing: the call is explained as itself. Alone, it is one opaque part.
+        return [] if depth else [_exact(_bash(command), command, "opaque", whole)]
     parts, cwd = [], ""
     for index, (text, operator, (plain, shaped)) in enumerate(parsed):
         base = PurePosixPath(plain[0]).name
