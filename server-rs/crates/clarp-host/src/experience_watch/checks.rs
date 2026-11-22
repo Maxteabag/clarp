@@ -1,18 +1,20 @@
 //! Observe one window of Host state. Refused reads leave that finding open.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use clarp_actor::{QueueItemStatus, Waiting};
 use clarp_kernel::experience::Window;
 use clarp_kernel::jobs::Job;
 use clarp_kernel::turn::Origin;
+use clarp_store_sqlite::client_events::CrashCandidate;
 use futures_util::{StreamExt as _, stream};
+use serde_json::Value;
 
 use crate::edge::App;
 use crate::fleet::Directory;
 
-use super::{book::Seen, settings::Settings};
+use super::{Relaunches, book::Seen, settings::Settings};
 
 const RECENT_MS: i64 = 24 * 60 * 60 * 1_000;
 
@@ -155,6 +157,102 @@ fn release(seen: &mut Seen, settings: &Settings, job: &Job, now: i64) {
     }
 }
 
+fn crash_count(row: &CrashCandidate) -> u64 {
+    let event = row.event.to_ascii_lowercase();
+    if event == "metrickit_report" {
+        return row
+            .report
+            .as_deref()
+            .and_then(|report| serde_json::from_str::<Value>(report).ok())
+            .and_then(|report| report["crashes"].as_u64())
+            .unwrap_or(0);
+    }
+    // Severity alone is not a crash: the apps also log error and fault
+    // levels for background sync, reconnects, hangs, and other diagnostics.
+    let kind = event.rsplit(['.', ':']).next().unwrap_or_default();
+    u64::from(matches!(
+        kind,
+        "crash"
+            | "app_crash"
+            | "app-crash"
+            | "fatal"
+            | "fatal_error"
+            | "fatal-error"
+            | "uncaught_exception"
+            | "uncaught-exception"
+    ))
+}
+
+fn platform(value: &str) -> bool {
+    matches!(value, "ios" | "android" | "desktop" | "web")
+}
+
+#[derive(Default)]
+struct Crashes {
+    count: u64,
+    build: String,
+    contract: Option<i64>,
+}
+
+fn app_crashes(
+    seen: &mut Seen,
+    settings: &Settings,
+    rows: Vec<CrashCandidate>,
+    launches: &BTreeMap<String, Relaunches>,
+) {
+    let mut crashes: BTreeMap<(String, String), Crashes> = BTreeMap::new();
+    for row in rows {
+        let count = crash_count(&row);
+        if count == 0 {
+            continue;
+        }
+        let launch = launches.get(&row.device);
+        let client = if platform(&row.client) {
+            row.client.as_str()
+        } else if row.event == "metrickit_report" {
+            "ios"
+        } else if let Some(launch) = launch.filter(|launch| platform(&launch.platform)) {
+            launch.platform.as_str()
+        } else {
+            continue;
+        };
+        let crash = crashes.entry((row.device, client.to_owned())).or_default();
+        crash.count = crash.count.saturating_add(count);
+        if !row.build.is_empty() {
+            crash.build = row.build;
+        }
+        if row.contract.is_some() {
+            crash.contract = row.contract;
+        }
+    }
+    let threshold = u64::try_from(settings.crash_events).unwrap_or(u64::MAX);
+    for ((device, client), crash) in crashes {
+        if crash.count < threshold {
+            continue;
+        }
+        let launch = launches.get(&device);
+        let matching_launch = launch.filter(|launch| launch.platform == client);
+        let build = if !crash.build.is_empty() {
+            &crash.build
+        } else {
+            matching_launch.map_or("unknown", |launch| launch.build.as_str())
+        };
+        let contract = crash
+            .contract
+            .or_else(|| matching_launch.and_then(|launch| launch.contract))
+            .map_or_else(|| "unknown".to_owned(), |n| n.to_string());
+        let count = launch.map_or(0, |launch| launch.count);
+        seen.add(
+            &format!("app_crash_{client}"),
+            &device,
+            format!(
+                "{} crash events. {count} launch requests. Build {build}. Contract {contract}.",
+                crash.count,
+            ),
+        );
+    }
+}
+
 pub(super) async fn collect(app: &App, settings: &Settings, now: i64) -> Seen {
     let since = now.saturating_sub(settings.window_ms);
     let directory = app.fleet.directory();
@@ -212,23 +310,21 @@ pub(super) async fn collect(app: &App, settings: &Settings, now: i64) -> Seen {
         }
     }
 
-    // There is no device client-events journal on this Host yet. The relaunch
-    // signal works independently of crash-event collection.
-    for (device, launch) in app.experience.relaunches(since, now) {
-        if launch.count >= settings.relaunch_burst
-            && matches!(
-                launch.platform.as_str(),
-                "ios" | "android" | "desktop" | "web"
-            )
-        {
-            let kind = format!("app_crash_{}", launch.platform);
-            let contract = launch
-                .contract
-                .map_or_else(|| "unknown".to_owned(), |n| n.to_string());
-            seen.add(&kind, &device, format!(
-                "{} launch requests. Build {}. Contract {contract}. Crash event store unavailable.",
-                launch.count, launch.build,
-            ));
+    match crate::client_events::crash_candidates(app, since, now).await {
+        Ok(rows) => app_crashes(
+            &mut seen,
+            settings,
+            rows,
+            &app.experience.relaunches(since, now),
+        ),
+        Err(why) => {
+            seen.unavailable_kinds.extend([
+                "app_crash_ios",
+                "app_crash_android",
+                "app_crash_desktop",
+                "app_crash_web",
+            ]);
+            eprintln!("clarp-host: experience-watch could not read crash signals: {why}");
         }
     }
 
@@ -289,7 +385,7 @@ mod tests {
             .find(|ms| (1..21).contains(&local_hour(*ms)))
             .unwrap();
         let config: toml::Value = format!(
-            "enabled = true\nsummary_hour = {}\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n",
+            "enabled = true\nsummary_hour = {}\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\n",
             local_hour(now) + 1,
         ).parse().unwrap();
         let settings = Settings::from_section(Some(&config));
@@ -300,6 +396,36 @@ mod tests {
                 now - n * 4_000,
             );
         }
+        for n in 0..6 {
+            app.experience
+                .launched("proof-phone", Some("ios/3099;contract=87"), now - n);
+        }
+        let proof = &app.experience.relaunches(now - 60_000, now)["proof-phone"];
+        assert_eq!((proof.count, proof.platform.as_str()), (6, "ios"));
+        assert_eq!((proof.build.as_str(), proof.contract), ("3099", Some(87)));
+        place.clock.advance_ms(now - first);
+        let paired = crate::edge::Principal::Device {
+            device_id: "paired-phone".into(),
+            scope: crate::pairing::Scope::Limited,
+        };
+        let mut header = axum::http::HeaderMap::new();
+        header.insert("x-clarp-client", "ios/200 contract=130".parse().unwrap());
+        crate::client_events::record(&app, &paired, &header, &[
+            serde_json::json!({"event": "ios.push.background-sync", "level": "error"}),
+            serde_json::json!({"event": "metrickit_report", "level": "fault", "detail": {"crashes": 0, "hangs": 12}}),
+        ]).await.unwrap();
+        let seen = collect(&app, &settings, now).await;
+        assert!(
+            !seen
+                .found
+                .keys()
+                .any(|(kind, _)| kind.starts_with("app_crash_"))
+        );
+
+        crate::client_events::record(&app, &paired, &header, &[
+            serde_json::json!({"event": "metrickit_report", "level": "fault", "detail": {"crashes": 2, "hangs": 2}}),
+            serde_json::json!({"event": "ios.crash", "level": "fatal"}),
+        ]).await.unwrap();
         let facts = AgentFacts {
             window: Window {
                 reads: vec![Read {
@@ -341,6 +467,7 @@ mod tests {
             .find(|row| row.kind == "app_crash_ios")
             .unwrap();
         assert_eq!(crash.subject, "paired-phone");
+        assert!(crash.detail.contains("3 crash events"));
         assert!(crash.detail.contains("27 launch requests"));
         assert!(crash.detail.contains("Build 200"));
         let wait = book.rows.iter().find(|row| row.kind == "wait").unwrap();

@@ -50,6 +50,17 @@ impl Event {
     }
 }
 
+/// Minimal event metadata for the watcher's crash check. Detail is needed
+/// only for a stored MetricKit report's counts.
+pub struct CrashCandidate {
+    pub device: String,
+    pub client: String,
+    pub build: String,
+    pub contract: Option<i64>,
+    pub event: String,
+    pub report: Option<String>,
+}
+
 pub struct Query {
     pub device: Option<String>,
     pub since_ms: Option<i64>,
@@ -142,6 +153,30 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         expire(&tx, now)?;
         tx.commit()
+    }
+
+    pub fn crash_candidates(&self, since: i64, now: i64) -> rusqlite::Result<Vec<CrashCandidate>> {
+        let mut select = self.connection.prepare_cached(
+            "SELECT device, client, client_build, client_contract, event,
+                    CASE WHEN event = 'metrickit_report' THEN detail END
+             FROM client_events
+             WHERE received_at BETWEEN ?1 AND ?2
+               AND device NOT IN ('', 'administrator', 'local', 'unknown')
+               AND (event = 'metrickit_report' OR event LIKE '%crash%'
+                    OR event LIKE '%fatal%' OR event LIKE '%uncaught%')
+             ORDER BY received_at, id",
+        )?;
+        let rows = select.query_map(params![since, now], |row| {
+            Ok(CrashCandidate {
+                device: row.get(0)?,
+                client: row.get(1)?,
+                build: row.get(2)?,
+                contract: row.get(3)?,
+                event: row.get(4)?,
+                report: row.get(5)?,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn read(&mut self, query: &Query, now: i64) -> rusqlite::Result<Vec<Event>> {

@@ -28,7 +28,7 @@ release = "SESSION"
 wait_seconds = 60
 wait_count = 1
 queue_stuck_seconds = 600
-relaunch_burst = 5
+crash_events = 10
 window_minutes = 15
 failed_sends = 1
 card_age_hours = 24
@@ -37,12 +37,14 @@ release_hold_minutes = 10
 
 `clarp-admin experience [--since 1h] [--open] [--json]` reads stored
 findings even while the watcher is off. It reports late reads (steered,
-waited, or still waiting), paused or stuck queues, relaunch bursts, failed
+waited, or still waiting), paused or stuck queues, client crash signals, failed
 or refused user sends, unhealthy release skill links, old decision cards,
 and long-running jobs that hold a release. Relaunch requests are counted
 by authenticated device and include the latest reported app build and
-contract. This Rust base has no client-event store, so crash-event counts
-begin when that store is available. The HTTP counters keep at most
+contract. An app-crash finding requires a crash-kind client event or a
+MetricKit report with a nonzero crash count. Launch requests are context
+only, so repeated pushes, reconnects, and background sync cannot open a
+finding on their own. The HTTP counters keep at most
 32,768 recent events per signal and restart with the Host. Send history
 is rebuilt from the actor journals. The Rust queue has no separate
 `launch_unknown` status. Recent unconfirmed interruptions count in sends.
