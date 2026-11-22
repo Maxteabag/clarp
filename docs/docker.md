@@ -263,13 +263,19 @@ skill already present in either CLI home.
 Configure peers explicitly; Tailnet discovery does not imply trust:
 
 ```bash
-clarp-admin peers add work https://clarp-work.example.ts.net --token TOKEN
+# On the peer: a one-time code (limited scope is enough).
+clarp-admin pair create --scope limited --json
+# Here: spend it; the device token is kept, never printed.
+clarp-admin peers add work https://clarp-work.example.ts.net --code clp_...
 clarp-admin prompt --server work --to rachel \
   --from "$CLARP_SESSION" --text "Please review the branch."
 ```
 
-The address is always `(peer, session)`. The peer token is stored with mode
-`0600` inside this node's volume and is redacted from `peers list` output.
+`peers add <url>` alone takes the peer's own name. A token you already have can
+come from stdin instead (`--token-stdin`), never from the command line. The
+address is always `(peer, session)`. The peer token is stored with mode `0600`
+inside this node's volume and is redacted from `peers list` output. The same
+peers list the chats of the web app's all-Hosts list (`GET /peers/snapshot`).
 
 ## Accessing host files and credentials
 

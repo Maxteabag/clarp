@@ -15,7 +15,7 @@ import { clog } from '../lib/net.js';
 import { ensureLoaded, reconcileWithSnapshot } from './conversations.svelte.js';
 import { hostBadgeText } from '@core/host-badge.js';
 import { prefs } from './prefs.svelte.js';
-import { hostsState, readHosts } from './hosts.svelte.js';
+import { knownHosts, readHosts } from './hosts.svelte.js';
 
 export const AVATAR_PALETTE = {
   Mike: '#7aa2f7', Rachel: '#f7768e', Domi: '#bb9af7', Bella: '#ff9e64',
@@ -303,7 +303,7 @@ export function logState(ev, machine) {
 
 /** Every saved Host as [{id: server id, name}], the serving Host first (static/lib/host-badge.js). */
 export function savedHosts() {
-  return [...app.hosts, ...hostsState.saved.map(h => ({ id: h.serverId || h.id, name: h.name || h.url }))];
+  return [...app.hosts, ...knownHosts().map(h => ({ id: h.serverId || h.id, name: h.name || h.url }))];
 }
 
 /** The server ids of the Hosts read now: the serving Host, and the others while all are read. */
