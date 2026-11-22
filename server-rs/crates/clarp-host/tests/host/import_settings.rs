@@ -10,6 +10,21 @@ fn imports_only_owner_settings_and_dry_run_changes_nothing() {
     fixture.execute_batch(
         "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);",
     ).unwrap();
+    let action = json!({
+        "id": "fixture-action", "title": "Fixture action", "type": "http_post",
+        "enabled": true, "url": "http://127.0.0.1:9/action",
+        "body": {"message": "private fixture action body"}
+    });
+    let mapping = json!({
+        "device": "*", "button": "primary", "gesture": "single-click",
+        "action_id": "fixture-action"
+    });
+    let registry = json!({
+        "revision": 8,
+        "actions": {"fixture-action": action},
+        "mappings": [mapping],
+    })
+    .to_string();
     let rows = [
         ("transcription.engine", "cartesia"),
         ("transcription.retain_audio", "true"),
@@ -34,6 +49,8 @@ fn imports_only_owner_settings_and_dry_run_changes_nothing() {
         ("server_instance_id", "leave out"),
         ("quota-keeper.window.claude", "leave out"),
         ("dreaming.enabled", "leave out"),
+        ("controller_actions.registry", registry.as_str()),
+        ("controller_actions.audit:fixture", "leave out"),
     ];
     for (key, value) in rows {
         fixture
@@ -58,6 +75,11 @@ fn imports_only_owner_settings_and_dry_run_changes_nothing() {
     });
     let heartbeat = serde_json::to_vec(&heartbeat).unwrap();
     kept.put("kept.heartbeat", "all", &heartbeat).unwrap();
+    let controller = clarp_host::fleet::shelf("controller-actions");
+    let before_registry = br#"{"revision":12,"actions":{},"mappings":[]}"#;
+    let audit = br#"[{"event":"rust-audit"}]"#;
+    kept.put(&controller, "registry", before_registry).unwrap();
+    kept.put(&controller, "audit", audit).unwrap();
     let before_rust = kept.list("setting").unwrap();
     drop(kept);
 
@@ -80,6 +102,7 @@ fn imports_only_owner_settings_and_dry_run_changes_nothing() {
         assert!(output.stderr.is_empty());
         let receipt = String::from_utf8(output.stdout).unwrap();
         assert!(!receipt.contains("fixture words to keep private"));
+        assert!(!receipt.contains("private fixture action body"));
         receipt
     };
     let preview = run(true);
@@ -88,6 +111,17 @@ fn imports_only_owner_settings_and_dry_run_changes_nothing() {
     assert!(preview.contains("heartbeat.interval_sec\tcopied\n"));
     assert!(preview.contains("heartbeat.backoff_strategy\tequal\n"));
     assert!(preview.contains("orchestrator.addressing_mode\tcopied\n"));
+    assert!(preview.contains("controller_actions.registry\tcopied\n"));
+    assert!(preview.contains("controller_actions.audit:fixture\tno reader\n"));
+    assert_eq!(
+        store
+            .open(&fleet)
+            .unwrap()
+            .get(&controller, "registry")
+            .unwrap()
+            .as_deref(),
+        Some(before_registry.as_slice()),
+    );
     assert!(preview.contains("orchestrator.enabled\tcarried by janitor configs\n"));
     assert!(preview.contains("orchestrator.model\tcarried by janitor configs\n"));
     assert!(!preview.contains("discard-old-model"));
@@ -147,6 +181,24 @@ fn imports_only_owner_settings_and_dry_run_changes_nothing() {
         Some(b"fixture words to keep private".as_slice())
     );
     assert_eq!(kept.list("setting").unwrap().len(), 8);
+    let imported: clarp_kernel::controller_actions::Registry =
+        serde_json::from_slice(&kept.get(&controller, "registry").unwrap().unwrap()).unwrap();
+    assert_eq!(imported.screen()["actions"], json!([action]));
+    assert_eq!(imported.screen()["mappings"], json!([mapping]));
+    assert_eq!(
+        imported.mapped("fixture-device", "primary", "single-click"),
+        Some("fixture-action")
+    );
+    assert_eq!(imported.revision, 13);
+    assert_eq!(
+        kept.get(&controller, "audit").unwrap().as_deref(),
+        Some(audit.as_slice())
+    );
+    assert!(
+        kept.get("setting", "controller_actions.registry")
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         kept.get("setting", "orchestrator.addressing_mode")
             .unwrap()
@@ -171,7 +223,7 @@ fn imports_only_owner_settings_and_dry_run_changes_nothing() {
             .lines()
             .filter(|line| line.ends_with("\tequal"))
             .count(),
-        11
+        12
     );
     assert!(!again.lines().any(|line| line.ends_with("\tcopied")));
     assert_eq!(std::fs::read(&source).unwrap(), before);

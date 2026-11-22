@@ -8,6 +8,8 @@ use clarp_ports::kv::{KeyValue, StoreError, Write};
 use clarp_store_sqlite::SqliteKeyValue;
 use serde_json::{Map, Value, json};
 
+use crate::controller_actions::{PYTHON_REGISTRY, plan_import_registry};
+
 use super::offline_import::{self, Files};
 
 const SETTING: &str = "setting";
@@ -111,15 +113,16 @@ fn read(path: &Path) -> Result<Rows, String> {
     let mut rows = Vec::new();
     for key in keys {
         let key = key.map_err(|_| "a Python setting key could not be read")?;
-        let setting = if supported(&key) || heartbeat_field(&key).is_some() {
-            Some(
-                value
-                    .query_row([&key], |row| row.get(0))
-                    .map_err(|_| "a supported Python setting could not be read")?,
-            )
-        } else {
-            None
-        };
+        let setting =
+            if supported(&key) || heartbeat_field(&key).is_some() || key == PYTHON_REGISTRY {
+                Some(
+                    value
+                        .query_row([&key], |row| row.get(0))
+                        .map_err(|_| "a supported Python setting could not be read")?,
+                )
+            } else {
+                None
+            };
         rows.push((key, setting));
     }
     Ok(rows)
@@ -147,6 +150,16 @@ fn compare(store: &dyn KeyValue, rows: Rows) -> Result<(Vec<Write>, String), Sto
                 "equal"
             } else {
                 "copied"
+            }
+        } else if key == PYTHON_REGISTRY {
+            let value = value.as_deref().ok_or_else(|| {
+                StoreError("the Python controller action registry is invalid".into())
+            })?;
+            if let Some(write) = plan_import_registry(store, value)? {
+                writes.push(write);
+                "copied"
+            } else {
+                "equal"
             }
         } else {
             match value {
@@ -182,6 +195,11 @@ pub(super) fn run(args: impl Iterator<Item = String>) -> Result<String, String> 
         if error.0.starts_with("heartbeat_")
             || error.0 == "invalid heartbeat_backoff_strategy"
             || error.0 == "invalid Python heartbeat integer"
+            || matches!(
+                error.0.as_str(),
+                "the Python controller action registry is invalid"
+                    | "the Rust controller action registry is invalid"
+            )
         {
             error.0
         } else {

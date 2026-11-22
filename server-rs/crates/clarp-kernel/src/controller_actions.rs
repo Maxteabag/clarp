@@ -99,7 +99,7 @@ pub fn validate(data: &Value, entries: &[Destination]) -> Result<Value, Error> {
     Ok(action)
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Registry {
     pub revision: i64,
     pub actions: BTreeMap<String, Value>,

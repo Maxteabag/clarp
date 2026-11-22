@@ -16,6 +16,7 @@ use clarp_kernel::{
     destination::{self, Destination},
     python,
 };
+use clarp_ports::kv::{KeyValue, StoreError, Write};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{
@@ -43,7 +44,35 @@ fn fits(kept: &[u8]) -> bool {
 }
 
 const KIND: &str = "controller-actions";
+const REGISTRY: &str = "registry";
 const RECEIPTS: &str = "controller-action-receipts";
+/// The Python settings row already uses the registry's persisted shape.
+pub(crate) const PYTHON_REGISTRY: &str = "controller_actions.registry";
+
+/// Transfer definitions and bindings only. The normal invocation path still checks its
+/// allow-list, and this import leaves the Rust Host's audit and request receipts in place.
+pub(crate) fn plan_import_registry(
+    store: &dyn KeyValue,
+    stored: &str,
+) -> Result<Option<Write>, StoreError> {
+    let mut incoming: Registry = serde_json::from_str(stored)
+        .map_err(|_| StoreError("the Python controller action registry is invalid".into()))?;
+    let table = crate::fleet::shelf(KIND);
+    if let Some(bytes) = store.get(&table, REGISTRY)? {
+        let current: Registry = serde_json::from_slice(&bytes)
+            .map_err(|_| StoreError("the Rust controller action registry is invalid".into()))?;
+        let previous_revision = incoming.revision;
+        incoming.revision = current.revision;
+        if incoming == current && previous_revision <= current.revision {
+            return Ok(None);
+        }
+        incoming.revision = previous_revision.max(current.revision.saturating_add(1));
+    }
+    let bytes = serde_json::to_vec(&incoming)
+        .map_err(|_| StoreError("the controller action registry could not be encoded".into()))?;
+    Ok(Some((table, REGISTRY.into(), Some(bytes))))
+}
+
 type Answer = Result<Value, Error>;
 type Row = (&'static str, String, Vec<u8>);
 #[derive(Default)]
@@ -126,12 +155,12 @@ fn allow_list(app: &App) -> Vec<Destination> {
 }
 pub(crate) async fn change(app: &App, op: &str, data: &Value, actor: &str) -> Answer {
     let _serial = app.controller_actions.0.lock().await;
-    let mut state: Registry = read(app, "registry").await?;
+    let mut state: Registry = read(app, REGISTRY).await?;
     let now = app.clock.now_ms();
     let (result, audit) = state.change(op, data, &allow_list(app), actor, now)?;
     app.fleet
         .keep_together(vec![
-            row(KIND, "registry", &state)?,
+            row(KIND, REGISTRY, &state)?,
             audits(app, audit).await?,
         ])
         .await
@@ -143,7 +172,7 @@ pub(crate) async fn change(app: &App, op: &str, data: &Value, actor: &str) -> An
     Ok(result)
 }
 pub(crate) async fn list(app: &App) -> Answer {
-    Ok(read::<Registry>(app, "registry").await?.screen())
+    Ok(read::<Registry>(app, REGISTRY).await?.screen())
 }
 pub(crate) async fn audit(app: &App, limit: &str) -> Answer {
     let n = if limit.is_empty() {
@@ -258,7 +287,7 @@ async fn invoke_owned(app: &App, id: String, data: Value, actor: String) -> Answ
     let request = rule::request_id(&data)?;
     let source = rule::source(&data);
     let mut rt = app.controller_actions.0.lock().await;
-    let action = read::<Registry>(app, "registry").await?.enabled(&id)?;
+    let action = read::<Registry>(app, REGISTRY).await?.enabled(&id)?;
     let now = app.clock.now_ms();
     if let Some(bytes) = app
         .fleet
