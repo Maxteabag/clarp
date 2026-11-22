@@ -216,6 +216,15 @@ pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
+/// This Rust Host's configuration directory, separate from the Python Host's.
+pub(crate) fn host_config_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home().join(".config"))
+        .join("clarp-host")
+}
+
 /// A path as a person types it on a phone, as a path on this machine: `~` is the home of
 /// whoever runs this Host, nothing is that home too, and a path under `/home` that is not
 /// there is tried under that home (`/home/projects/site` for `~/projects/site`: the name of
@@ -658,11 +667,7 @@ impl Config {
             shim,
             auth_token: std::env::var("CLARP_HOST_TOKEN").unwrap_or_default(),
             web_read_origins: crate::cross_origin::read_config(
-                &std::env::var_os("XDG_CONFIG_HOME")
-                    .map(PathBuf::from)
-                    .filter(|path| path.is_absolute())
-                    .unwrap_or_else(|| home().join(".config"))
-                    .join("clarp-host/config.toml"),
+                &host_config_dir().join("config.toml"),
             ),
             name,
             default_cwd,

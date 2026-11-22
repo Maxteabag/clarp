@@ -383,7 +383,7 @@ pub struct Directory {
     /// The devices that are told of finished turns: who gets a push.
     pub push: Arc<PushBook>,
     /// The other Hosts this one may write to, by name.
-    pub peers: Arc<BTreeMap<String, Peer>>,
+    pub(crate) legacy_peers: Arc<BTreeMap<String, Peer>>,
     /// The settings the owner makes from an app, each a text under its key
     /// (`transcription.agent_engines`), as the Python Host keeps them.
     pub settings: Arc<BTreeMap<String, String>>,
@@ -599,12 +599,23 @@ fn can_receive(devices: &HashMap<String, Arc<Device>>, owner: &str) -> bool {
 
 /// Another Host this one may write to: where it is, and the token it takes. The owner names
 /// it; an agent then writes to an agent there by that name (`clarp-admin prompt --server`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Peer {
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Peer {
     pub url: String,
     pub token: String,
     #[serde(default = "enabled")]
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub server_id: String,
+}
+
+impl std::fmt::Debug for Peer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Peer")
+            .field("enabled", &self.enabled)
+            .finish_non_exhaustive()
+    }
 }
 
 fn enabled() -> bool {
@@ -817,17 +828,6 @@ enum Ask {
         token: String,
         outcome: Pushed,
     },
-    /// The owner names another Host. The inner error is what is missing.
-    PeerAdd {
-        name: String,
-        url: String,
-        token: String,
-        answer: Answer<Result<(), String>>,
-    },
-    PeerRemove {
-        name: String,
-        answer: Answer<bool>,
-    },
     /// The owner sets settings. The inner error is a store that failed, or a key that is
     /// no setting's.
     Set {
@@ -925,6 +925,7 @@ enum Ask {
 #[derive(Clone)]
 pub struct FleetHandle {
     pub(crate) delegation_view: delegations::Rejoin,
+    pub(crate) peer_snapshot: Arc<tokio::sync::Mutex<crate::peers::SnapshotCache>>,
     tx: Arc<mpsc::Sender<Ask>>,
     directory: Arc<watch::Receiver<Arc<Directory>>>,
     log: crate::unkept::Log,
@@ -1233,28 +1234,6 @@ impl FleetHandle {
             answer,
         })
         .await
-    }
-
-    /// Names another Host this one may write to, or renames where one is. The inner error
-    /// is what is missing.
-    pub async fn peer_add(
-        &self,
-        name: String,
-        url: String,
-        token: String,
-    ) -> Result<Result<(), String>, Unavailable> {
-        self.ask(|answer| Ask::PeerAdd {
-            name,
-            url,
-            token,
-            answer,
-        })
-        .await
-    }
-
-    /// Forgets another Host. Returns whether it was known.
-    pub async fn peer_remove(&self, name: String) -> Result<bool, Unavailable> {
-        self.ask(|answer| Ask::PeerRemove { name, answer }).await
     }
 
     /// Makes a persona, or changes the one named `original`. The inner error is why not,
@@ -1704,8 +1683,8 @@ struct Fleet {
     computer_jobs: computer_jobs::ComputerJobs,
     /// The register of push devices.
     push: PushBook,
-    /// The other Hosts this one may write to.
-    peers: BTreeMap<String, Peer>,
+    /// Older Rust Hosts kept peers in the fleet table, before peers.json.
+    legacy_peers: Arc<BTreeMap<String, Peer>>,
     /// The owner's settings, by key.
     settings: BTreeMap<String, String>,
     /// The personas the owner made, and how he made built-in ones look.
@@ -1975,6 +1954,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     for (name, peer) in read!(Peer, PEERS).read {
         peers.insert(name, peer);
     }
+    let legacy_peers = Arc::new(peers);
     let (roster, janitors) = apart(&members);
     let cwd_owners = Arc::new(owners);
     let (directory, read) = watch::channel(Arc::new(Directory {
@@ -1985,7 +1965,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         focus: focus.clone(),
         devices: devices.clone(),
         push: Arc::new(push.clone()),
-        peers: Arc::new(peers.clone()),
+        legacy_peers: legacy_peers.clone(),
         settings: Arc::new(settings.clone()),
         coordination: crate::hidden_coordination::Roster::of(
             &settings,
@@ -2023,7 +2003,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         jobs,
         computer_jobs,
         push,
-        peers,
+        legacy_peers,
         settings,
         book,
         directory,
@@ -2035,6 +2015,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         .map_err(|error| format!("the fleet's thread could not be started: {error}"))?;
     Ok(FleetHandle {
         delegation_view,
+        peer_snapshot: Arc::default(),
         tx,
         directory: read,
         log,
@@ -2229,17 +2210,6 @@ impl Fleet {
                     let _ = answer.send(self.push_disable(&token, &owner, only_owner.as_deref()));
                 }
                 Ask::Pushed { token, outcome } => self.pushed(&token, outcome),
-                Ask::PeerAdd {
-                    name,
-                    url,
-                    token,
-                    answer,
-                } => {
-                    let _ = answer.send(self.peer_add(&name, &url, &token));
-                }
-                Ask::PeerRemove { name, answer } => {
-                    let _ = answer.send(self.peer_remove(&name));
-                }
                 Ask::PersonaWrite {
                     original,
                     said,
@@ -2458,7 +2428,7 @@ impl Fleet {
             focus: self.focus.clone(),
             devices: self.devices.clone(),
             push: Arc::new(self.push.clone()),
-            peers: Arc::new(self.peers.clone()),
+            legacy_peers: self.legacy_peers.clone(),
             settings,
             coordination: crate::hidden_coordination::Roster::of(
                 &self.settings,
@@ -2828,42 +2798,6 @@ impl Fleet {
         }
         self.works.hub.publish(event, self.now_ms());
         Ok(effective)
-    }
-
-    fn peer_add(
-        &mut self,
-        name: &str,
-        url: &str,
-        token: &str,
-    ) -> Result<Result<(), String>, Unavailable> {
-        let (name, url, token) = (name.trim(), url.trim().trim_end_matches('/'), token.trim());
-        let addressed = url.starts_with("http://") || url.starts_with("https://");
-        if name.is_empty() || !addressed || token.is_empty() {
-            return Ok(Err("peer requires name, HTTP(S) URL, and token".to_string()));
-        }
-        let peer = Peer {
-            url: url.to_string(),
-            token: token.to_string(),
-            enabled: true,
-        };
-        let stored =
-            serde_json::to_vec(&peer).map_err(|error| Unavailable::new(error.to_string()))?;
-        self.store
-            .put(PEERS, name, &stored)
-            .map_err(|error| Unavailable::new(error.to_string()))?;
-        self.peers.insert(name.to_string(), peer);
-        self.publish();
-        Ok(Ok(()))
-    }
-
-    fn peer_remove(&mut self, name: &str) -> Result<bool, Unavailable> {
-        let known = self
-            .store
-            .delete(PEERS, name)
-            .map_err(|error| Unavailable::new(error.to_string()))?;
-        self.peers.remove(name);
-        self.publish();
-        Ok(known)
     }
 
     /// Keeps rows of the push register as a change left them, and publishes the register.

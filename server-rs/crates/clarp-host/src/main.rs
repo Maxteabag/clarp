@@ -546,11 +546,11 @@ fn main() -> ExitCode {
             }
         };
     }
-    if args.peek().map(String::as_str) == Some("peer") {
-        args.next();
+    if matches!(args.peek().map(String::as_str), Some("peer" | "peers")) {
+        let json_output = args.next().as_deref() == Some("peers");
         let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
         let peer_token = std::env::var("CLARP_PEER_TOKEN").unwrap_or_default();
-        return match clarp_host::admin::peer(args, &token, &peer_token) {
+        return match clarp_host::admin::peer(args, &token, &peer_token, json_output) {
             Ok(shown) => {
                 println!("{shown}");
                 ExitCode::SUCCESS
