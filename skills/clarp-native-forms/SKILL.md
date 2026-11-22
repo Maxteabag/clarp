@@ -84,7 +84,8 @@ Version 2 (`"catalog_version": 2`, catalog at `GET /artifact-catalogs/clarp.form
 is version 1 plus three components. Each app is switched on for it separately.
 
 **Drawn by: the web app** (the browser app and the desktop shell that loads it), from
-its contract 2. Not yet by the iOS app, the Android app or the native desktop app. An app
+its contract 2, and the Android app, from its contract 42. Not yet by the iOS app or the
+native desktop app. An app
 that does not draw version 2 shows such a form as a plain card that cannot be answered,
 so use `"catalog_version": 1` when the user may answer on one of those.
 
@@ -145,7 +146,7 @@ Which apps draw forms (version 1):
 - iOS app: from client contract 74 (TestFlight 2981).
 - Web app (the browser app and the desktop shell that loads it): from its
   first contract (version 2: see above).
-- Android app: from client contract 41 (release 0.1.0, build 1058).
+- Android app: from client contract 41 (release 0.1.0, build 1058); version 2 from 42 (see above).
 - Native desktop app: not yet; it shows the plain card.
 
 So say in your reply what you are asking, briefly, and do not wait for the form
