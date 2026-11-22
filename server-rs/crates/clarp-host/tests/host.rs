@@ -38360,8 +38360,8 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     let (status, forbidden) = claim(&host, &other, &fourth_op, "no_mic", "other", json!({}));
     assert_eq!(status, 403);
     assert!(forbidden["opening"].get("token").is_none());
-    // The retired call is old enough to collect, and its public history can
-    // already be absent. Restart prunes its opening and all addressing rows.
+    // An old retirement is collectable even when the call ended recently and
+    // its public history is absent. Restart clears the opening and its indexes.
     drop(db);
     drop(host);
     let mut db = clarp_store_sqlite::SqliteKeyValue
@@ -38371,7 +38371,7 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     let mut kept: Value =
         serde_json::from_slice(&db.get("kept.opening_history", ring_id).unwrap().unwrap()).unwrap();
     let principal = kept["_opening"]["principal"].as_str().unwrap().to_owned();
-    kept["_opening"]["call_ended_at"] = json!(1);
+    kept["_opening"]["call_ended_at"] = json!(now_ms());
     kept["_opening"]["retired"]["at"] = json!(1);
     let mut calls: Vec<Value> =
         serde_json::from_slice(&db.get("kept.call", &principal).unwrap().unwrap()).unwrap();

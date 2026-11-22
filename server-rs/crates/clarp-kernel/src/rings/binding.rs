@@ -65,16 +65,15 @@ pub enum CallEnd {
     Unknown,
 }
 
-/// A retired binding fences clips already in flight. Keep it for a full day
-/// after the later event so a late retirement cannot turn a fenced clip into
-/// ordinary speech. With no known end, the retirement starts that day.
+/// A retired binding is kept for a day from retirement, and longer while the
+/// call is still live. Missing call history does not extend the retention period.
 pub fn expired(retired_at: Option<i64>, call: CallEnd, now: i64) -> bool {
     let Some(retired) = retired_at else {
         return false;
     };
     let since = match call {
         CallEnd::Live => return false,
-        CallEnd::Ended(ended) => retired.max(ended),
+        CallEnd::Ended(_) => retired,
         CallEnd::Unknown => retired,
     };
     now.saturating_sub(since) >= 86_400_000
