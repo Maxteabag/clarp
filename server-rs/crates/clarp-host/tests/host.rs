@@ -21993,6 +21993,46 @@ fn answers_using(
 }
 
 #[test]
+fn an_open_event_stream_cannot_keep_the_host_from_exiting() {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    let place = Place::new("shutdown-open-stream");
+    let mut host = place.start();
+    let events = host.listen();
+    wait_for("the open event stream", || {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "server-version")
+    });
+
+    let stopping = Instant::now();
+    let pid = Pid::from_raw(i32::try_from(host.process.id()).unwrap());
+    kill(pid, Signal::SIGTERM).unwrap();
+    // Allow for scheduling the signal and observing the exit on a shared build machine.
+    wait_within(
+        "the Host to exit with an open stream",
+        Duration::from_secs(7),
+        || host.process.try_wait().unwrap().is_some(),
+    );
+    let status = host.process.wait().unwrap();
+    assert!(status.success(), "{status}");
+    assert!(stopping.elapsed() >= Duration::from_secs(5));
+    wait_within(
+        "the count of open connections",
+        Duration::from_secs(1),
+        || {
+            host.heard
+                .lock()
+                .unwrap()
+                .contains("HTTP shutdown deadline reached with 1 open connections")
+        },
+    );
+}
+
+#[test]
 fn a_quiet_stream_of_events_is_sent_a_heartbeat_an_app_can_see() {
     let place = Place::new("sse-heartbeat");
     let host = place.start();

@@ -4,6 +4,8 @@
 //! rejoins the turns that are running), and serves the apps. Stopping it stops none of the
 //! turns: they belong to their shims, and the next Host finds them.
 
+mod shutdown;
+
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
@@ -497,29 +499,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // And where the Host is reached through a relay, what a phone asks there is asked of
     // the same routes, from now on.
     clarp_host::connector::run(&app, router.clone());
-    let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
-    axum::serve(listener, service)
-        .with_graceful_shutdown(told_to_stop())
+    shutdown::serve(listener, router)
         .await
         .map_err(|error| error.to_string())
-}
-
-/// Resolves when the Host is asked to stop. The turns that run are not asked: they go on.
-async fn told_to_stop() {
-    use tokio::signal::unix::{SignalKind, signal};
-    let mut terminate = signal(SignalKind::terminate()).ok();
-    let terminated = async {
-        match terminate.as_mut() {
-            Some(terminate) => {
-                terminate.recv().await;
-            }
-            None => std::future::pending::<()>().await,
-        }
-    };
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        () = terminated => {}
-    }
 }
 
 /// What every turn is told of its Host: where it listens, and the token its agent's tools
@@ -647,7 +629,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(serve(config)) {
+    let result = runtime.block_on(serve(config));
+    // After the HTTP drain, dropping the runtime must not start another wait
+    // for blocking requests. The turns live in their own units.
+    runtime.shutdown_background();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("clarp-host: {error}");
