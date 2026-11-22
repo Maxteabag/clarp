@@ -16,7 +16,7 @@ pub(crate) fn routes() -> Router<App> {
         .route("/teams/{id}", post(update).delete(remove_team))
         .route("/teams/{id}/members", post(add_member))
         .route("/teams/{id}/members/{agent}", delete(remove_member))
-        .route("/teams/{id}/messages", get(messages))
+        .route("/teams/{id}/messages", get(messages).post(post_message))
         .route("/team-nudging", post(nudge))
 }
 
@@ -185,7 +185,11 @@ async fn messages(
                         "trace_id": message.trace_id,
                         "text": message.text,
                         "created_at": message.created_at,
-                        "source_name": source.0,
+                        "source_name": if message.source_agent_id == teams::USER_SOURCE {
+                            "User"
+                        } else {
+                            &source.0
+                        },
                         "source_session": source.1,
                     })
                 })
@@ -194,4 +198,52 @@ async fn messages(
         Ok(json!({ "team_id": id, "messages": messages }))
     })
     .await
+}
+
+/// The user's words follow the same delivery and per-member inbox as agent posts.
+async fn post_message(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    raw: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let body = object(&raw)?;
+    let text = body.get("text").and_then(Value::as_str).map_or("", str::trim);
+    if text.is_empty() {
+        return Err(bad("text required"));
+    }
+    if text.chars().count() > 10_000 {
+        return Err(bad("team message is too long"));
+    }
+    let text = text.to_string();
+    ask(app, move |app| {
+        let message_id = format!("tm-{}", crate::ids::hex(12));
+        let mut refusal = None;
+        app.teams.deliver(|book| {
+            let Some(team) = book.get(&id).filter(|team| team.archived_at.is_none()) else {
+                refusal = Some(Error::Missing("team not found"));
+                return Vec::new();
+            };
+            if !team.communication_enabled {
+                refusal = Some(Error::Invalid("team communication is disabled"));
+                return Vec::new();
+            }
+            vec![teams::Delivery {
+                order: 0,
+                message: teams::Message {
+                    team_message_id: message_id.clone(),
+                    team_id: id.clone(),
+                    source_agent_id: teams::USER_SOURCE.into(),
+                    source_message_id: String::new(),
+                    trace_id: String::new(),
+                    text,
+                    created_at: app.clock.now_ms(),
+                },
+                inbox: team.members.iter().map(|member| (member.agent_id.clone(), None)).collect(),
+            }]
+        })?;
+        if let Some(error) = refusal {
+            return Err(error);
+        }
+        Ok(json!({ "ok": true, "team_message_id": message_id }))
+    }).await
 }

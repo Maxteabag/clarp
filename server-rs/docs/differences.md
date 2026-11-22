@@ -535,3 +535,19 @@ between wakes and at most three wakes per hour. iOS decides whether to deliver
 each wake. Reply alerts continue to request a refresh through
 `content-available`, and the Host leaves `aps.badge` unset because it cannot
 compute the phone's unread count.
+
+Issue 278. The Rust Host accepts a device's calendar result at
+`POST /calendar/response` with `request_id`, `session` and `status`
+(`added`, `declined` or `failed`). The requesting agent receives the first
+result through its normal queue. The response window is 24 hours, up to the
+most recent 4,096 requests in the current Host process. The Host publishes
+`calendar-response` after admission.
+
+A full app can post `{"text":"..."}` to `POST /teams/{id}/messages` for an
+active team with communication enabled. The post is attributed to User in
+the feed and is available to current team members in their next team brief.
+
+`GET /task-plan` returns the most recently changed paused plan if the agent
+has no active plan. A plan revision publishes `task-plan-updated` with
+`session`, `agent_id`, `plan_id` and `revision` after the changed plan is
+readable. Native Codex goals continue to use `goal-updated`.

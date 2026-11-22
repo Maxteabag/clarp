@@ -3710,8 +3710,24 @@ impl Worker {
         // The books are published before anything is told of them, and before whoever
         // asked for the change is answered.
         if out.changed.goals || out.changed.artifacts || out.changed.media {
+            let prior = self.books.clone();
             self.refresh_books(out.changed.media);
             self.publish_view();
+            if out.changed.goals {
+                let record = &self.setup.record;
+                let now = self.now_ms();
+                for plan in self.books.goals.plans() {
+                    if prior.goals.plan(&plan.plan_id).is_none_or(|old| old.revision != plan.revision) {
+                        self.setup.hub.publish(json!({
+                            "type": "task-plan-updated",
+                            "session": record.session,
+                            "agent_id": record.agent_id,
+                            "plan_id": plan.plan_id,
+                            "revision": plan.revision,
+                        }), now);
+                    }
+                }
+            }
         }
         if out.changed.artifacts {
             self.tell_artifacts();
