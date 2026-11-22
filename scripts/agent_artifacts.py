@@ -212,12 +212,17 @@ def _publish_render_spec(args: list[str]) -> dict:
     try:
         return _request("POST", path, options.request_file.read_bytes())
     except urllib.error.HTTPError as exc:
-        if exc.code not in (400, 403, 409):
-            raise
-        refusal = json.load(exc)
-        if not isinstance(refusal, dict) or not isinstance(refusal.get("error"), dict):
-            raise
-        return refusal
+        # Every refusal is shown with its body. Metadata refusals such as an
+        # unknown session carry {"error": "<text>"} rather than a code triple;
+        # a bare "HTTP Error 409: Conflict" left the author guessing.
+        text = exc.read().decode("utf-8", "replace")
+        try:
+            refusal = json.loads(text)
+        except ValueError:
+            refusal = None
+        if isinstance(refusal, dict) and "error" in refusal:
+            return refusal
+        return {"error": {"status": exc.code, "message": text.strip() or str(exc)}}
 
 
 def _create_form(args: list[str]) -> dict:
