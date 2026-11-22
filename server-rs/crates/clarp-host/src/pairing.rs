@@ -8,10 +8,23 @@
 //! This is the Python Host's scheme, word for word on the wire (`clp_` codes, `cld_` tokens,
 //! `POST /pairing/exchange`), so an app pairs with either Host the same way.
 
+use clarp_ports::kv::{KeyValue, StoreError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::ids;
+
+pub const SERVER_ID: &str = "server_id";
+pub(crate) const PREVIOUS_SERVER_IDS: &str = "previous_server_ids";
+
+/// Identities of Hosts whose paired devices were moved here.
+pub fn previous_server_ids(store: &dyn KeyValue) -> Result<Vec<String>, StoreError> {
+    let Some(bytes) = store.get("setting", PREVIOUS_SERVER_IDS)? else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_slice(&bytes)
+        .map_err(|_| StoreError("the previous Host IDs could not be read".into()))
+}
 
 pub const DEFAULT_TTL_SECONDS: i64 = 10 * 60;
 pub const MAX_TTL_SECONDS: i64 = 60 * 60;

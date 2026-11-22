@@ -184,6 +184,17 @@ Host task plans keep their existing records and execution.
 
 ## 6. Layout
 
+### Moving pairings from the Python Host (Rust contract 144)
+
+After the Python Host has stopped and before starting the Rust Host, run
+`clarp-host import --devices --from-db /path/to/state.sqlite --data /path/to/rust-data`.
+Use the Rust Host's actual `--data` directory, containing its existing `fleet.db`.
+The source stays read-only, including its WAL. The import keeps active devices' original
+IDs, names, token digests and scopes and leaves existing Rust pairings and revocations in
+place. The command prints counts. The Rust Host keeps its own identity and advertises the
+Python Host's prior ID in `previous_server_ids` on `/server-info` and `/pairing/identity`.
+The list is empty on a Host with no predecessors.
+
 ```
 server-rs/
   REBUILD.md            this brief (lead only)

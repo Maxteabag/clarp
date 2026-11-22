@@ -131,7 +131,7 @@ const FOCUS: &str = "focus";
 /// Pairing codes that wait to be handed in, by the digest of the code.
 const CODES: &str = "pairing-code";
 /// Paired devices, by device id.
-const DEVICES: &str = "device";
+pub(crate) const DEVICES: &str = "device";
 const JOBS: &str = "job";
 /// The register of push devices: one row for each token, under the token.
 const PUSH: &str = "push";
