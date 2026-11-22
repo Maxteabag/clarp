@@ -28,6 +28,9 @@ impl Backend for OpenCode {
     fn id(&self) -> &'static str {
         self.0
     }
+    fn runs_through(&self) -> Option<&'static str> {
+        (self.0 == "deepseek").then_some("opencode")
+    }
     fn efforts(&self) -> &'static [&'static str] {
         rules::EFFORTS
     }

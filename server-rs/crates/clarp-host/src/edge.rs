@@ -254,6 +254,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `clarp.hotseat-status/1`): served from what was kept, nothing read for it. Listed by
     // every Host, as there: the strict answer of a Host without the owner's tool says so.
     ("accounts_hotseat", 78),
+    ("account_harness_metadata", 147),
     // Signing OpenCode and DeepSeek in to their providers of models from an app
     // (`/harness-providers`); with it an app lists every harness's login
     // (`/backend-auth?harnesses=all`). A change is made only by a Host that keeps this
@@ -1327,6 +1328,7 @@ pub(crate) fn identity(app: &App) -> ServerInfo {
         min_app_version: "1.0".to_string(),
         capabilities: Capabilities {
             version: 1,
+            hotseat_providers: crate::seats::providers(app),
             features: features(app)
                 .map(|(feature, _)| (*feature).to_string())
                 .collect(),
