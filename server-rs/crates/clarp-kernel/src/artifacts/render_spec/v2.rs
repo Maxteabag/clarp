@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde_json::{Map, Value};
+
 use super::Refusal;
 use super::json::{self, J, Obj, index};
 use super::validate::Checks;
@@ -53,6 +55,17 @@ fn button(
 fn chart(props: &J, at: &str) -> Result<(), Refusal> {
     let series_at = format!("{at}/series");
     let series = array(props.get("series"));
+    let mut names = BTreeSet::new();
+    for (i, one) in series.iter().enumerate() {
+        if let Some(name) = one.get("name").and_then(J::str)
+            && !names.insert(name)
+        {
+            return Err(Refusal::new(
+                "chart_series_duplicate",
+                &format!("{series_at}/{i}/name"),
+            ));
+        }
+    }
     let kind = props.get("kind").and_then(J::str);
     if kind == Some("pie") && series.len() != 1 {
         return Err(Refusal::new("chart_pie", &series_at));
@@ -180,23 +193,20 @@ pub(super) fn button_rules(
     Ok(())
 }
 
-/// The button labels by action, read from the already validated payload.
-pub(super) fn labels(payload: &J) -> BTreeMap<&str, &str> {
-    if payload.get("catalog_version") != Some(&J::Int(2)) {
-        return BTreeMap::new();
+/// The label of an action in a v2 form's validated button elements.
+pub(super) fn label<'a>(payload: &'a Map<String, Value>, action: &str) -> Option<&'a str> {
+    if payload.get("catalog_version").and_then(Value::as_u64) != Some(2) {
+        return None;
     }
-    payload
-        .get("spec")
-        .and_then(|spec| spec.get("elements"))
-        .and_then(J::object)
-        .into_iter()
-        .flat_map(Obj::iter)
-        .filter_map(|(_, node)| {
-            if node.get("type")?.str()? != "button" {
-                return None;
-            }
-            let props = node.get("props")?;
-            Some((props.get("action")?.str()?, props.get("label")?.str()?))
-        })
-        .collect()
+    let elements = payload.get("spec")?.get("elements")?.as_object()?;
+    elements.values().find_map(|node| {
+        if node.get("type")?.as_str()? != "button" {
+            return None;
+        }
+        let props = node.get("props")?;
+        if props.get("action")?.as_str()? != action {
+            return None;
+        }
+        props.get("label")?.as_str()
+    })
 }

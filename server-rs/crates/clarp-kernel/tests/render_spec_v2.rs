@@ -133,7 +133,7 @@ fn v2_payloads_answers_and_client_levels_match_the_reference() {
                                 submitted.get("version").and_then(J::str).unwrap(),
                                 submitted.get("submission_id").and_then(J::str).unwrap(),
                                 &answers_json,
-                                &payload,
+                                case["payload"].as_object().unwrap(),
                                 submitted.get("answers").unwrap(),
                             ),
                             case["message"]
@@ -142,6 +142,32 @@ fn v2_payloads_answers_and_client_levels_match_the_reference() {
                     Ok(Admitted::Repeat) => panic!("a new submission was repeated"),
                     Err(why) => assert_eq!(why.triple(Ok(&catalog)), case["refused"], "{case}"),
                 }
+            }
+            "answered_button" => {
+                let goals = clarp_kernel::goals::GoalBook::default();
+                let mut given = case["item"].clone();
+                for (key, value) in [
+                    ("agent_id", json!("fixture")),
+                    ("session", json!("fixture")),
+                    ("title", json!("Decide")),
+                    ("summary", json!("")),
+                    ("reference_id", json!("")),
+                    ("created_at", json!(1)),
+                    ("updated_at", json!(30)),
+                    ("payload", case["payload"].clone()),
+                    ("submissions", case["submissions"].clone()),
+                ] {
+                    given[key] = value;
+                }
+                let artifact: clarp_kernel::artifacts::Artifact =
+                    serde_json::from_value(given).unwrap();
+                let row = artifact.public("Fixture", &goals, 30);
+                let fields: serde_json::Map<String, Value> = ["answered_action", "answered_label"]
+                    .into_iter()
+                    .filter_map(|key| row.get(key).cloned().map(|value| (key.to_string(), value)))
+                    .collect();
+                assert_eq!(Value::Object(fields), case["fields"], "{case}");
+                assert!(row.get("payload").is_none(), "{case}");
             }
             "level" => {
                 let table = |key: &str| -> Option<std::collections::BTreeMap<String, i64>> {
