@@ -591,6 +591,15 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
         _telemetry.reset_for_tests(tmp_path / "telemetry.sqlite")
     except (ImportError, AttributeError):
         pass
+    # The peer list (lib.server_peers) lives in the config dir: a test never reads the machine's
+    # own peers.json, so a route probe of /peers/snapshot never reaches a real Host with its token.
+    try:
+        from lib import peer_reads as _peer_reads, server_peers as _server_peers
+        monkeypatch.setattr(_server_peers, "PATH", tmp_path / "peers.json")
+        _server_peers._learned.clear()
+        _peer_reads.reset_cache()
+    except (ImportError, AttributeError):
+        pass
     try:
         from lib import heartbeat as _heartbeat
         _heartbeat.reset_for_tests()
