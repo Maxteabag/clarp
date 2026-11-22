@@ -140,7 +140,7 @@ event arrives.
 
       "alive": true, "busy": false, "focused": true,
       "latest_state": "idle", "latest_state_ts": 1756800000000,
-      "turn_started_at": 0, "last_activity": 1756800000, "last_turn_end": 1756799000,
+      "turn_started_at": 0, "last_activity": 1756800000000, "last_turn_end": 1756799000000,
       "status_text": null, "activity": { "…": "see agent-activity" },
       "compacting": false, "context_tokens": 12345, "context_window": 1000000,
       "last_compaction": null,
@@ -757,7 +757,7 @@ means an out-of-band job is running and the agent is otherwise idle.
   "synthesize_audio": true,
   "hands_free": false,
   "queue_if_busy": false,
-  "transcription_id": "<optional; from /transcribe>",
+  "transcription_id": "<optional; the X-Transcription-ID the client sent to /transcribe>",
   "client": "<optional; the app's short name, e.g. desktop>"
 }
 ```
@@ -916,8 +916,10 @@ event with `kind: agent-moved` follows each change.
 **In:** `POST /transcribe` with the audio body (`Content-Type` of the
 recording, e.g. `audio/webm`), headers `X-Hands-Free: 1` for dictation,
 `X-Transcription-ID: <uuid>` for idempotent retries, `X-Transcription-Model`
-to pick a model. Response includes `text`, `trace_id`, and `transcription_id`;
-pass both ids on the following `/send`.
+to pick a model. Response includes `text` and `trace_id`; it carries no
+`transcription_id`. The transcription id is the client's own `X-Transcription-ID`
+(the Host mints none when the header is left out). Pass `trace_id`, and that id
+when you sent one, on the following `/send`.
 When the engine cannot be handed the agent's language set (a set such as `no,en` goes only
 to Google Chirp or ElevenLabs Scribe), the Host stays within what the owner chose for
 transcription: its selected engine when that one takes the set, else its own engine when its
@@ -1012,7 +1014,8 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 
 - `GET /agents` — session-keyed map of live agents (a subset of the snapshot).
 - `POST /agents` — create, relaunch, or fork: `{"name", "voice_id",
-  "backend", "cwd", "model", "effort", "session" (to relaunch),
+  "backend", "cwd", "model", "effort", "replace_sid" (to relaunch),
+  "session" (an id asked for a new agent, honoured only when unused),
   "resume_session_id", "fork_session_id", "avatar_symbol", "personality",
   "parent", "role"}`. `parent` is the creating session or agent id and
   `role` is `agent` (default) or `helper`; a helper needs a parent, and a
