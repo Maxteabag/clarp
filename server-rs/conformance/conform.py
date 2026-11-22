@@ -788,6 +788,8 @@ def own_particulars(body):
     out = dict(body)
     if isinstance(out.get('capabilities'), dict):
         out['capabilities'] = {**out['capabilities'], 'features': '<features>'}
+        # These providers depend on which tools this particular Host has installed.
+        out['capabilities'].pop('hotseat_providers', None)
     if isinstance(out.get('contract'), dict):
         out['contract'] = {**out['contract'], 'features': '<features>'}
     if out.get('clarp_version'):

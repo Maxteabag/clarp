@@ -33,6 +33,8 @@ pub struct ServerInfo {
 pub struct Capabilities {
     pub version: u64,
     pub features: Vec<String>,
+    #[serde(default)]
+    pub hotseat_providers: Vec<String>,
 }
 
 impl Capabilities {

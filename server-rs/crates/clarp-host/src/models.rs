@@ -379,6 +379,13 @@ pub(crate) async fn default_for(app: &App, backend: &str) -> Option<String> {
 /// that keeps the machine's tools signs them in from an app, and says so of each it can.
 async fn told(State(app): State<App>) -> Json<Value> {
     let mut told = app.models.told(app.clock.now_ms()).await;
+    if let Some(providers) = told["providers"].as_object_mut() {
+        for (tool, row) in providers {
+            let harness = clarp_backend::by_id(tool).and_then(|backend| backend.runs_through());
+            row["runs_through"] = json!(harness);
+        }
+    }
+
     if crate::logins::sign_in::keeps(&app) {
         for tool in clarp_kernel::sign_in::TOOLS {
             if let Some(row) = told["providers"].get_mut(tool) {

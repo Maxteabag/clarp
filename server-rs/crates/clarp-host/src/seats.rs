@@ -532,6 +532,18 @@ pub async fn resume(app: &App, asked: &Value) -> resume::Answer {
     }
 }
 
+/// Which installed tools this Host exposes through Hotseat, independent of any live read.
+pub(crate) fn providers(app: &App) -> Vec<String> {
+    if !app.seats.told() {
+        return Vec::new();
+    }
+    clarp_kernel::seats::READ_PROVIDERS
+        .into_iter()
+        .filter(|tool| clarp_backend::program(tool).is_some_and(|path| crate::logins::installed(&path)))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// `GET /hotseat/status`: how the account seats stand, as the tool's list last said them.
 /// Nothing is read for it.
 pub async fn status(app: &App) -> Value {

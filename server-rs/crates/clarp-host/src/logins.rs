@@ -211,6 +211,13 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
             }
             row
         })
+        .map(|mut row| {
+            if every {
+                let harness = row["id"].as_str().and_then(clarp_backend::by_id);
+                row["runs_through"] = json!(harness.and_then(|backend| backend.runs_through()));
+            }
+            row
+        })
         .collect();
     let idle = |tool: &str| {
         json!({

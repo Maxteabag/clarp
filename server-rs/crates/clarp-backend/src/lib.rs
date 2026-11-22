@@ -209,6 +209,11 @@ pub trait Backend: Send + Sync {
     /// The name this backend has in configuration and on the wire.
     fn id(&self) -> &'static str;
 
+    /// A card that shares another harness's binary, runner and sign-in store.
+    fn runs_through(&self) -> Option<&'static str> {
+        None
+    }
+
     fn launch(&self, spec: &TurnSpec) -> Launch;
 
     /// The named session is usable as soon as the tool starts, even if it prints nothing.
