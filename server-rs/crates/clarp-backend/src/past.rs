@@ -9,15 +9,9 @@
 //! and the title it was given, by its user or by the tool.
 //!
 //! The rule is the Python Host's (`server/lib/session_catalog.py`, `list_claude_sessions`),
-//! held by `tests/fixtures/past-sessions-vectors.json`. Two things are done otherwise, on
-//! purpose, and named in the test:
-//!
-//! - A project is looked for under the name Claude Code gives it. The Python Host puts a
-//!   dash for every slash only, and so offers nothing for a directory whose path has a dot,
-//!   an underscore or a space.
-//! - A session the index marks as a side chain (the transcript of a helper inside a turn)
-//!   is not offered. The Python Host leaves it out where it reads the index and then offers
-//!   it after all, as a transcript the index does not name.
+//! held by `tests/fixtures/past-sessions-vectors.json`. Listing and resume use
+//! the same project name (R36). Side chains are omitted whether the index or
+//! the sampled transcript records identify them (R37).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader};
@@ -36,14 +30,20 @@ const TITLE_MOST: usize = 160;
 /// A moment that is counted in more than this is counted in milliseconds.
 const MOST_SECONDS: i64 = 10_000_000_000;
 
-/// A path as it is compared: without a slash at its end and without a slash said twice.
-/// Nothing at all is the directory one is in.
+/// The path spelling given by Python's pathlib before project encoding.
 fn plain(path: &str) -> String {
-    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
-    match (path.starts_with('/'), parts.is_empty()) {
-        (true, _) => format!("/{}", parts.join("/")),
-        (false, true) => ".".to_string(),
-        (false, false) => parts.join("/"),
+    let parts: Vec<_> = path
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    if path.starts_with("//") && !path.starts_with("///") {
+        format!("//{}", parts.join("/"))
+    } else if path.starts_with('/') {
+        format!("/{}", parts.join("/"))
+    } else if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
     }
 }
 
@@ -118,11 +118,13 @@ fn read(path: &Path) -> Option<Value> {
     let bytes = std::fs::read(path).ok()?;
     let (mut cwd, mut preview) = (String::new(), String::new());
     let (mut made, mut given) = (String::new(), String::new());
+    let mut side_chain = false;
     let mut take = |line: &str| {
         let Ok(Value::Object(event)) = serde_json::from_str::<Value>(line) else {
             return;
         };
         let event = Value::Object(event);
+        side_chain |= event["isSidechain"] == true;
         let said = |key: &str| Some(text_of(event.get(key))).filter(|text| !text.is_empty());
         cwd = said("cwd").unwrap_or(std::mem::take(&mut cwd));
         if preview.is_empty() {
@@ -148,6 +150,9 @@ fn read(path: &Path) -> Option<Value> {
     }
     for line in lines {
         take(line);
+    }
+    if side_chain {
+        return None;
     }
     let id = path.file_stem()?.to_string_lossy().into_owned();
     let title = if given.is_empty() { made } else { given };
