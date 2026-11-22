@@ -979,7 +979,7 @@ mod tests {
     /// shows as its receipt: no protocol line reaches the chat.
     #[test]
     fn a_resolved_decision_shows_as_its_receipt_not_the_prompt() {
-        let text = "[Clarp decision resolved]\nDecision ID: dec-7\nArtifact ID: art-42\nQuestion: Deploy to production?\nContext: CI is green.\nReference: \nPayload: {}\nThe user chose: rejected. Do not perform the protected action.";
+        let text = "[Clarp decision resolved]\nDecision ID: dec-7\nArtifact ID: art-42\nResolved by: user\nQuestion: Deploy to production?\nContext: CI is green.\nReference: \nPayload: {}\nThe user rejected this exact action: Deploy to production? Do not perform it or a broader version of it.";
         let messages = [Message::from_json(serde_json::json!({"id": "m1", "role": "user", "origin": "automation", "text": text}).as_object().unwrap())];
         let rows = clarp_core::presentation::present(&messages, &mut clarp_core::presentation::Settings::default(), None).rows;
         let row = super::message_row(&rows[0], false, &Default::default());
