@@ -5863,20 +5863,28 @@ fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_a
     world.exits(1, Some(0), None);
     world.hint(&mut actor);
     let page = actor.tail(100).unwrap();
-    let rows: Vec<(String, Option<String>)> = page
+    let rows: Vec<_> = page
         .entries
         .iter()
-        .map(|row| (row.entry.id().to_string(), row.coordination.clone()))
+        .map(|row| (row.entry.id(), row.coordination.as_deref()))
         .collect();
-    let boss = Some("a-boss".to_string());
+    // The prompt belongs to the agents. Notes address the user even in a marked turn.
     assert_eq!(
         rows,
-        vec![
-            ("u-a1".to_string(), boss.clone()),
-            ("note-a1-green".to_string(), boss.clone()),
-            ("note-a1-blue".to_string(), boss.clone()),
+        [
+            ("u-a1", Some("a-boss")),
+            ("note-a1-green", None),
+            ("note-a1-blue", None),
         ]
     );
+    for which in [
+        Which::WithoutCoordination,
+        Which::chat(true).conversation_view(true),
+    ] {
+        let shown = actor.tail_of(100, which).unwrap();
+        let ids: Vec<_> = shown.entries.iter().map(|row| row.entry.id()).collect();
+        assert_eq!(ids, ["note-a1-green", "note-a1-blue"]);
+    }
     let end = page
         .entries
         .iter()
