@@ -1000,12 +1000,16 @@ def _attach_output(turns: list[dict], call_id: str, output: Any) -> None:
                 continue
             real_index = len(turn.get("display_cells") or []) - i - 1
             if cell.get("kind") == "command":
-                turn["display_cells"][real_index] = _command_cell(
+                rebuilt = _command_cell(
                     command=str(cell.get("summary") or ""),
                     call_id=str(cell.get("id") or call_id),
                     output=text,
                     exit_code=exit_code,
                 )
+                # Which turn and kind an older call stands in for: the structured items
+                # of that turn still replace it once its output has arrived (R41).
+                rebuilt.update({key: value for key, value in cell.items() if key.startswith("_legacy_")})
+                turn["display_cells"][real_index] = rebuilt
             elif cell.get("kind") == "patch":
                 cell = dict(cell)
                 cell["status"] = "ok"
