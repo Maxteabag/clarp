@@ -710,3 +710,20 @@ def test_a_compact_turn_keeps_its_failed_calls_and_does_not_count_them(tmp_path)
     assert first["display_cells"][0]["detail_count"] == 2      # ok-1 and ok-2, not the failure
     assert first["display_cells"][1]["status"] == "error"
     assert [c["id"] for c in second["display_cells"]] == ["bad-1", "bad-2"]
+
+
+def test_a_compact_turn_keeps_its_failed_tools(tmp_path):
+    # A Claude turn keeps its calls in tools, not display cells: a failure stays there too.
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [{
+        "id": "claude-turn", "role": "assistant", "timestamp": "2026-01-01T00:00:00Z",
+        "text": "", "tools": [
+            {"id": "t1", "name": "Read", "summary": "a", "status": "ok"},
+            {"id": "t2", "name": "Bash", "summary": "b", "status": "error"},
+            {"id": "t3", "name": "Edit", "summary": "c", "status": "ok"},
+        ],
+    }])
+    compact = _load("reliable", limit=20, include_automated=False, include_tool_details=False)
+    turn = compact["turns"][0]
+    assert [t["id"] for t in turn["tools"]] == ["t1", "t2"]
+    assert turn["activity_count"] == 3
