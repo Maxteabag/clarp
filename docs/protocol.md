@@ -83,6 +83,27 @@ allows sending work to agents that run with the host user's permissions.
 `GET /` and the static assets are public so a browser can load the shell
 before it has a token.
 
+### Cross-origin reads (feature `cross_origin_read`)
+
+The web app is served by one Host. Its all-Hosts list reads the user's other Hosts from its own
+origin, which needs CORS on those Hosts. A Host allows it only for the origins on its
+`[server] web_read_origins` list (exact `scheme://host[:port]`, the user's own web apps), and
+only for two routes:
+
+- `GET /server-info` (the Host's `server_id` and name, for the Host badge and the moved line)
+- `GET /agents/snapshot` (the roster: names, activity, `moved`)
+
+For a listed origin those two answer `Access-Control-Allow-Origin: <origin>` and
+`Vary: Origin`, on success and on a refusal alike. `OPTIONS` on them is the preflight: 204 with
+`Access-Control-Allow-Methods: GET`, `Access-Control-Allow-Headers: Authorization,
+X-Clarp-Client` and `Access-Control-Max-Age: 600` when the origin is listed and nothing else is
+asked; every other `OPTIONS` is 403 with no CORS header. No credentials mode: the Host never
+sends `Access-Control-Allow-Credentials`, and takes such a request with the token in the
+`Authorization` header only (a cookie or URL token gets 401). A cross-origin request is never
+local, so the token is a paired device's (`POST /pairing/exchange`), with that device's scope.
+Every other route and every write stays same-origin. With no list, nothing is allowed
+cross-origin.
+
 ## Core conversation protocol
 
 ### 1. Bootstrap: `GET /agents/snapshot`
