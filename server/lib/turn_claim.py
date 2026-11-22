@@ -8,11 +8,11 @@ import time
 from dataclasses import replace
 from . import agents as agents_db
 from . import eventlog
-from . import tts_queue, turn_queue
+from . import turn_queue
 from .turn_slots import defer_on
 from .log import log, log_exception
 from .turn_dispatch_state import _TURN_LOCK, _SLOTS, _INFLIGHT, _STOPPING_SENTINEL, _PROCESS_OWNER_PREFIX, _PROCESS_EXIT_POLL_S, _terminal_live, _alive
-from .turn_command import DispatchResult, _TurnSpec, _park, _park_at_head, DispatchError, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _is_call_opening, DispatchCommand
+from .turn_command import DispatchResult, _TurnSpec, _park, DispatchError, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _is_call_opening, DispatchCommand
 
 
 class ClaimMixin:
@@ -83,7 +83,7 @@ class ClaimMixin:
         """Decide how to handle a new send for this agent:
         - Stop barrier up → park behind it, return True;
         - terminal attached → queue behind it, return True (caller doesn't spawn);
-        - in-flight turn running → queue a user send; legacy other origins preempt;
+        - in-flight turn running → queue the send, whatever its origin (no send preempts);
         - stale slot (no live process) → take it over, return False;
         - idle → claim the slot, return False.
         Returns True when the send waits instead of spawning.
@@ -91,8 +91,8 @@ class ClaimMixin:
         Only the decision is taken under _TURN_LOCK. The durable queue row is
         written before it (a no-op when admission already wrote it, as it does
         for every queue request), the Stop-park row is written before it and
-        withdrawn after it if the barrier had gone, and eventlog rows and the
-        preempting interrupt are deferred past the release."""
+        withdrawn after it if the barrier had gone, and eventlog rows are
+        deferred past the release."""
         if queue_if_busy:
             turn_queue.enqueue(
                 queue_id=spec.queue_id, agent_id=spec.agent_id,
@@ -106,8 +106,7 @@ class ClaimMixin:
             park_id = _park(spec)
         elif (not spec.queue_id
               and str(_SLOTS.get(spec.agent_id) or "").startswith(_PROCESS_OWNER_PREFIX)):
-            # It will wait behind a turn process: durably, like the send
-            # that preempted that process (TP-01).
+            # It will wait behind a leftover turn process, durably (TP-01b).
             park_id = _park(spec, prefix="preempt-park")
         elif wait_for_start and not spec.queue_id:
             # It waits for the agent's own pending start: durable before it
@@ -116,21 +115,18 @@ class ClaimMixin:
             if not park_id:
                 raise DispatchError(503, "could not durably queue message")
         parked = False
-        preempt: list = []
         queue_user: list = []
         try:
             with _TURN_LOCK:
                 parked, decision = self._claim_or_queue(
                     spec, queue_if_busy=queue_if_busy, park_id=park_id,
-                    preempt=preempt, queue_user=queue_user, wait_for_start=wait_for_start)
+                    queue_user=queue_user, wait_for_start=wait_for_start)
         finally:
             if park_id and not parked:
                 turn_queue.unpark(park_id)
-        if preempt and self._preempt_for(spec, preempt[0]):
-            decision = True     # it waits for the old process to exit
         if queue_user:
             # Ordinary admission and supported steering have already run.
-            # Persist before making this previously-preempting send eligible.
+            # Persist before making this waiting send eligible.
             queue_id = spec.client_msg_id or spec.trace_id
             try:
                 turn_queue.enqueue(
@@ -219,49 +215,6 @@ class ClaimMixin:
 
         threading.Thread(target=wait, daemon=True,
                          name=f"turn-wait-{spec.agent_id}").start()
-
-    def _preempt_for(self, spec: _TurnSpec, killed: str) -> bool:
-        """Interrupt the running turn for ``spec``. Two processes on one native
-        session interleave and corrupt it, so when the old process is still
-        running ``spec`` waits behind it, durably (a park row a restart
-        recovers), and starts when it exits. Returns whether it waits; a send
-        that cannot wait durably is refused."""
-        try:
-            self.backends.interrupt(spec.backend, spec.agent_id)
-        except Exception as e:  # noqa: BLE001
-            log_exception("preemptInterruptFail", e, detail=spec.agent_id)
-        if killed and killed != spec.trace_id:
-            # The preempted turn's speech not yet synthesized is dropped, not
-            # spoken late over the new turn (VP-06).
-            try:
-                tts_queue.cancel(spec.agent_id, killed, reason="turn preempted")
-            except Exception as e:  # noqa: BLE001
-                log_exception("preemptSpeechCancelFail", e, detail=spec.agent_id)
-        eventlog.emit("server", "turnPreempted", context=spec.context,
-                      detail={"killed_trace": killed})
-        log("turnPreempted",
-            f"agent={spec.agent_id} killed={killed or '∅'} "
-            f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
-        if not self._running_processes(spec):
-            return False
-        park_id = "" if spec.park_id else _park_at_head(spec)
-        owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
-        with _TURN_LOCK:
-            if _SLOTS.get(spec.agent_id) != spec.trace_id:
-                # A Stop or another send took the slot meanwhile.
-                if park_id:
-                    defer_on(_TURN_LOCK, lambda: turn_queue.unpark(park_id))
-                return False
-            if not (park_id or spec.park_id):
-                _SLOTS.release(spec.agent_id, spec.trace_id)
-                raise DispatchError(503, "could not durably queue message")
-            _SLOTS.claim(spec.agent_id, owner)
-            _SLOTS.mark_spawned(spec.agent_id, owner)
-            _SLOTS.requeue_front(spec.agent_id, replace(
-                spec, park_id=park_id or spec.park_id))
-            depth = _SLOTS.queue_depth(spec.agent_id)
-        self._wait_for_process_exit(spec, owner, depth)
-        return True
 
     def _call_opening_claimed(self, spec: _TurnSpec) -> bool:
         """The dispatcher's claim of a listen-first initiative before it runs
