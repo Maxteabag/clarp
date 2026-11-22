@@ -29,7 +29,11 @@ def normalize_job_id(value: str | None) -> str:
 
 
 def request_fingerprint(audio: bytes, content_type: str, model: str,
-                        hands_free: bool) -> str:
+                        hands_free: bool, call: dict | None = None) -> str:
+    """The request a transcription id stands for. A call clip's also binds whose it is,
+    in which call and session (R87): the same id with the same audio from another
+    principal, call or participant, or from chat, is another request and gets 409, never
+    another scope's cached text. A chat clip's fingerprint is as it always was."""
     digest = hashlib.sha256()
     digest.update(audio)
     digest.update(b"\0")
@@ -38,6 +42,11 @@ def request_fingerprint(audio: bytes, content_type: str, model: str,
     digest.update(model.encode())
     digest.update(b"\0")
     digest.update(b"1" if hands_free else b"0")
+    if call is not None:
+        digest.update(b"\0call")
+        for field in ("principal", "call_id", "session"):
+            value = str(call.get(field) or "").encode()
+            digest.update(b"%d:%s," % (len(value), value))   # netstrings: no field bleeds into the next
     return digest.hexdigest()
 
 
