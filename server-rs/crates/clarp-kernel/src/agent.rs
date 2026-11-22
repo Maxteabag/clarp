@@ -1302,11 +1302,14 @@ impl Agent {
                     self.deliveries.fence(self.at, *at_ms);
                 }
                 self.stop_generation += 1;
-                if !self.paused || !self.unheld.is_empty() {
+                let relaunch = control.is_relaunch();
+                if !self.paused || (!relaunch && !self.unheld.is_empty()) {
                     self.queue_revision += 1;
                 }
                 self.paused = true;
-                self.user_stop_floor = (by == crate::control::USER).then_some(self.next_turn);
+                if !relaunch {
+                    self.user_stop_floor = (by == crate::control::USER).then_some(self.next_turn);
+                }
                 self.unheld.clear();
             }
             AgentEvent::Resumed { .. } => {
@@ -1401,6 +1404,11 @@ impl Agent {
             AgentEvent::StartedAgain { .. } => {
                 self.backend_session = None;
                 self.note = None;
+                // Python counts both the pause and its release even for an idle agent.
+                // For a busy agent the Host records those transitions around the relaunch.
+                if !self.paused {
+                    self.queue_revision += 2;
+                }
             }
             AgentEvent::Labelled { text, at_ms } => {
                 self.resting = Some(if text.is_empty() {
@@ -2864,17 +2872,22 @@ mod tests {
         let mut a = Driven::new();
         // Never at work, it is started again all the same: there is nothing to forget.
         assert_eq!(a.send(Command::StartAgain).unwrap(), vec![]);
+        assert_eq!(a.agent.queue_revision(), 2);
+        assert!(!a.agent.is_paused());
         a.user(10);
         a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
         a.send(bound(1, "sess-1")).unwrap();
         assert_eq!(a.agent.backend_session(), Some("sess-1"));
         a.user(11);
         // While a turn of it runs it is not started again: that turn is stopped first.
+        let revision = a.agent.queue_revision();
         assert_eq!(a.send(Command::StartAgain), Err(Refusal::AtWork));
+        assert_eq!(a.agent.queue_revision(), revision);
         a.send(Command::Stop {
-            by: Control::by("relaunch"),
+            by: Control::for_relaunch(),
         })
         .unwrap();
+        assert_eq!(a.agent.queue_revision(), revision + 1);
         a.finish(1);
         assert_eq!((a.live(), a.waiting()), (None, vec![2]));
         assert_eq!(a.send(Command::StartAgain).unwrap(), vec![]);
@@ -2890,6 +2903,7 @@ mod tests {
         // What waits still waits, and how the last turn ended is still known.
         assert_eq!(a.waiting(), vec![2]);
         assert!(a.agent.last().is_some());
+        assert_eq!(a.agent.queue_revision(), revision + 1);
         // Let go, the waiting message runs, and the session its tool names is the agent's.
         let resumed = a.send(Command::Resume {
             by: "relaunch".to_string(),
@@ -2901,9 +2915,34 @@ mod tests {
                 message_seq: 11
             }]
         );
+        assert_eq!(a.agent.queue_revision(), revision + 3);
         a.send(Command::TurnStarted { turn: TurnId(2) }).unwrap();
         a.send(bound(2, "sess-2")).unwrap();
         assert_eq!(a.agent.backend_session(), Some("sess-2"));
+    }
+
+    #[test]
+    fn relaunch_keeps_an_existing_pause_without_counting_another() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.send(Command::Stop {
+            by: Control::by("move"),
+        })
+        .unwrap();
+        a.user(11);
+        assert!(a.agent.unheld.contains(&TurnId(2)));
+        let revision = a.agent.queue_revision();
+        a.send(Command::Stop {
+            by: Control::for_relaunch(),
+        })
+        .unwrap();
+        a.finish(1);
+        a.send(Command::StartAgain).unwrap();
+        assert!(a.agent.is_paused());
+        assert!(a.agent.unheld.is_empty());
+        assert_eq!(a.waiting(), vec![2]);
+        assert_eq!(a.agent.queue_revision(), revision);
     }
 
     #[test]
