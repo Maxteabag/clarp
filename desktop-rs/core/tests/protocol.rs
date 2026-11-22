@@ -317,3 +317,13 @@ fn a_user_row_reads_its_own_send_delivery_state() {
     let unknown = Message::from_json(&obj(json!({"id": "u-abc", "role": "user"})));
     assert_eq!(unknown.send_state, "", "absent means unknown");
 }
+
+/// A Host that knows no real usage sends null: it stays unknown, never 0 (#403).
+#[test]
+fn an_unknown_context_size_stays_unknown() {
+    let size = |row: Value| Agent::from_json(&obj(row)).context_tokens;
+    assert_eq!(size(json!({"session": "a", "context_tokens": null, "context_window": 200000})), None);
+    assert_eq!(size(json!({"session": "a"})), None, "an older Host that leaves it out");
+    assert_eq!(size(json!({"session": "a", "context_tokens": 0, "context_window": 200000})), Some(0), "a real empty context is 0");
+    assert_eq!(size(json!({"session": "a", "context_tokens": 51200})), Some(51200));
+}

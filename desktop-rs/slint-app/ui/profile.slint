@@ -381,7 +381,8 @@ export component AgentProfile inherits Modal {
                 }
                 Card {
                     title: "CONTEXT";
-                    Rectangle {
+                    // No gauge while the usage is unknown (#403).
+                    if root.info.context-fraction >= 0: Rectangle {
                         height: 4px;
                         border-radius: 2px;
                         background: Palette.border;
