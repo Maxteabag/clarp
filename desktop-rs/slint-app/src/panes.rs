@@ -562,6 +562,8 @@ impl App {
         let stamps = self.prefs.borrow().timestamps;
         let session_artifacts = self.engine.borrow().artifacts_for_session(&pane.session);
         let artifacts = crate::cells_view::artifacts_by_row(&presented, &session_artifacts);
+        // A native form's card reads its spec when it is drawn.
+        crate::form_view::want(self, &session_artifacts);
         let agent_name = self.engine.borrow().roster().find(&pane.session).map(|a| clarp_core::protocol::display_name(a).to_owned()).unwrap_or_default();
         let mentionable = crate::mention_view::candidates(&self.engine.borrow());
         let cursor = self.artifact_cursor.borrow().clone();

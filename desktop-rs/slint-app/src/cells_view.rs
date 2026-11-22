@@ -92,6 +92,16 @@ pub fn artifacts_by_row(rows: &[PresentedRow], artifacts: &[Value]) -> Vec<Vec<V
     // The latest reply (the last one stamped latest).
     let last = stamps.iter().enumerate().filter_map(|(i, s)| s.map(|s| (s, i))).max().map(|(_, i)| i);
     for artifact in artifacts {
+        // The turn that published it, when the Host names it (Host contract
+        // 106): under that turn's last reply, as iOS places it.
+        let trace = text(artifact, "source_trace_id");
+        let traced = (!trace.trim().is_empty())
+            .then(|| rows.iter().enumerate().rev().find(|(i, row)| stamps[*i].is_some() && row.message.trace_id == trace.trim()).map(|(i, _)| i))
+            .flatten();
+        if let Some(index) = traced {
+            placed[index].push(artifact.clone());
+            continue;
+        }
         let created = number(artifact, "created_at");
         if created <= 0 {
             continue;
@@ -137,6 +147,26 @@ mod tests {
             activity_label: String::new(),
             explanation_repeat: 1,
         }
+    }
+
+    #[test]
+    fn an_artifact_naming_its_turn_sits_under_that_turns_reply() {
+        let mut rows = vec![
+            row("q1", "user", "2026-09-29T10:00:00Z"),
+            row("a1", "assistant", "2026-09-29T10:00:30Z"),
+            row("q2", "user", "2026-09-29T10:01:00Z"),
+            row("a2", "assistant", "2026-09-29T10:01:30Z"),
+        ];
+        rows[1].message.trace_id = "turn-1".into();
+        rows[3].message.trace_id = "turn-2".into();
+        // Made late (after both replies), but by the first turn.
+        let late = 1_759_140_200_000_i64;
+        let traced = json!({"artifact_id": "f", "created_at": late, "source_trace_id": "turn-1"});
+        let untraced = json!({"artifact_id": "g", "created_at": late});
+        let placed = artifacts_by_row(&rows, &[traced, untraced]);
+        assert_eq!(placed[1].len(), 1);
+        assert_eq!(placed[1][0]["artifact_id"], "f");
+        assert_eq!(placed[3][0]["artifact_id"], "g");
     }
 
     #[test]

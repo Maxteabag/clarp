@@ -45,6 +45,7 @@ mod agent_dialogs_view;
 mod launch_view;
 // ---- profile and overview
 mod artifacts_view;
+mod form_view;
 mod form_server;
 mod cells_view;
 mod orchestrator_view;
@@ -1036,6 +1037,7 @@ fn main() {
     }));
     window.on_team_action(|action, argument| with_window(|app, window| teams_view::action(app, window, &action, &argument)));
     artifacts_view::bind(&window);
+    form_view::bind(&window);
     window.on_team_created(|name| with_window(|app, window| teams_view::created(app, window, &name)));
     window.on_team_saved(|name, colour, leader| with_window(|app, window| teams_view::saved(app, window, &name, &colour, leader)));
     window.on_team_member_added(|index| with_window(|app, window| teams_view::member_added(app, window, index)));
