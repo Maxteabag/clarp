@@ -2,9 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use jiff::tz::TimeZone;
 use serde::{Deserialize, Serialize};
 
-use super::settings::Settings;
+use super::{clock, local, settings::Settings};
+use crate::fleet::Directory;
 
 const DAY: i64 = 24 * 60 * 60 * 1_000;
 const MAX_CLEARED: usize = 2_000;
@@ -36,6 +38,8 @@ pub(super) struct Row {
     pub id: u64,
     pub kind: String,
     pub subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    device_name: Option<String>,
     pub first_seen: i64,
     pub last_seen: i64,
     pub count: u64,
@@ -78,14 +82,38 @@ pub(super) struct Book {
     summary_date: String,
 }
 
-fn local(ms: i64) -> Option<jiff::Zoned> {
-    let ts = jiff::Timestamp::from_millisecond(ms).ok()?;
-    Some(ts.to_zoned(jiff::tz::TimeZone::system()))
+impl Row {
+    pub fn refresh_device_name(&mut self, directory: &Directory) {
+        if self.kind.starts_with("app_crash_")
+            && let Some(device) = directory.devices.values().find(|device| {
+                device.device_id == self.subject && !device.name.trim().is_empty()
+            })
+        {
+            self.device_name = Some(device.name.clone());
+        }
+    }
+
+    pub fn subject_label(&self) -> String {
+        self.device_name
+            .as_ref()
+            .map_or_else(|| self.subject.clone(), |name| format!("{name} ({})", self.subject))
+    }
 }
 
 impl Book {
-    pub fn reconcile(&mut self, mut seen: Seen, settings: &Settings, now: i64) {
-        for row in self.rows.iter_mut().filter(|row| row.cleared_at.is_none()) {
+    pub fn reconcile(
+        &mut self,
+        mut seen: Seen,
+        settings: &Settings,
+        directory: &Directory,
+        zone: &TimeZone,
+        now: i64,
+    ) {
+        for row in &mut self.rows {
+            row.refresh_device_name(directory);
+            if row.cleared_at.is_some() {
+                continue;
+            }
             let key = (row.kind.clone(), row.subject.clone());
             if let Some(detail) = seen.found.remove(&key) {
                 row.last_seen = now;
@@ -95,12 +123,9 @@ impl Book {
                 && !seen.unavailable_kinds.contains(row.kind.as_str())
             {
                 row.cleared_at = Some(now);
-                let since = local(row.first_seen)
-                    .map(|time| time.strftime("%H:%M").to_string())
-                    .unwrap_or_default();
                 let text = format!(
-                    "Experience watch: {} cleared for {} (open since {}, seen {}x).",
-                    row.kind, row.subject, since, row.count,
+                    "Experience watch: {} cleared for {} at {} (open since {}, seen {}x).",
+                    row.kind, row.subject_label(), clock(now, zone), clock(row.first_seen, zone), row.count,
                 );
                 for to in settings.recipients(&row.kind) {
                     self.owed.push(Owed {
@@ -113,29 +138,32 @@ impl Book {
         }
         for ((kind, subject), detail) in seen.found {
             self.next = self.next.saturating_add(1);
-            let detail: String = detail.chars().take(DETAIL_CHARS).collect();
+            let mut row = Row {
+                id: self.next,
+                kind,
+                subject,
+                device_name: None,
+                first_seen: now,
+                last_seen: now,
+                count: 1,
+                detail: detail.chars().take(DETAIL_CHARS).collect(),
+                cleared_at: None,
+                notified_open: Vec::new(),
+                notified_clear: Vec::new(),
+            };
+            row.refresh_device_name(directory);
             let text = format!(
-                "Experience watch: {kind} opened for {subject}. {detail} (clarp-admin experience --open)"
+                "Experience watch: {} opened for {} at {}. {} (clarp-admin experience --open)",
+                row.kind, row.subject_label(), clock(now, zone), row.detail,
             );
-            for to in settings.recipients(&kind) {
+            for to in settings.recipients(&row.kind) {
                 self.owed.push(Owed {
-                    notice: Notice::Open(self.next),
+                    notice: Notice::Open(row.id),
                     to,
                     text: text.clone(),
                 });
             }
-            self.rows.push(Row {
-                id: self.next,
-                kind,
-                subject,
-                first_seen: now,
-                last_seen: now,
-                count: 1,
-                detail,
-                cleared_at: None,
-                notified_open: Vec::new(),
-                notified_clear: Vec::new(),
-            });
+            self.rows.push(row);
         }
         let mut kept = 0;
         self.rows
@@ -148,11 +176,11 @@ impl Book {
                 true
             }
         });
-        self.daily(settings, now);
+        self.daily(settings, zone, now);
     }
 
-    fn daily(&mut self, settings: &Settings, now: i64) {
-        let Some(time) = local(now) else { return };
+    fn daily(&mut self, settings: &Settings, zone: &TimeZone, now: i64) {
+        let Some(time) = local(now, zone) else { return };
         let day = time.strftime("%Y-%m-%d").to_string();
         self.owed.retain(|owed| {
             !matches!(&owed.notice, Notice::Summary(date) if date != &day || settings.front_desk.is_empty())
@@ -199,7 +227,8 @@ impl Book {
             notice: Notice::Summary(day),
             to: settings.front_desk.clone(),
             text: format!(
-                "Experience watch, last 24 h: {opened} opened, {cleared} cleared, {open} still open{detail}. clarp-admin experience --since 24h"
+                "Experience watch, last 24 h through {}: {opened} opened, {cleared} cleared, {open} still open{detail}. clarp-admin experience --since 24h",
+                clock(now, zone),
             ),
         });
     }

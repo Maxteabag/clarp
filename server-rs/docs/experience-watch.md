@@ -54,4 +54,7 @@ for seven days and up to 2,000 rows. The configured owner and front desk get
 one notice on open and on clear, from `experience-watch`. A shared recipient
 gets one copy. `wait` and `sends` use the `queue` owner unless assigned
 separately. `app_crash_ios` and the other platform kinds fall back to
-`app_crash`. The front desk also gets one local-time summary per date.
+`app_crash`. The front desk also gets one local-time summary per date. Notices and the
+admin command show the paired device name with its ID and use the Host's
+local timezone, with a UTC offset. JSON output also keeps the original
+epoch-millisecond timestamps.

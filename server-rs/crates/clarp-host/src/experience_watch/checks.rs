@@ -373,25 +373,31 @@ mod tests {
     async fn experience_watch_findings_open_clear_and_summarize_once() {
         let place = crate::unkept::at_the_port::place("experience-watch-pass");
         let app = place.app().await;
-        let local_hour = |ms| {
-            jiff::Timestamp::from_millisecond(ms)
-                .unwrap()
-                .to_zoned(jiff::tz::TimeZone::system())
-                .hour()
-        };
-        let first = app.clock.now_ms();
-        let now = (0..24)
-            .map(|n| first + n * 3_600_000)
-            .find(|ms| (1..21).contains(&local_hour(*ms)))
+        let zone = jiff::tz::TimeZone::get("Europe/Oslo").unwrap();
+        let now = "2026-11-22T15:23:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
+        place.clock.advance_ms(now - app.clock.now_ms());
+        let scope = crate::pairing::Scope::Limited;
+        let issued = app
+            .fleet
+            .issue("iPhone".into(), scope, 60)
+            .await
+            .unwrap()
             .unwrap();
-        let config: toml::Value = format!(
-            "enabled = true\nsummary_hour = {}\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\n",
-            local_hour(now) + 1,
-        ).parse().unwrap();
+        let phone = app
+            .fleet
+            .exchange(issued.code, String::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let directory = app.fleet.directory();
+        let config: toml::Value = "enabled = true\nsummary_hour = 17\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\n".parse().unwrap();
         let settings = Settings::from_section(Some(&config));
         for n in (0..27).rev() {
             app.experience.launched(
-                "paired-phone",
+                &phone.device_id,
                 Some("ios/200 contract=130"),
                 now - n * 4_000,
             );
@@ -403,10 +409,9 @@ mod tests {
         let proof = &app.experience.relaunches(now - 60_000, now)["proof-phone"];
         assert_eq!((proof.count, proof.platform.as_str()), (6, "ios"));
         assert_eq!((proof.build.as_str(), proof.contract), ("3099", Some(87)));
-        place.clock.advance_ms(now - first);
         let paired = crate::edge::Principal::Device {
-            device_id: "paired-phone".into(),
-            scope: crate::pairing::Scope::Limited,
+            device_id: phone.device_id.clone(),
+            scope,
         };
         let mut header = axum::http::HeaderMap::new();
         header.insert("x-clarp-client", "ios/200 contract=130".parse().unwrap());
@@ -454,7 +459,7 @@ mod tests {
         let mut book = Book::default();
         let mut seen = collect(&app, &settings, now).await;
         agent(&mut seen, &settings, "worker", now, &facts, 0);
-        book.reconcile(seen, &settings, now);
+        book.reconcile(seen, &settings, &directory, &zone, now);
         assert_eq!(book.rows.len(), 3);
         assert_eq!(
             book.owed.len(),
@@ -466,7 +471,28 @@ mod tests {
             .iter()
             .find(|row| row.kind == "app_crash_ios")
             .unwrap();
-        assert_eq!(crash.subject, "paired-phone");
+        assert_eq!(crash.subject, phone.device_id);
+        let label = format!("iPhone ({})", phone.device_id);
+        let opened = format!("opened for {label} at 2026-11-22 16:23 +01:00");
+        for owed in book.owed.iter().filter(|owed| owed.text.contains("app_crash_ios")) {
+            assert!(owed.text.contains(&opened), "{}", owed.text);
+        }
+        // Old stored rows can still pick up the device's current paired name.
+        let mut previous_row = serde_json::to_value(crash).unwrap();
+        previous_row.as_object_mut().unwrap().remove("device_name");
+        let previous_row = serde_json::from_value(previous_row).unwrap();
+        let shown = super::super::render(vec![previous_row], &settings, &directory, &zone, false);
+        assert_eq!(shown.exit, 0);
+        assert!(shown.stdout.contains(&label));
+        assert!(shown.stdout.contains("since 2026-11-22 16:23 +01:00"));
+        let shown = super::super::render(book.rows.clone(), &settings, &directory, &zone, true);
+        assert_eq!(shown.exit, 0);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&shown.stdout).unwrap();
+        let shown = rows.iter().find(|row| row["kind"] == "app_crash_ios").unwrap();
+        assert_eq!(shown["subject"], phone.device_id);
+        assert_eq!(shown["device_name"], "iPhone");
+        assert_eq!(shown["first_seen"], now);
+        assert_eq!(shown["first_seen_local"], "2026-11-22 16:23 +01:00");
         assert!(crash.detail.contains("3 crash events"));
         assert!(crash.detail.contains("27 launch requests"));
         assert!(crash.detail.contains("Build 200"));
@@ -485,13 +511,15 @@ mod tests {
 
         let mut seen = collect(&app, &settings, now + 1).await;
         agent(&mut seen, &settings, "worker", now + 1, &facts, 0);
-        book.reconcile(seen, &settings, now + 1);
+        book.reconcile(seen, &settings, &directory, &zone, now + 1);
         assert!(book.rows.iter().all(|row| row.count == 2));
         assert!(book.owed.is_empty());
 
+        assert!(app.fleet.revoke(phone.device_id.clone()).await.unwrap());
+        let directory = app.fleet.directory();
         let later = now + 3_600_000;
         let seen = collect(&app, &settings, later).await;
-        book.reconcile(seen, &settings, later);
+        book.reconcile(seen, &settings, &directory, &zone, later);
         assert!(book.rows.iter().all(|row| row.cleared_at == Some(later)));
         let summaries = book
             .owed
@@ -506,6 +534,11 @@ mod tests {
                 .contains("3 opened, 3 cleared, 0 still open")
         );
         assert_eq!(book.owed.len(), 5);
+        let cleared = format!("cleared for {label} at 2026-11-22 17:23 +01:00");
+        for owed in book.owed.iter().filter(|owed| owed.text.contains("app_crash_ios")) {
+            assert!(owed.text.contains(&cleared), "{}", owed.text);
+            assert!(owed.text.contains("open since 2026-11-22 16:23 +01:00"));
+        }
         for owed in std::mem::take(&mut book.owed) {
             book.told(owed);
         }
@@ -517,7 +550,7 @@ mod tests {
         assert_eq!(crash.notified_open, ["ios-owner", "desk"]);
         assert_eq!(crash.notified_clear, ["ios-owner", "desk"]);
 
-        book.reconcile(Seen::default(), &settings, later + 1);
+        book.reconcile(Seen::default(), &settings, &directory, &zone, later + 1);
         assert!(book.owed.is_empty());
     }
 }
