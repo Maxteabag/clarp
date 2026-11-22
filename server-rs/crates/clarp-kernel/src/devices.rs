@@ -215,6 +215,10 @@ impl PushBook {
         self.rows.values()
     }
 
+    pub fn row(&self, token: &str) -> Option<&PushRow> {
+        self.rows.get(token)
+    }
+
     /// Takes rows as a change left them.
     pub fn apply(&mut self, changed: &[PushRow]) {
         for row in changed {
@@ -229,14 +233,9 @@ impl PushBook {
             .collect()
     }
 
-    /// Registers a token, or registers it again: the rows this leaves changed. `can_receive`
-    /// says whether a paired device still is one (full scope, not revoked).
-    pub fn register(
-        &self,
-        given: &Registration<'_>,
-        can_receive: &dyn Fn(&str) -> bool,
-        now: i64,
-    ) -> Result<Vec<PushRow>, Refused> {
+    /// Registers a token, or registers it again: the rows this leaves changed. A full-scope
+    /// device is given in `Registration::owner`. An unbound registration cannot take a token.
+    pub fn register(&self, given: &Registration<'_>, now: i64) -> Result<Vec<PushRow>, Refused> {
         let invalid = |why: String| Err(Refused::Invalid(why));
         let token = canonical_token(given.token);
         if token.is_empty() {
@@ -290,13 +289,10 @@ impl PushBook {
             }
         };
         if !owner.is_empty() {
-            // A token whose owner is no longer a paired device passes to the device that
-            // registers it now: the same phone, paired again. Only to a device.
+            // The full-scope pairing that presents this token takes it over. The old pairing
+            // keeps its authority and any other tokens.
             for row in work.values_mut().filter(|row| same(row)) {
-                let stale = !row.principal.is_empty()
-                    && row.principal != owner
-                    && !can_receive(&row.principal);
-                if stale {
+                if !row.principal.is_empty() && row.principal != owner {
                     row.principal = owner.to_string();
                 }
             }

@@ -334,7 +334,9 @@ impl<C: Clone> Herald<C> {
         // Held before the herald's clip is made, so that a user who turns to the agent
         // meanwhile finds it.
         self.held.entry(session.to_string()).or_default().push(clip);
-        if self.pending.iter().any(|pending| pending == session) || self.inflight.contains_key(session) {
+        if self.pending.iter().any(|pending| pending == session)
+            || self.inflight.contains_key(session)
+        {
             return Taken::Decided(Vec::new());
         }
         self.attempts += 1;
