@@ -1743,7 +1743,7 @@ mod tests {
         assert_eq!(unreadable_at(&with_chart(json!({"kind": "bar", "series": [{"name": "a", "points": [{"x": "a", "y": 1}, {"x": "a", "y": 2}]}]}))), format!("{at}/series/0/points/1/x"), "x unique in a series");
         assert_eq!(unreadable_at(&with_chart(json!({"kind": "bar", "series": [{"name": "a", "points": points(1)}, {"name": "a", "points": points(1)}]}))), format!("{at}/series/1/name"), "series names unique");
         assert_eq!(unreadable_at(&with_chart(json!({"kind": "bar", "decimals": 7, "series": [{"name": "a", "points": points(1)}]}))), format!("{at}/decimals"));
-        assert_eq!(unreadable_at(&with_chart(json!({"kind": "bar", "series": [{"name": "a", "points": [{"x": "a", "y": 1.5}]}]}))), format!("{at}/series/0/points/0/y"), "numbers are integers");
+        assert_eq!(unreadable_at(&with_chart(json!({"kind": "bar", "series": [{"name": "a", "points": [{"x": "a", "y": 1.5}]}]}))), "/spec", "a fraction is not canonical JSON: the spec is refused whole");
         let line = form(&with_chart(json!({"kind": "line", "series": [{"name": "a", "points": [{"x": 1, "y": 1}, {"x": 5, "y": 2}]}]})));
         let Kind::Chart(chart) = &element(&line, "lat").kind else { panic!("chart") };
         assert!(chart.scaled_x() && !chart.legend(), "a numeric line draws x to scale; one series has no legend");
