@@ -380,7 +380,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         })
         .collect();
 
-    let (tokens, window_size) = (count("context_tokens"), count("context_window"));
+    // Unknown usage (null) stays unknown: no gauge and no "0 tokens" (#403).
+    let (tokens, window_size) = (details.get("context_tokens").and_then(Value::as_i64), count("context_window"));
     let queue = count("queue_count");
     let state = value("state");
     let info = ProfileInfo {
@@ -397,8 +398,16 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         heartbeat: flag("heartbeat_enabled"),
         dreaming: flag("dreaming_enabled"),
         push_alerts: !flag("muted"),
-        context_fraction: if window_size > 0 { tokens as f32 / window_size as f32 } else { 0.0 },
-        context_used: format!("{tokens} / {} tokens", if window_size > 0 { window_size.to_string() } else { "unknown".into() }).into(),
+        context_fraction: match tokens {
+            Some(tokens) if window_size > 0 => tokens as f32 / window_size as f32,
+            Some(_) => 0.0,
+            None => -1.0,
+        },
+        context_used: match tokens {
+            Some(tokens) => format!("{tokens} / {} tokens", if window_size > 0 { window_size.to_string() } else { "unknown".into() }),
+            None => "Unknown".to_owned(),
+        }
+        .into(),
         compacting: state == "compacting",
         queue_text: if queue == 0 { "Nothing waiting".to_owned() } else { format!("{queue} waiting") }.into(),
         plan_shown: engine.profile_loading() || !plan.is_empty(),
