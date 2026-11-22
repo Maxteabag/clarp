@@ -808,8 +808,10 @@ impl Agent {
             } => {
                 work.agent.require_here()?;
                 let turn = TurnId(work.agent.next_turn);
-                let (_, mut accepted) =
+                let (queued, mut accepted) =
                     Queued::accept(turn, message_seq, origin, admission, now_ms);
+                let resumes_while_busy =
+                    work.agent.live.is_some() && work.agent.continues_user_queue(&queued);
                 if let TurnEvent::Accepted {
                     coordination: mark,
                     user_word: priority,
@@ -825,6 +827,11 @@ impl Agent {
                     turn,
                     change: accepted,
                 });
+                // A busy agent takes the fresh message in normal queue order. An idle
+                // agent starts it past the hold before releasing the older items.
+                if resumes_while_busy {
+                    work.resume_user_queue(now_ms);
+                }
                 if admission == Admission::Direct {
                     // The live turn makes way. One that is already on its way out is left to it.
                     work.stop_live(Control::by(preempted_by(turn)), now_ms);
@@ -2342,7 +2349,45 @@ mod tests {
     }
 
     #[test]
-    fn a_confirmed_new_follow_up_releases_the_hold_but_an_old_read_repair_does_not() {
+    fn a_fresh_send_to_a_busy_stopped_agent_waits_behind_older_user_messages() {
+        let oracle = Origin::Trigger {
+            name: "oracle".into(),
+        };
+        for origin in [Origin::User, oracle] {
+            let mut a = Driven::new();
+            a.user(10);
+            a.background(11);
+            a.user(12);
+            a.user(13);
+            a.send(Command::Stop {
+                by: Control::by("user"),
+            })
+            .unwrap();
+            assert_eq!(a.live(), Some(1));
+            assert!(a.agent.is_paused());
+            assert_eq!(a.waiting(), vec![3, 4, 2]);
+
+            let effects = a
+                .send(Command::Accept {
+                    message_seq: 14,
+                    origin,
+                    admission: Admission::Queue,
+                    coordination: None,
+                    user_word: false,
+                })
+                .unwrap();
+            assert!(effects.is_empty(), "the stopped process has not exited");
+            assert!(!a.agent.is_paused());
+            assert_eq!(a.waiting(), vec![3, 4, 5, 2]);
+            for turn in [1, 3, 4, 5, 2] {
+                a.finish(turn);
+            }
+            assert_eq!(a.started, [1, 3, 4, 5, 2].map(TurnId));
+        }
+    }
+
+    #[test]
+    fn a_fresh_follow_up_is_admitted_unpaused_and_an_old_read_repair_does_not_resume() {
         let mut a = Driven::new();
         a.user(10);
         a.user(11);
@@ -2400,6 +2445,11 @@ mod tests {
             user_word: false,
         })
         .unwrap();
+        assert!(
+            !a.agent.is_paused(),
+            "a fresh send ends the busy agent's pause on admission"
+        );
+        assert_eq!(a.waiting(), vec![5, 6]);
         a.send(Command::Join {
             turn: TurnId(6),
             join: Join {
@@ -2409,7 +2459,6 @@ mod tests {
             },
         })
         .unwrap();
-        assert!(a.agent.is_paused(), "reservation alone is not a read");
         a.send(Command::JoinRead { turn: TurnId(6) }).unwrap();
         assert!(!a.agent.is_paused());
         assert_eq!(a.waiting(), vec![5]);
