@@ -18,8 +18,8 @@ from . import backends, transcript_paths
 
 
 def _encoded_project_dir(cwd: str, projects_root: pathlib.Path) -> pathlib.Path:
-    encoded = "-" + str(pathlib.Path(cwd)).strip("/").replace("/", "-")
-    return projects_root / encoded
+    from .fork import encoded_project_dir
+    return encoded_project_dir(cwd, projects_root)      # Claude Code's own naming (R36)
 
 
 def find_session_jsonl(backend_session_id: str, cwd: str,
