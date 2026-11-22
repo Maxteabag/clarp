@@ -8,6 +8,11 @@ import uuid
 from . import db
 
 
+# The client message id prefix of a form submission delivered to its agent
+# (html_forms.delivery_id). Kept here, in the core layer, so the turn queue can
+# tell form answers apart without importing the forms feature.
+FORM_ANSWER_CLIENT_ID_PREFIX = "html-form-"
+
 ADMISSION_VERSION = 1
 
 

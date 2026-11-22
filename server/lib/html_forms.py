@@ -7,7 +7,7 @@ import json
 import re
 # Defined before `db`: db_schema imports SCHEMA while `db` is still loading.
 from .persistence.schema_parts.html_forms import SCHEMA
-from . import db
+from . import db, prompt_admissions
 from . import lifecycle as lk
 from .lifecycle import Edge, Lifecycle, WaitForever
 
@@ -35,7 +35,7 @@ READ_ONLY_SCHEMA = {'type': 'object', 'properties': {}, 'additionalProperties': 
 # 428): the answered form card is their record of what they submitted. The
 # Host leaves the row out of every chat read the apps get (/log, the chat-list
 # preview, /turn-queue), so no client needs to know about it.
-DELIVERY_ID_PREFIX = "html-form-"
+DELIVERY_ID_PREFIX = prompt_admissions.FORM_ANSWER_CLIENT_ID_PREFIX
 ANSWER_ROW_PREFIX = "u-" + DELIVERY_ID_PREFIX
 # A form answer's prompt row (alias m: messages). The prefix holds no LIKE wildcard.
 ANSWER_ROW_SQL = f"m.message_id LIKE '{ANSWER_ROW_PREFIX}%'"
