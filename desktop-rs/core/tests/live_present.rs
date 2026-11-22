@@ -718,6 +718,7 @@ fn a_spoken_acknowledgment_stays_above_the_work_row() {
     let open = present(&heard_turn(), &[], &opts);
     assert_eq!(read(&open), ["On it, checking the build.", "Worked for 8s · 3 tools", "Ran git status", "Ran make build", "Looking at the build log now.", "Ran make test", "All green."], "opened, the rest in place");
     assert!(clarp_core::text::has_speech("Sure. <speak>On it.</speak>") && !clarp_core::text::has_speech("<speak> </speak>") && !clarp_core::text::has_speech("speak plainly"));
+}
 
 const SPOKEN_STARTED: i64 = 1791100000000;
 
