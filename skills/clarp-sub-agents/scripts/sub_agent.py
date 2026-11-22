@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Spawn sub-agents that survive the parent Clarp session being restarted.
 
-    clarp-sub-agent start NAME WORKDIR PROMPT_FILE [--model M] [--backend B] [--title T] [--clarp-agent]
+    clarp-sub-agent start NAME WORKDIR PROMPT_FILE [--model M] [--effort E] [--backend B] [--title T] [--clarp-agent]
     clarp-sub-agent fork NAME --task T|--task-file F [--count N] [--worktree REPO:BRANCH] [--cwd D]
-                         [--backend B] [--model M] [--title T]
+                         [--backend B] [--model M] [--effort E] [--title T]
     clarp-sub-agent status [NAME]
     clarp-sub-agent stop NAME
 
@@ -198,11 +198,15 @@ def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: path
         helper = _live_helper(a.name)
         if helper:
             _admin("agent", "helper-state", helper, "running", "--from", parent)
+            if a.effort:
+                _admin("model", "--effort", a.effort, "--session", helper)
         else:
             create = ["agent", "create", a.name, "--parent", parent, "--role", "helper",
                       "--cwd", str(workdir), "--backend", a.backend]
             if model:
                 create += ["--model", model]
+            if a.effort:
+                create += ["--effort", a.effort]
             helper = str(_admin(*create).get("session") or "")
             if not helper:
                 raise AdminError("agent create returned no session")
@@ -249,8 +253,9 @@ def fork(a: argparse.Namespace) -> int:
         args += ["--task", a.task]
     else:
         sys.exit("fork needs --task or --task-file")
+    _check_effort(a.backend or "", a.effort)
     for flag, value in (("--count", a.count), ("--worktree", a.worktree), ("--cwd", a.cwd),
-                        ("--backend", a.backend), ("--model", a.model)):
+                        ("--backend", a.backend), ("--model", a.model), ("--effort", a.effort)):
         if value:
             args += [flag, str(value)]
     try:
@@ -359,6 +364,12 @@ def run(name: str, backend: str, model: str, parent: str) -> int:
     return rc
 
 
+def _check_effort(backend: str, effort) -> None:
+    """--effort is a separate setting except on AGY, whose model id carries it."""
+    if effort and backend == "agy":
+        sys.exit("--effort is part of the model id on agy: pass e.g. --model claude-opus-5-5-high")
+
+
 def start(a: argparse.Namespace) -> int:
     if not re.fullmatch(r"[A-Za-z0-9._-]+", a.name):
         sys.exit("name must be [A-Za-z0-9._-]")
@@ -367,6 +378,9 @@ def start(a: argparse.Namespace) -> int:
         sys.exit(f"no such workdir: {workdir}")
     if not prompt.is_file() or not prompt.read_text().strip():
         sys.exit(f"empty prompt file: {prompt}")
+    _check_effort(a.backend, a.effort)
+    if a.effort and not a.clarp_agent:
+        sys.exit("--effort needs --clarp-agent (it is set on the helper agent)")
     if a.clarp_agent:
         model = a.model if a.model is not None else ("" if a.backend != "claude" else DEFAULT_MODEL)
         return start_clarp_agent(a, workdir.resolve(), prompt, model)
@@ -427,6 +441,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("start")
     s.add_argument("name"); s.add_argument("workdir"); s.add_argument("prompt_file")
     s.add_argument("--model"); s.add_argument("--backend", choices=CLARP_BACKENDS, default="claude")
+    s.add_argument("--effort", help="reasoning effort for the helper (not on agy: it is in the model id)")
     s.add_argument("--title")
     s.add_argument("--clarp-agent", action="store_true",
                    help="run as a Clarp helper agent the owner can open and steer")
@@ -435,6 +450,7 @@ def main(argv: list[str]) -> int:
     f.add_argument("--count", type=int); f.add_argument("--worktree", help="REPO:BRANCH")
     f.add_argument("--cwd"); f.add_argument("--backend", choices=CLARP_BACKENDS)
     f.add_argument("--model"); f.add_argument("--title")
+    f.add_argument("--effort", help="reasoning effort for every child (not on agy)")
     st = sub.add_parser("status"); st.add_argument("name", nargs="?")
     sp = sub.add_parser("stop"); sp.add_argument("name")
     a = p.parse_args(argv)

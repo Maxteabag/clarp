@@ -349,3 +349,33 @@ def test_sub_agent_fork_reports_failed_children(sub, monkeypatch, capsys):
     assert "probe-1-aa" in out.out and "contact_occupied" in out.err
     assert (sub.DIR / "probe-1.session").exists()
     assert not (sub.DIR / "probe-2.session").exists()
+
+
+def test_effort_reaches_the_helper_and_is_refused_where_the_model_id_carries_it(sub, tmp_path, monkeypatch):
+    """Issue 422: --effort on start --clarp-agent and on fork; refused on agy and without a helper."""
+    def admin(*args):
+        sub.calls["admin"].append(args)
+        if args[:2] == ("agent", "create"):
+            return {"session": "stream-a-3f9c"}
+        if args[:2] == ("agent", "fork"):
+            return {"children": []}
+        return {"ok": True}
+    monkeypatch.setattr(sub, "_admin", admin)
+
+    assert _start(sub, tmp_path, "--backend", "codex", "--model", "gpt-5.5", "--effort", "high") == 0
+    assert sub.calls["admin"][0][-2:] == ("--effort", "high")
+
+    sub.calls["admin"].clear()
+    sub.main(["fork", "probe", "--task", "Try it.", "--effort", "medium"])
+    fork = next(args for args in sub.calls["admin"] if args[:2] == ("agent", "fork"))
+    assert fork[-2:] == ("--effort", "medium")
+
+    for argv in (["--backend", "agy", "--model", "claude-opus-5-5-high", "--effort", "high"],):
+        with pytest.raises(SystemExit, match="part of the model id"):
+            _start(sub, tmp_path, *argv)
+    with pytest.raises(SystemExit, match="part of the model id"):
+        sub.main(["fork", "probe", "--task", "Try it.", "--backend", "agy", "--effort", "high"])
+    workdir = tmp_path / "wt"
+    prompt = tmp_path / "task.md"
+    with pytest.raises(SystemExit, match="needs --clarp-agent"):
+        sub.main(["start", "plain", str(workdir), str(prompt), "--effort", "high"])
