@@ -443,7 +443,10 @@ impl Roster {
         }
         for row in 0..self.agents.len() {
             let agent = &mut self.agents[row];
-            if agent.stalled_since.take().is_some() | agent.stalled_action.take().is_some() {
+            let stalled = agent.stalled_since.is_some() || agent.stalled_action.is_some();
+            agent.stalled_since = None;
+            agent.stalled_action = None;
+            if stalled {
                 self.notify_row(row, &[Role::State, Role::StatusText]);
             }
         }
