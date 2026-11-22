@@ -51,7 +51,9 @@ report with a nonzero crash count. A malformed `X-Clarp-Client` records
 an unknown platform and is logged once per paired device per Host run.
 The HTTP counters keep the last 24 hours, up to 32,768 events per signal,
 and restart with the Host. Send history
-is rebuilt from the actor journals. The Rust queue has no separate
+is rebuilt from the actor journals. Wait findings count fresh user and
+Oracle messages. Agent coordination, scheduled sends, and synthetic form
+deliveries are excluded. The Rust queue has no separate
 `launch_unknown` status. Recent unconfirmed interruptions count in sends.
 
 A finding stays open until a pass stops seeing it. Cleared findings are kept
