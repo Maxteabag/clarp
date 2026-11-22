@@ -678,7 +678,7 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     item.hints = slint::ModelRc::new(slint::VecModel::from(card_hints(&item, &crate::commands::overrides_of(engine))));
     if item.kind == "render_spec" && !item.spec_state.is_empty() {
         let form = engine.render_spec(&item.id);
-        crate::form_view::spec_fields(&mut item, form);
+        crate::form_view::spec_fields(&mut item, form, artifact.get("answered_label").and_then(Value::as_str));
     }
     item
 }

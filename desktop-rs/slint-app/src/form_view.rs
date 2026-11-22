@@ -6,7 +6,11 @@
 //! of rows: a vertical stack's children one after another, a card's children
 //! in its box (its title first), a horizontal stack of words side by side.
 //! A horizontal stack holding a control lays its controls out one under
-//! another, as iOS does at large text sizes. Each card keeps one row model
+//! another, as iOS does at large text sizes; one of buttons keeps them side
+//! by side. Catalog version 2's chart and table are drawn from
+//! `form_chart` and the table's cells here, numbers in the device's decimal
+//! separator; its buttons send the form (a question first, in the window's
+//! `form-confirm` dialog). Each card keeps one row model
 //! for as long as the window runs, changed in place, so a text field being
 //! typed in is never rebuilt under the keyboard.
 
@@ -14,11 +18,71 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-use clarp_core::render_spec::{Accepted, Answer, Element, Form, Gap, Kind, TextSource, Values, footnote};
+use clarp_core::render_spec::{Accepted, Answer, ButtonStyle, Cell, Element, Form, Gap, Kind, Table, TextSource, Values, answered_word, footnote};
 use clarp_engine::{Change, FormState, FormView};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
-use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption, FormLeaf, FormRow};
+use crate::form_chart::Drawn;
+use crate::{
+    App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption, FormChart, FormChartDot, FormChartKey, FormChartMark, FormChartTick, FormLeaf, FormRow, FormTable,
+    FormTableCell, FormTableColumn, FormTableRow,
+};
+
+/// The overlay a button's question opens.
+pub const CONFIRM: &str = "form-confirm";
+
+/// The device's decimal separator, read once.
+fn separator() -> char {
+    thread_local! {
+        static SEPARATOR: char = clarp_core::render_spec::device_decimal_separator();
+    }
+    SEPARATOR.with(|s| *s)
+}
+
+/// A table as drawn: columns (label, end-aligned, width in characters) and
+/// rows of (words, flag), each with what a screen reader says.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct TableLeaf {
+    title: String,
+    columns: Vec<(String, bool, i32)>,
+    rows: Vec<(Vec<(String, i32)>, String)>,
+}
+
+/// A column is as wide as its longest words, from 3 to 32 characters.
+fn table_leaf(table: &Table, separator: char) -> TableLeaf {
+    let rows: Vec<(Vec<(String, i32)>, String)> = table
+        .rows
+        .iter()
+        .map(|row| {
+            let cells = row
+                .iter()
+                .zip(&table.columns)
+                .map(|(cell, column)| match cell {
+                    Cell::Flag(true) => ("✓".to_owned(), 1),
+                    Cell::Flag(false) => ("–".to_owned(), 0),
+                    other => (Table::words(other, column, separator), -1),
+                })
+                .collect();
+            let words = row
+                .iter()
+                .zip(&table.columns)
+                .filter_map(|(cell, column)| Some(Table::words(cell, column, separator)).filter(|w| !w.is_empty()).map(|w| format!("{}: {w}", column.label)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (cells, words)
+        })
+        .collect();
+    let columns = table
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            let widest = rows.iter().map(|(cells, _)| cells[index].0.chars().count()).chain([column.label.chars().count()]).max().unwrap_or(0);
+            (column.label.clone(), column.align_end, widest.clamp(3, 32) as i32)
+        })
+        .collect();
+    TableLeaf { title: table.title.clone().unwrap_or_default(), columns, rows }
+}
 
 /// A row as built, compared before the model is touched.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -36,6 +100,12 @@ struct Leaf {
     chosen: i32,
     required: bool,
     note: String,
+    chart: Drawn,
+    table: TableLeaf,
+    style: &'static str,
+    confirm: String,
+    enabled: bool,
+    busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -74,6 +144,14 @@ struct Context<'a> {
     values: &'a Values,
     read_only: bool,
     short: BTreeMap<String, usize>,
+    /// The button the accepted answer chose.
+    chosen: Option<String>,
+    /// The button whose answer is being sent.
+    sending: Option<String>,
+    /// The buttons can be pressed: every required value is there and
+    /// nothing was sent or is being sent.
+    pressable: bool,
+    separator: char,
 }
 
 impl Context<'_> {
@@ -133,6 +211,28 @@ impl Context<'_> {
                 leaf.kind = "card";
                 leaf.text = title.clone().unwrap_or_default();
             }
+            Kind::Chart(chart) => {
+                leaf.kind = "chart";
+                leaf.chart = crate::form_chart::draw(chart, self.separator);
+            }
+            Kind::Table(table) => {
+                leaf.kind = "table";
+                leaf.table = table_leaf(table, self.separator);
+            }
+            Kind::Button(button) => {
+                leaf.kind = "button";
+                leaf.text = button.label.clone();
+                leaf.key = button.action.clone();
+                leaf.style = match button.style {
+                    ButtonStyle::Primary => "primary",
+                    ButtonStyle::Secondary => "secondary",
+                    ButtonStyle::Destructive => "destructive",
+                };
+                leaf.confirm = button.confirm.clone().unwrap_or_default();
+                leaf.on = self.chosen.as_deref() == Some(button.action.as_str());
+                leaf.busy = self.sending.as_deref() == Some(button.action.as_str());
+                leaf.enabled = self.pressable;
+            }
             Kind::Stack { .. } => {}
         }
         leaf
@@ -142,9 +242,10 @@ impl Context<'_> {
     fn rows(&self, element: &Element, in_card: bool, out: &mut Vec<Row>) {
         match &element.kind {
             Kind::Stack { horizontal } => {
-                // Words side by side; controls one under another.
+                // Words side by side, buttons too; controls one under another.
                 let words = element.children.len() >= 2
-                    && element.children.iter().all(|c| matches!(c.kind, Kind::Heading { .. } | Kind::Text(_) | Kind::Divider));
+                    && (element.children.iter().all(|c| matches!(c.kind, Kind::Heading { .. } | Kind::Text(_) | Kind::Divider))
+                        || element.children.iter().all(|c| matches!(c.kind, Kind::Button(_))));
                 if *horizontal && words {
                     let cells = element.children.iter().map(|c| self.leaf(c)).collect();
                     out.push(Row { cells, in_card, ..Row::default() });
@@ -175,6 +276,43 @@ impl Context<'_> {
     }
 }
 
+fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
+    ModelRc::new(VecModel::from(items))
+}
+
+fn form_chart(chart: &Drawn) -> FormChart {
+    FormChart {
+        kind: chart.kind.into(),
+        title: chart.title.clone().into(),
+        marks: model(chart.marks.iter().map(|m| FormChartMark { commands: m.commands.clone().into(), color: m.color, fill: m.fill }).collect()),
+        dots: model(chart.dots.iter().map(|d| FormChartDot { x: d.x, y: d.y, color: d.color }).collect()),
+        x_ticks: model(chart.x_ticks.iter().map(|t| FormChartTick { at: t.at, text: t.text.clone().into() }).collect()),
+        y_ticks: model(chart.y_ticks.iter().map(|t| FormChartTick { at: t.at, text: t.text.clone().into() }).collect()),
+        keys: model(chart.keys.iter().map(|k| FormChartKey { label: k.label.clone().into(), color: k.color }).collect()),
+        x_label: chart.x_label.clone().into(),
+        y_label: chart.y_label.clone().into(),
+        summary: chart.summary.clone().into(),
+    }
+}
+
+fn form_table(table: &TableLeaf) -> FormTable {
+    FormTable {
+        title: table.title.clone().into(),
+        columns: model(table.columns.iter().map(|(label, end, chars)| FormTableColumn { label: label.into(), end: *end, chars: *chars }).collect()),
+        rows: model(
+            table
+                .rows
+                .iter()
+                .map(|(cells, words)| FormTableRow {
+                    cells: model(cells.iter().map(|(text, flag)| FormTableCell { text: text.into(), flag: *flag }).collect()),
+                    words: words.into(),
+                })
+                .collect(),
+        ),
+        chars: table.columns.iter().map(|c| c.2).sum(),
+    }
+}
+
 fn form_leaf(leaf: &Leaf) -> FormLeaf {
     let options: Vec<ArtifactOption> =
         leaf.options.iter().map(|(value, label)| ArtifactOption { id: value.into(), label: label.into(), ..ArtifactOption::default() }).collect();
@@ -192,6 +330,12 @@ fn form_leaf(leaf: &Leaf) -> FormLeaf {
         chosen: leaf.chosen,
         required: leaf.required,
         note: leaf.note.clone().into(),
+        chart: form_chart(&leaf.chart),
+        table: form_table(&leaf.table),
+        style: leaf.style.into(),
+        confirm: leaf.confirm.clone().into(),
+        enabled: leaf.enabled,
+        busy: leaf.busy,
     }
 }
 
@@ -233,7 +377,13 @@ fn answered_when(accepted: &Accepted) -> String {
 }
 
 /// The card's form fields from the engine's form (None: not read yet).
-pub fn spec_fields(item: &mut ArtifactItem, view: Option<FormView>) {
+/// `answered_label` is the row's (a Host with `render_spec_answered_button`
+/// names the button an answered v2 form chose); the badge reads "Answered ·
+/// <label>" from it, or from the form's own read on an older Host.
+pub fn spec_fields(item: &mut ArtifactItem, view: Option<FormView>, answered_label: Option<&str>) {
+    if answered_label.is_some_and(|l| !l.is_empty()) {
+        item.badge = answered_word(answered_label).into();
+    }
     let Some(view) = view else {
         item.spec_state = "loading".into();
         return;
@@ -249,7 +399,17 @@ pub fn spec_fields(item: &mut ArtifactItem, view: Option<FormView>) {
     let values = view.accepted.as_ref().map_or(&view.values, |a| &a.state);
     let gaps = form.gaps(&view.values);
     let short = gaps.iter().filter_map(|g| if let Gap::TooShort(key, min) = g { Some((key.clone(), *min)) } else { None }).collect();
-    let context = Context { form, values, read_only, short };
+    let chosen = form.chosen_button(view.accepted.as_ref()).map(|b| b.action.clone());
+    let context = Context {
+        form,
+        values,
+        read_only,
+        short,
+        chosen,
+        sending: view.pressed.clone().filter(|_| view.sending),
+        pressable: !read_only && !view.sending && !view.closed && gaps.is_empty(),
+        separator: separator(),
+    };
     let mut rows = Vec::new();
     context.rows(&form.root, false, &mut rows);
     let captions: BTreeMap<String, String> = rows
@@ -267,9 +427,53 @@ pub fn spec_fields(item: &mut ArtifactItem, view: Option<FormView>) {
     let when = view.accepted.as_ref().map(answered_when).unwrap_or_default();
     item.spec_footnote = footnote(form, &view.values, view.accepted.as_ref(), &view.note, view.closed, &captions, &when).into();
     if read_only {
-        // An answered form is no longer an open question.
-        item.badge = "Answered".into();
+        // An answered form is no longer an open question; a button form's
+        // badge names the button (the read's answer, else the row's).
+        let label = form.chosen_button(view.accepted.as_ref()).map(|b| b.label.as_str()).or(answered_label);
+        item.badge = answered_word(label).into();
     }
+}
+
+/// A form's button pressed: its question first when it has one, else the
+/// form is sent with its action.
+fn press(id: &str, action: &str) {
+    let Some(app) = crate::app() else { return };
+    let confirm = {
+        let engine = app.engine.borrow();
+        let Some(FormView { state: FormState::Form(form), .. }) = engine.render_spec(id) else { return };
+        let Some(button) = form.buttons.iter().find(|b| b.action == action) else { return };
+        button.confirm.clone().map(|question| (question, button.style == ButtonStyle::Destructive))
+    };
+    let Some((question, destructive)) = confirm else {
+        return with_engine(|e| e.press_render_spec_button(id, action));
+    };
+    let Some(window) = crate::window() else { return };
+    PENDING.with(|p| *p.borrow_mut() = Some((id.to_owned(), action.to_owned())));
+    let bridge = window.global::<ArtifactBridge>();
+    bridge.set_confirm_text(question.into());
+    bridge.set_confirm_ok("OK".into());
+    bridge.set_confirm_destructive(destructive);
+    // Its field gives the keyboard back: Escape is the dialog's.
+    bridge.set_editing(false);
+    crate::commands::open_overlay(&app, &window, CONFIRM);
+}
+
+/// The question's answer: OK sends the form with the button's action.
+fn confirmed(ok: bool) {
+    let pending = PENDING.with(|p| p.borrow_mut().take());
+    if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+        if *app.overlay.borrow() == CONFIRM {
+            crate::commands::close_overlay(&app, &window);
+        }
+    }
+    if let (true, Some((id, action))) = (ok, pending) {
+        with_engine(|e| e.press_render_spec_button(&id, &action));
+    }
+}
+
+thread_local! {
+    /// The button whose question is open: (card, action).
+    static PENDING: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
 }
 
 /// A render_spec row the Host drew for this client: a list row's marker,
@@ -306,6 +510,8 @@ pub fn bind(window: &AppWindow) {
     bridge.on_form_send(|id| with_engine(|e| e.send_render_spec(&id)));
     bridge.on_form_rows(|id| model_of(&id));
     bridge.on_form_retry(|id| with_engine(|e| e.retry_render_spec(&id)));
+    bridge.on_form_press(|id, action| press(&id, &action));
+    bridge.on_form_confirm_answer(confirmed);
 }
 
 #[cfg(test)]
@@ -341,7 +547,7 @@ mod tests {
     fn rows(values: &Values, read_only: bool) -> Vec<Row> {
         let Reading::Form(form) = read(&release_check()) else { panic!("form") };
         let short = form.gaps(values).iter().filter_map(|g| if let Gap::TooShort(k, m) = g { Some((k.clone(), *m)) } else { None }).collect();
-        let context = Context { form: &form, values, read_only, short };
+        let context = Context { form: &form, values, read_only, short, chosen: None, sending: None, pressable: true, separator: ',' };
         let mut out = Vec::new();
         context.rows(&form.root, false, &mut out);
         out
@@ -371,5 +577,70 @@ mod tests {
         assert_eq!(rows[3].leaf.note, "At least 5 characters.");
         assert!(rows[6].leaf.on);
         assert_eq!(rows[7].leaf.text, "no", "a $state text shows the key's value");
+    }
+
+    fn deploy() -> Form {
+        let payload: serde_json::Value = serde_json::from_str(include_str!("../../../tests/fixtures/render_spec/deploy-v2.json")).unwrap();
+        let Reading::Form(form) = read(&payload) else { panic!("form") };
+        *form
+    }
+
+    fn v2_rows(form: &Form, chosen: Option<&str>, sending: Option<&str>, pressable: bool) -> Vec<Row> {
+        let values = Values::new();
+        let context = Context {
+            form,
+            values: &values,
+            read_only: chosen.is_some(),
+            short: BTreeMap::new(),
+            chosen: chosen.map(str::to_owned),
+            sending: sending.map(str::to_owned),
+            pressable,
+            separator: ',',
+        };
+        let mut out = Vec::new();
+        context.rows(&form.root, false, &mut out);
+        out
+    }
+
+    #[test]
+    fn a_v2_form_draws_its_chart_table_and_buttons_side_by_side() {
+        let form = deploy();
+        let rows = v2_rows(&form, None, None, true);
+        let kinds: Vec<&str> = rows.iter().map(|r| if r.cells.is_empty() { r.leaf.kind } else { "cells" }).collect();
+        assert_eq!(kinds, ["chart", "table", "field", "cells"]);
+        assert_eq!(rows[0].leaf.chart.kind, "line");
+        assert_eq!(rows[0].leaf.chart.keys.len(), 2, "two series, a legend");
+        assert_eq!(rows[1].leaf.table.columns, [("Host".to_owned(), false, 4), ("Healthy".to_owned(), true, 7)]);
+        assert_eq!(rows[1].leaf.table.rows[0], (vec![("one".to_owned(), -1), ("✓".to_owned(), 1)], "Host: one, Healthy: Yes".to_owned()));
+        assert_eq!(rows[1].leaf.table.rows[1].0[1], ("–".to_owned(), 0), "false is a dash");
+        let buttons = &rows[3].cells;
+        assert_eq!(buttons.iter().map(|b| (b.kind, b.text.as_str(), b.key.as_str(), b.style)).collect::<Vec<_>>(),
+            [("button", "Ship it", "ship", "primary"), ("button", "Hold", "hold", "destructive")]);
+        assert!(buttons.iter().all(|b| b.enabled && !b.on && !b.busy));
+        assert_eq!(buttons[1].confirm, "Hold the release?");
+    }
+
+    #[test]
+    fn a_pressed_button_is_busy_and_the_chosen_one_marked_once_answered() {
+        let form = deploy();
+        let rows = v2_rows(&form, None, Some("ship"), false);
+        assert!(rows[3].cells[0].busy && !rows[3].cells[1].busy);
+        assert!(rows[3].cells.iter().all(|b| !b.enabled), "every button waits while one is sent");
+        let rows = v2_rows(&form, Some("ship"), None, false);
+        assert!(rows[3].cells[0].on && !rows[3].cells[1].on, "the answered form marks the chosen button");
+        assert!(rows[3].cells.iter().all(|b| !b.enabled), "after one submission every button is off");
+    }
+
+    #[test]
+    fn a_table_cell_shows_numbers_in_the_device_separator_without_grouping() {
+        let table = Table {
+            title: None,
+            columns: vec![clarp_core::render_spec::Column { key: "v".into(), label: "Value".into(), align_end: true, decimals: 1 }],
+            rows: vec![vec![Cell::Number(125)], vec![Cell::Number(125_000)], vec![Cell::Empty]],
+        };
+        let leaf = table_leaf(&table, ',');
+        assert_eq!(leaf.rows.iter().map(|r| r.0[0].0.as_str()).collect::<Vec<_>>(), ["12,5", "12500,0", ""]);
+        assert_eq!(leaf.rows[2].1, "", "an empty cell is left out of what a screen reader says");
+        assert_eq!(leaf.columns[0], ("Value".to_owned(), true, 7));
     }
 }

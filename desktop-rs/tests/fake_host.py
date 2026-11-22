@@ -513,6 +513,10 @@ def record(entry):
 # replaces the table. The form's payload is kept apart from the row, as the
 # Host keeps it; its one accepted submission beside it.
 render_spec_min = {"ios": 74}
+# Catalog version 2 (chart, table, button; issue 673): drawn only for a
+# client named here too (server_identity.RENDER_SPEC_V2_MIN_CONTRACT); an
+# unnamed client gets a v2 form as the plain card.
+render_spec_v2_min = {}
 render_spec_submissions = {}
 _CLIENT = re.compile(r"([A-Za-z][A-Za-z0-9_-]{0,31})/[A-Za-z0-9._-]{1,80} contract=([0-9]{1,9})")
 RENDER_SPEC_PAYLOAD = {
@@ -547,6 +551,35 @@ RENDER_SPEC_PAYLOAD = {
         "testers": {"type": "string", "maxLength": 20},
         "notify": {"type": "boolean"}, "quiet": {"type": "boolean"}}},
 }
+# The Host's v2 example (tests/fixtures/render_spec/deploy-v2.json) with a
+# bar chart in decimals, a pie, numbers in the table and a required note.
+RENDER_SPEC_V2_PAYLOAD = {
+    "version": "deploy-7", "catalog": "clarp.form", "catalog_version": 2,
+    "spec": {"root": "root", "state": {}, "elements": {
+        "root": {"type": "stack", "props": {}, "children": ["lat", "load", "share", "cmp", "note", "row"]},
+        "lat": {"type": "chart", "props": {"kind": "line", "title": "p95 latency", "unit": "ms", "series": [
+            {"name": "before", "points": [{"x": "Mon", "y": 120}, {"x": "Tue", "y": 118}, {"x": "Wed", "y": 121}]},
+            {"name": "after", "points": [{"x": "Mon", "y": 80}, {"x": "Tue", "y": 77}, {"x": "Wed", "y": 79}]}]}, "children": []},
+        "load": {"type": "chart", "props": {"kind": "bar", "title": "CPU per host", "y_label": "Load", "unit": "%", "decimals": 1, "series": [
+            {"name": "before", "points": [{"x": "one", "y": 625}, {"x": "two", "y": 418}, {"x": "three", "y": 125}]},
+            {"name": "after", "points": [{"x": "one", "y": 402}, {"x": "two", "y": 391}, {"x": "three", "y": 120}]}]}, "children": []},
+        "share": {"type": "chart", "props": {"kind": "pie", "title": "Traffic share", "unit": "%", "series": [
+            {"name": "share", "points": [{"x": "eu", "y": 55}, {"x": "us", "y": 35}, {"x": "asia", "y": 10}]}]}, "children": []},
+        "cmp": {"type": "table", "props": {"title": "Hosts", "columns": [
+            {"key": "host", "label": "Host"}, {"key": "ok", "label": "Healthy", "align": "end"},
+            {"key": "p95", "label": "p95 ms", "align": "end", "decimals": 1}, {"key": "requests", "label": "Requests", "align": "end"},
+            {"key": "region", "label": "Region"}],
+            "rows": [{"host": "one", "ok": True, "p95": 802, "requests": 12500, "region": "eu-north"},
+                     {"host": "two", "ok": False, "p95": 771, "requests": 9100, "region": None},
+                     {"host": "three", "ok": True, "requests": 4}]}, "children": []},
+        "note": {"type": "text_field", "props": {"label": "Note", "placeholder": "Why", "value": {"$bindState": "/note"}}, "children": []},
+        "row": {"type": "stack", "props": {"axis": "horizontal"}, "children": ["ship", "hold"]},
+        "ship": {"type": "button", "props": {"label": "Ship it", "action": "ship", "style": "primary"}, "children": []},
+        "hold": {"type": "button", "props": {"label": "Hold", "action": "hold", "style": "destructive", "confirm": "Hold the release?"}, "children": []}}},
+    "answer_schema": {"type": "object", "properties": {
+        "action": {"type": "string", "enum": ["ship", "hold"]}, "note": {"type": "string", "maxLength": 500}},
+        "required": ["action", "note"]},
+}
 RENDER_SPEC_REASONS = {
     "client_contract": "This app cannot answer forms on this Host.",
     "already_answered": "This form was already answered.",
@@ -578,6 +611,27 @@ def render_spec_capable(header):
     return isinstance(minimum, int) and minimum >= 1 and int(found.group(2)) >= minimum
 
 
+def render_spec_level(header):
+    """The newest catalog version the client draws: 0, 1 or 2
+    (server_identity.render_spec_level)."""
+    if not render_spec_capable(header):
+        return 0
+    found = _CLIENT.fullmatch(header or "")
+    minimum = render_spec_v2_min.get(found.group(1))
+    return 2 if isinstance(minimum, int) and minimum >= 1 and int(found.group(2)) >= minimum else 1
+
+
+def answered_button(row, payload):
+    """An answered v2 button form's chosen button on every row
+    (render_spec_store.answered_button, Host contract 138)."""
+    if payload.get("catalog_version") != 2 or row.get("status") != "completed":
+        return {}
+    labels = {e["props"]["action"]: e["props"]["label"] for e in payload["spec"]["elements"].values() if e["type"] == "button"}
+    held = render_spec_submissions.get(row.get("artifact_id"))
+    action = ((held or {}).get("answers") or {}).get("state", {}).get("action")
+    return {"answered_action": action, "answered_label": labels[action]} if action in labels else {}
+
+
 def spec_canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
@@ -589,13 +643,16 @@ def spec_identity(payload):
 
 def render_view(row, capable, full):
     """A render_spec row as the Host projects it (render_spec_store): the
-    plain row for a client without the kind; for one with it, the marker
-    (never the spec), and on the single read the payload flat beside it."""
+    plain row for a client that does not draw its catalog version
+    (`capable`, render_spec_level's); for one that does, the marker (never
+    the spec), and on the single read the payload flat beside it. An
+    answered button form names its button on every row."""
     if row.get("type") != "render_spec":
         return row
     payload = row.get("render_payload") or RENDER_SPEC_PAYLOAD
     out = {k: v for k, v in row.items() if k != "render_payload"}
-    if not capable:
+    out.update(answered_button(out, payload))
+    if int(capable) < payload["catalog_version"]:
         return out
     identity = spec_identity(payload)
     out.update({k: payload[k] for k in ("version", "catalog", "catalog_version")})
@@ -604,7 +661,7 @@ def render_view(row, capable, full):
     if not full:
         out["content_omitted"] = {**identity, "updated_at": out.get("updated_at", 0)}
         return out
-    out.update({k: copy.deepcopy(payload[k]) for k in ("spec", "submit", "answer_schema")})
+    out.update({k: copy.deepcopy(payload[k]) for k in ("spec", "submit", "answer_schema") if k in payload})
     out["content_identity"] = identity
     if out.get("artifact_id") in render_spec_submissions:
         out["submission"] = copy.deepcopy(render_spec_submissions[out["artifact_id"]])
@@ -739,6 +796,12 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "rs-release", "type": "render_spec", "status": "ready", "session": s,
              "title": "Release check", "summary": "Your call on tonight's build.", "reference_id": "",
              "source_trace_id": ""},
+        ]
+    if kind == "render_spec_v2":
+        return [
+            {"artifact_id": "rs-deploy", "type": "render_spec", "status": "ready", "session": s,
+             "title": "Deploy check", "summary": "Ship or hold the release.", "reference_id": "",
+             "source_trace_id": "", "render_payload": copy.deepcopy(RENDER_SPEC_V2_PAYLOAD)},
         ]
     if kind == "html_form":
         form = ("<h1>Trip planner</h1><form><label>Destination <input name=\"destination\" value=\"Bergen\"></label>"
@@ -1170,13 +1233,13 @@ class Handler(BaseHTTPRequestHandler):
             if representation == "summary-v1":
                 if not artifact_summary["on"] or artifact_summary.get("refuse"):
                     return self.reply(400, {"error": "unsupported artifact representation"})
-                capable = render_spec_capable(self.headers.get("X-Clarp-Client"))
+                capable = render_spec_level(self.headers.get("X-Clarp-Client"))
                 with state_lock:
                     rows = [render_view(summary_row(represent(a, "flat-v1")), capable, False) for a in listed_artifacts(int(query.get("limit", "100")))]
                     return self.reply(200, {"artifacts": rows})
             if representation not in ("", "flat-v1") or (representation and not flat_supported):
                 return self.reply(400, {"error": "unsupported artifact representation"})
-            capable = render_spec_capable(self.headers.get("X-Clarp-Client"))
+            capable = render_spec_level(self.headers.get("X-Clarp-Client"))
             with state_lock:
                 rows = [render_view(represent(a, representation), capable, False) for a in listed_artifacts(int(query.get("limit", "100")))]
                 return self.reply(200, {"artifacts": rows})
@@ -1195,7 +1258,7 @@ class Handler(BaseHTTPRequestHandler):
                 if found is None:
                     return self.reply(404, {"error": "artifact not found"})
                 item = copy.deepcopy(represent(stored(found), "flat-v1" if flat_item else ""))
-                item = render_view(item, render_spec_capable(self.headers.get("X-Clarp-Client")), True)
+                item = render_view(item, render_spec_level(self.headers.get("X-Clarp-Client")), True)
                 if artifact_summary["corrupt"].get(artifact_id, 0) > 0:
                     artifact_summary["corrupt"][artifact_id] -= 1
                     item["content"] = item.get("content", "") + "<!-- altered -->"
@@ -1398,10 +1461,10 @@ class Handler(BaseHTTPRequestHandler):
         state, version, intent and required answers."""
         def refuse(status, code, path=""):
             return self.reply(status, {"error": {"code": code, "path": path, "message": RENDER_SPEC_REASONS.get(code, code)}})
-        if not render_spec_capable(self.headers.get("X-Clarp-Client")):
+        payload = artifact.get("render_payload") or RENDER_SPEC_PAYLOAD
+        if render_spec_level(self.headers.get("X-Clarp-Client")) < payload["catalog_version"]:
             return refuse(403, "client_contract")
         artifact_id = artifact["artifact_id"]
-        payload = artifact.get("render_payload") or RENDER_SPEC_PAYLOAD
         answers = body.get("answers") or {}
         with state_lock:
             held = render_spec_submissions.get(artifact_id)
@@ -1414,9 +1477,13 @@ class Handler(BaseHTTPRequestHandler):
                 return refuse(409, "not_open")
             if body.get("version") != payload["version"]:
                 return refuse(409, "version_mismatch", "/version")
-            if answers.get("intent") != payload["submit"]["intent"]:
+            # A button form has no submit: every button sends intent "button".
+            if answers.get("intent") != (payload["submit"]["intent"] if "submit" in payload else "button"):
                 return refuse(400, "intent_mismatch", "/answers/intent")
             state = answers.get("state") or {}
+            action = payload["answer_schema"]["properties"].get("action", {})
+            if "submit" not in payload and state.get("action") not in action.get("enum", []):
+                return refuse(400, "state_value", "/answers/state/action")
             for key in payload["answer_schema"].get("required", []):
                 if key not in state:
                     return refuse(400, "missing_key", "/answers/state/" + key)
@@ -1461,8 +1528,9 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(raw or b"{}")
         if url.path == "/__control/render-spec-clients":
             # Test control: the Host's per-client render_spec minimums.
-            global render_spec_min
+            global render_spec_min, render_spec_v2_min
             render_spec_min = dict(body.get("minimums", {}))
+            render_spec_v2_min = dict(body.get("v2_minimums", {}))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/render-spec-reset":
             # Test control: forget the accepted answers and reopen the forms.

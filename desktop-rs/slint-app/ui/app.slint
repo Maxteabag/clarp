@@ -32,13 +32,13 @@ export { FontBridge, FontItem, FontKey }
 import { AvatarArt } from "avatar.slint";
 export { AvatarArt }
 import { DisplayCell, CellLine } from "cells.slint";
-import { ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow } from "artifacts.slint";
+import { ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow, FormConfirmDialog, FormChart, FormChartMark, FormChartTick, FormChartDot, FormChartKey, FormTable, FormTableColumn, FormTableCell, FormTableRow } from "artifacts.slint";
 import { LinkHints, LinkBadge, LinkHintLayer } from "link_hints.slint";
 export { LinkHints, LinkBadge }
 // ---- settings: the value editor and colour picker
 import { PrefEditorDialog, PrefConfirmDialog, PrefEditor, Swatch } from "prefs.slint";
 export { PrefEditor, Swatch }
-export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow }
+export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow, FormChart, FormChartMark, FormChartTick, FormChartDot, FormChartKey, FormTable, FormTableColumn, FormTableCell, FormTableRow }
 
 export { ScrollBook, MeasureRow, VimBridge, DraftMirror, ChatMenu, ChatChoice }
 export { Palette, Focus, ChatLook, Motion, SendFlight, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
@@ -866,6 +866,12 @@ export component AppWindow inherits Window {
         }
         PrefConfirmDialog {
             visible: root.overlay == "pref-confirm";
+            width: parent.width;
+            height: parent.height;
+        }
+        // A native form's button asks its question (form_view.rs).
+        FormConfirmDialog {
+            visible: root.overlay == "form-confirm";
             width: parent.width;
             height: parent.height;
         }

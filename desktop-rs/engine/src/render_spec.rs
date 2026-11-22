@@ -40,6 +40,9 @@ pub struct FormView {
     pub note: String,
     /// The Host takes no answer any more; the form stays readable.
     pub closed: bool,
+    /// The action of the button last pressed (a version 2 button form):
+    /// the one being sent while `sending`.
+    pub pressed: Option<String>,
 }
 
 struct Entry {
@@ -54,7 +57,7 @@ struct Entry {
 impl Entry {
     fn new() -> Self {
         Entry {
-            view: FormView { state: FormState::Loading, values: Values::new(), accepted: None, sending: false, note: String::new(), closed: false },
+            view: FormView { state: FormState::Loading, values: Values::new(), accepted: None, sending: false, note: String::new(), closed: false, pressed: None },
             asked_for: i64::MIN,
             reading: None,
             submission_id: new_submission_id(),
@@ -141,17 +144,33 @@ impl Engine {
         }
     }
 
-    /// Sends the form's answers, when every required one is there.
+    /// Sends the form's answers through its footer submit, when every
+    /// required one is there (a form with buttons has no footer submit).
     pub fn send_render_spec(&mut self, artifact_id: &str) {
         on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.send_render_spec(artifact_id));
+        self.submit_render_spec(artifact_id, None);
+    }
+
+    /// Presses the form's button with `action` (its question, if any, was
+    /// already answered OK): the form is sent once with intent `button` and
+    /// that action, when every required value is there.
+    pub fn press_render_spec_button(&mut self, artifact_id: &str, action: &str) {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.press_render_spec_button(artifact_id, action));
+        self.submit_render_spec(artifact_id, Some(action));
+    }
+
+    fn submit_render_spec(&mut self, artifact_id: &str, pressing: Option<&str>) {
         let Some(entry) = self.render_specs.entries.get_mut(artifact_id) else { return };
         let view = &mut entry.view;
         let FormState::Form(form) = &view.state else { return };
-        if view.accepted.is_some() || view.sending || view.closed {
+        // After one submission every button is off; a button form has no
+        // footer submit, and a form without buttons no button.
+        if view.accepted.is_some() || view.sending || view.closed || form.buttons.is_empty() != pressing.is_none() {
             return;
         }
-        let Submission::Ready(answers) = form.submission(&view.values) else { return };
+        let Submission::Ready(answers) = form.submission(&view.values, pressing) else { return };
         let body = json!({"submission_id": entry.submission_id, "version": form.version, "answers": answers});
+        view.pressed = pressing.map(str::to_owned);
         view.sending = true;
         view.note.clear();
         let tag = format!("{SUBMIT}{artifact_id}|{}", entry.submission_id);
@@ -194,7 +213,7 @@ impl Engine {
             match (&view.state, echoed) {
                 (FormState::Form(form), true) => {
                     let state: serde_json::Map<String, Value> = view.values.iter().map(|(k, v)| (k.clone(), v.value())).collect();
-                    let answers = match form.submission(&view.values) {
+                    let answers = match form.submission(&view.values, view.pressed.as_deref()) {
                         Submission::Ready(answers) => answers,
                         Submission::Blocked(_) => json!({"intent": form.submit_intent, "state": state}),
                     };
@@ -312,6 +331,7 @@ fn apply_read(entry: &mut Entry, read: Option<Read>) {
             if let Some(accepted) = read.submission {
                 eprintln!("render spec: event=read outcome=answered delivery={}", accepted.delivery_status);
                 view.values = Values::new();
+                view.pressed = None;
                 view.accepted = Some(accepted);
                 view.closed = false;
                 view.note.clear();
