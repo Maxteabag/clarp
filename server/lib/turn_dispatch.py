@@ -918,6 +918,49 @@ def complete_stop(
     finish_stop(ctx, agent_id, backend_registry=backend_registry)
 
 
+def stop_for_restart(ctx, agent_id: str, backend: str, *, session: str = "",
+                     backend_registry=backends) -> str:
+    """End the agent's running turn before it is started again in place (POST /agents
+    with replace_sid; issue 360, R51). Left running, its answer went into the
+    conversation the restart ended, and the user was notified of an answer no reader
+    shows. Unlike the user's Stop it holds nothing: the queue keeps the pause it had,
+    so what waited behind the turn, and what was said already, is answered in the new
+    conversation. Returns the stopped turn's trace, or "" when none ran."""
+    runtime_client = getattr(ctx, "runtime_client", None)
+    was_paused = bool(turn_queue.state(agent_id)["paused"])
+    trace = ""
+    if runtime_client is not None:
+        lease = runtime_client.begin_stop(agent_id, backend, strict=False, hold=False,
+                                          fence_user_receipts=False)
+        trace = str(lease.trace_id or "")
+    else:
+        snapshot, _dropped, _paused = begin_stop(agent_id, user_stop=False)
+        trace = str(snapshot.get("trace_id") or "")
+        if trace:
+            try:
+                backend_registry.interrupt(backend, agent_id)
+            except Exception as exc:  # noqa: BLE001 - the slot is released all the same
+                log_exception("restartInterruptFail", exc, detail=agent_id)
+        complete_stop(ctx, agent_id, snapshot, set(), backend_registry=backend_registry)
+    if not was_paused:
+        turn_queue.set_paused(agent_id, False)
+    if not trace:
+        return ""
+    log("turnStoppedForRestart", f"agent={agent_id} trace={trace}")
+    try:
+        stopped = turn_lifecycle.try_transition(agent_id, TurnEvent.STOP_REQUESTED, {
+            "source": "restart", "message": "Turn stopped: the agent was started again",
+            "trace_id": trace})
+    except Exception as exc:  # noqa: BLE001 - the turn is stopped; its row settles on recovery
+        log_exception("restartStopRecordFail", exc, detail=agent_id)
+        stopped = None
+    if stopped is not None and getattr(ctx, "stream", None) is not None:
+        events.broadcast(ctx.stream, events.agent_state(
+            session=session, agent_id=agent_id, kind=stopped.to_state,
+            ts=stopped.ts, detail=stopped.detail))
+    return trace
+
+
 def finish_stop(ctx, agent_id: str, *, backend_registry=backends) -> None:
     """Release the barrier and run a normal send admitted during Stop."""
     next_spec = _SLOTS.pop_next(agent_id, expected=_STOPPING_SENTINEL)
