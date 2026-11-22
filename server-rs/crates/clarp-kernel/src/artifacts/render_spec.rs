@@ -241,9 +241,10 @@ pub fn stored(catalog: &Catalog, payload: &J) -> Result<Map<String, Value>, Refu
     Ok(kept)
 }
 
-/// The lowest client contracts that draw and answer a render spec. The client names itself
-/// exactly. iOS draws from 74, the web app from 1, and Android from 41.
-pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74), ("web", 1), ("android", 41)];
+/// The lowest client contracts that draw and answer a v1 render spec. iOS draws from 74,
+/// Android from 41, and the web app and native desktop from 1.
+pub const DEFAULT_MINIMUMS: &[(&str, i64)] =
+    &[("ios", 74), ("web", 1), ("android", 41), ("desktop", 1)];
 
 /// Whether the client that sent this header can answer a render spec
 /// (`server_identity.render_spec_capable`): it says who it is as `<name>/<build> contract=<n>`

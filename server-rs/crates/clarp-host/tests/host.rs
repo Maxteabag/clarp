@@ -8729,12 +8729,11 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
             .contains(&canary.to_lowercase())
     );
 
-    // A client the default does not name (only iOS from 74 is), here the desktop at any
-    // contract, sees no spec and cannot answer one.
+    // A client the default does not name sees no spec and cannot answer one.
     let (status, made) = ask(
         "POST",
         "/artifacts",
-        Some("desktop/12 contract=999"),
+        Some("other/12 contract=999"),
         Some(&envelope("plain")),
     );
     assert_eq!(status, 201, "{made}");
@@ -8757,21 +8756,21 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (_, read) = ask(
         "GET",
         "/artifacts/plain",
-        Some("desktop/12 contract=999"),
+        Some("other/12 contract=999"),
         None,
     );
     assert_eq!(read["artifact"], row);
     let (status, said) = ask(
         "POST",
         "/artifacts/plain/submit",
-        Some("desktop/12 contract=999"),
+        Some("other/12 contract=999"),
         Some(&json!({})),
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
     let (status, said) = raw(
         "POST",
         "/artifacts/plain/submit",
-        Some("desktop/12 contract=999"),
+        Some("other/12 contract=999"),
         b"",
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
@@ -8818,7 +8817,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         "the name as sent, exactly"
     );
     assert!(!spec_of("ios/12 contract=74"));
-    assert!(!spec_of("desktop/1 contract=999"));
+    assert!(!spec_of("other/1 contract=999"));
     // A key is a client's name in the header's own form, counted exactly as written (one rule
     // for both of the Python Host's tables, its owner's of 20 Nov): 'IOS' and 'Ios' are taken
     // for clients that send them so, not for iOS, and that is said once; a key of no such form,
@@ -8947,9 +8946,11 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
 
     // Each client as the wire vectors have it: what it is shown in every list and in the
     // artifact itself, and whether it may answer.
+    let desktop = Some("desktop/0.1.0 contract=1");
     let clients = [
         (None, false),
         (Some("ios/12 contract=73"), false),
+        (desktop, true),
         (Some("ios/12 contract=74"), true),
         (Some("ios/12 contract=75"), true),
         (Some("ios/ contract=99"), false),
@@ -9034,6 +9035,20 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     wait_for("the agent to be told the first answers", || {
         host.conversation(&theo).len() == 1 && host.state(&theo) == "done"
     });
+
+    let mut v2 = envelope("desktop-v2");
+    v2["payload"]["catalog_version"] = json!(2);
+    let web_v2 = Some("web/1 contract=2");
+    let (status, made) = ask("POST", "/artifacts", web_v2, Some(&v2));
+    assert_eq!(status, 201, "{made}");
+    let path = "/artifacts/desktop-v2?representation=flat-v1";
+    let (status, page) = ask("GET", path, web_v2, None);
+    assert_eq!(status, 200, "{page}");
+    assert_eq!(page["artifact"]["spec"], form["spec"]);
+    let (status, page) = ask("GET", path, desktop, None);
+    assert_eq!(status, 200, "{page}");
+    assert_eq!(page["artifact"]["type"], "render_spec");
+    assert!(page["artifact"].get("spec").is_none(), "{page}");
 
     // The first accepted answers close the spec, are told to the agent once, and are told
     // to the apps once; the same answers again get the same receipt.
