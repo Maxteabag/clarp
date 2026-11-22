@@ -30,11 +30,13 @@ function foldable(row) {
   return { tools, cells };
 }
 
-/** 'Worked for 11s · 3 tools', '3 tools' without a worked time, 'Working · 2 tools' running. */
+/** 'Worked for 11s · 3 tools', 'Worked for 11s' with none folded, '3 tools' without a worked
+ * time, 'Working · 2 tools' running. */
 export function workLabel({ running = false, worked_ms = null, tool_count = 0 } = {}) {
   const tools = plural(tool_count, 'tool');
   if (running) return `Working · ${tools}`;
-  return worked_ms != null ? `Worked for ${formatDuration(worked_ms)} · ${tools}` : tools;
+  if (worked_ms == null) return tools;
+  return `Worked for ${formatDuration(worked_ms)}` + (tool_count ? ` · ${tools}` : '');
 }
 
 /**
@@ -76,11 +78,14 @@ export function foldTurns(rows, { mode = 'grouped', busy = false } = {}) {
     // The label counts what the fold opens to: a failed call stays in its row, so the turn
     // summary's tool_count (every call) is not used.
     const counted = calls.reduce((n, c) => n + c.tools.length + c.cells.length, 0);
-    if (!counted) continue;
     const summary = members.findLast(m => m.turn)?.turn || null;
     const later = prompt < current;                   // a prompt came after this turn's
     const streaming = members.some(m => m.kind === 'live' || m.optimistic);
     const settled = !streaming && (!!summary || later || !busy);
+    // A settled turn whose calls all failed (none folds) still says how long it worked
+    // ('Worked for 11s'); with neither a worked time nor a folded call, or no call at all, no row.
+    const failedOnly = settled && summary && summary.worked_ms != null && Number(summary.tool_count) > 0;
+    if (!counted && !failedOnly) continue;
     const turnId = (prompt >= 0 && rows[prompt].trace_id) || members.find(m => m.trace_id)?.trace_id
       || members[0].id;
     const fold = {
