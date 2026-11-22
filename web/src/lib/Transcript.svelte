@@ -11,7 +11,11 @@
   import { foldTurns } from '@core/history-fold.js';
   import { statusFor } from '../stores/app.svelte.js';
   import LiveTurn from './live/LiveTurn.svelte';
-  import { conversation, loadOlder, placeholderFor } from '../stores/conversations.svelte.js';
+  import HiddenRun from './HiddenRun.svelte';
+  import { hidesLiveTurn } from '@core/coordination.js';
+  import {
+    concealCoordination, conversation, loadOlder, placeholderFor, revealCoordination,
+  } from '../stores/conversations.svelte.js';
   import { live, liveFor, liveRequested, openLive, watchSession } from '../stores/live.svelte.js';
   import { prefs } from '../stores/prefs.svelte.js';
 
@@ -32,7 +36,11 @@
   // The live turn (docs/live-items.md): its items replace the transient
   // activity rows, and stand in for the /log rows that carry them.
   let liveState = $derived(liveFor(session));
-  let liveItems = $derived(liveState ? currentTurnItems(liveState) : []);
+  // Hidden coordination (docs/protocol.md): under an effective hide a live turn another agent
+  // started is not drawn. The policy the rows were read under says it, else the snapshot.
+  let visibility = $derived(conv.coordination?.visibility || statusFor(session).coordination_visibility || '');
+  let liveHidden = $derived(hidesLiveTurn(visibility, liveState && liveState.turn));
+  let liveItems = $derived(liveState && !liveHidden ? currentTurnItems(liveState) : []);
   // Every live event replaces liveItems; the hidden set and the live block's
   // position only change now and then. Both keep their identity (a set) or
   // value (a number) between events, so the turn filter, the merged timeline
@@ -55,6 +63,13 @@
   // busy is its own derived boolean: a status tick that leaves it unchanged does not refold.
   let busy = $derived(!!statusFor(session).busy);
   let fold = $derived(foldTurns(turns, { mode: prefs.toolActivity, busy }));
+
+  // A chat's own Show lasts for this visit: leaving the chat reads it under its setting again.
+  $effect(() => {
+    const shownSession = session;
+    return () => concealCoordination(shownSession);
+  });
+  const showCoordination = () => revealCoordination(session);
 
   // Keep this chat's live items coming while it is on screen.
   $effect(() => {
@@ -196,6 +211,7 @@
        patches only rows whose revision moved. -->
   {#each timeline as entry (entry.key)}
     {#if entry.type === 'turn'}
+      {#if entry.item.hidden_before && prefs.showCoordinationLine}<HiddenRun count={entry.item.hidden_before} onShow={showCoordination} />{/if}
       {#if fold.byRow.has('before:' + entry.item.id)}<WorkRow fold={fold.byRow.get('before:' + entry.item.id)} />{/if}
       <Turn turn={entry.item} strip={fold.stripped.get(entry.item.id)} />
       {#if fold.byRow.has(entry.item.id)}<WorkRow fold={fold.byRow.get(entry.item.id)} />{/if}
@@ -209,6 +225,13 @@
       </div>
     {/if}
   {/each}
+  {#if conv.hiddenAfter && prefs.showCoordinationLine}<HiddenRun count={conv.hiddenAfter} onShow={showCoordination} />{/if}
+  {#if conv.revealed}
+    <div class="turn hidden-run revealed" role="note">
+      <span class="hidden-run-text">Showing messages between agents</span>
+      <button class="hidden-run-show" type="button" onclick={() => concealCoordination(session)}>Hide</button>
+    </div>
+  {/if}
   </div>
 </div>
 

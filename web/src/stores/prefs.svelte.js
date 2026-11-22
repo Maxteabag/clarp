@@ -16,7 +16,15 @@ export const prefs = $state({
   lastQuietMode: 'grouped',
   // 'Show the Host on each chat': on unless turned off. Kept on this device, never on the Host.
   showHostBadge: localStorage.getItem('chatShowHostBadge') !== '0',
+  // 'Show a line where agent messages were' ('3 messages between agents' with its Show): on unless
+  // turned off. Off draws no such line; the chat's own setting (⇄) still shows them.
+  showCoordinationLine: localStorage.getItem('chatShowCoordinationLine') !== '0',
 });
+
+export function setShowCoordinationLine(on) {
+  prefs.showCoordinationLine = !!on;
+  try { localStorage.setItem('chatShowCoordinationLine', on ? '1' : '0'); } catch (_) {}
+}
 
 export function setShowHostBadge(on) {
   prefs.showHostBadge = !!on;
