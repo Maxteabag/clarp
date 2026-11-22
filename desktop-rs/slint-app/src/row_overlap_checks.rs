@@ -829,7 +829,7 @@ pub(super) fn row_overlap_check(out: String) {
             true
         })),
         moment("a long Markdown reply under its folded turn", 1500, || has_row("a-final"), move |_, _| {
-            check(has_row("a-note") && !has_row("a-tool-1") && !has_row("a-tool-2"), "the folded turn keeps its commentary in view and folds its tools");
+            check(!has_row("a-note") && !has_row("a-tool-1") && !has_row("a-tool-2"), "the folded turn folds its commentary and its tools into the work row (#653)");
             shot1();
         }),
         read_through("reading the history"),
@@ -863,7 +863,7 @@ pub(super) fn row_overlap_check(out: String) {
             agent_state("thinking");
         }),
         moment("the next turn starts and the last one folds into history", 1200, || has_row("c-prompt"), move |app, window| {
-            check(has_row("b-note") && !has_row("b-tool"), "the folded turn keeps its commentary in view and folds its tool");
+            check(!has_row("b-note") && !has_row("b-tool"), "the folded turn folds its commentary and its tool (#653)");
             shot4();
             crate::artifacts_view::open(app, window, "a2a:b-prompt");
         }),

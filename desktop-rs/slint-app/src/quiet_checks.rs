@@ -84,7 +84,7 @@ pub fn quiet_chat_check(out: String) {
             check(fold.live.title == "Working · 2 tools", &format!("the running turn is one work row with its tools so far: {:?}", titles()));
             check(fold.live.shimmer == "accent", &format!("it shimmers while the turn runs: {:?}", fold.live.shimmer));
             check(!titles().iter().any(|t| t.starts_with("Running") || t.starts_with("Thought") || t.starts_with("Explored")), &format!("its tools and thinking fold into it: {:?}", titles()));
-            check(live_row("live:cl:msg_01:1").is_some(), "the commentary stays in view");
+            check(live_row("live:cl:msg_01:1").is_none(), "the commentary folds into it too, as a working detail");
             app_now().focus_transcript();
             shot(&out1, "quiet-01-working");
             crate::artifacts_view::toggle_live(app, FOLD);
@@ -96,6 +96,7 @@ pub fn quiet_chat_check(out: String) {
             }
             let titles = titles();
             check(titles.iter().any(|t| t == "Running npm test") && titles.iter().any(|t| t == "Explored 1 file, 1 search"), &format!("opened in place: every tool row: {titles:?}"));
+            check(live_row("live:cl:msg_01:1").is_some(), "and the commentary, in its place");
             shot(&out2, "quiet-02-opened");
             crate::artifacts_view::toggle_live(app, FOLD);
             replay(AFTER_INTERRUPT)
@@ -106,6 +107,8 @@ pub fn quiet_chat_check(out: String) {
             }
             let titles = titles();
             check(titles.first().map(String::as_str) == Some("3 tools"), &format!("settled without a /log summary yet: the 3 folded calls (the failed and the stopped one keep their rows), no time from /live: {titles:?}"));
+            check(titles == ["3 tools", "Ran npm test", "", "Stopped npm test"], &format!("the commentary stays folded; the reply and what failed or stopped show: {titles:?}"));
+            check(live_row("live:cl:msg_01:1").is_none() && live_row("live:cl:msg_02:0").is_some(), "the final reply never folds");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::HIDE_WHEN_DONE);
             true
         })),
@@ -115,9 +118,17 @@ pub fn quiet_chat_check(out: String) {
             }
             check(setting(app, "activity").is_some_and(|r| r.detail == "Hide when done"), "Settings say Hide when done");
             let titles = titles();
-            check(titles == ["", "Ran npm test", "", "Stopped npm test"], &format!("the finished turn has no work row; its messages and what failed or stopped stay: {titles:?}"));
+            check(titles == ["Ran npm test", "", "Stopped npm test"], &format!("the finished turn has no work row; its reply and what failed or stopped stay, its commentary went with the row: {titles:?}"));
             check(live_row("live:cl:msg_02:0").is_some(), "the reply stays");
             shot(&out3, "quiet-03-hidden-when-done");
+            app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
+            true
+        })),
+        ("always visible", Box::new(move |_, _window, elapsed| {
+            if live_row(FOLD).is_none() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(live_row("live:cl:msg_01:1").is_some(), "Always visible shows the commentary in its place");
             true
         })),
     ];

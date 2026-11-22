@@ -474,3 +474,19 @@ fn neither_a_worked_time_nor_a_folded_call_is_no_work_row() {
     assert!(folded.folds.iter().all(|f| folds(f).is_empty()), "no work row: {:?}", folded.folds.iter().map(read).collect::<Vec<_>>());
     assert!(folded.folds.iter().any(|f| f.pieces.iter().any(|p| matches!(p, Piece::Entry(e) if e.status == "failed"))), "the failed call shows");
 }
+
+/// Commentary folds into the work row (#653); the answer stays; the count
+/// is still the folded calls.
+#[test]
+fn commentary_in_history_folds_and_opens_in_place() {
+    let mut first = tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "ok");
+    first["text"] = json!("Building first.");
+    let rows = turn(&[prompt("u1", "2026-10-03T10:00:00Z", "t1"), first, text_row("a2", "2026-10-03T10:00:06Z", "Done.")]);
+    let quiet = Options { fold_commentary: true, ..options(&[]) };
+    let folded = present(&rows, None, &quiet);
+    assert_eq!(read(&folded.folds[0]), ["1 tool", "row a2"], "the commentary folds with its tool; the answer stays");
+    assert!(folded.hidden_rows.contains("a1"));
+    let open = present(&rows, None, &Options { fold_commentary: true, ..options(&["live:fold:t1"]) });
+    assert_eq!(read(&open.folds[0]), ["1 tool", "row a1", "Ran make build", "row a2"]);
+    assert!(!open.hidden_rows.contains("a1"));
+}

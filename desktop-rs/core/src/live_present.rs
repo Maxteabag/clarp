@@ -93,6 +93,10 @@ pub struct Options {
     /// Leave a settled turn's work row out (Hide when done): its messages,
     /// and what failed or stopped, stay.
     pub hide_settled: bool,
+    /// Commentary (the agent's lines between tools, phase `commentary`)
+    /// folds into the work row as a working detail (#653): every mode but
+    /// Always visible. The final reply never folds.
+    pub fold_commentary: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -313,6 +317,12 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             if placed.insert(row) {
                 let mut entry = item_entry(item, options);
                 entry.row = row.to_owned();
+                // A row that also carries the final reply is the reply: it
+                // never folds as commentary.
+                let carries_final = items.iter().any(|i| text(i, "kind") == "message" && text(i, "phase") == "final" && owner_of(i) == Some(row));
+                if carries_final {
+                    entry.phase = "final".to_owned();
+                }
                 rows_of.insert(text(item, "id"), entry);
                 shown.push(*item);
             }
@@ -340,6 +350,11 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let live_turn = turn.expect("a turn");
     let summary = if settled { Some(logged_summary(rows, &turn_id).cloned().unwrap_or_else(|| counted(live_turn, &shown))) } else { None };
     presented.entries = arrange(&turn_id, summary.as_ref().unwrap_or(live_turn), settled, &shown, rows_of, options);
+    // A durable row whose commentary the work row folds is not shown in
+    // the chat either; opened, it shows in its place again.
+    let placed_rows: HashSet<&str> = presented.entries.iter().map(|e| e.row.as_str()).collect();
+    let folded_rows: Vec<String> = giving.iter().filter(|r| !placed_rows.contains(*r)).map(|r| (*r).to_owned()).collect();
+    presented.hidden_rows.extend(folded_rows);
     presented.turn_id = turn_id;
     presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));
     presented.own_rows = presented.taken_over.values().chain(&presented.absorbed_rows).chain(&presented.hidden_rows).cloned().collect();
@@ -424,7 +439,9 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
     // and thinking, running ones too, under `Working · N tools`.
     if settled || options.fold_running {
         let stays = |entry: &Entry| {
-            entry.kind == Kind::Message || matches!(entry.status.as_str(), "failed" | "interrupted") || (settled && matches!(entry.status.as_str(), "running" | "pending"))
+            (entry.kind == Kind::Message && !(options.fold_commentary && entry.phase == "commentary"))
+                || matches!(entry.status.as_str(), "failed" | "interrupted")
+                || (settled && matches!(entry.status.as_str(), "running" | "pending"))
         };
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
         // The calls the row opens to: a tool, each member of an explore group.

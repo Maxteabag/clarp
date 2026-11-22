@@ -77,10 +77,10 @@ jobs:
           source = path.read_text()
           field = '    pub busy: bool,\n'
           assert source.count(field) == 1
-          source = source.replace(field, field + '    pub hide_settled: bool,\n')
+          source = source.replace(field, field + '    pub hide_settled: bool,\n    pub fold_commentary: bool,\n')
           literal = 'host_now_ms: 0 }'
           assert source.count(literal) == 2
-          source = source.replace(literal, 'host_now_ms: 0, fold_running: false, hide_settled: false }')
+          source = source.replace(literal, 'host_now_ms: 0, fold_running: false, hide_settled: false, fold_commentary: false }')
           path.write_text(source)
           PYCTRL
           set +e

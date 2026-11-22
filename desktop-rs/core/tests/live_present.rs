@@ -40,7 +40,7 @@ fn row(value: Value) -> Message {
 }
 
 fn options(expanded: &[&str], host_now_ms: i64) -> Options {
-    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, fold_running: false, hide_settled: false }
+    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, fold_running: false, hide_settled: false, fold_commentary: false }
 }
 
 fn titles(presented: &Presented) -> Vec<String> {
@@ -640,4 +640,46 @@ fn a_live_item_never_goes_above_a_row_written_before_it_started() {
     let place = |id: &str| order.iter().position(|o| o == id).unwrap_or_else(|| panic!("{id} in {order:?}"));
     assert!(place("live:cl:msg_a2:0") < place("u-note") && place("u-note") < place("live:cl:toolu_a3"), "{order:?}");
     assert!(place("u-stale-second") < place("live:cl:msg_b1:0"), "{order:?}");
+}
+
+/// Commentary folds into the work row as a working detail (#653, every
+/// mode but Always visible); the final reply never folds; the count is
+/// still the folded calls.
+#[test]
+fn commentary_folds_into_the_work_row_and_the_reply_stays() {
+    let view = commentary_turn();
+    let mut opts = options(&[], 0);
+    opts.fold_commentary = true;
+    let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
+    let p = present(&view, &[], &opts);
+    assert_eq!(read(&p), ["3 tools", "All green."], "the commentary folds; the count is the three calls");
+    assert_eq!(p.entries[0].items, ["cl:m:0", "cl:c1", "cl:c2", "cl:m:1", "cl:c3"]);
+    opts.expanded.insert("live:fold:tr-c".to_owned());
+    let open = present(&view, &[], &opts);
+    assert_eq!(read(&open), ["3 tools", "Building it first.", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."], "opened, in place");
+}
+
+/// A durable row carrying folded commentary is not shown on its own; one
+/// that also carries the final reply is the reply and never folds.
+#[test]
+fn a_durable_commentary_row_hides_with_its_fold() {
+    let mut view = commentary_turn();
+    let mut snapshot = serde_json::json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 2, "server_now_ms": 20_000,
+        "activity": {"state": "idle", "turn_id": "tr-c"},
+        "turn": {"turn_id": "tr-c", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 13_000, "worked_ms": 12_000, "tool_count": 3},
+        "items": view.items().iter().map(|i| Value::Object((*i).clone())).collect::<Vec<_>>()});
+    for item in snapshot["items"].as_array_mut().unwrap() {
+        if item["id"] == "cl:m:0" {
+            item["row_id"] = json!("r-note");
+        }
+    }
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    let note = row(json!({"id": "r-note", "role": "assistant", "text": "Building it first.", "revision": 3}));
+    let mut opts = options(&[], 0);
+    opts.fold_commentary = true;
+    let p = present(&view, std::slice::from_ref(&note), &opts);
+    assert!(p.hidden_rows.contains(&"r-note".to_owned()), "folded: {:?}", p.hidden_rows);
+    opts.expanded.insert("live:fold:tr-c".to_owned());
+    let open = present(&view, std::slice::from_ref(&note), &opts);
+    assert!(!open.hidden_rows.contains(&"r-note".to_owned()) && open.entries.iter().any(|e| e.row == "r-note"), "opened, the row shows in its place");
 }

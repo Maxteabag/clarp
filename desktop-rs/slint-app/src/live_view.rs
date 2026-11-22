@@ -34,6 +34,7 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
         host_now_ms: view.host_now_ms(now_ms()),
         fold_running: folds_running(engine.activity_mode()),
         hide_settled: engine.activity_mode() == clarp_core::presentation::HIDE_WHEN_DONE,
+        fold_commentary: engine.activity_mode() != clarp_core::presentation::ALWAYS_VISIBLE,
     };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
     pace(&mut presented);
@@ -65,6 +66,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         held_rows: live.map(|l| l.own_rows.clone()).unwrap_or_default(),
         busy,
         hide_settled: engine.activity_mode() == clarp_core::presentation::HIDE_WHEN_DONE,
+        fold_commentary: engine.activity_mode() != clarp_core::presentation::ALWAYS_VISIBLE,
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
     };
     clarp_core::history_fold::present(rows, view, &options)
