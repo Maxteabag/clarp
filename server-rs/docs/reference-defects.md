@@ -32,6 +32,10 @@ here; none of R29 to R37 is fixed or installed. His author is on R28 (PR 398: th
 right, the writing of the state is being made safe against races), then on what the goal keeper reads.
 His issue 396 there is R50 here.
 
+Python PR 659 (`81faf824c`) extends the R193 handoff policy to a send kept only in a park row.
+The Rust Host journals held sends in its regular queue. When one takes its turn, it uses the
+same backoff, ten-failure limit and sender notice as other queued handoffs.
+
 | # | What | Evidence | State |
 |---|---|---|---|
 | R1 | A message sent again under the same `client_msg_id`, after it was answered, leaves the conversation in one of two shapes: the reply is either the row written while the turn ran (with the turn's end on it), or the row imported from the tool's transcript (another id, no `turn`). Which one depends on timing | Conformance runs 43678950870 and 43679413710, scenario `retry-same-client-id`: the reference differs from itself | Closed by the release owner on 22 Nov 2026 (issue 360, comment 7072009553). No difference of this kind was recorded in Conformance run 44964832095 against `5b06b5b1` (through PR 612). |
