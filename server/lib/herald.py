@@ -136,7 +136,9 @@ class HeraldManager:
         self._settings_fn = settings
         self._buffers: dict[str, list[str]] = {}    # sid -> [url, ...]
         self._clip_meta: dict[str, dict] = {}        # url -> sidecar metadata
-        self._pending: set[str] = set()             # sids whose herald has fired
+        # sids whose herald has fired, in the order they fired: one grant for several
+        # plays them in that order on every Host start, never a set's hash order (R52).
+        self._pending: dict[str, None] = {}
         self._gated_buffers: set[str] = set()       # held until authoritative release
         self._herald_inflight: dict[str, object] = {}
         self._state_lock = threading.RLock()
@@ -329,7 +331,7 @@ class HeraldManager:
             return self._fall_back_locked(
                 attempt, focus=focus, awaiting_active=awaiting_active,
                 reason="herald_broadcast_failed")
-        self._pending.add(session)
+        self._pending.setdefault(session, None)
         log("heraldEmitted", f"{session} → {herald_url}")
         self._log_decision(
             session=session, focus=focus, awaiting_active=awaiting_active,
@@ -348,7 +350,7 @@ class HeraldManager:
         session = attempt.session
         flushed = self._flush(session, herald=False)
         if not flushed:
-            self._pending.add(session)
+            self._pending.setdefault(session, None)
         log("heraldFallbackFlush", f"{session} reason={reason} flushed={int(flushed)}")
         self._log_decision(
             session=session, focus=focus, awaiting_active=awaiting_active,
@@ -451,14 +453,14 @@ class HeraldManager:
             if failed:
                 self._buffers[sid] = failed
                 if was_pending:
-                    self._pending.add(sid)
+                    self._pending.setdefault(sid, None)
                 else:
-                    self._pending.discard(sid)
+                    self._pending.pop(sid, None)
                 event = "heraldFlushPartial" if delivered else "heraldFlushFailed"
                 log(event, f"{sid} delivered={delivered} failed={len(failed)}")
                 return False
             self._buffers.pop(sid, None)
-            self._pending.discard(sid)
+            self._pending.pop(sid, None)
             self._gated_buffers.discard(sid)
             log("heraldFlushed", f"{sid} count={len(urls)}")
             return True
