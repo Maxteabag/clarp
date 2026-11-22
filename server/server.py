@@ -2674,6 +2674,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             else:
                 turn_dispatch.finish_stop(
                     self.ctx, agent_id, backend_registry=backends)
+            if actor == "user":
+                self._start_users_waiting_after_stop(agent_id, session)
             if stop_unrecorded is not None:
                 raise StopNotRecorded(agent_id) from stop_unrecorded
         log("turnStop", f"session={session} terminated={n} actor={actor} "
@@ -2764,6 +2766,36 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             "paused": state["paused"],
             "revision": state["revision"],
         })
+
+    def _start_users_waiting_after_stop(self, agent_id: str, session: str) -> None:
+        """The user's Stop means "stop and take my waiting message now": a message of
+        the user's that waited behind the stopped turn starts at once, in queue
+        order, with no further send. The pause stays for everything else (agents,
+        peers, goal wakes), which waits as before for the user's next message."""
+        from lib import turn_queue
+        try:
+            waiting = [row for row in turn_queue.pending(agent_id)
+                       if str(row.get("origin") or "user") == "user"]
+            released = [row["queue_id"] for row in waiting
+                        if turn_queue.allow_paused(str(row["queue_id"]))]
+        except Exception as exc:  # noqa: BLE001 - the stop itself already succeeded
+            log_exception("stopStartsUserMessageFail", exc, detail=session)
+            return
+        if not released:
+            return
+        log("stopStartsUserMessage", f"session={session} items={len(released)}")
+        runtime_client = getattr(self.ctx, "runtime_client", None)
+        try:
+            if runtime_client is not None:
+                runtime_client.recover_queued()
+            else:
+                TurnDispatchService(self.ctx).recover_queued()
+        except Exception as exc:  # noqa: BLE001 - the next recovery pass runs them
+            log_exception("stopStartsUserMessageRecoverFail", exc, detail=session)
+        try:
+            self._broadcast_turn_queue(agent_id, session)
+        except Exception as exc:  # noqa: BLE001 - a projection of durable state
+            log_exception("stopStartsUserMessageBroadcastFail", exc, detail=session)
 
     def _handle_turn_queue_resume(self):
         """Lift a Stop's pause and let the waiting messages run in order."""
