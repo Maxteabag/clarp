@@ -514,8 +514,11 @@ the daily schedule.
 - **Stalled live turns (issue 249, Rust contract 149).** When a running tool
   has produced no stdout or stderr for the configured duration and a fresh user
   or Oracle message is waiting, the Rust Host exposes the stall and the existing
-  Stop action. Activity events show both transitions. The Python Host does
-  not project this state.
+  Stop action. Activity events show both transitions. The `stalled_turn` feature
+  adds `stalled_since` and `stalled_action` to snapshots and activity events.
+  Both fields are null when a turn is not stalled. The retired Python reference
+  has neither field. The fourteen occurrences in `stop-with-queue` from run
+  45054107427 are registered in `conformance/intended.txt`.
 
 
 The bounded client log (issue 707, contract 146) is available on the Rust Host.
