@@ -14,7 +14,7 @@ enabled = false
 interval_seconds = 300
 summary_hour = 9
 front_desk = "SESSION"
-release_kinds = ["release", "install", "check", "test"]
+release_kinds = ["check", "test"]
 
 [experience_watch.owners]
 app_crash_ios = "SESSION"
@@ -60,3 +60,8 @@ separately. `app_crash_ios` and the other platform kinds fall back to
 `summary_hour`. A missed hour is skipped. Notices and the admin command show the paired device name with its ID and use the Host's
 local timezone, with a UTC offset. JSON output also keeps the original
 epoch-millisecond timestamps.
+
+A release finding requires a running job registered as `check` or `test`
+and a recognized check step in that job's live worker process tree. Builds,
+releases, installs and opaque remote commands are excluded. The detail
+shows the registered kind, active step and Host-local step start time.
