@@ -110,8 +110,8 @@ A Host can keep a device token for each of its owner's other Hosts (`clarp-admin
 pairing by a one-time code made on the peer). `GET /peers/snapshot` (full scope only: a
 limited device gets 403) answers `{peers: {<server_id>: {name, url, server_id, reachable, error,
 snapshot}}, cache_seconds}`: the Host reads each peer's `GET /server-info` and `GET
-/agents/snapshot` server to server with that token and returns the peer's snapshot as the peer
-gave it. Unreachable: `reachable: false`, `snapshot: null`, an `error` code. Only the peers'
+/agents/snapshot?include_archived=0` server to server with that token (15 s per read, at most 16 MiB) and returns the peer's
+snapshot as the peer gave it. Unreachable: `reachable: false`, `snapshot: null`, an `error` code. Only the peers'
 own configured URLs are fetched, never one from the request; redirects are refused; tokens are
 never returned. The web app's all-Hosts list reads this, so the browser needs no other Host's
 token; opening a peer's chat opens `url` (that Host's own web app).
