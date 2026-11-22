@@ -949,3 +949,14 @@ def test_a_failed_herald_broadcast_plays_the_reply_too():
     assert stream.audio_urls == ["/audio/r1.mp3"]
     assert hm.held_clips("rachel") == []
 
+
+
+@pytest.mark.parametrize("stored", ["", "{}", " {} "])
+def test_a_herald_for_a_voiceless_agent_hands_the_engine_no_voice(stored):
+    """An empty map names no voice, like "": the engine is handed "" (it may still find the
+    persona's own voice), never the raw "{}" text as a voice id."""
+    hm, _stream, tts = make_manager(agents={"rachel": {"name": "Rachel", "voice_id": stored}})
+    hm._synthesize_herald("rachel", {"name": "Rachel", "voice_id": stored})
+    assert [voice for _text, voice, _session in tts.calls] == [""]
+    hm._synthesize_herald("rachel", {"name": "Rachel", "voice_id": '{"cartesia":"c-1"}'})
+    assert tts.calls[-1][1] == '{"cartesia":"c-1"}'
