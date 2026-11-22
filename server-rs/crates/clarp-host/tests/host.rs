@@ -727,7 +727,7 @@ fn a_fresh_send_releases_the_held_queue(origin: &str, later: bool) {
     wait_for("the turn to run", || host.state(&session) == "thinking");
     let queued = host.post(
         "/send",
-        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true }),
+        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true, "origin": "automation" }),
     );
     assert_eq!(queued["queued"], true);
 
@@ -826,7 +826,7 @@ fn a_stop_while_another_message_waits_ends_the_turn_that_ran_by_its_own_trace() 
     wait_for("the turn to run", || host.state(&session) == "thinking");
     let waits = host.post(
         "/send",
-        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true }),
+        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true, "origin": "automation" }),
     );
     assert_eq!(waits["queued"], true, "{waits}");
 
@@ -26139,7 +26139,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     );
 
     // The turn is stopped: what waits is held.
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("the turn to end", || host.state(&echo) == "interrupted");
     let held = queue();
     assert_eq!((&held["paused"], waiting().len()), (&json!(true), 3));
@@ -26208,7 +26208,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     host.send(&echo, "sleep 60", "m6");
     wait_for("a turn to run again", || host.state(&echo) == "thinking");
     leave("seventh", "m7");
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("that turn to end", || host.state(&echo) == "interrupted");
     assert_eq!(queue()["paused"], true);
     host.ask("DELETE", "/turn-queue/m7", None);
@@ -26369,7 +26369,7 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
     assert_eq!(waiting(&echo).len(), 2);
     // Fox's goes to run: the id is Echo's alone again, and each route acts on the one that
     // still waits.
-    host.post("/stop", json!({ "session": fox }));
+    host.post("/stop", json!({ "session": fox, "actor": "maintenance" }));
     wait_for("Fox's turn to end", || host.state(&fox) == "interrupted");
     host.post("/turn-queue/resume", json!({ "session": fox }));
     wait_for("Fox's waiting message to be answered", || {
@@ -26404,7 +26404,7 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
             .conversation(&fox)
             .contains(&said("assistant", "other words for Echo"))
     );
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("Echo's turn to end", || host.state(&echo) == "interrupted");
 
     // Two agents taken over from another Host whose conversations have rows of one name:
@@ -26724,7 +26724,7 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
 
     // The turn is stopped, and the words of what is held are changed once more. Let go,
     // each turn answers the words its message has now, under the id it always had.
-    host.post("/stop", json!({ "session": echo }));
+    host.post("/stop", json!({ "session": echo, "actor": "maintenance" }));
     wait_for("the turn to end", || host.state(&echo) == "interrupted");
     assert_eq!(
         put("m2", json!({ "text": "the second, as it was held" })).0,
@@ -32985,7 +32985,7 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         json!({ "session": gamma, "text": "later", "client_msg_id": "g-2", "queue_if_busy": true });
     assert_eq!(host.post("/send", later)["queued"], true);
     for agent in [&gamma, &delta] {
-        host.post("/stop", json!({ "session": agent }));
+        host.post("/stop", json!({ "session": agent, "actor": "maintenance" }));
         wait_for("the stop to end the turn", || {
             host.state(agent) == "interrupted"
         });
