@@ -131,6 +131,53 @@ CHANGES = [
         'expect': {'channel': 'http', 'locator': r'\.body\.turns\[\d+\]\.text$', 'kinds': {'changed'}},
     },
     # ---- changes planted by the reviewer go below this line ----
+    {
+        'id': 'media-suffix-short',
+        'what': 'a media suffix range omits the first byte of the requested tail',
+        'file': 'server/server.py',
+        'find': '        return ("partial", max(0, total - hi), total - 1)\n',
+        'replace': '        return ("partial", min(total - 1, max(0, total - hi + 1)), total - 1)\n',
+        # media: fetch the end of the picture. The range header is the concrete receipt.
+        'expect': {'channel': 'http', 'locator': r'^\[14\]\.headers\.content-range$', 'kinds': {'changed'}},
+    },
+    {
+        'id': 'report-version-latest-page',
+        'what': 'an older report version keeps its version label but shows the current page',
+        'file': 'server/lib/html_report_revisions.py',
+        'find': "        value['payload'] = json.loads(value.pop('payload_json'))\n",
+        'replace': ("        value['payload'] = json.loads(value.pop('payload_json'))\n"
+                    "        value['payload']['content'] = current['payload']['content']\n"),
+        # reports: read the first version after publishing two successors.
+        'expect': {'channel': 'http', 'locator': r'^\[18\]\.body\.revision\.payload\.content$',
+                   'kinds': {'changed'}},
+    },
+    {
+        'id': 'calendar-event-loses-zone',
+        'what': 'a calendar request arrives on the event stream with a blank time zone',
+        'file': 'server/lib/events.py',
+        'find': '        ("time_zone", time_zone),\n',
+        'replace': '        ("time_zone", ""),\n',
+        'expect': {'channel': 'sse', 'locator': r'^lane\[calendar-request@[0-9a-f]+\]\[\d+\]\.data\.time_zone$',
+                   'kinds': {'changed'}},
+    },
+    {
+        'id': 'transcription-retry-loses-trace',
+        'what': 'replaying a transcription returns the cached text without the original trace id',
+        'file': 'server/server.py',
+        'find': '                cached["cached"] = True\n',
+        'replace': '                cached["cached"] = True\n                cached.pop("trace_id", None)\n',
+        # speech-in: repeat the identical named audio upload.
+        'expect': {'channel': 'http', 'locator': r'^\[4\]\.body\.trace_id$', 'kinds': {'field-removed'}},
+    },
+    {
+        'id': 'team-nudge-shows-leader-setting',
+        'what': 'a team reports autonomous nudging as on as soon as it has an enabled leader',
+        'file': 'server/lib/team_store.py',
+        'find': '        "nudge_enabled": bool(row["nudge_enabled"]),\n',
+        'replace': '        "nudge_enabled": bool(row["leader_enabled"]),\n',
+        # team-management: assign a leader before explicitly enabling nudges.
+        'expect': {'channel': 'http', 'locator': r'^\[7\]\.body\.team\.nudge_enabled$', 'kinds': {'changed'}},
+    },
 ]
 
 BY_ID = {change['id']: change for change in CHANGES}
