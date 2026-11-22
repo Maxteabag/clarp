@@ -19,6 +19,7 @@ use crate::fleet::FleetHandle;
 
 pub(crate) mod opencode;
 pub mod sign_in;
+mod status;
 
 /// What stands for a login file as it is now: nothing of what is in it. `None` when the file
 /// is not there or cannot be read.
@@ -91,23 +92,21 @@ pub fn credential(tool: &str, file: &Path) -> (bool, i64) {
 /// When a token that says so of itself runs out, in milliseconds: the `exp` of a token in
 /// three parts. 0 for any other.
 fn expiry_of(token: &str) -> i64 {
+    jwt_payload(token)
+        .and_then(|data| data["exp"].as_i64())
+        .unwrap_or(0)
+        .saturating_mul(1000)
+}
+
+fn jwt_payload(token: &str) -> Option<Value> {
     let parts: Vec<&str> = token.split('.').collect();
     let [_, payload, _] = parts.as_slice() else {
-        return 0;
+        return None;
     };
-    let standard: String = payload
-        .chars()
-        .map(|sign| match sign {
-            '-' => '+',
-            '_' => '/',
-            other => other,
-        })
-        .collect();
+    let standard = payload.replace('-', "+").replace('_', "/");
     let padded = format!("{standard}{}", "=".repeat((4 - standard.len() % 4) % 4));
-    let said: Value = python::b64decode(&padded)
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or(Value::Null);
-    said["exp"].as_i64().unwrap_or(0).saturating_mul(1000)
+    let bytes = python::b64decode(&padded)?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Whether a program can be started: a path that is a file, or a name found on the path.

@@ -2618,6 +2618,18 @@ def cmd_model(args) -> int:
     return 0
 
 
+def cmd_client_log(args) -> int:
+    """The apps' client log and crash events this Host keeps (GET /client-log), one JSON object
+    per line, oldest first."""
+    query = {key: value for key, value in (
+        ("device", args.device), ("since", args.since), ("level", args.level),
+        ("event", args.event), ("limit", str(args.limit))) if value}
+    result = api_request("GET", "/client-log?" + urllib.parse.urlencode(query))
+    for row in result.get("events", []):
+        print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+    return 0
+
+
 def cmd_peers(args) -> int:
     server_root = SHARE
     if not (server_root / "lib").is_dir(): server_root = REPO / "server"
@@ -3621,6 +3633,14 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         "--effort", help="reasoning effort, or 'default' to clear the override")
     model_cmd.add_argument("--session", help="target session (default: $CLAUDE_PWA_SESSION)")
     model_cmd.set_defaults(func=cmd_model)
+    client_log = sub.add_parser(
+        "client-log", help="the apps' client log and crash events this Host keeps, as JSON lines")
+    client_log.add_argument("--device", help="a paired device's id (see `pair list`)")
+    client_log.add_argument("--since", help="30m, 2h, 7d, or milliseconds since the epoch")
+    client_log.add_argument("--level", help="error (with fault, critical, fatal), warning, info ...")
+    client_log.add_argument("--event", help="one event name")
+    client_log.add_argument("--limit", type=int, default=200, help="at most this many, newest kept (max 5000)")
+    client_log.set_defaults(func=cmd_client_log)
     peers = sub.add_parser("peers").add_subparsers(
         dest="peers_command", required=True)
     peers.add_parser("list").set_defaults(func=cmd_peers)

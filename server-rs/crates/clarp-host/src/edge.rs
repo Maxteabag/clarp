@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 145;
+pub const HOST_CONTRACT: u64 = 146;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -128,6 +128,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("background_jobs", 1),
     ("provider_background_tasks", 24),
     ("diagnostics", 1),
+    ("client_events_kept", 146),
     // Pairing codes and devices with tokens of their own.
     ("pairing", 1),
     // Calls: the Host's record of who is in a phone's call, on hold and on the floor
@@ -362,6 +363,7 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 #[derive(Clone)]
 pub struct App {
     pub capture: Arc<crate::diagnostics::Capture>,
+    pub client_events: Arc<crate::client_events::Desk>,
     pub controller_actions: Arc<crate::controller_actions::Desk>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
     /// Held by a change to the skills this Host keeps installed, from its reading of the
@@ -1130,17 +1132,18 @@ fn who(
         return local.then_some((Principal::Administrator, Presented::Nowhere));
     }
     let known = |token: &str| -> Option<Principal> {
-        // The administrator's token opens the Host only from the machine it runs on, and so
-        // does what a turn was given for its agent's tools. From anywhere else a device
-        // presents a token of its own, which can be taken away again.
-        if same_token(token, expected)
-            || app
-                .config
-                .administrator_aliases()
-                .iter()
-                .any(|alias| same_token(token, alias))
-        {
+        // The primary and tool tokens are local. An administrator alias can also
+        // authenticate a proxied request. Address tokens still require locality below.
+        if same_token(token, expected) {
             return local.then_some(Principal::Administrator);
+        }
+        if app
+            .config
+            .administrator_aliases()
+            .iter()
+            .any(|alias| same_token(token, alias))
+        {
+            return Some(Principal::Administrator);
         }
         if local && same_token(token, &crate::tool_token(expected)) {
             return Some(Principal::Tools);
@@ -1225,13 +1228,14 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
             }
             Some((principal, presented)) => {
                 if let Principal::Device { device_id, .. } = &principal {
-                    if (read && path == "/server-info")
-                        || (request.method() == Method::POST && path == "/devices")
-                    {
-                        let client = crate::render_spec::client(request.headers());
-                        app.experience
-                            .launched(device_id, client, app.clock.now_ms());
-                    }
+                    let startup_endpoint = (read && path == "/server-info")
+                        || (request.method() == Method::POST && path == "/devices");
+                    app.experience.device_request(
+                        device_id,
+                        request.headers(),
+                        startup_endpoint,
+                        app.clock.now_ms(),
+                    );
                     device = Some(device_id.clone());
                 }
                 request.extensions_mut().insert(Asker { source });
@@ -2486,10 +2490,7 @@ async fn import_agent(
             return Err(not_to_stay(&app.fleet, session, failed, ApiError::from).await);
         }
     };
-    // It is here, and until its owner says it lives here it is on the other Host too. So it
-    // takes no turn of its own yet: a goal that is due, or anything else that would start by
-    // itself, waits for a resume. What its user says to it runs.
-    let held = member.agent.hold(Control::by("move")).await.is_ok();
+    // The actor put the move hold in the same journal append as the conversation.
     Ok(Json(json!({
         "ok": true,
         "session": member.record.session,
@@ -2497,7 +2498,7 @@ async fn import_agent(
         "imported": imported,
         "artifacts": artifacts,
         "plans": plans,
-        "held": held,
+        "held": true,
     })))
 }
 
@@ -4307,17 +4308,26 @@ mod tests {
         let place = crate::unkept::at_the_port::place("experience-signals");
         let app = place.app().await;
         let now = app.clock.now_ms();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-clarp-client",
+            HeaderValue::from_static("ios/130 contract=125"),
+        );
         for n in 0..27 {
             app.experience
-                .launched("device-a", Some("ios/130 contract=125"), now - n * 4_000);
+                .device_request("device-a", &headers, true, now - n * 4_000);
         }
+        headers.insert(
+            "x-clarp-client",
+            HeaderValue::from_static("android/42 contract=121"),
+        );
         app.experience
-            .launched("device-b", Some("android/42 contract=121"), now);
+            .device_request("device-b", &headers, true, now);
         let launches = app.experience.relaunches(now - 120_000, now);
-        assert_eq!(launches["device-a"].count, 27);
+        assert_eq!(launches["device-a"].legacy_requests, 27);
         assert_eq!(launches["device-a"].build, "130");
         assert_eq!(launches["device-a"].contract, Some(125));
-        assert_eq!(launches["device-b"].count, 1);
+        assert_eq!(launches["device-b"].legacy_requests, 1);
         assert!(app.experience.relaunches(now + 1, now + 60_000).is_empty());
 
         for name in ["Speaker", "Mover"] {

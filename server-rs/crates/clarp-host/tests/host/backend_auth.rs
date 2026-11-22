@@ -534,3 +534,161 @@ fn a_turn_whose_tool_is_signed_out_under_it_ends_on_the_login_and_holds_nothing(
             .any(|(role, text)| role == "assistant" && text == "on it")
     });
 }
+
+#[test]
+fn account_status_verifies_current_logins_and_reports_configured_selectors() {
+    let place = Place::new("account-status");
+    let home = place.root.join("home");
+    let claude = place.root.join("claude");
+    let codex = place.root.join("codex");
+    let agy = place.root.join("agy");
+    let claude_config = home.join(".claude");
+    let codex_config = home.join(".codex");
+    let gemini = home.join(".gemini");
+    for directory in [&claude_config, &codex_config, &gemini] {
+        std::fs::create_dir_all(directory).unwrap();
+    }
+    let credential = claude_config.join(".credentials.json");
+    std::fs::write(
+        &credential,
+        r#"{"claudeAiOauth":{"accessToken":"fixture-claude"}}"#,
+    )
+    .unwrap();
+    let payload = clarp_kernel::python::b64encode(br#"{"email":"codex@example.invalid"}"#);
+    std::fs::write(
+        codex_config.join("auth.json"),
+        json!({"auth_mode":"chatgpt","tokens":{
+            "account_id":"fixture-id","access_token":"fixture-codex",
+            "id_token":format!("head.{payload}.signature")
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let agy_account = gemini.join("google_accounts.json");
+    std::fs::write(&agy_account, r#"{"active":"agy@example.invalid"}"#).unwrap();
+    program(
+        &claude,
+        r#"#!/bin/sh
+[ "$*" = "auth status --json" ] || exit 2
+echo '{"loggedIn":true,"email":"claude@example.invalid","authMethod":"claude.ai"}'
+"#,
+    );
+    program(&codex, "#!/bin/sh\nexit 2\n");
+    program(
+        &agy,
+        r#"#!/bin/sh
+[ "$*" = "models" ] || exit 2
+echo models >> "$HOME/agy-asked"
+if [ -f "$HOME/signed-out" ]; then
+    echo 'Sign in to list models'
+    exit 0
+fi
+echo 'Fetching available models'
+printf 'gemini-3-flash\tGemini Flash\n'
+"#,
+    );
+    let selector = place.root.join("selector");
+    program(
+        &selector,
+        "#!/bin/sh\ntouch \"$HOME/selector-ran\"\nexit 2\n",
+    );
+    let owners = place.root.join("owners.toml");
+    std::fs::write(&owners, format!(
+        "[agents]\nclaude_account_switch_command = [\"{0}\"]\ncodex_account_switch_command = [\"{0}\"]\n",
+        selector.display(),
+    )).unwrap();
+    let (usage_url, requests) = answers_using(|path, request| {
+        let request = request.to_ascii_lowercase();
+        match path {
+            "/api/oauth/usage" if request.contains("authorization: bearer fixture-claude\r\n") => {
+                ("200 OK", r#"{"five_hour":{"utilization":10}}"#.into())
+            }
+            "/backend-api/wham/usage" if request.contains("authorization: bearer fixture-codex\r\n") => {
+                ("200 OK", r#"{"rate_limit":{"primary_window":{"used_percent":20,"limit_window_seconds":18000}}}"#.into())
+            }
+            _ => ("401 Unauthorized", "{}".into()),
+        }
+    });
+    let launch = |ownership| {
+        place.start_in(
+            "fixture-admin",
+            &[
+                "--accounts",
+                ownership,
+                "--ask-usage",
+                "--seats-tool",
+                "/bin/false",
+                "--speech-keys",
+                owners.to_str().unwrap(),
+            ],
+            &[
+                ("HOME", home.to_str().unwrap()),
+                ("CLAUDE_CONFIG_DIR", claude_config.to_str().unwrap()),
+                ("CODEX_HOME", codex_config.to_str().unwrap()),
+                ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+                ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+                ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+                (
+                    "CLARP_USAGE_LOOPBACK",
+                    usage_url.trim_start_matches("http://"),
+                ),
+            ],
+        )
+    };
+    let path = "/backend-auth?harnesses=all";
+    let following = launch("follow");
+    assert_eq!(row(&following.get(path), "claude")["state"], "unverified");
+    assert_eq!(
+        following.get("/hotseat/status")["switcher"]["enabled"],
+        false
+    );
+    assert!(requests.lock().unwrap().is_empty());
+    assert!(!home.join("agy-asked").exists());
+    drop(following);
+
+    let host = launch("select");
+    for _ in 0..2 {
+        let account_status = host.get(path);
+        for (tool, account) in [
+            ("claude", "claude@example.invalid"),
+            ("codex", "codex@example.invalid"),
+            ("agy", "agy@example.invalid"),
+        ] {
+            let receipt = row(&account_status, tool);
+            assert_eq!(receipt["state"], "valid", "{tool}: {receipt}");
+            assert_eq!(receipt["logged_in"], true);
+            assert_eq!(receipt["account"], account);
+        }
+        assert!(!account_status.to_string().contains("fixture-claude"));
+    }
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(home.join("agy-asked")).unwrap(),
+        "models\n"
+    );
+
+    let hotseat = host.get("/hotseat/status");
+    assert_eq!(hotseat["switcher"]["enabled"], true);
+    for provider in hotseat["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| matches!(row["provider"].as_str(), Some("claude" | "codex")))
+    {
+        assert!(provider["error_code"].is_null(), "{provider}");
+    }
+    assert!(!home.join("selector-ran").exists());
+
+    // A different credential must earn verification, and a login prompt is no model list.
+    std::fs::write(
+        credential,
+        r#"{"claudeAiOauth":{"accessToken":"rotated-fixture"}}"#,
+    )
+    .unwrap();
+    std::fs::write(agy_account, r#"{"active":"other@example.invalid"}"#).unwrap();
+    std::fs::write(home.join("signed-out"), "").unwrap();
+    let changed = host.get(path);
+    assert_eq!(row(&changed, "claude")["state"], "unverified");
+    assert_eq!(row(&changed, "agy")["state"], "signed_out");
+    assert_eq!(row(&changed, "agy")["account"], "");
+}

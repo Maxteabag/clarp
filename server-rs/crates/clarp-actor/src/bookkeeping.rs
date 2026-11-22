@@ -179,6 +179,7 @@ impl Actor {
         let span = conversation::Span {
             floor: 0,
             head_revision: self.head_revision(),
+            ..conversation::Span::default()
         };
         loop {
             let page = conversation::after(

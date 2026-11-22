@@ -138,23 +138,66 @@ pub struct Desk {
     /// time reads and changes it.
     known: tokio::sync::Mutex<Known>,
     refresh: tokio::sync::Mutex<()>,
-    verified: std::sync::Mutex<BTreeMap<String, ([u8; 32], i64)>>,
+    verified: std::sync::Mutex<BTreeMap<String, Verification>>,
     agy_attempt: std::sync::Mutex<Option<i64>>,
     /// Which accounts were used up when that was last looked at, and which tools were
     /// looked at at all: to tell when it is no longer as it was.
     last: std::sync::Mutex<Option<(Arc<UsedUp>, Vec<String>)>>,
 }
 
+struct Verification {
+    stamp: [u8; 32],
+    at: i64,
+    valid: bool,
+}
+
 impl Desk {
-    /// Success belongs to the exact credential that answered, for the auth cache's minute.
-    pub fn login_verified(&self, tool: &str, home: &Path, now: i64) -> bool {
-        let file = clarp_backend::by_id(tool).and_then(|b| b.login_file(home));
-        let stamp = file.and_then(|f| crate::logins::digest(&f));
+    /// A verification is for one exact credential and can be shared with usage refreshes.
+    pub(crate) fn login_result(&self, tool: &str, stamp: [u8; 32], now: i64) -> Option<bool> {
         self.verified
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(tool)
-            .is_some_and(|(seen, at)| Some(*seen) == stamp && now - *at < 60_000)
+            .filter(|seen| seen.stamp == stamp && (0..60_000).contains(&(now - seen.at)))
+            .map(|seen| seen.valid)
+    }
+
+    fn keep_verification(&self, tool: &str, stamp: [u8; 32], at: i64, valid: bool) {
+        self.verified
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(tool.into(), Verification { stamp, at, valid });
+    }
+
+    pub(crate) async fn verify_login(
+        &self,
+        app: &crate::edge::App,
+        tool: &'static str,
+        home: &Path,
+        stamp: [u8; 32],
+    ) -> bool {
+        let _one = self.refresh.lock().await;
+        let now = app.clock.now_ms();
+        if let Some(valid) = self.login_result(tool, stamp, now) {
+            return valid;
+        }
+        let Ok(_login) = crate::pool::Service::use_login(app, tool).await else {
+            return false;
+        };
+        let file = clarp_backend::by_id(tool).and_then(|backend| backend.login_file(home));
+        let current = || file.as_deref().and_then(crate::logins::digest);
+        if current() != Some(stamp) {
+            return false;
+        }
+        let provider = crate::usage_provider::Provider {
+            loopback: app.config.usage_loopback,
+        };
+        let valid = provider.ask(tool, home, now, Some(stamp)).await.is_some();
+        if current() != Some(stamp) {
+            return false;
+        }
+        self.keep_verification(tool, stamp, app.clock.now_ms(), valid);
+        valid
     }
 
     pub async fn refresh(&self, app: &crate::edge::App, home: &Path, force: bool) -> Vec<Value> {
@@ -314,10 +357,8 @@ impl Desk {
                     self.looked(with, name, kept.used_up(tool, on, with.now_ms));
                 }
             }
-            let mut cache = self.verified.lock().unwrap_or_else(PoisonError::into_inner);
-            cache.remove(name);
-            if let Some(stamp) = before.filter(|_| verified) {
-                cache.insert(name.into(), (stamp, with.now_ms));
+            if let Some(stamp) = before {
+                self.keep_verification(name, stamp, with.now_ms, verified);
             }
         }
         events

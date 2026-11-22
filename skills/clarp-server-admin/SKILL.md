@@ -22,14 +22,32 @@ toolchain paths.
 
 On a Rust Host, `clarp-admin experience --open` lists outstanding findings.
 Use `--since 1h` to limit the time window and `--json` for stored rows. The
-watcher reads late sends, stuck or paused queues, app relaunch bursts,
-failed sends, skill links, old decision cards, and release-blocking jobs.
+watcher reads late sends, stuck or paused queues, app crash reports and
+crash events, failed sends, skill links, old decision cards, and release-blocking
+jobs. Relaunch counts provide context for a crash finding.
 
 The watcher is off unless `[experience_watch] enabled = true` is set in
 the Host configuration. Each finding's owner and the configured front
 desk hear once on open and once on clear, from `experience-watch`. The
 front desk also gets one daily summary. Findings are stored even without
 a configured recipient. See [the watcher configuration](../../server-rs/docs/experience-watch.md).
+
+## Read why an app crashed
+
+The Host keeps the apps' client log and crash reports whatever the diagnostics
+setting says: errors, crashes, hangs and MetricKit reports for 7 days with the
+30 minutes before them, everything else for 30 minutes (bounded, secrets cut).
+Read it as JSON lines, oldest first:
+
+```bash
+clarp-admin client-log --since 2h --level error
+clarp-admin client-log --device device_<id> --since 30m     # one phone, with context
+clarp-admin client-log --event metrickit_report --since 7d  # crash reports (file names under crashes/)
+```
+
+`clarp-admin pair list` names the devices. The full MetricKit payloads are the
+files the `metrickit_report` events name, beside the state database in
+`crashes/`.
 
 ## Which code may meet which database
 

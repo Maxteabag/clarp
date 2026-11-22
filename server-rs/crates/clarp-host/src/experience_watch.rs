@@ -2,18 +2,23 @@
 
 mod book;
 mod checks;
+mod release;
 mod settings;
 
 pub(crate) use checks::AgentFacts;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Mutex;
 
+use crate::client_events::{self, TelemetryClient};
+use crate::fleet::Directory;
 use crate::kept::{Found, Key, Kind};
 use crate::tools::ToolAnswer;
-use book::Book;
+use book::{Book, Row};
+use jiff::{Zoned, tz::TimeZone};
 use settings::Settings;
 
+use axum::http::{HeaderMap, HeaderValue};
 use clarp_protocol::requests::SendRequest;
 use clarp_protocol::responses::SendResponse;
 use serde_json::json;
@@ -27,7 +32,8 @@ const KEEP_MS: i64 = 24 * 60 * 60 * 1_000;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Relaunches {
-    pub count: usize,
+    pub foreground_sessions: usize,
+    pub legacy_requests: usize,
     pub platform: String,
     pub build: String,
     pub contract: Option<i64>,
@@ -40,15 +46,19 @@ struct Event<T> {
 }
 
 #[derive(Default)]
-pub struct Signals {
-    launches: Mutex<VecDeque<Event<Relaunches>>>,
-    refusals: Mutex<VecDeque<Event<()>>>,
+struct Launches {
+    foreground: BTreeSet<String>,
+    events: VecDeque<Event<Relaunches>>,
 }
 
-fn append<T>(ring: &Mutex<VecDeque<Event<T>>>, at: i64, subject: &str, detail: T) {
-    let Ok(mut ring) = ring.lock() else {
-        return;
-    };
+#[derive(Default)]
+pub struct Signals {
+    launches: Mutex<Launches>,
+    refusals: Mutex<VecDeque<Event<()>>>,
+    malformed_clients: Mutex<BTreeSet<String>>,
+}
+
+fn append<T>(ring: &mut VecDeque<Event<T>>, at: i64, subject: &str, detail: T) {
     while ring
         .front()
         .is_some_and(|first| first.at < at.saturating_sub(KEEP_MS) || ring.len() >= MAX_EVENTS)
@@ -63,42 +73,103 @@ fn append<T>(ring: &Mutex<VecDeque<Event<T>>>, at: i64, subject: &str, detail: T
 }
 
 impl Signals {
-    /// Count a launch request the Host served for an authenticated device.
-    pub(crate) fn launched(&self, device_id: &str, client: Option<&str>, now: i64) {
-        let detail = client
-            .and_then(|header| {
-                let (platform, contract) = clarp_kernel::client::named(header)?;
-                let (_, tail) = header.split_once('/')?;
-                let (build, _) = tail.split_once(' ')?;
-                Some(Relaunches {
-                    count: 0,
-                    platform: platform.to_ascii_lowercase(),
-                    build: build.to_owned(),
-                    contract: Some(contract),
-                })
-            })
-            .unwrap_or_default();
-        append(&self.launches, now, device_id, detail);
+    /// A marked foreground observation starts a session once per device until a
+    /// request reports background. Unmarked startup requests are weaker evidence.
+    pub(crate) fn device_request(
+        &self,
+        device_id: &str,
+        headers: &HeaderMap,
+        startup_endpoint: bool,
+        now: i64,
+    ) {
+        let state = headers.get("x-clarp-app-state").map(HeaderValue::as_bytes);
+        if state.is_none() && !startup_endpoint {
+            return;
+        }
+        let client = self.client_metadata(device_id, headers);
+        let Ok(mut launches) = self.launches.lock() else {
+            return;
+        };
+        let foreground_session = match state {
+            Some(b"foreground") => {
+                if !launches.foreground.insert(device_id.to_owned()) {
+                    return;
+                }
+                true
+            }
+            Some(b"background") => {
+                launches.foreground.remove(device_id);
+                return;
+            }
+            None => false,
+            Some(_) => return,
+        };
+        let mut detail = match client {
+            Ok(Some(client)) => Relaunches {
+                platform: if checks::platform(&client.platform) {
+                    client.platform
+                } else {
+                    "unknown".to_owned()
+                },
+                build: client.build,
+                contract: Some(client.contract),
+                ..Relaunches::default()
+            },
+            Ok(None) => Relaunches::default(),
+            Err(()) => Relaunches {
+                platform: "unknown".to_owned(),
+                ..Relaunches::default()
+            },
+        };
+        detail.foreground_sessions = usize::from(foreground_session);
+        detail.legacy_requests = usize::from(!foreground_session);
+        append(&mut launches.events, now, device_id, detail);
+    }
+
+    pub(crate) fn client_metadata(
+        &self,
+        device_id: &str,
+        headers: &HeaderMap,
+    ) -> Result<Option<TelemetryClient>, ()> {
+        let client = client_events::telemetry_client(headers);
+        if client.is_err()
+            && let Ok(mut devices) = self.malformed_clients.lock()
+            && devices.insert(device_id.to_owned())
+        {
+            eprintln!(
+                "clarp-host: experience-watch: device {device_id:?} sent a malformed X-Clarp-Client header; platform unknown"
+            );
+        }
+        client
     }
 
     pub(crate) fn refused(&self, agent_id: &str, now: i64) {
-        if !agent_id.is_empty() {
-            append(&self.refusals, now, agent_id, ());
+        if !agent_id.is_empty()
+            && let Ok(mut ring) = self.refusals.lock()
+        {
+            append(&mut ring, now, agent_id, ());
         }
     }
 
     pub fn relaunches(&self, since: i64, now: i64) -> BTreeMap<String, Relaunches> {
         let mut result: BTreeMap<String, Relaunches> = BTreeMap::new();
-        let Ok(events) = self.launches.lock() else {
+        let Ok(launches) = self.launches.lock() else {
             return result;
         };
-        for event in events
+        for event in launches
+            .events
             .iter()
             .filter(|event| in_window(event.at, since, now))
         {
-            let row = result.entry(event.subject.clone()).or_default();
-            row.count += 1;
-            if event.detail.contract.is_some() {
+            let row = result
+                .entry(event.subject.clone())
+                .or_insert_with(|| Relaunches {
+                    platform: "unknown".to_owned(),
+                    ..Relaunches::default()
+                });
+            row.foreground_sessions += event.detail.foreground_sessions;
+            row.legacy_requests += event.detail.legacy_requests;
+            if !event.detail.platform.is_empty() {
                 row.platform.clone_from(&event.detail.platform);
                 row.build.clone_from(&event.detail.build);
                 row.contract = event.detail.contract;
@@ -182,16 +253,23 @@ async fn save(app: &App, book: &Book) -> Result<(), String> {
         .map_err(|why| why.0)
 }
 
-async fn pass(app: &App, settings: &Settings, now: i64) -> Result<(), String> {
+async fn pass(app: &App, settings: &Settings, previous: i64, now: i64) -> Result<(), String> {
     let mut book = load(app).await?;
-    let seen = checks::collect(app, settings, now).await;
-    book.reconcile(seen, settings, now);
+    let seen = checks::collect(app, settings, settings.window_start(now, previous), now).await;
+    let directory = app.fleet.directory();
+    let zone = TimeZone::system();
+    book.reconcile(seen, settings, &directory, &zone, now);
     // Record pending notices before sending, with stable IDs across a restart.
     save(app, &book).await?;
     if book.owed.is_empty() {
         return Ok(());
     }
     for owed in std::mem::take(&mut book.owed) {
+        if let book::Notice::Summary(day) = &owed.notice
+            && book::summary_day(settings, &zone, app.clock.now_ms()).as_ref() != Some(day)
+        {
+            continue;
+        }
         let id = owed.message_id();
         match tell(app, &owed.to, id, owed.text.clone()).await {
             Ok(_) => book.told(owed),
@@ -201,7 +279,7 @@ async fn pass(app: &App, settings: &Settings, now: i64) -> Result<(), String> {
                     owed.to,
                     why.message(),
                 );
-                // A summary can be retried the same day using its original text and id.
+                // A summary can be retried in its hour using its original text and id.
                 if matches!(owed.notice, book::Notice::Summary(_)) {
                     book.owed.push(owed);
                 }
@@ -216,14 +294,18 @@ pub fn run(app: &App) {
     let app = app.clone();
     tokio::spawn(async move {
         let mut settings = Settings::read();
+        let mut previous = app.clock.now_ms();
         loop {
             tokio::time::sleep(settings.interval).await;
             settings = Settings::read();
+            let now = app.clock.now_ms();
             if settings.enabled
-                && let Err(why) = pass(&app, &settings, app.clock.now_ms()).await
+                && let Err(why) = pass(&app, &settings, previous, now).await
             {
                 eprintln!("clarp-host: experience-watch pass: {why}");
+                continue;
             }
+            previous = now;
         }
     });
 }
@@ -241,13 +323,14 @@ fn duration_ms(raw: &str) -> Option<i64> {
     (value >= 0).then_some(value.saturating_mul(scale))
 }
 
-fn clock(ms: i64, format: &str) -> String {
-    jiff::Timestamp::from_millisecond(ms)
-        .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::system())
-                .strftime(format)
-                .to_string()
-        })
+fn local(ms: i64, zone: &TimeZone) -> Option<Zoned> {
+    let ts = jiff::Timestamp::from_millisecond(ms).ok()?;
+    Some(ts.to_zoned(zone.clone()))
+}
+
+fn clock(ms: i64, zone: &TimeZone) -> String {
+    local(ms, zone)
+        .map(|time| time.strftime("%Y-%m-%d %H:%M %:z").to_string())
         .unwrap_or_default()
 }
 
@@ -277,13 +360,48 @@ pub(crate) async fn command(app: &App, args: &[String]) -> ToolAnswer {
         .collect::<Vec<_>>();
     rows.sort_unstable_by_key(|row| std::cmp::Reverse((row.last_seen, row.id)));
     rows.truncate(500);
-    if parsed.flags.contains("--json") {
-        return match serde_json::to_string_pretty(&rows) {
+    render(
+        rows,
+        &Settings::read(),
+        &app.fleet.directory(),
+        &TimeZone::system(),
+        parsed.flags.contains("--json"),
+    )
+}
+
+fn render(
+    mut rows: Vec<Row>,
+    settings: &Settings,
+    directory: &Directory,
+    zone: &TimeZone,
+    json_output: bool,
+) -> ToolAnswer {
+    for row in &mut rows {
+        row.refresh_subject(directory);
+    }
+    if json_output {
+        #[derive(serde::Serialize)]
+        struct LocalRow<'a> {
+            #[serde(flatten)]
+            row: &'a Row,
+            first_seen_local: String,
+            last_seen_local: String,
+            cleared_at_local: Option<String>,
+        }
+        let shown: Vec<_> = rows
+            .iter()
+            .map(|row| LocalRow {
+                row,
+                first_seen_local: clock(row.first_seen, zone),
+                last_seen_local: clock(row.last_seen, zone),
+                cleared_at_local: row.cleared_at.map(|at| clock(at, zone)),
+            })
+            .collect();
+        return match serde_json::to_string_pretty(&shown) {
             Ok(text) => ToolAnswer::printed(0, text),
             Err(why) => ToolAnswer::said(1, format!("clarp-admin experience: {why}")),
         };
     }
-    let settings = Settings::read();
     let enabled = if settings.enabled { "on" } else { "off" };
     let mut lines = vec![format!(
         "experience watch: {enabled}, every {}s; {} finding(s)",
@@ -303,9 +421,13 @@ pub(crate) async fn command(app: &App, args: &[String]) -> ToolAnswer {
                 to.join(", ")
             }
         };
+        let cleared = row
+            .cleared_at
+            .map(|at| format!(", cleared {}", clock(at, zone)))
+            .unwrap_or_default();
         lines.push(format!(
-            "  {state:<7} {:<18} {:<28} since {}, last {}, seen {}x, told on open {}, on clear {}\n          {}",
-            row.kind, row.subject, clock(row.first_seen, "%H:%M"), clock(row.last_seen, "%Y-%m-%d %H:%M"),
+            "  {state:<7} {:<18} {:<28} since {}, last {}{cleared}, seen {}x, told on open {}, on clear {}\n          {}",
+            row.kind, row.subject_label(), clock(row.first_seen, zone), clock(row.last_seen, zone),
             row.count, told(&row.notified_open), told(&row.notified_clear), row.detail,
         ));
     }
