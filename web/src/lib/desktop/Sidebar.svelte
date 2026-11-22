@@ -7,11 +7,12 @@
   // is too narrow to expand, so the toggle is disabled rather than hidden and
   // the control does not move.
   import {
-    AVATAR_PALETTE, app, avatarUrl, isUserNotificationUnread, setSession,
+    AVATAR_PALETTE, app, avatarUrl, hostBadgeFor, isUserNotificationUnread, setSession,
     shortActivityPhase, shortActivityText, statusFor,
   } from '../../stores/app.svelte.js';
   import { orderChats } from '../chat-order.js';
   import { movedLine } from '@core/agent-moved.js';
+  import HostBadge from '../HostBadge.svelte';
   import { input, setRegion } from '../../stores/input.svelte.js';
 
   let { collapsed = false, forced = false, onToggle, onOpenOverview } = $props();
@@ -39,6 +40,7 @@
           ...row,
           current: row.sid === app.session,
           busy: !!s.busy,
+          host: hostBadgeFor(row.sid),
           unread: isUserNotificationUnread(row.sid),
           // A moved agent's row says where it went (contract 125).
           line: movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
@@ -88,7 +90,7 @@
         {#if !collapsed}
           <span class="side-copy">
             <span class="side-name">{chat.name}</span>
-            <span class="side-line">{chat.line}</span>
+            <span class="side-line"><HostBadge name={chat.host} />{chat.line}</span>
           </span>
         {/if}
       </button>
