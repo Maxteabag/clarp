@@ -1473,7 +1473,7 @@ pub(crate) fn agent_row(
         let at = newest.map_or(member.record.created_at_ms, |preview| {
             preview.ts_ms.max(member.record.created_at_ms)
         });
-        row["last_activity"] = json!(at / 1_000);
+        row["last_activity"] = json!(at);
     }
     // Whether its tool's account is used up: advice for whoever is about to write to it.
     row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
