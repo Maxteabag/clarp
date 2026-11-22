@@ -2,20 +2,23 @@
   // Phone dock: identity block, connection dot, and a chat button that
   // toggles the composer overlay.
   import {
-    AVATAR_PALETTE, app, avatarUrl, chipLabel, shortActivityText, statusFor,
+    AVATAR_PALETTE, app, avatarUrl, chipLabel, hostBadgeFor, shortActivityText, statusFor,
     unreadAgentCount,
   } from '../../stores/app.svelte.js';
   import { activityStatusClass } from '../render.js';
   import ConnDot from '../ConnDot.svelte';
   import DockControls from '../DockControls.svelte';
+  import { movedLine } from '@core/agent-moved.js';
+  import HostBadge from '../HostBadge.svelte';
 
   let { chatOpen = $bindable(), onTapAgent, onHoldAgent } = $props();
 
   let label = $derived(chipLabel(app.session));
   let status = $derived(statusFor(app.session));
   let activity = $derived(
-    shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
+    movedLine(status.moved) || shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
   let unread = $derived((app.tick, unreadAgentCount()));
+  let host = $derived((app.tick, hostBadgeFor(app.session)));
 
   // Tap opens the quick switcher, a 600ms hold opens the full overview.
   let holdTimer = null;
@@ -59,7 +62,7 @@
     <span class="agent-text">
       <span class="agent-label">{label}</span>
       <span class="agent-activity-label {activityStatusClass(status.activity_status)}" title={activity}>
-        {activity}
+        {#if host}<HostBadge name={host} /> · {/if}{activity}
       </span>
     </span>
     <ConnDot />

@@ -27,6 +27,8 @@ pub const REFUSED_IN_ALL: u32 = 20;
 /// The wait after a send's own try, before the first counted one: the queue is looked at again
 /// a second later.
 pub const FIRST_WAIT_MS: i64 = 1_000;
+/// A queued handoff ends on its tenth launch failure before the tool starts (R193, PR 654).
+pub const HANDOFF_GIVE_UP: u32 = 10;
 /// How much of its words a refusal keeps.
 const SIGNED_MOST: usize = 300;
 /// How much of its words the notice says of a refusal.
@@ -104,6 +106,17 @@ pub enum Next {
     Wait { ms: i64 },
     /// The turn ends failed, and its sender is told.
     End,
+}
+
+/// A queued handoff counts every failed launch, even when the error changes (R193).
+pub fn after_handoff_failure(failures: u32) -> Next {
+    if failures >= HANDOFF_GIVE_UP {
+        Next::End
+    } else {
+        Next::Wait {
+            ms: wait_ms(failures),
+        }
+    }
 }
 
 impl Refusals {

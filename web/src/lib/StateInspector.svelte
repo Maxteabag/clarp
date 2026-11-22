@@ -51,7 +51,7 @@
           session: c.session, status: c.status, error: c.error,
           turnsCount: c.turns.length, activityCount: c.activity.length,
           latestRevision: c.latestRevision, conversationId: c.conversationId,
-          hasMore: c.hasMore, hideTools: prefs.hideTools,
+          hasMore: c.hasMore, toolActivity: prefs.toolActivity,
         };
       })(),
       audio: {

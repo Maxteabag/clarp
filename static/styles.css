@@ -773,6 +773,15 @@ body::before {
   gap: 10px;
   align-items: center;
 }
+/* The composer of an agent that moved to another Host: one line, no input (contract 125). */
+.chat-held {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  font: 400 13px/1.35 var(--font-ui);
+  color: var(--washi-low);
+}
+
 .chat-input {
   flex: 1;
   border: 0;
@@ -991,13 +1000,6 @@ body.chat-open .status { display: none !important; }
   gap: 8px;
   margin-left: auto;
 }
-.history-body.hide-tools .tool { display: none; }
-/* Hiding the tools inside a turn is not enough when the turn is nothing but
-   tools: the wrapper keeps its margin, its padding and the height
-   content-visibility assumes for it, so a run of tool-only turns leaves a
-   column of blank space between two replies. Drop the wrapper too. Activity
-   rows are their own live feed and are not part of this toggle. */
-.history-body.hide-tools .turn:not(.has-body):not(.activity) { display: none; }
 .history-body {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -3357,6 +3359,32 @@ html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
 .lv-step { line-height: 20px; color: var(--washi-dim); }
 .lv-step.completed { color: var(--washi-low); text-decoration: line-through; }
 .lv-step.in_progress { color: var(--washi); }
+/* Hidden coordination (docs/protocol.md): where messages between agents were left out. */
+.hidden-run {
+  display: flex; align-items: center; gap: 8px; margin: 2px 0; padding: 0 12px; min-height: 26px;
+  color: var(--washi-low); font: 12.5px var(--font-ui);
+}
+.hidden-run-agents { color: var(--washi-low); }
+.hidden-run-show {
+  background: none; border: 0; padding: 0; color: var(--washi-dim); font: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.hidden-run-show:hover { color: var(--washi); }
+.coordination-menu-wrap { position: relative; display: inline-flex; }
+.history-btn.coordination-btn::before { -webkit-mask-image: url('/static/img/icons/chat.png'); mask-image: url('/static/img/icons/chat.png'); }
+.coordination-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 180px; padding: 4px;
+  background: var(--ink-soft-2); border: 1px solid var(--ink-edge); border-radius: 8px;
+  display: flex; flex-direction: column;
+}
+.coordination-menu button {
+  text-align: left; background: none; border: 0; border-radius: 5px; padding: 6px 10px;
+  color: var(--washi-dim); font: 13px var(--font-ui); cursor: pointer;
+}
+.coordination-menu button:hover { background: var(--ink-edge); color: var(--washi); }
+.coordination-menu button.checked { color: var(--washi); }
+.coordination-menu button.checked::before { content: '✓ '; }
+.coordination-menu-hint { color: var(--washi-low); }
 .lv-divider { margin: 6px 12px; color: var(--washi-low); font: 12px var(--font-ui); text-align: center; }
 
 .status-line {
@@ -3390,7 +3418,6 @@ html:not(.desktop) .history:has(.status-line) .history-body {
 html:not(.desktop) .history:has(.status-line) .history-jump {
   bottom: calc(env(safe-area-inset-bottom) + 118px);
 }
-.history-body.hide-tools .tool-cell { display: none; }
 .turn .tool-cell { padding-left: 0; }
 /* The transcript anchors its own prepends (Transcript.svelte); the browser's
    scroll anchoring would compensate a second time where it exists. */
@@ -3399,3 +3426,22 @@ html:not(.desktop) .history:has(.status-line) .history-jump {
 .sl-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .lv-pulse { animation: lv-flash 900ms var(--ease) 1; }
 @keyframes lv-flash { 0%, 40% { background: rgba(125, 207, 255, .12); } 100% { background: transparent; } }
+
+/* The Host a chat is on (static/lib/host-badge.js): a small neutral capsule, no colour per
+   Host, never squeezed before the chat's name is. */
+.host-badge {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .07);
+  color: var(--washi-low);
+  font: 500 10px/16px var(--font-ui);
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+/* The quiet chat's work row (static/lib/history-fold.js): a settled turn's tool calls, opened in place. */
+.turn.work-row { padding-top: 2px; padding-bottom: 2px; }
+.work-row-calls { margin: 4px 0 2px 14px; }
