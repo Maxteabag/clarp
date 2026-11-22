@@ -1,2 +1,2 @@
-10b7547dd6c981b0f3ed6041404cd5ccdb255c2f
+c1485087e5497ff28abd052f674f33489b25ab04
 The merge of the Python Host's PR 708 (it holds every merge through PR 708 in main's order: everything through 701 as before; 705 ported, peer reads take 15 s and 16 MiB and ask /agents/snapshot?include_archived=0; 708 no port, a Python test that reads no peers.json of the machine): the commit of main whose Python Host the Rust Host is held to; fixtures are generated from it and the conformance run compares with it.
