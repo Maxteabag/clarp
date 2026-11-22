@@ -403,6 +403,7 @@ pub(crate) fn lineage(app: &App, session: &str) -> Result<Value, Refusal> {
     Ok(json!({
         "agent_id": record.agent_id,
         "session": record.session,
+        "backend": record.backend,
         "role": record.role(),
         "parent_agent_id": record.parent_agent_id,
         "helper_state": record.helper_state,

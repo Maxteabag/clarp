@@ -225,6 +225,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Agents that make agents: who made an agent, how a helper's work stands
     // (`/agent-helper-state`), and what an agent's row says of the ones it made.
     ("helper_agents", 13),
+    ("helper_state_backend", 152),
     ("claude_subagent_cells", 14),
     // An agent forks itself into helpers that start from its conversation and each get a
     // task (`POST /agents/<session>/fork`). Each child starts from the conversation as

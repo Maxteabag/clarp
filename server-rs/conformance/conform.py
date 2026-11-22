@@ -584,6 +584,15 @@ def by_fiat(path, body):
     return {key: value for key, value in body.items() if key not in said}
 
 
+def shared_helper_state(exchange):
+    """The Python response does not carry the Rust helper_state_backend field."""
+    body = exchange['body']
+    if (exchange.get('path') == '/agent-helper-state' and exchange.get('method') == 'GET'
+            and exchange.get('status') == 200 and isinstance(body, dict)):
+        return {**exchange, 'body': {key: value for key, value in body.items() if key != 'backend'}}
+    return exchange
+
+
 # Lists whose order is an accident of the reference, compared in the order of their names: the
 # contacts an agent may take (`POST /agent-assign` with `options`) come in the order the Python
 # Host lists its personas, by the millisecond each built-in one was written at its start, which
@@ -1044,6 +1053,7 @@ def core(raw: dict) -> dict:
     http = [{**exchange, 'body': kept_where(exchange['body'])} if exchange.get('path') == '/upload' else exchange
             for exchange in http]
     http = [{**exchange, 'body': by_fiat(exchange.get('path'), exchange['body'])} for exchange in http]
+    http = [shared_helper_state(exchange) for exchange in http]
     http = [{**exchange, 'body': in_any_order(exchange.get('path'), exchange['body'])} for exchange in http]
     sse = []
     for frame in raw['sse']:

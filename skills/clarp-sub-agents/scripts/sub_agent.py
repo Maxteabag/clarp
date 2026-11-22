@@ -171,17 +171,19 @@ def _helper_message(name: str, helper: str, parent: str, workdir: pathlib.Path,
     )
 
 
-def _live_helper(name: str) -> str:
-    """The session of an earlier helper with this name that is still live."""
+def _live_helper(name: str) -> tuple[str, str] | None:
+    """The session and backend of an earlier helper that is still live."""
     saved = DIR / f"{name}.session"
     if not saved.exists():
-        return ""
+        return None
     session = saved.read_text().strip()
     try:
         row = _admin("agent", "helper-state", session)
     except AdminError:
-        return ""
-    return session if row.get("role") == "helper" and not row.get("archived_at") else ""
+        return None
+    if row.get("role") != "helper" or row.get("archived_at"):
+        return None
+    return session, str(row.get("backend") or "")
 
 
 def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: pathlib.Path,
@@ -195,11 +197,12 @@ def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: path
     (DIR / f"{a.name}.title").write_text((a.title or f"Helper {a.name}") + "\n")
     (DIR / f"{a.name}.exit").unlink(missing_ok=True)
     try:
-        helper = _live_helper(a.name)
-        if helper:
+        existing = _live_helper(a.name)
+        if existing:
+            helper, backend = existing
             # The effort first: a refusal must leave the reused helper as it was, not 'running'.
             if a.effort:
-                _check_effort(_backend_of(helper), a.effort)
+                _check_effort(backend or _backend_of(helper), a.effort)
                 _admin("model", "--effort", a.effort, "--session", helper)
             _admin("agent", "helper-state", helper, "running", "--from", parent)
         else:

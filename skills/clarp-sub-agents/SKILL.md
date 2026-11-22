@@ -69,6 +69,10 @@ row of the snapshot; for other backends the Host does not show it.
 (Claude, Codex): `clarp-sub-agent start --clarp-agent ... --effort high` passes it
 to the helper's creation (or sets it on a helper it reuses), and `fork --effort`
 applies it to every child. On AGY it is refused: the effort is part of the model id.
+For a reused helper, the check uses its current backend. The Rust Host
+advertises it in `helper-state` with feature `helper_state_backend` (contract
+152). On older Hosts and the Python Host, the helper's model settings supply
+the backend instead.
 
 ### Antigravity (`--backend agy`)
 

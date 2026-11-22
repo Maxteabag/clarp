@@ -628,6 +628,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     assert_eq!(info["contract"]["features"]["voice_pool"], 123);
     assert_eq!(info["contract"]["features"]["client_events_kept"], 146);
     assert_eq!(info["contract"]["features"]["stalled_turn"], 149);
+    assert_eq!(info["contract"]["features"]["helper_state_backend"], 152);
     assert_eq!(info["contract"]["features"]["voice_for_helpers"], 135);
     assert_eq!(info["contract"]["features"]["cross_origin_read"], 139);
     assert_eq!(info["contract"]["features"]["previous_server_ids"], 144);
@@ -11762,6 +11763,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         json!({
             "agent_id": helper_id,
             "session": "slice-1",
+            "backend": "scripted",
             "role": "helper",
             "parent_agent_id": maker_id,
             "helper_state": "running",
@@ -17915,6 +17917,7 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
         "{out}{err}"
     );
     let made = lineage("counter");
+    assert_eq!(made["backend"], "claude");
     assert_eq!(
         (
             &made["role"],
@@ -18031,6 +18034,37 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(lineage("counter")["helper_state"], "running");
     assert_eq!(row(&maker)["child_count"], 1);
+
+    // Effort must fit the backend of the helper that will run.
+    let made = host.post(
+        "/agents",
+        json!({"name":"Agy Helper","backend":"agy","role":"helper","parent":maker}),
+    );
+    let agy = made["session"].as_str().expect("make the AGY helper");
+    assert_eq!(lineage(agy)["backend"], "agy");
+    let marked = host.post(
+        "/agent-helper-state",
+        json!({"session":agy,"state":"failed"}),
+    );
+    assert_eq!(marked["helper_state"], "failed");
+    std::fs::write(kept.join("agy-helper.session"), format!("{agy}\n")).unwrap();
+    let (code, out, err) = run(&[
+        "start",
+        "agy-helper",
+        work.to_str().unwrap(),
+        "brief.md",
+        "--clarp-agent",
+        "--backend",
+        "claude",
+        "--effort",
+        "high",
+    ]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert_eq!(
+        err.trim(),
+        "--effort is part of the model id on agy: pass e.g. --model claude-opus-5-5-high"
+    );
+    assert_eq!(lineage(agy)["helper_state"], "failed");
 }
 
 /// One answer as it came: its status, its headers under their names in small letters, its
