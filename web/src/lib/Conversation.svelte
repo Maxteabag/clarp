@@ -24,9 +24,10 @@
       <button
         id={active ? 'historyToolsToggle' : undefined}
         class="history-btn"
-        class:active={!prefs.hideTools}
+        class:active={prefs.toolActivity === 'always'}
         aria-label="Toggle tools"
-        title="Show/hide tool calls"
+        title={prefs.toolActivity === 'always' ? 'Every tool call in view (Tool activity in Chat settings)'
+          : 'Tool calls grouped (Tool activity in Chat settings)'}
         onclick={toggleTools}
       >⚙</button>
       {#if live.explanationSetting}
