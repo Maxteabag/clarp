@@ -158,7 +158,9 @@ impl Profiles for Shelf {
     }
 
     fn takes_calls(&self, session: &str) -> Result<Option<String>, Refused> {
-        Ok(self.taking(true).takes?.get(session).cloned().flatten())
+        let taking = self.taking(true);
+        taking.takes?;
+        Ok(taking.available.get(session).cloned())
     }
 }
 
@@ -265,10 +267,16 @@ impl Desk {
     /// The agents that take the user's calls live, by their sessions: what an app's list of
     /// agents says of each (`call_mode`). Those known to are kept, so that a profile that
     /// cannot be read for a moment does not turn a live call into an ordinary one.
-    pub async fn taking(&self, app: &App) -> std::collections::HashSet<String> {
+    pub async fn taking(
+        &self,
+        app: &App,
+    ) -> (
+        std::collections::HashSet<String>,
+        std::collections::HashSet<String>,
+    ) {
         let mut held = self.books.lock().await;
         let Ok(books) = Self::read(&mut held, app).await else {
-            return std::collections::HashSet::new();
+            return Default::default();
         };
         let shelf = Shelf::of(app, books.taking.clone());
         let taking = shelf.taking(false);
@@ -279,9 +287,12 @@ impl Desk {
                 books.taking = Some(keep);
             }
         }
-        taking
-            .takes
-            .map_or_else(|_| Default::default(), |takes| takes.into_keys().collect())
+        (
+            taking
+                .takes
+                .map_or_else(|_| Default::default(), |takes| takes.into_keys().collect()),
+            taking.available.into_keys().collect(),
+        )
     }
 
     /// Whether a client may be told of the ring of this id: a live ring only a phone that

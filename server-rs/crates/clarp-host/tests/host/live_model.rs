@@ -290,3 +290,81 @@ fn the_owners_table_of_minimums_says_what_it_refused_and_what_is_a_name_in_other
         assert_eq!(told, lines, "{file:?}: {said}");
     }
 }
+
+#[test]
+fn a_user_can_pick_live_or_normal_independently_of_the_profile_default() {
+    const ADMIN: &str = "the-administrators-token";
+    const LIVE: &str = "agent_live_v1";
+    let place = Place::new("call-mode");
+    let voice = stand_in_live_voice();
+    let host = place.start_in(
+        ADMIN,
+        &[],
+        &[
+            ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+            ("OPENAI_API_KEY", "a-key-of-the-test"),
+        ],
+    );
+    let theo = host.new_agent("Theo");
+    let no_live = host.new_agent("No live");
+    let theo_id = row_id(&host, &theo);
+    let no_live_id = row_id(&host, &no_live);
+    let row = |session: &str| {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .unwrap()
+            .clone()
+    };
+    let (phone, _) = pair(&host, "Phone", "full");
+    let token = json!({"token":"af".repeat(32),"supported_conversation_modes":["classic",LIVE]});
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/calls/ring/voip-token", Some(&token))
+            .0,
+        200
+    );
+
+    let normal = |mode| {
+        let body = json!({"agents":[theo],"mode":mode});
+        host.ask_as(&phone, "POST", "/calls", Some(&body))
+    };
+    let call_live = |agent: &str, request_id: &str| {
+        let body = json!({"agent":agent,"request_id":request_id,"client_nonce":"fixture"});
+        host.ask_as(&phone, "POST", "/calls/live", Some(&body))
+    };
+    let set_default = |mode| {
+        live_profile(
+            &place,
+            "theo",
+            &theo,
+            json!({"user_call_default":mode,"user_call_opening":"Hello from Theo."}),
+        )
+    };
+    set_default("live");
+    let live_default = row(&theo);
+    assert_eq!(live_default["call_mode"], LIVE);
+    assert_eq!(live_default["live_call_available"], true);
+    assert_eq!(row(&no_live)["live_call_available"], false);
+    let (status, wrong_route) = normal("live");
+    assert_eq!(status, 400);
+    assert_eq!(wrong_route["error"], "mode_not_supported_here");
+    assert!((200..300).contains(&normal("normal").0));
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/calls/end", Some(&json!({})))
+            .0,
+        200
+    );
+
+    set_default("normal");
+    let normal_default = row(&theo);
+    assert_ne!(normal_default["call_mode"], LIVE);
+    assert_eq!(normal_default["live_call_available"], true);
+    let (status, unavailable) = call_live(&no_live_id, "no-profile");
+    assert_eq!(status, 409, "{unavailable}");
+    assert_eq!(unavailable["error"], "live_profile_unavailable");
+    let (status, grant) = call_live(&theo_id, "choose-live");
+    assert_eq!(status, 200, "{grant}");
+    assert_eq!(grant["live"]["provider"], "openai");
+}

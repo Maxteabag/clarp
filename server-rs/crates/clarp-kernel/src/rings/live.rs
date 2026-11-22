@@ -121,8 +121,8 @@ pub trait Profiles {
     fn profile(&self, profile_id: &str) -> Option<String>;
     /// The bytes of a file inside the folder of a profile.
     fn file(&self, profile_id: &str, name: &str) -> Option<Vec<u8>>;
-    /// The profile with which an agent takes the user's calls live, asked strictly
-    /// ([`live_call::taking`]): `None` when it takes none so.
+    /// The profile with which an agent can take a user-started Live call, asked strictly
+    /// ([`live_call::taking`]), regardless of the agent's default mode.
     fn takes_calls(&self, session: &str) -> Result<Option<String>, Refused>;
 }
 
@@ -813,9 +813,12 @@ impl Rings {
             }
             return Ok(Self::granted(ring, false, world.host_id, now_ms));
         }
-        let unavailable = || refused(409, "live_context_unavailable");
-        let profile_id = world.profiles.takes_calls(&caller.session)?;
-        let profile_id = profile_id.ok_or_else(unavailable)?;
+        let unavailable = || refused(409, "live_profile_unavailable");
+        let profile_id = world
+            .profiles
+            .takes_calls(&caller.session)
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?;
         let held = world.profiles.profile(&profile_id);
         let who = Agent {
             agent_id: &caller.agent_id,
@@ -823,7 +826,8 @@ impl Rings {
             persona: &caller.persona,
         };
         let moment = live_call::moment(now_ms);
-        let context = live_call::user_call(held.as_deref(), &profile_id, who, request_id, &moment)?;
+        let context = live_call::user_call(held.as_deref(), &profile_id, who, request_id, &moment)
+            .map_err(|_| unavailable())?;
         let holds_one = |ring: &Ring| {
             ring.answered_by == principal && ring.live.as_ref().is_some_and(|live| live.holds())
         };

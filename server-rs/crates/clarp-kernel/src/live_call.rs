@@ -1094,19 +1094,19 @@ pub fn user_call(
         return Err(refused(400, "live_request_invalid"));
     };
     let profile = approved(held, profile_id, agent)?;
-    if profile["user_call_default"] != "live" {
-        return Err(unavailable());
-    }
-    let opening = profile["user_call_opening"].as_str();
-    let opening = opening
-        .filter(|opening| !python::strip(opening).is_empty())
-        .filter(|opening| opening.chars().count() <= OPENING_SIGNS);
-    let opening = opening.ok_or_else(unavailable)?;
+    let opening = user_call_opening(&profile).ok_or_else(unavailable)?;
     Ok(json!({
         "version": 1, "kind": USER_CALL, "profile_id": profile_id, "story": USER_CALL,
         "source": USER_INITIATED, "request_id": asked_as, "requested_at": now,
         "opening_text": one_line(opening),
     }))
+}
+
+fn user_call_opening(profile: &Value) -> Option<&str> {
+    profile["user_call_opening"]
+        .as_str()
+        .filter(|opening| !python::strip(opening).is_empty())
+        .filter(|opening| opening.chars().count() <= OPENING_SIGNS)
 }
 
 // ---- which agents take the user's calls live -------------------------------------------
@@ -1139,11 +1139,13 @@ pub struct Taking {
     pub keep: Option<String>,
     /// The agents known to take such calls, each with its profile when one was found now.
     pub takes: Result<BTreeMap<String, Option<String>>, Refused>,
+    /// Profiles with a user-call opening, irrespective of their default mode.
+    pub available: BTreeMap<String, String>,
 }
 
 /// The agent a profile is bound to and whether it takes the user's calls live; `None`: the
 /// entry is no profile that can be read.
-fn bound_to(found: &Found) -> Option<(String, bool)> {
+fn bound_to(found: &Found) -> Option<(String, bool, bool)> {
     if !profile_name(&found.name) || !found.is_folder {
         return None;
     }
@@ -1160,7 +1162,11 @@ fn bound_to(found: &Found) -> Option<(String, bool)> {
     let session = profile["agent_session"]
         .as_str()
         .filter(|it| !it.is_empty())?;
-    Some((session.to_string(), profile["user_call_default"] == "live"))
+    Some((
+        session.to_string(),
+        profile["user_call_default"] == "live",
+        user_call_opening(&profile).is_some(),
+    ))
 }
 
 /// Which agents take the user's calls live: those whose profile says so, and those known to
@@ -1171,6 +1177,7 @@ pub fn taking(known: Option<&str>, scan: Scan, strict: bool) -> Taking {
     let none = |keep| Taking {
         keep,
         takes: Err(unavailable()),
+        available: BTreeMap::new(),
     };
     let mut sessions: Vec<String> = Vec::new();
     if let Some(raw) = known.filter(|raw| !raw.is_empty()) {
@@ -1196,6 +1203,7 @@ pub fn taking(known: Option<&str>, scan: Scan, strict: bool) -> Taking {
         .map(|session| (session, None))
         .collect();
     let (mut live, mut usual) = (BTreeMap::new(), Vec::new());
+    let mut available = BTreeMap::<String, Option<String>>::new();
     // Whether all of the folder was read, and every profile in it.
     let mut uncertain = match scan {
         Scan::NotThere => !known_now.is_empty(),
@@ -1204,12 +1212,21 @@ pub fn taking(known: Option<&str>, scan: Scan, strict: bool) -> Taking {
     };
     if let Scan::Folders(found) = scan {
         for entry in found.iter().take(PROFILES_SCANNED) {
-            match bound_to(entry) {
-                None => uncertain = true,
-                Some((session, true)) => {
-                    uncertain |= live.insert(session, entry.name.clone()).is_some();
-                }
-                Some((session, false)) => usual.push(session),
+            let Some((session, defaults_to_live, callable)) = bound_to(entry) else {
+                uncertain = true;
+                continue;
+            };
+            if callable {
+                // Where two profiles offer a call, there is no unambiguous choice.
+                available
+                    .entry(session.clone())
+                    .and_modify(|profile| *profile = None)
+                    .or_insert_with(|| Some(entry.name.clone()));
+            }
+            if defaults_to_live {
+                uncertain |= live.insert(session, entry.name.clone()).is_some();
+            } else {
+                usual.push(session);
             }
         }
     }
@@ -1234,6 +1251,10 @@ pub fn taking(known: Option<&str>, scan: Scan, strict: bool) -> Taking {
     Taking {
         keep,
         takes: Ok(known_now),
+        available: available
+            .into_iter()
+            .filter_map(|(session, profile)| profile.map(|profile| (session, profile)))
+            .collect(),
     }
 }
 

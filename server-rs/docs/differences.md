@@ -573,3 +573,7 @@ visible. If no note followed the steer, the final reply remains visible.
 Issue 217 (feature contract 150) gives the Rust Host's original paired VoIP recipients
 a bounded ring answer grace through the existing answer route. The Python Host
 still settles the ring at 45 seconds.
+
+Issue 216 (feature contract 151) adds per-call mode selection to the Rust Host.
+The Python Host requires a Live default for user-started Live calls. The Rust Host
+advertises availability separately and accepts explicit Live through `/calls/live`.

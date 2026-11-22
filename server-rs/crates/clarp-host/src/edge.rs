@@ -153,6 +153,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The user calls an agent that takes calls live (`POST /calls/live`; `call_mode` of an
     // agent in the list).
     ("agent_call_live", 76),
+    ("agent_live_call_mode", 151),
     // The Oracle: the voice a user speaks with hands-free. Its calls of the second kind
     // (`GET /oracle/v2`, with what `GET /oracle/status` says of them) and the work it hands
     // to agents (`/oracle/delegations`); who its contact is (`/oracle/contact`); a call in
@@ -1600,7 +1601,7 @@ async fn snapshot(
     let families = Families::of(&directory);
     let used_up = crate::quota::used_up(&app).await;
     // Which agents the user calls live: by their profiles, as they are now.
-    let called_live = app.calls.taking(&app).await;
+    let (live_defaults, live_available) = app.calls.taking(&app).await;
     let owners = app.mouth.owners_from(&directory);
     let teams = app
         .teams
@@ -1617,7 +1618,8 @@ async fn snapshot(
         .map(|member| {
             let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
             row["team_ids"] = json!(team_ids(member));
-            if called_live.contains(&member.record.session) {
+            row["live_call_available"] = json!(live_available.contains(&member.record.session));
+            if live_defaults.contains(&member.record.session) {
                 row["call_mode"] = json!(clarp_kernel::live_call::LIVE);
             }
             row
@@ -1633,6 +1635,7 @@ async fn snapshot(
         }
         let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
         row["team_ids"] = json!(team_ids(member));
+        row["live_call_available"] = json!(false);
         let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
         row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
         row["model_avatar_url"] = json!("");

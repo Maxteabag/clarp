@@ -1075,6 +1075,9 @@ async fn start(
         Err(refused) => return refused.into_response(),
     };
     let said = body(&bytes);
+    if said.get("mode").is_some_and(|mode| mode != "normal") {
+        return ApiError::new(StatusCode::BAD_REQUEST, "mode_not_supported_here").into_response();
+    }
     let Some(agents) = said["agents"].as_array() else {
         return ApiError::new(StatusCode::BAD_REQUEST, "agents must be a list").into_response();
     };
