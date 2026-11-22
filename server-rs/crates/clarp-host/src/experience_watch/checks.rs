@@ -241,12 +241,13 @@ fn app_crashes(
             .contract
             .or_else(|| matching_launch.and_then(|launch| launch.contract))
             .map_or_else(|| "unknown".to_owned(), |n| n.to_string());
-        let count = launch.map_or(0, |launch| launch.count);
+        let foreground = launch.map_or(0, |launch| launch.foreground_sessions);
+        let legacy = launch.map_or(0, |launch| launch.legacy_requests);
         seen.add(
             &format!("app_crash_{client}"),
             &device,
             format!(
-                "{} crash events. {count} requests to /devices or /server-info. Build {build}. Contract {contract}.",
+                "{} crash events. {foreground} observed foreground sessions. {legacy} unmarked requests to /devices or /server-info. Build {build}. Contract {contract}.",
                 crash.count,
             ),
         );
@@ -366,20 +367,26 @@ pub(super) async fn collect(app: &App, settings: &Settings, now: i64) -> Seen {
 mod tests {
     use super::*;
     use crate::experience_watch::book::{Book, Notice};
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode, header},
+    };
     use clarp_kernel::experience::Read;
     use clarp_kernel::turn::{Admission, TurnId};
+    use tower::ServiceExt as _;
 
     #[tokio::test]
     async fn experience_watch_findings_open_clear_and_summarize_once() {
         let place = crate::unkept::at_the_port::place("experience-watch-pass");
-        let app = place.app().await;
+        let mut app = place.app().await;
+        std::sync::Arc::make_mut(&mut app.config).auth_token = "fixture-admin".into();
         let zone = jiff::tz::TimeZone::get("Europe/Oslo").unwrap();
         let now = "2026-11-22T15:23:00Z"
             .parse::<jiff::Timestamp>()
             .unwrap()
             .as_millisecond();
         place.clock.advance_ms(now - app.clock.now_ms());
-        let scope = crate::pairing::Scope::Limited;
+        let scope = crate::pairing::Scope::Full;
         let issued = app
             .fleet
             .issue("iPhone".into(), scope, 60)
@@ -395,19 +402,111 @@ mod tests {
         let directory = app.fleet.directory();
         let config: toml::Value = "enabled = true\nsummary_hour = 17\nfront_desk = 'desk'\n[owners]\napp_crash = 'ios-owner'\nqueue = 'desk'\n[thresholds]\ncrash_events = 3\n".parse().unwrap();
         let settings = Settings::from_section(Some(&config));
-        for n in (0..27).rev() {
-            app.experience.launched(
-                &phone.device_id,
-                Some("ios/200 contract=130"),
-                now - n * 4_000,
+        let router = crate::edge::router(app.clone());
+        let request = |method: Method, path, token: &str, client, state| {
+            let body = if method == Method::POST {
+                Body::from(format!(r#"{{"token":"{}"}}"#, "a".repeat(64)))
+            } else {
+                Body::empty()
+            };
+            let mut request = Request::builder()
+                .method(method)
+                .uri(path)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-clarp-client", client);
+            if let Some(state) = state {
+                request = request.header("x-clarp-app-state", state);
+            }
+            let request = request.body(body).unwrap();
+            let router = router.clone();
+            async move { router.oneshot(request).await.unwrap().status() }
+        };
+        let ios = "ios/200 contract=130";
+        // Background requests do not add a launch. A background marker on
+        // another API route can rearm the device for a later foreground.
+        for background_path in ["/server-info", "/host/start"] {
+            assert_eq!(
+                request(
+                    Method::GET,
+                    background_path,
+                    &phone.token,
+                    ios,
+                    Some("background")
+                )
+                .await,
+                StatusCode::OK,
+            );
+            for _ in 0..7 {
+                assert_eq!(
+                    request(
+                        Method::GET,
+                        "/server-info",
+                        &phone.token,
+                        ios,
+                        Some("foreground")
+                    )
+                    .await,
+                    StatusCode::OK,
+                );
+            }
+            for _ in 0..6 {
+                assert_eq!(
+                    request(
+                        Method::POST,
+                        "/devices",
+                        &phone.token,
+                        ios,
+                        Some("foreground")
+                    )
+                    .await,
+                    StatusCode::OK,
+                );
+            }
+        }
+        assert_eq!(
+            request(
+                Method::GET,
+                "/server-info",
+                &phone.token,
+                ios,
+                Some("unknown")
+            )
+            .await,
+            StatusCode::OK,
+        );
+        let proof_code = app
+            .fleet
+            .issue("watcher proof".into(), crate::pairing::Scope::Limited, 60)
+            .await
+            .unwrap()
+            .unwrap();
+        let proof_phone = app
+            .fleet
+            .exchange(proof_code.code, String::new())
+            .await
+            .unwrap()
+            .unwrap();
+        let old_ios = "ios/3099;contract=87";
+        for _ in 0..6 {
+            assert_eq!(
+                request(
+                    Method::GET,
+                    "/server-info",
+                    &proof_phone.token,
+                    old_ios,
+                    None
+                )
+                .await,
+                StatusCode::OK,
             );
         }
-        for n in 0..6 {
-            app.experience
-                .launched("proof-phone", Some("ios/3099;contract=87"), now - n);
-        }
-        let proof = &app.experience.relaunches(now - 60_000, now)["proof-phone"];
-        assert_eq!((proof.count, proof.platform.as_str()), (6, "ios"));
+        let counts = app.experience.relaunches(now - 60_000, now);
+        assert_eq!(counts[&phone.device_id].foreground_sessions, 2);
+        assert_eq!(counts[&phone.device_id].legacy_requests, 0);
+        let proof = &counts[&proof_phone.device_id];
+        assert_eq!((proof.foreground_sessions, proof.legacy_requests), (0, 6));
+        assert_eq!(proof.platform, "ios");
         assert_eq!((proof.build.as_str(), proof.contract), ("3099", Some(87)));
         let paired = crate::edge::Principal::Device {
             device_id: phone.device_id.clone(),
@@ -474,7 +573,11 @@ mod tests {
         assert_eq!(crash.subject, phone.device_id);
         let label = format!("iPhone ({})", phone.device_id);
         let opened = format!("opened for {label} at 2026-11-22 16:23 +01:00");
-        for owed in book.owed.iter().filter(|owed| owed.text.contains("app_crash_ios")) {
+        for owed in book
+            .owed
+            .iter()
+            .filter(|owed| owed.text.contains("app_crash_ios"))
+        {
             assert!(owed.text.contains(&opened), "{}", owed.text);
         }
         // Old stored rows can still pick up the device's current paired name.
@@ -488,13 +591,17 @@ mod tests {
         let shown = super::super::render(book.rows.clone(), &settings, &directory, &zone, true);
         assert_eq!(shown.exit, 0);
         let rows: Vec<serde_json::Value> = serde_json::from_str(&shown.stdout).unwrap();
-        let shown = rows.iter().find(|row| row["kind"] == "app_crash_ios").unwrap();
+        let shown = rows
+            .iter()
+            .find(|row| row["kind"] == "app_crash_ios")
+            .unwrap();
         assert_eq!(shown["subject"], phone.device_id);
         assert_eq!(shown["device_name"], "iPhone");
         assert_eq!(shown["first_seen"], now);
         assert_eq!(shown["first_seen_local"], "2026-11-22 16:23 +01:00");
         assert!(crash.detail.contains("3 crash events"));
-        assert!(crash.detail.contains("27 requests to /devices or /server-info"));
+        assert!(crash.detail.contains("2 observed foreground sessions"));
+        assert!(crash.detail.contains("0 unmarked requests"));
         assert!(crash.detail.contains("Build 200"));
         let wait = book.rows.iter().find(|row| row.kind == "wait").unwrap();
         assert!(wait.detail.contains("1 steered"));
@@ -535,7 +642,11 @@ mod tests {
         );
         assert_eq!(book.owed.len(), 5);
         let cleared = format!("cleared for {label} at 2026-11-22 17:23 +01:00");
-        for owed in book.owed.iter().filter(|owed| owed.text.contains("app_crash_ios")) {
+        for owed in book
+            .owed
+            .iter()
+            .filter(|owed| owed.text.contains("app_crash_ios"))
+        {
             assert!(owed.text.contains(&cleared), "{}", owed.text);
             assert!(owed.text.contains("open since 2026-11-22 16:23 +01:00"));
         }
@@ -562,7 +673,16 @@ mod tests {
         delayed.reconcile(Seen::default(), &settings, &directory, &zone, next_day);
         assert_eq!(delayed.owed.len(), 1);
         assert!(matches!(delayed.owed[0].notice, Notice::Summary(_)));
-        delayed.reconcile(Seen::default(), &settings, &directory, &zone, next_day + 3_600_000);
-        assert!(delayed.owed.is_empty(), "a retry expires after the summary hour");
+        delayed.reconcile(
+            Seen::default(),
+            &settings,
+            &directory,
+            &zone,
+            next_day + 3_600_000,
+        );
+        assert!(
+            delayed.owed.is_empty(),
+            "a retry expires after the summary hour"
+        );
     }
 }
