@@ -755,7 +755,7 @@ pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<
         "type": "queue-updated",
         "agent_id": record.agent_id,
         "session": record.session,
-        "queue_depth": status.queue_depth,
+        "queue_depth": status.listed_queue_depth,
         "queue_paused": status.paused,
         "queue_started": matches!(update, QueueUpdate::Started(_)),
         "queue_revision": status.queue_revision,
@@ -2022,6 +2022,7 @@ mod tests {
         };
         let status = Status {
             queue_depth: 1,
+            listed_queue_depth: 1,
             paused: true,
             queue_revision: 7,
             ..status(None, None)
@@ -2152,6 +2153,7 @@ mod tests {
             interrupted_since_ms: None,
             waiting: vec![TurnId(3)],
             queue_depth: 1,
+            listed_queue_depth: 1,
             paused: true,
             queue_revision: 7,
             stop_generation: 0,

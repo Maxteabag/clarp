@@ -37,13 +37,31 @@ pub enum Which {
     WithoutAutomated,
     WithoutCoordination,
     WithoutAutomatedOrCoordination,
+    /// The app's /log read. Its submitted answers are shown on their form cards.
+    Chat {
+        include_automated: bool,
+        hide_coordination: bool,
+    },
 }
 
 impl Which {
+    pub fn chat(include_automated: bool) -> Self {
+        Self::Chat {
+            include_automated,
+            hide_coordination: false,
+        }
+    }
+
     pub fn hide_coordination(self) -> Self {
         match self {
             Self::All => Self::WithoutCoordination,
             Self::WithoutAutomated => Self::WithoutAutomatedOrCoordination,
+            Self::Chat {
+                include_automated, ..
+            } => Self::Chat {
+                include_automated,
+                hide_coordination: true,
+            },
             _ => self,
         }
     }
@@ -51,15 +69,31 @@ impl Which {
     fn hides(self) -> bool {
         matches!(
             self,
-            Self::WithoutCoordination | Self::WithoutAutomatedOrCoordination
+            Self::WithoutCoordination
+                | Self::WithoutAutomatedOrCoordination
+                | Self::Chat {
+                    hide_coordination: true,
+                    ..
+                }
         )
     }
 
+    fn skips_form_answer(self, id: &str) -> bool {
+        matches!(self, Self::Chat { .. }) && clarp_kernel::artifacts::forms::is_answer_row(id)
+    }
+
     fn keeps(self, entry: &Entry) -> bool {
-        !matches!(
+        let hides_automated = matches!(
             self,
-            Self::WithoutAutomated | Self::WithoutAutomatedOrCoordination
-        ) || !left_out_of_chats(entry.origin_name())
+            Self::WithoutAutomated
+                | Self::WithoutAutomatedOrCoordination
+                | Self::Chat {
+                    include_automated: false,
+                    ..
+                }
+        );
+        !self.skips_form_answer(entry.id())
+            && (!hides_automated || !left_out_of_chats(entry.origin_name()))
     }
 
     fn keeps_row(self, row: &Versioned) -> bool {
@@ -361,6 +395,13 @@ impl<'a> Reader<'a> {
             return Ok(true);
         }
         let entry = Entry::from_item(item).map_err(|why| corrupt(item, why))?;
+        if entry
+            .as_ref()
+            .and_then(Entry::part_of)
+            .is_some_and(|id| which.skips_form_answer(id))
+        {
+            return Ok(false);
+        }
         if which.hides() {
             let parent = super::helper_cells::parent(item)?;
             if let Some(id) = parent
@@ -687,7 +728,11 @@ fn adjacent(
             let Some(entry) = Entry::from_item(&item).map_err(|why| corrupt(&item, why))? else {
                 continue;
             };
-            let sender = reader.hidden(&item, &entry)?;
+            let sender = if which.skips_form_answer(entry.id()) {
+                None
+            } else {
+                reader.hidden(&item, &entry)?
+            };
             if sender.is_none() && which.keeps(&entry) {
                 return Ok(counted);
             }

@@ -16,6 +16,32 @@ use super::reports::Page;
 use super::{Artifact, ArtifactBook, Ctx, Made, Maker, New, Opening, Refused, answers, refuse};
 use crate::python::{sorted_ascii, text};
 
+const DELIVERY_ID_PREFIX: &str = "html-form-";
+const ANSWER_ROW_PREFIX: &str = "u-html-form-";
+
+pub fn answer_row_id(submission_id: &str) -> String {
+    format!("{ANSWER_ROW_PREFIX}{submission_id}")
+}
+
+/// Chat reads match the stored row prefix as SQLite LIKE does.
+pub fn is_answer_row(id: &str) -> bool {
+    has_prefix(id, ANSWER_ROW_PREFIX)
+}
+
+/// The queue endpoint recognizes both form delivery ID spellings.
+pub fn is_answer_delivery(client_id: &str) -> bool {
+    client_id.starts_with(DELIVERY_ID_PREFIX) || client_id.starts_with(ANSWER_ROW_PREFIX)
+}
+
+pub(crate) fn counts_as_waiting_answer(client_id: &str) -> bool {
+    has_prefix(client_id, DELIVERY_ID_PREFIX)
+}
+
+fn has_prefix(id: &str, prefix: &str) -> bool {
+    id.get(..prefix.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+}
+
 /// What a submission to a report is refused with. The Python Host answers this one as a
 /// request that was wrong (400), the others as one that cannot be now (409).
 pub const READ_ONLY: &str = "read-only report; it does not accept answers";

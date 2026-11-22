@@ -355,6 +355,16 @@ def run_step(host, events, step, http, variables, clock=None):
         replay._record(named, answer, http, variables)
         if clock is not None:
             clock.read(http[-1], asked_at)
+    elif op == 'mark_reply':
+        # Form prompts are not in /log. Remember the replies already visible
+        # before submitting, so waiting for the next reply needs no prompt row.
+        variables['form_replies'] = [turn.get('id') for turn in turns(host, session)
+                                     if turn.get('role') == 'assistant']
+    elif op == 'wait_form_reply':
+        earlier = variables.pop('form_replies')
+        replay._poll('a reply to the form', lambda: any(
+            turn.get('role') == 'assistant' and (turn.get('text') or '').strip()
+            and turn.get('id') not in earlier for turn in turns(host, session)))
     elif op == 'wait_reply':
         # The agent has answered the message with this id.
         def replied():

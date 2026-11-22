@@ -216,7 +216,7 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             continue;
         };
         let message = Message {
-            id: format!("u-html-form-{submission_id}"),
+            id: clarp_kernel::artifacts::forms::answer_row_id(&submission_id),
             speak: spoken,
             text: prompt,
             origin: Origin::User,

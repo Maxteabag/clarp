@@ -19,6 +19,8 @@ use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, AgentEvent, Command, Effect, Refusal};
+use crate::artifacts::forms;
+use crate::conversation::Message;
 use crate::turn::{Admission, IllegalTransition, Origin, Queued, Turn, TurnEvent, TurnId};
 
 /// What an item in an agent's log is. The numbers are permanent once a log holds them.
@@ -245,6 +247,8 @@ pub struct Recorder {
     agent: Agent,
     /// Legacy waiting turns that already have a conversation row.
     shown_waiting: HashSet<TurnId>,
+    /// Form answer deliveries among the queued turns, recovered from their stored prompts.
+    waiting_answers: HashSet<TurnId>,
     cursor: Option<SpoolCursor>,
     /// The position of the newest item. This recorder is the log's one writer, so it knows.
     last_seq: Seq,
@@ -380,17 +384,21 @@ impl Recorder {
             .last()
             .map_or(0, |item| item.seq);
         let mut shown_waiting = HashSet::new();
+        let mut waiting_answers = HashSet::new();
         for queued in agent.waiting() {
-            if log
-                .read_after(
-                    queued.message_seq.saturating_sub(1),
-                    Kinds::only(kind::MESSAGE),
-                    1,
-                )?
-                .first()
-                .is_some_and(|item| item.seq == queued.message_seq)
-            {
-                shown_waiting.insert(queued.id);
+            let items = log.read_after(
+                queued.message_seq.saturating_sub(1),
+                Kinds::range(kind::WAITING, kind::MESSAGE),
+                1,
+            )?;
+            if let Some(item) = items.first().filter(|item| item.seq == queued.message_seq) {
+                if item.kind == kind::MESSAGE {
+                    shown_waiting.insert(queued.id);
+                } else if item.kind == kind::WAITING
+                    && waiting_answer(item.key.as_deref(), &item.body)
+                {
+                    waiting_answers.insert(queued.id);
+                }
             }
         }
         Ok(Self {
@@ -398,6 +406,7 @@ impl Recorder {
             turn_sessions,
             agent,
             shown_waiting,
+            waiting_answers,
             cursor,
             last_seq,
             conversation_seq,
@@ -529,6 +538,18 @@ impl Recorder {
     pub fn unshown_waiting(&self) -> impl Iterator<Item = &Queued> {
         self.agent.waiting().filter(|queued| {
             !queued.returning_to_tool() && !self.shown_waiting.contains(&queued.id)
+        })
+    }
+
+    /// The waiting depth for the client's queue read and its events.
+    pub fn queue_depths(&self) -> (usize, usize) {
+        self.count_waiting(self.unshown_waiting())
+    }
+
+    fn count_waiting<'a>(&self, waiting: impl Iterator<Item = &'a Queued>) -> (usize, usize) {
+        waiting.fold((0, 0), |(total, listed), queued| {
+            let visible = !self.waiting_answers.contains(&queued.id);
+            (total + 1, listed + usize::from(visible))
         })
     }
 
@@ -692,6 +713,7 @@ impl Recorder {
         } else {
             kind::MESSAGE
         };
+        let hides = kind == kind::WAITING && waiting_answer(message.key.as_deref(), &message.body);
         let mut batch = self.batch();
         let mut item = NewItem::new(kind, now_ms, message.body).in_turn(turn.0);
         item.key = message.key;
@@ -715,6 +737,9 @@ impl Recorder {
             )
             .map_err(JournalError::Refused)?;
         let committed = batch.commit()?;
+        if hides {
+            self.waiting_answers.insert(turn);
+        }
         Ok(Accepted {
             message_seq,
             turn: Some(turn),
@@ -733,6 +758,12 @@ fn sent(body: Vec<u8>, at_ms: i64) -> Vec<u8> {
     };
     message.insert(crate::conversation::SENT_AT.to_string(), at_ms.into());
     serde_json::to_vec(&message).unwrap_or(body)
+}
+
+fn waiting_answer(key: Option<&str>, body: &[u8]) -> bool {
+    key.is_some_and(|id| forms::is_answer_row(id) || forms::counts_as_waiting_answer(id))
+        && serde_json::from_slice::<Message>(body)
+            .is_ok_and(|message| forms::counts_as_waiting_answer(message.client_id()))
 }
 
 /// Things that happened together, on their way into the log as one append.
@@ -899,13 +930,11 @@ impl Batch<'_> {
         self.recorder.log()
     }
 
-    pub fn queue_depth(&self) -> usize {
-        self.work
-            .waiting()
-            .filter(|queued| {
+    pub fn queue_depths(&self) -> (usize, usize) {
+        self.recorder
+            .count_waiting(self.work.waiting().filter(|queued| {
                 !queued.returning_to_tool() && !self.recorder.shown_waiting.contains(&queued.id)
-            })
-            .count()
+            }))
     }
 
     /// Writes everything in one append, then changes the state.
@@ -942,9 +971,11 @@ impl Batch<'_> {
             if let AgentEvent::Turn {
                 turn,
                 change: TurnEvent::Started { .. } | TurnEvent::Settled { .. },
-            } = event
+            }
+            | AgentEvent::JoinRead { turn, .. } = event
             {
                 self.recorder.shown_waiting.remove(turn);
+                self.recorder.waiting_answers.remove(turn);
             }
         }
         for (turn, session) in self.turn_bindings {
