@@ -50,7 +50,7 @@ fn only_full_scope_reads_the_registered_peer_and_shares_the_cache() {
             "200 OK",
             json!({"server_id":"reported-id","name":"Host B"}).to_string(),
         ),
-        "/clarp/agents/snapshot" => (
+        "/clarp/agents/snapshot?include_archived=0" => (
             "200 OK",
             json!({"agents":[{"session":"ada","cwd":"/fixture/ada"}]}).to_string(),
         ),
@@ -97,10 +97,10 @@ fn only_full_scope_reads_the_registered_peer_and_shares_the_cache() {
     assert!(proxy_requests.lock().unwrap().is_empty());
     let requests = requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
-    for (request, path) in requests
-        .iter()
-        .zip(["/clarp/server-info", "/clarp/agents/snapshot"])
-    {
+    for (request, path) in requests.iter().zip([
+        "/clarp/server-info",
+        "/clarp/agents/snapshot?include_archived=0",
+    ]) {
         assert_eq!(
             request.lines().next(),
             Some(format!("GET {path} HTTP/1.1").as_str())
@@ -114,6 +114,7 @@ fn only_full_scope_reads_the_registered_peer_and_shares_the_cache() {
 
 #[test]
 fn read_or_send_never_follows_a_redirect_and_read_errors_are_codes() {
+    const ABOVE_PREVIOUS_LIMIT: usize = 4 * 1024 * 1024 + 1;
     let place = Place::new("peer-refusals");
     let (proxy, proxy_requests) = answers_using(|_, _| ("502 Bad Gateway", "{}".into()));
     let (host, _) = start(&place, &[("HTTP_PROXY", &proxy), ("NO_PROXY", "")]);
@@ -130,20 +131,35 @@ fn read_or_send_never_follows_a_redirect_and_read_errors_are_codes() {
     let (big, _) = answers_using(|_, _| {
         (
             "200 OK",
-            format!("{{\"x\":\"{}\"}}", "x".repeat(4 * 1024 * 1024)),
+            format!("{{\"x\":\"{}\"}}", "x".repeat(16 * 1024 * 1024)),
         )
+    });
+    let (large_read, _) = answers_using(|path, _| match path {
+        "/server-info" => ("200 OK", json!({"server_id":"large-id"}).to_string()),
+        "/agents/snapshot?include_archived=0" => (
+            "200 OK",
+            format!("{{\"padding\":\"{}\"}}", "x".repeat(ABOVE_PREVIOUS_LIMIT)),
+        ),
+        _ => ("404 Not Found", "{}".into()),
     });
     let (array, _) = answers_using(|_, _| ("200 OK", "[]".into()));
     let (echo, _) = answers_using(|_, _| ("200 OK", json!({"secret":PEER_TOKEN}).to_string()));
     for (alias, url) in [
         ("refused", refused),
         ("big", big),
+        ("large-read", large_read),
         ("array", array),
         ("echo", echo),
     ] {
         add(&host, alias, &url, "");
     }
     let answer = host.get("/peers/snapshot");
+    let large = &answer["peers"]["large-id"];
+    assert_eq!(large["reachable"], true);
+    assert_eq!(
+        large["snapshot"]["padding"].as_str().map(str::len),
+        Some(ABOVE_PREVIOUS_LIMIT)
+    );
     for (key, error) in [
         ("known-id", "redirect_refused"),
         ("peer:refused", "refused"),

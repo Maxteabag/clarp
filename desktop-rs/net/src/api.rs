@@ -310,9 +310,22 @@ fn http_status_text(status: reqwest::StatusCode) -> String {
     }
 }
 
+/// The header the Host reads a client's name and contract from.
+pub const CLIENT_HEADER: &str = "x-clarp-client";
+
+/// `desktop/<version> contract=<n>` (core `render_spec::client_header`).
+pub fn client_header() -> String {
+    clarp_core::render_spec::client_header(env!("CARGO_PKG_VERSION"))
+}
+
 pub(crate) fn auth_headers(token: &str, accept: &'static str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_static(accept));
+    // Who this client is, for the Host's per-client tables (render_spec's
+    // minimum client contract among them).
+    if let Ok(client) = HeaderValue::from_str(&client_header()) {
+        headers.insert(CLIENT_HEADER, client);
+    }
     if !token.is_empty()
         && let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}")) {
             headers.insert(AUTHORIZATION, value);

@@ -42,6 +42,7 @@ pub mod preview;
 pub mod protocol;
 pub mod reading_theme;
 pub mod readability;
+pub mod render_spec;
 pub mod roster;
 pub mod settings;
 pub mod sidebar;

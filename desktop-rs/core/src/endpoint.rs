@@ -116,11 +116,26 @@ pub fn error_message(body: &[u8], fallback: &str) -> String {
     let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(body) else {
         return fallback.to_owned();
     };
+    // A contract refusal (`{"error": {code, path, message}}`, the form
+    // path's): its sentence, and its code where a caller can read it back
+    // (`refusal_code`).
+    if let Some(Value::Object(error)) = object.get("error")
+        && let Some(code) = error.get("code").and_then(Value::as_str).filter(|c| !c.is_empty())
+    {
+        let message = error.get("message").and_then(Value::as_str).filter(|m| !m.is_empty()).unwrap_or(fallback);
+        return format!("{message} [{code}]");
+    }
     ["message", "detail", "error"]
         .iter()
         .filter_map(|key| object.get(*key).and_then(Value::as_str))
         .find(|text| !text.is_empty())
         .map_or_else(|| fallback.to_owned(), str::to_owned)
+}
+
+/// The code `error_message` put at the end of a contract refusal's text.
+pub fn refusal_code(message: &str) -> Option<&str> {
+    let (_, code) = message.strip_suffix(']')?.rsplit_once(" [")?;
+    (!code.is_empty() && code.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')).then_some(code)
 }
 
 /// QUrl::toPercentEncoding: everything but RFC 3986 unreserved characters.
