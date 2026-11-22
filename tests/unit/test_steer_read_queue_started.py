@@ -70,3 +70,20 @@ def test_a_steer_whose_start_never_succeeds_says_nothing_started(tmp_path, clock
     clock.at(7_600)
     _send(world, "two")
     assert _started_events(seen, "two") == []
+
+
+def test_a_steer_whose_turn_already_ended_still_says_it_started(tmp_path, clock, monkeypatch):
+    """The joined turn can end before the check reads the item: its receipt is past
+    'started' already (done), and it did start, so it is said all the same."""
+    world = _SteeredWorld(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    seen = _capture(world)
+    real = turn_queue.status
+    monkeypatch.setattr(turn_queue, "status",
+                        lambda queue_id: "done" if queue_id == "two" and real(queue_id) == "started"
+                        else real(queue_id))
+    clock.at(7_600)
+    _send(world, "two")
+    assert len(_started_events(seen, "two")) == 1, seen
