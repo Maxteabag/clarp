@@ -14,6 +14,26 @@ clarp-admin rollback
 clarp-admin skills repair-links
 ```
 
+## What the user is experiencing
+
+`clarp-admin experience --open` lists what the experience watcher (Python
+Host) has found and not yet cleared. Use `--since 1h` for a time window and
+`--json` for machine-readable output. It reads only Host state, never tests:
+
+- user messages that waited too long before a turn read them;
+- queues paused with a user message in them, and stuck queue rows;
+- crash bursts and relaunch bursts per app device, with the build in use;
+- the user's failed or refused sends;
+- release skills not linked for a backend;
+- old open decision cards;
+- check jobs that held a release or install.
+
+Each finding is one row per kind and subject, open until a pass no longer
+sees it. Whoever is named in `[experience_watch] owners` gets one message
+when a finding opens and one when it clears, from `experience-watch`. The
+watcher is off unless `[experience_watch] enabled = true` is set in that
+Host's configuration. Its findings are stored whether or not anyone is told.
+
 Never hand-edit the active generated release. Use `clarp-admin paths` to find
 the platform-native release, configuration, database, cache, log, service, and
 toolchain paths.

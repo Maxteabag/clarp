@@ -635,6 +635,9 @@ class Config:
     # switch and resource budget; read by lib.transcript_incremental). Off
     # unless `enabled = true`; see docs/transcript-incremental-import.md.
     transcript_shadow: dict[str, Any] = field(default_factory=dict)
+    # [experience_watch]: the watcher of the user's experience from Host state (issue 703;
+    # read by lib.experience_watch). Off unless `enabled = true`.
+    experience_watch: dict[str, Any] = field(default_factory=dict)
     # [runtime] release_drain: how a new runtime release takes over.
     # "natural" (default) waits for a moment with nothing to cut short and
     # fences only for the seal check; "fenced" holds new turns for up to 15
@@ -1339,6 +1342,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         fcm_service_account = str(fcm_section.get("service_account", "")).strip(),
         transcript_shadow = dict(data.get("transcript_shadow") or {})
             if isinstance(data.get("transcript_shadow"), dict) else {},
+        experience_watch = dict(data.get("experience_watch") or {})
+            if isinstance(data.get("experience_watch"), dict) else {},
         runtime_release_drain = str(
             (data.get("runtime") if isinstance(data.get("runtime"), dict) else {})
             .get("release_drain", "natural")).strip().lower(),

@@ -2124,6 +2124,40 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
             os.close(owner)
 
 
+def cmd_experience(args) -> int:
+    """`experience [--since 1h] [--open] [--json]`: what the experience watcher found (issue 703).
+    Reads this Host's own store; works whether or not the watcher is switched on."""
+    server_root = SHARE
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
+    sys.path.insert(0, str(server_root))
+    from lib import experience_watch
+    since_ms = None
+    if args.since:
+        units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        raw = args.since.strip().lower()
+        try:
+            seconds = float(raw[:-1]) * units[raw[-1]] if raw[-1] in units else float(raw)
+        except (ValueError, IndexError):
+            raise SystemExit(f"--since: give a duration such as 30m, 1h or 2d, not {args.since!r}")
+        since_ms = int((time.time() - seconds) * 1000)
+    rows = experience_watch.findings(since_ms=since_ms, open_only=args.open)
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    settings = experience_watch.Settings.from_config()
+    print(f"experience watch: {'on' if settings.enabled else 'off'}, every "
+          f"{int(settings.interval_seconds)}s; {len(rows)} finding(s)")
+    for r in rows:
+        state = "OPEN   " if r["cleared_at"] is None else "cleared"
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["last_seen"] / 1000))
+        first = time.strftime("%H:%M", time.localtime(r["first_seen"] / 1000))
+        told = r["notified_open"] or "-"
+        print(f"  {state} {r['kind']:<18} {r['subject']:<28} since {first}, last {when}, "
+              f"seen {r['count']}x, told {told}\n          {r['detail']}")
+    return 0
+
+
 def cmd_voice(args) -> int:
     """`voice migrate [--apply DIGEST] [--json]`: the one stored voice shape (issue 476).
 
@@ -3449,6 +3483,14 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         "mode", choices=("tailscale", "lan", "manual", "off"))
     network_use.add_argument("--url", default="")
     network_use.set_defaults(func=cmd_network)
+
+    experience = sub.add_parser(
+        "experience", help="what the experience watcher found: waits, stuck queues, app crashes, "
+                           "failed sends, unlinked skills, old cards, held releases")
+    experience.add_argument("--since", default="", help="only findings seen since, e.g. 1h, 30m, 2d")
+    experience.add_argument("--open", action="store_true", help="only findings still open")
+    experience.add_argument("--json", action="store_true")
+    experience.set_defaults(func=cmd_experience)
 
     voice = sub.add_parser("voice").add_subparsers(dest="voice_command", required=True)
     voice_migrate = voice.add_parser(

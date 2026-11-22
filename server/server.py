@@ -119,6 +119,7 @@ from lib.tts_worker import TTSWorker  # noqa: E402
 from lib.workers import BOOT, SERVING, Worker, WorkerSet, started  # noqa: E402
 from lib.cache_warmup import CacheWarmupWorker  # noqa: E402
 from lib.voice_names import VoiceNamesWorker, worker_enabled as voice_names_worker_enabled  # noqa: E402
+from lib.experience_watch import ExperienceWatchWorker, worker_enabled as experience_watch_worker_enabled  # noqa: E402
 
 
 from lib.config import load as load_config  # noqa: E402
@@ -3577,6 +3578,10 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # Voice names for the profile's voice_label, fetched off every read path.
         Worker("voice-names", lambda: started(VoiceNamesWorker()), stage=SERVING,
                enabled=voice_names_worker_enabled),
+        # The user's experience from Host state (issue 703); a pass does nothing while
+        # [experience_watch] enabled is not true.
+        Worker("experience-watch", lambda: started(ExperienceWatchWorker()), stage=SERVING,
+               enabled=experience_watch_worker_enabled),
         Worker("bookkeeping-listeners", start_bookkeeping_listeners,
                stop=lambda thread: None, stage=SERVING),
         Worker("decision-delivery", lambda: started(

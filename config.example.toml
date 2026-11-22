@@ -352,3 +352,30 @@ janitor_autonomy_reads = false
 # render_spec_min_client = 74
 # render_spec_min_contract = {ios = 74}
 # render_spec_v2_min_contract = {ios = 0, android = 0, desktop = 0, web = 0}  # 0 or unnamed: off
+
+# The user's experience, watched from this Host's own state (no tests, no model calls).
+# Findings are stored whether or not anyone is told: `clarp-admin experience --open`.
+# Off by default; the release owner turns it on per Host.
+# [experience_watch]
+# enabled = false
+# interval_seconds = 300
+# summary_hour = 9                  # local hour of the front desk's one-line daily summary
+# front_desk = "SESSION"            # gets the daily summary; unset: none
+# [experience_watch.owners]         # kind -> session told when a finding opens and when it
+#                                   # clears; a kind with no owner is stored only
+# app_crash_ios = "SESSION"
+# app_crash_android = "SESSION"
+# queue = "SESSION"                 # also wait and sends, unless they are named themselves
+# skills = "SESSION"
+# cards = "SESSION"
+# release = "SESSION"
+# [experience_watch.thresholds]
+# wait_seconds = 60                 # a user message waiting this long before a turn read it
+# wait_count = 1
+# queue_stuck_seconds = 600
+# crash_events = 10                 # crash/exception/MetricKit events from one device ...
+# relaunch_burst = 5                # ... or app launches from one device, in window_minutes
+# window_minutes = 15
+# failed_sends = 1
+# card_age_hours = 24
+# release_hold_minutes = 10
