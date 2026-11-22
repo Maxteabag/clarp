@@ -331,12 +331,7 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         }
         if mode == "stop" {
             host.post("/stop", json!({"session":session}));
-            wait_for("the unread follow-up to be held", || {
-                let queue = host.get(&format!("/turn-queue?session={session}"));
-                queue["paused"] == true && queue["items"][0]["id"] == "add-stop-0"
-            });
-            assert_eq!(ids(&host, &session), ["u-first"]);
-            host.post("/turn-queue/resume", json!({"session":session}));
+            // The unread user follow-up now starts when the stopped process ends.
         } else {
             if matches!(mode, "restart" | "ledger") {
                 host.kill();
