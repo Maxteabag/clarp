@@ -99,10 +99,8 @@ fn chart(props: &J, at: &str) -> Result<(), Refusal> {
                     }
                     previous = Some(*number);
                 }
-                J::Text(text) => {
-                    if !labels.insert(text.as_str().unwrap_or_default()) {
-                        return Err(Refusal::new("chart_x_duplicate", &x_at));
-                    }
+                J::Text(text) if !labels.insert(text.as_str().unwrap_or_default()) => {
+                    return Err(Refusal::new("chart_x_duplicate", &x_at));
                 }
                 _ => {}
             }

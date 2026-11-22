@@ -27,7 +27,7 @@ def reference(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import config, log, voice_names
+    from lib import cartesia_voices, config, log, voice_names, voice_pool, voice_profile
 
     now = 1_700_000_000
     startup = []
@@ -198,8 +198,18 @@ def reference(root):
         with patch.object(voice_names, 'start_due', lambda: due):
             backoff.append({'failed': due, 'wait': worker.next_wait(), 'retry': worker._retries > 0})
 
+    curated = voice_pool.curated_names()
+    first = next(iter(curated))
+    saved_names = {first: 'Saved label'}
+    picker_names = {first: 'Picker label'}
+    labels = []
+    for saved, picker in (({}, {}), (saved_names, {}), (saved_names, picker_names)):
+        with patch.object(voice_names, 'names', lambda provider: saved if provider == 'cartesia' else {}), \
+                patch.object(cartesia_voices, 'cached_names', return_value=picker):
+            combined = voice_profile._labels(config.Config())['cartesia']
+        labels.append({'id': first, 'saved': saved, 'picker': picker, 'result': combined[first]})
     return {'startup': startup, 'merge': merged, 'access': access,
-            'refusals': refusals, 'backoff': backoff,
+            'refusals': refusals, 'backoff': backoff, 'curated': curated, 'labels': labels,
             'deleted': {'current': previous, 'fetched': update, 'result': json.loads(deleted_path.read_text()),
                         'logged': gone_lines},
             'lookup': {'used': sorted(used), 'listed': {row['id']: row['name'] for row in pages},

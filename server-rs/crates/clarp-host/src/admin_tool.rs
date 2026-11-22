@@ -1971,8 +1971,12 @@ async fn voice_migrate(app: &App, args: &[String]) -> ToolAnswer {
         Err(why) => return ToolAnswer::said(2, why),
     };
     let view = app.mouth.speech_view(&app.mouth.owners());
-    let reviewed = args.option("--apply").map(str::to_owned);
-    match app.fleet.migrate_voices(view, reviewed).await {
+    let mode = args
+        .option("--apply")
+        .map_or(crate::fleet::VoiceMigration::Plan, |digest| {
+            crate::fleet::VoiceMigration::Reviewed(digest.to_owned())
+        });
+    match app.fleet.migrate_voices(view, mode).await {
         Ok(Ok(report)) => shown(&report),
         Ok(Err(why)) => ToolAnswer::said(3, why),
         Err(why) => ToolAnswer::said(1, why.0),

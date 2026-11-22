@@ -5,7 +5,8 @@ fn voice_edits_merge_and_migration_requires_the_current_review() {
     let place = Place::new("voice-maps");
     let owners = place.root.join("silent-voice.toml");
     std::fs::write(&owners, "[tts]\nprovider='none'\n").unwrap();
-    let host = place.start_with("", &["--speech-keys", owners.to_str().unwrap()]);
+    let start = || place.start_with("", &["--speech-keys", owners.to_str().unwrap()]);
+    let host = start();
     let uuid = "f0000000-0000-4000-8000-000000000000";
     let create = |name, voice| {
         host.post(
@@ -18,10 +19,33 @@ fn voice_edits_merge_and_migration_requires_the_current_review() {
     let first = create("First Voice", "old-voice");
     let risky = create("Risky Voice", uuid);
     let session = first["session"].as_str().unwrap();
+    let risky_session = risky["session"].as_str().unwrap();
+    assert_eq!(
+        risky["agent"]["voice_id"],
+        json!({"cartesia": uuid}).to_string()
+    );
+    drop(host);
+    // Supply the legacy shapes a Host before 135 could store.
+    for (session, legacy) in [(session, "old-voice"), (risky_session, uuid)] {
+        let (id, mut record) = kept_records(&place, "agent")
+            .into_iter()
+            .find(|(_, row)| row["session"] == session)
+            .unwrap();
+        record["voice_id"] = json!(legacy);
+        keep_record(&place, "agent", &id, &record);
+    }
+    let host = start();
     let run = |argv| host.post("/tools/run", json!({"tool":"clarp-admin","argv":argv}));
     let dry = run(json!(["voice", "migrate", "--json"]));
     assert_eq!(dry["exit"], 0, "{dry}");
     let report: Value = serde_json::from_str(dry["stdout"].as_str().unwrap()).unwrap();
+    let voices = report["voices"].as_array().unwrap();
+    assert!(!voices.iter().any(|row| row["session"] == session));
+    assert!(
+        voices
+            .iter()
+            .any(|row| row["session"] == risky_session && row["audible"] == true)
+    );
     let digest = report["digest"].as_str().unwrap();
     assert_eq!(
         run(json!(["voice", "migrate", "--apply", "stale"]))["exit"],
@@ -39,7 +63,7 @@ fn voice_edits_merge_and_migration_requires_the_current_review() {
             .clone()
     };
     assert_eq!(read(session), r#"{"elevenlabs":"old-voice"}"#);
-    assert_eq!(read(risky["session"].as_str().unwrap()), uuid);
+    assert_eq!(read(risky_session), uuid);
     host.post("/agent-voice", json!({"session":session,"voice_id":uuid}));
     assert_eq!(
         read(session),

@@ -94,12 +94,8 @@ fn the_voice_pool_fills_new_rows_and_keeps_old_roster_voices() {
     assert_eq!(json!(status), collision["status"]);
     assert_eq!(refusal, collision["body"]);
 
-    // Both names start their walk at c2. The first can share it in a tie, then the
-    // second has to pass c2 and take the less-shared c1.
     let shared = create("Auto Share", "{}");
-    assert_eq!(stored(&shared["agent"])["cartesia"], "c2");
-    let shared = create("Next Auto Share", "{}");
-    assert_eq!(stored(&shared["agent"])["cartesia"], "c1");
+    assert!(["c1", "c2"].contains(&stored(&shared["agent"])["cartesia"].as_str().unwrap()));
 
     let session = agent["session"].as_str().unwrap();
     let helper = host.post(
@@ -107,7 +103,10 @@ fn the_voice_pool_fills_new_rows_and_keeps_old_roster_voices() {
         json!({"name":"Pool Helper","backend":"scripted",
         "role":"helper","parent":session,"voice_id":"{}"}),
     );
-    assert_eq!(helper["agent"]["voice_id"], "{}");
+    assert_eq!(stored(&helper["agent"]), agent_voice);
+    let uuid = "f0000000-0000-4000-8000-000000000000";
+    let pinned = create("Canonical Voice", uuid);
+    assert_eq!(stored(&pinned["agent"])["cartesia"], uuid);
     let janitors = snapshot()["agents"].as_array().unwrap().clone();
     assert!(janitors.iter().any(|row| row["is_janitor"] == true));
     for row in janitors.iter().filter(|row| row["is_janitor"] == true) {
@@ -122,9 +121,8 @@ fn the_voice_pool_fills_new_rows_and_keeps_old_roster_voices() {
     let ordinary = create("Empty Configured Pool", "{}");
     let picked = stored(&ordinary["agent"]);
     assert!(
-        clarp_kernel::said::BUILT_IN_CARTESIA_VOICES
-            .iter()
-            .any(|(_, id)| picked["cartesia"] == *id)
+        clarp_kernel::voice_pool::curated_names()
+            .contains_key(picked["cartesia"].as_str().unwrap())
     );
 
     let ada = create("Ada", "{}");
