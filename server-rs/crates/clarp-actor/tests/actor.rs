@@ -223,6 +223,77 @@ fn pair(id: &str, says: &str) -> (String, String) {
 }
 
 #[test]
+fn form_answers_wait_and_reach_the_agent_but_are_not_chat_rows() {
+    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/form-answer-reads.json"
+    ))
+    .unwrap();
+    let ordinary = vectors["ordinary_id"].as_str().unwrap();
+    let answer =
+        clarp_kernel::artifacts::forms::answer_row_id(vectors["submission_id"].as_str().unwrap());
+    let mut world = World::new("form-answer-reads");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-opening", "opening", Admission::Queue);
+    world.send(
+        &mut actor,
+        &format!("u-{ordinary}"),
+        "ordinary",
+        Admission::Queue,
+    );
+    world.send(&mut actor, &answer, "the user's answers", Admission::Later);
+    drop(actor);
+
+    let mut actor = world.open();
+    let queue = actor.queue_state();
+    assert_eq!(Some(queue.waiting as u64), vectors["count"].as_u64());
+    assert_eq!(Some(queue.listed as u64), vectors["listed"].as_u64());
+    assert!(
+        actor
+            .queue()
+            .unwrap()
+            .iter()
+            .any(|item| item.message_id == answer)
+    );
+
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let before_answer = actor.status().head_revision;
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+
+    let app = actor.tail_of(1, Which::chat(true)).unwrap();
+    assert_eq!(
+        Some(app.entries[0].entry.id()),
+        vectors["app_rows"][0].as_str()
+    );
+    let all = actor.tail_of(1, Which::All).unwrap();
+    assert_eq!(
+        Some(all.entries[0].entry.id()),
+        vectors["agent_rows"][1].as_str()
+    );
+    let clarp_kernel::conversation::Entry::Message(message) = &all.entries[0].entry else {
+        panic!("the answer reached the agent as a prompt");
+    };
+    assert_eq!(message.text, "the user's answers");
+    let delta = actor.after_of(before_answer, 1, Which::chat(true)).unwrap();
+    assert!(delta.entries.iter().all(|row| row.entry.id() != answer));
+    assert_eq!(delta.latest_revision, all.head_revision);
+
+    world.says(3, "form reply");
+    world.exits(3, Some(0), None);
+    world.hint(&mut actor);
+    let latest = actor.tail_of(1, Which::chat(true)).unwrap();
+    let older = actor
+        .before_of(latest.entries[0].entry.id(), 1, Which::chat(true))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        Some(older.entries[0].entry.id()),
+        vectors["preview"].as_str()
+    );
+}
+
+#[test]
 fn a_message_runs_as_a_turn_and_the_reply_grows_and_settles_in_the_conversation() {
     let mut world = World::new("turn");
     let mut actor = world.open();
@@ -3069,7 +3140,7 @@ fn the_delegates_baseline_is_the_revision_at_the_requested_message_offset() {
         .collect();
     let (taken, _) = actor.import("source", None, input, 1000).unwrap();
     assert_eq!(taken, Ok(301));
-    let rows = actor.tail_of_any(400).unwrap().entries;
+    let rows = actor.tail_of_any(400, Which::All).unwrap().entries;
     assert_eq!(rows.len(), 301);
     for offset in [0, 1, 199, 200, 255, 256, 300] {
         assert_eq!(
@@ -3470,6 +3541,7 @@ mod follow_by_revision {
                 Which::WithoutAutomated => "without automated",
                 Which::WithoutCoordination => "without coordination",
                 Which::WithoutAutomatedOrCoordination => "without automated or coordination",
+                Which::Chat { .. } => "chat",
             };
             let cursor = if self.by_rows {
                 ", the newest row's revision its cursor"

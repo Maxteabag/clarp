@@ -1443,16 +1443,18 @@ pub(crate) fn agent_row(
                 .map(wire::preview)
                 .unwrap_or_default()
         );
-        let at = newest.map_or(member.record.created_at_ms, |preview| {
-            preview.ts_ms.max(member.record.created_at_ms)
-        });
-        row["last_activity"] = json!(at / 1_000);
         if working.is_some_and(|with| with.audience() == clarp_kernel::coordination::AGENTS) {
             let headline =
                 clarp_kernel::hidden_coordination::working_headline(sender.map(|(_, name)| name));
             clarp_kernel::hidden_coordination::veil_activity(&mut row["activity"], &headline);
             clarp_kernel::hidden_coordination::veil_live(&mut row["live_activity"], &headline);
         }
+    }
+    if hides || view.newest_is_form_answer {
+        let at = newest.map_or(member.record.created_at_ms, |preview| {
+            preview.ts_ms.max(member.record.created_at_ms)
+        });
+        row["last_activity"] = json!(at / 1_000);
     }
     // Whether its tool's account is used up: advice for whoever is about to write to it.
     row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
@@ -2497,11 +2499,7 @@ async fn log(
         .include_automated
         .as_deref()
         .is_some_and(|said| matches!(said.to_lowercase().as_str(), "0" | "false" | "no"));
-    let which = if include_automated {
-        Which::All
-    } else {
-        Which::WithoutAutomated
-    };
+    let which = Which::chat(include_automated);
     // Only an agent that can leave a note for its user has rows for the agents.
     let hides = coordination::can_leave_note(
         &member.record.agent_id,
@@ -3291,7 +3289,7 @@ async fn send_as(
         // Where the queue stands with this message in it. A message that did not have to
         // wait says nothing about the queue: the Python Host answers zeros, and so does this.
         queue_depth: Some(if sent.queued {
-            sent.queue.waiting as u64
+            sent.queue.listed as u64
         } else {
             0
         }),
@@ -3680,6 +3678,7 @@ async fn queue(
     let directory = app.fleet.directory();
     let items: Vec<Value> = waiting
         .iter()
+        .filter(|item| !clarp_kernel::artifacts::forms::is_answer_delivery(&item.client_id))
         .map(|item| wire::queue_item(item, &directory))
         .collect();
     Ok(Json(json!({
@@ -3721,7 +3720,7 @@ async fn resume(
     let (_, state) = member.agent.resume("user".to_string()).await?;
     Ok(Json(json!({
         "session": member.record.session,
-        "count": state.waiting,
+        "count": state.listed,
         "paused": state.paused,
         "revision": state.revision,
     })))

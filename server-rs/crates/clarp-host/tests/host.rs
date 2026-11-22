@@ -9001,7 +9001,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (_, listed) = ask("GET", "/artifacts?search=Decide", capable, None);
     assert!(!listed.to_string().contains("submit_decision"));
     wait_for("the agent to be told the first answers", || {
-        host.conversation(&theo).len() == 2 && host.state(&theo) == "done"
+        host.conversation(&theo).len() == 1 && host.state(&theo) == "done"
     });
 
     // The first accepted answers close the spec, are told to the agent once, and are told
@@ -9019,17 +9019,12 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (status, first) = ask("POST", "/artifacts/answered/submit", capable, Some(&sent));
     assert_eq!((status, &first), (200, &receipt));
     wait_for("the agent to be told the answers", || {
-        host.conversation(&theo).len() == 4 && host.state(&theo) == "done"
+        host.conversation(&theo).len() == 2 && host.state(&theo) == "done"
     });
-    let message = "The user answered \"Decide\".\nArtifact ID: answered\nVersion: build-1\n\
-                   Submission ID: recorded-answer-01\nThese are user preferences for review, not approval \
-                   to perform protected actions.\nAnswers:\n\
-                   {\"intent\":\"submit_decision\",\"state\":{\"choice\":\"send\"}}";
-    assert_eq!(
-        host.conversation(&theo)[2],
-        ("user".to_string(), message.to_string())
-    );
-    assert_eq!(host.turns(&theo)[2]["id"], "u-html-form-recorded-answer-01");
+    let turns = host.turns(&theo);
+    assert!(turns.iter().all(|row| row["role"] == "assistant"));
+    assert!(turns[1]["text"].as_str().unwrap().contains("Decide"));
+    let reply_id = turns[1]["id"].clone();
     let (status, again) = ask("POST", "/artifacts/answered/submit", capable, Some(&sent));
     let mut delivered = receipt.clone();
     delivered["delivery_status"] = json!("delivered");
@@ -9041,7 +9036,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         events_of("answered"),
         [published[0].clone(), published[0].clone()]
     );
-    assert_eq!(host.conversation(&theo).len(), 4);
+    assert_eq!(host.conversation(&theo).len(), 2);
     // Other answers under the same id; a new id after it was answered; another version.
     let mut other = sent.clone();
     other["answers"]["state"]["choice"] = json!("review");
@@ -9818,8 +9813,13 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         "delivered"
     );
     assert_eq!(read["artifact"]["submission"]["answers"], sent["answers"]);
-    let told: Vec<(String, String)> = host.conversation(&theo);
-    assert_eq!(told.iter().filter(|(_, text)| text == message).count(), 1);
+    assert_eq!(
+        host.turns(&theo)
+            .iter()
+            .filter(|row| row["id"] == reply_id && row["role"] == "assistant")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -19134,13 +19134,13 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         }
         host.ask("POST", "/artifacts/audio-form/submit", Some(&data))
     };
-    let done = |id: &str| {
+    let done = |replies| {
         wait_for("the reply to the form", || {
-            let turns = host.turns(&agent);
-            turns
+            host.turns(&agent)
                 .iter()
-                .position(|r| r["id"] == format!("u-html-form-{id}"))
-                .is_some_and(|i| turns[i + 1..].iter().any(|r| r["role"] == "assistant"))
+                .filter(|r| r["role"] == "assistant")
+                .count()
+                == replies
                 && host.state(&agent) == "done"
         })
     };
@@ -19169,7 +19169,7 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         .0,
         200
     );
-    done(silent);
+    done(1);
     assert!(voice.asked().is_empty());
     let mut clips = Vec::new();
     for (index, (id, words, audio)) in [
@@ -19185,21 +19185,26 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         }
         let (status, receipt) = submit(id, words, audio);
         if index == 1 {
-            let queued = successful
-                .iter()
-                .find(|row| row["input"]["synthesize_audio"] == true)
-                .unwrap();
+            wait_for("the form answer to be queued", || {
+                host.get("/agents/snapshot")["agents"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["session"] == agent && row["queued_turn_count"] == 1)
+            });
             let queue = host.get(&format!("/turn-queue?session={agent}"));
-            let item = queue["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|r| r["id"] == format!("html-form-{id}"))
-                .unwrap();
-            assert_eq!(item["synthesize_audio"], queued["synthesize_audio"]);
+            assert_eq!(queue["items"], json!([]));
+            wait_for("the listed queue depth to be sent", || {
+                events.lock().unwrap().iter().any(|event| {
+                    event["type"] == "queue-updated"
+                        && event["client_msg_id"] == format!("html-form-{id}")
+                        && event["queue_started"] == false
+                        && event["queue_depth"] == 0
+                })
+            });
         }
         assert_eq!(status, 200, "{receipt}");
-        done(id);
+        done(if index == 0 { 2 } else { 4 });
         wait_for("the scripted voice receives the requested reply", || {
             voice.asked().len() == index + 1
         });
@@ -19233,7 +19238,7 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         let trace = host
             .turns(&agent)
             .into_iter()
-            .find(|r| r["id"] == format!("u-html-form-{id}"))
+            .rfind(|r| r["role"] == "assistant")
             .unwrap()["trace_id"]
             .clone();
         assert_eq!(announced["trace_id"], trace);
@@ -19493,17 +19498,11 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
                 "accepted": true, "delivery_status": "pending" })
     );
     wait_for("the agent's answer to the form's answers", || {
-        host.conversation(&maker).len() == 2 && host.state(&maker) == "done"
+        host.conversation(&maker).len() == 1 && host.state(&maker) == "done"
     });
-    let told = format!(
-        "The user submitted answers to HTML form \"Plan: it's time\".\nArtifact ID: form-plan\n\
-         Version: 1\nSubmission ID: {first}\nThese are user preferences for review, not \
-         approval to perform protected actions. Interpret the answers in the context of the \
-         originating plan.\nAnswers:\n{{\"budget\":12.5,\"when\":\"now\"}}"
-    );
-    assert_eq!(host.conversation(&maker)[0], ("user".to_string(), told));
     let rows = host.turns(&maker);
-    assert_eq!(rows[0]["id"], format!("u-html-form-{first}"));
+    assert_eq!(rows[0]["role"], "assistant");
+    assert!(rows[0]["text"].as_str().unwrap().contains("it's time"));
     // Sent again, they are the same answers: answered as told, and told once.
     let (status, again) = send(&host, "form-plan", &answers(first, given.clone()));
     assert_eq!(
@@ -19520,7 +19519,7 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
         other["error"],
         "submission ID already used for different answers"
     );
-    assert_eq!(host.conversation(&maker).len(), 2);
+    assert_eq!(host.conversation(&maker).len(), 1);
 
     // After the Host was killed the form, its page and what was answered are all there.
     host.kill();
@@ -19541,9 +19540,13 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
         (200, &json!("pending"))
     );
     wait_for("the agent's answer to the second answers", || {
-        host.conversation(&maker).len() == 4 && host.state(&maker) == "done"
+        host.conversation(&maker).len() == 2 && host.state(&maker) == "done"
     });
-    assert_eq!(host.turns(&maker)[2]["id"], format!("u-html-form-{second}"));
+    assert!(
+        host.turns(&maker)
+            .iter()
+            .all(|row| row["role"] == "assistant")
+    );
     let shown = fetch(&host, token, "GET", "/artifacts/form-plan/html", &[], b"");
     assert!(shown.status == 200 && shown.text().contains(page));
 }
