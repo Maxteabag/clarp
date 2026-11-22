@@ -400,6 +400,10 @@ pub async fn switch(app: &App, asked: &Value) -> resume::Answer {
 /// `POST /hotseat/resume`: work that stopped goes on, a held queue is let go, or the command
 /// of a session that is no Host's is given. The status and the body.
 pub async fn resume(app: &App, asked: &Value) -> resume::Answer {
+    resume_as(app, asked, clarp_kernel::control::USER).await
+}
+
+pub(crate) async fn resume_as(app: &App, asked: &Value, by: &str) -> resume::Answer {
     let text = |key: &str| said(asked, key);
     let wanted = resume::wanted(
         &text("id"),
@@ -441,7 +445,7 @@ pub async fn resume(app: &App, asked: &Value) -> resume::Answer {
         )
     };
     if lets_go {
-        return match member.agent.resume("user".to_string()).await {
+        return match member.agent.resume(by.to_string()).await {
             Ok((_, queue)) => resume::let_go(agent.session, queue.paused, queue.waiting as u64),
             Err(_) => unavailable(),
         };
