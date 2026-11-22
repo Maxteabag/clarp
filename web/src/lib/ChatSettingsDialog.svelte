@@ -2,7 +2,9 @@
   // Settings > Chats: how chats look. Kept in localStorage on this device, except 'Show
   // messages between agents', which is the Host's (static/lib/coordination.js).
   import { app } from '../stores/app.svelte.js';
-  import { prefs, setShowHostBadge, setToolActivity } from '../stores/prefs.svelte.js';
+  import {
+    prefs, setShowCoordinationLine, setShowHostBadge, setToolActivity,
+  } from '../stores/prefs.svelte.js';
   import { TOOL_ACTIVITY, TOOL_ACTIVITY_LABELS } from '@core/history-fold.js';
   import { coordination, setCoordinationVisibility } from '../stores/coordination.svelte.js';
   import { live } from '../stores/live.svelte.js';
@@ -45,6 +47,20 @@
             Notes, cards and files an agent leaves for you always show.
           {/if}
         </p>
+        {#if coordination.visibility !== 'show'}
+          <label class="start-field inline-toggle">
+            <span>Show a line where agent messages were</span>
+            <input type="checkbox" checked={prefs.showCoordinationLine}
+                   onchange={e => setShowCoordinationLine(e.currentTarget.checked)} />
+          </label>
+          <p class="start-hint">
+            {#if prefs.showCoordinationLine}
+              '3 messages between agents', with a Show that opens them in that chat.
+            {:else}
+              No line where they were. A chat's own setting (⇄) still shows them.
+            {/if}
+          </p>
+        {/if}
       {/if}
 
       <label class="start-field">
