@@ -285,6 +285,11 @@ enum Ask {
     Shown {
         answer: Answer<Value>,
     },
+    /// Go on with another tool, carrying the conversation ([`crate::agent_transit`]).
+    ChangeTool {
+        change: crate::agent_transit::Change,
+        answer: Answer<Result<crate::agent_transit::Changed, crate::agent_transit::Refused>>,
+    },
     /// Take over the conversation the agent had on another Host. Answers how many rows came,
     /// or why it cannot be done.
     Import {
@@ -905,6 +910,16 @@ impl AgentHandle {
     /// Everything that is shown of the agent's turn as it runs.
     pub async fn shown(&self) -> Result<Value, Unavailable> {
         self.ask(|answer| Ask::Shown { answer }).await
+    }
+
+    /// Goes on with another tool, its conversation carried into it: while no turn runs and
+    /// nothing waits ([`crate::agent_transit`]).
+    pub async fn change_tool(
+        &self,
+        change: crate::agent_transit::Change,
+    ) -> Result<Result<crate::agent_transit::Changed, crate::agent_transit::Refused>, Unavailable>
+    {
+        self.ask(|answer| Ask::ChangeTool { change, answer }).await
     }
 
     /// Takes over the conversation the agent had on another Host.
@@ -2152,6 +2167,25 @@ impl Worker {
             Some(Box::new(move |backend| telling.launch_defaults(backend))),
         )
         .map_err(|error| error.to_string())?;
+        // The agent's log changed its tool, and its record still says the tool it changed
+        // from: the Host stopped between the two writes. The log is what the agent runs on.
+        if let Some((from, to)) = actor.changed_tool()
+            && from == self.setup.record.backend
+            && to != from
+            && let Some(backend) = clarp_backend::by_id(&to)
+        {
+            eprintln!(
+                "clarp-host: agent {} runs on {to}, as its log says (its record said {from})",
+                self.setup.record.session
+            );
+            drop(actor);
+            let effort = Some(self.setup.record.effort.clone())
+                .filter(|effort| clarp_backend::efforts(&to).contains(&effort.as_str()))
+                .unwrap_or_default();
+            let model = String::new();
+            self.adopt_tool(backend, &to, &model, &effort);
+            return self.open();
+        }
         self.setup
             .delegation_rejoin
             .reconcile(&mut actor, self.now_ms());
@@ -2371,6 +2405,61 @@ impl Worker {
         };
         let waiting = requests::attention(&[shelf], true, false, now).len();
         self.setup.hub.waiting_for_user(&record.agent_id, waiting)
+    }
+
+    /// Carries the agent's conversation into another tool and goes on with it: in this
+    /// thread, so that nothing starts a turn in between. The agent is opened again on the new
+    /// tool before anything else is asked of it.
+    fn handle_change_tool(
+        &mut self,
+        change: &crate::agent_transit::Change,
+        answer: Answer<Result<crate::agent_transit::Changed, crate::agent_transit::Refused>>,
+    ) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            let _ = answer.send(Err(Unavailable::new("the agent is not open".to_string())));
+            return Ok(());
+        };
+        if let Err(why) = actor.require_here() {
+            let _ = answer.send(Err(unavailable(&why)));
+            return Ok(());
+        }
+        let Some(backend) = clarp_backend::by_id(&change.backend) else {
+            let refused = crate::agent_transit::Refused::Failed {
+                stage: "switch",
+                why: format!("this Host has no backend named `{}`", change.backend),
+            };
+            let _ = answer.send(Ok(Err(refused)));
+            return Ok(());
+        };
+        match crate::agent_transit::carry(actor, &self.setup.record, change, now) {
+            Ok((Ok(changed), out)) => {
+                self.after(out);
+                self.adopt_tool(backend, &change.backend, &change.model, &change.effort);
+                let _ = answer.send(Ok(Ok(changed)));
+                Ok(())
+            }
+            Ok((Err(refused), _)) => {
+                let _ = answer.send(Ok(Err(refused)));
+                Ok(())
+            }
+            Err(error) => {
+                let _ = answer.send(Err(unavailable(&error)));
+                Err(error)
+            }
+        }
+    }
+
+    /// The agent runs on another tool from now on, as its log says: it is opened again on it.
+    fn adopt_tool(&mut self, backend: Arc<dyn Backend>, id: &str, model: &str, effort: &str) {
+        self.setup.backend = backend;
+        self.setup.record.backend = id.to_string();
+        self.setup.record.model = model.to_string();
+        self.setup.record.effort = effort.to_string();
+        self.setup.profile.model = non_empty(model);
+        self.setup.profile.effort = non_empty(effort);
+        self.setup.profile.told = Some(self.setup.telling.of(&self.setup.record));
+        self.actor = None;
     }
 
     /// Something is asked of the agent's artifacts. What changed is published before the
@@ -2748,6 +2837,7 @@ impl Worker {
                 return result;
             }
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
+            Ask::ChangeTool { change, answer } => return self.handle_change_tool(&change, answer),
             Ask::TakePlans {
                 source,
                 plans,
@@ -3490,6 +3580,7 @@ impl Worker {
             Ask::RevisionAt { ts_ms, answer } => return read(actor.revision_at(ts_ms), answer),
             // Answered above, where what they change is published first.
             Ask::Artifact { .. }
+            | Ask::ChangeTool { .. }
             | Ask::Goal { .. }
             | Ask::Amended { .. }
             | Ask::OpenTerminal { .. }
@@ -3731,14 +3822,21 @@ impl Worker {
                 let record = &self.setup.record;
                 let now = self.now_ms();
                 for plan in self.books.goals.plans() {
-                    if prior.goals.plan(&plan.plan_id).is_none_or(|old| old.revision != plan.revision) {
-                        self.setup.hub.publish(json!({
-                            "type": "task-plan-updated",
-                            "session": record.session,
-                            "agent_id": record.agent_id,
-                            "plan_id": plan.plan_id,
-                            "revision": plan.revision,
-                        }), now);
+                    if prior
+                        .goals
+                        .plan(&plan.plan_id)
+                        .is_none_or(|old| old.revision != plan.revision)
+                    {
+                        self.setup.hub.publish(
+                            json!({
+                                "type": "task-plan-updated",
+                                "session": record.session,
+                                "agent_id": record.agent_id,
+                                "plan_id": plan.plan_id,
+                                "revision": plan.revision,
+                            }),
+                            now,
+                        );
                     }
                 }
             }
@@ -4763,12 +4861,14 @@ impl Worker {
             }
         }
         if !alert_queued
-            && (turn_ended || was_live.is_some_and(working_for_badge)
-                != status.live.as_ref().is_some_and(working_for_badge))
+            && (turn_ended
+                || was_live.is_some_and(working_for_badge)
+                    != status.live.as_ref().is_some_and(working_for_badge))
             && hub.queue_directory().is_some_and(|directory| {
                 badge_chat(&record, &directory)
                     && directory.push.active().any(|row| {
-                        row.platform == "ios" && row.provider != "fcm"
+                        row.platform == "ios"
+                            && row.provider != "fcm"
                             && directory.can_receive(&row.principal)
                     })
             })
@@ -4891,7 +4991,11 @@ fn badge_chat(record: &AgentRecord, directory: &crate::fleet::Directory) -> bool
         if current.is_janitor || current.archived_at_ms.is_some() {
             return false;
         }
-        let Some(parent) = current.parent_agent_id.as_deref().and_then(|id| directory.by_id(id)) else {
+        let Some(parent) = current
+            .parent_agent_id
+            .as_deref()
+            .and_then(|id| directory.by_id(id))
+        else {
             return true;
         };
         current = &parent.record;
@@ -5062,6 +5166,7 @@ fn refuse_for(
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
             }
+            Ok(Ask::ChangeTool { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SendNow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Reword { answer, .. }) => drop(answer.send(Err(refusal()))),

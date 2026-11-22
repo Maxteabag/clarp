@@ -406,6 +406,8 @@ async fn told(State(app): State<App>) -> Json<Value> {
             }
         }
     }
+    // Which tool an agent can be moved to, and the model each runs when none is named.
+    crate::agent_transit::annotate(&app, &mut told).await;
     if let Some(providers) = told["providers"].as_object_mut() {
         for (tool, row) in providers {
             let harness = clarp_backend::by_id(tool).and_then(|backend| backend.runs_through());

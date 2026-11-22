@@ -283,6 +283,13 @@ pub enum Amend {
     /// The tool it runs on: for a member that has no conversation with the tool it had.
     /// Whoever asks has seen to that.
     Tool(String),
+    /// The tool it goes on with, with the model and the effort it runs there: its log has
+    /// the change already, and its conversation was carried ([`crate::agent_transit`]).
+    ToolChanged {
+        backend: String,
+        model: String,
+        effort: String,
+    },
     /// The voices it was given, as they are stored: one for each engine it has one for.
     Voice { provider: String, voice: String },
     /// How much it says while it works, from 0 to 3.
@@ -3816,6 +3823,15 @@ impl Fleet {
                 }
             }
             Amend::Tool(backend) => record.backend = backend,
+            Amend::ToolChanged {
+                backend,
+                model,
+                effort,
+            } => {
+                record.backend = backend;
+                record.model = model;
+                record.effort = effort;
+            }
             Amend::McpServers(names) => record.mcp_servers = Some(names),
             Amend::Voice { provider, voice } => {
                 let occupied = self
@@ -4233,8 +4249,9 @@ impl Fleet {
         let cwd_created = match std::fs::metadata(cwd) {
             Ok(metadata) if metadata.is_dir() => false,
             Err(why) if why.kind() == std::io::ErrorKind::NotFound && cwd.is_absolute() => {
-                std::fs::create_dir_all(cwd)
-                    .map_err(|why| format!("cannot create working directory {}: {why}", cwd.display()))?;
+                std::fs::create_dir_all(cwd).map_err(|why| {
+                    format!("cannot create working directory {}: {why}", cwd.display())
+                })?;
                 true
             }
             _ => return Err(format!("{} is not a directory on this machine", record.cwd)),
@@ -4250,7 +4267,10 @@ impl Fleet {
         self.works
             .hub
             .publish(wire::roster_created(&record), self.now_ms());
-        Ok(Adopted { member, cwd_created })
+        Ok(Adopted {
+            member,
+            cwd_created,
+        })
     }
 
     fn remember_owner(&mut self, record: &AgentRecord) {

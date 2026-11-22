@@ -10,6 +10,7 @@
 //! This is the `transit` tool's injectors, rebuilt for the Host (its notes on the formats are
 //! the rules: a Claude assistant row has a list of blocks as its content, never a string; a
 //! Codex rollout begins with `session_meta` and carries the text in `response_item` messages).
+//! Antigravity has no writer: its database is never opened while it may run.
 //!
 //! A writer writes and registers, and nothing else: it never runs the tool. What it wrote is
 //! named in [`Written`], so that whoever asked can take it back ([`Written::undo`]) when the
@@ -62,6 +63,8 @@ pub struct Place {
     pub tool_version: Option<String>,
     /// The model the agent runs on there, when one is chosen.
     pub model: Option<String>,
+    /// The tool's program, for a tool a session is handed to (OpenCode's `import`).
+    pub program: Option<PathBuf>,
 }
 
 /// What a writer did: the session it made, and what to remove to take it back.
@@ -73,6 +76,8 @@ pub struct Written {
     /// How many things that were said it holds.
     pub carried: usize,
     files: Vec<PathBuf>,
+    /// Directories it made for the session alone, removed once empty.
+    dirs: Vec<PathBuf>,
     rows: Vec<(PathBuf, String)>,
 }
 
@@ -87,6 +92,9 @@ impl Written {
         }
         for file in self.files.iter().rev() {
             let _ = std::fs::remove_file(file);
+        }
+        for dir in self.dirs.iter().rev() {
+            let _ = std::fs::remove_dir(dir);
         }
     }
 
@@ -244,7 +252,10 @@ fn write_new(path: &Path, body: &[u8]) -> Result<(), Failed> {
     if path.exists() {
         return Err(Failed::Translate(format!("{} exists", path.display())));
     }
-    let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
     let aside = dir.join(format!(".{name}.carrying"));
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -360,6 +371,7 @@ impl Writer for ClaudeWriter {
             session,
             carried: rows.len() - 2,
             files: vec![file],
+            dirs: Vec::new(),
             rows: Vec::new(),
         })
     }
@@ -472,10 +484,9 @@ impl CodexWriter {
                 "codex index has no table of threads".to_string(),
             ));
         }
-        if let Some((name, _)) = columns
-            .iter()
-            .find(|(name, required)| *required && name != "id" && !CODEX_COLUMNS.contains(&name.as_str()))
-        {
+        if let Some((name, _)) = columns.iter().find(|(name, required)| {
+            *required && name != "id" && !CODEX_COLUMNS.contains(&name.as_str())
+        }) {
             return Err(Failed::Register(format!(
                 "codex index requires a column this Host does not know: {name}"
             )));
@@ -546,6 +557,7 @@ impl Writer for CodexWriter {
             session: thread.clone(),
             carried: rows.len() - 1,
             files: vec![file.clone()],
+            dirs: Vec::new(),
             rows: Vec::new(),
         };
         if let Some(index) = Self::index(&place.tool_home) {
@@ -606,6 +618,7 @@ mod tests {
             now_ms: 1_800_000_010_000,
             tool_version: Some("2.1.321".into()),
             model: Some("claude-opus-5-5".into()),
+            program: None,
         }
     }
 
@@ -649,7 +662,7 @@ mod tests {
             .join("projects")
             .join("-home-someone-work-repo-x")
             .join(format!("{}.jsonl", written.session));
-        assert_eq!(written.files(), [file.clone()]);
+        assert_eq!(written.files(), std::slice::from_ref(&file));
         let rows = read_lines(&file);
         assert_eq!(rows[0]["type"], "mode");
         assert_eq!(rows[1]["type"], "permission-mode");
@@ -660,8 +673,16 @@ mod tests {
         let mut parent = Value::Null;
         for row in &turns {
             for key in [
-                "uuid", "parentUuid", "timestamp", "sessionId", "cwd", "version",
-                "gitBranch", "userType", "entrypoint", "isSidechain",
+                "uuid",
+                "parentUuid",
+                "timestamp",
+                "sessionId",
+                "cwd",
+                "version",
+                "gitBranch",
+                "userType",
+                "entrypoint",
+                "isSidechain",
             ] {
                 assert!(row.get(key).is_some(), "{key} missing");
             }
@@ -677,9 +698,15 @@ mod tests {
         assert_eq!(turns[0]["timestamp"], "2027-01-15T08:00:00.000Z");
         let answer = &turns[1]["message"];
         assert_eq!(turns[1]["type"], "assistant");
-        assert!(answer["content"].is_array(), "an answer's content is a list of blocks");
+        assert!(
+            answer["content"].is_array(),
+            "an answer's content is a list of blocks"
+        );
         assert_eq!(answer["content"][0]["type"], "text");
-        assert_eq!(answer["content"][0]["text"], "Done: the parser reads both shapes now.");
+        assert_eq!(
+            answer["content"][0]["text"],
+            "Done: the parser reads both shapes now."
+        );
         for key in ["role", "type", "id", "model", "stop_reason", "usage"] {
             assert!(answer.get(key).is_some(), "{key} missing");
         }
@@ -749,7 +776,15 @@ mod tests {
             .query_row(
                 "SELECT rollout_path, cwd, title, source, model FROM threads WHERE id = ?1",
                 [&written.session],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(path, file.display().to_string());
@@ -761,7 +796,11 @@ mod tests {
         written.undo();
         assert!(!file.exists());
         let left: i64 = db
-            .query_row("SELECT count(*) FROM threads WHERE id = ?1", [&thread], |row| row.get(0))
+            .query_row(
+                "SELECT count(*) FROM threads WHERE id = ?1",
+                [&thread],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(left, 0);
         std::fs::remove_dir_all(home).unwrap();

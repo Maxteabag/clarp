@@ -1,6 +1,6 @@
 ---
 name: clarp-sessions
-description: Resolve Clarp agent personas, session slugs, backends, and working directories, and show or switch an agent's model. Use before targeting another agent, diagnosing session state, or when asked to change your own or another agent's model.
+description: Resolve Clarp agent personas, session slugs, backends, and working directories, show or switch an agent's model, and move an agent to another backend with its conversation. Use before targeting another agent, diagnosing session state, or when asked to change your own or another agent's model or backend.
 ---
 
 # Clarp Sessions
@@ -29,6 +29,28 @@ clarp-admin model default                         # clear back to the config def
 Use an exact ID from `available`; do not substitute a model the catalog does
 not list. The change applies from the agent's next turn, so the turn that ran
 the command keeps its current model. Janitors refuse model changes.
+
+## Move an agent to another backend
+
+On a Rust Host that lists the feature `agent_backend_transit` (contract 158; the
+Python Host has no such command), an agent can be moved to another tool and keep
+its conversation:
+
+```bash
+clarp-admin agent transit --session lena-1a3f --backend codex --model gpt-5.5
+clarp-admin agent transit --session lena-1a3f --backend claude --model opus --effort high
+```
+
+`--backend` is one of `claude`, `codex`, `agy`, `grok`, `opencode` whose row in
+`GET /agent-model-options` says `available: true`; `--model` is an exact ID that
+row lists (`""` for the tool's default). The command waits until the move is
+done or failed and prints its last state. The Host refuses while a turn of the
+agent runs or messages wait in its queue, so never move yourself from inside
+your own turn: ask another agent or the user's app. What is carried is the text
+of the user's and the agent's turns (the newest 400,000 characters); tool calls,
+their results and thinking are not. The agent's name, voice, goals and chat
+history stay. To move an agent to another Host instead, use
+`clarp-switch-agent-host`.
 
 ## An agent stays busy with no process
 

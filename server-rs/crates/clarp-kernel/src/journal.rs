@@ -323,6 +323,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         | AgentEvent::Adopted { .. }
         | AgentEvent::TookUp { .. }
         | AgentEvent::StartedAgain { .. }
+        | AgentEvent::ChangedTool { .. }
         | AgentEvent::Repaired { .. }
         | AgentEvent::Labelled { .. } => None,
     };

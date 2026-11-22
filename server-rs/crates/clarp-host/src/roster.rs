@@ -91,7 +91,7 @@ pub(crate) fn occupied(owner: &str, session: &str) -> Value {
 }
 
 /// A request's body as the object it has to be. No body is an empty object.
-fn object(body: &Bytes) -> Result<Fields, Refusal> {
+pub(crate) fn object(body: &Bytes) -> Result<Fields, Refusal> {
     let given = if body.is_empty() {
         json!({})
     } else {

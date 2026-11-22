@@ -227,6 +227,27 @@ pub const RESTORED_OF_ONE: usize = 4_000;
 /// of all of it, what is most recent. Where nothing was said, the message is itself. As
 /// the Python Host does it (`backend/agy.py`, `_restore_prompt`), with the tool by its name.
 pub fn restored(tool: &str, said: &[(bool, &str)], message: &str) -> String {
+    let note = format!(
+        "{tool} no longer has this conversation (it prunes old ones), so it continues in a new \
+         one. Below is Clarp's record of it, most recent last; carry on from it. The new message \
+         follows the record."
+    );
+    recorded(&note, said, message)
+}
+
+/// A turn's message with the most recent part of the conversation before it, for an agent
+/// that changed its tool from `from` to `tool` and whose new tool has no session of the
+/// conversation: its first turn there opens with the Host's record, as [`restored`] does.
+pub fn carried(tool: &str, from: &str, said: &[(bool, &str)], message: &str) -> String {
+    let note = format!(
+        "This conversation moved from {from} to {tool}, which continues it in a new session. \
+         Below is Clarp's record of it, most recent last; carry on from it. The new message \
+         follows the record."
+    );
+    recorded(&note, said, message)
+}
+
+fn recorded(note: &str, said: &[(bool, &str)], message: &str) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for (by_user, text) in said {
         let shown = clarp_speech::markup::clean_for_display(text, false);
@@ -260,9 +281,7 @@ pub fn restored(tool: &str, said: &[(bool, &str)], message: &str) -> String {
     }
     kept.reverse();
     format!(
-        "{RESTORED_OPEN}\n[{tool} no longer has this conversation (it prunes old ones), so it \
-         continues in a new one. Below is Clarp's record of it, most recent last; carry on from \
-         it. The new message follows the record.]\n\n{}\n{RESTORED_CLOSE}\n\n{message}",
+        "{RESTORED_OPEN}\n[{note}]\n\n{}\n{RESTORED_CLOSE}\n\n{message}",
         kept.join("\n\n")
     )
 }

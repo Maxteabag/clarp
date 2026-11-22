@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 157;
+pub const HOST_CONTRACT: u64 = 158;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -350,6 +350,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("conversation_fork", 153),
     ("helper_ended_unreported", 155),
     ("agent_api_status", 154),
+    // `POST /agent-transit`: an agent moves to another tool with its conversation.
+    ("agent_backend_transit", 158),
     ("waited_send_order", 115),
     // GET /turn-queue reads the same priority order the mailbox dispatches.
     ("queue_user_first", 118),
@@ -745,6 +747,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::oracle::routes())
         .merge(crate::calendar::routes())
         .merge(crate::models::routes())
+        .merge(crate::agent_transit::routes())
         .merge(crate::usage::routes())
         .merge(crate::files::routes())
         .merge(crate::screens::routes())
@@ -1534,6 +1537,8 @@ pub(crate) fn agent_row(
     }
     // Whether its tool's account is used up: advice for whoever is about to write to it.
     row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
+    // A change of its backend that runs now (feature `agent_backend_transit`), else null.
+    row["transit"] = crate::agent_transit::running_of(&member.record.agent_id);
     // The face it is shown with: the picture it has of its own; else, unless it has a
     // symbol, the picture this Host ships for its name, or the one for its tool. And the
     // picture drawn for its name on its model, where there is one and the agent wears no

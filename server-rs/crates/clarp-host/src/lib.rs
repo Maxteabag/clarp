@@ -16,6 +16,7 @@ pub mod admin;
 pub mod admin_tool;
 pub mod agent;
 mod agent_moved;
+pub mod agent_transit;
 pub mod android_chip;
 pub mod apps;
 pub mod artifact_tool;

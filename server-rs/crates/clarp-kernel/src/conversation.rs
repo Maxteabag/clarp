@@ -249,6 +249,9 @@ impl Notice {
     /// that the agent was asked into a call, put on hold, that the call ended. Shown in
     /// the chat, never spoken, never a reason to page anybody.
     pub const SYSTEM: &'static str = "system";
+    /// The code of the Host's one row on a change of the agent's backend: that it moved, with
+    /// its conversation, or why it did not. Shown to every app as a row of role `system`.
+    pub const TRANSIT: &'static str = "agent-transit";
 }
 
 /// How a turn ended. It is not a row of the conversation: it belongs to the row that closed

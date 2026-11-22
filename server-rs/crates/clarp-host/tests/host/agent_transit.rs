@@ -1,0 +1,321 @@
+use super::*;
+
+/// A stand-in for Claude Code: says its version, and answers each message with "Heard: <it>",
+/// holding the turn while a file `hold` is there.
+const CLAUDE: &str = r#"#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+import time
+
+if "--version" in sys.argv:
+    print("2.1.321 (Claude Code)")
+    raise SystemExit(0)
+
+root = pathlib.Path(__file__).resolve().parent
+incoming = json.loads(sys.stdin.readline())
+prompt = incoming["message"]["content"][0]["text"]
+
+def send(kind, **fields):
+    print(json.dumps({"type": kind, "session_id": "claude-before", **fields}), flush=True)
+
+send("system", subtype="init")
+while (root / "hold").exists():
+    time.sleep(0.05)
+answer = "Heard: " + prompt.split("\n")[0]
+send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
+                           "content": [{"type": "text", "text": answer}]})
+send("result", subtype="success", is_error=False, result=answer)
+"#;
+
+/// A stand-in for Codex that only says its version: no turn of it runs here.
+const CODEX: &str =
+    "#!/bin/sh\ncase \"$1\" in --version) echo 'codex-cli 0.167.1'; exit 0;; esac\nexit 1\n";
+
+struct Setting {
+    place: Place,
+    home: std::path::PathBuf,
+    claude: std::path::PathBuf,
+    codex: std::path::PathBuf,
+}
+
+impl Setting {
+    fn new(name: &str) -> Self {
+        let place = Place::new(name);
+        let home = place.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let claude = place.root.join("claude");
+        program(&claude, CLAUDE);
+        let codex = place.root.join("codex");
+        program(&codex, CODEX);
+        Self {
+            place,
+            home,
+            claude,
+            codex,
+        }
+    }
+
+    /// A Host whose tools keep their sessions in this test's home, never the machine's.
+    fn start(&self) -> Host {
+        let claude_dir = self.home.join(".claude");
+        let codex_home = self.home.join(".codex");
+        std::fs::create_dir_all(&codex_home).unwrap();
+        // Signed in, as far as the Host looks.
+        std::fs::write(
+            codex_home.join("auth.json"),
+            r#"{"OPENAI_API_KEY": "made-up-key"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(
+            claude_dir.join(".credentials.json"),
+            r#"{"claudeAiOauth": {"accessToken": "made-up", "expiresAt": 4102444800000}}"#,
+        )
+        .unwrap();
+        let world = [
+            ("HOME", self.home.to_str().unwrap()),
+            ("CLAUDE_CONFIG_DIR", claude_dir.to_str().unwrap()),
+            ("CODEX_HOME", codex_home.to_str().unwrap()),
+            ("CLARP_CLAUDE_PROGRAM", self.claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", self.codex.to_str().unwrap()),
+        ];
+        self.place.start_in("", &[], &world)
+    }
+
+    fn rollouts(&self) -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        let mut dirs = vec![self.home.join(".codex").join("sessions")];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                if entry.path().is_dir() {
+                    dirs.push(entry.path());
+                } else if entry.file_name().to_string_lossy().starts_with("rollout-") {
+                    found.push(entry.path());
+                }
+            }
+        }
+        found
+    }
+}
+
+fn row(host: &Host, session: &str) -> Value {
+    host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == session)
+        .unwrap()
+        .clone()
+}
+
+fn talked(host: &Host, session: &str) {
+    host.send(session, "Remember the word lantern.", "bc-1");
+    wait_for("the answer", || {
+        host.conversation(session)
+            .iter()
+            .any(|(role, text)| role == "assistant" && text.contains("lantern"))
+    });
+    wait_for("the agent to be done", || {
+        row(host, session)["busy"] == false
+    });
+}
+
+/// Begins a change and waits until it is done or failed: its last state.
+fn transit(host: &Host, ask: Value) -> Value {
+    let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
+    assert_eq!(status, 202, "{began}");
+    let id = began["transit_id"].as_str().unwrap().to_string();
+    let session = ask["session"].as_str().unwrap().to_string();
+    let mut last = Value::Null;
+    wait_for("the change to end", || {
+        last = host.get(&format!("/agent-transit?session={session}&transit_id={id}"));
+        matches!(last["phase"].as_str(), Some("done" | "failed"))
+    });
+    last
+}
+
+#[test]
+fn an_agent_moves_to_codex_with_its_conversation_and_keeps_its_name() {
+    let setting = Setting::new("agent-transit");
+    let host = setting.start();
+    let made = host.post("/agents", json!({"name": "Mover", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap().to_string();
+    talked(&host, &session);
+    let conversation = row(&host, &session)["conversation_id"].clone();
+    assert!(!conversation.as_str().unwrap_or("").is_empty());
+    assert!(row(&host, &session)["transit"].is_null());
+
+    // What can be chosen: whether each tool can be moved to, and its default model.
+    let options = host.get(&format!("/agent-model-options?session={session}"));
+    assert_eq!(
+        options["providers"]["codex"]["available"], true,
+        "{options}"
+    );
+    assert!(options["providers"]["codex"]["unavailable_reason"].is_null());
+    assert_eq!(options["providers"]["muse"]["available"], false);
+    assert_eq!(
+        options["providers"]["muse"]["unavailable_reason"],
+        "not_supported"
+    );
+    let models = options["providers"]["codex"]["models"].as_array().unwrap();
+    assert_eq!(
+        models
+            .iter()
+            .filter(|model| model["default"] == true)
+            .count(),
+        1
+    );
+
+    let heard = host.listen();
+    let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                     "request_id": "move-1"});
+    let done = transit(&host, ask.clone());
+    assert_eq!(done["phase"], "done", "{done}");
+    assert!(done["error"].is_null());
+    assert_eq!(done["backend"], "codex");
+    assert_eq!(done["model"], "gpt-5.5");
+    assert_eq!(done["previous_backend"], "claude");
+    assert_eq!(done["carried"]["user"], 1, "{done}");
+    assert_eq!(done["carried"]["assistant"], 1, "{done}");
+    assert_eq!(done["carried"]["omitted"], 0);
+    // The same request again begins nothing new.
+    let (status, again) = host.ask("POST", "/agent-transit", Some(&ask));
+    assert_eq!(status, 202);
+    assert_eq!(again["transit_id"], done["transit_id"]);
+
+    // The rollout is where Codex looks and holds what was said.
+    let rollouts = setting.rollouts();
+    assert_eq!(rollouts.len(), 1, "{rollouts:?}");
+    let written = std::fs::read_to_string(&rollouts[0]).unwrap();
+    assert!(written.contains("Remember the word lantern."));
+    assert!(written.contains("Heard: Remember the word lantern."));
+
+    // The row has the new tool; the conversation keeps its name, its rows and the one row
+    // every app shows of the change.
+    let after = row(&host, &session);
+    assert_eq!(after["backend"], "codex");
+    assert_eq!(after["model"], "gpt-5.5");
+    assert_eq!(after["conversation_id"], conversation);
+    assert!(after["transit"].is_null());
+    let said = host.conversation(&session);
+    assert!(
+        said.iter()
+            .any(|(_, text)| text == "Remember the word lantern.")
+    );
+    assert!(
+        said.iter().any(|(role, text)| role == "system"
+            && text.starts_with("Now on Codex · ")
+            && text.ends_with("The conversation came along.")),
+        "{said:?}"
+    );
+    wait_for("the phases to be told", || {
+        let heard = heard.lock().unwrap();
+        let phases: Vec<&str> = heard
+            .iter()
+            .filter(|event| event["type"] == "agent-transit")
+            .filter_map(|event| event["phase"].as_str())
+            .collect();
+        phases == ["reading", "translating", "registering", "switching", "done"]
+    });
+
+    // A Host started again has the same.
+    drop(host);
+    let host = setting.start();
+    let again = row(&host, &session);
+    assert_eq!(again["backend"], "codex");
+    assert_eq!(again["conversation_id"], conversation);
+}
+
+#[test]
+fn nothing_changes_while_a_turn_runs_or_when_the_carry_fails() {
+    let setting = Setting::new("agent-transit-refused");
+    let host = setting.start();
+    let made = host.post("/agents", json!({"name": "Stayer", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap().to_string();
+    talked(&host, &session);
+    let conversation = row(&host, &session)["conversation_id"].clone();
+
+    // A turn runs: refused, and nothing is written.
+    let hold = setting.claude.parent().unwrap().join("hold");
+    std::fs::write(&hold, "").unwrap();
+    host.send(&session, "Take your time.", "bc-2");
+    wait_for("the turn to run", || row(&host, &session)["busy"] == true);
+    let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                     "request_id": "stay-1"});
+    let (status, refused) = host.ask("POST", "/agent-transit", Some(&ask));
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["error"], "turn_running");
+    assert!(setting.rollouts().is_empty());
+    std::fs::remove_file(&hold).unwrap();
+    wait_for("the agent to be done", || {
+        row(&host, &session)["busy"] == false
+    });
+
+    // Codex's index has a column this Host cannot fill: the carry fails and takes back what
+    // it wrote; the agent stays on its tool, under its name, and the chat says why.
+    let index = setting.home.join(".codex").join("state_5.sqlite");
+    let db = rusqlite::Connection::open(&index).unwrap();
+    db.execute_batch(
+        "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL,
+         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, source TEXT NOT NULL,
+         model_provider TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT NOT NULL,
+         sandbox_policy TEXT NOT NULL, approval_mode TEXT NOT NULL, unknown_now TEXT NOT NULL);",
+    )
+    .unwrap();
+    drop(db);
+    let failed = transit(&host, ask);
+    assert_eq!(failed["phase"], "failed", "{failed}");
+    assert!(failed["error"].as_str().unwrap().contains("unknown_now"));
+    assert!(setting.rollouts().is_empty());
+    let after = row(&host, &session);
+    assert_eq!(after["backend"], "claude");
+    assert_eq!(after["conversation_id"], conversation);
+    assert!(
+        host.conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "system"
+                && text.starts_with("Couldn't move to Codex: ")
+                && text.contains(". Still on Claude")),
+        "{:?}",
+        host.conversation(&session)
+    );
+
+    // Asked wrongly: refused before anything is done.
+    let refusal = |ask: Value| {
+        let (status, said) = host.ask("POST", "/agent-transit", Some(&ask));
+        (status, said["error"].as_str().unwrap_or("").to_string())
+    };
+    let other = |more: Value| {
+        let mut ask = json!({"session": session, "request_id": "x"});
+        for (key, value) in more.as_object().unwrap() {
+            ask[key] = value.clone();
+        }
+        ask
+    };
+    assert_eq!(
+        refusal(other(json!({"backend": "nothing"}))),
+        (400, "unknown_backend".into())
+    );
+    assert_eq!(
+        refusal(other(json!({"backend": "codex", "model": "no-such-model"}))),
+        (400, "unknown_model".into())
+    );
+    assert_eq!(
+        refusal(other(json!({"backend": "muse", "model": ""}))),
+        (400, "backend_unavailable".into())
+    );
+    assert_eq!(
+        refusal(other(json!({"backend": "claude", "model": ""}))),
+        (400, "same_backend_and_model".into())
+    );
+    let (status, _) = host.ask("GET", "/agent-transit?transit_id=nothing", None);
+    assert_eq!(status, 404);
+    // And the agent still answers on its own tool.
+    host.send(&session, "Still there?", "bc-3");
+    wait_for("its answer", || {
+        host.conversation(&session)
+            .iter()
+            .any(|(_, text)| text == "Heard: Still there?")
+    });
+}

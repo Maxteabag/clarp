@@ -526,6 +526,15 @@ the daily schedule.
 
 ## Rust-first features
 
+- **Moving an agent to another backend (issue 720, Rust contract 158).** `POST /agent-transit`,
+  `GET /agent-transit`, the `agent-transit` event and `clarp-admin agent transit` move an agent to
+  another tool with its conversation, rebuilt from the `transit` tool's writers: the Host writes
+  its own record of the conversation as a native Claude or Codex session, or opens the agent's
+  next turn with that record for Antigravity, Grok and OpenCode.
+  The agent's log holds the change; a Host stopped before the fleet record follows runs the
+  agent on the new tool when it opens it again (the model is then the tool's default). What
+  the Host knows of changes is in memory only. The Python Host has none of it.
+
 - **Agent activity feature advertisement (feature 156).** The Rust Host
   advertises `agent_state` to clients that gate on it. Both Hosts already
   send `agent-state` and `agent-activity` in the base event stream.

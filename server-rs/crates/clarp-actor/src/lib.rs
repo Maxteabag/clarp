@@ -375,6 +375,10 @@ pub struct QueueState {
     pub revision: u64,
 }
 
+/// How the id of the Host's row on a change of the agent's backend begins
+/// ([`Notice::TRANSIT`]).
+pub const TRANSIT_ROW: &str = "agent-transit-";
+
 /// What became of a waiting message its user sent by hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ByHand {
@@ -3675,10 +3679,16 @@ impl Actor {
         if id.is_empty() || text.trim().is_empty() || self.row(id)?.is_some() {
             return Ok((false, Outputs::default()));
         }
+        // The Host's row on a change of the agent's backend is told as that.
+        let code = if id.starts_with(TRANSIT_ROW) {
+            Notice::TRANSIT
+        } else {
+            Notice::SYSTEM
+        };
         let notice = Entry::Notice(Notice {
             id: id.to_string(),
             turn: None,
-            code: Notice::SYSTEM.to_string(),
+            code: code.to_string(),
             text: text.to_string(),
             trace_id: None,
         });
@@ -3855,6 +3865,149 @@ impl Actor {
             ..Outputs::default()
         };
         Ok((true, out))
+    }
+
+    /// What stands in the way of changing the agent's tool: whether a turn runs, and how many
+    /// messages wait. `None`: nothing.
+    pub fn busy_for_change(&self) -> Option<(bool, usize)> {
+        let agent = self.recorder.agent();
+        let live = agent.live().is_some();
+        let waiting = agent.waiting().count();
+        (live || waiting > 0).then_some((live, waiting))
+    }
+
+    /// The tools the agent's log last changed it from and to, since it was last started again.
+    pub fn changed_tool(&self) -> Option<(String, String)> {
+        self.recorder
+            .agent()
+            .changed()
+            .map(|(from, to)| (from.to_string(), to.to_string()))
+    }
+
+    /// What was said in the agent's conversation (since it was last started again), the
+    /// oldest first: the user's words and the agent's answers, each with when. What goes on
+    /// in a turn besides (tool calls, what they returned, thinking) is not in it. Of a long
+    /// conversation the newest part is read, until `most` signs are held and one more.
+    pub fn said_so_far(
+        &self,
+        most: usize,
+    ) -> Result<Vec<clarp_backend::transit::Said>, ActorError> {
+        use clarp_backend::transit::{Role, Said as Carried};
+        const AT_A_TIME: usize = 200;
+        let mut said: Vec<Carried> = Vec::new(); // the newest first
+        let mut held = 0usize;
+        let mut page = Some(self.tail_of(AT_A_TIME, Which::All)?);
+        while let Some(rows) = page.take() {
+            for row in rows.entries.iter().rev() {
+                if row.live {
+                    continue;
+                }
+                let (role, text) = match &row.entry {
+                    // The user's compaction is the tool's own command, said to the tool that
+                    // had the conversation: nothing that was said in it.
+                    Entry::Message(message) if matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION) =>
+                    {
+                        continue;
+                    }
+                    Entry::Message(message) => (Role::User, message.text.clone()),
+                    Entry::Reply(reply) => (Role::Assistant, reply.text.clone()),
+                    Entry::Imported(brought) => {
+                        let text = brought.row["text"].as_str().unwrap_or_default().to_string();
+                        match brought.row["role"].as_str() {
+                            Some("user") => (Role::User, text),
+                            Some("assistant") => (Role::Assistant, text),
+                            _ => continue,
+                        }
+                    }
+                    _ => continue,
+                };
+                if text.trim().is_empty() {
+                    continue;
+                }
+                held += text.chars().count();
+                said.push(Carried {
+                    role,
+                    text,
+                    at_ms: row.ts_ms,
+                });
+            }
+            let oldest = rows.entries.first().map(|row| row.entry.id().to_string());
+            if held <= most
+                && rows.has_more
+                && let Some(oldest) = oldest
+            {
+                page = self.before_of(&oldest, AT_A_TIME, Which::All)?;
+            }
+        }
+        said.reverse();
+        Ok(said)
+    }
+
+    /// The agent goes on with another tool, `backend`: the session of it its conversation was
+    /// written as, or none, when its next turn is to begin one with the Host's record of it.
+    /// `notice` is what its conversation says of the change, quietly, in the same write.
+    /// The inner error is the agent's refusal: a turn runs, or messages wait.
+    pub fn change_tool(
+        &mut self,
+        backend: &str,
+        backend_session: Option<String>,
+        notice: &str,
+        now_ms: i64,
+    ) -> Result<(Result<(), String>, Outputs), ActorError> {
+        let from = self.backend_id().to_string();
+        // A Claude session begins here: older launches in it cannot make jobs for this agent.
+        let binding = backend_session
+            .as_ref()
+            .filter(|_| backend == "claude")
+            .map(|native| clarp_kernel::provider_tasks::JournalEntry {
+                native: native.clone(),
+                session: clarp_kernel::provider_tasks::Session {
+                    revision: 1,
+                    bound_at: now_ms,
+                    cwd: self.profile.cwd.to_string_lossy().into_owned(),
+                    ..Default::default()
+                },
+                records: Vec::new(),
+            });
+        let mut batch = self.recorder.batch();
+        let change = Command::ChangeTool {
+            from,
+            backend: backend.to_string(),
+            backend_session,
+        };
+        if let Err(refusal) = batch.command(change, now_ms) {
+            return Ok((Err(refusal.to_string()), Outputs::default()));
+        }
+        if !notice.trim().is_empty() {
+            let said = Entry::Notice(Notice {
+                id: format!("{TRANSIT_ROW}{now_ms}"),
+                turn: None,
+                code: Notice::TRANSIT.to_string(),
+                text: notice.to_string(),
+                trace_id: None,
+            });
+            batch.item(written(&said, now_ms)?);
+        }
+        if let Some(entry) = &binding {
+            batch.item(NewItem::new(
+                kind::PROVIDER_JOBS,
+                now_ms,
+                serde_json::to_vec(entry).map_err(|e| ActorError::Corrupt(e.to_string()))?,
+            ));
+        }
+        batch.commit()?;
+        if let Some(entry) = binding {
+            self.provider_sessions.insert(entry.native, entry.session);
+        }
+        let out = Outputs {
+            changed: Changed {
+                conversation: !notice.trim().is_empty(),
+                status: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        Ok((Ok(()), out))
     }
 
     /// The agent says what it is busy with beyond its turns, or with an empty label, that it
@@ -4405,6 +4558,14 @@ impl Actor {
                 .as_deref()
                 .is_some_and(|session| !self.backend.keeps(session));
         let backend_session = backend_session.filter(|_| !lost);
+        // An agent that changed its tool, whose new tool has no session of its conversation:
+        // the turn begins one, which opens with the Host's record of it.
+        let carried_from = self
+            .recorder
+            .agent()
+            .carried_from()
+            .filter(|_| takeover.is_none() && backend_session.is_none())
+            .map(str::to_string);
         // A turn that waited for an account is taken up again: the tool, which has the turn
         // in its own session, is told so. One whose tool never got as far as a session is
         // given the message, as if for the first time.
@@ -4423,17 +4584,22 @@ impl Actor {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
             None => message.text,
         };
-        let prompt = if lost && !bare {
+        let prompt = if (lost || carried_from.is_some()) && !bare {
             let said = self.said_before(&message.id)?;
             let said: Vec<(bool, &str)> = said
                 .iter()
                 .map(|(by_user, text)| (*by_user, text.as_str()))
                 .collect();
-            let declared = clarp_backend::catalogue::declared(self.backend.id());
-            let tool = declared["shown"]["label"]
-                .as_str()
-                .unwrap_or(self.backend.id());
-            told::restored(tool, &said, &prompt)
+            let label = |id: &str| {
+                clarp_backend::catalogue::declared(id)["shown"]["label"]
+                    .as_str()
+                    .map_or_else(|| id.to_string(), str::to_string)
+            };
+            let tool = label(self.backend.id());
+            match carried_from.as_deref().filter(|_| !lost) {
+                Some(from) => told::carried(&tool, &label(from), &said, &prompt),
+                None => told::restored(&tool, &said, &prompt),
+            }
         } else {
             prompt
         };

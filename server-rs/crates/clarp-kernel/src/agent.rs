@@ -138,6 +138,15 @@ pub enum Command {
     /// The agent begins with a session its tool kept on this machine: its first turn
     /// continues it. Only before its first turn.
     TakeUp { backend_session: String },
+    /// The agent goes on with another tool, `backend`, after `from`. Its conversation was
+    /// written as a session of that tool, which its next turn continues; or, where none was
+    /// (`None`), its next turn begins one that opens with the Host's record of it. Only
+    /// while no turn runs and nothing waits.
+    ChangeTool {
+        from: String,
+        backend: String,
+        backend_session: Option<String>,
+    },
     /// The agent is started again: its next turn begins a conversation with its tool
     /// instead of continuing the one it has. Only when no turn runs: a turn that runs is
     /// stopped first.
@@ -259,6 +268,14 @@ pub enum AgentEvent {
     StartedAgain {
         at_ms: i64,
     },
+    /// The agent goes on with another tool ([`Command::ChangeTool`]). Its conversation, as
+    /// it is read, goes on: only the tool's session is another.
+    ChangedTool {
+        from: String,
+        backend: String,
+        backend_session: Option<String>,
+        at_ms: i64,
+    },
     /// What the user's compaction did, the turn it ran as having ended: what the agent's row
     /// says of its last compaction (`last_compaction`) until the next one.
     Compacted {
@@ -314,6 +331,8 @@ pub enum Refusal {
     NoCompactionOwed(TurnId),
     /// The live turn or its next waiting user message changed during takeover.
     TakeoverStale,
+    /// Messages wait for the agent: what changes under them would answer them otherwise.
+    Waiting,
 }
 
 impl std::fmt::Display for Refusal {
@@ -334,6 +353,7 @@ impl std::fmt::Display for Refusal {
                 write!(f, "turn {} is no compaction whose outcome is owed", turn.0)
             }
             Self::TakeoverStale => write!(f, "the selected turn can no longer be taken over"),
+            Self::Waiting => write!(f, "messages wait for the agent"),
         }
     }
 }
@@ -401,6 +421,12 @@ pub struct Agent {
     resting: Option<Rest>,
     /// The agent came from another Host, where it had worked.
     arrived: bool,
+    /// The tool the agent had before it changed to the one it has, while it has no session
+    /// of the new one: its next turn begins one with the Host's record of the conversation.
+    carried_from: Option<String>,
+    /// The tool the agent's log last changed it from and to, since it was last started
+    /// again: a record elsewhere that still says the first lost the change.
+    changed: Option<(String, String)>,
     /// Where in the agent's own log the event being applied is: a send's revisions are taken
     /// from it. Set by whoever applies events that are in the log (the journal).
     at: u64,
@@ -471,6 +497,8 @@ impl Default for Agent {
             label_at: None,
             resting: None,
             arrived: false,
+            carried_from: None,
+            changed: None,
             at: 0,
             user_stop_generation: 0,
             deliveries: crate::delivery::Ledger::default(),
@@ -671,6 +699,20 @@ impl Agent {
     /// The tool's own session, where the agent's next turn continues.
     pub fn backend_session(&self) -> Option<&str> {
         self.backend_session.as_deref()
+    }
+
+    /// The tool the agent changed from, while its new tool has no session of its conversation
+    /// yet: its next turn begins one that opens with the Host's record of it.
+    pub fn carried_from(&self) -> Option<&str> {
+        self.carried_from.as_deref()
+    }
+
+    /// The tools the agent's log last changed it from and to, since it was last started
+    /// again.
+    pub fn changed(&self) -> Option<(&str, &str)> {
+        self.changed
+            .as_ref()
+            .map(|(from, to)| (from.as_str(), to.as_str()))
     }
 
     /// Whether a live tool ever named a session that this agent could not bind.
@@ -1065,6 +1107,25 @@ impl Agent {
                     return Err(Refusal::AtWork);
                 }
                 work.record(AgentEvent::StartedAgain { at_ms: now_ms });
+            }
+            Command::ChangeTool {
+                from,
+                backend,
+                backend_session,
+            } => {
+                work.agent.require_here()?;
+                if work.agent.live.is_some() {
+                    return Err(Refusal::AtWork);
+                }
+                if !work.agent.mailbox.is_empty() {
+                    return Err(Refusal::Waiting);
+                }
+                work.record(AgentEvent::ChangedTool {
+                    from,
+                    backend,
+                    backend_session,
+                    at_ms: now_ms,
+                });
             }
             Command::RecordCompaction { turn, said } => {
                 if work.agent.compaction_owed.as_ref().map(|owed| owed.id) != Some(turn) {
@@ -1476,8 +1537,20 @@ impl Agent {
             AgentEvent::TookUp {
                 backend_session, ..
             } => self.bind_session(Some(backend_session)),
+            AgentEvent::ChangedTool {
+                from,
+                backend,
+                backend_session,
+                ..
+            } => {
+                self.bind_session(backend_session.as_deref());
+                self.carried_from = self.backend_session.is_none().then(|| from.clone());
+                self.changed = Some((from.clone(), backend.clone()));
+            }
             AgentEvent::StartedAgain { .. } => {
                 self.backend_session = None;
+                self.carried_from = None;
+                self.changed = None;
                 self.note = None;
                 // Python counts both the pause and its release even for an idle agent.
                 // For a busy agent the Host records those transitions around the relaunch.
@@ -1654,6 +1727,9 @@ impl Agent {
             if let TurnEvent::Bound { backend_session } = change {
                 self.bind_session(Some(backend_session));
                 self.refused_live_binding |= self.backend_session.is_none();
+                if self.backend_session.is_some() {
+                    self.carried_from = None;
+                }
             }
             match live.apply(change)? {
                 Turn::Settled(ended) => {
@@ -3099,6 +3175,73 @@ mod tests {
         );
         assert_eq!(a.agent.backend_session(), Some("sess-9"));
         assert!(a.agent.arrived());
+    }
+
+    #[test]
+    fn agent_transit_only_at_rest_keeps_what_the_agent_was_given() {
+        let change = |session: Option<&str>| Command::ChangeTool {
+            from: "claude".to_string(),
+            backend: "codex".to_string(),
+            backend_session: session.map(str::to_string),
+        };
+        let bound = |turn: u64, session: &str| Command::TurnBound {
+            turn: TurnId(turn),
+            backend_session: session.to_string(),
+        };
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.send(bound(1, "claude-1")).unwrap();
+        assert_eq!(a.send(change(Some("thread-1"))), Err(Refusal::AtWork));
+        a.user(11);
+        a.finish(1);
+        // The message that waited runs now: still not at rest.
+        assert!(a.send(change(Some("thread-1"))).is_err());
+        a.send(Command::TurnStarted { turn: TurnId(2) }).unwrap();
+        a.finish(2);
+        assert_eq!(a.agent.backend_session(), Some("claude-1"));
+
+        a.send(change(Some("thread-1"))).unwrap();
+        assert_eq!(a.agent.backend_session(), Some("thread-1"));
+        assert_eq!(a.agent.carried_from(), None);
+        assert_eq!(a.agent.changed(), Some(("claude", "codex")));
+
+        // Changed with no session of the new tool: its next turn begins one with the record,
+        // until a turn names its session.
+        a.send(change(None)).unwrap();
+        assert_eq!(a.agent.backend_session(), None);
+        assert_eq!(a.agent.carried_from(), Some("claude"));
+        a.user(12);
+        a.send(Command::TurnStarted { turn: TurnId(3) }).unwrap();
+        a.send(bound(3, "fresh-3")).unwrap();
+        assert_eq!(a.agent.carried_from(), None);
+        a.finish(3);
+
+        // Started again, the change is no longer the agent's last word on its tool.
+        a.send(Command::StartAgain).unwrap();
+        assert_eq!(a.agent.changed(), None);
+    }
+
+    #[test]
+    fn agent_transit_is_held_by_a_waiting_message() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::Stop {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.finish(1);
+        a.background(11);
+        assert_eq!(a.live(), None, "a held mailbox starts nothing");
+        assert_eq!(a.waiting(), vec![2]);
+        let changed = a.send(Command::ChangeTool {
+            from: "claude".to_string(),
+            backend: "codex".to_string(),
+            backend_session: Some("thread-1".to_string()),
+        });
+        assert_eq!(changed, Err(Refusal::Waiting));
+        assert_eq!(a.agent.changed(), None);
     }
 
     #[test]

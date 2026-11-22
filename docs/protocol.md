@@ -683,6 +683,60 @@ stores it and answers `{ok: true, session, chat_view}`, and broadcasts `agent-ro
 In conversation view, the brief the Host adds to each of the agent's turns says that its final
 reply and its posts reach the user and its text in between does not.
 
+#### Moving an agent to another backend
+
+Rust Host feature `agent_backend_transit` (issue 720, contract 158). An agent moves to another
+tool (`claude`, `codex`, `agy`, `grok`, `opencode`) and keeps its conversation.
+
+**What can be chosen.** `GET /agent-model-options?session=S` carries, on each tool's row
+(`providers.<backend>`), `available` (bool) and, when false, `unavailable_reason`, one of
+`not_installed` (the tool is missing on this Host), `signed_out` (no login file), `usage_limit`
+(with `until_ms` when the Host knows the reset), `not_supported` (a tool an agent cannot be moved
+to: `deepseek`, `muse`) or `error` (with `unavailable_detail`). `until_ms` and
+`unavailable_detail` are null otherwise. Each model has `default` (bool): the model the tool
+runs when none is named (the owner's configured default where it is listed, else the first).
+
+**Start.** `POST /agent-transit {session, backend, model, effort?, request_id}` answers
+`202 {transit_id}`. The same `request_id` for the same agent answers the same `transit_id`
+and starts nothing. `model` is an id the tool's row lists (`""`: the tool's default). `effort`
+absent keeps the agent's effort where the target takes it. Refusals, after which nothing has
+started: `400 {error: "unknown_backend" | "unknown_model" | "same_backend_and_model"}`,
+`400 {error: "backend_unavailable", reason, until_ms?, unavailable_detail?}`,
+`400 {error: "invalid effort for backend", valid_efforts}`, `409 {error: "turn_running"}`,
+`409 {error: "messages_waiting"}`, `409 {error: "transit_running"}`, `404` for no such agent.
+
+**Progress.** The event `agent-transit` `{agent_id, session, transit_id, backend, model, phase,
+error, previous_backend, previous_model, carried}`; `phase` is `reading`, `translating`,
+`registering`, `switching`, then `done` or `failed`; `error` is text on `failed`, else null.
+On `done`, `carried` is `{turns, user, assistant, omitted}` (`omitted`: the oldest things said
+that the 400,000-character budget left out, the newest kept), else null. A change of the model
+alone (same backend) goes straight to `switching` and `done`, with `carried` null.
+`GET /agent-transit?session=S&transit_id=T` answers the same object at its latest phase; an
+unknown id answers 404. The Host keeps these in memory: after a restart it has forgotten the
+finished ones. While a change runs, the agent's snapshot row carries `transit` `{transit_id,
+phase, backend, model}`, null otherwise; an `agent-roster` with `kind: agent-transit` is sent
+when one begins and when it ends.
+
+**Result.** On `done` the agent's row carries the new `backend`, `model` and `effort`, and the
+tool's session changes inside the Host. `conversation_id` stays: an app keeps its cached chat.
+Persona, voice, goals, jobs and history stay. The Host writes one row into the conversation,
+`role` `system`, `origin` `system`, `kind` `agent-transit`, in the conversation view:
+"Now on <Backend> · <Model>. The conversation came along." (with ", except its oldest N
+turns." when some were left out, "its oldest turn" for one), "Now on <Model>." for a model change, or on failure
+"Couldn't move to <Backend>: <reason>. Still on <Old backend> · <Old model>." On failure
+nothing else changes.
+
+What is carried: the user's words and the agent's answers of each turn of the current
+conversation (since the agent was last started again), in order, from the Host's own record.
+Claude and Codex get a native session written where the tool keeps its sessions; the agent's
+next turn resumes it. Antigravity, Grok and OpenCode get none yet (the Host never opens
+Antigravity's database): the agent's next turn there begins a new conversation that opens with
+the Host's record of the old one (its most recent 60,000 bytes). They are reported available. Not carried: tool calls and what they returned, thinking, attachments and images, the
+old tool's compaction summaries, system and developer prompts, and sub-agent sessions.
+
+`clarp-admin agent transit --session S --backend B [--model M] [--effort E]` starts a change,
+waits until it is done or failed, and prints its last state (exit 1 when it failed).
+
 #### Pair conversations: `GET /agent-conversations`
 
 Agent-to-agent exchanges are also readable as one conversation per pair,
@@ -746,8 +800,9 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
+| `agent-transit` | `agent_id`, `session`, `transit_id`, `backend`, `model`, `phase` ∈ reading, translating, registering, switching, done, failed, `error` (text on failed, else null), `previous_backend`, `previous_model`, `carried` (on done) | Rust feature `agent_backend_transit` (contract 158): how a move of the agent to another backend goes. Show progress, then the result; see [Moving an agent to another backend](#moving-an-agent-to-another-backend). |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text`, `origin`, `sender` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. An event that names an item (edited, deleted, a retired goal wake) also carries its `origin` and `sender` as `GET /turn-queue` does (R182). |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 108). |

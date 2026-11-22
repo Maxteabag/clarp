@@ -1586,6 +1586,14 @@ pub fn row(version: &Versioned) -> Value {
         }
         // Why a turn failed, under the message that caused it: the Host's own word, not the
         // agent's and not the user's.
+        // The Host's row on a change of the agent's backend (feature `agent_backend_transit`).
+        Entry::Notice(notice) if notice.code == Notice::TRANSIT => {
+            row["role"] = json!("system");
+            row["origin"] = json!("system");
+            row["kind"] = json!(Notice::TRANSIT);
+            row["text"] = json!(notice.text);
+            row["trace_id"] = json!("");
+        }
         Entry::Notice(notice)
             if matches!(notice.code.as_str(), Notice::TURN_FAILED | Notice::SYSTEM) =>
         {

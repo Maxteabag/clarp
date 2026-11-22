@@ -41,6 +41,10 @@ impl Actor {
                         backend_session: id,
                         ..
                     }
+                    | AgentEvent::ChangedTool {
+                        backend_session: Some(id),
+                        ..
+                    }
                     | AgentEvent::Turn {
                         change:
                             TurnEvent::Bound {

@@ -153,6 +153,7 @@ pub fn is_conversation(entry: &Entry, session_rows: Option<usize>) -> bool {
             notice.code.as_str(),
             clarp_kernel::conversation::Notice::SYSTEM
                 | clarp_kernel::conversation::Notice::TURN_FAILED
+                | clarp_kernel::conversation::Notice::TRANSIT
         ),
         Entry::Reply(_) => session_rows.is_some(),
         Entry::Imported(import) => {

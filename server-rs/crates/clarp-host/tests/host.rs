@@ -21,6 +21,8 @@ mod agent_creation;
 mod agent_moved;
 #[path = "host/agent_portraits.rs"]
 mod agent_portraits;
+#[path = "host/agent_transit.rs"]
+mod agent_transit;
 #[path = "host/backend_auth.rs"]
 mod backend_auth;
 #[path = "host/body_text.rs"]

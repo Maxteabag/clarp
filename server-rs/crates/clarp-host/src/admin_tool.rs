@@ -984,14 +984,67 @@ async fn agent_helper_state(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// `clarp-admin agent transit --session S --backend B [--model M] [--effort E]`: moves an agent
+/// to another backend with its conversation ([`crate::agent_transit`]), waits until the change
+/// is done or failed, and prints its last state; exits 1 when it failed or was refused.
+async fn agent_transit(app: &App, args: &[String]) -> ToolAnswer {
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin agent transit [-h] --session SESSION --backend BACKEND \
+                 [--model MODEL] [--effort EFFORT]\n\
+                 clarp-admin agent transit: error: {why}"
+            ),
+        )
+    };
+    let parsed = match parse(
+        args,
+        &["--session", "--backend", "--model", "--effort"],
+        &[],
+        &[],
+    ) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let mut asked = roster::Fields::new();
+    for (flag, key) in [("--session", "session"), ("--backend", "backend")] {
+        let Some(said) = parsed.option(flag).filter(|said| !said.trim().is_empty()) else {
+            return usage(&format!("the following arguments are required: {flag}"));
+        };
+        asked.insert(key.to_string(), json!(said));
+    }
+    // No model: the tool's default.
+    asked.insert(
+        "model".to_string(),
+        json!(parsed.option("--model").unwrap_or("")),
+    );
+    if let Some(effort) = parsed.option("--effort") {
+        asked.insert("effort".to_string(), json!(effort));
+    }
+    asked.insert("request_id".to_string(), json!(ids::uuid()));
+    match crate::agent_transit::start_and_wait(app, &asked).await {
+        Ok(state) if state["phase"] == "done" => shown(&state),
+        Ok(state) => ToolAnswer::said(1, python::dumps(&state)),
+        Err(refused) => {
+            let (status, body) = refused.answered();
+            ToolAnswer::said(1, format!("clarp-admin: HTTP {status}: {body}"))
+        }
+    }
+}
+
 /// `clarp-admin agent ...`: what an agent does about other agents.
 async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     match args.split_first() {
         Some((command, rest)) if command == "create" => agent_create(app, call, rest).await,
         Some((command, rest)) if command == "helper-state" => agent_helper_state(app, rest).await,
         Some((command, rest)) if command == "fork" => agent_fork(app, call, rest).await,
+        Some((command, rest)) if command == "transit" => agent_transit(app, rest).await,
         Some((command, _)) => not_here(&format!("agent {command}")),
-        None => ToolAnswer::said(2, "usage: clarp-admin agent {create,fork,helper-state} ..."),
+        None => ToolAnswer::said(
+            2,
+            "usage: clarp-admin agent {create,fork,helper-state,transit} ...",
+        ),
     }
 }
 
