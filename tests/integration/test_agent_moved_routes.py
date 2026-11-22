@@ -226,3 +226,31 @@ def test_a_routed_send_names_where_it_went_through_a_split_runtime(fake_ctx, tmp
         runtime.server_close()
     assert status == 409 and body["error"] == "agent_moved"
     assert body["moved_to"] == {"host": "rust-host", "id": "r-1"}
+
+
+
+def test_a_send_the_model_orchestrator_routes_answers_where_too(fake_ctx, monkeypatch):
+    """With the model orchestrator on, a send it routes to a moved agent got the routing
+    envelope (409, error agent_moved) without where the agent went: the orchestrator caught
+    the refusal and its HTTP adapter never answered it as every door does."""
+    import threading
+    from lib import orchestrator, settings_store
+    from tests.integration.test_server_di import _free_port
+    settings_store.set_bool("orchestrator.enabled", True)       # before the server builds its delegator
+    settings_store.set_bool("orchestrator.fallback_only", False)
+    monkeypatch.setattr(orchestrator, "call_model", lambda _packet, _settings: {
+        "kind": "agent_message", "target_session": "rachel", "confidence": 0.99,
+        "addressing": True, "text_to_send": "check the build", "reason": "routed by the model"})
+    srv = server_module.build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        assert _call(base, "POST", "/agent-moved", {**MOVE, "session": "rachel"})[0] == 200
+        status, body = _call(base, "POST", "/send", {
+            "text": "please check the build", "session": "claude", "hands_free": True,
+            "client_msg_id": "c-model-routed"})
+        assert status == 409 and body["error"] == "agent_moved", body
+        assert body["moved_to"] == {"host": "rust-host", "id": "r-1"} and body["moved_at"] > 0, body
+    finally:
+        srv.shutdown()
+        srv.server_close()

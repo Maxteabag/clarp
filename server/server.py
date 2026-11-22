@@ -2983,6 +2983,13 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             orchestrated.action == FINAL_FALLBACK and not req.orchestrator_fallback
         ):
             return False
+        if not orchestrated.ok and orchestrated.status == 409:
+            # A routed send refused because its agent moved answers as every door does,
+            # naming where it went, not with the routing envelope (PR 657's agent id).
+            refusal = DispatchError(orchestrated.status, orchestrated.error,
+                                    agent_id=orchestrated.refused_agent_id)
+            if self._answer_moved(refusal, session=orchestrated.session):
+                return True
         status = orchestrated.status
         body = {
             "ok": orchestrated.ok,
