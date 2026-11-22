@@ -94,10 +94,13 @@ class Tree:
             return 'outdated'
         return 'foreign'
 
-    def chosen(self, active):
+    def chosen(self, active, off=None):
         if active is not None:
             self.ms.INSTALL_STATE.parent.mkdir(parents=True, exist_ok=True)
-            self.ms.INSTALL_STATE.write_text(json.dumps({'skills': active, 'channel': 'x'}))
+            state = {'skills': active, 'channel': 'x'}
+            if off is not None:
+                state['skills_off'] = off
+            self.ms.INSTALL_STATE.write_text(json.dumps(state))
 
     def manifest(self, value) -> None:
         path = self.release / 'skills/manifest.json'
@@ -219,7 +222,7 @@ def status_runs(ms, root: Path):
         base = root / f'status-{int(agy)}'
         base.mkdir()
         tree = Tree(ms, base, agy=agy)
-        items, active, present, n = [], [], [], 0
+        items, off, present, n = [], [], [], 0
         for claude in INTENTS:
             for codex in INTENTS:
                 for enabled in (False, True):
@@ -235,29 +238,27 @@ def status_runs(ms, root: Path):
                             if n % 7 == 3:
                                 item['enabled'] = 'kept'
                                 item['health'] = 'kept'
-                            if n % 11 == 5:
-                                item['default_enabled'] = False
                             tree.source(skill_id, present=has_source)
                             tree.put(tree.claude, skill_id, claude)
                             tree.put(tree.codex, skill_id, codex)
                             if agy:
                                 tree.put(tree.agy, skill_id, INTENTS[n % len(INTENTS)])
-                            if enabled:
-                                active.append(skill_id)
+                            if not enabled:
+                                off.append(skill_id)
                             if has_source:
                                 present.append(skill_id)
                             items.append(item)
                             n += 1
         items.append({'id': '7', 'pack': 'core'})
         tree.source('7')
-        active.append('7')
+        off.append('7')
         present.append('7')
-        active.append('gone-from-manifest')
+        off.append('gone-from-manifest')
         tree.manifest({'version': 1, 'skills': items})
-        tree.chosen(active)
+        tree.chosen([], off)
         found = {name: bool(ms.shutil.which(name)) for name in ('gh', 'wacli')}
         rows = ms.status()
-        runs.append(normal(root, {'agy': agy, 'manifest': items, 'chosen': active,
+        runs.append(normal(root, {'agy': agy, 'manifest': items, 'off': off,
                                   'present': present, 'found': found, 'rows': rows}))
     return runs
 
@@ -319,7 +320,8 @@ def change_cases(ms, root: Path):
                 tree.put(tree.codex, skill, codex)
             if agy is not None and shared != 'agy':
                 tree.put(tree.agy, skill, agy)
-        tree.chosen(active)
+        off = None if active is None else (['unrelated', skill] if enabled else ['unrelated'])
+        tree.chosen(active, off)
         before = {'claude': tree.seen(tree.claude, skill), 'codex': tree.seen(tree.codex, skill)}
         if agy is not None:
             before['agy'] = tree.seen(tree.agy, skill)
@@ -337,13 +339,14 @@ def change_cases(ms, root: Path):
         state = json.loads(ms.INSTALL_STATE.read_text()) if ms.INSTALL_STATE.is_file() else None
         cases.append(normal(root, {
             'skill': skill, 'manifest': items, 'enabled': enabled,
-            'present': present, 'shared': shared, 'chosen': active, 'before': before,
+            'present': present, 'shared': shared, 'chosen': active, 'off': off, 'before': before,
             'roots': roots, 'used': used,
             'destinations': {name: str(Path(path) / skill) for name, path in
                              [('claude', tree.claude), ('codex', tree.codex), ('agy', tree.agy)]},
             'result': result, 'after': after,
             'chosen_after': None if state is None else state.get('skills'),
-            'state_kept': None if state is None else sorted(k for k in state if k != 'skills')}))
+            'off_after': None if state is None else state.get('skills_off'),
+            'state_kept': None if state is None else sorted(k for k in state if k not in ('skills', 'skills_off'))}))
 
     for pack in ('core', 'artifacts'):
         for enabled in (True, False):

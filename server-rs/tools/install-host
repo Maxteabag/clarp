@@ -512,7 +512,7 @@ printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
 # skills, copied into a place of its own for this version, so that a link an earlier version
 # left reads as outdated and is put right by the Host at its start. Named to the Host with the
 # releases of the Python Host that kept the tools before (a link it left is Clarp's own too) and
-# that Host's record of the skills it kept chosen, which the Host reads once and never writes.
+# that Host's record of explicit skill opt-outs, which the Host reads once and never writes.
 # This tool never touches a tool's skill folder. The programs a skill requires are looked up on
 # the unit's PATH below, which is the Python Host's.
 skills=""
