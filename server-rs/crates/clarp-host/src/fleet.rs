@@ -928,11 +928,17 @@ enum Ask {
         bytes: [Vec<u8>; 2],
         answer: Answer<bool>,
     },
-    /// The owner removes a persona of his own. Answers whether there was one to remove.
+    /// The owner removes a persona of his own that no chat uses.
     PersonaRemove {
         name: String,
-        answer: Answer<bool>,
+        answer: Answer<PersonaRemoval>,
     },
+}
+
+pub(crate) enum PersonaRemoval {
+    Removed,
+    Missing,
+    InUse,
 }
 
 /// The way to the fleet's thread, and the fleet as anyone may read it.
@@ -1331,7 +1337,7 @@ impl FleetHandle {
     }
 
     /// Removes a persona the owner made. Answers whether there was one of that name.
-    pub async fn persona_remove(&self, name: String) -> Result<bool, Unavailable> {
+    pub(crate) async fn persona_remove(&self, name: String) -> Result<PersonaRemoval, Unavailable> {
         self.ask(|answer| Ask::PersonaRemove { name, answer }).await
     }
 
@@ -2757,7 +2763,7 @@ impl Fleet {
 
     /// The owner removes a persona of his own. Its picture stays where it is kept: an agent
     /// that was made as that persona may still wear it.
-    fn persona_remove(&mut self, name: &str) -> Result<bool, Unavailable> {
+    fn persona_remove(&mut self, name: &str) -> Result<PersonaRemoval, Unavailable> {
         let [roster, cartesia, gemini] = self.works.telling.owner_tables();
         let owner = Owner {
             roster: &roster,
@@ -2766,8 +2772,11 @@ impl Fleet {
         };
         let mut book = (*self.book).clone();
         let Some(made) = book.delete(&owner, name) else {
-            return Ok(false);
+            return Ok(PersonaRemoval::Missing);
         };
+        if self.owner_of_name(&made.name, "").is_some() {
+            return Ok(PersonaRemoval::InUse);
+        }
         self.store
             .delete(PERSONAS, &made.persona_id)
             .map_err(|error| Unavailable::new(error.to_string()))?;
@@ -2776,7 +2785,7 @@ impl Fleet {
         self.works
             .hub
             .publish(wire::roster_personas("persona-deleted"), self.now_ms());
-        Ok(true)
+        Ok(PersonaRemoval::Removed)
     }
 
     /// Writes settings and publishes them. Only what has a dot in its key is a setting.

@@ -69,6 +69,8 @@ mod import_settings;
 mod installer;
 #[path = "host/issue_278.rs"]
 mod issue_278;
+#[path = "host/issue_314.rs"]
+mod issue_314;
 #[path = "host/janitor_attention.rs"]
 mod janitor_attention;
 #[path = "host/language_set.rs"]

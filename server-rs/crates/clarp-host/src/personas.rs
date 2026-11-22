@@ -111,10 +111,14 @@ async fn update(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiE
 /// or that is not there, is not removed.
 async fn remove(State(app): State<App>, Path(name): Path<String>) -> Result<Json<Value>, ApiError> {
     let name = name.trim_matches('/').to_string();
-    if app.fleet.persona_remove(name).await? {
-        Ok(Json(json!({ "ok": true })))
-    } else {
-        Err(ApiError::new(StatusCode::NOT_FOUND, rules::NOT_REMOVABLE))
+    use crate::fleet::PersonaRemoval;
+    match app.fleet.persona_remove(name).await? {
+        PersonaRemoval::Removed => Ok(Json(json!({ "ok": true }))),
+        PersonaRemoval::Missing => Err(ApiError::new(StatusCode::NOT_FOUND, rules::NOT_REMOVABLE)),
+        PersonaRemoval::InUse => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "contact is in use by a chat",
+        )),
     }
 }
 

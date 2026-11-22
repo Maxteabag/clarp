@@ -1342,6 +1342,7 @@ pub(crate) fn identity(app: &App) -> ServerInfo {
         contract: Contract {
             host: HOST_CONTRACT,
             min_ios: MIN_IOS_CONTRACT,
+            min_android: Some(1),
             features: features(app)
                 .map(|(feature, introduced)| ((*feature).to_string(), *introduced))
                 .collect(),

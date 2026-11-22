@@ -49,6 +49,8 @@ impl Capabilities {
 pub struct Contract {
     pub host: u64,
     pub min_ios: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_android: Option<u64>,
     pub features: BTreeMap<String, u64>,
 }
 
