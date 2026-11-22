@@ -221,14 +221,27 @@ def load_conversation(*, session: str, after_revision: int = 0,
             # One representative collapsed card is enough to show that tool
             # activity exists. Expansion replaces it with the complete payload.
             # Sending hundreds of hidden card headers defeated lazy loading.
-            turn["tools"] = compact_tools[:1]
+            # A failed call stays too, after the representative, as for display cells below
+            # (the quiet chat, #653: failures are never folded away by a reload).
+            turn["tools"] = compact_tools[:1] + [
+                tool for tool in compact_tools[1:] if tool.get("status") == "error"]
             if compact_cells:
-                representative = compact_cells[0]
-                representative["detail_count"] = sum(
-                    max(1, int(cell.get("detail_count") or 0))
-                    for cell in compact_cells
-                )
-                turn["display_cells"] = [representative]
+                # A failed call is never compacted away: it stays in its own row, as it does
+                # live, and is not counted among the folded calls (the quiet chat, #653).
+                folded = [cell for cell in compact_cells if cell.get("status") != "error"]
+                failed = [cell for cell in compact_cells if cell.get("status") == "error"]
+                if folded:
+                    representative = folded[0]
+                    representative["detail_count"] = sum(
+                        max(1, int(cell.get("detail_count") or 0))
+                        for cell in folded
+                    )
+                    turn["display_cells"] = [
+                        cell for cell in compact_cells
+                        if cell is representative or cell.get("status") == "error"
+                    ]
+                else:
+                    turn["display_cells"] = failed
             else:
                 turn["display_cells"] = []
     # Never advance an incremental cursor beyond rows actually delivered.

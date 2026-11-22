@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 136  # The Android app draws and answers render_spec from its contract 41 (issue 428). Every earlier number is a row in docs/compatibility.md.
+HOST_CONTRACT = 137  # A compact /log turn keeps its failed tool calls as their own cells and counts only the folded ones (the quiet chat, #653). Every earlier number is a row in docs/compatibility.md.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -50,8 +50,8 @@ CLIENT_HEADER = "X-Clarp-Client"
 # The lowest client contract that draws and answers a render_spec, PER CLIENT (issue 428): each
 # client's contract numbers are its own series, so one number for all would one day tell a client
 # without a renderer that it can render. The name is the client's own (`ios/2981 contract=74`),
-# matched exactly. A client not named here never gets the kind: Android (until its owner names
-# its number), the desktop, the Watch, an unknown or absent name. 0: never.
+# matched exactly. A client not named here never gets the kind: the native desktop (until its
+# owner names its number), the Watch, an unknown or absent name. 0: never.
 # iOS from 74 (TestFlight 2981, the first to send 74); the web app (PWA and the Tauri shell,
 # `web/<version> contract=1`) from 1, its first contract, the build that draws clarp.form v1.
 RENDER_SPEC_MIN_CONTRACT: dict[str, int] = {"ios": 74, "web": 1, "android": 41}
