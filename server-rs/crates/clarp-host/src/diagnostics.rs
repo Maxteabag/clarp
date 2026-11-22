@@ -348,38 +348,39 @@ fn compact_bytes(value: &Value) -> usize {
         usize::MAX
     }
 }
-pub async fn clog(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
-    let s = app.capture.settings();
-    if !s.uploads() {
-        // Validate the JSON without constructing any strings or event rows.
-        let mut de = serde_json::Deserializer::from_slice(&body);
-        if body.iter().copied().find(|b| !b.is_ascii_whitespace()) != Some(b'{')
-            || <serde::de::IgnoredAny as serde::Deserialize>::deserialize(&mut de).is_err()
-            || de.end().is_err()
-        {
-            return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json"));
-        }
-        return Ok(Json(json!({"ok":true,"captured":false})));
-    }
+pub async fn clog(
+    State(app): State<App>,
+    axum::Extension(principal): axum::Extension<crate::edge::Principal>,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
     let Ok(v @ Value::Object(_)) = serde_json::from_slice::<Value>(&body) else {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json"));
     };
     let items = v["events"]
         .as_array()
         .map_or_else(|| std::slice::from_ref(&v), Vec::as_slice);
-    let mut captured = false;
-    for item in items {
-        let name = rules::client_name(item);
-        let category = rules::client_category(name);
-        captured |= app.capture.emit(category, app.clock.now_ms(), || {
-            rules::client_event(item, name)
-        });
+    let (captured, kept) =
+        match crate::client_events::record(&app, &principal, &headers, items).await {
+            Ok(kept) => (true, kept),
+            Err(why) => {
+                eprintln!("clientEventsKeepFail {why}");
+                (false, 0)
+            }
+        };
+    let mut full_capture = false;
+    if app.capture.settings().uploads() {
+        for item in items.iter().filter(|item| item.is_object()) {
+            let name = rules::client_name(item);
+            let category = rules::client_category(name);
+            full_capture |= app.capture.emit(category, app.clock.now_ms(), || {
+                crate::client_events::redact_report(&rules::client_event(item, name))
+            });
+        }
     }
-    Ok(Json(if captured {
-        json!({"ok":true})
-    } else {
-        json!({"ok":true,"captured":false})
-    }))
+    Ok(Json(
+        json!({"ok":true,"captured":captured,"kept":kept,"full_capture":full_capture}),
+    ))
 }
 
 #[cfg(test)]

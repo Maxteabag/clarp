@@ -18,6 +18,23 @@ Never hand-edit the active generated release. Use `clarp-admin paths` to find
 the platform-native release, configuration, database, cache, log, service, and
 toolchain paths.
 
+## Read why an app crashed
+
+The Host keeps the apps' client log and crash reports whatever the diagnostics
+setting says: errors, crashes, hangs and MetricKit reports for 7 days with the
+30 minutes before them, everything else for 30 minutes (bounded, secrets cut).
+Read it as JSON lines, oldest first:
+
+```bash
+clarp-admin client-log --since 2h --level error
+clarp-admin client-log --device device_<id> --since 30m     # one phone, with context
+clarp-admin client-log --event metrickit_report --since 7d  # crash reports (file names under crashes/)
+```
+
+`clarp-admin pair list` names the devices. The full MetricKit payloads are the
+files the `metrickit_report` events name, beside the state database in
+`crashes/`.
+
 ## Which code may meet which database
 
 Only the installed Host and runtime services upgrade a database, when they

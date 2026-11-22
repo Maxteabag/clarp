@@ -26,6 +26,7 @@ pub mod calls;
 pub(crate) mod child;
 pub mod chip;
 mod cli_version;
+pub mod client_events;
 mod codex_goal_lane;
 pub mod compact;
 pub mod config;

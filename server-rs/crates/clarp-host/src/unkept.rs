@@ -454,6 +454,9 @@ pub(crate) mod at_the_port {
             let gallery = crate::gallery::Store::open(table, blobs.clone()).unwrap();
             let gallery = crate::gallery::Writer::start(gallery).unwrap();
             crate::edge::App {
+                client_events: crate::client_events::Desk::new(
+                    self.dir.join("client-events.sqlite"),
+                ),
                 capture: crate::diagnostics::Capture::start(
                     Box::new(clarp_store_files::diagnostics::HourFiles::new(
                         self.dir.join("diagnostics"),

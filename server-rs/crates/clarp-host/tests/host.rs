@@ -19849,7 +19849,13 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
 
     // A client can submit diagnostics without enabling capture.
     let (status, said) = host.ask_as(&limited, "POST", "/clog", Some(&json!({"event":"fixture"})));
-    assert_eq!((status, said), (200, json!({"ok":true,"captured":false})));
+    assert_eq!(
+        (status, said),
+        (
+            200,
+            json!({"ok":true,"captured":true,"kept":1,"full_capture":false})
+        )
+    );
     assert_eq!(
         fetch(&host, token, "POST", "/clog", &[], b"[1]").status,
         400
