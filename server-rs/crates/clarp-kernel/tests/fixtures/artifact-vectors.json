@@ -12729,7 +12729,7 @@
        "archived_at": null,
        "pinned_at": null,
        "agent_name": "Vera",
-       "pinned": true,
+       "pinned": false,
        "payload": {
         "content": "x"
        },
