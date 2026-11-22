@@ -1079,7 +1079,7 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   ends in a slash lists the visible directories inside it (absolute paths only); any other path completes its last
   name in its parent. At most 20 matches. A directory that is not there answers no matches.
 - `POST /clog` — batched client diagnostics `{"events":[{"event","detail","level","trace_id","clip_id"}]}`.
-  With `client_events_kept` (Rust Host contract 144), a bounded store accepts the batch
+  With `client_events_kept` (Rust Host contract 146), a bounded store accepts the batch
   regardless of diagnostics settings and answers `{ok,captured,kept,full_capture}`.
   `captured` confirms persistence to the bounded store. `kept` counts the events it took.
   `full_capture` indicates that diagnostics also captured events from the batch.
