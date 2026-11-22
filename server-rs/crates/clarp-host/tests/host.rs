@@ -53,6 +53,8 @@ mod goal_ledger;
 mod harness;
 #[path = "host/harness_providers.rs"]
 mod harness_providers;
+#[path = "host/hotseat_demand.rs"]
+mod hotseat_demand;
 #[path = "host/import_devices.rs"]
 mod import_devices;
 #[path = "host/import_jobs.rs"]

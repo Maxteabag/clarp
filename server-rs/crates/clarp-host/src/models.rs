@@ -331,6 +331,50 @@ impl Shelf {
     }
 }
 
+/// The configured model for a backend when the agent has selected none.
+pub(crate) async fn default_for(app: &App, backend: &str) -> Option<String> {
+    let key = format!("{backend}_model");
+    if let Some(model) = crate::owner::text_at(&app.mouth.owners(), &["agents", &key]) {
+        return Some(model);
+    }
+    let backend = backend.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let home = crate::config::home();
+        match backend.as_str() {
+            "claude" => {
+                let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+                    .filter(|directory| !directory.is_empty())
+                    .map_or_else(|| home.join(".claude"), PathBuf::from);
+                std::env::var("ANTHROPIC_MODEL")
+                    .ok()
+                    .filter(|model| !model.is_empty())
+                    .or_else(|| {
+                        let settings =
+                            std::fs::read_to_string(config.join("settings.json")).ok()?;
+                        let settings: Value = serde_json::from_str(&settings).ok()?;
+                        settings["model"].as_str().map(str::to_owned)
+                    })
+            }
+            "codex" => {
+                let config = crate::past::codex_home(&home).join("config.toml");
+                let config = std::fs::read_to_string(config).ok()?;
+                let config: toml::Table = config.parse().ok()?;
+                let profile = crate::owner::text_at(&config, &["profile"]);
+                profile
+                    .as_deref()
+                    .and_then(|profile| {
+                        crate::owner::text_at(&config, &["profiles", profile, "model"])
+                    })
+                    .or_else(|| crate::owner::text_at(&config, &["model"]))
+            }
+            _ => None,
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// `GET /agent-model-options`: the tools this Host runs and the models each can run. The Host
 /// that keeps the machine's tools signs them in from an app, and says so of each it can.
 async fn told(State(app): State<App>) -> Json<Value> {
