@@ -1121,7 +1121,9 @@ pub fn import(
         .map_or_else(String::new, |why| format!("avatar not carried: {why}\n"));
     let cwd_created = answer["cwd_created"]
         .as_str()
-        .map_or_else(String::new, |cwd| format!("created working directory: {cwd}\n"));
+        .map_or_else(String::new, |cwd| {
+            format!("created working directory: {cwd}\n")
+        });
     // The agent is here. Its files follow: one that does not arrive does not undo the move.
     let followed = files(&way, &wants);
     let (came, more) = followed.told(&way);
@@ -1240,7 +1242,12 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     let started_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
-    if name == "clarp-admin" && argv.first().is_some_and(|arg| arg == "peers") {
+    // Only peers list uses the agent tool route. The owner's add/remove command still
+    // checks its authority locally before any remote pairing request.
+    if name == "clarp-admin"
+        && argv.first().is_some_and(|arg| arg == "peers")
+        && !matches!(argv.as_slice(), [_, action] if action == "list")
+    {
         let result = peer_command(argv.into_iter().skip(1), token, "", address, true);
         return match result {
             Ok(shown) => ToolOutcome {
@@ -1381,9 +1388,13 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             std::thread::sleep(Duration::from_millis(again_ms.clamp(100, 60_000)));
             continue;
         }
-        let exit = answer["exit"].as_i64().and_then(|code| u8::try_from(code).ok());
+        let exit = answer["exit"]
+            .as_i64()
+            .and_then(|code| u8::try_from(code).ok());
         if job_active && !matches!(exit, Some(0..=2)) {
-            return unavailable(format!("{name}: the Host at {address} sent no valid job state"));
+            return unavailable(format!(
+                "{name}: the Host at {address} sent no valid job state"
+            ));
         }
         return ToolOutcome {
             exit: exit.unwrap_or(1),

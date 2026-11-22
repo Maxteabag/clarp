@@ -77,16 +77,20 @@ async fn list(
     Extension(principal): Extension<Principal>,
 ) -> Result<Json<Value>, ApiError> {
     owner_only(&principal)?;
+    Ok(Json(json!(list_public(&app).await?)))
+}
+
+/// What an agent can read about its Host's peers, through the same projection as the owner.
+pub(crate) async fn list_public(app: &App) -> Result<Vec<Value>, ApiError> {
     let legacy = app.fleet.directory().legacy_peers.clone();
     let peers = tokio::task::spawn_blocking(move || registry::read(&registry_path(), &legacy))
         .await
         .map_err(|_| registry_failed())?
         .map_err(|_| registry_failed())?;
-    let peers: Vec<_> = peers
+    Ok(peers
         .into_iter()
         .filter_map(|(name, value)| parse(value).map(|peer| public(&name, &peer)))
-        .collect();
-    Ok(Json(json!(peers)))
+        .collect())
 }
 
 /// `POST /peers`: names a Host, or says anew where one is.

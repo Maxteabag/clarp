@@ -1078,11 +1078,11 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     if path.starts_with("/tools/") {
         return !matches!(principal, Principal::Administrator | Principal::Tools);
     }
-    // And that token opens nothing else: what the apps read and do is not a tool's. But
-    // for what an agent asks of its user's phone by a script that speaks to the Host
-    // itself: an event for the calendar.
+    // Scripts may read the public job list or ask the user's phone for a calendar
+    // event. Job detail, cancellation and other app routes keep their own scope.
     if matches!(principal, Principal::Tools) {
-        return !(method == Method::POST && path == "/calendar/request");
+        return !((method == Method::POST && path == "/calendar/request")
+            || (method == Method::GET && path == "/background-jobs"));
     }
     let Principal::Device {
         scope: Scope::Limited,
@@ -2416,7 +2416,10 @@ async fn import_agent(
             Some(ImportedRow { id, ts_ms, row })
         })
         .collect();
-    let crate::fleet::Adopted { member, cwd_created } = app
+    let crate::fleet::Adopted {
+        member,
+        cwd_created,
+    } = app
         .fleet
         .adopt(record)
         .await?

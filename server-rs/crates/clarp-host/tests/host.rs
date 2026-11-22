@@ -67,6 +67,8 @@ mod import_render_specs;
 mod import_settings;
 #[path = "host/installer.rs"]
 mod installer;
+#[path = "host/issue_278.rs"]
+mod issue_278;
 #[path = "host/janitor_attention.rs"]
 mod janitor_attention;
 #[path = "host/language_set.rs"]
@@ -125,8 +127,6 @@ mod steer_c;
 mod takeover_b;
 #[path = "host/teams_runtime.rs"]
 mod teams_runtime;
-#[path = "host/issue_278.rs"]
-mod issue_278;
 #[path = "host/transcription_errors.rs"]
 mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]
@@ -1028,7 +1028,8 @@ fn job_active_reports_unknown_for_missing_jobs_and_unavailable_answers() {
     let token = host.token.clone();
     host.kill();
     let probe = |address: &str| {
-        place.command(env!("CARGO_BIN_EXE_clarp-host"))
+        place
+            .command(env!("CARGO_BIN_EXE_clarp-host"))
             .arg("tool")
             .args(query)
             .env("CLARP_HOST_ADDR", address)
@@ -7847,7 +7848,9 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     let server_id = host.get("/server-info")["server_id"].clone();
     // The push of a turn that ended on this, when it is the newest the relay was sent.
     let alerts = || {
-        relay.taken().into_iter()
+        relay
+            .taken()
+            .into_iter()
             .filter(|(_, _, body)| body["notifications"][0]["pushType"] == "alert")
             .collect::<Vec<_>>()
     };
@@ -7917,13 +7920,18 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
             (notification["pushType"] == "background").then(|| notification.clone())
         })
     };
-    wait_for("a silent badge refresh for a quiet turn", || sync().is_some());
+    wait_for("a silent badge refresh for a quiet turn", || {
+        sync().is_some()
+    });
     let sync = sync().unwrap();
     assert_eq!(sync["priority"], "5");
     assert_eq!(sync["collapseId"], "badge-sync");
-    assert_eq!(sync["payload"], json!({
-        "aps": {"content-available": 1}, "kind": "sync", "server_instance_id": server_id,
-    }));
+    assert_eq!(
+        sync["payload"],
+        json!({
+            "aps": {"content-available": 1}, "kind": "sync", "server_instance_id": server_id,
+        })
+    );
     assert_eq!(alerts().len(), 1);
     let desk = |sequence: u64, active: bool| {
         host.ask(
@@ -16593,6 +16601,82 @@ const STAND_IN_ANSWERS: &str = "\
 printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
 printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
 printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n";
+
+#[test]
+fn agent_read_parity_peers_list_uses_only_public_fields() {
+    let place = Place::new("tool-peers-list");
+    let admin = "fixture-admin";
+    let host = place.start_with_token(admin);
+    let token = "private-fixture-peer-token";
+    let peer = json!({
+        "name": "work", "url": "https://work.invalid", "token": token, "server_id": "work-host",
+    });
+    host.post("/peers", peer.clone());
+
+    let tools = clarp_host::tool_token(admin);
+    let output = place
+        .host_command()
+        .args(["tool", "clarp-admin", "peers", "list"])
+        .current_dir(&place.root)
+        .env("CLARP_HOST_ADDR", &host.address)
+        .env("CLARP_TOOL_TOKEN", &tools)
+        .env_remove("CLARP_HOST_TOKEN")
+        .ended();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        listed,
+        json!([{"name": "work", "url": "https://work.invalid", "enabled": true, "server_id": "work-host"}])
+    );
+    for (method, path) in [
+        ("GET", "/peers"),
+        ("POST", "/peers"),
+        ("DELETE", "/peers/work"),
+    ] {
+        assert_eq!(host.ask_as(&tools, method, path, Some(&peer)).0, 403);
+    }
+}
+
+#[test]
+fn agent_read_parity_background_jobs_opens_only_the_list() {
+    let place = Place::new("tool-background-jobs");
+    let admin = "fixture-admin";
+    let host = place.start_with_token(admin);
+    let session = host.new_agent("Worker");
+    let job_id = "tool-list-job";
+    let (code, _, error) = tool(
+        &host,
+        &place.root,
+        None,
+        &[
+            "clarp-agent-bg",
+            &session,
+            "job-upsert",
+            job_id,
+            "implementation",
+            "Fixture job",
+        ],
+    );
+    assert_eq!(code, 0, "{error}");
+    let tools = clarp_host::tool_token(admin);
+    let (status, listed) = host.ask_as(&tools, "GET", "/background-jobs", None);
+    assert_eq!(status, 200, "{listed}");
+    let jobs = listed["jobs"].as_array().unwrap();
+    let job = jobs.iter().find(|job| job["job_id"] == job_id).unwrap();
+    assert_eq!(job["session"], session);
+    assert!(job.get("log_tail").is_none());
+    for (method, path) in [
+        ("POST", "/background-jobs"),
+        ("GET", "/background-jobs/tool-list-job"),
+        ("DELETE", "/background-jobs/tool-list-job"),
+    ] {
+        assert_eq!(host.ask_as(&tools, method, path, None).0, 403);
+    }
+}
 
 #[test]
 fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
@@ -33561,9 +33645,12 @@ fn a_reading_of_the_seats_that_fails_says_how_and_one_of_which_a_part_fails_says
     let host = place.start_with("", &["--seats-tool", tool.to_str().unwrap()]);
     let empty = host.get("/hotseat/desk?refresh=1");
     assert_eq!(empty["source_errors"], json!({}));
-    assert_eq!(empty["providers"][0], json!({
-        "provider":"claude","inventory":"empty","read_state":"ok","error_code":null
-    }));
+    assert_eq!(
+        empty["providers"][0],
+        json!({
+            "provider":"claude","inventory":"empty","read_state":"ok","error_code":null
+        })
+    );
     drop(host);
 
     // A Host that was told a tool that is not there says so, and so does one that was told

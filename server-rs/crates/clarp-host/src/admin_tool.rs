@@ -2317,6 +2317,12 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
         Some((command, rest)) if command == "prompt" => prompt(app, call, rest, owner_token).await,
         Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
+        Some((command, [action])) if command == "peers" && action == "list" => {
+            match peers::list_public(app).await {
+                Ok(listed) => shown(&json!(listed)),
+                Err(why) => ToolAnswer::said(2, format!("clarp-admin peers: {}", why.message())),
+            }
+        }
         Some((command, _)) if command == "sessions" => sessions(app),
         Some((command, rest)) if command == "paths" => match parse(rest, &[], &[], &[]) {
             Ok(_) => paths(&app.config.data_dir),
