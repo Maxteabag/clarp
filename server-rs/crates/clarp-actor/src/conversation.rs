@@ -17,8 +17,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use clarp_kernel::agent::AgentEvent;
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
 use clarp_kernel::journal::{Batch, coordination_key, kind, mixed_coordination_key, mixed_turn};
-use clarp_kernel::turn::{Origin, Turn, TurnEvent, TurnId, left_out_of_chats};
+use clarp_kernel::turn::{Origin, TurnEvent, TurnId, left_out_of_chats};
 use clarp_ports::log::{AgentLog, Item, NewItem, Seq};
+use serde::{Deserialize, Serialize};
 
 use crate::ActorError;
 
@@ -255,31 +256,58 @@ fn restamp_key(id: &str) -> String {
     format!("coordination-row-{id}")
 }
 
-pub(super) fn mixed(log: &dyn AgentLog, turn: u64) -> Result<bool, ActorError> {
+fn mixed_record(log: &dyn AgentLog, turn: u64) -> Result<Option<Item>, ActorError> {
     Ok(log
         .find(&mixed_coordination_key(turn))?
-        .is_some_and(|item| item.kind == kind::MIXED_TURN))
+        .filter(|item| item.kind == kind::MIXED_TURN))
 }
 
-/// Show a marked turn once a user is heard in it. New revisions let a client read the old
-/// rows again without writing a second message or moving any existing row.
-pub(super) fn loosen(batch: &mut Batch<'_>, turn: TurnId, at: i64) -> Result<bool, ActorError> {
-    let Some(message_seq) = (match batch.agent().live() {
-        Some(Turn::Starting(live)) if live.id == turn => Some(live.message_seq),
-        Some(Turn::Running(live)) if live.id == turn => Some(live.message_seq),
-        _ => None,
-    }) else {
+pub(super) fn mixed(log: &dyn AgentLog, turn: u64) -> Result<bool, ActorError> {
+    Ok(mixed_record(log, turn)?.is_some())
+}
+
+/// Rows in flight at the echo retain their original audience even if they
+/// are written or updated after the echo. All other rows follow journal order.
+#[derive(Serialize, Deserialize)]
+struct Split {
+    earlier: BTreeSet<String>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct OpenRows<'a> {
+    pub(super) drafts: &'a [Draft],
+    pub(super) calls: &'a [ToolCall],
+}
+
+/// Record the audience boundary just after the follow-up row, in the same
+/// transaction that records the tool's read. A legacy empty mark was a full
+/// reveal and keeps its meaning.
+pub(super) fn split(
+    batch: &mut Batch<'_>,
+    turn: TurnId,
+    open: OpenRows<'_>,
+    at: i64,
+) -> Result<bool, ActorError> {
+    if mark_of(batch.log(), turn.0)?.is_none() {
         return Ok(false);
-    };
-    let items = loosen_from(batch.log(), turn, Some(message_seq), at)?;
-    let revealed = !items.is_empty();
-    for item in items {
-        batch.item(item);
     }
-    Ok(revealed)
+    let split = Split {
+        earlier: open
+            .drafts
+            .iter()
+            .map(|draft| draft.id.clone())
+            .chain(open.calls.iter().map(|call| call.id.clone()))
+            .collect(),
+    };
+    let mut item = mixed_turn(turn.0, at);
+    item.body = serde_json::to_vec(&split).map_err(|error| {
+        ActorError::Corrupt(format!("could not write audience boundary: {error}"))
+    })?;
+    batch.item(item);
+    Ok(true)
 }
 
-/// The writes that reveal an existing turn with the input that revealed it.
+/// The writes that reveal an existing turn when a trusted relay uses its trace.
 /// A waiting message still has no rows to restamp.
 pub(super) fn loosen_from(
     log: &dyn AgentLog,
@@ -325,13 +353,38 @@ pub(super) fn loosen_from(
     Ok(items)
 }
 
+enum TurnAudience {
+    User {
+        restamped: bool,
+    },
+    Agents {
+        sender: String,
+        split: Option<(Seq, Split)>,
+    },
+}
+
+impl TurnAudience {
+    fn sender(&self, id: &str, seq: Seq) -> Option<&str> {
+        match self {
+            Self::Agents { sender, split }
+                if split
+                    .as_ref()
+                    .is_none_or(|(at, split)| seq < *at || split.earlier.contains(id)) =>
+            {
+                Some(sender)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Reads rows as they are now: each with the parts that name it.
 struct Reader<'a> {
     log: &'a dyn AgentLog,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
     /// Whether the turns asked about answer another agent ([`mark_of`]).
-    marks: HashMap<u64, (Option<String>, bool)>,
+    marks: HashMap<u64, TurnAudience>,
 }
 
 impl<'a> Reader<'a> {
@@ -343,22 +396,37 @@ impl<'a> Reader<'a> {
         }
     }
 
-    /// Whether this turn answers another agent: looked up once per turn.
-    fn mark(&mut self, turn: u64) -> Result<(Option<String>, bool), ActorError> {
-        if let Some(known) = self.marks.get(&turn) {
-            return Ok(known.clone());
+    /// Read the turn's durable audience boundary once per page.
+    fn mark(&mut self, turn: u64) -> Result<&TurnAudience, ActorError> {
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.marks.entry(turn) {
+            let marker = mixed_record(self.log, turn)?;
+            let audience = match marker {
+                Some(marker) if marker.body.is_empty() => TurnAudience::User { restamped: true },
+                marker => match original_mark(self.log, turn)? {
+                    Some(sender) => {
+                        let split = marker
+                            .as_ref()
+                            .map(|item| {
+                                serde_json::from_slice(&item.body)
+                                    .map(|split| (item.seq, split))
+                                    .map_err(|error| corrupt(item, error))
+                            })
+                            .transpose()?;
+                        TurnAudience::Agents { sender, split }
+                    }
+                    None => TurnAudience::User { restamped: false },
+                },
+            };
+            slot.insert(audience);
         }
-        let loosened = mixed(self.log, turn)?;
-        let found = (
-            if loosened {
-                None
-            } else {
-                original_mark(self.log, turn)?
-            },
-            loosened,
-        );
-        self.marks.insert(turn, found.clone());
-        Ok(found)
+        Ok(&self.marks[&turn])
+    }
+
+    fn draft_mark(&mut self, draft: &Draft) -> Result<Option<String>, ActorError> {
+        Ok(self
+            .mark(draft.turn)?
+            .sender(&draft.id, Seq::MAX)
+            .map(str::to_owned))
     }
 
     /// How this turn ended, when it has.
@@ -381,7 +449,10 @@ impl<'a> Reader<'a> {
             return Ok(None);
         }
         match item.turn.or(entry.turn()) {
-            Some(turn) => self.mark(turn).map(|(sender, _)| sender),
+            Some(turn) => Ok(self
+                .mark(turn)?
+                .sender(entry.id(), item.seq)
+                .map(str::to_owned)),
             None => Ok(None),
         }
     }
@@ -428,6 +499,22 @@ impl<'a> Reader<'a> {
             ..Versioned::of(entry, item.seq * REVISION_STEP, item.ts_ms)
         };
         let mut newest = item.seq;
+        row.coordination = self.hidden(item, &row.entry)?;
+        let split = if let Some(turn) = row.turn_number {
+            let audience = self.mark(turn)?;
+            if matches!(audience, TurnAudience::User { restamped: true })
+                && let Some(restamp) = self.log.find(&restamp_key(row.entry.id()))?
+                && restamp.kind == kind::AUDIENCE_ROW
+            {
+                newest = newest.max(restamp.seq);
+            }
+            matches!(
+                self.mark(turn)?,
+                TurnAudience::Agents { split: Some(_), .. }
+            )
+        } else {
+            false
+        };
         if let Entry::Imported(import) = &mut row.entry
             && import.row["display_cells"]
                 .as_array()
@@ -456,6 +543,12 @@ impl<'a> Reader<'a> {
                 if let Some(Entry::Tool(mut call)) =
                     Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
                 {
+                    if split
+                        && row.coordination.is_none()
+                        && self.mark(call.turn)?.sender(id, stored.seq).is_some()
+                    {
+                        continue;
+                    }
                     newest = newest.max(stored.seq);
                     if call
                         .cell
@@ -475,16 +568,6 @@ impl<'a> Reader<'a> {
             {
                 newest = newest.max(stored.seq);
                 row.commentary = true;
-            }
-        }
-        if let Some(turn) = row.turn_number {
-            let (marked, loosened) = self.mark(turn)?;
-            row.coordination = marked;
-            if loosened
-                && let Some(restamp) = self.log.find(&restamp_key(row.entry.id()))?
-                && restamp.kind == kind::AUDIENCE_ROW
-            {
-                newest = newest.max(restamp.seq);
             }
         }
         if let Some(turn) = row.turn_number
@@ -594,7 +677,7 @@ pub(crate) fn visible_previews(
         let row = draft.versioned();
         if head_left > 0 && candidate(&row.entry) {
             head_left -= 1;
-            if reader.mark(draft.turn)?.0.is_none() {
+            if reader.draft_mark(draft)?.is_none() {
                 head = Some(row);
                 break;
             }
@@ -838,7 +921,7 @@ fn gaps(
         counted.run.capped |= cut;
         for draft in drafts {
             let visible = draft.versioned();
-            if let (Some(sender), _) = reader.mark(draft.turn)? {
+            if let Some(sender) = reader.draft_mark(draft)? {
                 counted.push(&visible.entry, Some(draft.turn), sender);
             } else if which.keeps(&visible.entry) {
                 counted = Counting::default();
@@ -922,7 +1005,7 @@ pub(crate) fn older(
         let mut reader = Reader::new(log);
         for draft in drafts {
             let mut shown = draft.versioned();
-            (shown.coordination, _) = reader.mark(draft.turn)?;
+            shown.coordination = reader.draft_mark(draft)?;
             if which.keeps_row(&shown) {
                 live.push(shown);
             }
@@ -1022,6 +1105,7 @@ pub(crate) fn after(
     which: Which,
 ) -> Result<Page, ActorError> {
     let head_revision = span.head_revision;
+    let mut reader = Reader::new(log);
     let mut from = (revision / REVISION_STEP).max(span.floor);
     let (mut entries, latest_revision, has_more) = loop {
         let (items, has_more, cursor) = items_after(log, from, limit, which)?;
@@ -1029,7 +1113,7 @@ pub(crate) fn after(
         if !has_more {
             for draft in drafts {
                 let mut shown = draft.versioned();
-                shown.coordination = mark_of(log, draft.turn)?;
+                shown.coordination = reader.draft_mark(draft)?;
                 if draft.revision > revision && which.keeps_row(&shown) {
                     entries.push(shown);
                 }
@@ -1168,7 +1252,11 @@ mod tests {
         );
 
         let mut batch = recorder.batch();
-        assert!(loosen(&mut batch, TurnId(1), 300).unwrap());
+        let writes = loosen_from(batch.log(), TurnId(1), Some(1), 300).unwrap();
+        assert!(!writes.is_empty());
+        for item in writes {
+            batch.item(item);
+        }
         batch.commit().unwrap();
         let span = Span {
             floor: 0,
@@ -1196,7 +1284,11 @@ mod tests {
             original_mark(recorder.log(), 1).unwrap().as_deref(),
             Some("sender")
         );
-        assert!(!loosen(&mut recorder.batch(), TurnId(1), 400).unwrap());
+        assert!(
+            loosen_from(recorder.log(), TurnId(1), Some(1), 400)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

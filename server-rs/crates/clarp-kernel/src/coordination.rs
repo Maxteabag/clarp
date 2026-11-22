@@ -18,9 +18,8 @@
 //! These are the Python Host's rules (its PR 482, contract 108: `lib/coordination.py`,
 //! `lib/send_request.py`, `lib/agent_notes.py`, `policies/notifications.note_decision` and
 //! `user_notifications.classify_note`), held to it by `tests/coordination_vectors.rs` and
-//! `tests/agent_note_vectors.rs`. Two things differ on purpose. A turn's audience never
-//! loosens here ('mixed' on the Python Host): this Host steers no message into a running turn,
-//! so nothing the user says joins a turn that answers another agent. And an agent on Codex can
+//! `tests/agent_note_vectors.rs`. A steer into a coordination turn leaves earlier rows
+//! for the agents and makes subsequent rows visible to the user. An agent on Codex can
 //! leave a note here ([`can_leave_note`]): every turn of this Host carries a token, Codex's too.
 
 use serde_json::Value;
