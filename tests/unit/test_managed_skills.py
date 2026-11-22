@@ -152,3 +152,27 @@ def test_antigravitys_folder_never_holds_back_the_other_links(tmp_path, monkeypa
     agy.symlink_to(tmp_path / "gone", target_is_directory=True)
     managed_skills.set_enabled("clarp-core", True)
     assert next(r for r in managed_skills.status() if r["id"] == "clarp-core")["health"] == "healthy"
+
+
+import pytest
+
+
+@pytest.mark.parametrize("bad", [5, "clarp-core", {"pack": "native"}, {"id": ""},
+                                 {"id": "x", "requires": 5}, {"id": "x", "requires": True}],
+                         ids=["a number", "text", "no id", "an empty id", "requires a number",
+                              "requires true"])
+def test_a_malformed_manifest_item_makes_the_manifest_unavailable(tmp_path, monkeypatch, bad):
+    """R155: such an item raised uncaught (item["id"], iterating requires) and the request got
+    no answer of its own. The manifest is now unavailable, said once in the log, and both
+    routes answer 503 with that."""
+    from lib import log as log_module
+    release, _state = configure(tmp_path, monkeypatch)
+    manifest = release / "skills/manifest.json"
+    manifest.write_text(json.dumps({"skills": [{"id": "clarp-core", "pack": "core"}, bad]}))
+    logged = []
+    monkeypatch.setattr(log_module, "log", lambda event, detail="": logged.append((event, detail)))
+    with pytest.raises(RuntimeError, match="Clarp skill manifest is unavailable"):
+        managed_skills.status()
+    with pytest.raises(RuntimeError, match="Clarp skill manifest is unavailable"):
+        managed_skills.set_enabled("clarp-core", True)
+    assert logged and logged[0][0] == "managedSkillsManifestBad" and logged[0][1].startswith("item=1 ")
