@@ -82,7 +82,7 @@ PLANTS = [
     (S, 'hush', 'no Stop silences the agent', '        let silenced = by.is_the_users();', '        let silenced = { let _ = &by; false };'),
     # The pause keeps the Stop's Control: the one line of an idle agent's Stop.
     (A, 'lines', 'the pause forgets whether the Host knew who stopped', '                work.record(AgentEvent::Paused {\n                    by: by.actor,\n                    verified: by.verified,', '                work.record(AgentEvent::Paused {\n                    by: by.actor,\n                    verified: false,'),
-    (A, 'lines', 'the pause forgets why', '                    verified: by.verified,\n                    reason: by.reason,\n                    at_ms: now_ms,\n                });\n            }\n            Command::Repair', '                    verified: by.verified,\n                    reason: String::new(),\n                    at_ms: now_ms,\n                });\n                let _ = by.reason;\n            }\n            Command::Repair'),
+    (A, 'lines', 'the pause forgets why', '                work.record(AgentEvent::Paused {\n                    by: by.actor,\n                    verified: by.verified,\n                    reason: by.reason,\n                    at_ms: now_ms,\n                });', '                work.record(AgentEvent::Paused {\n                    by: by.actor,\n                    verified: by.verified,\n                    reason: { let _ = by.reason; String::new() },\n                    at_ms: now_ms,\n                });'),
 ]
 
 if __name__ == '__main__':
