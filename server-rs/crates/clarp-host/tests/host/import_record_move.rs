@@ -144,6 +144,7 @@ fn exercise(source_kind: Source, take_back: bool) {
             assert!(report.contains("The move is incomplete"), "{report}");
             assert!(moved.lock().unwrap().is_null());
             let sender = host.new_agent("Sender");
+            let mut traces = Vec::new();
             for (id, text, by) in [
                 ("peer-before-move", "first message", "agent"),
                 ("user-before-move", "second message", "user"),
@@ -156,6 +157,7 @@ fn exercise(source_kind: Source, take_back: bool) {
                 }
                 let sent = host.post("/send", message);
                 assert_eq!(sent["queued"], true, "{sent}");
+                traces.push(sent["trace_id"].as_str().unwrap().to_string());
             }
             let queue = host.get(QUEUE);
             assert_eq!(queue["paused"], true);
@@ -173,16 +175,20 @@ fn exercise(source_kind: Source, take_back: bool) {
             wait_for("the two held messages to finish", || {
                 host.conversation("mover").len() == 5 && host.state("mover") == "done"
             });
-            assert_eq!(
-                host.conversation("mover"),
-                [
-                    said("assistant", "Moved history"),
-                    said("user", "second message"),
-                    said("assistant", "second message"),
-                    said("user", "first message"),
-                    said("assistant", "first message"),
-                ]
-            );
+            let rows = host.turns("mover");
+            assert_eq!(rows.len(), 5, "{rows:?}");
+            assert_eq!(rows[0]["text"], "Moved history");
+            // Scripted echoes the first prompt line, which can be the team context header.
+            // Match each completed reply to its own send rather than the prompt text.
+            let expected = [("second message", &traces[1]), ("first message", &traces[0])];
+            for (pair, (text, trace)) in rows[1..].chunks_exact(2).zip(expected) {
+                assert_eq!(pair[0]["role"], "user");
+                assert_eq!(pair[0]["text"], text);
+                assert_eq!(pair[0]["trace_id"], trace.as_str());
+                assert_eq!(pair[1]["role"], "assistant");
+                assert_eq!(pair[1]["trace_id"], trace.as_str());
+                assert_eq!(pair[1]["turn"]["status"], "completed");
+            }
         }
         Source::Marks => {
             assert!(report.contains(&format!("It is marked moved on the Host at {source}. Its turn-start doors there now refuse it. It is resumed here.")), "{report}");
