@@ -1,5 +1,5 @@
 # Differences between the Python Host and the Rust Host that are meant to be there.
-# One per line: the difference's id from the report, then why. The register with the reasoning
+# One per line: the difference's id from the report or a supported rule, then why. The register with the reasoning
 # is server-rs/docs/differences.md; an id is added here only once it is written there.
 
 # The model that answered is shown after a turn that completed (the Python Host shows none
@@ -183,3 +183,9 @@ b1ef57890b8a  stop-with-queue: null stalled_since on the activity event at lane 
 d85cf592dd04  stop-with-queue: null stalled_since on the activity event at lane index 9 (#249)
 c8103eeafa7a  stop-with-queue: null stalled_action on the activity event at lane index 11 (#249)
 847a6a8e729c  stop-with-queue: null stalled_since on the activity event at lane index 11 (#249)
+
+# Issue 718, Rust Host contract 153. The retired Python reference did not
+# label individual log rows with their conversation and producing session.
+# Match only text fields added on turns in a successful GET /log response.
+log-row-field-added:conversation_id  the stable conversation ID of every row
+log-row-field-added:session_id  the producing tool session where the Host knows it

@@ -62,6 +62,28 @@ def main() -> int:
           and conform.team_member_path(path, {agent_id: 'claire'}) == '/teams/<team:1>/members/<agent:claire>'
           and conform.team_member_path(path, {}) == path,
           'team paths keep the issued team and the named member', failed)
+    def read(path, rows):
+        return {'method': 'GET', 'path': path, 'status': 200, 'body': {'turns': rows}}
+
+    def recording(*http):
+        core = {'scenario': 'router', 'http': list(http), 'sse': [], 'error': ''}
+        return {'router': {'core': core, 'full': core}}
+
+    base = recording(read('/log', [{'id': 'a'}, {'id': 'b', 'conversation_id': 'old'}]),
+                     read('/another-route', [{'id': 'a'}]))
+    head = recording(read('/log', [
+        {'id': 'a', 'conversation_id': '<id:1>', 'session_id': 'provider-session'},
+        {'id': 'b', 'conversation_id': 'changed', 'session_id': None},
+    ]), read('/another-route', [{'id': 'a', 'conversation_id': '<id:1>'}]))
+    intended_log_rows = {'log-row-field-added:conversation_id', 'log-row-field-added:session_id'}
+    lines, ok = conform.judged([base], head, ROUTER, intended_log_rows, [])
+    page = '\n'.join(lines)
+    check(not ok and 'differences: 5  registered intended: 2' in page and 'unexplained: 3' in page,
+          'registered log IDs explain text additions only on GET /log rows', failed)
+    lines, ok = conform.judged([base], head, ROUTER, set(), [])
+    check(not ok and 'unexplained: 5' in '\n'.join(lines),
+          'log additions still differ without their register entries', failed)
+
     made = report(('router', '[10].body.session'), ('router', '[14].body.session'))
     ids = [d['id'] for d in made.items]
     shown = set(ids)

@@ -2259,12 +2259,32 @@ def told_by_rule(difference: dict, base: dict, head: dict, bases=()) -> str:
     return f'defect {defect}' if defect else PLACE if only_its_place(difference) else ''
 
 
+LOG_ROW_FIELD = re.compile(r'^\[(\d+)\]\.body\.turns\[\d+\]\.([a-z0-9_#]+)$')
+LOG_ROW_TEXT = re.compile(r'^(?:str\[[1-9]\d*\]#[0-9a-f]{8}|<(?:id|secret):\d+>)$')
+
+
+def intended_log_row_field(difference: dict, base: dict, registered: set) -> bool:
+    """The two registered Rust-only identities of rows in a successful log read."""
+    if (difference['channel'] != 'http' or difference['kind'] != 'field-added'
+            or not LOG_ROW_TEXT.fullmatch(difference['head'])):
+        return False
+    match = LOG_ROW_FIELD.fullmatch(difference['locator'])
+    if not match:
+        return False
+    exchange = base['http'][int(match[1])]
+    if exchange['method'] != 'GET' or exchange['path'] != '/log' or exchange['status'] != 200:
+        return False
+    return any(f'log-row-field-added:{key}' in registered and match[2] == diff.safe_key(key)
+               for key in ('conversation_id', 'session_id'))
+
+
 def rendered(report, intended: set, shaped: dict, title: str, errors=(), awaited=()) -> str:
     """A report of differences in six kinds: registered by its id as intended, registered as
     awaited (the reference moved and this Host's port is owed), a defect of the reference told
     by its shape, an event's place in its lane, the reference's usual answer when it was asked
     again (`usual`), and unexplained. `shaped`: what a rule says of a
     difference, by its id (`told_by_rule`)."""
+    intended = intended | {ident for ident, rule in shaped.items() if rule == 'intended'}
     registered = lambda d: d['id'] in intended or d['id'] in awaited  # noqa: E731
     explained = lambda d: registered(d) or d['id'] in shaped  # noqa: E731
     unexplained = [d for d in report.items if not explained(d)]
@@ -2338,7 +2358,9 @@ def held(recordings: list, seen: dict, chosen, registered: set) -> tuple:
         counted = [[d for d in items if place(d) in everywhere] for items in against]
         bases = [recording[name]['core'] for recording in recordings]
         head = seen[name]['core']
-        told = [{d['id']: told_by_rule(d, bases[n], head, bases) for d in counted[n] if d['id'] not in registered}
+        told = [{d['id']: 'intended' if intended_log_row_field(d, bases[n], registered)
+                 else told_by_rule(d, bases[n], head, bases)
+                 for d in counted[n] if d['id'] not in registered}
                 for n in range(len(recordings))]
         nearest = min(range(len(recordings)), key=lambda n: sum(1 for defect in told[n].values() if not defect))
         report.items.extend(counted[nearest])
@@ -2485,7 +2507,7 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=
                       awaited)]
     by_defect: dict = {}
     for said in shaped.values():
-        if said not in (PLACE, ASKED):
+        if said not in ('intended', PLACE, ASKED):
             defect = said.removeprefix('defect ')
             by_defect[defect] = by_defect.get(defect, 0) + 1
     if by_defect:
