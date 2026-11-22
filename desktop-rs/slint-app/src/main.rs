@@ -297,6 +297,25 @@ impl App {
         chats
     }
 
+    /// Once a second: a working row's stamp is its turn's running time, so
+    /// only those rows change (`view::start_turn_clock`).
+    pub fn tick_turn_stamps(&self) {
+        let Ok(engine) = self.engine.try_borrow() else { return };
+        let roster = engine.roster();
+        for index in 0..self.chats.row_count() {
+            let Some(mut chat) = self.chats.row_data(index) else { continue };
+            if !chat.busy {
+                continue;
+            }
+            let Some(agent) = roster.find(chat.session.as_str()) else { continue };
+            let stamp = view::row_stamp(chat.busy && agent.busy, agent.turn_started_at, agent.last_activity);
+            if chat.stamp != stamp.as_str() {
+                chat.stamp = stamp.into();
+                self.chats.set_row_data(index, chat);
+            }
+        }
+    }
+
     /// Folds (`Some(false)`), unfolds (`Some(true)`) or toggles (`None`) the
     /// sub-agents under `session`.
     pub fn fold(&self, session: &str, open: Option<bool>) {
@@ -1079,6 +1098,7 @@ fn main() {
     slint::Timer::single_shot(std::time::Duration::from_millis(50), move || platform::desktop::set_ui_scale(ui_scale));
     platform::diagnostics::start(headless);
     motion::start();
+    view::start_turn_clock();
     if let Some(socket) = &socket {
         launch::listen(socket);
     }

@@ -88,6 +88,8 @@ pub struct AgentRow {
     pub last_message: String,
     pub last_completed_message: String,
     pub last_activity: i64,
+    /// The running turn's start (epoch ms), or None: idle, or an older Host.
+    pub turn_started_at: Option<i64>,
     pub conversation_id: String,
     pub head_revision: i64,
     pub context_tokens: Option<i64>,
@@ -131,6 +133,9 @@ pub struct Roster {
     outgoing_counter: u64,
     archived_only: bool,
     transport_available: bool,
+    /// The Host's snapshot carries `turn_started_at`, so a turn that starts
+    /// between snapshots may take its start from the state event.
+    turn_clock: bool,
     ops: Vec<Op>,
 }
 
@@ -190,6 +195,7 @@ impl Roster {
             last_message: agent.last_message.clone(),
             last_completed_message: agent.last_completed_message.clone(),
             last_activity: agent.last_activity,
+            turn_started_at: agent.turn_started_at,
             conversation_id: agent.conversation_id.clone(),
             head_revision: agent.head_revision,
             context_tokens: agent.context_tokens,
@@ -302,6 +308,7 @@ impl Roster {
         let mut seen: HashSet<String> = HashSet::new();
         for value in json::array(snapshot, "agents") {
             let Some(object) = value.as_object() else { continue };
+            self.turn_clock |= object.contains_key("turn_started_at");
             let mut agent = Agent::from_json(object);
             if agent.session.is_empty() || agent.archived != self.archived_only {
                 continue;
@@ -331,6 +338,7 @@ impl Roster {
                     agent.latest_state = old.latest_state.clone();
                     agent.status_text = old.status_text.clone();
                     agent.busy = old.busy;
+                    agent.turn_started_at = old.turn_started_at;
                 }
                 if agent.queue_revision < old.queue_revision {
                     agent.queue_revision = old.queue_revision;
@@ -394,13 +402,22 @@ impl Roster {
 
     pub fn apply_state_event(&mut self, event: &Object) {
         let Some(row) = self.index_of_session(&json::string(event, "session")) else { return };
+        let turn_clock = self.turn_clock;
         let agent = &mut self.agents[row];
         if let Some(kind) = event.get("kind").and_then(Value::as_str) {
             agent.latest_state = kind.to_owned();
         }
         agent.status_text = json::string(event, "status_text");
         agent.latest_state_timestamp = json::integer(event, "ts");
+        let was_busy = agent.busy;
         agent.busy = is_busy_state(&agent.latest_state);
+        // A turn that starts between snapshots counts from its first busy
+        // state; the next snapshot brings the Host's own start.
+        if !agent.busy {
+            agent.turn_started_at = None;
+        } else if !was_busy && agent.turn_started_at.is_none() && turn_clock && agent.latest_state_timestamp > 0 {
+            agent.turn_started_at = Some(agent.latest_state_timestamp);
+        }
         self.notify_row(row, &[Role::State, Role::StatusText, Role::Busy]);
     }
 

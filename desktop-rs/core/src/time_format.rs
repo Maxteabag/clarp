@@ -126,3 +126,16 @@ pub fn compact_duration(milliseconds: i64) -> String {
     }
     format!("{}d", hours / 24)
 }
+
+/// A running turn's time for the chat list, ticking each second: "12s",
+/// "6m 39s", "1h 05m". A start ahead of the local clock reads "0s".
+pub fn turn_elapsed(milliseconds: i64) -> String {
+    let seconds = (milliseconds / 1000).max(0);
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    if seconds < 3600 {
+        return format!("{}m {:02}s", seconds / 60, seconds % 60);
+    }
+    format!("{}h {:02}m", seconds / 3600, seconds / 60 % 60)
+}

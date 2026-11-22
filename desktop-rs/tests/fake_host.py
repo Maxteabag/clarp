@@ -54,9 +54,9 @@ pair_revision = 3
 rooms_gone = False  # an older Host without /agent-conversations
 agents = [
     {"agent_id": "a1", "session": "rachel", "persona": "Rachel", "backend": "claude",
-     "latest_state": "idle", "alive": True, "last_activity": 2000, "conversation_id": "c-rachel", "head_revision": 2},
+     "latest_state": "idle", "alive": True, "last_activity": 2000, "turn_started_at": 0, "conversation_id": "c-rachel", "head_revision": 2},
     {"agent_id": "a2", "session": "mike", "persona": "Mike", "backend": "codex",
-     "latest_state": "idle", "alive": True, "last_activity": 1000, "conversation_id": "c-mike", "head_revision": 1},
+     "latest_state": "idle", "alive": True, "last_activity": 1000, "turn_started_at": 0, "conversation_id": "c-mike", "head_revision": 1},
 ]
 turns = {
     "rachel": [
