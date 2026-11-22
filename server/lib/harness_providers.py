@@ -521,7 +521,13 @@ def start_oauth(harness: str | None, provider: str, method: Any,
         serve = factory(executable)
         authorization = serve.client.request(
             "POST", f"/provider/{provider}/oauth/authorize",
-            {"method": method, "inputs": inputs}, timeout=30) or {}
+            {"method": method, "inputs": inputs}, timeout=30)
+        if authorization is None:
+            authorization = {}
+        if not isinstance(authorization, dict):
+            # R156: read below as an object, it raised after the task was marked running,
+            # which then stayed running with its server never ended. Failed here instead.
+            raise RuntimeError("OpenCode did not answer the sign-in")
     except Exception as exc:  # noqa: BLE001 - surfaced as a failed task
         if serve is not None:
             serve.close()
