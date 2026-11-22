@@ -556,3 +556,8 @@ the feed and is available to current team members in their next team brief.
 has no active plan. A plan revision publishes `task-plan-updated` with
 `session`, `agent_id`, `plan_id` and `revision` after the changed plan is
 readable. Native Codex goals continue to use `goal-updated`.
+
+On a Rust Host coordination turn that a user's message joins, the final reply
+retains its agents audience if the user received a note after their latest
+steer. The note, the steered message, and the other post-steer rows remain
+visible. If no note followed the steer, the final reply remains visible.
