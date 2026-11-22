@@ -18,6 +18,7 @@ use crate::{App, AppWindow};
 
 mod prefs;
 mod settings;
+pub use settings::COORDINATION_LINE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Entry {

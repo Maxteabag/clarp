@@ -207,6 +207,9 @@ pub fn live_check(out: String) {
                 return false;
             }
             check(!app.engine.borrow().live_items(), "without live_items in /server-info the desktop has no live items");
+            // Each running row on its own, as Always visible shows them; the
+            // default (Grouped) folds the running turn, `--check quiet-chat`.
+            app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
             check(requests("GET", "/live").is_empty(), "and never asks GET /live");
             check(events_queries().iter().all(|q| q.get("live").is_none()), "and opens /events without ?live=");
             // A long chat, so the reader can scroll away from the live turn.
@@ -542,8 +545,9 @@ pub fn live_check(out: String) {
             }
             check(status() == "■ Interrupted", &format!("the status line says Interrupted: {:?}", status()));
             check(!view().live_busy, "and the agent is no longer busy");
-            check(titles() == ["Worked for 12s · 3 tools", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds its reasoning, commentary and tools, counting the calls it opens to; the answer and what failed or stopped stay: {:?}", titles()));
-            check(live_row("live:cl:msg_01:1").is_none(), "the commentary (not spoken) folds into the work row (#653)");
+            check(titles() == ["Worked for 12s · 3 tools", "", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds its reasoning and tools, counting the calls it opens to; under Always visible the commentary, the answer and what failed or stopped stay: {:?}", titles()));
+            let commentary = live_row("live:cl:msg_01:1").unwrap_or_default();
+            check(message_text(&commentary) == "Let me look at the parser and its tests.", &format!("Always visible keeps the commentary in its place: {:?}", message_text(&commentary)));
             let stopped = live_row("live:cl:msg_02:0").unwrap_or_default();
             check(message_text(&stopped) == "The failure came from an off-by-one", &format!("the stopped answer stays: {:?}", message_text(&stopped)));
             check(stopped.live.meta == "interrupted", "and says it was interrupted");
@@ -744,7 +748,7 @@ pub fn live_check(out: String) {
             check(fold.live.title == "Worked for 16s · 1 tool" && !fold.live.expanded, &format!("the turn seen live stays folded in history, with the Host's worked time: {:?}", fold.live.title));
             check(live_row(&format!("live:{REAL_FAILED}")).is_some_and(|r| r.live.status == "failed"), "its failed tool stays in view");
             let between = live_row(BETWEEN_FOLD).unwrap_or_default();
-            check(between.live.title == "Used 3 tools" && !between.live.expanded, &format!("the turn in between, only ever in /log and ended before the Host summed turns up, folds the same without a worked time: {:?}", between.live.title));
+            check(between.live.title == "3 tools" && !between.live.expanded, &format!("the turn in between, only ever in /log and ended before the Host summed turns up, folds the same without a worked time: {:?}", between.live.title));
             check(activity_rows().is_empty(), &format!("no finished turn shows its tools as 'Show · 1 tool call' rows: {:?}", activity_rows()));
             *running_at1.borrow_mut() = at(REAL_RUNNING).unwrap_or(usize::MAX);
             *before3.borrow_mut() = crate::view::sync_stats();
@@ -782,7 +786,7 @@ pub fn live_check(out: String) {
             let from = shown.iter().position(|r| r.live.key == BETWEEN_FOLD).unwrap_or(0);
             let turn: Vec<String> = shown[from..].iter().take_while(|r| r.id != REAL_PREVIOUS_ANSWER).map(|r| r.live.title.to_string()).collect();
             check(
-                turn == ["Used 3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date"],
+                turn == ["3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date"],
                 &format!("O opens it to one row per tool, as the live fold opens: {turn:?}"),
             );
             check(activity_rows().is_empty(), "and no activity rows");

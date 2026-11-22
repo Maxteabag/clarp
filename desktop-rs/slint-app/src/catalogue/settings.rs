@@ -12,11 +12,13 @@ use super::{Choice, Setting, e, keyed, shown};
 use crate::{App, AppWindow};
 
 const ACTIVITY: [(&str, &str); 4] = [
-    ("Grouped", "Tool calls fold into one row per turn."),
+    ("Grouped", "Each turn's tool calls and thinking fold into one work row that opens in place."),
     ("Always visible", "Every tool call shows as its own row."),
     ("Group old", "Recent tool calls show; older ones fold."),
-    ("Hidden", "Tool calls do not show in the chat."),
+    ("Hide when done", "The work row shows while the turn runs and goes when it has finished."),
 ];
+/// This device shows the quiet line where agent messages were (#653).
+pub const COORDINATION_LINE: &str = "conversation/coordinationLine";
 /// The double-press windows offered, in milliseconds.
 const DOUBLE_PRESS: [u64; 8] = [150, 200, 250, 300, 400, 500, 700, 1000];
 /// The chat's font sizes offered, in pixels.
@@ -83,12 +85,12 @@ fn chats() -> Vec<Setting> {
         ),
         Setting::choice(
             keyed(
-                e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped, always visible, old ones grouped, or hidden.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools"]),
+                e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped into one work row, always visible, old ones grouped, or hidden once the turn is done.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools", "hide when done", "quiet chat", "work row"]),
                 &["tools"],
             ),
             "CHATS",
             |_| ACTIVITY.iter().enumerate().map(|(i, (label, about))| Choice::new(i.to_string(), *label).about(*about)).collect(),
-            |app| app.engine.borrow().activity_mode().clamp(0, clarp_core::presentation::HIDDEN).to_string(),
+            |app| app.engine.borrow().activity_mode().clamp(0, clarp_core::presentation::HIDE_WHEN_DONE).to_string(),
             |app, _, value| {
                 if let Ok(mode) = value.parse() {
                     app.engine.borrow_mut().set_activity_mode(mode);
@@ -96,6 +98,30 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("0"),
+        // Coordination between agents (`hidden_coordination`, #653): the
+        // Host's own setting, written only when the reader flips it.
+        Setting::toggle(
+            e("agent-messages", clarp_core::coordination::SETTING, "chats", "Shows the messages agents send each other in every chat (the Host's setting). Off, they are left out; each chat's profile can still show them.", &["coordination", "between agents", "agent to agent", "a2a", "hide agent messages", "quiet chat", "toggle"]),
+            "CHATS",
+            |app| app.engine.borrow().coordination_shown(),
+            |app, _, on| app.engine.borrow_mut().set_coordination_shown(on),
+        )
+        .when(|app| app.engine.borrow().hidden_coordination()),
+        // This device's choice, next to it: the quiet "N messages between
+        // agents" line, or nothing at all.
+        Setting::toggle(
+            e("agent-messages-line", clarp_core::coordination::LINE_SETTING, "chats", "Applies wherever messages between agents are hidden, in every chat.", &["agent messages line", "messages between agents", "hidden messages", "count line", "quiet chat", "toggle"]),
+            "CHATS",
+            |app| app.engine.borrow().settings().boolean(COORDINATION_LINE, true),
+            |app, _, on| {
+                store(app, COORDINATION_LINE, on);
+                app.refresh(&[Change::Preferences]);
+            },
+        )
+        .default("on")
+        // Listed whenever the Host offers it: a chat's own hide under a
+        // Host set to show still draws the line.
+        .when(|app| app.engine.borrow().hidden_coordination()),
         // Off, the working row shimmers in the chat and the shortcut bar
         // names the stop key.
         Setting::stored_toggle(

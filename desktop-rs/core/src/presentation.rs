@@ -17,11 +17,13 @@ use crate::json::Object;
 use crate::list_ops::ListOp;
 use crate::protocol::{Message, parse_iso_date};
 
-/// Chats → Tool activity: 0 grouped, 1 always visible, 2 group old, 3 hidden.
+/// Chats → Tool activity: 0 grouped, 1 always visible, 2 group old, 3 hide
+/// when done (stored as "Hidden" before #653: the same index, so a stored
+/// choice carries over as it is).
 pub const GROUPED: i32 = 0;
 pub const ALWAYS_VISIBLE: i32 = 1;
 pub const GROUP_OLD: i32 = 2;
-pub const HIDDEN: i32 = 3;
+pub const HIDE_WHEN_DONE: i32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -121,7 +123,7 @@ impl<'a> Pass<'a> {
             .iter()
             .zip(&inline)
             .map(|(message, &inline)| {
-                if inline || settings.activity_mode == HIDDEN {
+                if inline || settings.activity_mode == HIDE_WHEN_DONE {
                     return false;
                 }
                 if message.activity {
@@ -241,7 +243,7 @@ impl<'a> Pass<'a> {
         if self.settings.show_when_ready && !message.activity && message.role == "assistant" && message.kind == "live" {
             row.body = String::new();
         }
-        if self.settings.activity_mode == HIDDEN {
+        if self.settings.activity_mode == HIDE_WHEN_DONE {
             row.activity = false;
             row.tools.clear();
             row.display_cells.clear();
@@ -259,7 +261,7 @@ impl<'a> Pass<'a> {
         if repeated.contains(&index) || self.continues_group(index) {
             return false;
         }
-        if self.settings.activity_mode == HIDDEN {
+        if self.settings.activity_mode == HIDE_WHEN_DONE {
             let message = &self.rows[index];
             if message.activity {
                 return false;
@@ -531,3 +533,58 @@ pub fn diff(old: &[PresentedRow], new: &[PresentedRow]) -> Vec<Op> {
     }
     ops
 }
+
+/// Tool activity for one chat (#653): this device's own choice for it, kept
+/// in the settings under its Host's `server_id` and its session
+/// (`@<server_id>/<session>`, as `all_hosts` addresses a chat), so it
+/// follows the chat whichever Host this desktop reads first. None: the chat
+/// follows the global choice ("Follow Settings").
+pub const CHAT_ACTIVITY_KEY: &str = "conversation/chatActivity";
+
+/// The key of `session` on the primary Host `server_id`; a peer chat
+/// (`@<server_id>/<session>`) is its own key. Empty while the primary has
+/// not said its `server_id`.
+pub fn chat_key(server_id: &str, session: &str) -> String {
+    if crate::all_hosts::is_peer_session(session) {
+        return session.to_owned();
+    }
+    if server_id.is_empty() || session.is_empty() {
+        return String::new();
+    }
+    crate::all_hosts::qualify(server_id, session)
+}
+
+/// The chat's own choice, if it has one.
+pub fn chat_activity(settings: &crate::settings::Settings, key: &str) -> Option<i32> {
+    if key.is_empty() {
+        return None;
+    }
+    let mode = settings.get(CHAT_ACTIVITY_KEY)?.get(key)?.as_i64()?;
+    (GROUPED as i64..=HIDE_WHEN_DONE as i64).contains(&mode).then_some(mode as i32)
+}
+
+/// Sets the chat's own choice, or (None) lets it follow the global one.
+pub fn set_chat_activity(settings: &mut crate::settings::Settings, key: &str, mode: Option<i32>) {
+    if key.is_empty() {
+        return;
+    }
+    let mut map = settings.get(CHAT_ACTIVITY_KEY).and_then(Value::as_object).cloned().unwrap_or_default();
+    match mode {
+        Some(mode) => {
+            map.insert(key.to_owned(), json!(mode.clamp(GROUPED, HIDE_WHEN_DONE)));
+        }
+        None => {
+            map.remove(key);
+        }
+    }
+    if map.is_empty() {
+        settings.remove(CHAT_ACTIVITY_KEY);
+    } else {
+        settings.set(CHAT_ACTIVITY_KEY, Value::Object(map));
+    }
+}
+
+/// The five choices a chat offers, its own first: (value, label). "follow"
+/// follows the global choice.
+pub const CHAT_ACTIVITY_CHOICES: [(&str, &str); 5] =
+    [("follow", "Follow Settings"), ("0", "Grouped"), ("1", "Always visible"), ("2", "Group old"), ("3", "Hide when done")];

@@ -183,6 +183,46 @@ live_truth = {}      # session -> LiveView: what GET /live answers
 live_cursor = {}     # session -> (fixture name, next step index, time shift)
 live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
 tool_explanation_settings = {"enabled": True, "detail_level": 2}
+# Coordination between agents (feature hidden_coordination, Host contract
+# 120): off until a check turns it on; the Host's value, and each chat's own.
+coordination = {"on": False, "visibility": "hide", "overrides": {}}
+
+
+def coordination_effective(session):
+    return coordination["overrides"].get(session) or coordination["visibility"]
+
+
+def coordination_rows(session, rows, mode):
+    """The rows a read with `coordination=mode` answers, the echo, and the
+    count after the newest visible row (docs/protocol.md "Hidden
+    coordination"): under an effective hide the rows of a turn for other
+    agents (audience "agents", never a note) are left out, and the next
+    visible row says how many with hidden_before."""
+    source = "request" if mode == "show" else ("chat" if session in coordination["overrides"] else "global")
+    visibility = "show" if mode == "show" else coordination_effective(session)
+    echo = {"hidden": visibility == "hide", "source": source, "visibility": visibility}
+    if visibility != "hide":
+        return rows, echo, None
+    shown, run = [], []
+
+    def count(run):
+        names = []
+        for row in run:
+            name = row.get("sender_name") or ""
+            if name and {"agent_id": row.get("sender_agent_id", ""), "name": name} not in names:
+                names.append({"agent_id": row.get("sender_agent_id", ""), "name": name})
+        return {"messages": len(run), "exchanges": 1, "agents": names, "capped": False}
+
+    for row in rows:
+        if row.get("audience") == "agents" and row.get("kind") != "note":
+            run.append(row)
+            continue
+        row = {key: value for key, value in row.items() if key != "hidden_before"}
+        if run:
+            row["hidden_before"] = count(run)
+            run = []
+        shown.append(row)
+    return shown, echo, (count(run) if run else None)
 
 
 LOREM = ("The build runs the unit tests first, then the integration suite against a scratch "
@@ -934,6 +974,8 @@ class Handler(BaseHTTPRequestHandler):
             features.append("html_form_events")
             if turn_summaries:
                 features.append("log_turn_summary")
+            if coordination["on"]:
+                features.append("hidden_coordination")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -947,6 +989,10 @@ class Handler(BaseHTTPRequestHandler):
                 snapshot_delay[1] -= 1
                 time.sleep(snapshot_delay[0])
             with state_lock:
+                if coordination["on"]:
+                    for agent in agents:
+                        agent["coordination_visibility"] = coordination_effective(agent["session"])
+                        agent["coordination_override"] = coordination["overrides"].get(agent["session"])
                 return self.reply(200, {"agents": agents, "personas": personas,
                                         "tool_explanations": tool_explanation_settings,
                                         "available_mcp_servers": [{"name": "github", "description": "GitHub"}]})
@@ -1150,6 +1196,15 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(older_delay)
             with state_lock:
                 rows = turns.get(session, [])
+                echo = hidden_after = None
+                mode = query.get("coordination")
+                if coordination["on"] and mode:
+                    read = query.get("coordination_read")
+                    current = "show" if mode == "show" else coordination_effective(session)
+                    if read and read != current:
+                        return self.reply(200, {"conversation_id": "", "turns": [], "latest_revision": 0, "has_more": False,
+                                                "replace_required": True, "coordination": {"hidden": current == "hide", "source": "global", "visibility": current}})
+                    rows, echo, hidden_after = coordination_rows(session, rows, mode)
                 after = int(query.get("after_revision", "-1"))
                 chosen = [t for t in rows if t["revision"] > after] if after >= 0 else rows
                 latest = max([t["revision"] for t in rows] or [0])
@@ -1171,8 +1226,12 @@ class Handler(BaseHTTPRequestHandler):
                     limit = int(query.get("limit", "0") or 0)
                     if limit and len(chosen) > limit:
                         chosen, more = chosen[:limit], True
-            return self.reply(200, {"conversation_id": cid, "turns": chosen, "latest_revision": latest,
-                                    "has_more": more, "missing": False})
+            answer = {"conversation_id": cid, "turns": chosen, "latest_revision": latest, "has_more": more, "missing": False}
+            if echo is not None:
+                answer["coordination"] = echo
+                if hidden_after and not query.get("before"):
+                    answer["hidden_after"] = hidden_after
+            return self.reply(200, answer)
         if url.path == "/live":
             session = query.get("session", "")
             with state_lock:
@@ -1181,6 +1240,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, live_snapshot(session))
         if url.path == "/tool-explanations/settings":
             return self.reply(200, tool_explanation_settings)
+        if url.path == "/coordination-settings":
+            return self.reply(200, {"coordination_visibility": coordination["visibility"]})
         if url.path == "/events":
             inbox = queue.Queue()
             # `live=` (blank) asks for status ops only; no parameter, none.
@@ -1455,6 +1516,26 @@ class Handler(BaseHTTPRequestHandler):
             global live_features
             live_features = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/coordination":
+            # Test control: the hidden_coordination feature on or off (read
+            # from /server-info on connecting).
+            coordination["on"] = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/coordination-settings":
+            record({"method": "POST", "path": url.path, "body": body})
+            coordination["visibility"] = body.get("coordination_visibility", "hide")
+            broadcast({"type": "agent-roster", "kind": "coordination-changed"})
+            return self.reply(200, {"coordination_visibility": coordination["visibility"]})
+        if url.path == "/agent-coordination":
+            record({"method": "POST", "path": url.path, "body": body})
+            session, visibility = body.get("session", ""), body.get("visibility", "default")
+            if visibility == "default":
+                coordination["overrides"].pop(session, None)
+            else:
+                coordination["overrides"][session] = visibility
+            broadcast({"type": "agent-roster", "kind": "coordination-changed"})
+            return self.reply(200, {"ok": True, "session": session, "coordination_visibility": coordination_effective(session),
+                                    "coordination_override": coordination["overrides"].get(session)})
         if url.path == "/__control/turn-summary":
             # Test control: the log_turn_summary feature on or off (read from
             # /server-info on connecting). Rows carry trace_id, phase and turn

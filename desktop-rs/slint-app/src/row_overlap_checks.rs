@@ -877,7 +877,10 @@ pub(super) fn row_overlap_check(out: String) {
         moment("the settled turn's fold opens", 800, || true, |app, _| {
             crate::artifacts_view::toggle_live(app, "live:fold:t-b");
         }),
-        moment("and closes", 800, || app_now().engine.borrow().live_view(SESSION).is_some_and(|v| v.lseq().is_some()), |_, _| {
+        moment("and closes", 800, || app_now().engine.borrow().live_view(SESSION).is_some_and(|v| v.lseq().is_some()), |app, _| {
+            // Grouped folds the running turn into its work row (#653):
+            // opened, its plan and thinking show in place.
+            app.expanded.borrow_mut().insert("live:fold:t-d".to_owned());
             live_event(live_turn_starts());
         }),
         moment("a live turn shows a long plan and its thinking", 1000, || live_row("live:ov-plan").is_some(), |app, _| {

@@ -33,6 +33,13 @@ export struct ProfileInfo {
     prompts-loading: bool,
     prompts-more: bool,
     mcp-shown: bool,
+    // This chat's own choices (#653): messages between agents (the Host's,
+    // on a Host with `hidden_coordination`; 0 Follow Settings, 1 Show, 2
+    // Hide) and Tool activity (this device's; 0 Follow Settings, then the
+    // four modes).
+    agent-messages-shown: bool,
+    agent-messages-index: int,
+    tool-activity-index: int,
     error: string,
 }
 
@@ -93,6 +100,12 @@ export global ProfileBridge {
     callback set-heartbeat(bool);
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
+    callback set-agent-messages(int);
+    // Bumped to bring the profile's Artifacts into view.
+    in-out property <int> artifacts-request;
+    callback set-tool-activity(int);
+    in property <[string]> agent-message-choices: ["Follow Settings", "Show", "Hide"];
+    in property <[string]> tool-activity-choices: ["Follow Settings", "Grouped", "Always visible", "Group old", "Hide when done"];
     callback set-mcp(string, bool);
     callback set-schedule(string, bool);
     callback compact();
@@ -101,9 +114,16 @@ export global ProfileBridge {
 
 component Card inherits VerticalLayout {
     in property <string> title;
+    // An optional icon before the title (the Artifacts card's, which the
+    // chat's ⋯ menu shares).
+    in property <image> icon;
     padding: 10px;
     spacing: 8px;
-    SectionTitle { text: root.title; }
+    HorizontalLayout {
+        spacing: 6px;
+        if root.icon.width > 0: Image { source: root.icon; width: 12 * Look.unit; height: 12 * Look.unit; colorize: Palette.muted; y: (parent.height - self.height) / 2; }
+        SectionTitle { text: root.title; horizontal-stretch: 1; }
+    }
     @children
 }
 
@@ -193,7 +213,10 @@ export component AgentProfile inherits Modal {
             font-size: 11 * Look.unit;
             wrap: word-wrap;
         }
-        ScrollView {
+        // The chat's ⋯ menu opens the profile at its artifacts (#653).
+        property <int> artifacts-request: ProfileBridge.artifacts-request;
+        changed artifacts-request => { profile-scroll.viewport-y = -artifacts-card.y; }
+        profile-scroll := ScrollView {
             vertical-stretch: 1;
             content-width: self.visible-width;
             content-height: content.preferred-height;
@@ -306,6 +329,31 @@ export component AgentProfile inherits Modal {
                     ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
                 }
                 Card {
+                    title: "THIS CHAT";
+                    if root.info.agent-messages-shown: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.agent-message-choices;
+                            current-index: root.info.agent-messages-index;
+                            accessible-label: "Messages between agents";
+                            selected => { ProfileBridge.set-agent-messages(self.current-index); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Tool activity"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.tool-activity-choices;
+                            current-index: root.info.tool-activity-index;
+                            accessible-label: "Tool activity";
+                            selected => { ProfileBridge.set-tool-activity(self.current-index); }
+                        }
+                    }
+                }
+                Card {
                     title: "HEARTBEAT";
                     InfoRow { label: "State"; value: root.info.heartbeat-state; }
                     for line in ProfileBridge.heartbeat-history: HorizontalLayout {
@@ -364,8 +412,9 @@ export component AgentProfile inherits Modal {
                     }
                     if ProfileBridge.media.length == 0: Text { text: "No images in this chat yet"; color: Palette.muted; font-size: 11 * Look.unit; }
                 }
-                Card {
+                artifacts-card := Card {
                     title: "ARTIFACTS";
+                    icon: @image-url("icons/artifacts.svg");
                     for artifact in ProfileBridge.artifacts: Rectangle {
                         border-radius: 2px;
                         background: Palette.raised;

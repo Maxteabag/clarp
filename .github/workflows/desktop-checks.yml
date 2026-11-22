@@ -33,7 +33,7 @@ concurrency:
 
 env:
   DEFAULT_CHECKS: >-
-    scrollbar transcript scroll scroll-jump row-overlap composer live a2a receipts
+    scrollbar transcript scroll scroll-jump row-overlap composer live quiet-chat agent-messages a2a receipts
     artifacts artifact-open artifact-summary form-events artifact-keys link-hints keymap switcher panes sidebar banner
     layout-warning updates settings themes fonts startup refocus avatars message-search select-text mention customize chat-zoom
     send desktop vim processes roster-stale stop-receipt pair narrow explorer all-hosts
@@ -65,8 +65,9 @@ jobs:
           cp "$file" /tmp/history-fold-candidate.rs
           trap 'cp /tmp/history-fold-candidate.rs "$file"' EXIT
           git show "$baseline:desktop-rs/$file" > "$file"
-          # The baseline predates the hide_activity fields (Hidden tool
-          # activity, 4f163940): declare the field and set it false in the
+          # The baseline predates the hide_settled/fold_running fields (Hide
+          # when done, #653; Hidden tool activity before it, 4f163940):
+          # declare the field and set them false in the
           # two live_present literals, or the control fails to compile
           # (E0063) instead of failing its ordering assertion. False is the
           # baseline's own behaviour, so what is on trial does not change.
@@ -76,10 +77,10 @@ jobs:
           source = path.read_text()
           field = '    pub busy: bool,\n'
           assert source.count(field) == 1
-          source = source.replace(field, field + '    pub hide_activity: bool,\n')
+          source = source.replace(field, field + '    pub hide_settled: bool,\n    pub show_commentary: bool,\n')
           literal = 'host_now_ms: 0 }'
           assert source.count(literal) == 2
-          source = source.replace(literal, 'host_now_ms: 0, hide_activity: false }')
+          source = source.replace(literal, 'host_now_ms: 0, fold_running: false, hide_settled: false, show_commentary: false }')
           path.write_text(source)
           PYCTRL
           set +e

@@ -90,7 +90,7 @@ const WEIGHTS: &[(&str, &str)] = &[("300", "Light"), ("400", "Regular"), ("500",
 const DENSITIES: &[(&str, &str)] = &[("compact", "Compact"), ("comfortable", "Comfortable"), ("spacious", "Spacious")];
 const CLOCKS: &[(&str, &str)] = &[("12h", "12-hour (6:10 PM)"), ("24h", "24-hour (18:10)")];
 const ACTIVITY: &[(&str, &str)] =
-    &[("grouped", "Grouped"), ("visible", "Always visible"), ("group-old", "Group old"), ("hidden", "Hidden")];
+    &[("grouped", "Grouped"), ("visible", "Always visible"), ("group-old", "Group old"), ("hide-when-done", "Hide when done")];
 const DETAIL: &[(&str, &str)] =
     &[("raw", "Raw (no AI)"), ("brief", "Brief"), ("plain", "Plain English"), ("explained", "Explained"), ("teaching", "Teaching")];
 const LINKS: &[(&str, &str)] = &[("browser", "Open in the browser"), ("copy", "Copy the address")];
@@ -412,8 +412,8 @@ pub static SPECS: &[Spec] = &[
         name: "toolactivity",
         key: "conversation/activityDisplayMode",
         label: "Tool activity",
-        description: "How tool calls show: grouped under a 'Worked for' line, always visible, only old ones grouped, or hidden",
-        aliases: &["tool calls", "worked for", "fold tools", "collapse tools", "expand tools", "grouping", "hide tools", "no tools"],
+        description: "How tool calls show: one work row per turn, always visible, only old ones grouped, or the work row only while the turn runs",
+        aliases: &["tool calls", "worked for", "fold tools", "collapse tools", "expand tools", "grouping", "hide tools", "no tools", "hide when done", "quiet chat"],
         section: CHAT,
         kind: Kind::Choice { default: "grouped", options: ACTIVITY, indexed: true },
         scope: G,
@@ -730,11 +730,16 @@ pub fn validate(spec: &Spec, value: &Value) -> Result<Value, String> {
         }
         Kind::Choice { .. } => {
             let options = options_of(spec);
-            let text = match value {
+            let mut text = match value {
                 Value::String(s) => s.clone(),
                 Value::Number(n) => n.to_string(),
                 _ => String::new(),
             };
+            // Tool activity's "Hidden" became "Hide when done" (#653): the
+            // stored index is the same, and the old word still means it.
+            if spec.name == "toolactivity" && text.eq_ignore_ascii_case("hidden") {
+                text = "hide-when-done".to_owned();
+            }
             options
                 .iter()
                 .find(|(id, label)| id.eq_ignore_ascii_case(&text) || label.eq_ignore_ascii_case(&text))

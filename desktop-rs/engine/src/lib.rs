@@ -25,6 +25,7 @@ mod peers;
 pub mod blocks;
 mod composer;
 mod connection;
+mod coordination;
 mod form_events;
 pub use form_events::{FormEventStore, FormEvents};
 mod voice;
@@ -265,6 +266,7 @@ pub struct Engine {
     // over a page behind is replaced by the latest page, not walked forward.
     catching_up: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
+    coordination: coordination::Coordination,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
     cache_save_due: HashSet<String>,
@@ -366,7 +368,7 @@ impl Engine {
             activity_mode: config
                 .settings
                 .integer("conversation/activityDisplayMode", i64::from(tools_visible))
-                .clamp(0, i64::from(clarp_core::presentation::HIDDEN)) as i32,
+                .clamp(0, i64::from(clarp_core::presentation::HIDE_WHEN_DONE)) as i32,
             ..clarp_core::presentation::Settings::default()
         };
         // lifecycle
@@ -416,6 +418,7 @@ impl Engine {
             order_check: HashSet::new(),
             catching_up: HashSet::new(),
             pending_log_mode: HashMap::new(),
+            coordination: coordination::Coordination::default(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
             cache_saved_at: HashMap::new(),
@@ -604,8 +607,47 @@ impl Engine {
         hide: &std::collections::HashSet<String>,
         strip: &std::collections::HashSet<String>,
     ) -> Vec<clarp_core::presentation::PresentedRow> {
-        on_peer!(self.peer_mut(session), |engine, local| engine.presented_except(local, hide, strip));
-        self.present_with_explanations(session, hide, strip)
+        // The chat's own Tool activity (this device's), else the global one.
+        let mode = self.chat_activity_mode(session);
+        self.presented_as(session, hide, strip, mode)
+    }
+    fn presented_as(
+        &mut self,
+        session: &str,
+        hide: &std::collections::HashSet<String>,
+        strip: &std::collections::HashSet<String>,
+        mode: i32,
+    ) -> Vec<clarp_core::presentation::PresentedRow> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.presented_as(local, hide, strip, mode));
+        let global = self.presentation.activity_mode;
+        self.presentation.activity_mode = mode;
+        let rows = self.present_with_explanations(session, hide, strip);
+        self.presentation.activity_mode = global;
+        rows
+    }
+    /// The settings key of a chat's own choices on this device (#653):
+    /// `@<server_id>/<session>`.
+    fn chat_key(&self, session: &str) -> String {
+        clarp_core::presentation::chat_key(&self.server_id, session)
+    }
+    /// A chat's own Tool activity on this device, if it has one (None:
+    /// Follow Settings).
+    pub fn chat_activity_choice(&self, session: &str) -> Option<i32> {
+        clarp_core::presentation::chat_activity(&self.settings, &self.chat_key(session))
+    }
+    /// The Tool activity a chat shows: its own choice, else the global one.
+    pub fn chat_activity_mode(&self, session: &str) -> i32 {
+        self.chat_activity_choice(session).unwrap_or(self.presentation.activity_mode)
+    }
+    /// Sets a chat's own Tool activity (None: it follows the global one).
+    pub fn set_chat_activity(&mut self, session: &str, mode: Option<i32>) {
+        let key = self.chat_key(session);
+        if key.is_empty() || self.chat_activity_choice(session) == mode {
+            return;
+        }
+        clarp_core::presentation::set_chat_activity(&mut self.settings, &key, mode);
+        self.changes.push(Change::Preferences);
+        self.changes.push(Change::Conversation(session.to_owned()));
     }
     /// Fetches the tool calls of a message the Host sent without them
     /// (`tool_details_available`), once per message at a time.
@@ -636,7 +678,7 @@ impl Engine {
         self.presentation.activity_mode
     }
     pub fn set_activity_mode(&mut self, mode: i32) {
-        let mode = mode.clamp(0, clarp_core::presentation::HIDDEN);
+        let mode = mode.clamp(0, clarp_core::presentation::HIDE_WHEN_DONE);
         if self.presentation.activity_mode != mode {
             self.presentation.activity_mode = mode;
             self.settings.set("conversation/activityDisplayMode", i64::from(mode));
@@ -720,7 +762,7 @@ impl Engine {
         let mode = self
             .settings
             .integer("conversation/activityDisplayMode", i64::from(tools_visible))
-            .clamp(0, i64::from(clarp_core::presentation::HIDDEN)) as i32;
+            .clamp(0, i64::from(clarp_core::presentation::HIDE_WHEN_DONE)) as i32;
         if self.presentation.activity_mode != mode {
             self.set_activity_mode(mode);
         }
@@ -1029,6 +1071,7 @@ impl Engine {
             self.changes.push(Change::Archive);
         }
         self.schedule_agent_conversations();
+        self.coordination_reloads();
         self.open_shown_panes();
         if self.lifecycle_snapshot(object) {
             return;
@@ -1179,6 +1222,9 @@ impl Engine {
         self.waiting_for_session_choice = false;
         let changed = self.selected != session;
         self.selected = session.to_owned();
+        if changed {
+            self.end_coordination_visits(session);
+        }
         self.mutate_roster(|r| r.clear_unread(session));
         if changed {
             self.ensure_conversation(session);
@@ -1226,7 +1272,7 @@ impl Engine {
     /// A chat's rows changed from the Host: cache them a moment later, at
     /// most once per cooldown.
     fn schedule_cache_save(&mut self, session: &str) {
-        if self.transcript_cache.is_none() || session.is_empty() || !self.cache_save_due.insert(session.to_owned()) {
+        if self.transcript_cache.is_none() || session.is_empty() || !self.coordination_cacheable(session) || !self.cache_save_due.insert(session.to_owned()) {
             return;
         }
         let delay = Duration::from_millis(clarp_core::transcript_cache::SAVE_DELAY_MS);
@@ -1242,6 +1288,9 @@ impl Engine {
             return;
         }
         self.cache_save_due.remove(session);
+        if !self.coordination_cacheable(session) {
+            return;
+        }
         let (Some(cache), Some(conversation)) = (self.transcript_cache.clone(), self.conversations.get(session)) else { return };
         if conversation.latest_revision() <= 0 {
             return;
@@ -1304,11 +1353,9 @@ impl Engine {
         };
         self.log_in_flight.insert(session.to_owned());
         self.with_conversation(session, |c| c.set_loading(true));
-        self.api.get(
-            &format!("log-older:{session}"),
-            "/log",
-            &[("session", session), ("limit", "100"), ("include_automated", "0"), ("before", &before)],
-        );
+        let mut query = vec![("session", session), ("limit", "100"), ("include_automated", "0"), ("before", before.as_str())];
+        query.extend(self.coordination_query(session, false));
+        self.api.get(&format!("log-older:{session}"), "/log", &query);
     }
 
     fn begin_log_request(&mut self, session: &str, mode: &str) -> bool {
@@ -1344,7 +1391,9 @@ impl Engine {
         self.ensure_conversation(&session);
         self.with_conversation(&session, |c| c.set_loading(true));
         let tag = format!("{}{session}", if replace { "log-replace:" } else { "log-tail:" });
-        self.api.get(&tag, "/log", &[("session", &session), ("limit", "100"), ("include_automated", "0")]);
+        let mut query = vec![("session", session.as_str()), ("limit", "100"), ("include_automated", "0")];
+        query.extend(self.coordination_query(&session, false));
+        self.api.get(&tag, "/log", &query);
     }
 
     fn request_delta(&mut self, session: &str) {
@@ -1355,11 +1404,9 @@ impl Engine {
         }
         self.ensure_conversation(&session);
         let after = self.conversations.get(&session).map_or(0, |c| c.latest_revision()).to_string();
-        self.api.get(
-            &format!("log-delta:{session}"),
-            "/log",
-            &[("session", &session), ("limit", "100"), ("include_automated", "0"), ("after_revision", &after)],
-        );
+        let mut query = vec![("session", session.as_str()), ("limit", "100"), ("include_automated", "0"), ("after_revision", after.as_str())];
+        query.extend(self.coordination_query(&session, true));
+        self.api.get(&format!("log-delta:{session}"), "/log", &query);
     }
 
     fn apply_log(&mut self, session: &str, object: &Object, kind: LoadKind) {
@@ -1543,7 +1590,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) {
+        if self.live_json(tag, object) || self.coordination_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -1561,6 +1608,7 @@ impl Engine {
             self.set_connecting(false);
             self.force_snapshot();
             self.live_server_info(object);
+            self.coordination_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
@@ -1597,7 +1645,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {
