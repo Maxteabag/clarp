@@ -62,7 +62,7 @@ WINDOWS = [
     {'used_percent': 12.25, 'resets_at': '0'},
     {'used_percent': 12.25, 'resets_at': '-5'},
     {'resets_at': '0'},
-    # A text that is a number no calendar has is kept as the text it is; a number is not.
+    # Out-of-range numbers, including numeric text, have no reset time.
     {'used_percent': 12.25, 'resets_at': '1900000000000'},
     {'used_percent': 12.25, 'resets_at': 'nan'},
     {'used_percent': 12.25, 'resets_at': '-inf'},

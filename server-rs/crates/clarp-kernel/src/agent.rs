@@ -371,6 +371,7 @@ pub struct Agent {
     unheld: BTreeSet<TurnId>,
     /// The last turn that held the agent and ended.
     last: Option<Settled>,
+    interrupted_since_ms: Option<i64>,
     /// The user's compaction whose turn ended and whose outcome is not said yet: how it ended.
     compaction_owed: Option<Settled>,
     /// What the user's last compaction did.
@@ -444,6 +445,7 @@ impl Default for Agent {
             selected_takeover: None,
             unheld: BTreeSet::new(),
             last: None,
+            interrupted_since_ms: None,
             compaction_owed: None,
             last_compaction: None,
             backend_session: None,
@@ -617,6 +619,11 @@ impl Agent {
     /// The last turn that held the agent and ended. A message that was taken back never did.
     pub fn last(&self) -> Option<&Settled> {
         self.last.as_ref()
+    }
+
+    /// The first interrupted state since a completed or waiting turn.
+    pub fn interrupted_since_ms(&self) -> Option<i64> {
+        self.interrupted_since_ms
     }
 
     /// The user's compaction whose turn ended, also one taken back before it began, while what
@@ -1567,6 +1574,17 @@ impl Agent {
             }
             match live.apply(change)? {
                 Turn::Settled(ended) => {
+                    match &ended.outcome {
+                        Outcome::Failed { .. }
+                        | Outcome::Interrupted { .. }
+                        | Outcome::Stopped { .. } => {
+                            self.interrupted_since_ms.get_or_insert(ended.ended_at_ms);
+                        }
+                        Outcome::Completed => {
+                            self.interrupted_since_ms = None;
+                        }
+                        _ => {}
+                    }
                     self.joins.clear();
                     self.settled += 1;
                     self.stopping = None;
@@ -1579,6 +1597,15 @@ impl Agent {
                     self.last = Some(ended);
                 }
                 next => {
+                    if matches!(
+                        change,
+                        TurnEvent::Moved {
+                            activity: Activity::Waiting,
+                            ..
+                        }
+                    ) {
+                        self.interrupted_since_ms = None;
+                    }
                     if matches!(next, Turn::Parked(_)) {
                         self.joins.clear();
                     }
@@ -2313,6 +2340,42 @@ mod tests {
             vec![TurnId(1), TurnId(2), TurnId(3), TurnId(4)],
             "nothing was left behind by the stop"
         );
+    }
+
+    #[test]
+    fn the_interruption_clock_comes_from_the_first_failure_even_without_a_poll() {
+        let mut a = Driven::new();
+        let failure = |turn| Command::TurnEnded {
+            turn: TurnId(turn),
+            outcome: RunOutcome::Failed {
+                reason: "fixture failure".into(),
+            },
+        };
+
+        a.user(10);
+        a.send(failure(1)).unwrap();
+        let first = a.now_ms;
+        a.user(11);
+        a.send(failure(2)).unwrap();
+        assert_eq!(a.agent.interrupted_since_ms(), Some(first));
+
+        a.user(12);
+        a.finish(3);
+        assert_eq!(a.agent.interrupted_since_ms(), None);
+        a.user(13);
+        a.send(failure(4)).unwrap();
+        let after_completion = a.now_ms;
+        assert_eq!(a.agent.interrupted_since_ms(), Some(after_completion));
+
+        a.user(14);
+        a.send(Command::TurnMoved {
+            turn: TurnId(5),
+            activity: Activity::Waiting,
+        })
+        .unwrap();
+        assert_eq!(a.agent.interrupted_since_ms(), None);
+        a.send(failure(5)).unwrap();
+        assert_eq!(a.agent.interrupted_since_ms(), Some(a.now_ms));
     }
 
     #[test]

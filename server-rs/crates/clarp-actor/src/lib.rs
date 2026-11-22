@@ -532,6 +532,7 @@ pub struct Status {
     pub live: Option<LiveStatus>,
     /// The last turn that held the agent and ended.
     pub last: Option<Settled>,
+    pub interrupted_since_ms: Option<i64>,
     /// The turns that wait, in the order they will run.
     pub waiting: Vec<TurnId>,
     /// How many of the waiting turns have yet to put a row in the conversation.
@@ -2024,6 +2025,7 @@ impl Actor {
             moved: agent.moved().cloned(),
             live,
             last: agent.last().cloned(),
+            interrupted_since_ms: agent.interrupted_since_ms(),
             waiting: agent.waiting().map(|queued| queued.id).collect(),
             queue_depth: self.recorder.unshown_waiting().count(),
             paused: agent.is_paused(),

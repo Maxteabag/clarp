@@ -149,6 +149,7 @@ fn state(row: &Value) -> State {
     let starts = starts.map(|starts| starts.iter().map(|at| at.as_f64().unwrap()).collect());
     State {
         last_started: row["last_started"].as_f64().unwrap_or_default(),
+        interrupted_since: row["interrupted_since"].as_f64().unwrap_or_default(),
         recent_starts: starts.unwrap_or_default(),
         noop_streak: row["noop_streak"].as_i64().unwrap_or_default(),
         dormant: row["dormant"].as_bool().unwrap_or_default(),
@@ -178,7 +179,7 @@ fn an_agent_is_due_when_the_python_host_says_so_and_is_left_alone_for_its_reason
         asked += 1;
         due += usize::from(reason.is_empty());
     }
-    assert_eq!((asked, due), (1288, 182));
+    assert_eq!((asked, due), (1291, 183));
 }
 
 #[test]

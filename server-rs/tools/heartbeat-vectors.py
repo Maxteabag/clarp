@@ -175,6 +175,19 @@ def run(root) -> dict:
                                  'compacting': compacting, 'recent_activity': recent, 'state': kept,
                                  'reason': heartbeat._skip_reason(snapshot=snapshot, state=state, now=NOW),
                                  'interval': heartbeat._effective_interval_sec(state, is_interrupted=interrupted)})
+            policy = POLICIES[0]
+            heartbeat.get_settings = lambda: heartbeat.HeartbeatSettings(**policy)
+            last = latest('interrupted', HOUR)
+            # The latest failure is recent, but the run may be at the cutoff already.
+            for age in (11 * HOUR - 1, 11 * HOUR, 12 * HOUR):
+                since = NOW - age
+                state = heartbeat._HeartbeatState()
+                snapshot = heartbeat._AgentSnapshot(latest=last, interrupted_since=since)
+                rows.append({'policy': policy, 'latest': last, 'busy': False, 'active': False,
+                             'compacting': False, 'recent_activity': '',
+                             'state': {'interrupted_since': since},
+                             'reason': heartbeat._skip_reason(snapshot=snapshot, state=state, now=NOW),
+                             'interval': heartbeat._effective_interval_sec(state, is_interrupted=True)})
         finally:
             heartbeat.get_settings = real
         return rows
