@@ -23690,7 +23690,8 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         "a symbol, and no picture of its own"
     );
 
-    // What the request says of the agent comes before what its persona has.
+    // The empty map supplies no voice, so Rachel takes her Contact's voices.
+    // The explicit picture, symbol and personality still belong to this agent.
     let (status, made) = ask(
         "/agents",
         json!({
@@ -23703,7 +23704,15 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         made["session"].as_str().unwrap().to_string(),
         made["agent"]["agent_id"].as_str().unwrap().to_string(),
     );
-    assert_eq!(made["agent"]["voice_id"], "{}");
+    let rachel_voice: Value =
+        serde_json::from_str(made["agent"]["voice_id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        rachel_voice,
+        json!({
+            "cartesia": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+            "elevenlabs": "21m00Tcm4TlvDq8ikWAM",
+        })
+    );
     assert_eq!(made["agent"]["avatar_symbol"], "moon");
     let own = format!("/avatars/{rachel_id}?v=b2917681b4f4fee3");
     assert_eq!(
