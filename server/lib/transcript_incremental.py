@@ -1495,7 +1495,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         return message_carry.changed(
             state.inputs, rows_now, rules=applying, carry=cp.store_carry,
             boundary_seq=cp.boundary_seq, source_file=str(path),
-            backend_session_id=backend_session_id, session_rows=session_rows, why=why)
+            backend_session_id=backend_session_id, session_rows=session_rows, why=why,
+            steered_sent=message_writes.carry_steered_sent(db.conn(), agent_id, rows_now))
 
     # The file is the one that import read, to its last byte (a checkpoint's
     # size can be ahead of its imported bytes: the file grew during that
@@ -1727,7 +1728,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         what = message_carry.changed(
             state.inputs, rows_now, rules=rules, carry=cp.store_carry, boundary_seq=cp.boundary_seq,
             source_file=str(path), backend_session_id=backend_session_id, session_rows=session_rows,
-            pending_tail=pending)
+            pending_tail=pending,
+            steered_sent=message_writes.carry_steered_sent(db.conn(), agent_id, rows_now))
         if not what and pending:
             try:
                 plan = message_writes.plan_transcript_tail(
