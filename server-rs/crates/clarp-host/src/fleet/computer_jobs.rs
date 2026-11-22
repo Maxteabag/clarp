@@ -10,7 +10,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
     crate::kept::fits::<ComputerJob>,
 )];
 
-const TABLE: &str = "kept.computer-jobs";
+pub(crate) const TABLE: &str = "kept.computer-jobs";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobOwner {
