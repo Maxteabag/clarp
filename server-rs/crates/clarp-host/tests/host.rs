@@ -9038,17 +9038,19 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
 
     let mut v2 = envelope("desktop-v2");
     v2["payload"]["catalog_version"] = json!(2);
-    let web_v2 = Some("web/1 contract=2");
-    let (status, made) = ask("POST", "/artifacts", web_v2, Some(&v2));
+    let ios_v2 = Some("ios/3028 contract=87");
+    let (status, made) = ask("POST", "/artifacts", ios_v2, Some(&v2));
     assert_eq!(status, 201, "{made}");
     let path = "/artifacts/desktop-v2?representation=flat-v1";
-    let (status, page) = ask("GET", path, web_v2, None);
+    let (status, page) = ask("GET", path, ios_v2, None);
     assert_eq!(status, 200, "{page}");
     assert_eq!(page["artifact"]["spec"], form["spec"]);
-    let (status, page) = ask("GET", path, desktop, None);
-    assert_eq!(status, 200, "{page}");
-    assert_eq!(page["artifact"]["type"], "render_spec");
-    assert!(page["artifact"].get("spec").is_none(), "{page}");
+    for client in [desktop, Some("ios/3028 contract=86")] {
+        let (status, page) = ask("GET", path, client, None);
+        assert_eq!(status, 200, "{client:?}: {page}");
+        assert_eq!(page["artifact"]["type"], "render_spec");
+        assert!(page["artifact"].get("spec").is_none(), "{client:?}: {page}");
+    }
 
     // The first accepted answers close the spec, are told to the agent once, and are told
     // to the apps once; the same answers again get the same receipt.
