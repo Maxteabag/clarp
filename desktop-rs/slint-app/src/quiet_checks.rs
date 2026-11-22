@@ -211,8 +211,9 @@ fn count_line() -> Option<crate::MessageRow> {
 /// `--check agent-messages`: coordination between agents (#653, feature
 /// `hidden_coordination`). Under the Host's hide the run is left out and a
 /// quiet "2 messages between agents, with Arnold" line stands where it was;
-/// "Show a line where agent messages were" (on by default, listed under
-/// "Show messages between agents" while that is off) takes the line away;
+/// "Show a line where agent messages were" (on by default, listed next to
+/// "Show messages between agents" whenever the Host offers the feature)
+/// takes the line away;
 /// opening the line reads the chat again with the run shown for the visit;
 /// flipping the Host's setting writes it, and only then.
 pub fn agent_messages_check(out: String) {
@@ -240,6 +241,7 @@ pub fn agent_messages_check(out: String) {
             check(list.iter().any(|r| r.id == "agent-messages" && r.label == "Show messages between agents" && !r.on), "Settings show 'Show messages between agents' off, the Host's value");
             check(list.iter().any(|r| r.id == "agent-messages-line" && r.label == "Show a line where agent messages were" && r.on), "'Show a line where agent messages were' is listed, on by default");
             check(at("agent-messages").is_some_and(|i| at("agent-messages-line") == Some(i + 1)), "directly under it");
+            check(list.iter().any(|r| r.id == "agent-messages-line" && r.description == "Applies wherever messages between agents are hidden, in every chat."), "with its hint under it");
             check(posts("/coordination-settings").is_empty(), "the desktop never wrote the Host's value by itself");
             let line = count_line().unwrap_or_default();
             check(line.live.title == "2 messages between agents, with Arnold", &format!("the quiet line where they were: {:?}", line.live.title));
@@ -291,7 +293,7 @@ pub fn agent_messages_check(out: String) {
             }
             check(written.iter().any(|p| p["body"]["coordination_visibility"] == "show"), &format!("flipping the switch writes the Host's value: {written:?}"));
             check(setting(app, "agent-messages").is_some_and(|r| r.on), "the switch shows it on");
-            check(setting(app, "agent-messages-line").is_none(), "the line setting is listed only while it is off");
+            check(setting(app, "agent-messages-line").is_some_and(|r| r.on), "the line setting stays listed, on: a chat's own hide still draws the line");
             true
         })),
     ];

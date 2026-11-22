@@ -129,5 +129,5 @@ pub fn names(agents: &[String]) -> Option<String> {
 pub const HINT: &str = "Shows the messages between agents in this chat";
 /// The global setting and the chat's own switch.
 pub const SETTING: &str = "Show messages between agents";
-/// The device's line setting, shown while the global one is off.
+/// The device's line setting, listed whenever the Host offers the feature.
 pub const LINE_SETTING: &str = "Show a line where agent messages were";

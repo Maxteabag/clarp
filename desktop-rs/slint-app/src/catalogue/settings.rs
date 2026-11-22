@@ -107,10 +107,10 @@ fn chats() -> Vec<Setting> {
             |app, _, on| app.engine.borrow_mut().set_coordination_shown(on),
         )
         .when(|app| app.engine.borrow().hidden_coordination()),
-        // This device's choice, under it while it is off: the quiet
-        // "N messages between agents" line, or nothing at all.
+        // This device's choice, next to it: the quiet "N messages between
+        // agents" line, or nothing at all.
         Setting::toggle(
-            e("agent-messages-line", clarp_core::coordination::LINE_SETTING, "chats", "Draws a quiet 'N messages between agents' line where the Host left them out; it opens them in place. Off, no line at all: the chat's profile still shows them.", &["agent messages line", "messages between agents", "hidden messages", "count line", "quiet chat", "toggle"]),
+            e("agent-messages-line", clarp_core::coordination::LINE_SETTING, "chats", "Applies wherever messages between agents are hidden, in every chat.", &["agent messages line", "messages between agents", "hidden messages", "count line", "quiet chat", "toggle"]),
             "CHATS",
             |app| app.engine.borrow().settings().boolean(COORDINATION_LINE, true),
             |app, _, on| {
@@ -119,10 +119,9 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("on")
-        .when(|app| {
-            let engine = app.engine.borrow();
-            engine.hidden_coordination() && !engine.coordination_shown()
-        }),
+        // Listed whenever the Host offers it: a chat's own hide under a
+        // Host set to show still draws the line.
+        .when(|app| app.engine.borrow().hidden_coordination()),
         // Off, the working row shimmers in the chat and the shortcut bar
         // names the stop key.
         Setting::stored_toggle(
