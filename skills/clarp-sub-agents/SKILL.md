@@ -213,7 +213,11 @@ start, and the command exits 1.
    clarp-admin agent helper-state stream-a-3f9c        # show its state
    ```
 
-   To give a reported helper more work, just message it
+   On the Rust Host with `helper_ended_unreported` (contract 155), a helper
+   that finishes without reporting can be marked `ended-unreported`. Read
+   its result before accepting it or giving it more work.
+
+   To give a reported or ended-unreported helper more work, just message it
    (`clarp-admin prompt --to <helper> --from "$CLARP_SESSION"`); it goes back
    to `running`. A helper you already marked `done` does not: `done` means
    accepted, and a message alone leaves it showing `done` while its new turn

@@ -5,6 +5,7 @@
 //! - `running`: the helper is working;
 //! - `reported`: its report reached the parent, or it sat idle so long that it waits for
 //!   the parent;
+//! - `ended-unreported`: its turn ended without a report, and the parent can review it;
 //! - `done`: the parent or the user accepted the result;
 //! - `failed`: the work ended in a failure nothing follows;
 //! - `abandoned`: the parent was deleted or put away before the work was done.
@@ -34,16 +35,21 @@ pub struct Moved {
 pub fn next_state(current: &str, event: &str) -> Option<Moved> {
     let state = match (current, event) {
         // The helper wrote to its parent.
-        ("running", "reported") => "reported",
+        ("running" | "ended-unreported", "reported") => "reported",
         // The parent sent it more work.
-        ("reported", "parent_prompted") => "running",
+        ("reported" | "ended-unreported", "parent_prompted") => "running",
         // The parent or the user accepted it.
-        ("running" | "reported" | "failed" | "abandoned", "marked_done") => "done",
+        ("running" | "reported" | "ended-unreported" | "failed" | "abandoned", "marked_done") => {
+            "done"
+        }
         // The parent or the user opened it again.
-        ("reported" | "done" | "failed" | "abandoned", "marked_running") => "running",
-        ("running" | "reported", "failed") => "failed",
+        ("reported" | "ended-unreported" | "done" | "failed" | "abandoned", "marked_running") => {
+            "running"
+        }
+        ("running" | "reported" | "ended-unreported", "failed") => "failed",
         // The parent was deleted or put away.
-        ("running" | "reported", "parent_gone") => "abandoned",
+        ("running" | "reported" | "ended-unreported", "parent_gone") => "abandoned",
+        ("running", "ended_unreported") => "ended-unreported",
         // It sat idle past the limit: reported, not done or failed. What came of it is
         // still the parent's to say.
         ("running", "went_idle") => "reported",

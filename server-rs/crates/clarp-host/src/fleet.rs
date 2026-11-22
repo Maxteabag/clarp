@@ -198,6 +198,9 @@ pub struct AgentRecord {
     /// When a helper's work was over, while it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub helper_completed_at_ms: Option<i64>,
+    /// The latest turn already accounted for when checking for a missing helper report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helper_accounted_turn: Option<u64>,
     /// The voice it was made with, as it was named: kept for the day this Host speaks.
     /// `{}` is the Python Host's word for none of its own.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -3939,9 +3942,31 @@ impl Fleet {
         let Some(moved) = helpers::next_state(current, event) else {
             return Ok(None);
         };
+        let view = self.members[at].agent.view();
+        let last = view.status.last.as_ref();
+        if event == "ended_unreported"
+            && (!self.doing(&self.members[at]).idle()
+                || last.is_none_or(|turn| {
+                    turn.started_at_ms.is_none()
+                        || turn.id.0 <= before.helper_accounted_turn.unwrap_or(0)
+                }))
+        {
+            return Ok(None);
+        }
         let mut record = before.clone();
         record.helper_state = Some(moved.state.to_string());
         record.helper_completed_at_ms = moved.completed.then(|| self.now_ms());
+        let accounted = match event {
+            "reported" => view
+                .status
+                .live
+                .as_ref()
+                .map(|live| live.turn.0)
+                .or_else(|| last.map(|turn| turn.id.0)),
+            "ended_unreported" | "marked_running" => last.map(|turn| turn.id.0),
+            _ => None,
+        };
+        record.helper_accounted_turn = record.helper_accounted_turn.max(accounted);
         let session = record.session.clone();
         // Nobody waits for the helper's own thread to have it.
         let (took, _taken) = oneshot::channel();
@@ -4083,18 +4108,30 @@ impl Fleet {
     fn look_after_helpers(&mut self) -> Result<(), Unavailable> {
         let now = self.now_ms();
         let idle_after = self.works.config.helper_idle_after_ms;
-        let quiet: Vec<String> = self
+        let quiet: Vec<_> = self
             .members
             .iter()
-            .filter(|member| {
-                let state = member.record.helper_state.as_deref();
-                state == Some("running")
-                    && helpers::idle_due(state, &self.doing(member), now, idle_after)
+            .filter(|member| member.record.helper_state.as_deref() == Some("running"))
+            .filter_map(|member| {
+                let doing = self.doing(member);
+                let view = member.agent.view();
+                let ended = doing.idle()
+                    && view.status.last.as_ref().is_some_and(|last| {
+                        last.started_at_ms.is_some()
+                            && last.id.0 > member.record.helper_accounted_turn.unwrap_or(0)
+                    });
+                let event = if ended {
+                    "ended_unreported"
+                } else if helpers::idle_due(Some("running"), &doing, now, idle_after) {
+                    "went_idle"
+                } else {
+                    return None;
+                };
+                Some((member.record.agent_id.clone(), event))
             })
-            .map(|member| member.record.agent_id.clone())
             .collect();
-        for agent_id in quiet {
-            self.helper_event(&agent_id, "went_idle", true)?;
+        for (agent_id, event) in quiet {
+            self.helper_event(&agent_id, event, true)?;
         }
         let kept: Vec<helpers::Kept<'_>> = self
             .members
