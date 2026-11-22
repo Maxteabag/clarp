@@ -168,3 +168,39 @@ def test_the_index_offers_only_ids_by_the_shared_rule_and_paths_inside_the_store
             "/repo", projects_root=root, all_projects=scope)}
         assert "good-uuid" in listed
         assert not listed & {"*", "--last", "elsewhere"}, scope
+
+
+def test_a_directory_with_a_dot_an_underscore_or_a_space_finds_its_sessions(tmp_path):
+    """R36: Claude Code names a project directory by turning every character that is not a
+    letter or a digit into '-'; the catalog turned only '/', so a path with a dot, an
+    underscore or a space had no sessions to offer. resume finds the transcript there too."""
+    from lib import resume
+    root = tmp_path / "projects"
+    for number, cwd in enumerate(("/home/x/.config", "/work/my_repo", "/work/two words")):
+        sid = f"0000000{number}-0000-4000-8000-000000000000"
+        project = root / ("-" + "".join(c if c.isalnum() else "-" for c in cwd.lstrip("/")))
+        _write(project / f"{sid}.jsonl", [{"type": "user", "cwd": cwd,
+                                           "message": {"content": "Synthetic start"}}])
+        assert [item["id"] for item in session_catalog.list_claude_sessions(cwd, projects_root=root)] == [sid]
+        assert resume._encoded_project_dir(cwd, root) == project
+
+
+def test_a_session_the_index_marks_a_side_chain_is_never_offered(tmp_path):
+    """R37: the index leaves out a side chain, and the pass over the files it does not list
+    must leave it out too; one no index lists is known by its own records."""
+    root = tmp_path / "projects"
+    project = root / "-repo"
+    side = "11111111-1111-4111-8111-111111111111"
+    unlisted = "22222222-2222-4222-8222-222222222222"
+    main = "33333333-3333-4333-8333-333333333333"
+    _write(project / f"{side}.jsonl", [{"type": "user", "cwd": "/repo", "isSidechain": True,
+                                        "message": {"content": "A side chain"}}])
+    _write(project / f"{unlisted}.jsonl", [{"type": "user", "cwd": "/repo", "isSidechain": True,
+                                            "message": {"content": "Another side chain"}}])
+    _write(project / f"{main}.jsonl", [{"type": "user", "cwd": "/repo", "isSidechain": False,
+                                        "message": {"content": "The session"}}])
+    (project / "sessions-index.json").write_text(json.dumps({"version": 1, "entries": [
+        {"sessionId": side, "isSidechain": True, "projectPath": "/repo"}]}))
+    for all_projects in (False, True):
+        offered = session_catalog.list_claude_sessions("/repo", all_projects=all_projects, projects_root=root)
+        assert [item["id"] for item in offered] == [main]
