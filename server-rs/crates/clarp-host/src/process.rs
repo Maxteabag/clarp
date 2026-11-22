@@ -73,44 +73,46 @@ pub(crate) fn worker_commands<T>(
     worker: &clarp_kernel::jobs::Worker,
     step: impl Fn(&[String]) -> Option<T>,
 ) -> Option<Vec<(T, i64)>> {
-        use nix::unistd::{SysconfVar, sysconf};
-        use std::collections::VecDeque;
-        if !is_alive(worker.pid, &worker.start_token) {
+    use nix::unistd::{SysconfVar, sysconf};
+    use std::collections::VecDeque;
+    if !is_alive(worker.pid, &worker.start_token) {
+        return None;
+    }
+    let hz = sysconf(SysconfVar::CLK_TCK).ok()??;
+    let uptime = std::fs::read_to_string("/proc/uptime").ok()?;
+    let seconds: f64 = uptime.split_whitespace().next()?.parse().ok()?;
+    if hz <= 0 || !seconds.is_finite() {
+        return None;
+    }
+    let mut pending = VecDeque::from([(worker.pid, None)]);
+    let mut commands = Vec::new();
+    // A small, bounded read from a watcher pass. An incomplete tree is
+    // insufficient evidence to say its check is holding a release.
+    for _ in 0..32 {
+        let Some((pid, parent)) = pending.pop_front() else {
+            break;
+        };
+        let fields = after_name(pid)?;
+        if let Some(parent) = parent
+            && fields.get(1)?.parse::<u32>().ok()? != parent
+        {
             return None;
         }
-        let hz = sysconf(SysconfVar::CLK_TCK).ok()??;
-        let uptime = std::fs::read_to_string("/proc/uptime").ok()?;
-        let seconds: f64 = uptime.split_whitespace().next()?.parse().ok()?;
-        if hz <= 0 || !seconds.is_finite() {
-            return None;
+        let started: f64 = fields.get(19)?.parse().ok()?;
+        let args = command_args(pid);
+        if let Some(step) = step(&args) {
+            let elapsed_ms = ((seconds - started / hz as f64) * 1000.0).max(0.0) as i64;
+            commands.push((step, elapsed_ms));
+            continue;
         }
-        let mut pending = VecDeque::from([(worker.pid, None)]);
-        let mut commands = Vec::new();
-        // A small, bounded read from a watcher pass. An incomplete tree is
-        // insufficient evidence to say its check is holding a release.
-        for _ in 0..32 {
-            let Some((pid, parent)) = pending.pop_front() else {
-                break;
-            };
-            let fields = after_name(pid)?;
-            if let Some(parent) = parent
-                && fields.get(1)?.parse::<u32>().ok()? != parent
-            {
-                return None;
-            }
-            let started: f64 = fields.get(19)?.parse().ok()?;
-            let args = command_args(pid);
-            if let Some(step) = step(&args) {
-                let elapsed_ms = ((seconds - started / hz as f64) * 1000.0).max(0.0) as i64;
-                commands.push((step, elapsed_ms));
-                continue;
-            }
-            let children = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).ok()?;
-            pending.extend(children.split_whitespace().filter_map(|word| {
-                word.parse::<u32>().ok().map(|child| (child, Some(pid)))
-            }));
-        }
-        (pending.is_empty() && is_alive(worker.pid, &worker.start_token)).then_some(commands)
+        let children = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).ok()?;
+        pending.extend(
+            children
+                .split_whitespace()
+                .filter_map(|word| word.parse::<u32>().ok().map(|child| (child, Some(pid)))),
+        );
+    }
+    (pending.is_empty() && is_alive(worker.pid, &worker.start_token)).then_some(commands)
 }
 
 #[cfg(test)]

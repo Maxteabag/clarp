@@ -136,7 +136,9 @@ impl Signals {
             && let Ok(mut devices) = self.malformed_clients.lock()
             && devices.insert(device_id.to_owned())
         {
-            eprintln!("clarp-host: experience-watch: device {device_id:?} sent a malformed X-Clarp-Client header; platform unknown");
+            eprintln!(
+                "clarp-host: experience-watch: device {device_id:?} sent a malformed X-Clarp-Client header; platform unknown"
+            );
         }
         client
     }
@@ -159,10 +161,12 @@ impl Signals {
             .iter()
             .filter(|event| in_window(event.at, since, now))
         {
-            let row = result.entry(event.subject.clone()).or_insert_with(|| Relaunches {
-                platform: "unknown".to_owned(),
-                ..Relaunches::default()
-            });
+            let row = result
+                .entry(event.subject.clone())
+                .or_insert_with(|| Relaunches {
+                    platform: "unknown".to_owned(),
+                    ..Relaunches::default()
+                });
             row.foreground_sessions += event.detail.foreground_sessions;
             row.legacy_requests += event.detail.legacy_requests;
             if !event.detail.platform.is_empty() {
@@ -373,7 +377,7 @@ fn render(
     json_output: bool,
 ) -> ToolAnswer {
     for row in &mut rows {
-        row.refresh_device_name(directory);
+        row.refresh_subject(directory);
     }
     if json_output {
         #[derive(serde::Serialize)]

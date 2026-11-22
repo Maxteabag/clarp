@@ -63,12 +63,7 @@ impl Settings {
         let release_kinds = field("release_kinds")
             .and_then(toml::Value::as_array)
             .map_or_else(
-                || {
-                    ["check", "test"]
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect()
-                },
+                || ["check", "test"].into_iter().map(str::to_owned).collect(),
                 |items| {
                     items
                         .iter()
