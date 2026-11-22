@@ -27,10 +27,12 @@ import time
 import urllib.error
 import urllib.request
 
-READ_TIMEOUT = 4.0
+# A peer's chat list is about 0.6 MB without archived agents and takes seconds over Tailscale.
+READ_TIMEOUT = 15.0
 CACHE_SECONDS = 10.0
-MAX_BYTES = 4 * 1024 * 1024
-PATHS = ("/server-info", "/agents/snapshot")
+MAX_BYTES = 16 * 1024 * 1024
+SNAPSHOT_PATH = "/agents/snapshot?include_archived=0"  # the list a person sees; archived rows never show
+PATHS = ("/server-info", SNAPSHOT_PATH)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -88,7 +90,7 @@ def _read_peer(peer: dict) -> tuple[str, dict]:
              "reachable": False, "error": None, "snapshot": None}
     try:
         info = fetch_json(peer["url"], "/server-info", token=peer["token"])
-        snapshot = fetch_json(peer["url"], "/agents/snapshot", token=peer["token"])
+        snapshot = fetch_json(peer["url"], SNAPSHOT_PATH, token=peer["token"])
     except PeerReadError as exc:
         entry["error"] = exc.code
         return key, entry
