@@ -64,7 +64,8 @@ def load_conversation(*, session: str, after_revision: int = 0,
                       interaction_id: str = "",
                       background_import: bool = False,
                       coordination_mode: str = "",
-                      coordination_read: str = "") -> dict[str, Any]:
+                      coordination_read: str = "",
+                      view: str = "") -> dict[str, Any]:
     # The message store caps reads at 5,000 rows. Reserve one row for the
     # pagination lookahead so `has_more` remains truthful at the public maximum.
     limit = max(1, min(int(limit or 100), 4999))
@@ -182,6 +183,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
         include_automated=include_automated,
         hide_coordination=bool(policy and policy["hidden"]),
         hide_form_answers=True,
+        view=view,
     )
     has_more = len(turns) > limit
     if has_more:
@@ -264,6 +266,8 @@ def load_conversation(*, session: str, after_revision: int = 0,
         replace_required = True
     latest_ts = max((row.get("timestamp") or "" for row in turns), default="")
     extra: dict[str, Any] = {}
+    if view:
+        extra["view"] = view      # the view this answer was read under (issue 702)
     if policy:
         extra["coordination"] = {"hidden": policy["hidden"], "source": policy["source"],
                                  "visibility": policy["visibility"]}

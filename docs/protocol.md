@@ -360,6 +360,7 @@ GET /log?…&include_automated=0&include_tool_details=0
 | `include_automated=0` | Hide heartbeat, leader, dreaming, and watcher traffic. |
 | `include_tool_details=0` | Collapse tool cards to one summary card per message; fetch `/message-tool-details?session=&message_id=` on demand. |
 | `coordination=auto\|hide\|show` | Feature `hidden_coordination`: leave coordination between agents out (`hide`), keep it (`show`), or follow the chat's setting (`auto`). Absent: every row, as before. |
+| `view=conversation\|session` | Feature `chat_view`: `conversation` returns only the rows of the conversation view (before the page limit) and echoes `view`; `session`, or absent, returns every row as before. |
 | `coordination_read=show\|hide` | With `coordination` on a delta: the `visibility` the client's cache was read under. When it differs from the answer's, the answer says `replace_required: true`. |
 
 Response:
@@ -611,6 +612,43 @@ Sub-agent cells (`kind: "subagents"`) come from two backends:
   `.meta.json` or through its agent id, and is empty when the file does not
   exist. The Host does not import sub-agent transcripts as conversations.
   They appear only as these cells.
+
+#### Conversation and session views
+
+Feature `chat_view` (issue 702). Every `/log` row carries `view`, `conversation` or `session`,
+beside `audience`:
+
+- `conversation`, in a turn the user sees (`audience` `user`): the user's own message (a user
+  row of origin `user` or `oracle`); an agent's note (`kind` `note`: `POST /agent-notes`,
+  `clarp-admin tell-user`); a row the Host writes for the user (origin `system`); a turn's
+  final reply; an assistant text row that no known turn wrote (`trace_id` empty) whose `phase`
+  is `final`.
+- `session`: everything else: assistant text in between (commentary), tool rows, prompts the
+  Host or another agent sent (schedules, wakes, delivered answers, another agent's message), and
+  every row of a turn with `audience` `agents`.
+
+A turn's **final reply** is its last assistant text row (words, no tool name, not a note), and
+only once the turn has ended (settled; a turn a follow-up replaced has none). While a turn runs
+all its text is `session`. When it ends, its anchor row is written again with a new revision:
+the final reply, else (no text) its last note or the user's prompt. The anchor carries
+`session_rows`, how many of the turn's rows the conversation view leaves out, so a client offers
+"Show work" there and opens that turn in the session view. A delta (`after_revision`) brings the
+anchor, so a row a client holds as `session` arrives again as `conversation`; a later import
+that changes the reply clears the old anchor (it reads `session` again) and sets the new one,
+both with new revisions.
+
+`GET /log?view=conversation` returns only `conversation` rows, filtered before the page limit,
+for a snapshot, a delta and an older page alike, and echoes `view`. With `view=session`, or
+without `view`, every row comes as before. The two combine with `coordination` and
+`include_automated`.
+
+The agent's choice is kept on the Host: every snapshot agent row carries `chat_view`
+(`conversation` or `session`, default `session`). `POST /agent-chat-view {session, chat_view}`
+stores it and answers `{ok: true, session, chat_view}`, and broadcasts `agent-roster` with
+`kind: chat_view`, `session` and `chat_view`. An agent's own turn or a peer Host is refused
+`403 agents_may_not`; another value is `400`. A client may still override the view locally.
+In conversation view, the brief the Host adds to each of the agent's turns says that its final
+reply and its posts reach the user and its text in between does not.
 
 #### Pair conversations: `GET /agent-conversations`
 

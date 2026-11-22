@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 138  # idx_form_submission_artifact (form_submissions by artifact_id, created_at, submission_id): an artifact's submission found by the index, which every render_spec row of an answered button form reads (issue 673). 137: idx_janitor_demand_claims_open (open demand claims only), and the expired claims of runs that ended closed: a janitor's open claim is found among the few open ones, not by walking all its runs (PROVISIONAL number). 136: task_plans_clock, task_plan_versions and their three triggers: a version per goal plan that every write moves, so the agent scheduler reads a plan again only when it changed. 135: agent_moves (a table): an agent that moved to another Host; admission refuses its turns. 134: idx_queued_turns_client_msg: a peer request's queue row found by its client message id, which the agent scheduler reads for every open peer wait each tick (R136). 133: queued_turns.user_word and .taken and idx_queued_turns_waiting: the user's word goes first in an agent's queue (issue 481). 132: messages.sent_at, queued_turns.kind and queued_turns.shown_at: a message that waits for a running turn enters the conversation when its turn starts and keeps the time it was sent (issue 491). 131: media_assets.favorite_at, media_assets.deleted_by, the favourites index, the two tombstone indexes (GET /media/deleted) and the gallery page index in place of the created one (issue 489). 130: coordination_traces (a table) and agents.coordination_visibility: coordination between agents (issue 478). 129: provider_turns.trace_id, the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
+_SCHEMA_VERSION = 139  # messages.session_rows and agents.chat_view: conversation and session views of a chat (issue 702); a settled turn's final reply (else its last note or prompt) carries the number of its rows the conversation view leaves out, backfilled for turns already settled. 138: idx_form_submission_artifact (form_submissions by artifact_id, created_at, submission_id): an artifact's submission found by the index, which every render_spec row of an answered button form reads (issue 673). 137: idx_janitor_demand_claims_open (open demand claims only), and the expired claims of runs that ended closed: a janitor's open claim is found among the few open ones, not by walking all its runs (PROVISIONAL number). 136: task_plans_clock, task_plan_versions and their three triggers: a version per goal plan that every write moves, so the agent scheduler reads a plan again only when it changed. 135: agent_moves (a table): an agent that moved to another Host; admission refuses its turns. 134: idx_queued_turns_client_msg: a peer request's queue row found by its client message id, which the agent scheduler reads for every open peer wait each tick (R136). 133: queued_turns.user_word and .taken and idx_queued_turns_waiting: the user's word goes first in an agent's queue (issue 481). 132: messages.sent_at, queued_turns.kind and queued_turns.shown_at: a message that waits for a running turn enters the conversation when its turn starts and keeps the time it was sent (issue 491). 131: media_assets.favorite_at, media_assets.deleted_by, the favourites index, the two tombstone indexes (GET /media/deleted) and the gallery page index in place of the created one (issue 489). 130: coordination_traces (a table) and agents.coordination_visibility: coordination between agents (issue 478). 129: provider_turns.trace_id, the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -58,7 +58,10 @@ CREATE TABLE agents (
     custom_status_at INTEGER,
     -- Coordination between agents in this chat: '' follows the Host's
     -- setting, else 'show' or 'hide' (lib.coordination).
-    coordination_visibility TEXT NOT NULL DEFAULT ''
+    coordination_visibility TEXT NOT NULL DEFAULT '',
+    -- How the user reads this chat: 'session' (everything) or 'conversation'
+    -- (lib.chat_view, issue 702).
+    chat_view TEXT NOT NULL DEFAULT 'session'
 );
 CREATE INDEX idx_agents_parent ON agents(parent_agent_id) WHERE parent_agent_id IS NOT NULL;
 
@@ -218,6 +221,10 @@ CREATE TABLE messages (
     -- A user message that waited for a running turn: when it was sent (ms).
     -- Its timestamp is when its own turn started (issue 491). NULL otherwise.
     sent_at INTEGER,
+    -- A settled turn's anchor (its final reply, else its last note or prompt): how many
+    -- of the turn's rows the conversation view leaves out. NULL on every other row
+    -- (lib.chat_view, issue 702).
+    session_rows INTEGER,
     UNIQUE(agent_id, backend_session_id, seq)
 );
 CREATE INDEX idx_messages_agent_seq ON messages(agent_id, backend_session_id, seq);

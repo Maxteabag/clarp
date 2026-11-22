@@ -33,7 +33,7 @@ _LIST_COLUMNS = """a.agent_id, a.persona, a.voice_id, a.cwd, a.session, a.backen
                a.custom_status, a.avatar_symbol, a.avatar_path, a.personality,
                a.archived_at, a.is_janitor, a.voice_verbosity,
                a.parent_agent_id, a.role, a.helper_state, a.helper_completed_at,
-               a.custom_status_at"""
+               a.custom_status_at, a.chat_view"""
 
 
 def list_agents(*, with_moves: bool = False) -> list[dict[str, Any]]:
@@ -1387,7 +1387,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   include_automated: bool = True,
                   extra_backend_session_id: str = "",
                   hide_coordination: bool = False,
-                  hide_form_answers: bool = False) -> list[dict[str, Any]]:
+                  hide_form_answers: bool = False,
+                  view: str = "") -> list[dict[str, Any]]:
     from .message_store import list_messages as _list
     return _list(
         agent_id=agent_id, backend_session_id=backend_session_id,
@@ -1397,6 +1398,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         extra_backend_session_id=extra_backend_session_id,
         hide_coordination=hide_coordination,
         hide_form_answers=hide_form_answers,
+        view=view,
     )
 
 

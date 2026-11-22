@@ -315,6 +315,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v137(con)
         if version < 138:
             _migrate_to_v138(con)
+        if version < 139:
+            _migrate_to_v139(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1137,6 +1139,52 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v139(con: sqlite3.Connection) -> None:
+    """Conversation and session views of a chat (issue 702): ``agents.chat_view`` (default
+    'session') and ``messages.session_rows``, which every settled turn's anchor carries
+    (lib.chat_view). Turns settled before it get theirs here, as the turn's restamp would
+    write them: the last assistant text row, else the last note or user prompt, carries the
+    count of the turn's other rows that are not the conversation. Revisions do not move:
+    no client reads ``view`` before this step. Additive with NULL or constant defaults, so
+    older code ignores both and a rollback needs no down-step; guarded, so a rerun is a
+    no-op."""
+    agents = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if agents and "chat_view" not in agents:
+        con.execute("ALTER TABLE agents ADD COLUMN chat_view TEXT NOT NULL DEFAULT 'session'")
+    messages = {row[1] for row in con.execute("PRAGMA table_info(messages)")}
+    if not messages or "session_rows" in messages:
+        return
+    con.execute("ALTER TABLE messages ADD COLUMN session_rows INTEGER")
+    tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "turns" not in tables:
+        return
+    from .chat_view import anchor
+    factory = con.row_factory
+    con.row_factory = sqlite3.Row
+    try:
+        _backfill_chat_view_anchors(con, anchor)
+    finally:
+        con.row_factory = factory
+
+
+def _backfill_chat_view_anchors(con: sqlite3.Connection, anchor) -> None:
+    settled = con.execute(
+        """SELECT t.agent_id, t.trace_id FROM turns t
+            WHERE COALESCE(t.trace_id, '') <> '' AND t.settled_at IS NOT NULL
+              AND COALESCE(t.outcome, '') <> 'replaced'
+              AND t.started_at = (SELECT MAX(u.started_at) FROM turns u
+                                   WHERE u.agent_id = t.agent_id AND u.trace_id = t.trace_id)""").fetchall()
+    for agent_id, trace_id in settled:
+        rows = con.execute(
+            """SELECT message_id, role, text, kind, origin, tool_name, trace_id, phase,
+                      NULL AS session_rows
+                 FROM messages INDEXED BY idx_messages_trace WHERE agent_id = ? AND trace_id = ?
+                ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
+        chosen, count = anchor(rows, settled=True)
+        if chosen is not None:
+            con.execute("UPDATE messages SET session_rows = ? WHERE message_id = ?", (count, chosen))
 
 
 def _migrate_to_v138(con: sqlite3.Connection) -> None:

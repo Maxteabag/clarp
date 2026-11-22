@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from . import db as _db
 from .clock import iso_from_ms
 from .db import change_stamp, conn
-from . import coordination, html_forms, origins, team_leader
+from . import chat_view, coordination, html_forms, origins, team_leader
 from . import log as cache_log
 from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
@@ -49,7 +49,10 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   include_automated: bool = True,
                   extra_backend_session_id: str = "",
                   hide_coordination: bool = False,
-                  hide_form_answers: bool = False) -> list[dict[str, Any]]:
+                  hide_form_answers: bool = False,
+                  view: str = "") -> list[dict[str, Any]]:
+    """``view`` 'conversation': only the rows of that view (lib.chat_view), filtered
+    before LIMIT, so a page of N is N conversation rows; anything else: every row."""
     params: list[Any] = [agent_id]
     where = "m.agent_id = ?"
     sessions = list(dict.fromkeys(v for v in (backend_session_id, extra_backend_session_id) if v))
@@ -97,6 +100,12 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         # context, a dream's snapshot, a label's evidence) keep it: it is the user's word.
         # Before LIMIT, as the filters below.
         where += " AND NOT " + html_forms.ANSWER_ROW_SQL
+    if view == chat_view.CONVERSATION:
+        # Before LIMIT, as the filters around it. A row of a turn between agents is never
+        # the conversation (its audience; an agent that cannot leave a note has none).
+        where += " AND " + chat_view.STRUCTURAL_SQL
+        if coordination.can_leave_note(agent_id):
+            where += " AND NOT " + coordination.HIDDEN_ROW_SQL
     if hide_coordination and coordination.can_leave_note(agent_id):
         # Before LIMIT, as the automated filter: a page of N is N rows the user sees.
         where += " AND NOT " + coordination.HIDDEN_ROW_SQL
@@ -111,7 +120,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
-                           m.phase, m.turn_json, m.sent_at,
+                           m.phase, m.turn_json, m.sent_at, m.session_rows,
                            sender.persona AS sender_name,
                            sender.session AS sender_session,
                            {coordination.TRACE_AUDIENCE_SQL} AS trace_audience
@@ -127,7 +136,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
-                           m.phase, m.turn_json, m.sent_at,
+                           m.phase, m.turn_json, m.sent_at, m.session_rows,
                            sender.persona AS sender_name,
                            sender.session AS sender_session,
                            {coordination.TRACE_AUDIENCE_SQL} AS trace_audience
@@ -135,7 +144,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                             SELECT message_id, agent_id, role, timestamp, text, kind,
                                    tool_name, tools_json, display_cells_json,
                                    seq, revision, origin, sender_agent_id, trace_id,
-                                   phase, turn_json, sent_at
+                                   phase, turn_json, sent_at, session_rows
                               FROM messages m
                              WHERE {where}
                              ORDER BY COALESCE(timestamp, '') DESC, seq DESC, message_id DESC
@@ -166,6 +175,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             display_cells = json.loads(row["display_cells_json"] or "[]")
         except json.JSONDecodeError:
             display_cells = []
+        audience = coordination.row_audience(
+            kind=row["kind"], trace_audience=row["trace_audience"] if hideable else None)
         out.append({
             "id": row["message_id"],
             "role": row["role"],
@@ -183,8 +194,12 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             "revision": int(row["revision"]),
             # 'agents': a row of a turn another agent's message started
             # (lib.coordination); every other row, and a note, is 'user'.
-            "audience": coordination.row_audience(
-                kind=row["kind"], trace_audience=row["trace_audience"] if hideable else None),
+            "audience": audience,
+            # conversation | session (lib.chat_view, issue 702); a settled turn's anchor
+            # says how many of its rows the conversation view leaves out.
+            "view": chat_view.view_of(row, audience),
+            **({"session_rows": int(row["session_rows"])}
+               if row["session_rows"] is not None else {}),
             "automated": bool(automation_kind),
             "automation_kind": automation_kind,
             "phase": row["phase"],

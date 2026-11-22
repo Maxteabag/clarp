@@ -511,11 +511,17 @@ def _turn_protocol(agent_id: str, *, origin: str, sender_agent_id: str = "") -> 
     turn of a chat that hides coordination, the line that says so
     (lib.coordination.reminder). Both ride in the team-context block, which
     the transcript import takes off the user's row again."""
-    from . import agents as agents_db, coordination, team_store
+    from . import agents as agents_db, chat_view, coordination, team_store
     parts = [team_store.team_protocol_instruction(agent_id, turn_origin=origin)]
+    hidden = ""
     try:
-        parts.append(coordination.reminder(agents_db.get_by_agent_id(agent_id), origin=origin,
-                                           sender_agent_id=sender_agent_id))
+        agent = agents_db.get_by_agent_id(agent_id)
+        hidden = coordination.reminder(agent, origin=origin, sender_agent_id=sender_agent_id)
+        parts.append(hidden)
+        if not hidden:
+            # In conversation view (issue 702) only the final reply and posts reach the user.
+            # A hidden coordination turn already says nothing of it reaches them.
+            parts.append(chat_view.reminder(agent))
     except Exception as exc:  # noqa: BLE001 - a brief never fails a turn
         from .log import log_exception
         log_exception("coordinationReminderFail", exc, detail=agent_id)

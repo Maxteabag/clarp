@@ -98,6 +98,33 @@ class AgentRoutes:
         return self._json_ok({"ok": True, "session": session, "coordination_visibility": effective,
                               "coordination_override": own or None})
 
+    def _handle_agent_chat_view(self):
+        """POST /agent-chat-view {session, chat_view: conversation|session}: how the user
+        reads this chat (issue 702), kept on the Host so every app agrees. Answers and
+        broadcasts the stored value in the same step, as /agent-coordination does."""
+        from lib import chat_view
+        from lib.http_utils import from_an_agent
+        if from_an_agent(self.headers):
+            return self._json(403, {"error": "agents_may_not"})
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        session = str(data.get("session") or "").strip()
+        if not session or "chat_view" not in data:
+            return self._json_error(400, "session and chat_view required")
+        agent = identity.lookup(session)
+        if not agent:
+            return self._json_error(404, "no such agent")
+        try:
+            stored = chat_view.set_agent_view(agent["agent_id"], data["chat_view"])
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        stream = getattr(self.ctx, "stream", None)
+        if stream is not None:
+            events.broadcast(stream, events.agent_roster(
+                chat_view.ROSTER_KIND, session=session, chat_view=stored))
+        return self._json_ok({"ok": True, "session": session, "chat_view": stored})
+
     def _handle_agent_moved(self):
         """POST /agent-moved {session, moved_to: {host, id} | null}: the Rust Host's import
         marks the agent moved after it succeeded, and takes the move back (``null``) when

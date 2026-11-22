@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 143  # An unanswered render_spec is attention_bucket blocking, not review, so opening its chat never reads it away. Every earlier number is a row in docs/compatibility.md.
+HOST_CONTRACT = 144  # Conversation and session views (feature chat_view, issue 702): every /log row carries view, GET /log?view=conversation, per-turn session_rows, POST /agent-chat-view and the snapshot's chat_view. 143: An unanswered render_spec is attention_bucket blocking, not review, so opening its chat never reads it away. Every earlier number is a row in docs/compatibility.md.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -312,6 +312,10 @@ FEATURES: tuple[str, ...] = (
     # turn, but its prompt row is not in /log, the chat-list preview or GET /turn-queue:
     # the answered card is the user's record (issue 428).
     "form_answer_rows_hidden",
+    # Conversation and session views of a chat (issue 702): every /log row carries view
+    # (conversation | session), GET /log?view=conversation, session_rows on a settled
+    # turn's anchor, POST /agent-chat-view and chat_view on every snapshot agent row.
+    "chat_view",
 )
 
 
@@ -647,6 +651,7 @@ FEATURE_CONTRACTS["snapshot_without_archived"] = 82
 FEATURE_CONTRACTS["hidden_coordination"] = 120  # next free at merge (issue 478)
 FEATURE_CONTRACTS["coordination_working_state"] = 124  # PROVISIONAL: the release owner sets it at merge
 FEATURE_CONTRACTS["agent_moved"] = 125  # PROVISIONAL: the release owner sets it at merge
+FEATURE_CONTRACTS["chat_view"] = 144  # issue 702; next free at merge
 
 
 def feature_advertised(name: str) -> bool:

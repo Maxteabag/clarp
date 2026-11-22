@@ -14,7 +14,7 @@ from . import (background_jobs, agent_goals, agents as agents_db, avatar_setting
                compaction, db,
                config, message_store, model_avatars, persona_avatar_generation, team_store,
                turn_queue, scheduler, janitors, quiet_agents)
-from . import coordination, reconcile, turn_lifecycle
+from . import chat_view, coordination, reconcile, turn_lifecycle
 from .clock import now_ms
 from .revisioned_cache import RevisionedCache
 from .session_models import agent_model
@@ -609,6 +609,8 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             # Coordination between agents (lib.coordination): the chat's effective
             # visibility and its own choice (None: it follows the Host).
             **coordination.snapshot_fields(agent_id, coordination_chosen, coordination_host),
+            # How the user reads this chat: conversation | session (issue 702).
+            "chat_view":      chat_view.normalize(a.get("chat_view")) or chat_view.DEFAULT_VIEW,
             "archived_at":    a.get("archived_at"),
             "backend_session_id": bsid,
             "alive":          True,

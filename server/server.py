@@ -676,6 +676,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/agent-mute": "_handle_agent_mute",
         "/agent-notes": "_handle_agent_note",
         "/agent-coordination": "_handle_agent_coordination",
+        "/agent-chat-view": "_handle_agent_chat_view",
         "/agent-moved": "_handle_agent_moved",
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
@@ -1859,6 +1860,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         from lib import coordination as _coordination
         if coordination_mode and coordination_mode not in _coordination.MODES:
             return self._json_error(400, "coordination must be auto, hide or show")
+        # Conversation and session views (issue 702): conversation | session; absent = everything.
+        view = (qs.get("view", [""])[0] or "").strip().lower()
+        from lib import chat_view as _chat_view
+        if view and view not in _chat_view.VIEWS:
+            return self._json_error(400, "view must be conversation or session")
         from lib import agent_conversations
         from lib.message_previews import UnknownHistoryCursor
         if agent_conversations.is_pair_session(session):
@@ -1881,6 +1887,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 background_import=True,
                 coordination_mode=coordination_mode,
                 coordination_read=coordination_read,
+                view=view,
             )
             if coordination_mode and "coordination" not in body_obj:
                 # A chat with no conversation yet says the policy too (every answer does).

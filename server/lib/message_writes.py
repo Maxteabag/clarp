@@ -2199,7 +2199,8 @@ def turn_stamp(database, agent_id: str, trace_id: str):
         """SELECT started_at, settled_at, outcome FROM turns WHERE agent_id = ? AND trace_id = ?
             ORDER BY started_at DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
     rows = database.execute(
-        """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json, origin, kind
+        """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json, origin, kind,
+                  role, text, tool_name, trace_id, phase, session_rows
              FROM messages INDEXED BY idx_messages_trace WHERE agent_id = ? AND trace_id = ?
             ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
     if not rows:
@@ -2241,22 +2242,29 @@ def stamp_turn(database, agent_id: str, trace_id: str, next_revision, *,
     outcome = turn["outcome"] if turn is not None else None
     highest = 0
     last = rows[-1]["message_id"]
+    # Conversation view (lib.chat_view, issue 702): a settled turn's anchor carries how
+    # many of its rows that view leaves out; every other row of the turn carries NULL.
+    from . import chat_view
+    anchor_id, left_out = chat_view.anchor(
+        rows, settled=bool(turn is not None and turn["settled_at"] is not None
+                           and turn["outcome"] != "replaced"))
     for row in rows:
         tools = message_turns.settle_statuses(json.loads(row["tools_json"] or "[]"), outcome)
         cells = message_turns.settle_statuses(json.loads(row["display_cells_json"] or "[]"), outcome)
         tools_json = json.dumps(tools, separators=(",", ":"))
         cells_json = json.dumps(cells, separators=(",", ":"))
         turn_json = summary if row["message_id"] == last else None
-        if (tools_json, cells_json, turn_json) == (
+        session_rows = left_out if row["message_id"] == anchor_id else None
+        if (tools_json, cells_json, turn_json, session_rows) == (
                 json.dumps(json.loads(row["tools_json"] or "[]"), separators=(",", ":")),
                 json.dumps(json.loads(row["display_cells_json"] or "[]"), separators=(",", ":")),
-                row["turn_json"]):
+                row["turn_json"], row["session_rows"]):
             continue
         revision = next_revision(database)
         database.execute(
             """UPDATE messages SET tools_json = ?, display_cells_json = ?, turn_json = ?,
-                      revision = ?, updated_at = ? WHERE message_id = ?""",
-            (tools_json, cells_json, turn_json, revision, now_ms(), row["message_id"]))
+                      session_rows = ?, revision = ?, updated_at = ? WHERE message_id = ?""",
+            (tools_json, cells_json, turn_json, session_rows, revision, now_ms(), row["message_id"]))
         database.execute(
             """INSERT INTO conversation_heads (agent_id, backend_session_id, revision, replace_revision)
                VALUES (?, ?, ?, 0)

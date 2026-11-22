@@ -83,7 +83,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
     SSEType.AGENT_ROSTER: (
         "kind", "session", "persona", "voice_id", "backend", "name", "voice_profile",
-        "coordination_visibility",
+        "coordination_visibility", "chat_view",
     ),
     SSEType.AGENT_FOCUS: ("session", "agent_id"),
     SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session", "backend_session_id"),
@@ -286,7 +286,8 @@ def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
                  persona: Any = OMIT, voice_id: Any = OMIT,
                  backend: Any = OMIT, name: Any = OMIT,
                  voice_profile: Any = OMIT,
-                 coordination_visibility: Any = OMIT) -> Event:
+                 coordination_visibility: Any = OMIT,
+                 chat_view: Any = OMIT) -> Event:
     """Refetch the snapshot. Without ``kind`` it is the reconnect nudge.
     ``voice_profile`` is the agent's resolved voice and hearing (feature
     voice_profile) when the event is about one agent's voice."""
@@ -299,6 +300,7 @@ def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
         ("name", name),
         ("voice_profile", voice_profile),
         ("coordination_visibility", coordination_visibility),
+        ("chat_view", chat_view),
     ])
 
 
