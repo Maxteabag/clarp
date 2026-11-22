@@ -18,7 +18,7 @@ _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import agents as agents_db                 # noqa: E402
-from lib import eventlog, tts_queue                  # noqa: E402
+from lib import tts_queue                  # noqa: E402
 from lib.db import conn                              # noqa: E402
 from lib.protocol import TurnSource                  # noqa: E402
 from lib import tts_registry
@@ -205,16 +205,3 @@ def test_a_user_stop_cancels_that_agents_queued_speech(env, monkeypatch):
     assert _row(mine)["error"].startswith("cancelled: ")
     assert _row(other) == {"status": "queued", "error": None}
 
-
-def test_a_preempted_turns_queued_speech_is_cancelled_and_the_new_turns_kept(env):
-    from lib.turn_dispatch import TurnDispatchService
-    old = _enqueue(env.alice, "old answer", trace_id="t-old")
-    new = _enqueue(env.alice, "new answer", trace_id="t-new")
-    service = TurnDispatchService.__new__(TurnDispatchService)
-    service.backends = SimpleNamespace(interrupt=lambda backend, agent_id: 1)
-    spec = SimpleNamespace(backend="claude", agent_id=env.alice, trace_id="t-new",
-                           context=eventlog.EventContext())
-    service._preempt_for(spec, "t-old")
-    assert _row(old)["status"] == "failed"
-    assert _row(old)["error"].startswith("cancelled: ")
-    assert _row(new) == {"status": "queued", "error": None}

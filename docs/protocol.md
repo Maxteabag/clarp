@@ -713,9 +713,9 @@ Rules:
   `queue-updated` event follows, as for a send with `queue_if_busy`. A send
   that waits is a queue item until its turn starts and only then a `/log` row
   (Host contract 115, feature `waited_send_order`).
-  A send of another automatic origin without `queue_if_busy` still preempts the
-  running turn. A message from another agent (`origin: "agent"` with a
-  `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
+  A send of another origin (a schedule, an automation, the Oracle) waits in the
+  same way: no send ends a running turn; only the user's Stop does. A message
+  from another agent (`origin: "agent"` with a `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
   queues as if `queue_if_busy` were true. `/stop` pauses the queue to
   hold its backlog. The user's next fresh message (a plain user or Oracle send,
   whether it starts a turn or is taken as a follow-up or a steer) ends the
