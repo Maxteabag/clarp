@@ -134,9 +134,25 @@ class Part:
         """The part as the scripted templates classify it, with its `cd` context."""
         if self.cwd and self.activity.get("name") == "Bash":
             # The call's own command, also when it is only under input.cmd (R40).
-            command = f"cd {shlex.quote(self.cwd)} && {_shell_command(self.activity)}"
+            own = _shell_command(self.activity)
+            if _starts_in(own, self.cwd):
+                # An exact part that carries the whole call: its `cd` is already there.
+                command = own
+            else:
+                command = f"cd {shlex.quote(self.cwd)} && {own}"
             return {**self.activity, "command": command, "input": {"command": command}}
         return self.activity
+
+
+def _starts_in(command, cwd):
+    """Whether ``command`` begins by changing to ``cwd`` (``cd <cwd> &&`` or ``;``)."""
+    lexer = shlex.shlex(command or "", posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        first = [token for _, token in zip(range(3), lexer)]
+    except ValueError:
+        return False
+    return len(first) == 3 and first[0] == "cd" and first[1] == cwd and first[2] in {"&&", ";"}
 
 
 def _key(kind, shape):
