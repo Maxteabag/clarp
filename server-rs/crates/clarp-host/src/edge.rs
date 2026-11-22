@@ -1939,6 +1939,11 @@ pub(crate) async fn make_agent(
     }
     let mut request = CreateAgentRequest {
         name: plain("name").unwrap_or_default(),
+        test: match asked.get("test") {
+            None => None,
+            Some(Value::Bool(test)) => Some(*test),
+            Some(_) => return Err(bad("test must be a boolean")),
+        },
         backend: plain("backend").map(|backend| creation_backend(&backend)),
         cwd: plain("cwd"),
         model: text("model", "model")?,

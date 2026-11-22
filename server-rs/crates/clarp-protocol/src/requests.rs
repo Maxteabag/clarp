@@ -82,6 +82,9 @@ pub struct SessionRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct CreateAgentRequest {
     pub name: String,
+    /// A disposable agent, excluded from the Host's experience watcher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

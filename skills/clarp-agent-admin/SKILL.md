@@ -46,6 +46,9 @@ POST /personas {name, voice_id, personality, avatar_base64, avatar_symbol}
 persona's voice, personality, and avatar. `DELETE /personas/<name>` removes a
 non-builtin.
 
+For a disposable agent on the Rust Host, use `clarp-admin agent create NAME --test`
+or send `"test": true` in `POST /agents`. The experience watcher skips that agent.
+
 ## Scheduled Jobs
 
 Configure recurring autonomous turns for agent sessions:

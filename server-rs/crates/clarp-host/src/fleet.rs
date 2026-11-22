@@ -175,6 +175,9 @@ pub struct AgentRecord {
     /// It is woken from time to time to look at what it has standing (the heartbeat).
     #[serde(default, skip_serializing_if = "is_false")]
     pub heartbeat_enabled: bool,
+    /// Created for a test and omitted from experience watching.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_test: bool,
     /// When the agent was put away, when it is. It keeps everything and can still be
     /// written to; the apps leave it out of their lists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3660,6 +3663,7 @@ impl Fleet {
             model: request.model.unwrap_or_default().trim().to_string(),
             effort,
             mcp_servers: request.mcp_servers,
+            is_test: request.test.unwrap_or_default(),
             conversation_id: forked.unwrap_or_else(ids::uuid),
             created_at_ms: self.now_ms(),
             parent_agent_id: parent.map(|parent| parent.agent_id.clone()),

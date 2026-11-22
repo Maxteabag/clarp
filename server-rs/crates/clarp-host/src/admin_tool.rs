@@ -672,7 +672,7 @@ fn refused_by_host(status: u16, body: &Value) -> ToolAnswer {
 }
 
 /// `clarp-admin agent create NAME [--parent SESSION] [--role agent|helper] [--cwd DIR]
-/// [--backend B] [--model M] [--effort E] [--session S] [--voice-id V]`: makes an agent;
+/// [--backend B] [--model M] [--effort E] [--session S] [--voice-id V] [--test]`: makes an agent;
 /// with `--parent` and `--role helper`, a helper of that agent. This is how an agent makes
 /// another (the skill `clarp-sub-agents`).
 async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
@@ -692,12 +692,12 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
             format!(
                 "usage: clarp-admin agent create [-h] [--parent PARENT] [--role {{agent,helper}}] \
                  [--cwd CWD] [--backend BACKEND] [--model MODEL] [--effort EFFORT] \
-                 [--session SESSION] [--voice-id VOICE_ID] name\n\
+                 [--session SESSION] [--voice-id VOICE_ID] [--test] name\n\
                  clarp-admin agent create: error: {why}"
             ),
         )
     };
-    let parsed = match parse(args, &valued, &[], &["name"]) {
+    let parsed = match parse(args, &valued, &["--test"], &["name"]) {
         Ok(parsed) => parsed,
         Err(why) => return usage(&why),
     };
@@ -717,6 +717,9 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
     let mut asked = roster::Fields::new();
     let name = parsed.positional.first().cloned().unwrap_or_default();
     asked.insert("name".to_string(), json!(name));
+    if parsed.flags.contains("--test") {
+        asked.insert("test".to_string(), json!(true));
+    }
     asked.insert("synthesize_audio".to_string(), json!(false));
     for key in [
         "cwd", "backend", "model", "effort", "parent", "role", "session",

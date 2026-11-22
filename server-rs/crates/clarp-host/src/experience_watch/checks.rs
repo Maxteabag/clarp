@@ -1,6 +1,7 @@
 //! Observe one window of Host state. Refused reads leave that finding open.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use clarp_actor::{QueueItemStatus, Waiting};
@@ -10,7 +11,7 @@ use futures_util::{StreamExt as _, stream};
 use serde_json::Value;
 
 use crate::edge::App;
-use crate::fleet::Directory;
+use crate::fleet::{Directory, Member};
 
 use super::{Relaunches, book::Seen, release, settings::Settings};
 
@@ -99,11 +100,19 @@ fn sends(seen: &mut Seen, settings: &Settings, subject: &str, failed: usize, ref
     }
 }
 
+fn watched(directory: &Directory) -> impl Iterator<Item = &Arc<Member>> {
+    directory
+        .members
+        .iter()
+        .chain(&directory.janitors)
+        .filter(|member| !member.record.is_test && member.record.archived_at_ms.is_none())
+}
+
 fn cards(seen: &mut Seen, settings: &Settings, directory: &Directory, now: i64) {
     let mut count = 0;
     let mut oldest = 0;
     let mut agents: BTreeSet<String> = BTreeSet::new();
-    for member in directory.members.iter().chain(&directory.janitors) {
+    for member in watched(directory) {
         let view = member.agent.view();
         if view.broken.is_some() {
             seen.unavailable_kinds.insert("cards");
@@ -243,12 +252,7 @@ pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64
     let mut seen = Seen::default();
     let refusals = app.experience.refusals(since, now);
 
-    let members: Vec<_> = directory
-        .members
-        .iter()
-        .chain(&directory.janitors)
-        .cloned()
-        .collect();
+    let members: Vec<_> = watched(&directory).cloned().collect();
     let mut agents = stream::iter(members)
         .map(|member| async move {
             let facts =
@@ -696,10 +700,15 @@ mod tests {
         .await
         .unwrap();
         assert!(started_at > 0);
-        let records = SpoolReader::new(&spool).read_window(0, u64::MAX, 4096).unwrap();
-        assert!(!records.records.iter().any(|record| {
-            matches!(&record.entry, Entry::Out(text) | Entry::Err(text) if !text.is_empty())
-        }), "the tool was silent from launch");
+        let records = SpoolReader::new(&spool)
+            .read_window(0, u64::MAX, 4096)
+            .unwrap();
+        assert!(
+            !records.records.iter().any(|record| {
+                matches!(&record.entry, Entry::Out(text) | Entry::Err(text) if !text.is_empty())
+            }),
+            "the tool was silent from launch"
+        );
         assert_eq!(entered["stalled_since"], started_at);
         let request = Request::builder()
             .uri("/agents/snapshot")
@@ -757,6 +766,122 @@ mod tests {
         assert!(handle.view().stalled_since.is_none());
         let seen = collect(&app, &settings, started_at, due).await;
         assert!(!seen.found.contains_key(&("stall".into(), worker.agent_id)));
+    }
+
+    #[tokio::test]
+    async fn experience_watch_opens_waits_only_for_ordinary_active_agents() {
+        use axum::extract::ConnectInfo;
+        use clarp_kernel::{control::Control, conversation::Message};
+        use serde_json::json;
+
+        let place = crate::unkept::at_the_port::place("experience-agent-test-flag");
+        let mut app = place.app().await;
+        std::sync::Arc::make_mut(&mut app.config).auth_token = "fixture-admin".into();
+        let router = crate::edge::router(app.clone());
+        let post = |uri: &str, body: Value| {
+            let body = body.to_string();
+            let request = Request::post(uri)
+                .extension(ConnectInfo(std::net::SocketAddr::from((
+                    [127, 0, 0, 1],
+                    24000,
+                ))))
+                .header(header::AUTHORIZATION, "Bearer fixture-admin")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::CONTENT_LENGTH, body.len())
+                .body(Body::from(body))
+                .unwrap();
+            let router = router.clone();
+            async move {
+                let response = router.oneshot(request).await.unwrap();
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), 512 * 1024)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    status,
+                    StatusCode::OK,
+                    "{}",
+                    String::from_utf8_lossy(&bytes)
+                );
+                serde_json::from_slice::<Value>(&bytes).unwrap()
+            }
+        };
+
+        let normal = post(
+            "/agents",
+            json!({"name":"Probe Example", "backend":"scripted"}),
+        )
+        .await;
+        let via_http = post(
+            "/agents",
+            json!({"name":"Elm", "backend":"scripted", "test":true}),
+        )
+        .await;
+        let tool = post(
+            "/tools/run",
+            json!({
+                "tool": "clarp-admin",
+                "argv": ["agent", "create", "Oak", "--backend", "scripted", "--test"]
+            }),
+        )
+        .await;
+        assert_eq!(tool["exit"], 0, "{tool}");
+        let via_cli: Value = serde_json::from_str(tool["stdout"].as_str().unwrap()).unwrap();
+        let archived = post("/agents", json!({"name":"Beech", "backend":"scripted"})).await;
+        let archived_session = archived["session"].as_str().unwrap().to_owned();
+        app.fleet
+            .amend(archived_session, crate::fleet::Amend::Archive(true))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let since = app.clock.now_ms();
+        let directory = app.fleet.directory();
+        let mut expected = Vec::new();
+        for (created, watched) in [
+            (&normal, true),
+            (&via_http, false),
+            (&via_cli, false),
+            (&archived, false),
+        ] {
+            assert!(created["agent"].get("test").is_none());
+            assert!(created["agent"].get("is_test").is_none());
+            let member = directory
+                .by_session(created["session"].as_str().unwrap())
+                .unwrap();
+            member.agent.hold(Control::for_relaunch()).await.unwrap();
+            let sent = member
+                .agent
+                .send(
+                    Message {
+                        id: "u-waiting-word".into(),
+                        text: "Please look at this".into(),
+                        origin: Origin::User,
+                        ..Message::default()
+                    },
+                    Admission::Background,
+                )
+                .await
+                .unwrap();
+            assert!(sent.queued, "no wait for {}", member.record.session);
+            if watched {
+                expected.push(member.record.agent_id.clone());
+            }
+        }
+
+        let settings = Settings::from_section(None);
+        place.clock.advance_ms(settings.wait_ms + 1_000);
+        let now = app.clock.now_ms();
+        let seen = collect(&app, &settings, since, now).await;
+        let mut book = Book::default();
+        book.reconcile(seen, &settings, &directory, &jiff::tz::TimeZone::UTC, now);
+        let waits: Vec<_> = book
+            .rows
+            .into_iter()
+            .filter(|row| row.kind == "wait")
+            .map(|row| row.subject)
+            .collect();
+        assert_eq!(waits, expected);
     }
 
     #[tokio::test]
