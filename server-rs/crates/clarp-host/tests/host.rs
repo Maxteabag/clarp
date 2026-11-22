@@ -18701,6 +18701,11 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     }
     refused("POST", "/artifacts/door-limit-form", DEFAULT + 1);
     refused("POST", "/agents/import", 512 * 1024 * 1024 + 1);
+    refused(
+        "POST",
+        "/application-activity&token=SECRET_QUERY_MARKER",
+        DEFAULT + 1,
+    );
     const PAIRING: usize = 64 * 1024;
     // At and below the drain boundary, discard every byte before returning
     // the refusal. Only then may another ordinary request use the same socket.
@@ -18833,7 +18838,16 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
         let heard = host.heard.lock().unwrap();
         heard.lines().any(|line| line == wanted)
     });
+    let unmatched = format!(
+        "requestBodyTooLarge family=/unmatched bytes={}",
+        DEFAULT + 1
+    );
+    wait_for("the unmatched route's refusal log", || {
+        let heard = host.heard.lock().unwrap();
+        heard.lines().any(|line| line == unmatched)
+    });
     let log = host.heard.lock().unwrap().clone();
+    assert!(!log.contains("SECRET_QUERY_MARKER"));
     let lines: Vec<_> = log
         .lines()
         .filter(|line| line.starts_with("requestBodyLarge "))

@@ -10,7 +10,9 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, Request, State};
+use axum::extract::{
+    ConnectInfo, DefaultBodyLimit, Extension, MatchedPath, Path, Query, Request, State,
+};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, Sse};
@@ -816,11 +818,18 @@ async fn json_body(request: Request, next: Next) -> Response {
     let Some(length) = value.to_str().ok().and_then(|s| s.parse::<u64>().ok()) else {
         return body_refusal(StatusCode::BAD_REQUEST, "bad json", true);
     };
+    // A malformed query may be part of the raw path. Log only the router's own route.
+    let family = |request: &Request| {
+        request.extensions().get::<MatchedPath>().map_or_else(
+            || "/unmatched".to_owned(),
+            |route| request_body::family(route.as_str()),
+        )
+    };
     match request_body::admission(length, limit) {
         request_body::Admission::Refuse { close } => {
             eprintln!(
                 "requestBodyTooLarge family={} bytes={length}",
-                request_body::family(path)
+                family(&request)
             );
             if close {
                 return too_large(true);
@@ -832,10 +841,12 @@ async fn json_body(request: Request, next: Next) -> Response {
                 .is_ok_and(|b| b.len() as u64 == length);
             return too_large(!complete);
         }
-        request_body::Admission::LogLarge => eprintln!(
-            "requestBodyLarge family={} bytes={length}",
-            request_body::family(path)
-        ),
+        request_body::Admission::LogLarge => {
+            eprintln!(
+                "requestBodyLarge family={} bytes={length}",
+                family(&request)
+            )
+        }
         request_body::Admission::Accept => {}
     }
     // Downstream Bytes and Json extractors receive the admitted body under
