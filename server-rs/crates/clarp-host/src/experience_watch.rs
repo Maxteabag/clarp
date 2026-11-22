@@ -2,6 +2,7 @@
 
 mod book;
 mod checks;
+mod release;
 mod settings;
 
 pub(crate) use checks::AgentFacts;
