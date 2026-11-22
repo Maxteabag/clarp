@@ -1,4 +1,4 @@
--- user_version 138
+-- user_version 139
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -876,6 +876,7 @@ CREATE TABLE agents (
     helper_completed_at INTEGER,
     custom_status_at INTEGER,
     coordination_visibility TEXT NOT NULL DEFAULT '',
+    chat_view TEXT NOT NULL DEFAULT 'session',
     voice_verbosity INTEGER NOT NULL DEFAULT 0
 );
 
@@ -1616,6 +1617,7 @@ CREATE TABLE messages (
     phase TEXT,
     turn_json TEXT,
     sent_at INTEGER,
+    session_rows INTEGER,
     trace_id TEXT,
     UNIQUE(agent_id, backend_session_id, seq)
 );

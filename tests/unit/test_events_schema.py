@@ -64,7 +64,8 @@ FULL_SAMPLES = {
         server_now_ms=1, ops=[{"op": "status", "conv": "c", "activity": {"state": "idle"}}]),
     SSEType.AGENT_ROSTER: lambda: events.agent_roster(
         "created", session="s", persona="P", voice_id="v", backend="claude",
-        name="N", voice_profile={"speech": {}, "hearing": {}}, coordination_visibility="hide"),
+        name="N", voice_profile={"speech": {}, "hearing": {}}, coordination_visibility="hide",
+        chat_view="conversation"),
     SSEType.AGENT_FOCUS: lambda: events.agent_focus(session="s", agent_id="a"),
     SSEType.TRANSCRIPT_UPDATED: lambda: events.transcript_updated(
         agent_id="a", session="s", backend_session_id="b"),

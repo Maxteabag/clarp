@@ -82,7 +82,8 @@
         "type": {"const": "agent-roster"},
         "kind": {"type": "string"},
         "session": {"type": "string"},
-        "voice_profile": {"type": "object", "description": "feature voice_profile: as on the snapshot agent row"}
+        "voice_profile": {"type": "object", "description": "feature voice_profile: as on the snapshot agent row"},
+        "chat_view": {"enum": ["conversation", "session"], "description": "feature chat_view: with kind chat_view, the agent's new chat view (issue 702)"}
       }
     },
     "agent-focus": {

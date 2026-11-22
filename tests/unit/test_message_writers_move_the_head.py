@@ -45,6 +45,12 @@ NOT_A_WRITE = {
     # move a head: there is no row to move one for.
     ("message_import_writer", "_PlanWriter.execute"): "records an import's writes as a plan; runs none",
 }
+# A schema step's data write: it runs before the Host serves anything, so no client holds a
+# cursor to move, and the rows it writes are read by a field that did not exist before it.
+SCHEMA_UPGRADE = {
+    ("db_migrations", "_backfill_chat_view_anchors"):
+        "schema 139 fills session_rows, which no client read before it (issue 702)",
+}
 # Writers that move the head themselves but open no transaction: their two statements (the row,
 # the head) are one commit only because their caller holds BEGIN IMMEDIATE round the call. Each has
 # exactly the one caller named; a second caller turns this red until it is shown to do the same.
@@ -103,14 +109,14 @@ def test_every_writer_of_a_message_row_moves_its_head():
     assert len(sites) >= 20, "the scan found too few writers: the pattern no longer matches the code"
     unlisted = [f"lib/{module.replace('.', '/')}.py:{line} {name}" for (module, name), (fn, line) in sites.items()
                 if not _moves_head(fn) and (module, name) not in INSIDE_THE_IMPORT
-                and (module, name) not in NOT_A_WRITE]
+                and (module, name) not in NOT_A_WRITE and (module, name) not in SCHEMA_UPGRADE]
     assert not unlisted, ("a message row is written here and its function moves no conversation head; move "
                           "the head in the same transaction, or name it here with its reason: " + "; ".join(unlisted))
 
 
 def test_every_function_named_here_still_writes_a_message_row():
     present = set(_sites())
-    stale = sorted(key for key in {**INSIDE_THE_IMPORT, **NOT_A_WRITE} if key not in present)
+    stale = sorted(key for key in {**INSIDE_THE_IMPORT, **NOT_A_WRITE, **SCHEMA_UPGRADE} if key not in present)
     assert not stale, f"named here but no longer writing a message row: {stale}"
 
 
