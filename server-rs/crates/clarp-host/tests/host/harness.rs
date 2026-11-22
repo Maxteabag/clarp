@@ -544,8 +544,12 @@ fn a_tool_with_no_address_on_a_machine_with_an_installed_host_reaches_nothing_of
 /// own on that port, a test that leaves the address out speaks to that Host.
 const AT_A_FIXED_ADDRESS: &[&str] = &["import", "peer", "network", "pair"];
 
+/// The ways of `import` that speak to no Host: each reads a Python Host's database and writes
+/// a data folder (`--from-db`, `--data`), and has no `--host` to give.
+const IMPORTED_FROM_A_DATABASE: &[&str] = &["--devices", "--settings", "--jobs"];
+
 /// Every start of one of those commands in `text`: its line, the command, and whether it names
-/// `--host`. A start is a call `.args([` or `.arg(` whose first word is the command; it is read
+/// `--host` (or is an `import` of [`IMPORTED_FROM_A_DATABASE`], which has none to name). A start is a call `.args([` or `.arg(` whose first word is the command; it is read
 /// to the end of its statement (the `;` after it, or the bracket that closes around it, as in a
 /// closure that answers the command), so an address given in a later `.args(` of the same chain
 /// counts.
@@ -586,6 +590,11 @@ fn starts_at_a_fixed_address(text: &str) -> Vec<(usize, String, bool)> {
                 }
                 Token::Mark(';') if depth == 0 => break,
                 Token::Text(word) if word == "--host" => named = true,
+                Token::Text(word)
+                    if command == "import" && IMPORTED_FROM_A_DATABASE.contains(&word.as_str()) =>
+                {
+                    named = true;
+                }
                 _ => {}
             }
         }
@@ -614,6 +623,7 @@ fn every_start_of_a_command_at_a_fixed_address_in_the_tests_names_its_host() {
         let d = place.host_command().args(["pair", "--relay"]).ended(); let e = ["--host"];
         let f = place.host_command().args(["tool", "import"]).ended();
         let g = "import";
+        let h = place.host_command().args(["import", "--jobs", "--from-db"]).arg(db).ended();
     "#####;
     assert_eq!(
         starts_at_a_fixed_address(sample),
@@ -622,6 +632,7 @@ fn every_start_of_a_command_at_a_fixed_address_in_the_tests_names_its_host() {
             (3, "peer".to_string(), false),
             (4, "network".to_string(), false),
             (5, "pair".to_string(), false),
+            (8, "import".to_string(), true),
         ]
     );
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");

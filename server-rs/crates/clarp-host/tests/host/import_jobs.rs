@@ -65,11 +65,11 @@ fn a_running_python_job_is_carried_so_its_live_worker_is_still_its_run() {
     drop(host);
 
     // The live worker, and one that has ended.
-    let mut live = Command::new("sleep").arg("300").spawn().unwrap();
+    let mut live = place.command("sleep").arg("300").spawn().unwrap();
     let live_pid = live.id();
     let live_token = clarp_host::process::start_token(live_pid);
     assert!(!live_token.is_empty());
-    let mut gone = Command::new("true").spawn().unwrap();
+    let mut gone = place.command("true").spawn().unwrap();
     let gone_pid = gone.id();
     gone.wait().unwrap();
 

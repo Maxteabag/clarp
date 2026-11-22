@@ -171,6 +171,8 @@ pub const ABSENT: &[(&str, &str)] = &[
     // Who is calling, and the tokens a caller presents: the test's own, or none.
     ("CLARP_HOST_ADDR", "caller"),
     ("CLARP_HOST_TOKEN", "caller"),
+    // Further administrator tokens the Host accepts: a test that wants one sets it.
+    ("CLARP_HOST_TOKEN_ALIASES", "caller"),
     ("CLARP_PEER_TOKEN", "caller"),
     ("CLARP_SOURCE_TOKEN", "caller"),
     ("CLARP_FILES_TOKEN", "caller"),
