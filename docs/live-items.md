@@ -175,7 +175,7 @@ in `GET /live` and on `/agents/snapshot` agents as `live_activity`:
 | `state` | meaning | busy |
 |---|---|---|
 | `idle` | no turn running | no |
-| `thinking` | the model is working without visible output (or reasoning). On a Rust Host, while the tool asks a provider that would not answer again, `headline` says so: "API overloaded, retrying 2/10" (also "API rate limited", "An API error") | yes |
+| `thinking` | the model is working without visible output (or reasoning). On a Rust Host, while the tool asks a provider that would not answer again, `headline` says so, for example "API overloaded, retrying 2/10" (the words and the count vary) | yes |
 | `responding` | assistant text is streaming | yes |
 | `tool` | a tool is running; `tool` names it with its start time | yes |
 | `compacting` | context compaction | yes |
