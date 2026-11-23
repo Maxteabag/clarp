@@ -88,7 +88,11 @@ pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> 
     // it is over, after a message sent meanwhile), else the one above it.
     let mut members: Vec<Vec<usize>> = vec![Vec::new(); prompts.len() + 1];
     for (index, row) in rows.iter().enumerate() {
-        if row.role == "user" || row.activity {
+        // A note to the user (a tell-user line, kind `note`) is said to
+        // them, not part of the turn's work: it never folds, and it is not
+        // the turn's answer. Folding it as commentary hid it the moment the
+        // turn counted as over, e.g. when the user sent the next message.
+        if row.role == "user" || row.activity || row.kind == "note" {
             continue;
         }
         let traced = (!row.trace_id.is_empty()).then(|| prompts.iter().position(|&p| rows[p].trace_id == row.trace_id)).flatten();

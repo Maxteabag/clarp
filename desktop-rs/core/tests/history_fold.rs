@@ -513,3 +513,19 @@ fn a_spoken_acknowledgment_in_history_stays_above_the_work_row() {
     let hidden = present(&rows, None, &Options { hide_settled: true, ..quiet });
     assert_eq!(read(&hidden.folds[0]), ["row a0", "row a4"], "Hide when done keeps the words heard");
 }
+
+/// A note to the user (tell-user, kind `note`, no phase) written during a
+/// turn stays in view when the turn folds, and the answer is still the answer.
+#[test]
+fn a_note_to_the_user_never_folds_away() {
+    let mut rows = real_rows(false);
+    let at = rows.iter().position(|r| r.id == T1_ANSWER).expect("the answer row");
+    let mut note = row(&json!({"id": "note-a-tell-1", "role": "assistant", "kind": "note", "origin": "note",
+        "text": "I muted the only sound playing.", "trace_id": T1, "revision": 1}));
+    note.timestamp = rows[at].timestamp.clone();
+    rows.insert(at, note);
+    let folded = present(&rows, None, &options(&[]));
+    assert_eq!(folded.folds.len(), 1);
+    assert!(!folded.hidden_rows.contains("note-a-tell-1"), "the note stays: {:?}", sorted(&folded.hidden_rows));
+    assert_eq!(read(&folded.folds[0]), ["Ran sleep 60", "Worked for 16s · 1 tool", &format!("row {T1_ANSWER}")], "the fold is as without the note");
+}
