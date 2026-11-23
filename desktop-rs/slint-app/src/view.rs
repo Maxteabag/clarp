@@ -708,6 +708,9 @@ pub(crate) fn message_row(
             line: p.line.into(),
             expanded: prompt_open,
         }),
+        // The pane fills in Show work (Conversation view, #702).
+        work_key: SharedString::new(),
+        work_open: false,
     }
 }
 

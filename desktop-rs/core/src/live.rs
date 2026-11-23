@@ -62,6 +62,10 @@ pub struct LiveView {
     lseq: Option<i64>,
     activity: Object,
     turn: Option<Object>,
+    /// The agent's own turn while a conversation fork's turn is `turn`
+    /// (`conversation_fork`, contract 153): `{turn_id, audience, status,
+    /// started_at_ms, tool_count, activity}`; None when absent or null.
+    main_turn: Option<Object>,
     items: HashMap<String, Object>,
     awaiting_snapshot: bool,
     tool_explanations: Option<Object>,
@@ -84,6 +88,7 @@ impl Default for LiveView {
             lseq: None,
             activity: idle(),
             turn: None,
+            main_turn: None,
             items: HashMap::new(),
             awaiting_snapshot: false,
             tool_explanations: None,
@@ -109,6 +114,10 @@ impl LiveView {
     }
     pub fn turn(&self) -> Option<&Object> {
         self.turn.as_ref()
+    }
+    /// The agent's own turn beside a conversation fork's (`main_turn`).
+    pub fn main_turn(&self) -> Option<&Object> {
+        self.main_turn.as_ref()
     }
     /// A `GET /live` is outstanding: events are ignored until it lands.
     pub fn awaiting_snapshot(&self) -> bool {
@@ -189,6 +198,7 @@ impl LiveView {
         self.activity = snapshot.get("activity").and_then(Value::as_object).cloned().unwrap_or_else(idle);
         self.retire(snapshot.get("turn").and_then(Value::as_object));
         self.turn = snapshot.get("turn").and_then(Value::as_object).cloned();
+        self.main_turn = snapshot.get("main_turn").and_then(Value::as_object).cloned();
         self.items = snapshot
             .get("items")
             .and_then(Value::as_array)
@@ -223,14 +233,21 @@ impl LiveView {
             return self.need_snapshot();
         }
         let mut staged = (self.activity.clone(), self.turn.clone(), self.items.clone());
+        let mut main_turn = self.main_turn.clone();
         for op in event.get("ops").and_then(Value::as_array).into_iter().flatten() {
             let Some(op) = op.as_object() else { continue };
+            // The agent's own turn beside a fork's: replaced whole (null: gone).
+            if op.get("op").and_then(Value::as_str) == Some("main_turn") {
+                main_turn = op.get("main_turn").and_then(Value::as_object).cloned();
+                continue;
+            }
             if !apply_op(&mut staged, op) {
                 return self.need_snapshot();
             }
         }
         self.retire(staged.1.as_ref());
         (self.activity, self.turn, self.items) = staged;
+        self.main_turn = main_turn;
         self.lseq = Some(lseq);
         self.generation += 1;
         Vec::new()

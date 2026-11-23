@@ -182,6 +182,12 @@ live_features = False
 # A stalled turn (feature stalled_turn, Host contract 149): on, as a current
 # Host has it; /__control/stall-feature turns it off for an older Host.
 stall_feature = True
+# Conversation and Session views (feature chat_view, #702) and conversation
+# forks (conversation_fork): off until /__control/chat-view turns them on.
+# `refuse`: POST /agent-chat-view answers 403 agents_may_not.
+chat_view = {"on": False, "fork": False, "refuse": False}
+# session -> the agent's own turn beside a fork's (GET /live's main_turn).
+main_turns = {}
 # /log rows carry turn summaries (feature log_turn_summary, Host contract 47).
 turn_summaries = False
 live_truth = {}      # session -> LiveView: what GET /live answers
@@ -756,7 +762,8 @@ def live_snapshot(session):
     return {"conv": agent.get("conversation_id", ""), "session": session, "agent_id": agent.get("agent_id", ""),
             "epoch": view.epoch, "lseq": view.lseq, "server_now_ms": int(time.time() * 1000),
             "activity": copy.deepcopy(view.activity), "turn": copy.deepcopy(view.turn),
-            "items": copy.deepcopy(view.items()), "tool_explanations": dict(tool_explanation_settings)}
+            "items": copy.deepcopy(view.items()), "tool_explanations": dict(tool_explanation_settings),
+            "main_turn": copy.deepcopy(main_turns.get(session))}
 
 
 def live_step(session, step, skip=()):
@@ -1208,6 +1215,10 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("agent_backend_transit")
             if stall_feature:
                 features.append("stalled_turn")
+            if chat_view["on"]:
+                features.append("chat_view")
+            if chat_view["fork"]:
+                features.append("conversation_fork")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -1812,6 +1823,26 @@ class Handler(BaseHTTPRequestHandler):
             global live_features
             live_features = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/chat-view":
+            # Test control: the chat_view and conversation_fork features (read
+            # from /server-info on connecting), and whether writes are refused.
+            for key in ("on", "fork", "refuse"):
+                if key in body:
+                    chat_view[key] = bool(body[key])
+            return self.reply(200, {"ok": True})
+        if url.path == "/agent-chat-view":
+            record({"method": "POST", "path": url.path, "body": body})
+            session, value = body.get("session", ""), body.get("chat_view")
+            if chat_view["refuse"]:
+                return self.reply(403, {"error": "agents_may_not"})
+            if value not in ("conversation", "session"):
+                return self.reply(400, {"error": "chat_view must be conversation or session"})
+            with state_lock:
+                for agent in agents:
+                    if agent["session"] == session:
+                        agent["chat_view"] = value
+            broadcast({"type": "agent-roster", "kind": "chat_view", "session": session, "chat_view": value})
+            return self.reply(200, {"ok": True, "session": session, "chat_view": value})
         if url.path == "/__control/coordination":
             # Test control: the hidden_coordination feature on or off (read
             # from /server-info on connecting).
@@ -1957,6 +1988,10 @@ class Handler(BaseHTTPRequestHandler):
             # session's truth unless set), sent and applied.
             session = body.get("session", "rachel")
             event = dict(body["event"])
+            # The agent's own turn beside a fork's: what GET /live says next.
+            for op in event.get("ops") or []:
+                if op.get("op") == "main_turn":
+                    main_turns[session] = op.get("main_turn")
             with state_lock:
                 view = live_view(session)
                 event.setdefault("epoch", view.epoch)
