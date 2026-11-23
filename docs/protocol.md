@@ -750,7 +750,8 @@ nothing else changes.
 
 What is carried: the user's words and the agent's answers of each turn of the current
 conversation (since the agent was last started again), in order, from the Host's own record,
-with the tools the agent used and what they gave back. Claude, Codex and Grok get a native
+with the tools the agent used and what they gave back (feature `agent_backend_transit_tools`,
+contract 161; a Host without it carries only the text). Claude, Codex and Grok get a native
 session written where the tool keeps its sessions; the agent's next turn resumes it. Claude
 gets each call as a `tool_use` block and its result as a `tool_result` block, Codex as a
 `function_call` and `function_call_output`, Grok as a quoted block after the answer's text
