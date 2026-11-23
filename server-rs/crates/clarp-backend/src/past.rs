@@ -622,6 +622,35 @@ pub fn claude_source(
         .transpose()
 }
 
+/// The model of the newest turn a Codex rollout holds: what its last `turn_context` says ran
+/// it. Read from the end, as far back as a turn's context is.
+pub fn codex_turn_model(rollout: &Path) -> Option<String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut file = std::fs::File::open(rollout).ok()?;
+    let size = file.metadata().ok()?.len();
+    let mut back: u64 = 1 << 20;
+    loop {
+        let from = size.saturating_sub(back);
+        file.seek(SeekFrom::Start(from)).ok()?;
+        let mut tail = Vec::new();
+        file.read_to_end(&mut tail).ok()?;
+        let found = tail
+            .split(|byte| *byte == b'\n')
+            .rev()
+            .filter(|line| line.windows(14).any(|w| w == b"\"turn_context\""))
+            .find_map(|line| {
+                let entry: Value = serde_json::from_slice(line).ok()?;
+                (entry["type"] == "turn_context")
+                    .then(|| text_of(Some(&entry["payload"]["model"])))
+                    .filter(|model| !model.is_empty())
+            });
+        if found.is_some() || from == 0 {
+            return found;
+        }
+        back = back.saturating_mul(8);
+    }
+}
+
 /// The newest rollout whose complete timestamped name identifies this session.
 pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
     if !checked_id("codex", session) || !sessions.is_dir() {

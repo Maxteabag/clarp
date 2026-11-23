@@ -111,6 +111,8 @@ struct Stream {
     bound: bool,
     ended: bool,
     run_failed: bool,
+    /// The model the turn's answers named, once one did.
+    model: Option<String>,
     lines: BTreeMap<String, i64>,
     step: u64,
     assistant: BTreeSet<String>,
@@ -436,6 +438,23 @@ impl Stream {
                         }));
                     }
                     _ => {}
+                }
+            }
+            // An answer names the model that gave it: as the agent's model is named, its
+            // provider and its id (`opencode/big-pickle`).
+            "message.updated" if props["info"]["role"] == "assistant" => {
+                let (provider, id) = (
+                    word(&props["info"], "providerID"),
+                    word(&props["info"], "modelID"),
+                );
+                let model = match (provider, id) {
+                    (_, "") => String::new(),
+                    ("", id) => id.to_string(),
+                    (provider, id) => format!("{provider}/{id}"),
+                };
+                if !model.is_empty() && self.model.as_deref() != Some(model.as_str()) {
+                    self.model = Some(model.clone());
+                    out.push(Signal::Model(model));
                 }
             }
             "step_start" => self.step(out),

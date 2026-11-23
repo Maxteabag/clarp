@@ -22,7 +22,7 @@ const THREAD: &str = "00000000-0000-7000-8000-000000000002";
 fn read(fixture: &str, name: &str, exit: (Option<i32>, Option<i32>)) -> Vec<Signal> {
     let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
     let recorded = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let mut interpreter = CodexInterpreter::new(1, name);
+    let mut interpreter = CodexInterpreter::reading(1, name, None);
     let mut out = Vec::new();
     let mut t = 0;
     for line in recorded.lines() {

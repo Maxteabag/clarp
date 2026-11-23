@@ -201,6 +201,10 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("FIXTURE_CHILD_ORDER", "switch"),
     ("FIXTURE_LAUNCH_PARENT", "switch"),
     ("FIXTURE_SPEECH_PARENT", "switch"),
+    // Read only by a test that is asked to write sessions for a live resume (issue 720).
+    ("CLARP_TRANSIT_PROOF_DIR", "switch"),
+    ("CLARP_TRANSIT_PROOF_WORD", "switch"),
+    ("CLARP_TRANSIT_PROOF_CWD", "switch"),
 ];
 
 /// Names shaped like a variable in a file that reads the environment that are not read from it:

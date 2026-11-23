@@ -387,6 +387,11 @@ pub struct CodexInterpreter {
     ended: bool,
     /// The calls those who watch the turn were shown, by Codex's item id.
     shown: BTreeSet<String>,
+    /// The thread the turn runs in, once Codex said.
+    thread: Option<String>,
+    /// Where Codex keeps its rollouts: where the model that answered is read when the turn
+    /// is complete (Codex's events do not name it). `None`: not read.
+    sessions: Option<std::path::PathBuf>,
 }
 
 /// What the ids of Codex's live items begin with.
@@ -394,6 +399,13 @@ const SHOWN: &str = "cx";
 
 impl CodexInterpreter {
     pub fn new(turn: u64, name: &str) -> Self {
+        let home = std::env::var_os("HOME").map_or_else(|| "/".into(), std::path::PathBuf::from);
+        let sessions = crate::transit::tool_home("codex", &home).join("sessions");
+        Self::reading(turn, name, Some(sessions))
+    }
+
+    /// One that reads the model that answered from the rollouts under `sessions`.
+    pub fn reading(turn: u64, name: &str, sessions: Option<std::path::PathBuf>) -> Self {
         Self {
             turn,
             name: name.to_string(),
@@ -404,6 +416,8 @@ impl CodexInterpreter {
             stderr: ErrorTail::default(),
             ended: false,
             shown: BTreeSet::new(),
+            thread: None,
+            sessions,
         }
     }
 
@@ -422,6 +436,7 @@ impl CodexInterpreter {
             "thread.started" => {
                 let thread = text_of(&event["thread_id"]).trim();
                 if !thread.is_empty() {
+                    self.thread = Some(thread.to_string());
                     out.push(Signal::Bound {
                         backend_session: thread.to_string(),
                     });
@@ -433,6 +448,16 @@ impl CodexInterpreter {
             }
             "turn.completed" => {
                 self.completed = true;
+                // The model that answered: what the rollout's context of the turn says.
+                let model = self
+                    .sessions
+                    .as_deref()
+                    .zip(self.thread.as_deref())
+                    .and_then(|(sessions, thread)| crate::past::codex_rollout(sessions, thread))
+                    .and_then(|rollout| crate::past::codex_turn_model(&rollout));
+                if let Some(model) = model {
+                    out.push(Signal::Model(model));
+                }
                 let count = |field: &str| event["usage"][field].as_u64();
                 // Codex counts on from turn to turn of a thread: what it says here is what the
                 // whole thread has taken so far (a first turn said 87,566 in, the next turn of
@@ -905,7 +930,7 @@ mod tests {
     }
 
     fn read_all(lines: &[&str], exit: (Option<i32>, Option<i32>)) -> Vec<Signal> {
-        let mut interpreter = CodexInterpreter::new(3, "m1");
+        let mut interpreter = CodexInterpreter::reading(3, "m1", None);
         let mut out = Vec::new();
         let mut t = 100;
         for line in lines {
@@ -929,6 +954,68 @@ mod tests {
             &mut out,
         );
         out
+    }
+
+    #[test]
+    fn the_model_that_answered_is_read_from_the_rollout_when_the_turn_is_complete() {
+        let sessions = std::env::temp_dir().join(format!(
+            "clarp-codex-model-{}-{}",
+            std::process::id(),
+            crate::transit::uuid4().unwrap()
+        ));
+        let thread = "01a2075a-3e14-7f21-8f0b-d5fca1238159";
+        let day = sessions.join("2026/11/23");
+        std::fs::create_dir_all(&day).unwrap();
+        let rollout = [
+            json!({"type": "session_meta", "payload": {"id": thread}}),
+            json!({"type": "turn_context", "payload": {"model": "gpt-6.2-sol"}}),
+            json!({"type": "response_item", "payload": {"type": "message"}}),
+            json!({"type": "turn_context", "payload": {"model": "gpt-6-luna"}}),
+            json!({"type": "event_msg", "payload": {"type": "token_count"}}),
+        ]
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+        std::fs::write(
+            day.join(format!("rollout-2026-11-23T08-19-26-{thread}.jsonl")),
+            rollout,
+        )
+        .unwrap();
+        let lines = [
+            format!(r#"{{"type":"thread.started","thread_id":"{thread}"}}"#),
+            r#"{"type":"turn.started"}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}"#
+                .to_string(),
+            r#"{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}"#.to_string(),
+        ];
+        let models = |sessions: Option<std::path::PathBuf>| {
+            let mut interpreter = CodexInterpreter::reading(1, "m1", sessions);
+            let mut out = Vec::new();
+            for (t, line) in lines.iter().enumerate() {
+                interpreter.on_record(
+                    &Record {
+                        t: i64::try_from(t).unwrap(),
+                        entry: Entry::Out(line.clone()),
+                    },
+                    &mut out,
+                );
+            }
+            out.into_iter()
+                .filter_map(|signal| match signal {
+                    Signal::Model(model) => Some(model),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // The newest turn's context: the model that answered this turn.
+        assert_eq!(models(Some(sessions.clone())), ["gpt-6-luna"]);
+        assert!(
+            models(None).is_empty(),
+            "nothing is read where nothing is named"
+        );
+        assert!(models(Some(sessions.join("none"))).is_empty());
+        std::fs::remove_dir_all(sessions).unwrap();
     }
 
     #[test]
@@ -1047,7 +1134,7 @@ mod tests {
     #[test]
     fn the_ways_a_turn_fails_are_told_apart() {
         let outcome = |lines: &[&str], exit, stderr: &[&str]| {
-            let mut interpreter = CodexInterpreter::new(1, "m1");
+            let mut interpreter = CodexInterpreter::reading(1, "m1", None);
             let mut out = Vec::new();
             for line in stderr {
                 interpreter.on_record(

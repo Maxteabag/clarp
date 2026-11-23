@@ -741,7 +741,8 @@ phase, backend, model}`, null otherwise; an `agent-roster` with `kind: agent-tra
 when one begins and when it ends.
 
 **Result.** On `done` the agent's row carries the new `backend`, `model` and `effort`, and the
-tool's session changes inside the Host. `conversation_id` stays: an app keeps its cached chat.
+tool's session changes inside the Host. An agent set to no model (`""`) shows the model that answered last;
+after a move it shows none until the new tool's first answer, not the old tool's. `conversation_id` stays: an app keeps its cached chat.
 Persona, voice, goals, jobs and history stay. The Host writes one row into the conversation,
 `role` `system`, `origin` `system`, `kind` `agent-transit`, in the conversation view:
 "Now on <Backend> · <Model>. The conversation came along." (with ", its oldest N turns as a

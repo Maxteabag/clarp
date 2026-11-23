@@ -375,6 +375,12 @@ fn serve(client: Client, request: &Value, stop: &Mutex<Stop>) -> Result<()> {
                 emit(&ev)?;
             }
             "message.part.delta" | "session.error" if mine => emit(&ev)?,
+            // An answer of the turn's session names the model that gave it.
+            "message.updated"
+                if props["info"]["sessionID"] == sid && props["info"]["role"] == "assistant" =>
+            {
+                emit(&ev)?;
+            }
             // A retry that no retry gets past (the provider refused the account): OpenCode
             // would retry without end. Its words go to the record, the turn is let go.
             "session.status" if mine && opencode::refused(&props["status"]).is_some() => {

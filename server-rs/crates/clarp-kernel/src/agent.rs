@@ -434,6 +434,9 @@ pub struct Agent {
     /// The tool the agent's log last changed it from and to, since it was last started
     /// again: a record elsewhere that still says the first lost the change.
     changed: Option<(String, String)>,
+    /// When that change was made: what turns ended before it said was said of the tool it
+    /// left (which model answered, how full its conversation was).
+    changed_at_ms: Option<i64>,
     /// Where in the agent's own log the event being applied is: a send's revisions are taken
     /// from it. Set by whoever applies events that are in the log (the journal).
     at: u64,
@@ -507,6 +510,7 @@ impl Default for Agent {
             carried_from: None,
             carried_opening: None,
             changed: None,
+            changed_at_ms: None,
             at: 0,
             user_stop_generation: 0,
             deliveries: crate::delivery::Ledger::default(),
@@ -729,6 +733,11 @@ impl Agent {
         self.changed
             .as_ref()
             .map(|(from, to)| (from.as_str(), to.as_str()))
+    }
+
+    /// When the agent's log last changed its tool, since it was last started again.
+    pub fn changed_at_ms(&self) -> Option<i64> {
+        self.changed_at_ms
     }
 
     /// Whether a live tool ever named a session that this agent could not bind.
@@ -1560,8 +1569,9 @@ impl Agent {
                 backend,
                 backend_session,
                 opening,
-                ..
+                at_ms,
             } => {
+                self.changed_at_ms = Some(*at_ms);
                 self.bind_session(backend_session.as_deref());
                 self.carried_from = self.backend_session.is_none().then(|| from.clone());
                 self.carried_opening = opening.clone().filter(|_| self.carried_from.is_some());
@@ -1571,6 +1581,7 @@ impl Agent {
                 self.backend_session = None;
                 self.carried_from = None;
                 self.changed = None;
+                self.changed_at_ms = None;
                 self.note = None;
                 // Python counts both the pause and its release even for an idle agent.
                 // For a busy agent the Host records those transitions around the relaunch.

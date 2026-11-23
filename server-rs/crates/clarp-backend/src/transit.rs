@@ -1716,7 +1716,7 @@ mod tests {
                 {"type": "tool_result", "tool_use_id": "toolu_long", "content": whole}]}}),
             json!({"type": "user", "message": {"content": [
                 {"type": "tool_result", "tool_use_id": "toolu_pic", "content": [
-                    {"type": "image", "source": {"type": "base64", "data": "AAAA"}}]}]}}),
+                    {"type": "image", "source": {"type": "base64", "data": "aGk="}}]}]}}),
         ];
         std::fs::write(dir.join(format!("{session}.jsonl")), lines(&rows)).unwrap();
         let mut long = used("toolu_long", Some(&format!("{}\u{2026}", "w".repeat(4000))));

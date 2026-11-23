@@ -716,7 +716,9 @@ impl LiveTurn {
     fn facts(&self) -> Facts {
         Facts {
             trace_id: self.trace_id.clone(),
-            model: self.model.clone(),
+            // The model the tool said answered; where it says none, the one it was started
+            // with.
+            model: self.model.clone().or_else(|| self.launch_model.clone()),
             tokens: self.tokens,
             total: self.total,
             base: self.base,
@@ -2194,21 +2196,27 @@ impl Actor {
         };
         // From the newest end back: an older one only fills what the newer ones left open.
         let floor = self.recorder.floor();
+        // What a turn that ended before the agent changed its tool said of its conversation
+        // was said of the tool it left.
+        let changed_at = self.recorder.agent().changed_at_ms();
         for turn in (1..=last.id.0).rev().take(CONTEXT_LOOKBACK) {
             let stored = self.recorder.log().find(&format!("t-{turn}"))?;
             // A turn that ended before the agent was started again says when a turn last
             // ran to its end, and nothing of the conversation there is now.
             let earlier = stored.is_some_and(|stored| stored.seq <= floor);
+            let mut before_the_change = false;
             if let Some(end) = self.turn_end(turn)? {
                 let mut older = Remembered::default();
                 older.take(&end);
                 kept.completed_at_ms = kept.completed_at_ms.or(older.completed_at_ms);
-                if !earlier {
+                before_the_change = changed_at.is_some_and(|at| end.ended_at_ms <= at);
+                if !earlier && !before_the_change {
                     kept.context_tokens = kept.context_tokens.or(older.context_tokens);
                     kept.answered_by = kept.answered_by.or(older.answered_by);
                 }
             }
-            if kept.is_whole() || (earlier && kept.completed_at_ms.is_some()) {
+            if kept.is_whole() || ((earlier || before_the_change) && kept.completed_at_ms.is_some())
+            {
                 break;
             }
         }
@@ -4074,6 +4082,10 @@ impl Actor {
         if let Some(entry) = binding {
             self.provider_sessions.insert(entry.native, entry.session);
         }
+        // Which model answered, and how full the conversation was, were said of the tool the
+        // agent left: its row says nothing of either until the new tool's first answer.
+        self.remembered.answered_by = None;
+        self.remembered.context_tokens = None;
         let out = Outputs {
             changed: Changed {
                 conversation: !notice.trim().is_empty(),

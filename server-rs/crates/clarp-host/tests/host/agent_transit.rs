@@ -19,7 +19,7 @@ prompt = incoming["message"]["content"][0]["text"]
 def send(kind, **fields):
     print(json.dumps({"type": kind, "session_id": "claude-before", **fields}), flush=True)
 
-send("system", subtype="init")
+send("system", subtype="init", model="claude-stand-in")
 while (root / "hold").exists():
     time.sleep(0.05)
 call = "toolu_" + str(time.time_ns())
@@ -316,6 +316,33 @@ fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
             .any(|(role, text)| role == "system"
                 && text.ends_with(&format!("its oldest {omitted} turns as a summary.")))
     );
+}
+
+#[test]
+fn a_move_forgets_which_model_answered_on_the_tool_it_left() {
+    let setting = Setting::new("agent-transit-answered");
+    let host = setting.start();
+    // Set to no model: the row shows the model that answered last.
+    let made = host.post("/agents", json!({"name": "Shown", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap().to_string();
+    talked(&host, &session);
+    wait_for("the model that answered", || {
+        row(&host, &session)["model"] == "claude-stand-in"
+    });
+    let ask = json!({"session": session, "backend": "codex", "model": "",
+                     "request_id": "move-answered"});
+    let done = transit(&host, ask);
+    assert_eq!(done["phase"], "done", "{done}");
+    // Nothing has answered on Codex yet: the row names no model, not Claude's.
+    let after = row(&host, &session);
+    assert_eq!(after["backend"], "codex");
+    assert_eq!(after["model"], "", "{after}");
+    // Nor once the Host is started again and reads the turns' ends from the log.
+    drop(host);
+    let host = setting.start();
+    let again = row(&host, &session);
+    assert_eq!(again["backend"], "codex");
+    assert_eq!(again["model"], "", "{again}");
 }
 
 #[test]

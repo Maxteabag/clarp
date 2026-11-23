@@ -147,3 +147,41 @@ fn a_passing_retry_is_left_to_opencode() {
         Some("Insufficient credits".into())
     );
 }
+
+#[test]
+fn an_answer_names_the_model_that_gave_it() {
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "model");
+    let mut signals = Vec::new();
+    let updated = |role: &str, provider: &str, model: &str| {
+        json!({"type": "message.updated", "properties": {"info": {
+            "id": "msg_1", "sessionID": "ses_1", "role": role,
+            "providerID": provider, "modelID": model}}})
+        .to_string()
+    };
+    for line in [
+        updated("user", "opencode", "big-pickle"),
+        updated("assistant", "opencode", "big-pickle"),
+        // Told again as the answer grows: named once.
+        updated("assistant", "opencode", "big-pickle"),
+        updated("assistant", "huggingface", "zai-org/GLM-5.3"),
+    ] {
+        interpreter.on_record(
+            &Record {
+                t: 1,
+                entry: Entry::Out(line),
+            },
+            &mut signals,
+        );
+    }
+    let models: Vec<String> = signals
+        .into_iter()
+        .filter_map(|signal| match signal {
+            Signal::Model(model) => Some(model),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        models,
+        ["opencode/big-pickle", "huggingface/zai-org/GLM-5.3"]
+    );
+}
