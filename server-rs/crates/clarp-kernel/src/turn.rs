@@ -163,7 +163,7 @@ impl Admission {
 
 /// What a running turn is doing right now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "activity", rename_all = "kebab-case")]
+#[serde(from = "Written", into = "Written")]
 pub enum Activity {
     Thinking,
     /// Writing its answer.
@@ -174,6 +174,86 @@ pub enum Activity {
     /// Waiting for something outside the turn: an approval, a background task.
     Waiting,
     Compacting,
+    /// The provider would not answer, and the tool waits to ask it again by itself. To the
+    /// apps it is thinking, with words that say why it takes so long.
+    Retrying(ProviderRetry),
+}
+
+/// One more try of the tool's at a provider that would not answer: which try it is, of how
+/// many, and why, in the tool's word and as the provider's status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRetry {
+    pub attempt: u32,
+    /// The most tries the tool makes before it gives up. 0: it did not say.
+    #[serde(default)]
+    pub of: u32,
+    /// What the tool calls the refusal: `overloaded`, `rate_limit`, `server_error`, ...
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub error: String,
+    /// The provider's HTTP status, where the tool gave it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+}
+
+impl ProviderRetry {
+    /// The words the apps show while it waits: "API overloaded, retrying 2/10".
+    pub fn headline(&self) -> String {
+        let why = match (self.error.as_str(), self.status) {
+            ("overloaded", _) => "API overloaded".to_string(),
+            ("rate_limit", _) => "API rate limited".to_string(),
+            ("server_error", _) => "An API error".to_string(),
+            (_, Some(status)) => format!("API error {status}"),
+            _ => "An API error".to_string(),
+        };
+        match self.of {
+            0 => format!("{why}, retrying ({})", self.attempt),
+            of => format!("{why}, retrying {}/{of}", self.attempt),
+        }
+    }
+}
+
+/// An activity as the log keeps it. A retry is written as thinking with the retry beside it:
+/// a build of the Host from before retries were kept reads such a line as thinking, which is
+/// what it was to the apps, so the log stays readable to it after a rollback.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "activity", rename_all = "kebab-case")]
+enum Written {
+    Thinking {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry: Option<ProviderRetry>,
+    },
+    Responding,
+    Tool {
+        name: String,
+    },
+    Waiting,
+    Compacting,
+}
+
+impl From<Written> for Activity {
+    fn from(written: Written) -> Self {
+        match written {
+            Written::Thinking { retry: None } => Self::Thinking,
+            Written::Thinking { retry: Some(retry) } => Self::Retrying(retry),
+            Written::Responding => Self::Responding,
+            Written::Tool { name } => Self::Tool { name },
+            Written::Waiting => Self::Waiting,
+            Written::Compacting => Self::Compacting,
+        }
+    }
+}
+
+impl From<Activity> for Written {
+    fn from(activity: Activity) -> Self {
+        match activity {
+            Activity::Thinking => Self::Thinking { retry: None },
+            Activity::Retrying(retry) => Self::Thinking { retry: Some(retry) },
+            Activity::Responding => Self::Responding,
+            Activity::Tool { name } => Self::Tool { name },
+            Activity::Waiting => Self::Waiting,
+            Activity::Compacting => Self::Compacting,
+        }
+    }
 }
 
 /// How a turn ended.
@@ -1282,6 +1362,106 @@ mod tests {
                 && text.contains(r#""outcome":"completed""#),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_retry_is_kept_as_thinking_that_an_older_host_reads() {
+        // The activity as a build from before retries were kept has it.
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "activity", rename_all = "kebab-case")]
+        enum Before {
+            Thinking,
+            Responding,
+            Tool { name: String },
+            Waiting,
+            Compacting,
+        }
+        let retry = ProviderRetry {
+            attempt: 2,
+            of: 10,
+            error: "overloaded".to_string(),
+            status: Some(529),
+        };
+        let moved = TurnEvent::Moved {
+            activity: Activity::Retrying(retry.clone()),
+            at_ms: 5,
+        };
+        let line = serde_json::to_value(&moved).unwrap();
+        assert_eq!(
+            line["activity"],
+            serde_json::json!({
+                "activity": "thinking",
+                "retry": {"attempt": 2, "of": 10, "error": "overloaded", "status": 529}
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<TurnEvent>(line.clone()).unwrap(),
+            moved
+        );
+        assert_eq!(
+            serde_json::from_value::<Before>(line["activity"].clone()).unwrap(),
+            Before::Thinking,
+            "an older Host reads the retry as thinking"
+        );
+        // Every other activity is written as it was before, and what was written then reads.
+        for (activity, before) in [
+            (Activity::Thinking, Before::Thinking),
+            (Activity::Responding, Before::Responding),
+            (
+                Activity::Tool {
+                    name: "Bash".to_string(),
+                },
+                Before::Tool {
+                    name: "Bash".to_string(),
+                },
+            ),
+            (Activity::Waiting, Before::Waiting),
+            (Activity::Compacting, Before::Compacting),
+        ] {
+            let written = serde_json::to_value(&activity).unwrap();
+            assert_eq!(
+                serde_json::from_value::<Before>(written.clone()).unwrap(),
+                before
+            );
+            assert_eq!(
+                serde_json::from_value::<Activity>(written).unwrap(),
+                activity
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&Activity::Thinking).unwrap(),
+            r#"{"activity":"thinking"}"#
+        );
+    }
+
+    #[test]
+    fn a_retry_says_why_and_which_try_it_is() {
+        let retry = |error: &str, status: Option<u16>, attempt: u32, of: u32| {
+            ProviderRetry {
+                attempt,
+                of,
+                error: error.to_string(),
+                status,
+            }
+            .headline()
+        };
+        assert_eq!(
+            retry("overloaded", Some(529), 2, 10),
+            "API overloaded, retrying 2/10"
+        );
+        assert_eq!(
+            retry("rate_limit", Some(429), 1, 2),
+            "API rate limited, retrying 1/2"
+        );
+        assert_eq!(
+            retry("server_error", Some(500), 3, 10),
+            "An API error, retrying 3/10"
+        );
+        assert_eq!(
+            retry("unknown", Some(503), 4, 10),
+            "API error 503, retrying 4/10"
+        );
+        assert_eq!(retry("", None, 1, 0), "An API error, retrying (1)");
     }
 
     #[test]

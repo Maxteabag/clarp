@@ -157,6 +157,10 @@ fn a_wait_for_an_account_is_worded_as_the_python_host_words_it() {
 #[test]
 fn the_kinds_and_who_is_told_are_the_python_hosts() {
     let vectors = vectors();
+    // Besides the kinds of this Host's own (`docs/differences.md`), which it tells the user of.
+    assert_eq!(failures::OWN_KINDS, [failures::PROMPT_TOO_LONG]);
+    let pythons = |kind: &&str| !failures::OWN_KINDS.contains(kind);
+    assert!(failures::OWN_KINDS.iter().all(|kind| NOTIFY.contains(kind)));
     let mut kinds = vec![
         failures::CLEAN,
         failures::CONNECTION,
@@ -179,7 +183,7 @@ fn the_kinds_and_who_is_told_are_the_python_hosts() {
         .map(|kind| kind.as_str().unwrap())
         .collect();
     assert_eq!(kinds, theirs);
-    let mut told = NOTIFY.to_vec();
+    let mut told: Vec<&str> = NOTIFY.iter().copied().filter(pythons).collect();
     told.sort_unstable();
     let theirs: Vec<&str> = vectors["notify"]
         .as_array()

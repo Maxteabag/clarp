@@ -3,7 +3,9 @@
 //! The fixtures are two turns recorded from Claude Code 2.1.321 on 15 Nov 2026, with the same
 //! flags the Host starts it with: one that only answers, one that calls a tool and then
 //! answers; and, recorded on 17 Nov 2026, a conversation made shorter (`/compact` for a
-//! message). Everything about the machine and the account was taken out; the events, their
+//! message). Recorded on 23 Nov 2026: a turn whose provider was overloaded until Claude Code
+//! gave up (it was told to try twice), and one whose conversation did not fit the model.
+//! Everything about the machine and the account was taken out; the events, their
 //! order and their fields are as they came. When a newer Claude Code changes its stream, record
 //! it again, add it beside these, and keep the old ones: agents run on old versions for a while.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -12,7 +14,8 @@ use clarp_backend::claude::ClaudeInterpreter;
 use clarp_backend::{Interpreter, Signal};
 use clarp_kernel::compaction::Boundary;
 use clarp_kernel::conversation::ToolStatus;
-use clarp_kernel::turn::{Activity, RunOutcome};
+use clarp_kernel::failures;
+use clarp_kernel::turn::{Activity, ProviderRetry, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 
 const SESSION: &str = "00000000-0000-4000-8000-000000000001";
@@ -293,4 +296,50 @@ fn a_real_turn_says_which_model_ran_it_and_what_it_cost() {
         ),
         "the result's usage is passed on"
     );
+}
+
+#[test]
+fn a_real_turn_whose_provider_stays_overloaded_says_each_try() {
+    let signals = read("claude-2.1.321-overloaded.jsonl");
+    let stored = stored(&signals);
+    let tried = |attempt: u32| {
+        Signal::Moved(Activity::Retrying(ProviderRetry {
+            attempt,
+            of: 2,
+            error: "overloaded".to_string(),
+            status: Some(529),
+        }))
+    };
+    assert_eq!(&stored[1..3], [&tried(1), &tried(2)], "{stored:#?}");
+    // The tool gives up in its own words, which say the provider is busy: a failure that
+    // passes, asked again by the Host only where the turn has done nothing.
+    let Some(Signal::Ended(RunOutcome::Failed { reason })) = signals.last() else {
+        panic!("the turn fails: {signals:#?}");
+    };
+    assert!(reason.starts_with("API Error: 529 Overloaded."), "{reason}");
+    assert_eq!(failures::classify_error(reason), failures::TRANSIENT);
+}
+
+#[test]
+fn a_real_turn_whose_conversation_does_not_fit_the_model_says_so() {
+    let signals = read("claude-2.1.321-too-long.jsonl");
+    let Some(Signal::Ended(RunOutcome::Failed { reason })) = signals.last() else {
+        panic!("the turn fails: {signals:#?}");
+    };
+    assert!(
+        reason.starts_with("Prompt is too long · the request is ~1050000 tokens (limit 1000000)"),
+        "the tool's own words: {reason}"
+    );
+    assert_eq!(failures::classify_error(reason), failures::PROMPT_TOO_LONG);
+    let told = failures::told(
+        failures::PROMPT_TOO_LONG,
+        reason,
+        "claude-haiku-5-5",
+        failures::Known::default(),
+    );
+    assert_eq!(
+        told.message,
+        "This conversation is too long for the model. Compact it or start a new one"
+    );
+    assert!(told.row.ends_with(reason.as_str()), "{}", told.row);
 }

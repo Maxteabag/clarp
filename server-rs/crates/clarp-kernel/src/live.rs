@@ -441,6 +441,8 @@ pub struct Hub {
     explore_group: Option<String>,
     /// Why the turn waits for an account, while it does.
     account_wait: Option<String>,
+    /// What the tool says while it asks a provider again that would not answer.
+    provider_retry: Option<String>,
 }
 
 impl Hub {
@@ -459,6 +461,7 @@ impl Hub {
             ordinal: 0,
             explore_group: None,
             account_wait: None,
+            provider_retry: None,
         }
     }
 
@@ -580,6 +583,7 @@ impl Hub {
         self.flush(now, &mut out);
         self.explore_group = None;
         self.account_wait = None;
+        self.provider_retry = None;
         let started = started_at_ms.filter(|at| *at != 0).unwrap_or(now);
         let turn = json!({
             "turn_id": turn_id, "status": "running", "started_at_ms": started,
@@ -655,6 +659,19 @@ impl Hub {
         }
         self.flush(now, &mut out);
         self.account_wait = message.map(str::to_string);
+        self.emit(Vec::new(), (true, ""), now, &mut out);
+        out
+    }
+
+    /// The tool asks the provider again, after a refusal (`headline` says which try and why),
+    /// or no longer.
+    pub fn provider_retry(&mut self, headline: Option<&str>, now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
+        if !self.open(None) || self.provider_retry.as_deref() == headline {
+            return out;
+        }
+        self.flush(now, &mut out);
+        self.provider_retry = headline.map(str::to_string);
         self.emit(Vec::new(), (true, ""), now, &mut out);
         out
     }
@@ -1246,6 +1263,14 @@ impl Hub {
             activity["state"] = json!("limited");
             activity["headline"] = json!(wait);
             activity["since_ms"] = json!(previous_since(&self.view.activity, "limited", now));
+            return activity;
+        }
+        // Nothing of an answer has come while the provider is asked again: thinking, in words
+        // that say why it takes so long.
+        if let Some(retry) = &self.provider_retry {
+            activity["state"] = json!("thinking");
+            activity["headline"] = json!(retry);
+            activity["since_ms"] = json!(previous_since(&self.view.activity, "thinking", now));
             return activity;
         }
         let running: Vec<&Value> = view
