@@ -69,7 +69,8 @@ jobs:
           # when done, #653; Hidden tool activity before it, 4f163940):
           # declare the field and set them false in the
           # two live_present literals, or the control fails to compile
-          # (E0063) instead of failing its ordering assertion. False is the
+          # (E0063) instead of failing its ordering assertion. The same for
+          # veil (#733), which only a chat hiding coordination sets. False is the
           # baseline's own behaviour, so what is on trial does not change.
           python3 - <<'PYCTRL'
           from pathlib import Path
@@ -80,7 +81,7 @@ jobs:
           source = source.replace(field, field + '    pub hide_settled: bool,\n    pub show_commentary: bool,\n')
           literal = 'host_now_ms: 0 }'
           assert source.count(literal) == 2
-          source = source.replace(literal, 'host_now_ms: 0, fold_running: false, hide_settled: false, show_commentary: false }')
+          source = source.replace(literal, 'host_now_ms: 0, fold_running: false, hide_settled: false, show_commentary: false, veil: false }')
           path.write_text(source)
           PYCTRL
           set +e

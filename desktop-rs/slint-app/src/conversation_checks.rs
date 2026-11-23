@@ -555,12 +555,13 @@ pub fn audience_flip_check(out: String) {
             let subscribed = requests("GET", "/events").iter().any(|r| r["query"].get("live").and_then(|l| l.as_str()).is_some_and(|l| l.split(',').any(|s| s == SESSION)));
             let engine = app.engine.borrow();
             let ready = engine.chat_view_offered(SESSION) && engine.live_items() && engine.hidden_coordination() && subscribed
-                && engine.live_view(SESSION).and_then(|v| v.lseq()).is_some() && crate::live_view::veils(&engine, SESSION) && has("r2");
+                && engine.live_view(SESSION).and_then(|v| v.lseq()).is_some() && crate::live_view::veils(&engine, SESSION) && has("r2")
+                && engine.chat_view_conversation(SESSION);
             drop(engine);
             if !ready || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            check(app.engine.borrow().chat_view(SESSION) == "conversation", "the chat is in Conversation view");
+            check(app.engine.borrow().chat_view_conversation(SESSION), "the chat is in Conversation view");
             check(flip(FLIP_C, 1), "Bella starts a turn");
             true
         })),
