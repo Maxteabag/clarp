@@ -154,7 +154,10 @@ impl Engine {
         if !self.chat_view.fork || !self.roster.find(session).is_some_and(|a| a.conversation_fork) {
             return None;
         }
-        self.live.views.get(session).and_then(|v| v.main_turn()).and_then(chat_view::main_turn_line)
+        // Who the agent's own turn works with: the agent row's
+        // `working_with`, which names the turn the agent itself runs.
+        let name = self.roster.find(session).filter(|a| chat_view::between_agents(&a.working_audience)).map(|a| a.working_with.clone()).unwrap_or_default();
+        self.live.views.get(session).and_then(|v| v.main_turn()).and_then(|main| chat_view::main_turn_line(main, &name))
     }
 
     /// `/server-info` answered.
