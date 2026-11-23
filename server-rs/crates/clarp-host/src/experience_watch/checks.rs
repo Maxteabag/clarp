@@ -594,13 +594,18 @@ mod tests {
         use clarp_protocol::requests::CreateAgentRequest;
         use clarp_spool::{Entry, ShimEvent, SpoolReader};
 
-        let shim = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("clarp-shim");
+        // The shim is built into the profile's folder (`target/debug`). Where this test's own
+        // binary is depends on cargo: `target/debug/deps` here, and under the newer build
+        // layout of GitHub's runners `target/debug/build/clarp-host/<hash>/out` (23 Nov 2026,
+        // where two folders up was no shim and the turn never started). So it is looked for
+        // in every folder above this binary.
+        let exe = std::env::current_exe().unwrap();
+        let shim = exe
+            .ancestors()
+            .skip(1)
+            .map(|dir| dir.join("clarp-shim"))
+            .find(|shim| shim.is_file())
+            .unwrap_or_else(|| panic!("no clarp-shim built above {}", exe.display()));
         let place = crate::unkept::at_the_port::place_with_shim("stalled-turn", shim);
         let mut app = place.app().await;
         std::sync::Arc::make_mut(&mut app.config).auth_token.clear();
