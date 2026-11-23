@@ -229,8 +229,9 @@ invariant (a second claim, a steer for an attempt it does not hold, a stale logi
 - the input of a turn (the headed prompt the exec path builds);
 - the interpreter, which already reads the lane's spool. It gains one line kind
   (`steer.read`) that it hands to the actor as read evidence;
-- whether Codex can be steered (`steers() -> bool`) instead of the actor's
-  `backend.id() == "claude"`.
+- how a running turn of Codex takes another message: `steers()` answers
+  `Steers::Words` (Claude Code and agy-acp answer `Steers::Stdin`, the rest `Steers::No`),
+  the one place the Host and the actor ask instead of a backend's id.
 
 **The actor** owns:
 
