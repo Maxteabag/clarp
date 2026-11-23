@@ -131,6 +131,10 @@ const EXEMPT: &[(&str, &str)] = &[
         "crates/clarp-shim/src/opencode.rs",
         "Only the shim binary's main declares this module and runs the OpenCode driver; it is absent from the linked protocol library.",
     ),
+    (
+        "crates/clarp-shim/src/agy_acp.rs",
+        "Only the shim binary's main declares this module and runs the Antigravity ACP driver; it is absent from the linked protocol library. The Host already prepared the turn's environment, including the agent session and turn token the shared constructor would clear.",
+    ),
 ];
 
 fn inspect(
