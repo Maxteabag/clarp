@@ -21,6 +21,7 @@ clarp-store-files.workspace = true
 clarp-store-mem.workspace = true
 clarp-store-sqlite.workspace = true
 flate2 = "1.1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 futures-util.workspace = true
 h2.workspace = true
 url.workspace = true

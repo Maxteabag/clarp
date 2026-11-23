@@ -23862,7 +23862,12 @@ fn the_owner_makes_changes_and_removes_a_persona_and_an_agent_can_be_it() {
         (200, "a made-up picture")
     );
     assert_eq!(picture.header("content-type"), "image/jpeg");
-    assert_eq!(picture.header("cache-control"), "no-store");
+    // Its address names its version: whoever fetched it may keep it (`avatar_thumbnails`).
+    let a_year = "private, max-age=31536000, immutable";
+    assert_eq!(picture.header("cache-control"), a_year);
+    let unversioned = format!("/persona-avatars/{pictured_id}");
+    let fetched = fetch(&host, "secret", "GET", &unversioned, &[], b"");
+    assert_eq!(fetched.header("cache-control"), "no-store");
     let part = fetch(
         &host,
         "secret",
@@ -24000,6 +24005,166 @@ fn the_owner_makes_changes_and_removes_a_persona_and_an_agent_can_be_it() {
 }
 
 #[test]
+fn a_portrait_has_small_square_thumbnails_made_once_and_kept_by_its_version() {
+    let place = Place::new("thumbnails");
+    let claude = place.root.join("claude");
+    program(&claude, &["#!/bin/sh\nread -r message\n", STAND_IN_ANSWERS].concat());
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    // Pictures the Host ships: a PNG of a name and a JPEG of a name on a model.
+    let pictures = place.root.join("static");
+    std::fs::create_dir_all(pictures.join("avatars/models")).unwrap();
+    let shipped = |width: u32, height: u32| {
+        image::RgbImage::from_fn(width, height, |x, y| {
+            image::Rgb([(x * 255 / width) as u8, 64, (y * 255 / height) as u8])
+        })
+    };
+    shipped(320, 240)
+        .save(pictures.join("avatars/shipped.png"))
+        .unwrap();
+    shipped(240, 360)
+        .save(pictures.join("avatars/models/shipped.opus.jpg"))
+        .unwrap();
+    let statics = ["--static", pictures.to_str().unwrap()];
+    let host = place.start_in("secret", &statics, &world);
+    let ask = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    let row = |session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let found = agents.iter().find(|agent| agent["session"] == session);
+        found.unwrap_or_else(|| panic!("{session} is not listed")).clone()
+    };
+    let encoded = |picture: image::RgbImage, format: image::ImageFormat| {
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(picture)
+            .write_to(&mut out, format)
+            .unwrap();
+        out.into_inner()
+    };
+    let gradient = |width: u32, height: u32| {
+        image::RgbImage::from_fn(width, height, |x, y| {
+            image::Rgb([(x * 255 / width) as u8, (y * 255 / height) as u8, 128])
+        })
+    };
+    const KEEP: &str = "private, max-age=31536000, immutable";
+    let png = encoded(gradient(400, 300), image::ImageFormat::Png);
+    let jpeg = encoded(gradient(300, 500), image::ImageFormat::Jpeg);
+    for (name, picture) in [("Png Face", png), ("Jpeg Face", jpeg)] {
+        let base64 = clarp_kernel::python::b64encode(&picture);
+        let said = json!({ "name": name, "voice_id": "{}", "avatar_base64": base64 });
+        let (status, made) = ask("/personas", said);
+        assert_eq!(status, 201, "{made}");
+        let persona_face = made["persona"]["avatar_url"].as_str().unwrap().to_string();
+        let persona_small = format!("{persona_face}&px=128");
+        let (status, made) = ask("/agents", json!({ "name": name, "backend": "claude" }));
+        assert_eq!(status, 200, "{made}");
+        let session = made["session"].as_str().unwrap().to_string();
+        let agent_id = made["agent"]["agent_id"].as_str().unwrap().to_string();
+        let listed = row(&session);
+        let face = listed["avatar_url"].as_str().unwrap().to_string();
+        let version = face.rsplit("?v=").next().unwrap().to_string();
+        assert_eq!(face, format!("/avatars/{agent_id}?v={version}"));
+        let small = format!("{face}&px=128");
+
+        // The thumbnail: a square JPEG of 128 pixels, smaller than the picture, kept a year.
+        for address in [small.clone(), persona_small.clone()] {
+            let thumb = fetch(&host, "secret", "GET", &address, &[], b"");
+            assert_eq!(thumb.status, 200, "{address}");
+            assert_eq!(thumb.header("content-type"), "image/jpeg", "{address}");
+            assert_eq!(thumb.header("cache-control"), KEEP, "{address}");
+            let read = image::load_from_memory_with_format(&thumb.body, image::ImageFormat::Jpeg);
+            let read = read.unwrap();
+            assert_eq!((read.width(), read.height()), (128, 128), "{address}");
+            assert!(thumb.body.len() < picture.len(), "{address}");
+        }
+        let tiny = fetch(&host, "secret", "GET", &format!("{face}&px=64"), &[], b"");
+        let read = image::load_from_memory(&tiny.body).unwrap();
+        assert_eq!((read.width(), read.height()), (64, 64));
+
+        // It was made once and is read from where it is kept: what is kept is what is sent.
+        let shard = place.root.join("data").join("media").join(&version[..2]);
+        let kept: Vec<PathBuf> = std::fs::read_dir(&shard)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                let file = path.file_name().unwrap().to_string_lossy().into_owned();
+                file.starts_with(&version) && file.ends_with(".px128.jpg")
+            })
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        std::fs::write(&kept[0], b"\xff\xd8\xff kept once").unwrap();
+        let again = fetch(&host, "secret", "GET", &small, &[], b"");
+        assert_eq!(again.body, b"\xff\xd8\xff kept once");
+
+        // The picture whole: kept a year by its current version, not by another or none.
+        let whole = fetch(&host, "secret", "GET", &face, &[], b"");
+        assert_eq!((whole.status, &whole.body), (200, &picture));
+        assert_eq!(whole.header("cache-control"), KEEP);
+        let stale = face.replace("?v=", "?v=0");
+        for address in [
+            stale.clone(),
+            format!("{stale}&px=128"),
+            format!("/avatars/{agent_id}"),
+            format!("/avatars/{agent_id}?px=128"),
+        ] {
+            let fetched = fetch(&host, "secret", "GET", &address, &[], b"");
+            assert_eq!(fetched.status, 200, "{address}");
+            assert_eq!(fetched.header("cache-control"), "no-store", "{address}");
+        }
+        // A size not offered is the picture whole; the token is still asked for.
+        let other = fetch(&host, "secret", "GET", &format!("{face}&px=100"), &[], b"");
+        assert_eq!(other.body, picture);
+        assert_eq!(fetch(&host, "", "GET", &small, &[], b"").status, 401);
+    }
+
+    // A picture that cannot be read as one is sent whole when a thumbnail is asked for.
+    let said = json!({ "name": "Not A Face", "voice_id": "{}", "avatar_base64": "YSBtYWRlLXVwIHBpY3R1cmU=" });
+    let (status, made) = ask("/personas", said);
+    assert_eq!(status, 201, "{made}");
+    let small = format!("{}&px=128", made["persona"]["avatar_url"].as_str().unwrap());
+    let fetched = fetch(&host, "secret", "GET", &small, &[], b"");
+    assert_eq!(
+        (fetched.status, fetched.text().as_str()),
+        (200, "a made-up picture")
+    );
+
+    // A picture this Host ships has thumbnails too, as public as the picture: kept a year by
+    // its current version, else asked again by its tag.
+    for shipped in [
+        "/static/avatars/shipped.png",
+        "/static/avatars/models/shipped.opus.jpg",
+    ] {
+        let whole = fetch(&host, "", "GET", shipped, &[], b"");
+        assert_eq!(whole.status, 200, "{shipped}");
+        let version = whole.header("etag").trim_matches('"').to_string();
+        let small = format!("{shipped}?v={version}&px=128");
+        let thumb = fetch(&host, "", "GET", &small, &[], b"");
+        assert_eq!(thumb.status, 200, "{small}");
+        assert_eq!(thumb.header("content-type"), "image/jpeg", "{small}");
+        assert_eq!(thumb.header("cache-control"), "public, max-age=31536000, immutable");
+        let read = image::load_from_memory_with_format(&thumb.body, image::ImageFormat::Jpeg);
+        let read = read.unwrap();
+        assert_eq!((read.width(), read.height()), (128, 128), "{small}");
+        assert!(thumb.body.len() < whole.body.len(), "{small}");
+        let unversioned = fetch(&host, "", "GET", &format!("{shipped}?px=128"), &[], b"");
+        assert_eq!(unversioned.header("cache-control"), "no-cache");
+        assert_eq!(unversioned.body, thumb.body);
+        // Made once, by what is in the file, and read from where it is kept.
+        let kept = place
+            .root
+            .join("data")
+            .join("media")
+            .join(&version[..2])
+            .join(format!("{version}.shipped.px128.jpg"));
+        std::fs::write(&kept, b"\xff\xd8\xff kept once").unwrap();
+        let again = fetch(&host, "", "GET", &small, &[], b"");
+        assert_eq!(again.body, b"\xff\xd8\xff kept once");
+        let other = fetch(&host, "", "GET", &format!("{shipped}?v={version}&px=100"), &[], b"");
+        assert_eq!(other.body, whole.body, "a size not offered is the picture whole");
+    }
+}
+
+#[test]
 fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
     let place = Place::new("as-persona");
     let args = place.root.join("args");
@@ -24099,7 +24264,9 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
             "{way}"
         );
         assert_eq!(picture.header("content-type"), "image/jpeg");
-        assert_eq!(picture.header("cache-control"), "no-store");
+        // Kept a year by an address that names its version, else not kept.
+        let kept = if way == face { "private, max-age=31536000, immutable" } else { "no-store" };
+        assert_eq!(picture.header("cache-control"), kept, "{way}");
     }
     let part = fetch(&host, "secret", "GET", &face, &[("Range", "bytes=-7")], b"");
     assert_eq!((part.status, part.text().as_str()), (206, "picture"));

@@ -12,8 +12,8 @@
 //! where they refuse.
 
 use axum::body::Bytes;
-use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -24,7 +24,11 @@ use serde_json::{Map, Value, json};
 
 use crate::edge::{ApiError, App};
 use crate::fleet::{AgentRecord, Amend, PersonaSaid, picture_name};
-use crate::{ids, media};
+use crate::{ids, media, thumbnails};
+
+/// What an address of a picture says beyond its path: the version the asker holds (`v`)
+/// and the size of the thumbnail it wants (`px`).
+type Asked = Query<std::collections::HashMap<String, String>>;
 
 /// A request's body as the object it has to be. No body is an empty object.
 pub(crate) fn object(body: &Bytes) -> Result<Map<String, Value>, ApiError> {
@@ -124,7 +128,12 @@ async fn remove(State(app): State<App>, Path(name): Path<String>) -> Result<Json
 
 /// `GET /persona-avatars/<id>`: the picture a persona has of its own, or the part of it a
 /// `Range` header asks for.
-async fn avatar(State(app): State<App>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+async fn avatar(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Query(asked): Asked,
+    headers: HeaderMap,
+) -> Response {
     let [roster, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
     let owner = Owner {
         roster: &roster,
@@ -136,7 +145,45 @@ async fn avatar(State(app): State<App>, Path(id): Path<String>, headers: HeaderM
         return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
     };
     let range = media::header_text(&headers, "range");
-    send_picture(&app, picture_name(&digest), &range)
+    send_face(&app, &digest, &asked, &range, None).await
+}
+
+/// How a picture whose address names its current version may be kept by whoever fetched
+/// it: the address changes with the picture, so what it gives never does.
+const IMMUTABLE: &str = "private, max-age=31536000, immutable";
+
+/// Sends the picture kept under this digest: the thumbnail of the size `px` asks for (made
+/// and kept the first time), else the picture whole, as `kind` says or as its bytes say. A
+/// fetcher may keep it a year when `v` is the picture's current version; a stale or absent
+/// `v` keeps `no-store`.
+async fn send_face(
+    app: &App,
+    digest: &str,
+    asked: &std::collections::HashMap<String, String>,
+    range: &str,
+    kind: Option<&str>,
+) -> Response {
+    let fresh = asked
+        .get("v")
+        .is_some_and(|said| said.as_str() == rules::version(digest));
+    let small = match thumbnails::size(asked.get("px").map(String::as_str)) {
+        Some(px) => {
+            let (blobs, digest) = (app.blobs.clone(), digest.to_owned());
+            let made = tokio::task::spawn_blocking(move || thumbnails::kept(blobs.as_ref(), &digest, px));
+            made.await.ok().flatten()
+        }
+        None => None,
+    };
+    let mut response = match (small, kind) {
+        (Some(name), _) => media::send_kept(&app.blobs, name, "image/jpeg", range),
+        (None, Some(kind)) => media::send_kept(&app.blobs, picture_name(digest), kind, range),
+        (None, None) => send_picture(app, picture_name(digest), range),
+    };
+    if fresh && response.status().is_success() {
+        let kept_a_year = HeaderValue::from_static(IMMUTABLE);
+        response.headers_mut().insert(header::CACHE_CONTROL, kept_a_year);
+    }
+    response
 }
 
 /// Sends a kept picture, said as what its bytes are (image/jpeg when they cannot be read): every
@@ -159,6 +206,7 @@ pub(crate) const OF_AGENTS: &str = "/avatars";
 async fn agent_avatar(
     State(app): State<App>,
     Path(agent): Path<String>,
+    Query(asked): Asked,
     headers: HeaderMap,
 ) -> Response {
     let directory = app.fleet.directory();
@@ -167,7 +215,7 @@ async fn agent_avatar(
         return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
     };
     let range = media::header_text(&headers, "range");
-    send_picture(&app, picture_name(&digest), &range)
+    send_face(&app, &digest, &asked, &range, None).await
 }
 
 /// The picture an agent wears, as a portrait can hold it: its digest, and what kind of
@@ -246,7 +294,12 @@ async fn portraits(
 /// `GET /agent-portraits/<id>/content`: a portrait's picture. One that a change recorded
 /// is handed out as the kind of picture it is; the picture an agent wears that nothing
 /// has recorded yet as the file an agent's picture is kept as.
-async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+async fn portrait(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Query(asked): Asked,
+    headers: HeaderMap,
+) -> Response {
     let directory = app.fleet.directory();
     let range = media::header_text(&headers, "range");
     for member in &directory.members {
@@ -256,13 +309,13 @@ async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: Heade
             if let Err(why) = gallery_ready(&app.fleet, app.blobs.as_ref(), record).await {
                 return why.into_response();
             }
-            let name = picture_name(&found.sha256);
-            return media::send_kept(&app.blobs, name, &found.mime_type, &range);
+            let kind = Some(found.mime_type.as_str());
+            return send_face(&app, &found.sha256, &asked, &range, kind).await;
         }
         if let Some(digest) = record.avatar.as_deref()
             && kept::worn_id(&record.agent_id, digest) == id
         {
-            return send_picture(&app, picture_name(digest), &range);
+            return send_face(&app, digest, &asked, &range, None).await;
         }
     }
     ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response()
@@ -409,7 +462,7 @@ async fn pushed_face(
         return forbidden();
     }
     let range = media::header_text(&headers, "range");
-    send_picture(&app, picture_name(&digest), &range)
+    send_face(&app, &digest, &asked, &range, None).await
 }
 
 async fn avatar_settings(State(app): State<App>) -> Json<Value> {

@@ -116,3 +116,16 @@ python3 ~/dotfiles/skills/clarp-avatar-generation/scripts/generate_avatar.py \
 ## 5. Live Review Server
 
 Live avatar review runs on port 7685 via `clarp-avatar-review.service`. The HTML dashboard at `/home/peter/.cache/clarp/avatar-staging/clarp_contacts_redesign_report.html` displays all cards grouped by tier with interactive regeneration buttons and hot cache-busting previews.
+
+---
+
+## 6. Thumbnails a list shows
+
+Only the Rust Host has these, from Host contract 160 (feature `avatar_thumbnails` in
+`GET /server-info`); the Python Host has none. There, any picture address an agent or persona
+row gives (`avatar_url`, `model_avatar_url`: `/avatars/<agent>?v=`, `/persona-avatars/<id>?v=`,
+`/static/avatars/...?v=`) takes `&px=64`, `128` or `256` for a square JPEG of that size; any
+other `px`, or a Host without the feature, gives the full picture. No row has a separate field
+for it. Publish the full-size portrait as before: the Host makes the thumbnails itself, once per
+picture and size. An address whose `v` is the picture's current version may be cached for a
+year; a new picture has a new `v`.

@@ -17,6 +17,8 @@ use flate2::{Compression, write::GzEncoder};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
+use clarp_ports::blobs::Blobs;
+
 use crate::edge::App;
 
 const REVALIDATE: &str = "no-cache";
@@ -70,6 +72,7 @@ async fn serve(
     let Some(root) = app.config.static_dir.clone() else {
         return not_found();
     };
+    let blobs = app.blobs.clone();
     tokio::task::spawn_blocking(move || {
         let Ok(root) = root.canonicalize() else {
             return not_found();
@@ -79,6 +82,9 @@ async fn serve(
             (true, "") => read.index(&root),
             (true, "sw.js") => read.service_worker(&root),
             (true, "viz") => read.file(&root, "viz.html", false),
+            (false, _) => read
+                .thumbnail(&root, &path, blobs.as_ref())
+                .unwrap_or_else(|| read.file(&root, &path, true)),
             _ => read.file(&root, &path, true),
         }
     })
@@ -202,6 +208,8 @@ struct RequestHeaders<'a> {
     range: &'a str,
     if_none_match: &'a str,
     version: String,
+    /// The size of thumbnail asked for (`px`, feature `avatar_thumbnails`), when it is one.
+    px: Option<u32>,
     gzip: bool,
 }
 
@@ -213,13 +221,17 @@ impl<'a> RequestHeaders<'a> {
                 .and_then(|value| value.to_str().ok())
                 .unwrap_or("")
         };
-        let version = url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
-            .find(|(key, value)| key == "v" && !value.is_empty())
-            .map_or_else(String::new, |(_, value)| value.into_owned());
+        let said = |name: &str| {
+            url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
+                .find(|(key, value)| key == name && !value.is_empty())
+                .map_or_else(String::new, |(_, value)| value.into_owned())
+        };
+        let version = said("v");
         Self {
             range: text(header::RANGE),
             if_none_match: text(header::IF_NONE_MATCH),
             version,
+            px: crate::thumbnails::size(Some(&said("px"))),
             gzip: text(header::ACCEPT_ENCODING)
                 .to_ascii_lowercase()
                 .contains("gzip"),
@@ -283,6 +295,46 @@ impl<'a> RequestHeaders<'a> {
             }
             _ => response,
         }
+    }
+
+    /// A square JPEG of a picture this Host ships for agents' faces, when `px` asks for one:
+    /// made once and kept by what is in the file, and kept by whoever fetched it as the
+    /// file itself is. `None`: none was asked for, the file is not such a picture, or it
+    /// cannot be read as one; the file is then sent whole.
+    fn thumbnail(&self, root: &FilePath, path: &str, blobs: &dyn Blobs) -> Option<Response> {
+        let px = self.px?;
+        if !(path.starts_with("avatars/") || path.starts_with("janitor-avatars/")) {
+            return None;
+        }
+        let mut file = open_asset(root, path).ok()?;
+        let version = file_version(&file).ok()?;
+        let kept_as = crate::thumbnails::shipped_name(&version, px);
+        let kept = crate::thumbnails::kept_or_made(blobs, &kept_as, px, || {
+            if file.metadata().ok()?.len() > crate::thumbnails::SOURCE_MOST {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            file.rewind().ok()?;
+            file.read_to_end(&mut bytes).ok()?;
+            Some(bytes)
+        })?;
+        let bytes = crate::thumbnails::read_whole(blobs, &kept)?;
+        let cache = if self.version == version {
+            IMMUTABLE
+        } else {
+            REVALIDATE
+        };
+        let tag = format!("\"{version}-px{px}\"");
+        if cache == REVALIDATE && self.matches(&tag) {
+            let unchanged = StatusCode::NOT_MODIFIED.into_response();
+            return Some(with_cache(unchanged, cache, &tag));
+        }
+        let response = self.ranged_bytes(bytes, "image/jpeg");
+        Some(if response.status().is_success() {
+            with_cache(response, cache, &tag)
+        } else {
+            response
+        })
     }
 
     fn index(&self, root: &FilePath) -> Response {

@@ -113,6 +113,7 @@ mod takeover;
 pub mod teams;
 pub mod telling;
 pub mod terminal;
+pub mod thumbnails;
 pub mod tools;
 pub mod turn_identity;
 pub mod unkept;
