@@ -34151,8 +34151,11 @@ def size():
     return f'{now.columns}x{now.lines}'
 
 def say(text):
-    sys.stdout.write(text + '\n')
-    sys.stdout.flush()
+    # Straight to the descriptor: the resize handler says things too, and a buffered
+    # writer interrupted by its own handler raises a reentrant-call error.
+    data = (text + '\n').encode()
+    while data:
+        data = data[os.write(1, data):]
 
 signal.signal(signal.SIGWINCH, lambda *_: say('winch: ' + size()))
 try:
@@ -34184,8 +34187,7 @@ while True:
                                  preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN))
         say(f'child: pid={child.pid} ;')
     elif line == 'much':
-        sys.stdout.write('x' * 300000 + '\n')
-        sys.stdout.flush()
+        say('x' * 300000)
         say('that was much')
     elif line == 'raw':
         tty.setraw(0)
