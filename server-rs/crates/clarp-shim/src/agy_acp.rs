@@ -196,7 +196,9 @@ struct Turn {
 /// How the turn went, in the driver's exit: nought for an answered prompt.
 enum Outcome {
     Answered,
-    Failed,
+    /// In the words the failure was printed with: the settled line of a turn that failed
+    /// before its answer says them again.
+    Failed(String),
     Stopped,
 }
 
@@ -337,8 +339,7 @@ fn configure(
     let choice = match shared::choose(&options, models, &order.model, &order.effort) {
         Ok(choice) => choice,
         Err(why) => {
-            failed("config", &json!({"message": why}))?;
-            return Ok(Err(Outcome::Failed));
+            return Ok(Err(failed("config", &json!({"message": why}))?));
         }
     };
     for note in &choice.notes {
@@ -380,8 +381,7 @@ fn configure(
                     "Antigravity did not take the model {value}: {}",
                     shared::error_text(&error)
                 );
-                failed("config", &json!({"message": why}))?;
-                return Ok(Err(Outcome::Failed));
+                return Ok(Err(failed("config", &json!({"message": why}))?));
             }
             Ok(Answer::Error(error)) => notice(format!(
                 "Antigravity did not take {value} as its thinking level: {}",
@@ -483,11 +483,11 @@ fn mark_poisoned(session: &str) {
 
 /// Prints a failure the way the interpreter reads it. A failure of a prompt names the message
 /// whose prompt it was (`uuid`); one before the prompt names none: it is the turn's own.
-fn failed(stage: &str, error: &Value) -> io::Result<()> {
+fn failed(stage: &str, error: &Value) -> io::Result<Outcome> {
     failed_for(stage, error, "")
 }
 
-fn failed_for(stage: &str, error: &Value, uuid: &str) -> io::Result<()> {
+fn failed_for(stage: &str, error: &Value, uuid: &str) -> io::Result<Outcome> {
     let text = shared::error_text(error);
     let mut line = said(
         "failed",
@@ -496,7 +496,8 @@ fn failed_for(stage: &str, error: &Value, uuid: &str) -> io::Result<()> {
     if !uuid.is_empty() {
         line["uuid"] = json!(uuid);
     }
-    emit(&line)
+    emit(&line)?;
+    Ok(Outcome::Failed(text))
 }
 
 /// Whether an update is Antigravity at work on its prompt: what it writes, thinks or plans, a
@@ -540,7 +541,7 @@ fn early_for(stage: &str, how: Ended, uuid: &str) -> io::Result<Outcome> {
         line["uuid"] = json!(uuid);
     }
     emit(&line)?;
-    Ok(Outcome::Failed)
+    Ok(Outcome::Failed(text.to_string()))
 }
 
 /// Whether an error says the conversation is not there.
@@ -588,22 +589,20 @@ fn open(
             Ok(Answer::Error(error)) if gone(&error) => {
                 mark_poisoned(named);
                 let said = shared::error_text(&error);
-                failed(
+                return Ok(Err(failed(
                     "session",
                     &json!({"code": code::NOT_FOUND, "message": format!("Session not found: {said}")}),
-                )?;
-                return Ok(Err(Outcome::Failed));
+                )?));
             }
             Ok(Answer::Error(error)) => {
-                failed(
+                return Ok(Err(failed(
                     if error["code"] == code::AUTH_REQUIRED {
                         "auth"
                     } else {
                         "session"
                     },
                     &error,
-                )?;
-                return Ok(Err(Outcome::Failed));
+                )?));
             }
             Err(how) => return Ok(Err(early("session", how)?)),
         }
@@ -619,25 +618,21 @@ fn open(
                     Ok(Ok((id.to_string(), opened)))
                 }
                 None => {
-                    failed(
+                    Ok(Err(failed(
                         "session",
                         &json!({"message": "Antigravity opened no conversation"}),
-                    )?;
-                    Ok(Err(Outcome::Failed))
+                    )?))
                 }
             }
         }
-        Ok(Answer::Error(error)) => {
-            failed(
-                if error["code"] == code::AUTH_REQUIRED {
-                    "auth"
-                } else {
-                    "session"
-                },
-                &error,
-            )?;
-            Ok(Err(Outcome::Failed))
-        }
+        Ok(Answer::Error(error)) => Ok(Err(failed(
+            if error["code"] == code::AUTH_REQUIRED {
+                "auth"
+            } else {
+                "session"
+            },
+            &error,
+        )?)),
         Err(how) => Ok(Err(early("session", how)?)),
     }
 }
@@ -651,8 +646,7 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
     let initialized = match turn.setup(method::INITIALIZE, init)? {
         Ok(Answer::Result(result)) => result,
         Ok(Answer::Error(error)) => {
-            failed("initialize", &error)?;
-            return Ok(Outcome::Failed);
+            return Ok(failed("initialize", &error)?);
         }
         Err(how) => return Ok(early("initialize", how)?),
     };
@@ -799,8 +793,10 @@ pub fn run(program: &str) -> Result<u8> {
             .filter(|uuid| !uuid.is_empty())
             .into_iter()
             .collect();
+        // In the failure's own words: an unoffered model, a signed-out agy, a lost conversation.
         let why = match &outcome {
             Err(error) => error.to_string(),
+            Ok(Outcome::Failed(text)) if !text.trim().is_empty() => text.clone(),
             Ok(_) => "Antigravity's turn failed before it answered".to_string(),
         };
         let _ = emit(&steer::settled_line(true, &why, &own));
@@ -809,7 +805,7 @@ pub fn run(program: &str) -> Result<u8> {
     reap();
     match outcome? {
         Outcome::Answered => Ok(0),
-        Outcome::Failed => Ok(1),
+        Outcome::Failed(_) => Ok(1),
         Outcome::Stopped => {
             // A stopped turn ends by signal, as the shim's own stop would end a tool.
             let mut held = SigSet::empty();

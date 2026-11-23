@@ -150,7 +150,7 @@ pub(super) fn converse(
     Ok(match prompts.outcome {
         Some(outcome) => outcome,
         None if turn.stopping.is_some() => Outcome::Stopped,
-        None => Outcome::Failed,
+        None => Outcome::Failed("Antigravity's turn ended before it answered".to_string()),
     })
 }
 
@@ -322,6 +322,9 @@ impl Prompts<'_> {
         let stopped = turn.stopping.is_some();
         let own = held.covers.iter().any(|uuid| uuid == self.own)
             || (self.own.is_empty() && self.outcome.is_none());
+        // An answer that covers the turn's own message is told as its answer, so that how the
+        // turn stopped (a limit, a refusal) is the turn's; else as that of the prompt answered.
+        let tag = tag(self.own, &held.covers, &held.uuid);
         let outcome = match held.answer {
             Answer::Result(mut result) => {
                 if held
@@ -333,7 +336,7 @@ impl Prompts<'_> {
                 }
                 emit(&said(
                     "prompted",
-                    json!({"uuid": held.uuid, "result": result}),
+                    json!({"uuid": tag, "result": result}),
                 ))?;
                 emit(&steer::settled_line(false, &text, &held.covers))?;
                 if stopped {
@@ -347,13 +350,9 @@ impl Prompts<'_> {
                 if shared::classify(&said) == Failure::Signature {
                     mark_poisoned(self.session);
                 }
-                failed_for("prompt", &error, &held.uuid)?;
+                let failure = failed_for("prompt", &error, &tag)?;
                 emit(&steer::settled_line(true, &said, &held.covers))?;
-                if stopped {
-                    Outcome::Stopped
-                } else {
-                    Outcome::Failed
-                }
+                if stopped { Outcome::Stopped } else { failure }
             }
         };
         if own && self.outcome.is_none() {
@@ -379,7 +378,8 @@ impl Prompts<'_> {
                 // Under way: it failed, and says so for every message it carried. After a
                 // Stop the Host ends those with the turn.
                 None if !stopped => {
-                    let ended = early_for("prompt", how.clone(), &sent.uuid)?;
+                    let tag = tag(self.own, &sent.covers, &sent.uuid);
+                    let ended = early_for("prompt", how.clone(), &tag)?;
                     let text = std::mem::take(&mut turn.record.answer_text);
                     emit(&steer::settled_line(true, &text, &sent.covers))?;
                     turn.record.settled = true;
@@ -394,6 +394,15 @@ impl Prompts<'_> {
             self.outcome.get_or_insert(Outcome::Stopped);
         }
         Ok(())
+    }
+}
+
+/// The message an answer line names: the turn's own (`own`) where the answer covers it.
+fn tag(own: &str, covers: &[String], answered: &str) -> String {
+    if !own.is_empty() && covers.iter().any(|uuid| uuid == own) {
+        own.to_string()
+    } else {
+        answered.to_string()
     }
 }
 

@@ -745,8 +745,9 @@ fn a_message_sent_while_a_prompt_runs_is_read_when_antigravity_works_on_it_and_a
         );
         let prompted = driver(seen, "prompted");
         assert_eq!(prompted.len(), 1);
-        // The answer is the newer prompt's; its result names the turn's own message too.
-        assert_eq!(prompted[0]["uuid"], "u-add");
+        // The answer is the newer prompt's and covers the turn's own message: it is told as the
+        // turn's own answer, so the turn keeps how it stopped, and its result names both.
+        assert_eq!(prompted[0]["uuid"], "u-own");
         assert!(
             printed.at(|line| line["clarp"] == "prompted")
                 < printed.at(|line| line["type"] == "result")
@@ -885,6 +886,10 @@ fn a_turn_that_fails_before_its_prompt_settles_its_own_message_and_never_waits_f
     assert_eq!(answers.len(), 1, "{:?}", printed.seen);
     assert_eq!(answers[0]["is_error"], true);
     assert_eq!(answers[0]["user_message_uuids"], json!(["u-own"]));
+    // In the failure's own words, not a word of the driver's.
+    let said = &driver(&printed.seen, "failed")[0]["text"];
+    assert!(said.as_str().is_some_and(|said| !said.is_empty()));
+    assert_eq!(&answers[0]["result"], said);
 }
 
 #[test]
