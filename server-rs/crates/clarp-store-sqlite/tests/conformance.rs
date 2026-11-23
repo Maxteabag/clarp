@@ -130,6 +130,59 @@ fn a_failed_append_leaves_the_log_as_it_was() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// The keys that begin with a prefix are read from the key index between the prefix and the
+/// least key above them all; the keys just outside that stretch stay outside it.
+#[test]
+fn a_key_prefix_reads_exactly_the_keys_that_begin_with_it() {
+    let root = scratch_dir("sqlite-prefix");
+    let mut log = SqliteEngine::new()
+        .open(&root.join("agents/a"), standard_set("none").unwrap())
+        .unwrap();
+    let keys = [
+        "u-task-goal",
+        "u-task-goal-1",
+        "u-task-goal.",
+        "u-task-goal-",
+        "u-task-goam",
+        "u-task-goal-\u{10FFFF}",
+        "z\u{10FFFF}",
+        "z\u{10FFFF}a",
+        "{",
+    ];
+    let items: Vec<NewItem> = keys
+        .iter()
+        .map(|key| NewItem {
+            turn: None,
+            kind: 100,
+            ts_ms: 1,
+            key: Some((*key).to_owned()),
+            body: Vec::new(),
+        })
+        .collect();
+    log.append(&items).unwrap();
+    let found = |prefix: &str| -> Vec<String> {
+        log.with_key_prefix(prefix, Kinds::only(100))
+            .unwrap()
+            .into_iter()
+            .filter_map(|item| item.key)
+            .collect()
+    };
+    assert_eq!(
+        found("u-task-goal-"),
+        ["u-task-goal-1", "u-task-goal-", "u-task-goal-\u{10FFFF}"]
+    );
+    assert_eq!(found("z\u{10FFFF}"), ["z\u{10FFFF}", "z\u{10FFFF}a"]);
+    assert_eq!(found("\u{10FFFF}"), Vec::<String>::new());
+    assert!(
+        log.with_key_prefix("u-task-goal-", Kinds::only(101))
+            .unwrap()
+            .is_empty(),
+        "only the kinds asked for"
+    );
+    drop(log);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn a_log_from_a_newer_build_is_refused() {
     let root = scratch_dir("sqlite-newer");

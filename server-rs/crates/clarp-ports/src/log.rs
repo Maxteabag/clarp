@@ -132,6 +132,25 @@ pub trait AgentLog: Send {
     /// The newest item that carries this key.
     fn find(&self, key: &str) -> Result<Option<Item>, LogError>;
 
+    /// Every item of these kinds whose key begins with `prefix`, oldest first. Read here
+    /// from the whole log; a store that keeps its keys in order looks only among them.
+    fn with_key_prefix(&self, prefix: &str, kinds: Kinds) -> Result<Vec<Item>, LogError> {
+        let mut found = Vec::new();
+        let mut after = 0;
+        loop {
+            let items = self.read_after(after, kinds, 1_000)?;
+            let Some(last) = items.last() else {
+                return Ok(found);
+            };
+            after = last.seq;
+            found.extend(items.into_iter().filter(|item| {
+                item.key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with(prefix))
+            }));
+        }
+    }
+
     /// The newest `limit` items of these kinds, oldest first.
     fn read_tail(&self, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
         self.read_before(Seq::MAX, kinds, limit)

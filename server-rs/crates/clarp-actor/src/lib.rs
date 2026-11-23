@@ -1514,6 +1514,16 @@ impl Actor {
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
         actor.recover_imported_accounts(older_imports, now_ms)?;
+        // The goals' check-ins that the apps were shown as the user's words are sent again,
+        // once, so that the apps show them as the Host's own (`conversation::resend`).
+        let resent = conversation::resend::goal_wakes(actor.recorder.log(), now_ms)?;
+        if !resent.is_empty() {
+            let mut batch = actor.recorder.batch();
+            for item in resent {
+                batch.item(item);
+            }
+            batch.commit()?;
+        }
         actor.remembered = actor.remembered_in_log()?;
         // The sends whose turn is not over are what the agent's state holds, as they were;
         // each one's names are read from its message, once (a queue's length of reads).

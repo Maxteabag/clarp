@@ -216,6 +216,35 @@ impl AgentLog for SqliteLog {
         )?;
         Ok(found.into_iter().next())
     }
+
+    fn with_key_prefix(&self, prefix: &str, kinds: Kinds) -> Result<Vec<Item>, LogError> {
+        // The keys that begin with the prefix are one stretch of the key index.
+        let (min, max) = (i64::from(kinds.min), i64::from(kinds.max));
+        match above(prefix) {
+            Some(above) => self.select(
+                &format!("SELECT {COLUMNS} FROM item WHERE key >= ?1 AND key < ?2 AND kind BETWEEN ?3 AND ?4 ORDER BY seq"),
+                params![prefix, above, min, max],
+            ),
+            None => self.select(
+                &format!("SELECT {COLUMNS} FROM item WHERE key >= ?1 AND kind BETWEEN ?2 AND ?3 ORDER BY seq"),
+                params![prefix, min, max],
+            ),
+        }
+    }
+}
+
+/// The least key above every key that begins with `prefix`: the prefix with its last character
+/// one higher, since keys compare byte by byte and UTF-8 keeps the order of the characters.
+/// `None` when no key is above them all: the empty prefix, or one of the highest characters.
+fn above(prefix: &str) -> Option<String> {
+    let mut chars: Vec<char> = prefix.chars().collect();
+    while let Some(last) = chars.pop() {
+        if let Some(next) = (u32::from(last) + 1..=u32::from(char::MAX)).find_map(char::from_u32) {
+            chars.push(next);
+            return Some(chars.into_iter().collect());
+        }
+    }
+    None
 }
 
 const KV_SCHEMA_VERSION: i64 = 1;

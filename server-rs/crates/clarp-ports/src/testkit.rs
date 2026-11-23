@@ -293,6 +293,21 @@ pub fn log_engine_conformance(
         log.find("").expect("find the empty key").is_none(),
         "an item without a key is not found under the empty key"
     );
+
+    // The keys that begin alike: every version of each, of the kinds asked for, oldest first.
+    let prefixed = |prefix: &str, kinds: Kinds| {
+        positions(
+            &log.with_key_prefix(prefix, kinds)
+                .expect("read by key prefix"),
+        )
+    };
+    assert_eq!(prefixed("greet", Kinds::range(1, 9)), [1, 4]);
+    assert_eq!(prefixed("greeting", Kinds::range(1, 9)), [1, 4]);
+    assert_eq!(prefixed("greet", Kinds::only(2)), [4]);
+    assert_eq!(prefixed("oth", Kinds::range(1, 9)), [5]);
+    assert_eq!(prefixed("", Kinds::range(1, 9)), [1, 4, 5]);
+    assert!(prefixed("greetings", Kinds::range(1, 9)).is_empty());
+    assert!(prefixed("gref", Kinds::range(1, 9)).is_empty());
     drop(log);
 
     // Another agent's directory is another log.

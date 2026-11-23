@@ -78,6 +78,10 @@ pub mod kind {
         const HELPER_CELLS= 113;
         /// A hidden row whose turn the user joined. Its row stays where it was written.
         const AUDIENCE_ROW= 114;
+        /// A row the Host now shows otherwise than when the apps first read it, named by its
+        /// id: the row is sent again where it stands. An empty one only marks that a pass of
+        /// such sendings was made.
+        const RESENT_ROW= 115;
         /// A [`Note`](crate::conversation::Note): what an agent left for its user from a turn
         /// (`POST /agent-notes`). A row of the conversation, as a reply is.
         const AGENT_NOTE= 105;

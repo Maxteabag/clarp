@@ -25,6 +25,7 @@ use crate::ActorError;
 
 mod imported_anchors;
 pub(crate) use imported_anchors::ImportedAnchors;
+pub(crate) mod resend;
 
 /// The room between the revisions of two neighbouring log items, for what changes without
 /// being stored.
@@ -753,6 +754,13 @@ impl<'a> Reader<'a> {
             ..Versioned::of(entry, item.seq * REVISION_STEP, item.ts_ms)
         };
         let mut newest = item.seq;
+        // A goal's check-in that was sent again (`resend`) is as new as that.
+        if clarp_kernel::turn::names_a_goal_wake(row.entry.id())
+            && let Some(resent) = self.log.find(&resend::key(row.entry.id()))?
+            && resent.kind == kind::RESENT_ROW
+        {
+            newest = newest.max(resent.seq);
+        }
         row.coordination = self.hidden(item, &row.entry)?;
         let split = if let Some(turn) = row.turn_number {
             let audience = self.mark(turn)?;
@@ -930,9 +938,11 @@ fn rows(
     let mut reader = Reader::new(log).with_imported_anchors(imported_anchors);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
-        if item.kind == kind::AUDIENCE_ROW {
-            if place == Place::Newest {
-                let id = String::from_utf8_lossy(&item.body);
+        // A row named again: it is given again, as it is now. A sending again that names no
+        // row only marks that a pass of them was made.
+        if item.kind == kind::AUDIENCE_ROW || item.kind == kind::RESENT_ROW {
+            let id = String::from_utf8_lossy(&item.body);
+            if place == Place::Newest && !id.is_empty() {
                 found.retain(|r| r.entry.id() != id.as_ref());
                 found.extend(reader.stored(&id, which)?);
             }
