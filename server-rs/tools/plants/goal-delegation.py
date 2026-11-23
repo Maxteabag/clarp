@@ -39,7 +39,7 @@ for why,old,new in [
     ('principal backend not checked','[("principal", principal), ("delegate", delegate)]','[("delegate", delegate), ("delegate", delegate)]'),
     ('delegate backend not checked','[("principal", principal), ("delegate", delegate)]','[("principal", principal), ("principal", principal)]'),
     ('Claude identity unavailable','"claude" | "agy"','"bogus" | "agy"'),
-    ('Antigravity identity unavailable','"agy" | "grok"','"bogus" | "grok"'),
+    ('Antigravity identity unavailable','"agy" | "agy-acp" | "grok"','"bogus" | "agy-acp" | "grok"'),
     ('Grok identity unavailable','"grok" | "opencode"','"bogus" | "opencode"'),
     ('OpenCode identity unavailable','"opencode" | "deepseek"','"bogus" | "deepseek"'),
     ('DeepSeek identity unavailable','| "deepseek"','| "bogus"'),

@@ -26,11 +26,11 @@ F = 'clarp-host/src/fleet.rs'
 PLANTS = [
     # ---- the tier of a tool, the tool of a tier
     (C, 'kernel', 'OpenCode is of its own tier', '        "codex" | "opencode" => "codex",', '        "codex" => "codex",'),
-    (C, 'kernel', 'Antigravity is of Claude\'s tier', '        "gemini" | "agy" => "gemini",', '        "gemini" => "gemini",'),
+    (C, 'kernel', 'Antigravity is of Claude\'s tier', '        "gemini" | "agy" | "agy-acp" => "gemini",', '        "gemini" => "gemini",'),
     (C, 'kernel', 'a janitor\'s contacts run on no tool of their own', '        "codex" | "janitor" | "janitors" => "codex",',
      '        "codex" => "codex",'),
     (C, 'kernel', 'a contact\'s tool is compared with the case of its letters',
-     '        Some(tool) => (folded(backend.trim()) == tool, Some(tool)),', '        Some(tool) => (backend == tool, Some(tool)),'),
+     '            let given = folded(backend.trim());', '            let given = backend.to_owned();'),
     (C, 'kernel', 'a row\'s own tier is not read', '    let tier = if given.is_empty() {', '    let tier = if true {'),
     # ---- the name and the way of speaking of a minted contact
     (C, 'kernel', 'the first initial is skipped', '    const INITIALS: &str = "BCDEFGHJKLMNPQRSTVWXYZ";',
