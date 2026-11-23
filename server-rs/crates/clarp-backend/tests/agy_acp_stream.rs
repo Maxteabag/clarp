@@ -175,7 +175,9 @@ fn a_question_answered_by_policy_a_lost_conversation_and_a_turn_limit_are_told()
         ]
     );
     assert!(notices(&signals)[0].1.contains("conv-gone"));
-    assert!(notices(&signals)[2].1.contains("Which colour?") && notices(&signals)[2].1.contains("Red"));
+    assert!(
+        notices(&signals)[2].1.contains("Which colour?") && notices(&signals)[2].1.contains("Red")
+    );
     assert_eq!(ended(&signals), &RunOutcome::Completed);
 }
 

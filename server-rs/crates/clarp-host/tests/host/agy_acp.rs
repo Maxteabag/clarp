@@ -93,12 +93,17 @@ fn an_agent_moves_from_antigravity_over_acp_and_back_with_its_conversation() {
     ];
     let host = place.start_in("", &[], &world);
     let options = host.get("/agent-model-options");
-    assert_eq!(options["providers"]["agy-acp"]["runs_through"], "agy", "{options}");
+    assert_eq!(
+        options["providers"]["agy-acp"]["runs_through"], "agy",
+        "{options}"
+    );
     assert_eq!(options["providers"]["agy-acp"]["supports_steer"], false);
     let made = host.post("/agents", json!({"name": "Mover", "backend": "agy-acp"}));
     let session = made["session"].as_str().unwrap().to_string();
     host.send(&session, "remember the word lantern", "m-1");
-    wait_for("the first turn to finish", || host.state(&session) == "done");
+    wait_for("the first turn to finish", || {
+        host.state(&session) == "done"
+    });
 
     // To Antigravity as it runs today: it has no writer, so its next turn would begin with the
     // Host's record. And back, the same way.
@@ -206,7 +211,9 @@ fn a_real_antigravity_turn_over_acp_answers_and_is_continued() {
         .map(|(_, text)| text)
         .collect();
     assert!(
-        replies.last().is_some_and(|text| text.to_lowercase().contains("acp-ember")),
+        replies
+            .last()
+            .is_some_and(|text| text.to_lowercase().contains("acp-ember")),
         "the second turn continued the conversation: {replies:?}"
     );
 }

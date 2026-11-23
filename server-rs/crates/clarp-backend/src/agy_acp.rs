@@ -25,14 +25,14 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use clarp_acp::agy::{self as shared, Order};
+use clarp_acp::schema::{self, PromptResponse, SessionUpdate, StopReason};
 use clarp_kernel::conversation::{Notice, Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
 use clarp_kernel::takeover::Input;
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, Origin, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
-use clarp_acp::agy::{self as shared, Order};
-use clarp_acp::schema::{self, PromptResponse, SessionUpdate, StopReason};
 use serde_json::{Value, json};
 
 use crate::agy::{self, Agy};
@@ -355,8 +355,12 @@ impl AcpInterpreter {
             "permission" if !matches!(text_of(&line["kind"]), "allow_once" | "allow_always") => {
                 let title = shorten(text_of(&line["title"]), 300);
                 let text = match line["answer"].as_str() {
-                    Some(answer) => format!("Antigravity asked \"{title}\"; Clarp answered \"{answer}\"."),
-                    None => format!("Antigravity asked \"{title}\" and offered no answer; it was declined."),
+                    Some(answer) => {
+                        format!("Antigravity asked \"{title}\"; Clarp answered \"{answer}\".")
+                    }
+                    None => format!(
+                        "Antigravity asked \"{title}\" and offered no answer; it was declined."
+                    ),
                 };
                 self.notice("agy-question", text, out);
             }
@@ -365,7 +369,8 @@ impl AcpInterpreter {
                 self.close_thought(out);
                 self.close_message(out);
                 let answer = PromptResponse::read(&line["result"]);
-                if let Some((tokens_in, tokens_out)) = answer.usage.and_then(|usage| usage.tokens()) {
+                if let Some((tokens_in, tokens_out)) = answer.usage.and_then(|usage| usage.tokens())
+                {
                     out.push(Signal::Usage {
                         tokens_in,
                         tokens_out,
@@ -406,7 +411,11 @@ impl AcpInterpreter {
         if piece.is_empty() {
             return;
         }
-        let open = if thought { &self.thought } else { &self.message };
+        let open = if thought {
+            &self.thought
+        } else {
+            &self.message
+        };
         let number = match open {
             Some((number, _)) => *number,
             None => {
@@ -468,7 +477,9 @@ impl AcpInterpreter {
                     steps: Value::Array(steps),
                 }));
             }
-            SessionUpdate::UsageUpdate { used: Some(used), .. } => {
+            SessionUpdate::UsageUpdate {
+                used: Some(used), ..
+            } => {
                 out.push(Signal::Context { tokens: used });
             }
             SessionUpdate::ConfigOptionUpdate { config_options } => {
@@ -525,7 +536,8 @@ impl AcpInterpreter {
             return; // told twice
         }
         let (came_back, exit_code) = tool_output(update);
-        let failed = update.status.as_deref() == Some("failed") || exit_code.is_some_and(|code| code != 0);
+        let failed =
+            update.status.as_deref() == Some("failed") || exit_code.is_some_and(|code| code != 0);
         call.status = if failed {
             ToolStatus::Error
         } else {

@@ -50,7 +50,8 @@ pub trait Handler {
     /// A notification (`session/update` and others).
     fn notification(&mut self, message: &Value) -> io::Result<()>;
     /// A request of the agent's: its result, or an error code and message.
-    fn request(&mut self, method: &str, params: &Value) -> io::Result<Result<Value, (i64, String)>>;
+    fn request(&mut self, method: &str, params: &Value)
+    -> io::Result<Result<Value, (i64, String)>>;
 }
 
 pub struct Client<W: Write> {
@@ -69,10 +70,9 @@ impl<W: Write> Client<W> {
     }
 
     fn send(&mut self, message: &Value) -> io::Result<()> {
-        let output = self
-            .output
-            .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "the agent's input is closed"))?;
+        let output = self.output.as_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "the agent's input is closed")
+        })?;
         let mut line = serde_json::to_vec(message)?;
         line.push(b'\n');
         output.write_all(&line)?;
@@ -107,7 +107,9 @@ impl<W: Write> Client<W> {
     ) -> io::Result<Result<Answer, Ended>> {
         loop {
             let bound = match deadline {
-                Some(deadline) => deadline.saturating_duration_since(Instant::now()).min(silence),
+                Some(deadline) => deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(silence),
                 None => silence,
             };
             match self.inbound.recv_timeout(bound) {

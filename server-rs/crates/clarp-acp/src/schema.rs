@@ -199,7 +199,12 @@ pub fn chosen(options: &[PermissionOption]) -> Option<&PermissionOption> {
     let usable = |option: &&PermissionOption| !option.option_id.trim().is_empty();
     ["allow_once", "allow_always"]
         .iter()
-        .find_map(|kind| options.iter().filter(usable).find(|option| option.kind == *kind))
+        .find_map(|kind| {
+            options
+                .iter()
+                .filter(usable)
+                .find(|option| option.kind == *kind)
+        })
         .or_else(|| options.iter().find(usable))
 }
 
@@ -286,7 +291,9 @@ mod tests {
             "sessionId": "s", "update": {"sessionUpdate": "agent_message_chunk",
             "content": {"type": "text", "text": "Hi"}}}});
         let update = SessionUpdate::of_notification(&message).unwrap();
-        assert!(matches!(&update, SessionUpdate::AgentMessageChunk { content } if content.text() == "Hi"));
+        assert!(
+            matches!(&update, SessionUpdate::AgentMessageChunk { content } if content.text() == "Hi")
+        );
         let call: SessionUpdate = serde_json::from_value(json!({"sessionUpdate": "tool_call",
             "toolCallId": "t", "kind": "execute", "status": "pending",
             "rawInput": {"CommandLine": "ls"}, "locations": [{"path": "/w"}]}))
@@ -303,7 +310,12 @@ mod tests {
         let image: SessionUpdate = serde_json::from_value(json!({"sessionUpdate":
             "agent_message_chunk", "content": {"type": "image", "data": "", "mimeType": "image/png"}}))
         .unwrap();
-        assert!(matches!(image, SessionUpdate::AgentMessageChunk { content: ContentBlock::Other }));
+        assert!(matches!(
+            image,
+            SessionUpdate::AgentMessageChunk {
+                content: ContentBlock::Other
+            }
+        ));
     }
 
     #[test]
@@ -334,7 +346,10 @@ mod tests {
             json!({"outcome": {"outcome": "selected", "optionId": "red"}})
         );
         assert_eq!(chosen(&[]), None);
-        assert_eq!(permission_outcome(None), json!({"outcome": {"outcome": "cancelled"}}));
+        assert_eq!(
+            permission_outcome(None),
+            json!({"outcome": {"outcome": "cancelled"}})
+        );
     }
 
     #[test]

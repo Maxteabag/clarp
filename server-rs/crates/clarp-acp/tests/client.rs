@@ -95,32 +95,52 @@ fn a_request_is_answered_and_what_comes_before_the_answer_is_handled() {
         let asked = server.read().unwrap();
         server.update(json!({"sessionUpdate": "agent_message_chunk",
                              "content": {"type": "text", "text": "Hi"}}));
-        server.send(json!({"jsonrpc": "2.0", "id": "p-1", "method": "session/request_permission",
+        server.send(
+            json!({"jsonrpc": "2.0", "id": "p-1", "method": "session/request_permission",
             "params": {"sessionId": "s", "toolCall": {"toolCallId": "t"},
-                       "options": [{"optionId": "ok", "name": "Allow", "kind": "allow_once"}]}}));
+                       "options": [{"optionId": "ok", "name": "Allow", "kind": "allow_once"}]}}),
+        );
         // The answer to the permission comes before the answer to the request.
         let answered = server.read().unwrap();
         assert_eq!(answered["id"], "p-1");
-        server.send(json!({"jsonrpc": "2.0", "id": "x-1", "method": "fs/read_text_file", "params": {}}));
+        server.send(
+            json!({"jsonrpc": "2.0", "id": "x-1", "method": "fs/read_text_file", "params": {}}),
+        );
         server.read().unwrap();
-        server.send(json!({"jsonrpc": "2.0", "id": asked["id"], "result": {"stopReason": "end_turn"}}));
+        server.send(
+            json!({"jsonrpc": "2.0", "id": asked["id"], "result": {"stopReason": "end_turn"}}),
+        );
     });
     let mut kept = Kept::default();
     let answer = client
-        .request(method::SESSION_PROMPT, json!({"sessionId": "s"}), WAIT, &mut kept)
+        .request(
+            method::SESSION_PROMPT,
+            json!({"sessionId": "s"}),
+            WAIT,
+            &mut kept,
+        )
         .unwrap();
-    assert_eq!(answer, Ok(Answer::Result(json!({"stopReason": "end_turn"}))));
+    assert_eq!(
+        answer,
+        Ok(Answer::Result(json!({"stopReason": "end_turn"})))
+    );
     assert_eq!(kept.notified.len(), 1);
     assert!(matches!(
         SessionUpdate::of_notification(&kept.notified[0]),
         Some(SessionUpdate::AgentMessageChunk { .. })
     ));
-    assert_eq!(kept.asked, ["session/request_permission", "fs/read_text_file"]);
+    assert_eq!(
+        kept.asked,
+        ["session/request_permission", "fs/read_text_file"]
+    );
     client.close();
     let seen = server.join().unwrap();
     assert_eq!(seen[0]["method"], "session/prompt");
     assert_eq!(seen[0]["jsonrpc"], "2.0");
-    assert_eq!(seen[1]["result"]["outcome"], json!({"outcome": "selected", "optionId": "ok"}));
+    assert_eq!(
+        seen[1]["result"]["outcome"],
+        json!({"outcome": "selected", "optionId": "ok"})
+    );
     assert_eq!(seen[2]["error"]["code"], code::METHOD_NOT_FOUND);
 }
 
@@ -134,12 +154,18 @@ fn an_error_is_an_answer_and_ids_count_up() {
         server.send(json!({"jsonrpc": "2.0", "id": second["id"], "result": {"sessionId": "s"}}));
     });
     let mut kept = Kept::default();
-    let refused = client.request(method::SESSION_NEW, json!({}), WAIT, &mut kept).unwrap();
+    let refused = client
+        .request(method::SESSION_NEW, json!({}), WAIT, &mut kept)
+        .unwrap();
     assert_eq!(
         refused,
-        Ok(Answer::Error(json!({"code": -32000, "message": "Authentication required"})))
+        Ok(Answer::Error(
+            json!({"code": -32000, "message": "Authentication required"})
+        ))
     );
-    let opened = client.request(method::SESSION_NEW, json!({}), WAIT, &mut kept).unwrap();
+    let opened = client
+        .request(method::SESSION_NEW, json!({}), WAIT, &mut kept)
+        .unwrap();
     assert_eq!(opened, Ok(Answer::Result(json!({"sessionId": "s"}))));
     client.close();
     let seen = server.join().unwrap();
@@ -154,7 +180,9 @@ fn an_interrupt_ends_a_wait_and_the_answer_is_waited_for_again_after_a_cancel() 
                              "content": {"type": "text", "text": "working"}}));
         let cancel = server.read().unwrap();
         assert_eq!(cancel["method"], "session/cancel");
-        server.send(json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "cancelled"}}));
+        server.send(
+            json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "cancelled"}}),
+        );
     });
     struct Interrupting(Kept, Sender<Inbound>);
     impl Handler for Interrupting {
@@ -163,7 +191,11 @@ fn an_interrupt_ends_a_wait_and_the_answer_is_waited_for_again_after_a_cancel() 
             let _ = self.1.send(Inbound::Interrupt);
             self.0.notification(message)
         }
-        fn request(&mut self, asked: &str, params: &Value) -> io::Result<Result<Value, (i64, String)>> {
+        fn request(
+            &mut self,
+            asked: &str,
+            params: &Value,
+        ) -> io::Result<Result<Value, (i64, String)>> {
             self.0.request(asked, params)
         }
     }
@@ -171,13 +203,19 @@ fn an_interrupt_ends_a_wait_and_the_answer_is_waited_for_again_after_a_cancel() 
     let id = client
         .send_request(method::SESSION_PROMPT, json!({"sessionId": "s"}))
         .unwrap();
-    assert_eq!(client.wait(id, WAIT, None, &mut handler).unwrap(), Err(Ended::Interrupted));
+    assert_eq!(
+        client.wait(id, WAIT, None, &mut handler).unwrap(),
+        Err(Ended::Interrupted)
+    );
     client
         .notify(method::SESSION_CANCEL, json!({"sessionId": "s"}))
         .unwrap();
     let deadline = Some(Instant::now() + WAIT);
     let answer = client.wait(id, WAIT, deadline, &mut handler).unwrap();
-    assert_eq!(answer, Ok(Answer::Result(json!({"stopReason": "cancelled"}))));
+    assert_eq!(
+        answer,
+        Ok(Answer::Result(json!({"stopReason": "cancelled"})))
+    );
     client.close();
     server.join().unwrap();
 }
@@ -189,7 +227,12 @@ fn silence_and_a_closed_agent_end_a_wait() {
     });
     let mut kept = Kept::default();
     let silent = client
-        .request(method::INITIALIZE, json!({}), Duration::from_millis(50), &mut kept)
+        .request(
+            method::INITIALIZE,
+            json!({}),
+            Duration::from_millis(50),
+            &mut kept,
+        )
         .unwrap();
     assert_eq!(silent, Err(Ended::Silent));
     // A deadline that has passed ends the wait however long the silence may be.
@@ -200,7 +243,10 @@ fn silence_and_a_closed_agent_end_a_wait() {
     client.close();
     server.join().unwrap();
     // The server is gone: its output closed.
-    assert_eq!(client.wait(1, WAIT, None, &mut kept).unwrap(), Err(Ended::Closed));
+    assert_eq!(
+        client.wait(1, WAIT, None, &mut kept).unwrap(),
+        Err(Ended::Closed)
+    );
     // Nothing more can be sent to it.
     assert!(client.notify(method::SESSION_CANCEL, json!({})).is_err());
 }
