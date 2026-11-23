@@ -81,6 +81,11 @@ impl Backend for Claude {
             "--include-partial-messages",
             // Without this the stream is not a stream: the lines come when the turn is over.
             "--verbose",
+            // What the model thinks comes as a summary in words, which the Host shows as the
+            // turn's reasoning. Without it Claude Code sends no words of it outside its own
+            // screen, only an estimate of how much there was (measured with 2.1.321).
+            "--thinking-display",
+            "summarized",
             // The Host may name a subset for this agent. A slow or broken server in
             // the user's own configuration must not hold up every other turn's start.
             "--strict-mcp-config",
@@ -1841,6 +1846,13 @@ mod tests {
                 .args
                 .windows(2)
                 .any(|pair| pair == ["--model", "opus"])
+        );
+        assert!(
+            fresh
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--thinking-display", "summarized"]),
+            "what the model thinks comes in words"
         );
         assert!(
             !fresh
