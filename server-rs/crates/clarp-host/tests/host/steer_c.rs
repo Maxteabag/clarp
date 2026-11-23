@@ -781,3 +781,151 @@ else:
     host.send(session, "try another", "next");
     collect_answer(&host, session, "next ran");
 }
+
+/// A stand-in for Claude Code for rule FU: a turn for another agent, into which the user's
+/// follow-up is read; after the test leaves a note in the turn, the agent writes its reply and
+/// waits before it ends.
+const CLAUDE_FU: &str = r#"#!/usr/bin/env python3
+import json, os, pathlib, sys, time
+
+if "--version" in sys.argv:
+    print("2.1.321 (Claude Code)")
+    raise SystemExit(0)
+
+root = pathlib.Path(__file__).resolve().parent
+flag = "--resume" if "--resume" in sys.argv else "--session-id"
+session = sys.argv[sys.argv.index(flag) + 1]
+
+def say(kind, **fields):
+    print(json.dumps({"type": kind, "session_id": session, **fields}), flush=True)
+
+def prompt():
+    record = json.loads(sys.stdin.readline())
+    return record["uuid"], record["message"]["content"][0]["text"]
+
+def release(name):
+    end = time.monotonic() + 40
+    while not (root / name).exists():
+        if time.monotonic() >= end:
+            raise SystemExit("stand-in release expired")
+        time.sleep(.02)
+
+first, _ = prompt()
+(root / "fu-token").write_text(os.environ["CLARP_PROVIDER_TURN"])
+say("system", subtype="init")
+say("user", isReplay=True, uuid=first, message={"role": "user", "content": []})
+say("stream_event", event={"type": "content_block_start", "index": 0,
+    "content_block": {"type": "tool_use", "id": "fu-tool", "name": "Bash", "input": {}}})
+(root / "fu-tool").touch()
+followup, _ = prompt()
+say("user", isReplay=True, uuid=followup, message={"role": "user", "content": []})
+say("user", message={"content": [{"type": "tool_result", "tool_use_id": "fu-tool", "content": "ok"}]})
+(root / "fu-echoed").touch()
+release("fu-noted")
+say("assistant", message={"id": "msg_after_note", "role": "assistant",
+    "content": [{"type": "text", "text": "after-note"}]})
+say("stream_event", event={"type": "message_stop"})
+(root / "fu-replied").touch()
+release("fu-end")
+say("result", subtype="success", is_error=False, result="after-note",
+    user_message_uuids=[first, followup])
+"#;
+
+/// Rule FU. The user writes into a turn the agent runs for another agent, and the
+/// agent answers the user in a note. What it says after the note is the agents' again: it is
+/// hidden from the user while it is written and after the turn ends alike. Before, the reply
+/// was shown while the turn ran and hidden once it ended: the user's chat lost the message it
+/// had just shown.
+#[test]
+fn a_reply_after_the_note_that_answered_the_user_is_never_shown_then_hidden() {
+    let place = Place::new("steer-fu");
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE_FU);
+    let home = place.root.join("home");
+    let world = [
+        ("HOME", home.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let sender = host.new_agent("sender");
+    let session = "steer-fu";
+    host.post(
+        "/agents",
+        json!({"name": session, "session": session, "backend": "claude"}),
+    );
+    let at = |name: &str| place.root.join(name);
+    let first = host.post(
+        "/send",
+        json!({
+            "session": session, "text": "case-fu", "client_msg_id": "first",
+            "origin": "agent", "sender": sender,
+        }),
+    );
+    assert_eq!(first["queued"], false, "{first}");
+    wait_for("the tool", || at("fu-tool").exists());
+    wait_for("the tool in the live projection", || {
+        host.state(session) == "tool"
+    });
+    host.send(session, "a question of the user's", "steer");
+    wait_for("the follow-up read into the turn", || {
+        at("fu-echoed").exists()
+    });
+    wait_for("the user's live turn", || {
+        host.get(&format!("/live?session={session}"))["turn"]["audience"] == "user"
+    });
+    let shown = |text: &str| {
+        host.get(&format!("/log?session={session}&coordination=hide"))["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["text"] == text)
+    };
+    assert!(shown("a question of the user's"));
+
+    // The agent answers the user in a note: the rest of the turn is the agents' again, in the
+    // live projection too.
+    let token = std::fs::read_to_string(at("fu-token")).unwrap();
+    let body = json!({"session": session, "text": "the answer for the user", "note_id": "answer"});
+    let noted = fetch(
+        &host,
+        &host.token,
+        "POST",
+        "/agent-notes",
+        &[
+            ("Content-Type", "application/json"),
+            ("X-Clarp-Turn", &token),
+        ],
+        body.to_string().as_bytes(),
+    );
+    assert_eq!(
+        noted.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&noted.body)
+    );
+    assert!(shown("the answer for the user"));
+    wait_for("the live turn given back to the agents", || {
+        host.get(&format!("/live?session={session}"))["turn"]["audience"] == "agents"
+    });
+
+    // The reply comes while the turn still runs: hidden from the user already.
+    std::fs::write(at("fu-noted"), "").unwrap();
+    wait_for("the reply in the conversation", || {
+        host.get(&format!("/log?session={session}&coordination=show"))["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["text"] == "after-note")
+    });
+    assert!(
+        !shown("after-note"),
+        "the reply is the agents' while the turn runs"
+    );
+
+    // The turn ends: what the user was shown stays, and what was hidden stays hidden.
+    std::fs::write(at("fu-end"), "").unwrap();
+    wait_for("the turn to end", || host.state(session) == "done");
+    assert!(!shown("after-note"), "and after it ended");
+    assert!(shown("a question of the user's"));
+    assert!(shown("the answer for the user"));
+}

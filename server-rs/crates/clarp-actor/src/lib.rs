@@ -3781,6 +3781,17 @@ impl Actor {
         batch.commit()?;
         self.unstored_changes = 0;
         self.turn_notes = (turn, notes_of(self.turn_notes, TurnId(turn)) + 1);
+        // A turn for another agent that the user wrote into is the user's until a note answers
+        // them: what it says after is the agents' again, shown neither in the conversation nor
+        // while it is written (rule FU).
+        if self.recorder.agent().live().map(Turn::id) == Some(TurnId(turn))
+            && conversation::split_by_the_user(self.recorder.log(), turn)?
+        {
+            let events = self
+                .shown
+                .set_turn_audience(clarp_kernel::coordination::AGENTS, now_ms);
+            self.shown_events.extend(events);
+        }
         let out = Outputs {
             changed: Changed {
                 conversation: true,

@@ -194,9 +194,11 @@ impl State {
                         }
                         return Ok(None);
                     }
-                    let revealed = !self.mixed
-                        && conversation::mark_of(batch.log(), turn.0)?.is_none()
-                        && conversation::split(batch, into, open, now_ms)?;
+                    // A later message of the user's shows the turn to the user again, after
+                    // a note gave it back to the agents (rule FU).
+                    let revealed = self.mixed
+                        || (conversation::mark_of(batch.log(), turn.0)?.is_none()
+                            && conversation::split(batch, into, open, now_ms)?);
                     self.mixed |= revealed;
                     return Ok(Some(Sharing { speak, revealed }));
                 }
