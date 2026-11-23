@@ -123,6 +123,8 @@ def steering(mid, sid, words):
         return result(mid, {"stopReason": "end_turn"})
     # As agy 1.5 does: the running prompt is answered at once; the work goes on under the new one.
     result(mid, {"stopReason": "end_turn", "usage": {"inputTokens": 3, "outputTokens": 1}})
+    # As agy does within milliseconds of every prompt, before it has touched the message.
+    update(sid, {"sessionUpdate": "usage_update", "used": 0, "size": 1000000})
     # Its first word under the new prompt is what makes the message read: the test says when.
     wait_file("taken-" + mode)
     text(sid, "agent_thought_chunk", "Reading " + said_in(second))

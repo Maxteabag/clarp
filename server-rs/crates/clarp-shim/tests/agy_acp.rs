@@ -691,6 +691,10 @@ fn a_message_sent_while_a_prompt_runs_is_read_when_antigravity_works_on_it_and_a
         while let Ok(line) = printed.lines.try_recv() {
             printed.seen.push(line);
         }
+        // What agy says by itself right after the second prompt is no read either.
+        printed.until("agy's own usage update", |line| {
+            line["params"]["update"]["sessionUpdate"] == "usage_update"
+        });
         assert!(
             printed.seen.iter().all(|line| read_of(line).is_none()),
             "{:?}",
