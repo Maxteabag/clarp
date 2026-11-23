@@ -117,7 +117,11 @@ def live_facts(host, rows, agent):
             else "idle, no turn running")
     lines = [f"Now: {clock(now)} (local time).",
              f"You: {turn}, state {row.get('latest_state', 'unknown')}; "
-             f"last activity {clock(row.get('last_activity'))}; {len(waiting)} queued message(s)"
+             # latest_state_ts is the time of the turn's last change; last_activity only sorts the chat list
+             f"last change {clock(row.get('latest_state_ts'))}"
+             + (f", STALLED since {clock((row.get('activity') or {}).get('stalled_since'))}"
+                if (row.get('activity') or {}).get('stalled_since') else "")
+             + f"; {len(waiting)} queued message(s)"
              + (f", oldest {clock(oldest)}" if oldest else "")
              + ("; queue paused" if queue.get("paused") else "")]
     children = [item for item in rows if item.get("parent_agent_id") == aid and not item.get("moved")]
