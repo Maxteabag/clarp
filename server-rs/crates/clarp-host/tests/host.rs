@@ -5778,7 +5778,10 @@ fn an_agent_asks_another_for_something_that_comes_back_to_its_goal() {
     );
 
     // The result is what the goal waited for: the goal takes it, and its owner is woken
-    // with it.
+    // with it. The wake is the Host's own check-in in the conversation (contract 163); its
+    // words, the answer among them, are for the agent's tool only, and the kernel's goal
+    // vectors hold them.
+    let checked_in = told(&asker, "Goal check-in");
     let (code, out, err) = admin(&[
         "reply",
         "--request",
@@ -5794,12 +5797,14 @@ fn an_agent_asks_another_for_something_that_comes_back_to_its_goal() {
     let said: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(said["via"], format!("goal {plan_id}"));
     wait_for("the asker to be woken with the answer", || {
-        host.conversation(&asker).iter().any(|(role, text)| {
-            role == "user"
-                && text.starts_with("Continue your durable outcome commitment.")
-                && text.contains("Live: the log is at the new route.")
-        })
+        told(&asker, "Goal check-in") > checked_in
     });
+    assert!(
+        !host.conversation(&asker).iter().any(|(role, text)| {
+            role == "user" && text.starts_with("Continue your durable outcome commitment.")
+        }),
+        "the wake is never shown as words the user typed"
+    );
     // The same result again is known to be there already.
     let (code, out, _) = admin(&[
         "reply",
