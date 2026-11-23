@@ -451,9 +451,16 @@ fn a_stop_interrupts_the_lane_turn_at_once_and_the_next_message_runs_on_the_same
         "Codex answered the interrupt at once, so the turn ended at once: {:?}",
         began.elapsed()
     );
-    assert_eq!(noted(&place, "interrupts"), "t2\n", "the held turn was interrupted");
+    assert_eq!(
+        noted(&place, "interrupts"),
+        "t2\n",
+        "the held turn was interrupted"
+    );
     assert_eq!(answers(&host, "stopper", "said-hold-stop"), 0);
-    assert!(lane_lives(&socket), "a Codex that ended its turn keeps its lane");
+    assert!(
+        lane_lives(&socket),
+        "a Codex that ended its turn keeps its lane"
+    );
 
     // The next message runs on the same lane.
     asked(&host, "stopper", "ask-after");
@@ -479,7 +486,9 @@ fn a_lane_turn_held_through_a_host_restart_is_answered_once() {
 
     // Codex answers while the Host is away: the answer waits in the spool for the next Host.
     host.send("keeper", "hold-down", "down");
-    wait_for("the first held turn", || place.root.join("holding-down").exists());
+    wait_for("the first held turn", || {
+        place.root.join("holding-down").exists()
+    });
     host.kill();
     std::fs::write(place.root.join("release-down"), "").unwrap();
     wait_for("Codex to answer while the Host is away", || {
@@ -493,10 +502,14 @@ fn a_lane_turn_held_through_a_host_restart_is_answered_once() {
 
     // Codex answers after the Host is back: the Host rejoined the running turn.
     host.send("keeper", "hold-up", "up");
-    wait_for("the second held turn", || place.root.join("holding-up").exists());
+    wait_for("the second held turn", || {
+        place.root.join("holding-up").exists()
+    });
     host.kill();
     let host = start_lane_host(&place, &world);
-    wait_for("the second turn rejoined", || host.state("keeper") != "done");
+    wait_for("the second turn rejoined", || {
+        host.state("keeper") != "done"
+    });
     std::fs::write(place.root.join("release-up"), "").unwrap();
     wait_for("the answer given after the restart", || {
         answers(&host, "keeper", "said-hold-up") == 1
@@ -505,9 +518,22 @@ fn a_lane_turn_held_through_a_host_restart_is_answered_once() {
 
     // The next turn runs on the same lane, and nothing came twice.
     asked(&host, "keeper", "ask-last");
-    assert_eq!(answers(&host, "keeper", "said-hold-down"), 1, "{:?}", host.conversation("keeper"));
-    assert_eq!(answers(&host, "keeper", "said-hold-up"), 1, "{:?}", host.conversation("keeper"));
-    assert_eq!(user_rows(&host), ["u-ask-first", "u-down", "u-up", "u-ask-last"]);
+    assert_eq!(
+        answers(&host, "keeper", "said-hold-down"),
+        1,
+        "{:?}",
+        host.conversation("keeper")
+    );
+    assert_eq!(
+        answers(&host, "keeper", "said-hold-up"),
+        1,
+        "{:?}",
+        host.conversation("keeper")
+    );
+    assert_eq!(
+        user_rows(&host),
+        ["u-ask-first", "u-down", "u-up", "u-ask-last"]
+    );
     assert_eq!(
         noted(&place, "turns"),
         "ask-first\nhold-down\nhold-up\nask-last\n",
@@ -544,7 +570,10 @@ fn an_idle_lane_leaves_after_its_time_and_the_next_turn_starts_another_on_the_sa
 
     asked(&host, "idler", "ask-next");
     assert_eq!(noted(&place, "launches"), "app-server\napp-server\n");
-    let threads: Vec<String> = noted(&place, "threads").lines().map(str::to_owned).collect();
+    let threads: Vec<String> = noted(&place, "threads")
+        .lines()
+        .map(str::to_owned)
+        .collect();
     assert_eq!(threads.len(), 2, "{threads:?}");
     let started = threads[0]
         .strip_prefix("start ")
@@ -570,7 +599,10 @@ fn a_lane_beyond_the_cap_retires_the_one_idle_longest() {
 
     asked(&host, "cap-a", "ask-a1");
     asked(&host, "cap-b", "ask-b1");
-    assert!(lane_lives(&a) && lane_lives(&b), "two lanes are within the cap");
+    assert!(
+        lane_lives(&a) && lane_lives(&b),
+        "two lanes are within the cap"
+    );
 
     // A third: the lane idle longest (a's) leaves, b's stays.
     asked(&host, "cap-c", "ask-c1");
@@ -607,7 +639,11 @@ fn a_changed_login_sends_the_same_attempt_to_a_new_lane_once() {
     let second = lane_said(&socket, "inspect").unwrap()["state"]["instance"].clone();
     assert_ne!(first, second, "a new lane runs the turn");
     assert_eq!(noted(&place, "launches"), "app-server\napp-server\n");
-    assert_eq!(noted(&place, "turns"), "ask-one\nask-two\n", "the attempt reached Codex once");
+    assert_eq!(
+        noted(&place, "turns"),
+        "ask-one\nask-two\n",
+        "the attempt reached Codex once"
+    );
     assert_eq!(answers(&host, "switcher", "said-ask-two"), 1);
     let failed = host
         .turns("switcher")
@@ -632,7 +668,10 @@ fn a_changed_model_restarts_the_idle_lane_and_the_next_turn_runs_with_it() {
             .collect()
     };
 
-    let tuned = host.post("/agent-llm", json!({"session": "tuner", "model": "gpt-5.5"}));
+    let tuned = host.post(
+        "/agent-llm",
+        json!({"session": "tuner", "model": "gpt-5.5"}),
+    );
     assert_eq!(tuned["model"], "gpt-5.5", "{tuned}");
     asked(&host, "tuner", "ask-two");
     let second = lane_said(&socket, "inspect").unwrap()["state"]["instance"].clone();
@@ -640,7 +679,11 @@ fn a_changed_model_restarts_the_idle_lane_and_the_next_turn_runs_with_it() {
     assert_eq!(noted(&place, "launches"), "app-server\napp-server\n");
     assert_eq!(models()[1], "gpt-5.5");
     assert!(
-        noted(&place, "threads").lines().nth(1).unwrap().ends_with("model=gpt-5.5"),
+        noted(&place, "threads")
+            .lines()
+            .nth(1)
+            .unwrap()
+            .ends_with("model=gpt-5.5"),
         "the new lane resumed the thread with the model: {}",
         noted(&place, "threads")
     );
@@ -651,7 +694,15 @@ fn a_changed_model_restarts_the_idle_lane_and_the_next_turn_runs_with_it() {
     asked(&host, "tuner", "ask-three");
     let third = lane_said(&socket, "inspect").unwrap()["state"]["instance"].clone();
     assert_ne!(second, third, "the lane was started again for the default");
-    assert_eq!(noted(&place, "launches"), "app-server\napp-server\napp-server\n");
-    assert_eq!(models()[2], models()[0], "the turn runs with the default again: {:?}", models());
+    assert_eq!(
+        noted(&place, "launches"),
+        "app-server\napp-server\napp-server\n"
+    );
+    assert_eq!(
+        models()[2],
+        models()[0],
+        "the turn runs with the default again: {:?}",
+        models()
+    );
     assert_eq!(noted(&place, "turns"), "ask-one\nask-two\nask-three\n");
 }
