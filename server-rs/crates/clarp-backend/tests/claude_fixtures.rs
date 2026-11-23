@@ -358,13 +358,10 @@ fn thinking_in_words_is_the_turns_reasoning_and_never_its_reply() {
         "{whole}"
     );
     let signals = read(fixture);
-    let shown = signals
-        .iter()
-        .filter_map(|signal| match signal {
-            Signal::Glimpse(Glimpse::Reasoning { text, .. }) => Some(text.as_str()),
-            _ => None,
-        })
-        .last();
+    let shown = signals.iter().rev().find_map(|signal| match signal {
+        Signal::Glimpse(Glimpse::Reasoning { text, .. }) => Some(text.as_str()),
+        _ => None,
+    });
     assert_eq!(
         shown,
         Some(whole.as_str()),
