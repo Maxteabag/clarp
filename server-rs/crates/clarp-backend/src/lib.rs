@@ -17,6 +17,7 @@ use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::Record;
 
 pub mod agy;
+pub mod agy_acp;
 pub mod catalogue;
 pub mod claude;
 pub mod codex;
@@ -318,6 +319,7 @@ pub const PROGRAMS: &[(&str, &str, &str)] = &[
     ("claude", CLAUDE_PROGRAM_ENV, "claude"),
     ("codex", CODEX_PROGRAM_ENV, "codex"),
     ("agy", AGY_PROGRAM_ENV, "agy"),
+    ("agy-acp", AGY_PROGRAM_ENV, "agy"),
     ("grok", "CLARP_GROK_PROGRAM", "grok"),
     ("opencode", "CLARP_OPENCODE_PROGRAM", "opencode"),
     ("deepseek", "CLARP_OPENCODE_PROGRAM", "opencode"),
@@ -345,6 +347,10 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
         "agy" => Some(Arc::new(match named(AGY_PROGRAM_ENV) {
             Some(program) => agy::Agy::with_program(program),
             None => agy::Agy::new(),
+        })),
+        "agy-acp" => Some(Arc::new(match named(AGY_PROGRAM_ENV) {
+            Some(program) => agy_acp::AgyAcp::with_program(program),
+            None => agy_acp::AgyAcp::new(),
         })),
         "grok" | "muse" => Some(Arc::new(grok_muse::Adapter {
             tool: if id == "grok" {
@@ -432,7 +438,7 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"
+                "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse"
             ]
         );
         for (id, variable, name) in PROGRAMS {
@@ -448,9 +454,11 @@ mod tests {
             [CLAUDE_PROGRAM_ENV, CODEX_PROGRAM_ENV, AGY_PROGRAM_ENV],
             [PROGRAMS[0].1, PROGRAMS[1].1, PROGRAMS[2].1]
         );
-        // The two OpenCode cards are the one program.
-        let (opencode, deepseek) = (PROGRAMS[4], PROGRAMS[5]);
+        // The two OpenCode cards are the one program, and so are the two Antigravity cards.
+        let (opencode, deepseek) = (PROGRAMS[5], PROGRAMS[6]);
         assert_eq!((opencode.1, opencode.2), (deepseek.1, deepseek.2));
+        let (agy, acp) = (PROGRAMS[2], PROGRAMS[3]);
+        assert_eq!((agy.1, agy.2), (acp.1, acp.2));
         for id in ["scripted", "zoxide", "", "Claude"] {
             assert_eq!(program(id), None, "{id}");
         }
@@ -467,6 +475,8 @@ mod tests {
         );
         assert_eq!(by_id("agy").unwrap().id(), "agy");
         assert_eq!(efforts("agy"), ["low", "medium", "high"]);
+        assert_eq!(by_id("agy-acp").unwrap().id(), "agy-acp");
+        assert_eq!(efforts("agy-acp"), efforts("agy"));
         assert_eq!(by_id("scripted").unwrap().id(), "scripted");
         assert!(by_id("nobody").is_none());
     }

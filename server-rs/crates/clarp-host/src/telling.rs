@@ -60,7 +60,7 @@ impl Telling {
     pub(crate) fn launch_defaults(&self, backend: &str) -> clarp_actor::LaunchPreferences {
         let mut choices = clarp_actor::LaunchPreferences::default();
         let effort_key = match backend {
-            "agy" => None,
+            "agy" | "agy-acp" => None,
             "codex" => Some("codex_reasoning_effort".to_owned()),
             "claude" | "grok" | "deepseek" | "opencode" | "muse" => {
                 Some(format!("{backend}_effort"))

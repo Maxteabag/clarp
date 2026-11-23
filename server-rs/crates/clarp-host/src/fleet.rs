@@ -3066,7 +3066,7 @@ impl Fleet {
             "codex" => "Codex",
             "claude" => "Claude",
             "grok" => "Grok",
-            "agy" => "AGY",
+            "agy" | "agy-acp" => "AGY",
             "opencode" => "OpenCode",
             "deepseek" => "DeepSeek",
             other => other,
@@ -3442,7 +3442,7 @@ impl Fleet {
         effort: &str,
         file: &toml::Table,
     ) -> Result<(), NotMade> {
-        if backend == "agy"
+        if matches!(backend, "agy" | "agy-acp")
             && !effort.is_empty()
             && (!model.is_empty()
                 || crate::owner::text_at(file, &["agents", "agy_model"]).is_some())

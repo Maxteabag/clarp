@@ -53,11 +53,13 @@ pub const CLIENT_SETTABLE_ORIGINS: [&str; 8] = [
 ];
 /// The backends whose turns let their agent leave a note here: the Python Host's
 /// (`turn_identity.IDENTITY_BACKENDS`) and Codex, whose turns carry this Host's token too.
-const NOTE_BACKENDS: [&str; 6] = ["claude", "agy", "grok", "opencode", "deepseek", "codex"];
+const NOTE_BACKENDS: [&str; 7] = [
+    "claude", "agy", "agy-acp", "grok", "opencode", "deepseek", "codex",
+];
 /// The backends a record can name, and the one any other word means
 /// (`backend_catalogue.normalize`).
-const BACKENDS: [&str; 7] = [
-    "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+const BACKENDS: [&str; 8] = [
+    "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse",
 ];
 const DEFAULT_BACKEND: &str = "claude";
 
@@ -101,6 +103,7 @@ pub fn backend(raw: Option<&str>) -> &'static str {
     let word = python::strip(raw.unwrap_or("")).to_lowercase();
     let word = match word.as_str() {
         "antigravity" => "agy",
+        "antigravity-acp" | "agy_acp" => "agy-acp",
         "open-code" | "opencode-ai" => "opencode",
         "deep-seek" => "deepseek",
         "muse-code" | "musecode" => "muse",

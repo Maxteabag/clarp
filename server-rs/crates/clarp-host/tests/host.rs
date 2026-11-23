@@ -27,6 +27,8 @@ mod agent_portraits;
 mod agent_read_parity;
 #[path = "host/agent_transit.rs"]
 mod agent_transit;
+#[path = "host/agy_acp.rs"]
+mod agy_acp;
 #[path = "host/backend_auth.rs"]
 mod backend_auth;
 #[path = "host/body_text.rs"]
@@ -597,6 +599,11 @@ impl Drop for Host {
 /// The tools a Host runs, in the order it lists them: the order of the Python Host's registry.
 const TOOLS: [&str; 7] = [
     "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+];
+/// The tools an app's picker lists: those, and Antigravity over ACP beside Antigravity, which
+/// shares its program and its sign-in and so has no row of its own among the sign-ins.
+const PICKED: [&str; 8] = [
+    "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse",
 ];
 
 fn wait_for(what: &str, ready: impl FnMut() -> bool) {
@@ -15685,7 +15692,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         "{told}"
     );
     let tools: Vec<&String> = told["providers"].as_object().unwrap().keys().collect();
-    assert_eq!(tools, TOOLS, "the tools this Host runs, and no other");
+    assert_eq!(tools, PICKED, "the tools this Host runs, and no other");
     let ids = |row: &Value| -> Vec<String> {
         let models = row["models"].as_array().unwrap().iter();
         models
@@ -20303,7 +20310,7 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     let models = host.get("/agent-model-options");
     assert_eq!(models["schema_version"], 2);
     let tools: Vec<&String> = models["providers"].as_object().unwrap().keys().collect();
-    assert_eq!(tools, TOOLS);
+    assert_eq!(tools, PICKED);
     assert!(models["observed_at"].is_string() && models["freshness"].is_string());
 
     // On a Host that asks for no token, nobody is known to be a person.

@@ -55,7 +55,7 @@ pub fn context_tokens(backend: &str, model: &str) -> usize {
         "claude" => 200_000,
         "codex" => 272_000,
         "grok" => 256_000,
-        "agy" => 1_000_000,
+        "agy" | "agy-acp" => 1_000_000,
         _ => 128_000,
     }
 }

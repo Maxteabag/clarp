@@ -1909,6 +1909,7 @@ fn creation_backend(backend: &str) -> String {
     let backend = clarp_kernel::python::strip(backend).to_ascii_lowercase();
     match backend.as_str() {
         "antigravity" => "agy".to_string(),
+        "antigravity-acp" | "agy_acp" => "agy-acp".to_string(),
         "open-code" | "opencode-ai" => "opencode".to_string(),
         "deep-seek" => "deepseek".to_string(),
         "muse-code" | "musecode" => "muse".to_string(),

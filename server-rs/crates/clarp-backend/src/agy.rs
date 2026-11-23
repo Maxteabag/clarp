@@ -343,6 +343,14 @@ pub(crate) fn tool_name(raw: &str) -> String {
     }
 }
 
+/// The conversation's name of one of Antigravity's own tools, for a name that is one.
+pub(crate) fn known_tool(raw: &str) -> Option<&'static str> {
+    TOOL_NAMES
+        .iter()
+        .find(|(theirs, _)| *theirs == raw)
+        .map(|(_, ours)| *ours)
+}
+
 /// File arguments in the order agy checks them, for both live and saved tools.
 pub(crate) const FILE_ARGUMENTS: [&str; 6] = [
     "file_path",
@@ -381,7 +389,7 @@ pub(crate) fn printed_output(body: &str) -> &str {
 
 /// What a tool was given, under the names the conversation's tools have. Antigravity
 /// spells its own otherwise (`CommandLine`, `AbsolutePath`, `TargetFile`, `Query`).
-fn tool_input(name: &str, given: &Value) -> Value {
+pub(crate) fn tool_input(name: &str, given: &Value) -> Value {
     let none = Map::new();
     let given = given.as_object().unwrap_or(&none);
     let first = |keys: &[&str]| {
@@ -424,7 +432,7 @@ fn tool_input(name: &str, given: &Value) -> Value {
 /// command was made and done, how it ended, and after `Output:` what it printed), and the
 /// code the command ended with where that is said. As the Python Host reads it in
 /// Antigravity's own record of a conversation (`agy_transcript._settle`).
-fn came_back(output: &str) -> (String, Option<i64>) {
+pub(crate) fn came_back(output: &str) -> (String, Option<i64>) {
     let mut body = output;
     while let Some(rest) = body
         .strip_prefix("Created At:")

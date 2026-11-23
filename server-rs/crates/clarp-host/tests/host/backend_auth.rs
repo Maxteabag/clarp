@@ -740,6 +740,8 @@ fn account_metadata_names_the_shared_harness_and_installed_hotseat_providers() {
             "{tool}"
         );
     }
+    // Antigravity over ACP is listed for the picker only, and runs through Antigravity.
+    assert_eq!(catalogue["providers"]["agy-acp"]["runs_through"], json!("agy"));
     let legacy = host.get("/backend-auth");
     assert!(row(&legacy, "claude").get("runs_through").is_none());
     drop(host);
