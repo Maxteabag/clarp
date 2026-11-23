@@ -1458,6 +1458,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         pooled: None,
         terminals: 0,
         behind_terminal: None,
+        launches: launcher::Launches::default(),
         let_go_by_hand: false,
         queue_edit: None,
         takeover_wait: VecDeque::new(),
@@ -1529,6 +1530,9 @@ struct Worker {
     terminals: usize,
     /// The launch of an attempt that waits for those terminals to be closed.
     behind_terminal: Option<Box<ShimOrder>>,
+    /// The launches of this agent's turns whose shims are starting: a Stop of one of those
+    /// turns is carried out by its launch.
+    launches: launcher::Launches,
     /// Its user let the mailbox go a moment ago: the clients are told so in a word of its
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
@@ -4120,6 +4124,7 @@ impl Worker {
                 let versions = self.setup.versions.clone();
                 let runtime = self.setup.runtime.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
+                let starting = self.launches.begin(turn, &order.socket);
                 let claude_mcp = (self.setup.record.backend == "claude")
                     .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
                 std::thread::Builder::new()
@@ -4151,7 +4156,18 @@ impl Worker {
                                 if !launch_permitted(&tx, turn, attempt) {
                                     return;
                                 }
-                                match launcher.launch(&order) {
+                                match launcher.launch(&order, &starting) {
+                                    // Stopped before anything was started: the opening
+                                    // was never sent, and the turn is gone at once.
+                                    Launched::Stopped => {
+                                        let _ = opening_gate.ask(
+                                            Phase::ReleaseUnsent,
+                                            opening,
+                                            attempt,
+                                        );
+                                        tell(&tx, turn, attempt, Told::Gone);
+                                        return;
+                                    }
                                     Launched::NoShim(reason) => {
                                         if !opening_gate.ask(Phase::ReleaseUnsent, opening, attempt)
                                         {
@@ -4188,8 +4204,9 @@ impl Worker {
                             }
                         }
                         if launch_permitted(&tx, turn, attempt) {
-                            launcher
-                                .launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told));
+                            launcher.launch_and_follow(&order, &starting, &|told| {
+                                tell(&tx, turn, attempt, told)
+                            });
                         }
                     })
             }
@@ -4200,6 +4217,13 @@ impl Worker {
             } => std::thread::Builder::new()
                 .name(format!("turn-{}", turn.0))
                 .spawn(move || launcher::follow(&socket, &|told| tell(&tx, turn, attempt, told))),
+            // A turn whose shim is still starting is stopped by its launch: nothing is started,
+            // or the shim is told as soon as it is ready. Any other is told at its socket.
+            Action::Stop {
+                turn,
+                socket,
+                grace_ms,
+            } if self.launches.stop(turn, &socket, grace_ms) => return,
             Action::Stop {
                 socket, grace_ms, ..
             } => std::thread::Builder::new()
@@ -4253,6 +4277,7 @@ impl Worker {
         let pool = self.setup.pool().cloned();
         let (strict, servers) = (self.setup.mcp_strict, self.setup.record.mcp_servers.clone());
         let (turn, attempt) = (order.turn, order.attempt);
+        let starting = self.launches.begin(turn, &order.socket);
         std::thread::Builder::new()
             .name(format!("fork-{}", turn.0))
             .spawn(move || {
@@ -4260,7 +4285,8 @@ impl Worker {
                     pool.guard_turn(&mut order);
                 }
                 let _mcp = crate::mcp::configure(&mut order, strict, servers.as_deref());
-                launcher.launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told));
+                launcher
+                    .launch_and_follow(&order, &starting, &|told| tell(&tx, turn, attempt, told));
             })
     }
 

@@ -8,10 +8,12 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use clarp_actor::ShimOrder;
 use clarp_kernel::steering::REPLAY_USER_MESSAGES;
+use clarp_kernel::turn::TurnId;
 use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request};
 
 use crate::ids;
@@ -44,6 +46,8 @@ pub enum Launched {
     /// No shim has the turn.
     Failed(String),
     NoShim(String),
+    /// The turn was stopped before its shim was started: nothing was started for it.
+    Stopped,
 }
 
 /// What a turn's thread tells the agent.
@@ -190,9 +194,14 @@ impl Launcher {
     }
 
     /// Starts a shim and waits until it says the turn is its own and the tool is up, or ends.
-    pub fn launch(&self, order: &ShimOrder) -> Launched {
+    /// A Stop of the turn that came before the shim was started starts nothing; one that came
+    /// while it started is given to it as soon as it is ready, before anyone follows it.
+    pub fn launch(&self, order: &ShimOrder, starting: &Starting) -> Launched {
         if let Some(dir) = order.socket.parent() {
             let _ = std::fs::create_dir_all(dir);
+        }
+        if !starting.may_start() {
+            return Launched::Stopped;
         }
         let mut child = match self.command(order).spawn() {
             Ok(child) => child,
@@ -205,14 +214,12 @@ impl Launcher {
             let _ = BufReader::new(out).read_line(&mut said);
         }
         if said.trim() == "ready" {
-            // A Stop that came while the shim was starting found nothing listening. The shim
-            // listens now: it is told what it missed before anyone follows it.
-            if let Some(grace_ms) = early_stops::take(&order.socket) {
+            if let Some(grace_ms) = starting.started() {
                 ask_to_stop(&order.socket, grace_ms);
             }
             return Launched::Ready(child);
         }
-        match child.wait() {
+        let launched = match child.wait() {
             Ok(status) => match status.code() {
                 Some(code) if code == i32::from(EXIT_TURN_TAKEN) => Launched::TurnTaken,
                 Some(code) if code == i32::from(EXIT_NOT_STARTED) => Launched::SaidWhy,
@@ -221,12 +228,20 @@ impl Launcher {
                 )),
             },
             Err(error) => Launched::Failed(format!("the shim was lost: {error}")),
+        };
+        // A Stop asked of a launch that came to nothing goes with it: no later launch is
+        // stopped by it. The shim that has the turn already is told it, as its own would be.
+        if let Some(grace_ms) = starting.over()
+            && matches!(launched, Launched::TurnTaken)
+        {
+            ask_to_stop(&order.socket, grace_ms);
         }
+        launched
     }
 
     /// Starts a shim for a turn and follows it to its end. Blocks for as long as the turn runs.
-    pub fn launch_and_follow(&self, order: &ShimOrder, tell: &dyn Fn(Told)) {
-        match self.launch(order) {
+    pub fn launch_and_follow(&self, order: &ShimOrder, starting: &Starting, tell: &dyn Fn(Told)) {
+        match self.launch(order, starting) {
             Launched::Ready(mut child) => {
                 follow(&order.socket, tell);
                 let _ = child.wait();
@@ -234,6 +249,8 @@ impl Launcher {
             Launched::TurnTaken => follow(&order.socket, tell),
             Launched::SaidWhy => tell(Told::SpoolChanged),
             Launched::Failed(reason) | Launched::NoShim(reason) => tell(Told::Failed(reason)),
+            // Nothing was started: the turn is gone at once, as one held for an account is.
+            Launched::Stopped => tell(Told::Gone),
         }
     }
 }
@@ -287,58 +304,130 @@ pub(crate) fn takeover_request(socket: &Path, request: Request) -> Option<Reply>
     serde_json::from_str(&answer).ok()
 }
 
-/// Asks the shim at this socket to end its tool. A shim that is not listening yet may still be
-/// starting: the Stop is kept for it, and its launch tells it as soon as it says it is ready
-/// (issue 722: a Stop that came first was lost, and the turn it said it had ended ran on). A
-/// shim that has already gone has nothing to end, and what was kept for it is let go in time.
+/// Asks the shim at this socket to end its tool. A shim that is not there has nothing to end.
+/// A turn whose shim may still be starting is stopped through its launch instead
+/// ([`Launches::stop`]).
 pub fn stop(socket: &Path, grace_ms: u64) {
-    early_stops::keep(socket, grace_ms);
-    if ask_to_stop(socket, grace_ms) {
-        early_stops::take(socket);
-    }
+    ask_to_stop(socket, grace_ms);
 }
 
-/// Sends a Stop to the shim at this socket. Answers whether a shim was there to take it.
-fn ask_to_stop(socket: &Path, grace_ms: u64) -> bool {
+/// Sends a Stop to the shim at this socket, if one is there.
+fn ask_to_stop(socket: &Path, grace_ms: u64) {
     let Ok(mut shim) = UnixStream::connect(socket) else {
-        return false;
+        return;
     };
     let _ = shim.set_read_timeout(Some(STOP_TIMEOUT));
     let _ = shim.set_write_timeout(Some(STOP_TIMEOUT));
     let Ok(line) = serde_json::to_string(&Request::Stop { grace_ms }) else {
-        return true;
+        return;
     };
     if shim.write_all(format!("{line}\n").as_bytes()).is_ok() {
         let mut reply = String::new();
         let _ = BufReader::new(shim).read_line(&mut reply);
     }
-    true
 }
 
-/// The Stops that found no shim listening at their socket, by socket. A turn's socket names
-/// one attempt of it, and is never launched again once that attempt has ended.
-mod early_stops {
-    use std::path::{Path, PathBuf};
-    use std::sync::{Mutex, PoisonError};
-    use std::time::{Duration, Instant};
+/// Where one launch of a turn's shim stands, as far as a Stop of that turn is concerned. The
+/// agent hands it to the launch and keeps it in its [`Launches`] (issue 722: a Stop that came
+/// before the shim listened on its socket found nothing there and was lost, and the turn it
+/// had said it ended ran on).
+#[derive(Debug, Clone, Default)]
+pub struct Starting(Arc<Mutex<Start>>);
 
-    /// Longer than any shim takes to start; a Stop kept longer was for a shim already gone.
-    const KEPT: Duration = Duration::from_secs(600);
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Start {
+    /// The shim is not started yet, or not ready.
+    #[default]
+    Starting,
+    /// A Stop came meanwhile, with this grace.
+    StopAsked(u64),
+    /// The shim said it is ready: a Stop goes to its socket.
+    Started,
+    /// The launch came to nothing.
+    Over,
+}
 
-    static KEPT_STOPS: Mutex<Vec<(PathBuf, u64, Instant)>> = Mutex::new(Vec::new());
-
-    /// Keeps a Stop for the shim at this socket, in place of any kept before.
-    pub(super) fn keep(socket: &Path, grace_ms: u64) {
-        let mut kept = KEPT_STOPS.lock().unwrap_or_else(PoisonError::into_inner);
-        kept.retain(|(other, _, at)| other != socket && at.elapsed() < KEPT);
-        kept.push((socket.to_path_buf(), grace_ms, Instant::now()));
+impl Starting {
+    fn state(&self) -> MutexGuard<'_, Start> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The grace of the Stop kept for the shim at this socket, which is no longer kept.
-    pub(super) fn take(socket: &Path) -> Option<u64> {
-        let mut kept = KEPT_STOPS.lock().unwrap_or_else(PoisonError::into_inner);
-        let at = kept.iter().position(|(other, _, _)| other == socket)?;
-        Some(kept.swap_remove(at).1)
+    /// A Stop of this launch's turn. Answers `true` when the launch carries it out: it starts
+    /// nothing, or tells the shim as soon as it is ready, once however many Stops come.
+    /// `false`: the launch is over, and the Stop is for the shim's socket, if any.
+    pub fn stop(&self, grace_ms: u64) -> bool {
+        let mut state = self.state();
+        match *state {
+            Start::Starting => {
+                *state = Start::StopAsked(grace_ms);
+                true
+            }
+            Start::StopAsked(_) => true,
+            Start::Started | Start::Over => false,
+        }
+    }
+
+    /// Whether the shim may still be started. One stopped first never is.
+    fn may_start(&self) -> bool {
+        let mut state = self.state();
+        if matches!(*state, Start::StopAsked(_)) {
+            *state = Start::Over;
+        }
+        *state == Start::Starting
+    }
+
+    /// The shim is ready. Answers the grace of a Stop that came while it started.
+    fn started(&self) -> Option<u64> {
+        let mut state = self.state();
+        let asked = match *state {
+            Start::StopAsked(grace_ms) => Some(grace_ms),
+            _ => None,
+        };
+        *state = Start::Started;
+        asked
+    }
+
+    /// The launch came to nothing. Answers the grace of a Stop that came meanwhile, which
+    /// goes with it.
+    fn over(&self) -> Option<u64> {
+        let mut state = self.state();
+        let asked = match *state {
+            Start::StopAsked(grace_ms) => Some(grace_ms),
+            _ => None,
+        };
+        *state = Start::Over;
+        asked
+    }
+
+    /// Whether a launch still holds this and has not come to the end of starting.
+    fn under_way(&self) -> bool {
+        Arc::strong_count(&self.0) > 1
+            && matches!(*self.state(), Start::Starting | Start::StopAsked(_))
+    }
+}
+
+/// An agent's launches whose shims are starting, each by its turn and socket.
+#[derive(Debug, Default)]
+pub struct Launches(Vec<(TurnId, PathBuf, Starting)>);
+
+impl Launches {
+    /// A launch of this turn's shim at this socket begins: what it is to be handed.
+    pub fn begin(&mut self, turn: TurnId, socket: &Path) -> Starting {
+        self.0.retain(|(_, _, starting)| starting.under_way());
+        let starting = Starting::default();
+        self.0.push((turn, socket.to_path_buf(), starting.clone()));
+        starting
+    }
+
+    /// A Stop of this turn, whose shim listens at this socket. Answers `true` when a launch of
+    /// that very turn is starting the shim and carries the Stop out; `false` when the Stop is
+    /// for the socket.
+    pub fn stop(&mut self, turn: TurnId, socket: &Path, grace_ms: u64) -> bool {
+        self.0.retain(|(_, _, starting)| starting.under_way());
+        self.0
+            .iter()
+            .find(|(own, at, _)| *own == turn && at == socket)
+            .is_some_and(|(_, _, starting)| starting.stop(grace_ms))
     }
 }
 
@@ -580,6 +669,196 @@ mod tests {
             Launcher::by_name("direct", PathBuf::from("/nonexistent/clarp-shim")).unwrap();
         let mut order = order();
         order.socket = std::env::temp_dir().join("clarp-host-launcher-test/none.sock");
-        assert!(matches!(missing.launch(&order), Launched::NoShim(_)));
+        assert!(matches!(
+            missing.launch(&order, &Starting::default()),
+            Launched::NoShim(_)
+        ));
+    }
+
+    /// A stand-in for the shim, for the tests of a Stop that comes while a shim starts. It
+    /// notes in its place that it was started, takes `delay` seconds before it listens, and
+    /// either leaves with `exit` or says it is ready and notes every request it is given for
+    /// a second and a half after the last one.
+    struct StandIn {
+        dir: PathBuf,
+        launcher: Launcher,
+        order: ShimOrder,
+    }
+
+    impl StandIn {
+        fn new(name: &str, delay: f32, exit: Option<u8>) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("clarp-launcher-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let python = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+                .map(|path| path.join("python3"))
+                .find(|path| path.is_file())
+                .expect("python3 for the stand-in shim");
+            let leave = exit.map_or(String::new(), |code| format!("sys.exit({code})"));
+            let script = r#"#!PYTHON
+import os, socket, sys, time
+at = sys.argv[sys.argv.index("--socket") + 1]
+here = os.path.dirname(at)
+open(os.path.join(here, "started"), "a").write("started\n")
+time.sleep(DELAY)
+LEAVE
+server = socket.socket(socket.AF_UNIX)
+server.bind(at)
+server.listen(8)
+print("ready", flush=True)
+server.settimeout(1.5)
+try:
+    while True:
+        peer, _ = server.accept()
+        line = peer.makefile().readline()
+        open(os.path.join(here, "asked"), "a").write(line)
+        peer.sendall(b'{"ok": true}\n')
+        peer.close()
+except socket.timeout:
+    pass
+"#
+            .replace("PYTHON", &python.display().to_string())
+            .replace("DELAY", &delay.to_string())
+            .replace("LEAVE", &leave);
+            let shim = dir.join("stand-in");
+            std::fs::write(&shim, script).unwrap();
+            std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            let mut order = order();
+            order.socket = dir.join("turn.sock");
+            order.spool = dir.join("turn.jsonl");
+            order.stdin_file = dir.join("turn.stdin");
+            order.cwd = dir.clone();
+            Self {
+                launcher: Launcher::by_name("direct", shim).unwrap(),
+                dir,
+                order,
+            }
+        }
+
+        fn read(&self, name: &str) -> Vec<String> {
+            std::fs::read_to_string(self.dir.join(name))
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_string)
+                .collect()
+        }
+
+        /// Launches in the background, and waits until the stand-in has been started.
+        fn launch_in_background(&self, starting: &Starting) -> std::thread::JoinHandle<Launched> {
+            let (launcher, order, starting) =
+                (self.launcher.clone(), self.order.clone(), starting.clone());
+            let launch = std::thread::spawn(move || launcher.launch(&order, &starting));
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            while self.read("started").is_empty() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the stand-in never started"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            launch
+        }
+    }
+
+    impl Drop for StandIn {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn a_turn_stopped_before_its_shim_is_started_starts_nothing() {
+        let stand_in = StandIn::new("first", 0.0, None);
+        let starting = Starting::default();
+        assert!(starting.stop(1_000), "the launch carries the Stop out");
+        assert!(matches!(
+            stand_in.launcher.launch(&stand_in.order, &starting),
+            Launched::Stopped
+        ));
+        assert!(stand_in.read("started").is_empty(), "nothing was started");
+        let told = Mutex::new(Vec::new());
+        stand_in
+            .launcher
+            .launch_and_follow(&stand_in.order, &starting, &|what| {
+                told.lock().unwrap().push(what);
+            });
+        assert_eq!(
+            *told.lock().unwrap(),
+            vec![Told::Gone],
+            "the turn is gone at once"
+        );
+        assert!(stand_in.read("started").is_empty());
+        assert!(
+            !starting.stop(1_000),
+            "over: a later Stop is for the socket"
+        );
+    }
+
+    #[test]
+    fn stops_that_come_while_the_shim_starts_reach_it_once_when_it_is_ready() {
+        let stand_in = StandIn::new("starting", 2.0, None);
+        let starting = Starting::default();
+        let launch = stand_in.launch_in_background(&starting);
+        assert!(starting.stop(4_321));
+        assert!(starting.stop(1_234), "a second Stop is the first one's");
+        let Launched::Ready(mut child) = launch.join().unwrap() else {
+            panic!("the stand-in was to say it is ready");
+        };
+        assert!(child.wait().unwrap().success());
+        let asked = stand_in.read("asked");
+        assert_eq!(asked.len(), 1, "told once: {asked:?}");
+        let asked: serde_json::Value = serde_json::from_str(&asked[0]).unwrap();
+        assert_eq!(asked["grace_ms"], 4_321, "{asked}");
+        assert!(
+            !starting.stop(1_000),
+            "started: a later Stop is for the socket"
+        );
+    }
+
+    #[test]
+    fn a_launch_that_comes_to_nothing_drops_its_stop_and_no_later_launch_is_stopped_by_it() {
+        let failing = StandIn::new("failing", 2.0, Some(3));
+        let starting = Starting::default();
+        let launch = failing.launch_in_background(&starting);
+        assert!(starting.stop(1_000));
+        assert!(matches!(launch.join().unwrap(), Launched::Failed(_)));
+        assert!(!starting.stop(1_000), "the launch is over");
+        drop(starting);
+        // The next launch at the same socket begins anew, and nobody stops it.
+        let again = StandIn::new("after-failing", 0.0, None);
+        let mut launches = Launches::default();
+        let next = launches.begin(TurnId(7), &again.order.socket);
+        let Launched::Ready(mut child) = again.launcher.launch(&again.order, &next) else {
+            panic!("the stand-in was to say it is ready");
+        };
+        assert!(child.wait().unwrap().success());
+        assert!(again.read("asked").is_empty(), "nothing asked it to stop");
+    }
+
+    #[test]
+    fn a_stop_is_carried_out_by_the_launch_of_its_own_turn_only() {
+        let mut launches = Launches::default();
+        let socket = Path::new("/run/a1-7.sock");
+        let starting = launches.begin(TurnId(7), socket);
+        assert!(
+            !launches.stop(TurnId(8), socket, 1_000),
+            "another turn's Stop"
+        );
+        assert!(
+            !launches.stop(TurnId(7), Path::new("/run/a1-7-2.sock"), 1_000),
+            "another attempt's socket"
+        );
+        assert!(
+            starting.may_start(),
+            "neither touched this launch: it may still start"
+        );
+        assert!(launches.stop(TurnId(7), socket, 1_000));
+        assert!(!starting.may_start());
+        // A launch whose thread is gone is no longer looked at.
+        let gone = launches.begin(TurnId(9), socket);
+        drop(gone);
+        assert!(!launches.stop(TurnId(9), socket, 1_000));
     }
 }
