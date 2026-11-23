@@ -217,3 +217,48 @@ fn a_real_antigravity_turn_over_acp_answers_and_is_continued() {
         "the second turn continued the conversation: {replies:?}"
     );
 }
+
+#[test]
+fn an_agent_on_antigravity_over_acp_is_made_with_a_model_and_an_effort() {
+    let place = Place::new("agy-acp-effort");
+    let agy = place.root.join("agy");
+    program(&agy, FAKE);
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let ask =
+        json!({"name": "Thinker", "backend": "agy-acp", "model": "claude-b", "effort": "high"});
+    let (status, made) = host.ask("POST", "/agents", Some(&ask));
+    assert_eq!(status, 200, "{made}");
+    let session = made["session"].as_str().unwrap().to_string();
+    host.send(&session, "think hard", "m-1");
+    wait_for("the turn to finish", || host.state(&session) == "done");
+    let set: Vec<Value> = std::fs::read_to_string(place.root.join("acp.log"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|message| message["method"] == "session/set_config_option")
+        .map(|message| json!([message["params"]["configId"], message["params"]["value"]]))
+        .collect();
+    assert_eq!(
+        set,
+        [
+            json!(["model", "claude-b"]),
+            json!(["thought_level", "high"])
+        ]
+    );
+
+    // The `agy` card folds an effort into its model's name, and still refuses both apart.
+    let (status, refused) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({"name": "Folded", "backend": "agy", "model": "gemini-4-carbon-high", "effort": "high"})),
+    );
+    assert_eq!(status, 400, "{refused}");
+    assert!(
+        refused.to_string().contains("effort compatibility"),
+        "{refused}"
+    );
+}

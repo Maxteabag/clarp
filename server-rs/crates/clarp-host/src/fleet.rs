@@ -3442,7 +3442,9 @@ impl Fleet {
         effort: &str,
         file: &toml::Table,
     ) -> Result<(), NotMade> {
-        if matches!(backend, "agy" | "agy-acp")
+        // Antigravity over ACP sets its effort as the conversation's thinking level, apart from
+        // its model: only the `agy` card folds it into a model's name.
+        if backend == "agy"
             && !effort.is_empty()
             && (!model.is_empty()
                 || crate::owner::text_at(file, &["agents", "agy_model"]).is_some())
