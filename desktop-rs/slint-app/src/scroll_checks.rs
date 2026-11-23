@@ -85,7 +85,13 @@ pub(super) fn last_row_visible() -> (bool, String) {
     let id = last_id();
     match geo.find(&id) {
         Some((top, bottom)) => {
-            let ok = bottom <= geo.bottom + 1.0 && bottom > geo.top + 1.0 && (top >= geo.top - 1.0 || bottom - top > geo.bottom - geo.top);
+            // A row's accessible box leaves out its padding (half the
+            // message spacing above and below), which the gap under it at
+            // the end shows: a row that fits the view only without it is
+            // cut at its top by the rest of the padding, as it should be.
+            let padding = (geo.bottom - bottom).max(0.0);
+            let fits = bottom - top + 2.0 * padding <= geo.bottom - geo.top + 1.0;
+            let ok = bottom <= geo.bottom + 1.0 && bottom > geo.top + 1.0 && (top >= geo.top - 1.0 || !fits);
             (ok, format!("last row {id} at {top:.1}..{bottom:.1}, viewport {:.1}..{:.1} (gap {:.1}px; {})", geo.top, geo.bottom, geo.bottom - bottom, geo.drawn()))
         }
         None => (false, format!("last row {id} is not drawn (viewport {:.1}..{:.1}; {})", geo.top, geo.bottom, geo.drawn())),
