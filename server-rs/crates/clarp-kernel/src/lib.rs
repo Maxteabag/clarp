@@ -79,6 +79,7 @@ pub mod provider_tasks;
 pub mod push;
 pub mod python;
 pub mod quota;
+pub mod quota_near;
 pub mod recovery;
 pub mod remote_action;
 pub mod request_body;

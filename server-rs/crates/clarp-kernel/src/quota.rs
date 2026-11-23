@@ -969,6 +969,33 @@ impl Kept {
         }))
     }
 
+    /// How much of a window of the account the Host is on is used, in percent, as it is shown:
+    /// none for a window of which that was not said (a limit that a turn failed for).
+    pub fn used_of(&self, login: Option<Login<'_>>, now_ms: i64, kind: &str) -> Option<f64> {
+        let shown = self.shown(login, now_ms);
+        shown.iter().find(|one| one.kind == kind)?.window.used
+    }
+
+    /// Whether the account the Host is on stands near a limit of its usage, and what an
+    /// agent's row says of its tool then (`crate::quota_near`): of the five hours and of the
+    /// week as they are shown, the one nearest its end among those that stand near.
+    pub fn near(&self, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Option<Value> {
+        let shown = self.shown(login, now_ms);
+        let windows = shown
+            .iter()
+            .filter(|one| one.kind != "unknown")
+            .filter_map(|one| {
+                Some(crate::quota_near::Window {
+                    kind: one.kind,
+                    used: one.window.used?,
+                    resets_at: one.window.resets_at.as_deref(),
+                    fresh: one.fresh,
+                    observed_at_ms: one.window.observed_at_ms,
+                })
+            });
+        crate::quota_near::nearest(tool.provider, windows, now_ms)
+    }
+
     /// The tool's row (`_response_row`). It says when the record was seen and is fresh for
     /// an hour from then. (The Python Host's row keeps the time of the last whole reading of
     /// the account, and a Host that is given only records that are none says 1970 and stale.)

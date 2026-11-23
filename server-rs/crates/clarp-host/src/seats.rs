@@ -284,6 +284,10 @@ impl Desk {
         state.under_way = None;
         drop(state);
         let _ = done.send(Some(made));
+        if made {
+            // Whether another seat would take a turn of a tool near its limit.
+            crate::quota::seats_changed(app).await;
+        }
         if made { Outcome::Read } else { Outcome::Failed }
     }
 }
