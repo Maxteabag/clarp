@@ -270,15 +270,22 @@ pub fn tool_words(name: &str) -> &'static str {
 }
 
 /// The agent's own turn beside a fork's (`main_turn`), while it runs:
-/// "Also working with another agent · Running a command". Who it works
-/// with and the kind of its step, never its text. None when it is not
-/// running.
-pub fn main_turn_line(main: &Object) -> Option<String> {
+/// "Also working with Bella · Running a command" (iOS
+/// `secondaryLine`): who it works with (`name`, when the turn is between
+/// agents; else "another agent") and the kind of its step, never its
+/// text. None when it is not running.
+pub fn main_turn_line(main: &Object, name: &str) -> Option<String> {
     let text = |o: &Object, key: &str| o.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_ascii_lowercase();
     if text(main, "status") != "running" {
         return None;
     }
-    let mut line = if text(main, "audience") == "agents" { "Also working with another agent" } else { "Also working" }.to_owned();
+    let mut line = if text(main, "audience") != "agents" {
+        "Also working".to_owned()
+    } else if name.trim().is_empty() {
+        "Also working with another agent".to_owned()
+    } else {
+        format!("Also working with {}", name.trim())
+    };
     let activity = main.get("activity").and_then(Value::as_object);
     let state = activity.map(|a| text(a, "state")).unwrap_or_default();
     let tool = activity.and_then(|a| a.get("tool")).and_then(Value::as_object).map(|t| text(t, "name")).unwrap_or_default();

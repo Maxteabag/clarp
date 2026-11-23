@@ -97,10 +97,11 @@ fn the_running_box_says_what_runs() {
 #[test]
 fn the_main_turn_line_names_who_and_the_kind_of_step_never_its_text() {
     let main = object(json!({"turn_id": "t-m", "audience": "agents", "status": "running", "activity": {"state": "tool", "tool": {"name": "Bash"}}}));
-    assert_eq!(chat_view::main_turn_line(&main).as_deref(), Some("Also working with another agent · Running a command"));
+    assert_eq!(chat_view::main_turn_line(&main, "").as_deref(), Some("Also working with another agent · Running a command"));
+    assert_eq!(chat_view::main_turn_line(&main, " Bella ").as_deref(), Some("Also working with Bella · Running a command"), "named as iOS names it");
     let own = object(json!({"audience": "user", "status": "running", "activity": {"state": "thinking"}}));
-    assert_eq!(chat_view::main_turn_line(&own).as_deref(), Some("Also working · Thinking"));
-    assert_eq!(chat_view::main_turn_line(&object(json!({"status": "completed"}))), None);
+    assert_eq!(chat_view::main_turn_line(&own, "Bella").as_deref(), Some("Also working · Thinking"), "a turn for the user names no one");
+    assert_eq!(chat_view::main_turn_line(&object(json!({"status": "completed"})), ""), None);
     assert_eq!(chat_view::second_line(1, Some("Also working")), "1 step failed · Also working");
     assert_eq!(chat_view::second_line(2, None), "2 steps failed");
     assert_eq!(chat_view::second_line(0, None), "");
