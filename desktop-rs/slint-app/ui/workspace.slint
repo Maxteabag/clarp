@@ -474,7 +474,6 @@ export component Pane inherits Rectangle {
             marked: root.pane.marked;
             flight-id: root.flight-id;
             flight-reveal: root.copying ? (root.settled ? 1 : 0) : root.fade-t;
-            flight-pinning: root.copying || root.boxing;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
