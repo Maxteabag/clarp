@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use clarp_kernel::conversation::Entry;
 use clarp_kernel::failures::{AUTH, INTERRUPTED, USAGE_LIMIT};
 use clarp_kernel::turn::{COMPACTION, Origin, Outcome};
 use jiff::tz::TimeZone;
@@ -58,6 +59,16 @@ pub(crate) struct Ended {
     pub at: i64,
     #[serde(flatten)]
     pub how: How,
+}
+
+/// Whether any of these rows is a reply with words, or a note, of this turn: in any audience,
+/// so a coordination reply hidden from the user's view counts.
+pub(crate) fn said<'a>(rows: impl IntoIterator<Item = &'a Entry>, turn: u64) -> bool {
+    rows.into_iter().any(|entry| match entry {
+        Entry::Reply(reply) => reply.turn == turn && !reply.text.trim().is_empty(),
+        Entry::Note(note) => note.turn == turn,
+        _ => false,
+    })
 }
 
 /// How a settled turn counts: `None` for one that says nothing of its backend (a Stop, a
@@ -283,6 +294,46 @@ mod tests {
             panic!("failed");
         };
         assert_eq!(reason.chars().count(), REASON_CHARS);
+    }
+
+    #[test]
+    fn a_hidden_coordination_reply_is_an_answer_and_only_a_turn_with_no_reply_or_note_is_empty() {
+        use clarp_kernel::conversation::{Message, Note, Reply};
+        let reply = |turn, text: &str, origin| {
+            Entry::Reply(Reply {
+                id: format!("r-{turn}"),
+                turn,
+                text: text.into(),
+                origin,
+                ..Reply::default()
+            })
+        };
+        let from_an_agent = Origin::Agent {
+            agent_id: "maximus".into(),
+        };
+        // A reply to another agent, hidden from the user's view, was still said.
+        assert!(said([&reply(7, "done", from_an_agent.clone())], 7));
+        assert!(said(
+            [
+                &reply(6, "earlier turn", Origin::User),
+                &Entry::Note(Note {
+                    id: "n".into(),
+                    turn: 7,
+                    text: "note".into(),
+                    trace_id: None,
+                }),
+            ],
+            7
+        ));
+        let message = Entry::Message(Message::default());
+        assert!(!said(
+            [&message, &reply(6, "earlier turn", Origin::User)],
+            7
+        ));
+        assert!(
+            !said([&reply(7, "  \n", from_an_agent)], 7),
+            "blank is no reply"
+        );
     }
 
     #[test]

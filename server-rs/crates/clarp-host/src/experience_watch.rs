@@ -6,7 +6,7 @@ mod checks;
 mod release;
 mod settings;
 
-pub(crate) use backends::{Ended, judged};
+pub(crate) use backends::{Ended, judged, said};
 pub(crate) use checks::AgentFacts;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

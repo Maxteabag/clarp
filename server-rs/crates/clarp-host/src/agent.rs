@@ -4730,17 +4730,25 @@ impl Worker {
         if turn_ended {
             self.ended = self.last_end();
             // How the turn ended, for whether its backend works (the experience watcher's
-            // `backend_failures`): a done turn answered when the row that closed it is a reply
-            // with words in it, or it left a note.
+            // `backend_failures`): a done turn answered when it left a note or any row of it,
+            // in any audience, is a reply with words; a coordination reply hidden from the user
+            // still answered. What cannot be read is never counted against the backend.
             if let Some(last) = ended
                 && !self.setup.record.is_test
                 && let Some(end) = self.ended.as_ref().filter(|end| end.turn == last.id.0)
             {
+                use crate::experience_watch::said;
                 let answered = end.note_count > 0
-                    || matches!(
-                        actor.row(&end.closes),
-                        Ok(Some(row)) if matches!(&row.entry, Entry::Reply(reply) if !reply.text.trim().is_empty())
-                    );
+                    || match actor.row(&end.closes) {
+                        Ok(Some(closing)) if said([&closing.entry], end.turn) => true,
+                        Ok(Some(_)) => match actor.before(&end.closes, 200) {
+                            Ok(Some(page)) => {
+                                said(page.entries.iter().map(|row| &row.entry), end.turn)
+                            }
+                            Ok(None) | Err(_) => true,
+                        },
+                        Ok(None) | Err(_) => true,
+                    };
                 if let Some(how) =
                     crate::experience_watch::judged(&last.outcome, &last.origin, answered)
                 {

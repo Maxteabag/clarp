@@ -103,8 +103,9 @@ list of them; each gets one copy.
 `backend_failures` tells whether each backend's turns on this Host work, from real
 use (no test turns). An agent's turn that ends is counted against its backend when
 it failed (any failure but a usage limit, which the Hotseat handles, or a Stop),
-when it ended done with nothing reaching the chat (no reply with words and no note;
-a compaction is exempt), or when it failed on the backend's sign-in. A user's Stop,
+when it ended done with no reply with words and no note recorded for it in any
+audience (a coordination reply hidden from the user's view is a reply; a compaction
+is exempt; a turn whose rows cannot be read is not counted), or when it failed on the backend's sign-in. A user's Stop,
 a cut-off and a replaced or withdrawn turn are not counted at all. Test agents are
 left out. The finding, one per backend, opens when two or more of the backend's
 turns of the last hour went wrong, or when every turn of the hour (one at least)
