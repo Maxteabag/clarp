@@ -1297,10 +1297,14 @@ export component Transcript inherits FocusScope {
     // streams, the list re-estimating its rows, the view itself growing or
     // shrinking (the composer unfolding, the working footer coming and
     // going). The pin Timer below puts it right only a frame later, and
-    // that frame, drawn short of the end, is the jitter.
-    changed at-end => { root.keep-end(); }
+    // that frame, drawn short of the end, is the jitter. The end is exact:
+    // past it (blank below the last row, which the list leaves when a chat
+    // opens on rows shorter than it estimated) counts as at the end for the
+    // reader, but is pinned back too.
+    property <length> end-gap: list.content-y - Math.min(0px, list.visible-height - list.content-height);
+    changed end-gap => { root.keep-end(); }
     function keep-end() {
-        if (!root.follow || root.at-end) {
+        if (!root.follow || root.dragging || Math.abs(root.end-gap / 1px) <= 0.5) {
             return;
         }
         // Follow new messages off: a new message in the same chat leaves
