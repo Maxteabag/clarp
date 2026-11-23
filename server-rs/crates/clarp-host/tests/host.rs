@@ -29760,6 +29760,16 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
                 .iter()
                 .any(|r| r["text"] == "All green." && r["turn"]["status"] == "completed")
         );
+        // The user's turn shows its reply on the agent's row too (issue 725). A turn another
+        // agent started is hidden there on purpose for a backend that can leave a note.
+        let shown = host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["session"] == agent)
+            .unwrap()
+            .clone();
+        assert_eq!(shown["last_message"], "All green.", "{shown}");
         assert!(
             turns
                 .iter()
