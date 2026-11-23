@@ -36,6 +36,8 @@ pub(super) struct State {
     codex: bool,
     /// A Codex lane runs the turn and takes steered words until the turn ends.
     lane_open: bool,
+    /// How the Codex turn ended, which is how the words read into it ended.
+    codex_end: Option<&'static str>,
 }
 
 pub(super) struct Sharing {
@@ -126,8 +128,13 @@ impl State {
                 match event["type"].as_str() {
                     Some("steer.open") => self.lane_open = true,
                     Some("steer.read") => return Some(event),
-                    Some("turn.completed" | "turn.failed") => {
+                    Some(end @ ("turn.completed" | "turn.failed")) => {
                         self.lane_open = false;
+                        self.codex_end = Some(if end == "turn.completed" {
+                            "completed"
+                        } else {
+                            "failed"
+                        });
                         return Some(event);
                     }
                     _ => {}
@@ -303,8 +310,11 @@ impl State {
             .iter()
             .filter_map(|(&turn, follow)| follow.stage.read_at().map(|at| (turn, at)))
             .collect();
+        // A Codex turn says how it ended; a process that ended without a result did not
+        // answer what it read.
+        let status = self.codex_end.unwrap_or("interrupted");
         for (turn, read_at) in read {
-            self.finish(batch, turn, read_at, "interrupted", now_ms)?;
+            self.finish(batch, turn, read_at, status, now_ms)?;
         }
         Ok(())
     }
