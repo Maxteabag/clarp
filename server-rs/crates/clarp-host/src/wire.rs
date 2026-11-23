@@ -796,6 +796,7 @@ pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
     item.insert("id".into(), json!(message.client_id));
     item.insert("enqueued_at".into(), json!(message.accepted_at_ms));
     item.insert("synthesize_audio".into(), json!(message.speak));
+    item.insert("read_together".into(), json!(message.read_together));
     item.extend(queue_provenance(
         &message.origin,
         message.sender_agent_id.as_deref(),
@@ -863,6 +864,19 @@ pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<
         }
         QueueUpdate::Mailbox => {}
     }
+    event
+}
+
+/// A message joined the queue: as [`queue_updated`] tells it, and whether it is read together
+/// with the user's other waiting messages once the turn that runs is over (contract 169).
+pub fn queue_joined(
+    record: &AgentRecord,
+    status: &Status,
+    item: QueueIdentity<'_>,
+    read_together: bool,
+) -> Value {
+    let mut event = queue_updated(record, status, QueueUpdate::Joined(item));
+    event["read_together"] = json!(read_together);
     event
 }
 
@@ -2153,6 +2167,7 @@ mod tests {
                 name: "automation".into(),
             },
             sender_agent_id: None,
+            read_together: false,
         };
         let directory = Directory::default();
         let wake = queue_item(
@@ -2200,6 +2215,7 @@ mod tests {
                 name: origin.into(),
             },
             sender_agent_id,
+            read_together: false,
         };
         for row in fixture["rows"].as_array().unwrap() {
             let origin = row["origin"].as_str().unwrap_or_default();

@@ -73,6 +73,11 @@ owner turned the `codex_chat_lane` setting on (off by default; see
 it waits and runs as the agent's next turn. Either way, send it once: the queue
 shows it until it is read.
 
+Messages from agents keep a turn each. The user's own messages that waited while you were
+busy (because your tool could not take them into the running turn) do not: on a Rust Host from contract 169 (feature `queued_read_together`) they reach you
+together in one prompt that says so, numbered `[1]`, `[2]`, … in the order sent. Read all of
+them and answer them as one; the last may change or take back the first.
+
 A helper agent (one created with `--parent`) reports to its parent the same
 way. That message moves the helper to `reported`; a message from the parent
 back to it moves it to `running` again. See `clarp-sub-agents`.

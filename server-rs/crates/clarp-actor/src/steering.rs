@@ -550,6 +550,7 @@ impl Actor {
             into: live.turn,
             uuid,
             recovery,
+            together: false,
         };
         let socket = self.profile.socket_path_of(live.turn, live.attempt);
         let mut batch = self.recorder.batch();

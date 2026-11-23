@@ -931,7 +931,7 @@ Event types and payloads:
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `agent-transit` | `agent_id`, `session`, `transit_id`, `backend`, `model`, `phase` ∈ reading, translating, registering, switching, done, failed, `error` (text on failed, else null), `previous_backend`, `previous_model`, `carried` (on done; its `summary` since contract 161) | Rust feature `agent_backend_transit` (contract 158): how a move of the agent to another backend goes. Show progress, then the result; see [Moving an agent to another backend](#moving-an-agent-to-another-backend). |
-| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text`, `origin`, `sender` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. An event that names an item (edited, deleted, a retired goal wake) also carries its `origin` and `sender` as `GET /turn-queue` does (R182). |
+| `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text`, `origin`, `sender`, `read_together` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. An event that names an item (edited, deleted, a retired goal wake) also carries its `origin` and `sender` as `GET /turn-queue` does (R182). `read_together` (Rust Host contract 169, feature `queued_read_together`), on the event a message joined the queue with: as on its `GET /turn-queue` item. |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 108). |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
@@ -1123,6 +1123,24 @@ again. `GET /turn-queue` lists `items` in the order the Host takes them, so a
 user's item that arrives moves the others one place down; `revision` and the
 `queue-updated` event's `queue_revision` change with it. Other agents' messages
 still run: the user's items in front of them are only the few the user sent.
+
+**The user's waiting messages are read together** (Rust Host contract 169, feature
+`queued_read_together`). When a turn starts for a message of the user's (origin `user` or
+`oracle`, said to the agent, not another agent's words) and more such messages wait directly
+behind it, the turn takes all of them: its tool is given one prompt that says the user sent
+these while the agent was busy and holds each message in the order sent, numbered `[1]`, `[2]`,
+and so on, with nothing else added. Each of them leaves the queue as a started item
+(`queue-updated` with `queue_started: true` and its `client_msg_id`) and is a `/log` row of
+its own, in order after the first and before the answer, with its original `sent_at`. The
+answer is one turn: its rows and its end are on the first message's turn. The run stops at the
+first item that is not such a message (an agent's message, one left for later, one a Stop
+holds, one in a call), which keeps its own turn. A retry of the turn gives the tool the same
+prompt again. While a turn runs that cannot take such a message now (the tool cannot be steered,
+as on Antigravity, or on Codex without its chat lane, or a steer was not possible), its `GET /turn-queue` item carries
+`read_together: true`, as does the `queue-updated` event it joined the queue with: draw it as
+queued, to be read with the user's other waiting messages when the turn is over. The field is
+`false` on every other item and absent on other events; an older Host sends neither, and takes
+one item per turn.
 
 **An agent that moved to another Host** (feature `agent_moved`). When another Host (the
 Rust Host) has imported an agent and taken up its native session, it marks the agent moved:

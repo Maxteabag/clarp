@@ -4930,7 +4930,7 @@ impl Worker {
                 sender_name: name(sender),
             };
             hub.publish(
-                wire::queue_updated(&record, &status, wire::QueueUpdate::Joined(item)),
+                wire::queue_joined(&record, &status, item, waiting.read_together),
                 now,
             );
         }

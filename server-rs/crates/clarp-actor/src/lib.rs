@@ -74,6 +74,7 @@ pub mod provider_jobs;
 mod steering;
 pub mod takeover;
 pub mod teams;
+mod together;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
@@ -447,6 +448,9 @@ pub struct Waiting {
     pub status: QueueItemStatus,
     pub origin: Origin,
     pub sender_agent_id: Option<String>,
+    /// The user's own message waits while a turn runs that cannot take it, and goes to the
+    /// tool with the user's other waiting messages, as one turn, when that turn is over.
+    pub read_together: bool,
 }
 
 impl Waiting {
@@ -472,6 +476,7 @@ impl Waiting {
                 .sender
                 .as_ref()
                 .map(|sender| sender.agent_id.clone()),
+            read_together: false,
         }
     }
 }
@@ -2601,7 +2606,15 @@ impl Actor {
                     }
                     continue;
                 }
-                let Some(end) = ended(item)? else {
+                // A message taken into another turn's prompt is answered by that turn.
+                let end = match ended(item)? {
+                    Some(end) => Some(end),
+                    None => match self.gathered_into(item)? {
+                        Some(into) => self.turn_end(into)?,
+                        None => None,
+                    },
+                };
+                let Some(end) = end else {
                     return Ok(None);
                 };
                 if end.status != "completed" || end.ended_at_ms < since_ms {
@@ -2613,6 +2626,29 @@ impl Actor {
                 return Ok(asked.zip(answer.filter(said)));
             }
         }
+    }
+
+    /// The turn a message's row was taken into with the message that turn began for: the
+    /// reservation (`Join` with `together`) is the second event before its row, written in the
+    /// same append. None for every other row.
+    fn gathered_into(&self, row: &Item) -> Result<Option<u64>, ActorError> {
+        let Some(turn) = row.turn else {
+            return Ok(None);
+        };
+        let receipts =
+            self.recorder
+                .log()
+                .read_before(row.seq, Kinds::only(kind::AGENT_EVENT), 2)?;
+        Ok(receipts.iter().find_map(|receipt| {
+            match serde_json::from_slice::<AgentEvent>(&receipt.body) {
+                Ok(AgentEvent::Joined { turn: joined, join })
+                    if joined.0 == turn && join.together =>
+                {
+                    Some(join.into.0)
+                }
+                _ => None,
+            }
+        }))
     }
 
     fn turn_end(&self, turn: u64) -> Result<Option<TurnEnd>, ActorError> {
@@ -2699,13 +2735,20 @@ impl Actor {
             QueueItemStatus::Queued
         };
         let message = self.message_at(message_seq)?;
-        Ok(Waiting::from_message(
-            &message,
-            turn,
-            accepted_at_ms,
-            admission,
-            status,
-        ))
+        // What a turn that runs now does not take goes with the user's other waiting messages
+        // once it is over (`together`): as the start of the next turn will take them.
+        let read_together = status == QueueItemStatus::Queued
+            && agent.live().is_some()
+            && agent
+                .waiting()
+                .find(|queued| queued.id == turn)
+                .is_some_and(|queued| agent.goes_together(queued))
+            && message.call.is_none()
+            && self.mark(turn.0)?.is_none();
+        Ok(Waiting {
+            read_together,
+            ..Waiting::from_message(&message, turn, accepted_at_ms, admission, status)
+        })
     }
 
     /// The sender stored on the message that opened the live turn.
@@ -4828,10 +4871,33 @@ impl Actor {
             self.recorder.agent().live(),
             Some(Turn::Starting(starting)) if starting.resuming && backend_session.is_some()
         );
+        // The user's messages that waited directly behind this one go to the tool with it, as
+        // one turn. A later attempt is given the same ones again: the kernel keeps them.
+        let gather = attempt <= 1
+            && origin_is_user
+            && takeover.is_none()
+            && message.call.is_none()
+            && !self.fork_runs()
+            && self.mark(turn.0)?.is_none();
+        let together = if bare || opening.is_some() {
+            Vec::new()
+        } else {
+            self.together(turn, gather, out, now_ms)?
+        };
+        let speak = message.speak || together.iter().any(|one| one.speak);
+        let unheard = message.unheard || together.iter().any(|one| one.unheard);
+        let text = if together.is_empty() {
+            message.text.clone()
+        } else {
+            let texts: Vec<&str> = std::iter::once(message.text.as_str())
+                .chain(together.iter().map(|one| one.text.as_str()))
+                .collect();
+            told::together(&texts)
+        };
         let prompt = match recovering.filter(|_| !bare) {
-            Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
-            None if resuming && !bare => recovery::continue_prompt(&message.text),
-            None => message.text,
+            Some(relapsed) => recovery::resume_prompt(self.backend.id(), &text, relapsed),
+            None if resuming && !bare => recovery::continue_prompt(&text),
+            None => text,
         };
         let prompt = if (lost || carried_from.is_some()) && !bare {
             let label = |id: &str| {
@@ -4883,7 +4949,7 @@ impl Actor {
         };
         // A user who began to speak before hearing the last reply: the tool is told so before
         // the words. The conversation keeps the words as they were said.
-        let prompt = if message.unheard && !bare {
+        let prompt = if unheard && !bare {
             told::unheard(&prompt)
         } else {
             prompt
@@ -4964,7 +5030,7 @@ impl Actor {
             // How to speak is told to a turn whose answer is read aloud, and to no other.
             told: told.map(|told| told::Turn {
                 persona: told.persona.clone(),
-                spoken: message.speak.then_some(told.sound),
+                spoken: speak.then_some(told.sound),
                 call: message.call.clone(),
             }),
         });
@@ -5039,7 +5105,7 @@ impl Actor {
             last_row,
             said,
             said_worked,
-            speak: message.speak,
+            speak,
             client_id,
             message_id: message.id,
             trace_id: message.trace_id,

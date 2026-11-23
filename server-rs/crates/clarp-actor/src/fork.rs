@@ -444,6 +444,7 @@ impl Actor {
             into: main,
             uuid,
             recovery: None,
+            together: false,
         };
         record.asked.push(Asked {
             turn: turn.0,

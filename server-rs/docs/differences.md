@@ -580,6 +580,23 @@ the daily schedule.
   `no-cache` with an ETag). No row gains a field: an app adds `px` to the address it has. The
   Python Host has none of it: it ignores `px`, and its own pictures stay `no-store`.
 
+- **The user's waiting messages are one turn (Rust contract 169, feature
+  `queued_read_together`).** The owner, on 23 Nov 2026, of an agent that answered his waiting
+  messages one turn at a time: it should see the whole picture at once. When a turn starts for
+  a message of the user's and more of the user's own messages (said to the agent, not left for
+  later, not another agent's words, not held by a Stop, not in a call) wait directly behind
+  it, the Rust Host takes them into that turn in the write after its start: the reservation a
+  steered message has (`Join`, marked `together`, and its read at once), so each leaves the
+  queue as started and is its own row, in order, before the one answer on the first message's
+  turn. The tool is given one prompt that says the user sent these while it was busy and holds
+  each in order, numbered `[1]`, `[2]`, and so on; every backend. A later attempt of the turn
+  (a failure that passes, a wait for an account, a restart before the launch) is given the same
+  prompt, rebuilt from the agent's log. While a turn runs that cannot take such a message now
+  (no steering on the backend, or a steer that was not possible), its queue item and the
+  `queue-updated` event it joined with say `read_together: true`. The Python Host starts one
+  queued message per turn, so its agent answers the first without the others and each of the
+  rest in a turn of its own; it has no `read_together`.
+
 - **Agent activity feature advertisement (feature 156).** The Rust Host
   advertises `agent_state` to clients that gate on it. Both Hosts already
   send `agent-state` and `agent-activity` in the base event stream.
