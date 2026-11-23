@@ -256,6 +256,17 @@ impl WorkingWith {
 /// What a turn that waits a moment for its next attempt shows.
 const RECONNECTING: &str = "Reconnecting… Your message is saved.";
 
+/// What a turn shows that waits because its provider turned an attempt away for a moment.
+const PROVIDER_BUSY: &str = "The provider is busy. Trying again… Your message is saved.";
+
+/// What a turn that waits for its next attempt says of it: the provider's moment, or a line.
+fn retry_said(live: &LiveStatus) -> &'static str {
+    match live.parked.as_ref() {
+        Some(parked) if parked.kind == failures::TRANSIENT => PROVIDER_BUSY,
+        _ => RECONNECTING,
+    }
+}
+
 /// The attempt a live turn waits a moment for, how long it waits, and of how many tries:
 /// when it waits for one. A turn whose launch was refused before its tool was given anything
 /// has the tries of R121 (its own, and eight of one refusal) or R193 (ten queued handoff
@@ -270,7 +281,7 @@ fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
         recovery::MAX_ATTEMPTS
     };
     match parked.wait {
-        Wait::Retry { until_ms } => Some((
+        Wait::Retry { until_ms, .. } => Some((
             // Waits for an account are no tries against a bad line.
             live.handoff_retry
                 .map_or(parked.attempts - parked.account.count + 1, |failures| {
@@ -421,7 +432,7 @@ pub fn state(
                 "of": of,
                 "origin": live.origin.name(),
                 "reconnect": next,
-                "summary": RECONNECTING,
+                "summary": retry_said(live),
             })
         }
         // It waits for an account: it keeps its place, and says what it waits for.
@@ -571,7 +582,7 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
                 "thinking",
                 "thinking",
                 "running",
-                RECONNECTING,
+                running.map_or(RECONNECTING, retry_said),
             )
         }
         (AgentStateKind::Thinking, _) if responding => (

@@ -2295,7 +2295,10 @@ mod tests {
     fn dropped(turn: u64) -> Command {
         Command::TurnParked {
             turn: TurnId(turn),
-            wait: Wait::Retry { until_ms: 5_000 },
+            wait: Wait::Retry {
+                until_ms: 5_000,
+                resume: false,
+            },
             kind: "connection".to_string(),
             reason: "read ECONNRESET".to_string(),
         }

@@ -3,14 +3,19 @@
 //! The fixtures are two turns recorded from Claude Code 2.1.321 on 15 Nov 2026, with the same
 //! flags the Host starts it with: one that only answers, one that calls a tool and then
 //! answers; and, recorded on 17 Nov 2026, a conversation made shorter (`/compact` for a
-//! message). Everything about the machine and the account was taken out; the events, their
-//! order and their fields are as they came. When a newer Claude Code changes its stream, record
+//! message). Recorded on 23 Nov 2026: a turn whose thinking was asked for in words
+//! (`--thinking-display summarized`), and three turns against a stand-in for the provider's
+//! service, whose events are Claude Code's own: requests held back for a moment, a used-up
+//! window, and an overload. Everything about the machine and the account was taken out; the
+//! events, their order and their fields are as they came. When a newer Claude Code changes its stream, record
 //! it again, add it beside these, and keep the old ones: agents run on old versions for a while.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_backend::claude::ClaudeInterpreter;
 use clarp_backend::{Interpreter, Signal};
 use clarp_kernel::compaction::Boundary;
+use clarp_kernel::failures;
+use clarp_kernel::live::Glimpse;
 use clarp_kernel::conversation::ToolStatus;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -293,4 +298,72 @@ fn a_real_turn_says_which_model_ran_it_and_what_it_cost() {
         ),
         "the result's usage is passed on"
     );
+}
+
+/// The words a recorded turn that failed ends on.
+fn failed_with(fixture: &str) -> String {
+    match read(fixture).last() {
+        Some(Signal::Ended(RunOutcome::Failed { reason })) => reason.clone(),
+        other => panic!("{fixture}: the turn fails: {other:?}"),
+    }
+}
+
+#[test]
+fn requests_held_back_for_a_moment_are_a_busy_provider_and_no_account_is_out() {
+    // Claude Code tried twice, was refused with no window named, and gave up in its own words.
+    let reason = failed_with("claude-2.1.321-held-back.jsonl");
+    assert!(
+        reason.starts_with(
+            "API Error: Server is temporarily limiting requests (not your usage limit)"
+        ),
+        "{reason}"
+    );
+    assert_eq!(failures::classify_error(&reason), failures::TRANSIENT);
+    assert!(failures::provider_busy(&reason));
+}
+
+#[test]
+fn a_used_up_window_is_a_usage_limit() {
+    let reason = failed_with("claude-2.1.321-window-spent.jsonl");
+    assert_eq!(reason, clarp_backend::claude::USAGE_LIMIT);
+    assert_eq!(failures::classify_error(&reason), failures::USAGE_LIMIT);
+}
+
+#[test]
+fn an_overloaded_provider_is_a_busy_one() {
+    let reason = failed_with("claude-2.1.321-overloaded.jsonl");
+    assert!(reason.starts_with("API Error: 529 Overloaded"), "{reason}");
+    assert_eq!(failures::classify_error(&reason), failures::TRANSIENT);
+    assert!(failures::provider_busy(&reason));
+}
+
+#[test]
+fn thinking_in_words_is_the_turns_reasoning_and_never_its_reply() {
+    let fixture = "claude-2.1.321-thinking.jsonl";
+    let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
+    let recorded = std::fs::read_to_string(&path).unwrap();
+    // What the model thought, as its pieces came.
+    let whole: String = recorded
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event["event"]["delta"]["type"] == "thinking_delta")
+        .filter_map(|event| event["event"]["delta"]["thinking"].as_str().map(str::to_string))
+        .collect();
+    assert!(whole.starts_with("I'm checking that 40 is the answer"), "{whole}");
+    let signals = read(fixture);
+    let shown = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Glimpse(Glimpse::Reasoning { text, .. }) => Some(text.as_str()),
+            _ => None,
+        })
+        .last();
+    assert_eq!(shown, Some(whole.as_str()), "the summary is shown whole, as reasoning");
+    assert!(
+        !signals
+            .iter()
+            .any(|signal| matches!(signal, Signal::Reply(reply) if reply.text.contains("40 is the answer"))),
+        "what the model thought is no part of its answer"
+    );
+    assert_eq!(signals.last(), Some(&Signal::Ended(RunOutcome::Completed)));
 }

@@ -4,11 +4,13 @@
 //! dropped or a tool that stalled passes by itself: the turn waits a moment (the Python Host's
 //! rule, `turn_retry._handle_failure`: three attempts in all, a second after the first, two
 //! after the second). A provider that turned an attempt away for a moment (overloaded, or
-//! holding requests back) passes too, more slowly: a turn that has done nothing yet waits half
-//! a minute, then a minute, and is asked the same again. An account that is out passes when
-//! another account is put in its place, or when its limit is over: the turn waits for that,
-//! when this Host is told to. Everything else ends the turn, and the user is told why
-//! (`failures::told`).
+//! holding requests back) passes too, more slowly: the turn waits half a minute, then a
+//! minute, on the same account. One that has done nothing yet is asked the same again; one
+//! that had begun its work is told that it is taken up again and goes on from where it
+//! stands ([`continue_prompt`]). A call is not kept waiting so long: its turn ends at once.
+//! An account that is out passes when another account is put in its place, or when its limit
+//! is over: the turn waits for that, when this Host is told to. Everything else ends the turn,
+//! and the user is told why (`failures::told`).
 
 use crate::failures;
 
@@ -90,14 +92,20 @@ pub struct Failed<'a> {
     /// The turn has put nothing into the conversation and begun no tool, in any attempt:
     /// asking the same again repeats nothing of it.
     pub nothing_done: bool,
+    /// The tool's words say that its provider turned the attempt away for a moment
+    /// (`failures::provider_busy`): a failure of the transient kind that is worth a wait.
+    pub busy: bool,
+    /// The turn is a call's: someone listens, and is not kept in silence for a minute.
+    pub in_call: bool,
     pub now_ms: i64,
 }
 
 /// What follows a failed attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Next {
-    /// The same again, after so long.
-    Retry { after_ms: i64 },
+    /// The same again, after so long. `resume`: the turn had begun its work, and the next
+    /// attempt goes on from where it stands instead of being given the message anew.
+    Retry { after_ms: i64, resume: bool },
     /// The turn waits for an account, and is tried at this time at the latest.
     Account { until_ms: i64 },
     /// The turn failed on its account, on a Host that runs the selector itself: the pool of
@@ -117,13 +125,17 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
         failures::CONNECTION | failures::TIMEOUT if (1..MAX_ATTEMPTS).contains(&tries) => {
             Next::Retry {
                 after_ms: BACKOFF_BASE_MS << (tries - 1),
+                resume: false,
             }
         }
-        // Once the turn has done something, the same asked again could do it twice: it ends,
-        // and says why. No other account helps with a provider that is busy.
-        failures::TRANSIENT if failed.nothing_done && (1..MAX_ATTEMPTS).contains(&tries) => {
+        // No other account helps with a provider that is busy. A turn that had begun its
+        // work is not asked the same again, which could do it twice: it is told to go on.
+        failures::TRANSIENT
+            if failed.busy && !failed.in_call && (1..MAX_ATTEMPTS).contains(&tries) =>
+        {
             Next::Retry {
                 after_ms: PROVIDER_BACKOFF_MS << (tries - 1),
+                resume: !failed.nothing_done,
             }
         }
         // Also a plan that does not offer the model: another account's plan may, and the
@@ -173,6 +185,20 @@ pub fn resume_prompt(backend: &str, request: &str, relapsed: bool) -> String {
     format!("<clarp-account-recovery>\n{told}\n</clarp-account-recovery>")
 }
 
+/// What the tool is told when a turn that had begun its work is taken up again after its
+/// provider turned an attempt away for a moment: it goes on from where the conversation
+/// stands, in an envelope its transcript reader knows, as [`resume_prompt`]'s.
+pub fn continue_prompt(request: &str) -> String {
+    format!(
+        "<clarp-turn-resumed>\nThe provider held requests back for a moment and this turn \
+         stopped part way; Clarp has taken it up again on the same account. Continue the \
+         unfinished request from the existing conversation. Check the results of interrupted \
+         operations before retrying them; do not repeat work or external actions already \
+         completed. If the request is already complete, report that and stop.\n\n\
+         Original request:\n{request}\n</clarp-turn-resumed>"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,27 +210,49 @@ mod tests {
             account_waits: 0,
             account_wait_since_ms: None,
             nothing_done: false,
+            busy: false,
+            in_call: false,
             now_ms: 10_000,
         }
     }
 
     #[test]
-    fn a_busy_provider_is_asked_again_only_by_a_turn_that_has_done_nothing() {
+    fn a_busy_provider_is_waited_for_on_the_same_account_and_the_work_goes_on() {
         for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
-            let untouched = |attempt| Failed {
-                nothing_done: true,
+            let busy = |attempt, nothing_done| Failed {
+                busy: true,
+                nothing_done,
                 ..failed(failures::TRANSIENT, attempt)
             };
-            assert_eq!(
-                after_failed_attempt(untouched(1), accounts),
-                Next::Retry { after_ms: 30_000 }
-            );
-            assert_eq!(
-                after_failed_attempt(untouched(2), accounts),
-                Next::Retry { after_ms: 60_000 }
-            );
-            assert_eq!(after_failed_attempt(untouched(3), accounts), Next::Fail);
-            // Something of the turn was said or begun: asked again, it could be done twice.
+            for nothing_done in [true, false] {
+                // Nothing of the turn happened: asked the same again. Something did: it goes on.
+                let resume = !nothing_done;
+                assert_eq!(
+                    after_failed_attempt(busy(1, nothing_done), accounts),
+                    Next::Retry {
+                        after_ms: 30_000,
+                        resume
+                    }
+                );
+                assert_eq!(
+                    after_failed_attempt(busy(2, nothing_done), accounts),
+                    Next::Retry {
+                        after_ms: 60_000,
+                        resume
+                    }
+                );
+                assert_eq!(
+                    after_failed_attempt(busy(3, nothing_done), accounts),
+                    Next::Fail
+                );
+            }
+            // A call's listener is not kept in silence; and a failure whose words do not
+            // say the provider is busy ends as before.
+            let calling = Failed {
+                in_call: true,
+                ..busy(1, true)
+            };
+            assert_eq!(after_failed_attempt(calling, accounts), Next::Fail);
             assert_eq!(
                 after_failed_attempt(failed(failures::TRANSIENT, 1), accounts),
                 Next::Fail
@@ -213,16 +261,30 @@ mod tests {
     }
 
     #[test]
+    fn a_turn_taken_up_after_a_busy_provider_goes_on_from_where_it_stands() {
+        let told = continue_prompt("count the files");
+        assert!(told.starts_with("<clarp-turn-resumed>\n"));
+        assert!(told.ends_with("\nOriginal request:\ncount the files\n</clarp-turn-resumed>"));
+        assert!(told.contains("do not repeat work or external actions already completed"));
+    }
+
+    #[test]
     fn a_failure_that_passes_is_tried_three_times_in_all() {
         for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
             for kind in [failures::CONNECTION, failures::TIMEOUT] {
                 assert_eq!(
                     after_failed_attempt(failed(kind, 1), accounts),
-                    Next::Retry { after_ms: 1_000 }
+                    Next::Retry {
+                        after_ms: 1_000,
+                        resume: false
+                    }
                 );
                 assert_eq!(
                     after_failed_attempt(failed(kind, 2), accounts),
-                    Next::Retry { after_ms: 2_000 }
+                    Next::Retry {
+                        after_ms: 2_000,
+                        resume: false
+                    }
                 );
                 assert_eq!(after_failed_attempt(failed(kind, 3), accounts), Next::Fail);
                 assert_eq!(after_failed_attempt(failed(kind, 4), accounts), Next::Fail);
@@ -279,6 +341,8 @@ mod tests {
                     account_waits: waits,
                     account_wait_since_ms: (waits > 0).then_some(since),
                     nothing_done: false,
+                    busy: false,
+                    in_call: false,
                     now_ms: now,
                 },
                 Accounts::Follow,
@@ -346,11 +410,16 @@ mod tests {
             account_waits: 2,
             account_wait_since_ms: Some(1_000),
             nothing_done: false,
+            busy: false,
+            in_call: false,
             now_ms: 500_000,
         };
         assert_eq!(
             after_failed_attempt(after_two_waits, Accounts::Follow),
-            Next::Retry { after_ms: 1_000 }
+            Next::Retry {
+                        after_ms: 1_000,
+                        resume: false
+                    }
         );
     }
 

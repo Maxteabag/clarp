@@ -29,7 +29,7 @@ pub use rollout::{codex, codex_cell};
 
 /// What the tool writes into a conversation by itself, as a message of the user's: it
 /// begins with one of these marks.
-const WRITTEN_BY_THE_TOOL: [&str; 7] = [
+const WRITTEN_BY_THE_TOOL: [&str; 8] = [
     "task-notification",
     "system-reminder",
     "local-command-stdout",
@@ -37,6 +37,7 @@ const WRITTEN_BY_THE_TOOL: [&str; 7] = [
     "command-message",
     "command-args",
     "clarp-account-recovery",
+    "clarp-turn-resumed",
 ];
 
 /// Whether a text is something the tool wrote by itself: a mark of its own at its

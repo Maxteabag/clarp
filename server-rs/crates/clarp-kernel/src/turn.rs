@@ -322,8 +322,15 @@ pub enum TurnEvent {
 #[serde(tag = "for", rename_all = "kebab-case")]
 pub enum Wait {
     /// A moment, and then the same again: the attempt failed in a way that passes (a
-    /// connection that dropped, a tool that stalled). The next begins at `until_ms`.
-    Retry { until_ms: i64 },
+    /// connection that dropped, a tool that stalled, a provider that turned it away for a
+    /// moment). The next begins at `until_ms`. `resume`: the turn had begun its work, so the
+    /// next attempt tells the tool that the turn is taken up again, and does not give it the
+    /// message anew (absent in what an older Host wrote: it gave the message anew).
+    Retry {
+        until_ms: i64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        resume: bool,
+    },
     /// An account that serves the turn: the attempt failed on its account (a limit that was
     /// reached, a sign-in that ran out). The turn is tried when the tool's login has changed,
     /// and at `until_ms` at the latest, on whatever account is there then.
@@ -334,7 +341,7 @@ impl Wait {
     /// When the wait is over at the latest.
     pub fn until_ms(&self) -> i64 {
         match self {
-            Self::Retry { until_ms } | Self::Account { until_ms } => *until_ms,
+            Self::Retry { until_ms, .. } | Self::Account { until_ms } => *until_ms,
         }
     }
 
@@ -385,6 +392,9 @@ pub struct Starting {
     /// The turn waited for an account before this attempt: the tool is told that it is
     /// taken up again, not given the message as if for the first time.
     pub recovering: bool,
+    /// The attempt before had begun the turn's work when its provider turned it away: the
+    /// tool is told that the turn is taken up again, not given the message anew.
+    pub resuming: bool,
     /// An earlier attempt reached its tool.
     pub ran_before: bool,
     /// When the turn last changed: its start, or when this attempt began after a wait.
@@ -531,6 +541,7 @@ impl Queued {
             tool_count: 0,
             account: AccountWaits::default(),
             recovering: false,
+            resuming: false,
             ran_before: false,
             moved_at_ms: at_ms,
         };
@@ -746,6 +757,7 @@ impl Parked {
             tool_count: self.tool_count,
             account: self.account,
             recovering: self.wait.is_for_an_account(),
+            resuming: matches!(self.wait, Wait::Retry { resume: true, .. }),
             ran_before: self.ran,
             moved_at_ms: at_ms,
         };
@@ -973,6 +985,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_retry_wait_an_older_host_wrote_gives_the_message_anew() {
+        let older: Wait = serde_json::from_str(r#"{"for":"retry","until_ms":5}"#).unwrap();
+        assert_eq!(
+            older,
+            Wait::Retry {
+                until_ms: 5,
+                resume: false
+            }
+        );
+        // Written as before where nothing is new, so an older Host reads it as it was.
+        assert_eq!(
+            serde_json::to_string(&older).unwrap(),
+            r#"{"for":"retry","until_ms":5}"#
+        );
+        let goes_on = Wait::Retry {
+            until_ms: 5,
+            resume: true,
+        };
+        let written = serde_json::to_string(&goes_on).unwrap();
+        assert_eq!(written, r#"{"for":"retry","until_ms":5,"resume":true}"#);
+        assert_eq!(serde_json::from_str::<Wait>(&written).unwrap(), goes_on);
+    }
+
+    #[test]
+    fn a_turn_whose_work_had_begun_is_taken_up_and_not_given_its_message_anew() {
+        for resume in [true, false] {
+            let (queued, _) = accepted();
+            let (starting, _) = queued.start(1_100);
+            let (running, _) = starting.running(1_200);
+            let (parked, _) = running.park(
+                Wait::Retry {
+                    until_ms: 31_300,
+                    resume,
+                },
+                crate::failures::TRANSIENT.to_owned(),
+                "API Error: 529 Overloaded".into(),
+                1_300,
+            );
+            let (next, _) = parked.retry(31_300);
+            assert_eq!((next.resuming, next.recovering), (resume, false));
+            assert_eq!(next.attempt, 2);
+        }
+    }
+
+    #[test]
     fn a_goals_wake_is_filed_as_the_hosts_own_whatever_its_origin() {
         assert_eq!(
             message_automation_kind("automation", "u-task-goal-0123"),
@@ -1008,7 +1065,10 @@ mod tests {
             let (starting, started) = queued.start(1_100);
             let (running, moved) = starting.running(1_200);
             let (parked, parked_event) = running.park(
-                Wait::Retry { until_ms: 2_000 },
+                Wait::Retry {
+                    until_ms: 2_000,
+                    resume: false,
+                },
                 first_failure.to_owned(),
                 "first attempt".into(),
                 1_300,
@@ -1054,7 +1114,10 @@ mod tests {
         );
         // The connection drops: the turn is not over.
         let (parked, dropped) = running.park(
-            Wait::Retry { until_ms: 2_300 },
+            Wait::Retry {
+                until_ms: 2_300,
+                resume: false,
+            },
             "connection".to_string(),
             "read ECONNRESET".to_string(),
             1_300,

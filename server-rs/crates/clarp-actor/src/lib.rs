@@ -706,6 +706,8 @@ struct LiveTurn {
     for_account: bool,
     /// How many tools the attempt has begun, for what is shown of it beside a fork's turn.
     tool_count: u32,
+    /// The turn is a call's (its opening, or a message spoken in a call): someone listens.
+    in_call: bool,
 }
 
 impl LiveTurn {
@@ -1582,6 +1584,7 @@ impl Actor {
         if let Some(Turn::Parked(parked)) = actor.recorder.agent().live() {
             let (turn, message_seq, attempt) = (parked.id, parked.message_seq, parked.attempts);
             let message = actor.message_at(message_seq)?;
+            let in_call = opening_message(&message) || message.call.is_some();
             actor.live = Some(LiveTurn {
                 steering: steering::State::default(),
                 opening: opening_message(&message),
@@ -1622,6 +1625,7 @@ impl Actor {
                 attempt,
                 for_account: false,
                 tool_count: 0,
+                in_call,
             });
         }
         // A compaction whose turn ended and whose outcome an actor before this one did not
@@ -4339,7 +4343,10 @@ impl Actor {
                 AfterRefusal::Wait { until_ms } => {
                     let parked = Command::TurnParked {
                         turn,
-                        wait: Wait::Retry { until_ms },
+                        wait: Wait::Retry {
+                            until_ms,
+                            resume: false,
+                        },
                         kind: failures::NOT_STARTED.to_string(),
                         reason: reason.to_string(),
                     };
@@ -4754,8 +4761,15 @@ impl Actor {
         let bare = message.origin == Origin::NativeGoal
             || matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION);
         let preferences = self.launch_preferences(&message);
+        // A turn whose provider turned an attempt away after its work had begun goes on from
+        // where it stands; one that has done nothing is given its message anew.
+        let resuming = matches!(
+            self.recorder.agent().live(),
+            Some(Turn::Starting(starting)) if starting.resuming && backend_session.is_some()
+        );
         let prompt = match recovering.filter(|_| !bare) {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
+            None if resuming && !bare => recovery::continue_prompt(&message.text),
             None => message.text,
         };
         let prompt = if (lost || carried_from.is_some()) && !bare {
@@ -4941,6 +4955,7 @@ impl Actor {
             ),
             None => (message.id.clone(), None, None, None, None),
         };
+        let in_call = opening.is_some() || message.call.is_some();
         self.live = Some(LiveTurn {
             steering: steering::State::for_prompt((self.backend.id() == "claude").then(|| {
                 clarp_kernel::takeover::attempt_prompt_uuid(
@@ -4988,6 +5003,7 @@ impl Actor {
             attempt,
             for_account: false,
             tool_count: 0,
+            in_call,
         });
         // Never two sessions answer the user at once: a turn of the user's waits while the
         // agent's fork answers, and begins once the fork's turn is over, told what it said.
@@ -5239,6 +5255,7 @@ impl Actor {
         }
         let speak = message.speak || steering.joined_speech;
         let input_skipped = steering.input_skipped;
+        let in_call = opening_message(&message) || message.call.is_some();
         self.live = Some(LiveTurn {
             steering,
             opening: opening_message(&message),
@@ -5281,6 +5298,7 @@ impl Actor {
             attempt,
             for_account: false,
             tool_count: 0,
+            in_call,
         });
         out.changed.conversation = true;
         out.actions.push(Action::Follow {
@@ -5701,7 +5719,10 @@ impl Actor {
                                 AfterRefusal::Wait { until_ms } => {
                                     let park = Command::TurnParked {
                                         turn,
-                                        wait: Wait::Retry { until_ms },
+                                        wait: Wait::Retry {
+                                            until_ms,
+                                            resume: false,
+                                        },
                                         kind: failures::NOT_STARTED.into(),
                                         reason: reason.clone(),
                                     };
@@ -5837,10 +5858,16 @@ impl Actor {
                                 let waits = batch.agent().live().map(Turn::account_waits);
                                 let waits = waits.unwrap_or_default();
                                 // Its last row is still its message only while no attempt
-                                // has said or begun anything.
+                                // has said or begun anything; and the turn's own record
+                                // counts the tools of every attempt, across a restart too.
+                                let tools_before = match batch.agent().live() {
+                                    Some(Turn::Running(running)) => running.tool_count,
+                                    _ => 0,
+                                };
                                 let nothing_done =
                                     !closed_by_marker(&live.last_row, &live.message_id)
                                         && live.tool_count == 0
+                                        && tools_before == 0
                                         && live.said.is_empty()
                                         && live.steering.separate.is_none();
                                 let wait = match recovery::after_failed_attempt(
@@ -5850,13 +5877,18 @@ impl Actor {
                                         account_waits: waits.count,
                                         account_wait_since_ms: waits.since_ms,
                                         nothing_done,
+                                        busy: failures::provider_busy(reason),
+                                        in_call: live.in_call,
                                         now_ms: t,
                                     },
                                     accounts,
                                 ) {
-                                    recovery::Next::Retry { after_ms } => Some(Wait::Retry {
-                                        until_ms: t + after_ms,
-                                    }),
+                                    recovery::Next::Retry { after_ms, resume } => {
+                                        Some(Wait::Retry {
+                                            until_ms: t + after_ms,
+                                            resume,
+                                        })
+                                    }
                                     recovery::Next::Account { until_ms } => {
                                         Some(Wait::Account { until_ms })
                                     }

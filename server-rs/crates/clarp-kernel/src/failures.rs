@@ -158,10 +158,26 @@ static OPENCODE_FREE_RE: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"free tier can only be used from within opencode"));
 static PROVIDER_DOWN_RE: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"upstream request failed|endpoint is unavailable"));
+// A provider that turned a request away for a moment, in its own words or by its status.
+// Narrower than the transient kind, which also takes any number of the 500s in a text.
+static PROVIDER_BUSY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(concat!(
+        r"overloaded|rate[ _]?limit|too many requests|\b429\b|\b529\b|",
+        r"temporarily (?:limiting|unavailable)|service unavailable|bad gateway|",
+        r"gateway time-?out|internal server error|api error:? 5\d\d\b",
+    ))
+});
 
 /// What a tool said, without what it says a failure is not: a denial is no reading of it.
 fn affirmed(message: &str) -> std::borrow::Cow<'_, str> {
     DENIED_USAGE_LIMIT_RE.replace_all(message, " ")
+}
+
+/// Whether a failure's words say that its provider turned the request away for a moment:
+/// overloaded, holding requests back, or answering with a status of its own that passes.
+/// Only such a transient failure is worth waiting for and trying again.
+pub fn provider_busy(message: &str) -> bool {
+    PROVIDER_BUSY_RE.is_match(message)
 }
 
 /// The kind of a failure, from what a tool said of it.
@@ -692,6 +708,13 @@ mod tests {
             TRANSIENT
         );
         assert!(!usage_limit_resets(held));
+        assert!(provider_busy(held));
+        assert!(provider_busy(
+            "API Error: 529 Overloaded. This is a server-side issue, usually temporary"
+        ));
+        // A number of the 500s in other words is transient, and says nothing of the provider.
+        assert_eq!(classify_error("failed at cli.js:512"), TRANSIENT);
+        assert!(!provider_busy("failed at cli.js:512"));
         // A limit that is one is read as one, as before.
         assert_eq!(
             classify_error("You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)"),

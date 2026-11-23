@@ -1201,6 +1201,7 @@ mod tests {
             turn: TurnId(turn),
             wait: Wait::Retry {
                 until_ms: now_ms + 1_000,
+                resume: false,
             },
             kind: "connection".to_string(),
             reason: "read ECONNRESET".to_string(),
@@ -2013,7 +2014,10 @@ mod tests {
             .handle(
                 Command::TurnParked {
                     turn: TurnId(1),
-                    wait: Wait::Retry { until_ms: 5_000 },
+                    wait: Wait::Retry {
+                        until_ms: 5_000,
+                        resume: false,
+                    },
                     kind: "connection".to_string(),
                     reason: "read ECONNRESET".to_string(),
                 },
