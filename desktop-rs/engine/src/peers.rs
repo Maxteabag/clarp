@@ -283,7 +283,7 @@ impl Engine {
 
     /// How many Hosts this desktop has saved: the primary and every other
     /// saved Host, one per server id (paired or not, as on iOS).
-    pub fn saved_hosts(&self) -> usize {
+    pub fn saved_host_count(&self) -> usize {
         let mut seen: Vec<String> = vec![self.base_url.clone()];
         if !self.server_id.is_empty() {
             seen.push(self.server_id.clone());
@@ -306,7 +306,7 @@ impl Engine {
     /// this desktop has saved more than one Host (#651; iOS counts saved
     /// Hosts, AllHostsReading.swift).
     pub fn host_badges(&self) -> bool {
-        !self.peer && self.host_badges_setting() && self.saved_hosts() > 1
+        !self.peer && self.host_badges_setting() && self.saved_host_count() > 1
     }
 
     /// The first launch of a build with the option switches "Chats from all
@@ -320,7 +320,7 @@ impl Engine {
         if clarp_core::hosts::list(&self.settings).is_empty() {
             return;
         }
-        if self.saved_hosts() > 1 && !self.all_hosts() {
+        if self.saved_host_count() > 1 && !self.all_hosts() {
             self.settings.set(all_hosts::SETTING, true);
             self.changes.push(Change::Preferences);
         }
