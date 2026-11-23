@@ -156,6 +156,14 @@ printf '%s\n' \
 read -r listed
 case "$listed" in (*'"method":"thread/turns/list"'*) ;; (*) exit 1 ;; esac
 printf '%s\n' '{"id":6,"result":{"data":[{"id":"t1","items":[{"type":"userMessage","clientId":"s-2"},{"type":"userMessage","clientId":"never-sent"}]}]}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":7,"result":{}}'
+# The lane leaves in order after its idle time: it asks once more first.
+read -r leaving
+case "$leaving" in (*'"method":"thread/backgroundTerminals/clean"'*) ;; (*) exit 1 ;; esac
+touch "$(dirname "$0")/cleaned-on-leaving"
+printf '%s\n' '{"id":8,"result":{}}'
 read -r end || :
 "#;
     let mut lane = Lane::start("codex-chat-lane", fake, |root| {
@@ -231,6 +239,10 @@ read -r end || :
     // thread only after Codex is gone.
     assert!(lane.ended(Duration::from_secs(10)).success());
     assert!(held.try_lock_shared().is_ok());
+    assert!(
+        lane.root.join("cleaned-on-leaving").exists(),
+        "a lane that leaves in order asks Codex to end its terminals first"
+    );
 }
 
 #[test]
@@ -333,9 +345,11 @@ case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*'"threadId":"ol
 printf '%s\n' '{"id":7,"result":{}}'
 read -r end || :
 "#;
-    let lane = Lane::start("codex-chat-dropped", fake, |root| {
-        json!({"threadId": "old-thread", "cwd": root})
-    });
+    let lane = Lane::start(
+        "codex-chat-dropped",
+        fake,
+        |root| json!({"threadId": "old-thread", "cwd": root}),
+    );
     let claim = lane.claim();
     let prompt = Request::Prompt {
         claim: claim.clone(),
@@ -353,7 +367,10 @@ read -r end || :
         },
     );
     assert_eq!(steered["ok"], true, "Codex accepted the words");
-    let stopped = ask(&claim.socket, &clarp_shim::Request::Stop { grace_ms: 5_000 });
+    let stopped = ask(
+        &claim.socket,
+        &clarp_shim::Request::Stop { grace_ms: 5_000 },
+    );
     assert_eq!(stopped["ok"], true);
 
     let (output, exit) = finished(&claim.spool);
@@ -406,11 +423,13 @@ fi
     );
     assert_eq!(refused["ok"], false, "{refused}");
     assert_eq!(refused["code"], clarp_shim::codex_lane::LOGIN_CHANGED);
-    assert!(lane.ended(Duration::from_secs(10)).success(), "the lane leaves");
+    assert!(
+        lane.ended(Duration::from_secs(10)).success(),
+        "the lane leaves"
+    );
     assert!(!claim.spool.exists(), "nothing of the attempt was taken");
     assert!(!lane.root.join("reached-codex").exists());
 }
-
 
 #[test]
 fn a_stop_ends_the_turns_long_command_and_the_lane_answers_the_next_turn() {
@@ -449,9 +468,11 @@ printf '%s\n' \
     '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t2","status":"completed"}}}'
 read -r end || :
 "#;
-    let lane = Lane::start("codex-chat-command", fake, |root| {
-        json!({"threadId": "old-thread", "cwd": root})
-    });
+    let lane = Lane::start(
+        "codex-chat-command",
+        fake,
+        |root| json!({"threadId": "old-thread", "cwd": root}),
+    );
     let claim = lane.claim();
     let prompt = |claim: &Claim, text: &str| {
         ask(
@@ -514,7 +535,6 @@ read -r end || :
     assert_eq!(exit, (Some(0), None));
 }
 
-
 #[test]
 fn a_completed_turns_commands_end_with_it_and_the_next_turn_runs_on_the_lane() {
     // What Codex keeps for a turn (its background terminals) ends with the turn, however it
@@ -553,9 +573,11 @@ touch "$here/second-clean"
 printf '%s\n' '{"id":6,"result":{}}'
 read -r end || :
 "#;
-    let lane = Lane::start("codex-chat-turn-end", fake, |root| {
-        json!({"threadId": "old-thread", "cwd": root})
-    });
+    let lane = Lane::start(
+        "codex-chat-turn-end",
+        fake,
+        |root| json!({"threadId": "old-thread", "cwd": root}),
+    );
     let prompt = |claim: &Claim, text: &str| {
         ask(
             &lane.socket,
@@ -585,7 +607,10 @@ read -r end || :
     };
     let until = Instant::now() + Duration::from_secs(5);
     while !gone() {
-        assert!(Instant::now() < until, "the completed turn's command lived on");
+        assert!(
+            Instant::now() < until,
+            "the completed turn's command lived on"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 
