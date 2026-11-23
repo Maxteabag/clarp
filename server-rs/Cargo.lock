@@ -193,6 +193,7 @@ dependencies = [
  "clarp-kernel",
  "clarp-speech",
  "clarp-spool",
+ "clarp-tool-args",
  "jiff",
  "regex",
  "rusqlite",
