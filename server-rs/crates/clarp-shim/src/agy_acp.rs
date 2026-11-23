@@ -87,10 +87,17 @@ impl Handler for Record {
         emit(message)
     }
 
-    fn request(&mut self, asked: &str, params: &Value) -> io::Result<std::result::Result<Value, (i64, String)>> {
+    fn request(
+        &mut self,
+        asked: &str,
+        params: &Value,
+    ) -> io::Result<std::result::Result<Value, (i64, String)>> {
         if asked != method::REQUEST_PERMISSION {
             // No files and no terminal are offered: agy uses its own tools.
-            return Ok(Err((code::METHOD_NOT_FOUND, "Method not found".to_string())));
+            return Ok(Err((
+                code::METHOD_NOT_FOUND,
+                "Method not found".to_string(),
+            )));
         }
         let options = schema::permission_options(params);
         let chosen = schema::chosen(&options);
@@ -131,7 +138,11 @@ impl Turn {
     }
 
     /// The prompt, answered; a Stop cancels it and waits a bounded time for the answer.
-    fn prompt(&mut self, session: &str, blocks: Vec<Value>) -> Result<std::result::Result<Answer, Ended>> {
+    fn prompt(
+        &mut self,
+        session: &str,
+        blocks: Vec<Value>,
+    ) -> Result<std::result::Result<Answer, Ended>> {
         let id = self.client.send_request(
             method::SESSION_PROMPT,
             json!({"sessionId": session, "prompt": blocks}),
@@ -139,11 +150,17 @@ impl Turn {
         self.record.prompting = true;
         let silence = Duration::from_secs(shared::SILENCE_MOST_SECS);
         loop {
-            match self.client.wait(id, silence, self.stopping, &mut self.record)? {
+            match self
+                .client
+                .wait(id, silence, self.stopping, &mut self.record)?
+            {
                 Err(Ended::Interrupted) => {
                     if self.stopping.is_none() {
-                        self.stopping = Some(Instant::now() + Duration::from_millis(shared::CANCEL_WAIT_MS));
-                        let _ = self.client.notify(method::SESSION_CANCEL, json!({"sessionId": session}));
+                        self.stopping =
+                            Some(Instant::now() + Duration::from_millis(shared::CANCEL_WAIT_MS));
+                        let _ = self
+                            .client
+                            .notify(method::SESSION_CANCEL, json!({"sessionId": session}));
                         emit(&said("cancel", json!({"session": session})))?;
                     }
                 }
@@ -245,7 +262,12 @@ fn notice(text: String) -> io::Result<()> {
 
 /// Chooses the model and the effort, where the order names them and Antigravity offers
 /// them. What is not offered is said, and the turn goes on with what Antigravity chose.
-fn configure(turn: &mut Turn, session: &str, order: &Order, opened: &Value) -> Result<std::result::Result<(), Ended>> {
+fn configure(
+    turn: &mut Turn,
+    session: &str,
+    order: &Order,
+    opened: &Value,
+) -> Result<std::result::Result<(), Ended>> {
     let mut options = opened
         .get("configOptions")
         .filter(|options| options.is_array())
@@ -253,13 +275,19 @@ fn configure(turn: &mut Turn, session: &str, order: &Order, opened: &Value) -> R
         .unwrap_or(Value::Null);
     let models = &opened["models"];
     let mut set_model = None;
-    for (category, wanted) in [("model", order.model.trim()), ("thought_level", order.effort.trim())] {
+    for (category, wanted) in [
+        ("model", order.model.trim()),
+        ("thought_level", order.effort.trim()),
+    ] {
         if wanted.is_empty() {
             continue;
         }
         if let Some(found) = schema::option(&options, category).cloned() {
             let Some(value) = schema::matching(&found, wanted) else {
-                let names: Vec<String> = schema::offered(&found).into_iter().map(|(value, _)| value).collect();
+                let names: Vec<String> = schema::offered(&found)
+                    .into_iter()
+                    .map(|(value, _)| value)
+                    .collect();
                 notice(format!(
                     "Antigravity does not offer {wanted} as its {category} (it offers {}); it runs on its own choice.",
                     names.join(", ")
@@ -277,35 +305,46 @@ fn configure(turn: &mut Turn, session: &str, order: &Order, opened: &Value) -> R
                     "Antigravity did not take {value} as its {category}: {}",
                     shared::error_text(&error)
                 ))?,
-                Ok(Answer::Result(answer)) => match answer.get("configOptions").filter(|all| all.is_array()) {
-                    Some(changed) => options = changed.clone(),
-                    None => {
-                        if let Some(entry) = options
-                            .as_array_mut()
-                            .and_then(|all| all.iter_mut().find(|option| option["id"] == json!(config)))
-                        {
-                            entry["currentValue"] = json!(value);
+                Ok(Answer::Result(answer)) => {
+                    match answer.get("configOptions").filter(|all| all.is_array()) {
+                        Some(changed) => options = changed.clone(),
+                        None => {
+                            if let Some(entry) = options.as_array_mut().and_then(|all| {
+                                all.iter_mut().find(|option| option["id"] == json!(config))
+                            }) {
+                                entry["currentValue"] = json!(value);
+                            }
                         }
                     }
-                },
+                }
             }
             continue;
         }
         // An agy without options says its models apart (`models`), and takes one by its id.
-        let listed = models["availableModels"].as_array().filter(|_| category == "model");
+        let listed = models["availableModels"]
+            .as_array()
+            .filter(|_| category == "model");
         let Some(listed) = listed else {
-            notice(format!("Antigravity offers no choice of {category}; {wanted} was not applied."))?;
+            notice(format!(
+                "Antigravity offers no choice of {category}; {wanted} was not applied."
+            ))?;
             continue;
         };
         let known = listed.iter().find_map(|model| {
             let id = model["modelId"].as_str()?;
             let name = model["name"].as_str().unwrap_or(id);
-            (id.eq_ignore_ascii_case(wanted) || name.eq_ignore_ascii_case(wanted)).then(|| id.to_string())
+            (id.eq_ignore_ascii_case(wanted) || name.eq_ignore_ascii_case(wanted))
+                .then(|| id.to_string())
         });
         match known {
-            None => notice(format!("Antigravity does not offer the model {wanted} here; it runs on its own choice."))?,
+            None => notice(format!(
+                "Antigravity does not offer the model {wanted} here; it runs on its own choice."
+            ))?,
             Some(id) if models["currentModelId"] == json!(id) => {}
-            Some(id) => match turn.setup(method::SESSION_SET_MODEL, json!({"sessionId": session, "modelId": id}))? {
+            Some(id) => match turn.setup(
+                method::SESSION_SET_MODEL,
+                json!({"sessionId": session, "modelId": id}),
+            )? {
                 Err(ended) => return Ok(Err(ended)),
                 Ok(Answer::Error(error)) => notice(format!(
                     "Antigravity did not take the model {wanted}: {}",
@@ -356,9 +395,15 @@ fn blocks(order: &Order, text: &str, capabilities: &Value) -> io::Result<Vec<Val
             refused("too large")?;
             continue;
         }
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file").to_string();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file")
+            .to_string();
         let block = match kind {
-            Kind::Link => schema::resource_link(&format!("file://{}", path.display()), &name, mime, size),
+            Kind::Link => {
+                schema::resource_link(&format!("file://{}", path.display()), &name, mime, size)
+            }
             Kind::Image => {
                 carried += size;
                 schema::image_block(mime, STANDARD.encode(std::fs::read(&path)?))
@@ -368,7 +413,10 @@ fn blocks(order: &Order, text: &str, capabilities: &Value) -> io::Result<Vec<Val
                 schema::audio_block(mime, STANDARD.encode(std::fs::read(&path)?))
             }
         };
-        emit(&said("attached", json!({"path": path, "as": block["type"]})))?;
+        emit(&said(
+            "attached",
+            json!({"path": path, "as": block["type"]}),
+        ))?;
         blocks.push(block);
     }
     Ok(blocks)
@@ -387,7 +435,10 @@ fn mark_poisoned(session: &str) {
 /// Prints a failure the way the interpreter reads it.
 fn failed(stage: &str, error: &Value) -> io::Result<()> {
     let text = shared::error_text(error);
-    emit(&said("failed", json!({"stage": stage, "error": error, "text": text})))
+    emit(&said(
+        "failed",
+        json!({"stage": stage, "error": error, "text": text}),
+    ))
 }
 
 /// The turn ends before its answer: why, as the interpreter reads it.
@@ -397,18 +448,27 @@ fn early(stage: &str, how: Ended) -> io::Result<Outcome> {
         Ended::Silent => "Antigravity stopped answering",
         Ended::Interrupted => return Ok(Outcome::Stopped),
     };
-    emit(&said("failed", json!({"stage": stage, "text": text, "silent": how == Ended::Silent})))?;
+    emit(&said(
+        "failed",
+        json!({"stage": stage, "text": text, "silent": how == Ended::Silent}),
+    ))?;
     Ok(Outcome::Failed)
 }
 
 /// Whether an error says the conversation is not there.
 fn gone(error: &Value) -> bool {
-    error["code"] == code::NOT_FOUND || shared::classify(&shared::error_text(error)) == Failure::Unknown
+    error["code"] == code::NOT_FOUND
+        || shared::classify(&shared::error_text(error)) == Failure::Unknown
 }
 
 /// Opens the conversation: the one the order names, else a new one. Its id and what the
 /// agent answered of it (its options); or how the turn ended instead.
-fn open(turn: &mut Turn, order: &Order, cwd: &str, meta: Option<&Value>) -> Result<std::result::Result<(String, Value), Outcome>> {
+fn open(
+    turn: &mut Turn,
+    order: &Order,
+    cwd: &str,
+    meta: Option<&Value>,
+) -> Result<std::result::Result<(String, Value), Outcome>> {
     let mut params = json!({"cwd": cwd, "mcpServers": []});
     if let Some(meta) = meta {
         params["_meta"] = meta.clone();
@@ -435,25 +495,47 @@ fn open(turn: &mut Turn, order: &Order, cwd: &str, meta: Option<&Value>) -> Resu
             }
             Ok(Answer::Error(error)) if gone(&error) => lost = Some(named),
             Ok(Answer::Error(error)) => {
-                failed(if error["code"] == code::AUTH_REQUIRED { "auth" } else { "session" }, &error)?;
+                failed(
+                    if error["code"] == code::AUTH_REQUIRED {
+                        "auth"
+                    } else {
+                        "session"
+                    },
+                    &error,
+                )?;
                 return Ok(Err(Outcome::Failed));
             }
             Err(how) => return Ok(Err(early("session", how)?)),
         }
     }
     match turn.setup(method::SESSION_NEW, params)? {
-        Ok(Answer::Result(opened)) => match opened["sessionId"].as_str().filter(|id| !id.is_empty()) {
-            Some(id) => {
-                emit(&said("bound", json!({"session": id, "resumed": false, "lost": lost})))?;
-                Ok(Ok((id.to_string(), opened)))
+        Ok(Answer::Result(opened)) => {
+            match opened["sessionId"].as_str().filter(|id| !id.is_empty()) {
+                Some(id) => {
+                    emit(&said(
+                        "bound",
+                        json!({"session": id, "resumed": false, "lost": lost}),
+                    ))?;
+                    Ok(Ok((id.to_string(), opened)))
+                }
+                None => {
+                    failed(
+                        "session",
+                        &json!({"message": "Antigravity opened no conversation"}),
+                    )?;
+                    Ok(Err(Outcome::Failed))
+                }
             }
-            None => {
-                failed("session", &json!({"message": "Antigravity opened no conversation"}))?;
-                Ok(Err(Outcome::Failed))
-            }
-        },
+        }
         Ok(Answer::Error(error)) => {
-            failed(if error["code"] == code::AUTH_REQUIRED { "auth" } else { "session" }, &error)?;
+            failed(
+                if error["code"] == code::AUTH_REQUIRED {
+                    "auth"
+                } else {
+                    "session"
+                },
+                &error,
+            )?;
             Ok(Err(Outcome::Failed))
         }
         Err(how) => Ok(Err(early("session", how)?)),
@@ -507,14 +589,22 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
     Ok(match answer {
         Ok(Answer::Result(result)) => {
             emit(&said("prompted", json!({"result": result})))?;
-            if stopped { Outcome::Stopped } else { Outcome::Answered }
+            if stopped {
+                Outcome::Stopped
+            } else {
+                Outcome::Answered
+            }
         }
         Ok(Answer::Error(error)) => {
             if shared::classify(&shared::error_text(&error)) == Failure::Signature {
                 mark_poisoned(&session);
             }
             failed("prompt", &error)?;
-            if stopped { Outcome::Stopped } else { Outcome::Failed }
+            if stopped {
+                Outcome::Stopped
+            } else {
+                Outcome::Failed
+            }
         }
         // A Stop whose cancel was not answered in time: agy is ended below.
         Err(Ended::Silent) if stopped => Outcome::Stopped,

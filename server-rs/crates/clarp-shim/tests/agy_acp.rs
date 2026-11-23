@@ -134,7 +134,10 @@ fn a_turn_opens_a_conversation_chooses_its_model_and_streams_what_antigravity_sa
     // How long it took to hear from Antigravity, for the first real turns to give numbers.
     let timing = driver(&printed, "timing")[0];
     assert!(timing["launch_to_first_update_ms"].is_u64(), "{timing}");
-    assert!(timing["resume_ms"].is_null(), "a new conversation resumes nothing");
+    assert!(
+        timing["resume_ms"].is_null(),
+        "a new conversation resumes nothing"
+    );
 
     // The Host's head went into Antigravity's instructions, and the message is the user's.
     let opened = &place.sent_of("session/new")[0]["params"];
@@ -223,7 +226,10 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
     );
     assert_eq!(updates(&printed, "tool_call_update").len(), 1);
     let permission = driver(&printed, "permission")[0];
-    assert_eq!((&permission["kind"], &permission["answer"]), (&json!("allow_once"), &json!("Allow")));
+    assert_eq!(
+        (&permission["kind"], &permission["answer"]),
+        (&json!("allow_once"), &json!("Allow"))
+    );
     let answer = place
         .sent()
         .into_iter()
@@ -245,7 +251,10 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
         .into_iter()
         .find(|message| message["id"] == "perm-1")
         .unwrap();
-    assert_eq!(answer["result"]["outcome"], json!({"outcome": "selected", "optionId": "red"}));
+    assert_eq!(
+        answer["result"]["outcome"],
+        json!({"outcome": "selected", "optionId": "red"})
+    );
 }
 
 #[test]
