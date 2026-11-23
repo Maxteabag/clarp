@@ -91,6 +91,10 @@ clarp-agent-artifacts wait "$artifact" --timeout 300
 - `wait` blocks until the answer arrives and prints it: exit 0 answered,
   3 expired/withdrawn/discarded, 4 timed out. Use it when you would otherwise
   sit idle; the answer is also delivered to you as a normal decision result.
+  A release restarts the Host for a few seconds. The Rust Host's `wait` keeps
+  asking through a restart of up to two minutes. If a wait still ends with
+  exit 69 ("does not answer"), run the same `wait` again: the card keeps its
+  answer.
 - Treat the typed value as a secret when it is one: use it, never echo it into
   chat, commits or files.
 
