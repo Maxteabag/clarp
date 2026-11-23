@@ -945,7 +945,9 @@ mod tests {
         assert!(!closed.prompt.expanded, "folded by default");
         let open = super::message_row(&rows[0], false, &["a2a:u7".to_owned()].into_iter().collect());
         assert!(open.prompt.expanded);
-        assert_eq!(block_kinds(&open), ["heading", "prose"], "opened, the whole message as Markdown");
+        // A paragraph and a list are blocks of their own, so the chat's
+        // paragraph spacing falls between them.
+        assert_eq!(block_kinds(&open), ["heading", "prose", "prose"], "opened, the whole message as Markdown");
         let markdown: Vec<_> = clarp_engine::blocks::blocks("## Build plan\n\nRun `cargo test` first.\n\n- then report")
             .iter()
             .map(|b| super::message_block(b, false).styled)
