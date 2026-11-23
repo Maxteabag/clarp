@@ -257,22 +257,29 @@ Rules:
   (five_hour | seven_day), "used_percentage" (0 to 100, below 100), "resets_at"
   (ISO time or null), "observed_at", "failover" (none | unknown)}`, the shape of
   `exhausted` with `used_percentage` and `failover`; and `exhausted` gains
-  `used_percentage` too, the share of the window it names, null where that is
-  not known (window `unknown`). The account
+  `used_percentage` too, the share of the window it names (0 to 100), null where
+  that is not known (window `unknown`). On both, `resets_at` is UTC to the
+  second (`2026-11-23T18:00:00Z`), whatever form the tool gave it in. The account
   this agent runs on is near a limit. It starts at 80% of the five-hour window
   (about an hour of steady work left; the same share as the five-hour
   `provider-limit` warning) and at 90% of the weekly window (80% of a week would
-  leave a warning up for more than a day), names the window nearest its end, and
-  stands until that window resets or the tool is on another account; at 100% the
+  leave a warning up for more than a day), names the most used window, and
+  stands until that window resets or the tool is on another account (on a login
+  the Host cannot name, only while the word of it is fresh); at 100% the
   row is `exhausted` instead. It is set only when no other seat of the tool would
   take the turn, since account switching would hide the limit: `failover: "none"`
   means the Host knows no seat would (it switches no accounts, or its seats
-  reading shows no other seat below those shares for the agent's model),
-  `"unknown"` that it cannot know (`--accounts follow`, where another Host
-  switches, or a seats reading that is old, failed, missing or does not say
-  enough). The Host looks again a second after a named window resets, and sends
-  `agent-roster` with `kind: "backend-quota"` when the warning appears, changes
-  window or reset, grows by a whole percent, changes `failover`, or clears.
+  reading shows no other seat below those shares for the model the agent runs,
+  its own or the tool's default), `"unknown"` that it cannot know (`--accounts
+  follow`, where another Host switches, or a seats reading that is old, failed,
+  missing or does not say enough). A Host that cannot know warns: a warning a
+  switch then makes needless costs a glance, a limit reached without one stops
+  the agent. The Host looks again every five minutes, a second after a named
+  window resets, and after each seats reading or switch made from the desk or
+  its switcher (a switch by the owner's selector is seen at the next turn end or
+  look), and sends `agent-roster` with `kind: "backend-quota"` when the warning
+  appears, changes window or reset (to the minute), grows by a whole percent,
+  changes `failover` for a model its agents run, or clears.
   Example: `{"state": "near", "provider_id": "claude", "reason": "usage_limit",
   "window": "five_hour", "used_percentage": 84.0, "resets_at":
   "2026-11-23T18:00:00Z", "observed_at": "2026-11-23T15:12:40Z", "failover":

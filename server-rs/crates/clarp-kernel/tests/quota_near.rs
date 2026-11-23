@@ -58,6 +58,9 @@ fn a_codex_account_is_near_from_four_fifths_of_its_five_hours_until_they_begin_a
         account: Some("another-account"),
     };
     assert_eq!(kept.near(tool, Some(other), NOW + HOUR), None);
+    // On no login that can be named: an old word says nothing, a fresh one still does.
+    assert_eq!(kept.near(tool, None, NOW + HOUR), None);
+    assert!(kept.near(tool, None, NOW + 2 * MINUTE).is_some());
     // The window began anew.
     assert_eq!(kept.near(tool, Some(on), resets), None);
     // All used: the account is used up, which is said apart, and no longer near.
@@ -101,7 +104,10 @@ fn a_claude_account_is_near_by_its_week_from_nine_tenths() {
     );
     // Another account is in use: its word says nothing of it.
     assert_eq!(kept.near(tool, Some("another"), NOW + MINUTE), None);
-    // Both near: the one nearer its end is named.
+    // On no account that can be named: a fresh word counts, an old one does not.
+    assert!(kept.near(tool, None, NOW + MINUTE).is_some());
+    assert_eq!(kept.near(tool, None, NOW + 2 * HOUR), None);
+    // Both near: the more used is named.
     kept.seen(&word(97.0, 91.5), Some("acct"), "a word", NOW + 2 * MINUTE);
     let near = kept.near(tool, Some("acct"), NOW + 2 * MINUTE).unwrap();
     assert_eq!(near["window"], "five_hour");

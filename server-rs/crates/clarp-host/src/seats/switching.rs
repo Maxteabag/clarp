@@ -169,7 +169,7 @@ pub(super) async fn perform(
     drop(lock);
     if state == "switched" {
         // Another account, and another seat beside it.
-        crate::quota::seats_changed(app).await;
+        crate::quota::look_again(app).await;
     }
     if state == "switched" && expected.is_none() {
         pool.available(|_| true);

@@ -40,7 +40,6 @@ use std::time::{Duration, UNIX_EPOCH};
 use clarp_kernel::conversation::LimitsSaid;
 use clarp_kernel::quota::{self, Kept, Login, Shown, Tool};
 use clarp_kernel::standing::Standing;
-use clarp_ports::clock::Clock;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -147,11 +146,12 @@ pub struct Desk {
     /// which tools were looked at at all: to tell when it is no longer as it was.
     last: std::sync::Mutex<Option<(Looked, Vec<String>)>>,
     /// When the first window that an agent's row names begins anew: it is looked at again
-    /// then, so that what it said clears as it does.
+    /// then, so that what it said clears as it does. The watch is woken where it moves sooner.
     wake: std::sync::Mutex<Option<i64>>,
-    /// Whether another seat would take the turns of a tool that is near a limit, as the apps
-    /// were last told it by a reading of the seats ([`seats_changed`]).
-    failover: std::sync::Mutex<BTreeMap<String, &'static str>>,
+    woken: tokio::sync::Notify,
+    /// Whether another seat would take the turns of a tool that is near a limit, by the tool
+    /// and the model an agent runs on it, as the apps were last told it ([`look_again`]).
+    failover: std::sync::Mutex<BTreeMap<(String, String), &'static str>>,
 }
 
 /// Which accounts are used up, and which are near a limit and not used up, by the tool's
@@ -168,11 +168,16 @@ pub struct Looked {
 /// null where that is not known (a limit that a turn failed for).
 type Said = (Option<Value>, Option<Value>);
 
-/// What is used of the window that a used-up account's row names, set on the row.
+/// What is used of the window that a used-up account's row names, set on the row (no more
+/// than all of it), and when it begins anew written as the row's other moments are (UTC, to
+/// the second), whatever form the tool gave it in.
 fn with_used(mut used_up: Option<Value>, used: impl FnOnce(&str) -> Option<f64>) -> Option<Value> {
     if let Some(said) = &mut used_up {
         let window = said["window"].as_str().unwrap_or("").to_string();
-        said["used_percentage"] = json!(used(&window));
+        let used = used(&window).map(|used| used.clamp(0.0, 100.0));
+        said["used_percentage"] = json!(used);
+        let resets_at = said["resets_at"].as_str().and_then(quota::from_text);
+        said["resets_at"] = json!(resets_at.map(quota::moment));
     }
     used_up
 }
@@ -699,8 +704,11 @@ impl Desk {
                     )
                 }
             };
+            // To the minute: Codex says a window's reset a second apart from record to record.
+            let resets = said["resets_at"].as_str().and_then(quota::from_text);
+            let resets = resets.map(|ms| (ms + 30_000).div_euclid(60_000));
             let what = |field: &str| said[field].clone();
-            Some((what("state"), what("window"), what("resets_at"), used))
+            Some((what("state"), what("window"), resets, used))
         };
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         let (before, looked_at) = last.get_or_insert_with(Default::default);
@@ -722,14 +730,21 @@ impl Desk {
         }
         let changed = !first_look && shown(before) != shown(&all);
         *before = all.clone();
-        drop(last);
-        // The first window named that begins anew: looked at again when it has.
+        // The first window named that begins anew: looked at again when it has. Set while
+        // what it is of is held, so that of two looks at once the later one's stands.
         let resets = all.used_up.values().chain(all.near.values());
         let wake = resets
             .filter_map(|said| said["resets_at"].as_str().and_then(quota::from_text))
             .filter(|at| *at > with.now_ms)
             .min();
-        *self.wake.lock().unwrap_or_else(PoisonError::into_inner) = wake;
+        let mut kept = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        let sooner = wake.is_some_and(|wake| kept.is_none_or(|kept| wake < kept));
+        *kept = wake;
+        drop(kept);
+        drop(last);
+        if sooner {
+            self.woken.notify_one();
+        }
         if changed {
             let again = json!({ "type": "agent-roster", "kind": "backend-quota" });
             with.hub.publish(again, with.now_ms);
@@ -765,6 +780,8 @@ pub struct Rows {
     selectors: std::collections::BTreeSet<&'static str>,
     /// The seats as `GET /hotseat/status` serves them, where a tool is near a limit.
     desk: Value,
+    /// The model each tool that is near a limit runs for an agent that names none.
+    defaults: BTreeMap<String, String>,
 }
 
 impl Rows {
@@ -775,12 +792,23 @@ impl Rows {
             accounts: clarp_kernel::recovery::Accounts::None,
             selectors: Default::default(),
             desk: Value::Null,
+            defaults: BTreeMap::new(),
+        }
+    }
+
+    /// The model the tool runs for an agent: its own, else the tool's default.
+    fn model<'a>(&'a self, tool: &str, model: &'a str) -> &'a str {
+        if model.is_empty() {
+            self.defaults.get(tool).map_or("", String::as_str)
+        } else {
+            model
         }
     }
 
     /// Whether another seat would take a turn of an agent on `model` from its tool.
     fn failover(&self, tool: &str, model: &str) -> clarp_kernel::quota_near::Failover {
         let selector = self.selectors.contains(tool);
+        let model = self.model(tool, model);
         clarp_kernel::quota_near::failover(self.accounts, tool, model, selector, &self.desk)
     }
 
@@ -806,29 +834,41 @@ pub async fn rows(app: &crate::edge::App) -> Rows {
     } else {
         crate::seats::status(app).await
     };
+    let mut defaults = BTreeMap::new();
+    for tool in looked.near.keys() {
+        let model = crate::models::default_for(app, tool).await;
+        defaults.insert(tool.clone(), model.unwrap_or_default());
+    }
     let selectors = app.pools.iter().filter(|pool| pool.has_selector());
     Rows {
         looked,
         accounts: app.config.accounts,
         selectors: selectors.map(|pool| pool.tool()).collect(),
         desk,
+        defaults,
     }
 }
 
-/// The seats were read again, or the tool was moved to another: whether another seat would
-/// take the turns of a tool that is near a limit may have changed, and the account the tool
-/// is on with it. The accounts are looked at again, and where a tool's warning is now shown
-/// otherwise than it was, the apps are told to read their agents' rows again. (Judged for an
-/// agent on no model of its own; a seat that is closed to one model only is weighed for each
-/// agent when its row is read.)
-pub async fn seats_changed(app: &crate::edge::App) {
+/// The accounts are looked at again, and whether another seat would take the turns of a tool
+/// that is near a limit is judged again: for each model that an agent of the tool runs, its own
+/// or the tool's default. Where that is not as the apps were last told it, they are told to
+/// read their agents' rows again. What changes it: a reading of the seats, a seat that is
+/// switched to, a reading that grows old, a window of a seat that begins anew. So this is done
+/// after each reading and each switch from the desk or the switcher, and by the watch.
+pub async fn look_again(app: &crate::edge::App) {
     let rows = rows(app).await;
-    let now: BTreeMap<String, &'static str> = rows
-        .looked
-        .near
-        .keys()
-        .map(|tool| (tool.clone(), rows.failover(tool, "").word()))
-        .collect();
+    let directory = app.fleet.directory();
+    let agents = directory.members.iter().chain(&directory.janitors);
+    let mut now: BTreeMap<(String, String), &'static str> = BTreeMap::new();
+    for member in agents.filter(|member| member.record.archived_at_ms.is_none()) {
+        let tool = &member.record.backend;
+        if !rows.looked.near.contains_key(tool) {
+            continue;
+        }
+        let model = rows.model(tool, &member.record.model).to_string();
+        let word = rows.failover(tool, &model).word();
+        now.insert((tool.clone(), model), word);
+    }
     let mut told = app
         .limits
         .failover
@@ -844,28 +884,24 @@ pub async fn seats_changed(app: &crate::edge::App) {
 }
 
 /// That an account is used up or near a limit stops being so with time, and nothing happens
-/// when it does: what was said of it grows old, its window begins anew. So it is looked at now
-/// and then (every five minutes, as the Python Host looks, and as the first window an agent's
-/// row names begins anew), and an app that shows such an account is told to look again.
-pub async fn watch(
-    desk: Arc<Desk>,
-    fleet: FleetHandle,
-    hub: Arc<Hub>,
-    clock: Arc<dyn Clock + Send + Sync>,
-    server_id: String,
-) {
-    let home = crate::config::home();
-    loop {
-        tokio::time::sleep(desk.next_look(clock.now_ms())).await;
-        let with = With {
-            fleet: &fleet,
-            hub: &hub,
-            server_id: &server_id,
-            home: &home,
-            now_ms: clock.now_ms(),
-        };
-        desk.used_up(with).await;
-    }
+/// when it does: what was said of it grows old, its window begins anew; and so does whether
+/// another seat would take a turn, as the reading of the seats grows old. So it is looked at
+/// now and then (every five minutes, as the Python Host looks, and a second after the first
+/// window an agent's row names begins anew), and an app that shows such an account is told to
+/// look again.
+pub fn watch(app: &crate::edge::App) {
+    let app = app.clone();
+    tokio::spawn(async move {
+        loop {
+            let wait = app.limits.next_look(app.clock.now_ms());
+            tokio::select! {
+                () = tokio::time::sleep(wait) => {}
+                // A window named sooner than the one waited for: wait for that one.
+                () = app.limits.woken.notified() => continue,
+            }
+            look_again(&app).await;
+        }
+    });
 }
 
 /// What the desk has in hand.
