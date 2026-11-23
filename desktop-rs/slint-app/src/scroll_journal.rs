@@ -242,6 +242,11 @@ pub fn detect(frames: &[Frame]) -> Option<Flash> {
         let offset_flash = before.distance(&frames[jumped].shot) > viewport
             && away.iter().all(|f| before.distance(&f.shot) > viewport / 2.0)
             && before.distance(now) <= viewport / 2.0;
+        // Back in another chat opened since (A, B, then A again) is no return.
+        let reopened = frames[jumped..=back].iter().skip(1).any(|f| f.events.iter().any(|e| e.starts_with("reset:")));
+        if reopened {
+            continue;
+        }
         let top_flash = !before.top.is_empty()
             && now.top == before.top
             && away.iter().all(|f| !f.shot.top.is_empty() && f.shot.top != before.top && (f.shot.top_index - before.top_index).abs() >= 2);
@@ -603,6 +608,9 @@ mod tests {
         let up = Shot { offset: -3887.0, ..end.clone() };
         assert_eq!(detect(&frames(&[(end.clone(), &[][..]), (up.clone(), &["reader"][..]), (end.clone(), &[][..])])), None);
         assert_eq!(detect(&frames(&[(end.clone(), &[][..]), (up.clone(), &["key:Home"][..]), (end.clone(), &["jump-latest"][..])])), None);
+        // Another chat and back again, each at its end, is not.
+        let other = Shot { top: "other-9".into(), top_index: 9, offset: -9000.0, content: 9480.0, ..end.clone() };
+        assert_eq!(detect(&frames(&[(end.clone(), &[][..]), (other, &["reset:chat"][..]), (end.clone(), &["reset:chat"][..])])), None);
         // Another chat opened at its middle, then pinned to its end, is one.
         assert!(detect(&frames(&[(end.clone(), &[][..]), (up.clone(), &["reset:chat", "rows -0 +78 ~0"][..]), (end.clone(), &["jump-latest"][..])])).is_some());
         let slow = [(end.clone(), &[][..]), (up.clone(), &[][..]), (up.clone(), &[][..]), (up.clone(), &[][..]), (up, &[][..]), (end.clone(), &[][..])];
