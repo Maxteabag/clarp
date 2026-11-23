@@ -24,7 +24,7 @@
 //! again builds the view of a running turn from that turn's own records, under a new epoch,
 //! and a client that sees the epoch change asks for the snapshot.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clarp_speech::listen::{is_space, strip};
 use serde_json::{Map, Value, json};
@@ -443,6 +443,9 @@ pub struct Hub {
     account_wait: Option<String>,
     /// What the tool says while it asks a provider again that would not answer.
     provider_retry: Option<String>,
+    /// The answers a message of the user's, read into the running turn, closed: no tool that
+    /// comes after makes them narration, which the conversation does not show.
+    answered: HashSet<String>,
 }
 
 impl Hub {
@@ -462,6 +465,7 @@ impl Hub {
             explore_group: None,
             account_wait: None,
             provider_retry: None,
+            answered: HashSet::new(),
         }
     }
 
@@ -577,6 +581,7 @@ impl Hub {
         if running.as_deref() == Some(turn_id) {
             return out;
         }
+        self.answered.clear();
         if running.is_some() {
             self.end(("interrupted", None), now, &mut out);
         }
@@ -661,6 +666,21 @@ impl Hub {
         self.account_wait = message.map(str::to_string);
         self.emit(Vec::new(), (true, ""), now, &mut out);
         out
+    }
+
+    /// A message of the user's was read into the running turn: what the turn said before it
+    /// answered what came before, and stays an answer whatever work follows for the new one.
+    pub fn close_answers(&mut self) {
+        let answers: Vec<String> = self
+            .view
+            .items()
+            .into_iter()
+            .filter(|item| {
+                text_of(&item["kind"]) == "message" && text_of(&item["phase"]) == "final"
+            })
+            .map(|item| text_of(&item["id"]).to_string())
+            .collect();
+        self.answered.extend(answers);
     }
 
     /// The tool asks the provider again, after a refusal (`headline` says which try and why),
@@ -866,13 +886,16 @@ impl Hub {
                 tool["explain"] = Value::Null;
                 tool["output"] = Value::Null;
                 tool["diff"] = Value::Null;
-                // What was said before a tool call was narration, not the answer.
+                // What was said before a tool call was narration, not the answer, unless a
+                // message of the user's read into the turn since closed it as an answer.
                 let said: Vec<String> = self
                     .view
                     .items()
                     .into_iter()
                     .filter(|item| {
-                        text_of(&item["kind"]) == "message" && text_of(&item["phase"]) == "final"
+                        text_of(&item["kind"]) == "message"
+                            && text_of(&item["phase"]) == "final"
+                            && !self.answered.contains(text_of(&item["id"]))
                     })
                     .map(|item| text_of(&item["id"]).to_string())
                     .collect();
