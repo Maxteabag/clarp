@@ -12,6 +12,7 @@ RESET = """
 claude_reset_command = ["/home/peter/.local/bin/claude-auto-reset", "--broker", "laptopstudio", "--peer", "laptopstudio"]
 codex_reset_command = ["/home/peter/.local/bin/codex-auto-reset"]
 codex_reset_max_per_day = 1
+reset_tell = ["front-desk-1"]
 claude_account_switch_command = ["not", "carried"]
 """
 
@@ -32,6 +33,7 @@ def test_an_install_keeps_the_reset_settings_and_nothing_else_of_agents(tmp_path
                                  "--peer", "laptopstudio"],
         "codex_reset_command": ["/home/peter/.local/bin/codex-auto-reset"],
         "codex_reset_max_per_day": 1,
+        "reset_tell": ["front-desk-1"],
     }
     assert kept["conversation_forks"] == {"agents": ["a"]}
 
@@ -45,6 +47,7 @@ def test_compare_settings_reports_reset_settings_the_rust_config_lacks():
     python_cfg = tomllib.loads(RESET)
     found = compare.reset_findings(python_cfg, {})
     assert [name for _kind, name, _mine, theirs in found] == [
-        "[agents] claude_reset_command", "[agents] codex_reset_command", "[agents] codex_reset_max_per_day"]
+        "[agents] claude_reset_command", "[agents] codex_reset_command", "[agents] codex_reset_max_per_day",
+        "[agents] reset_tell"]
     assert all(theirs == "missing" for *_rest, theirs in found)
     assert compare.reset_findings(python_cfg, python_cfg) == []

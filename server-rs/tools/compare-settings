@@ -20,7 +20,7 @@ What it compares:
      own relay.json, the file named by relay-config in its install.conf, or a relay-also name);
   4. owner config keys the Rust Host does not read (informational; from the audit of 22 Nov 2026);
   6. (23 Nov 2026) the Hotseat switcher's banked-reset settings ([agents] claude_reset_command, codex_reset_command,
-     codex_reset_max_per_day): the Rust Host reads them from its own config (~/.config/clarp-host/config.toml), and the
+     codex_reset_max_per_day, reset_tell): the Rust Host reads them from its own config (~/.config/clarp-host/config.toml), and the
      cut-over dropped them unseen; a key the Python config has and the Rust config lacks or holds otherwise is reported;
   5. (since laptopstudio's cut-over, 22 Nov 2026) each janitor's MODEL (the Python janitor agent's model against the
      Rust janitor's), janitors the Rust Host lacks, and the Python Host's peers (~/.config/clarp/peers.json) against
@@ -256,7 +256,7 @@ def compare(findings):
     return findings
 
 
-RESET_KEYS = ("claude_reset_command", "codex_reset_command", "codex_reset_max_per_day")
+RESET_KEYS = ("claude_reset_command", "codex_reset_command", "codex_reset_max_per_day", "reset_tell")
 
 
 def reset_findings(python_cfg, rust_cfg):

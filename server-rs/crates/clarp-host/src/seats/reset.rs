@@ -7,16 +7,16 @@
 //! Host's config, an argv list; empty is off). It is started with one JSON request on stdin
 //! and nothing of the Host's own environment but its home, path, locale and XDG directories,
 //! and has [`banked_reset::TIMEOUT_SECONDS`]. A verified redemption switches to the refilled
-//! account the way the switcher does, and the owner and the front desk are told.
+//! account the way the switcher does, and the owner and the sessions of `[agents] reset_tell`
+//! are told; so they are, once, of a spend that could not be verified and of a reconciliation
+//! that gave up (then the lane spends nothing until someone looks).
 
 use super::*;
 use clarp_kernel::banked_reset::{self, Ledger, Receipt};
 use std::sync::{Mutex as StdMutex, PoisonError};
 use tokio::io::AsyncWriteExt as _;
 
-/// Who the front desk is that is told of a spent reset.
-const FRONT_DESK: &str = "hazel-74f6";
-/// The sender the Host names for what it tells the front desk.
+/// The sender the Host names for what it tells the sessions of `[agents] reset_tell`.
 const SENDER: &str = "hotseat-reset";
 /// What of the Host's environment the reset tool is given (the Python Host's set).
 const KEEPS: &[&str] = &[
@@ -66,13 +66,31 @@ pub(crate) fn settings(tool: &str, file: &toml::Table) -> (Vec<String>, Option<u
     (command, cap)
 }
 
-fn host_settings(tool: &str) -> (Vec<String>, Option<u32>) {
+/// The sessions told of a spent reset and of a reset that needs someone, beside the owner's
+/// push (`[agents] reset_tell`, a list of session names; empty or absent: the push only).
+pub(crate) fn told_sessions(file: &toml::Table) -> Vec<String> {
+    file.get("agents")
+        .and_then(toml::Value::as_table)
+        .and_then(|agents| agents.get("reset_tell"))
+        .and_then(toml::Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::trim)
+                .filter(|name| clarp_kernel::native_session_name(name))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn host_file() -> toml::Table {
     let path = crate::config::host_config_dir().join("config.toml");
-    let file = std::fs::read_to_string(path)
+    std::fs::read_to_string(path)
         .ok()
         .and_then(|text| text.parse::<toml::Table>().ok())
-        .unwrap_or_default();
-    settings(tool, &file)
+        .unwrap_or_default()
 }
 
 struct Claim(String);
@@ -126,10 +144,16 @@ pub(super) async fn consider(
     accounts: Vec<String>,
     models: Vec<String>,
 ) {
-    let (command, cap) = host_settings(tool);
+    let file = host_file();
+    let (command, cap) = settings(tool, &file);
     if command.is_empty() {
         return;
     }
+    // The claim comes before the ledger is read: a run that ends in between would otherwise
+    // leave this check deciding on a ledger from before its spend.
+    let Some(claim) = Claim::take(tool) else {
+        return;
+    };
     let now = app.clock.now_ms();
     let Some(ledger) = ledger(app, tool).await else {
         return;
@@ -143,9 +167,7 @@ pub(super) async fn consider(
             return;
         }
     }
-    let Some(claim) = Claim::take(tool) else {
-        return;
-    };
+    let told = told_sessions(&file);
     let natural = banked_reset::natural_resets(tool, body, now).unwrap_or_default();
     let app = app.clone();
     let tool = tool.to_string();
@@ -156,8 +178,12 @@ pub(super) async fn consider(
         let receipt = run(&command, &models, &accounts, reconcile_only).await;
         let now = app.clock.now_ms();
         let mut ledger = ledger;
-        ledger.after(&receipt, reconcile_only, now);
+        let attention = ledger.after(&receipt, reconcile_only, now);
         keep(&app, &tool, ledger).await;
+        if let Some(attention) = attention {
+            let text = banked_reset::told_attention(&tool, attention);
+            tell(&app, &janitor, &told, &tool, &text, now).await;
+        }
         if !receipt.verified {
             if receipt.needs_reconcile {
                 eprintln!(
@@ -173,7 +199,7 @@ pub(super) async fn consider(
         // The refilled account takes the turns, the way the switcher moves them.
         let _ = switching::perform(&app, &tool, &account, None).await;
         let text = banked_reset::told(&tool, &receipt, natural.get(&account).copied(), now);
-        tell(&app, &janitor, &tool, &text, now).await;
+        tell(&app, &janitor, &told, &tool, &text, now).await;
     });
 }
 
@@ -235,8 +261,9 @@ async fn run(
     }
 }
 
-/// Tells the owner (a push from the Hotseat janitor's chat) and the front desk of a spent reset.
-async fn tell(app: &App, janitor: &str, tool: &str, text: &str, now: i64) {
+/// Tells the owner (a push from the Hotseat janitor's chat) and the sessions of
+/// `[agents] reset_tell` that are on this Host.
+async fn tell(app: &App, janitor: &str, told: &[String], tool: &str, text: &str, now: i64) {
     let id = format!("hotseat-reset-{tool}-{now}");
     let directory = app.fleet.directory();
     if let Some(member) = directory.janitor(janitor) {
@@ -250,11 +277,14 @@ async fn tell(app: &App, janitor: &str, tool: &str, text: &str, now: i64) {
             needs_response: false,
         });
     }
-    if directory.named(FRONT_DESK).is_some() {
+    for session in told
+        .iter()
+        .filter(|session| directory.named(session).is_some())
+    {
         let request = SendRequest {
-            session: FRONT_DESK.to_string(),
+            session: session.clone(),
             text: text.to_string(),
-            client_msg_id: Some(id),
+            client_msg_id: Some(format!("{id}-{session}")),
             force_session: Some(true),
             synthesize_audio: Some(false),
             hands_free: Some(false),
@@ -304,6 +334,28 @@ codex_reset_command = ["/bin/codex-auto-reset"]
             .unwrap();
         assert_eq!(settings("codex", &off), (vec![], Some(0)));
         assert_eq!(settings("claude", &toml::Table::new()), (vec![], None));
+    }
+
+    #[test]
+    fn who_is_told_is_a_setting() {
+        let file: toml::Table = "[agents]\nreset_tell = [\"front-desk-1\", \" \", \"other\"]\n"
+            .parse()
+            .unwrap();
+        assert_eq!(told_sessions(&file), ["front-desk-1", "other"]);
+        let none: toml::Table = "[agents]\nreset_tell = []\n".parse().unwrap();
+        assert!(told_sessions(&none).is_empty());
+        assert!(told_sessions(&toml::Table::new()).is_empty());
+    }
+
+    #[test]
+    fn a_check_while_a_run_of_the_tool_is_under_way_takes_no_claim() {
+        // The claim is what consider() takes before it reads the ledger.
+        let first = Claim::take("test-tool").unwrap();
+        assert!(Claim::take("test-tool").is_none());
+        let other = Claim::take("test-other").unwrap();
+        drop(first);
+        assert!(Claim::take("test-tool").is_some());
+        drop(other);
     }
 
     #[tokio::test]

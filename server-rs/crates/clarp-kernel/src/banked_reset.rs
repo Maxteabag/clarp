@@ -221,9 +221,26 @@ pub fn reconcile_due(ledger: &Ledger, now_ms: i64) -> bool {
     ledger.needs_reconcile && now_ms >= ledger.next_at && ledger.attempts < MAX_RECONCILE_ATTEMPTS
 }
 
+/// What the owner and the told sessions must hear of a call, beyond a spent reset: said once
+/// each, when it happens (the Python lane's `attention_required`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attention {
+    /// The tool claims a reset was spent and it could not be verified: it is reconciled
+    /// before anything else.
+    Unverified,
+    /// Reconciliation gave up after [`MAX_RECONCILE_ATTEMPTS`]: the lane refuses
+    /// (`reconcile_first`) until someone looks.
+    GaveUp,
+}
+
 impl Ledger {
-    /// Takes in what one call came to.
-    pub fn after(&mut self, receipt: &Receipt, reconcile_only: bool, now_ms: i64) {
+    /// Takes in what one call came to, and says what the owner must hear of it.
+    pub fn after(
+        &mut self,
+        receipt: &Receipt,
+        reconcile_only: bool,
+        now_ms: i64,
+    ) -> Option<Attention> {
         self.redeemed.retain(|at| now_ms - DAY_MS < *at);
         // A reconciliation finishes the attempt before it: a spend it already counted is not
         // counted again.
@@ -242,6 +259,28 @@ impl Ledger {
         };
         let backoff = 1i64 << self.attempts.saturating_sub(1).min(6);
         self.next_at = now_ms + CHECK_INTERVAL_MS * backoff;
+        if self.needs_reconcile && reconcile_only && self.attempts == MAX_RECONCILE_ATTEMPTS {
+            Some(Attention::GaveUp)
+        } else if !reconcile_only && receipt.claimed && !receipt.verified {
+            Some(Attention::Unverified)
+        } else {
+            None
+        }
+    }
+}
+
+/// What the owner and the told sessions hear when a call needs someone.
+pub fn told_attention(tool: &str, attention: Attention) -> String {
+    let name = if tool == "codex" { "Codex" } else { "Claude" };
+    match attention {
+        Attention::Unverified => format!(
+            "Hotseat's {name} reset tool says it spent a banked reset, but that could not be \
+             verified. Nothing more is spent until it is reconciled."
+        ),
+        Attention::GaveUp => format!(
+            "Hotseat could not reconcile an earlier {name} banked reset after \
+             {MAX_RECONCILE_ATTEMPTS} tries. No {name} reset is spent until someone looks."
+        ),
     }
 }
 
@@ -381,6 +420,43 @@ mod tests {
             1,
             "the reconciled spend is not counted twice"
         );
+    }
+
+    #[test]
+    fn an_unverified_spend_is_told_once_and_a_reconciliation_that_gives_up_holds_the_lane() {
+        let saved = ["b".to_string()];
+        let unsure = receipt(
+            true,
+            r#"{"status":"redeemed","verified":false,"account":"b"}"#,
+            &saved,
+            false,
+        );
+        let mut ledger = Ledger::default();
+        assert_eq!(
+            ledger.after(&unsure, false, NOW),
+            Some(Attention::Unverified)
+        );
+        let still = receipt(false, "", &saved, true);
+        let mut at = NOW;
+        let mut told = Vec::new();
+        for _ in 0..MAX_RECONCILE_ATTEMPTS {
+            at = ledger.next_at;
+            assert!(reconcile_due(&ledger, at));
+            told.push(ledger.after(&still, true, at));
+        }
+        assert_eq!(
+            told.iter().filter(|said| said.is_some()).count(),
+            1,
+            "{told:?}"
+        );
+        assert_eq!(told.last(), Some(&Some(Attention::GaveUp)));
+        // No more tries, and nothing new is asked for, however long it waits.
+        assert!(!reconcile_due(&ledger, at + 100 * H));
+        assert_eq!(
+            refused(&ledger, Some(5), at + 100 * H),
+            Some("reconcile_first")
+        );
+        assert!(told_attention("codex", Attention::GaveUp).contains("until someone looks"));
     }
 
     #[test]
