@@ -35,6 +35,21 @@ pub use clarp_child::MANAGED_CLAUDE_ENV;
 /// The name is the Python Host's: every skill written for it reads this.
 pub use clarp_child::SESSION_ENV;
 
+/// How a running turn of a tool takes another message of the user's ([`Backend::steers`]).
+/// A message it does not read runs as a turn of its own afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Steers {
+    /// It does not: the message waits for a turn of its own.
+    No,
+    /// On the turn's standard input, which the shim keeps open until the tool's first result.
+    /// The tool says on its output when it read the message and which result answers it
+    /// (`clarp_kernel::steering`): Claude Code, and the agy-acp driver.
+    Stdin,
+    /// As words for a turn of a Codex lane, which says on its lane when it takes them. Only
+    /// while the owner's setting runs chat turns on the lane.
+    Words,
+}
+
 /// What a backend needs to know to start one turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnSpec {
@@ -229,19 +244,16 @@ pub trait Backend: Send + Sync {
         false
     }
 
-    /// Whether a running turn of this tool takes another message of the user's. The Host
-    /// writes it on the turn's standard input, which it keeps open until the tool's first
-    /// result, and the tool says on its output when it read the message and which result
-    /// answers it (`clarp_kernel::steering`). A message it does not read runs as a turn of its
-    /// own afterwards.
-    fn steers(&self) -> bool {
-        false
+    /// How a running turn of this tool takes another message of the user's: the one place
+    /// the Host and the actor ask whether, and how, a message is offered to a running turn.
+    fn steers(&self) -> Steers {
+        Steers::No
     }
 
     /// Whether this message can go to a running turn as it is. A message the tool would be
     /// given as more than its words waits for a turn of its own.
     fn steers_message(&self, text: &str) -> bool {
-        !text.trim().is_empty() && self.steers()
+        !text.trim().is_empty() && self.steers() != Steers::No
     }
 
     /// Whether the tool keeps a record of its own of the messages it read, beside its output:

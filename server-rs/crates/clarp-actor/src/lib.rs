@@ -31,7 +31,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
+use clarp_backend::{Backend, Interpreter, LiveReply, Signal, Steers, TurnSpec};
 use clarp_kernel::agent::{AgentEvent, Command, Effect, Note, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::control::Control;
@@ -4970,7 +4970,8 @@ impl Actor {
         });
         // A goal lane sends no prompt and an opening of a call is answered by itself: neither
         // takes the user's messages while it runs.
-        let streams_input = self.backend.steers() && !bare && opening.is_none();
+        let streams_input =
+            self.backend.steers() == Steers::Stdin && !bare && opening.is_none();
         if streams_input && self.backend.id() == "claude" {
             launch
                 .args
@@ -5023,8 +5024,8 @@ impl Actor {
         let (said, said_worked) = unfollowed(self.recorder.log(), turn)?;
         self.live = Some(LiveTurn {
             steering: steering::State::for_prompt(
-                self.backend.id(),
-                self.backend.steers().then(|| {
+                self.backend.steers(),
+                (self.backend.steers() == Steers::Stdin).then(|| {
                     clarp_kernel::takeover::attempt_prompt_uuid(
                         &self.profile.agent_id,
                         turn.0,
@@ -5197,7 +5198,7 @@ impl Actor {
         // Attach to the UUID actually sent to this process, including attempts
         // launched by an older Host before each retry had its own name. Its first line names
         // it: Claude's message, or the order of agy-acp's driver.
-        let uuid = if self.backend.steers() {
+        let uuid = if self.backend.steers() == Steers::Stdin {
             std::fs::read(self.profile.stdin_path_of(turn, attempt))
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
@@ -5210,7 +5211,7 @@ impl Actor {
         } else {
             None
         };
-        let mut steering = steering::State::for_prompt(self.backend.id(), uuid);
+        let mut steering = steering::State::for_prompt(self.backend.steers(), uuid);
         steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
         let mut offset = 0;
         let mut last_output_ms = None;

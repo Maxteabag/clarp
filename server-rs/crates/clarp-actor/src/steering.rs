@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use clarp_backend::Steers;
 use clarp_kernel::agent::{Agent, Command};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::journal::{Batch, kind};
@@ -64,10 +65,10 @@ impl Separate {
 }
 
 impl State {
-    pub(super) fn for_prompt(backend: &str, primary_uuid: Option<String>) -> Self {
+    pub(super) fn for_prompt(steers: Steers, primary_uuid: Option<String>) -> Self {
         Self {
             primary_uuid,
-            codex: backend == "codex",
+            codex: steers == Steers::Words,
             ..Self::default()
         }
     }
@@ -487,9 +488,10 @@ impl Actor {
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
-        // A Codex lane takes steered words; a tool that steers takes the message on its input.
-        let codex = self.backend.id() == "codex";
-        if !(codex || self.backend.steers_message(text))
+        // A Codex lane takes steered words; a tool that steers on its input takes the message
+        // there.
+        let codex = self.backend.steers() == Steers::Words;
+        if !self.backend.steers_message(text)
             || !live.steering.stream.can_join()
             || live.steering.input_skipped
             || live.steering.prompt_uuid() == Some(uuid.as_str())

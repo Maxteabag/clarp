@@ -67,8 +67,8 @@ impl Backend for Claude {
 
     /// Claude Code echoes a message it reads and names it in the result that answers it, when
     /// it is started with `--replay-user-messages`.
-    fn steers(&self) -> bool {
-        true
+    fn steers(&self) -> crate::Steers {
+        crate::Steers::Stdin
     }
 
     /// A message Claude Code read inside a tool call can be in its session file without an

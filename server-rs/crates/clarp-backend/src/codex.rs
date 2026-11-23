@@ -119,6 +119,12 @@ impl Backend for Codex {
         "codex"
     }
 
+    /// A turn of the chat lane takes the user's words while it runs, and says when it took
+    /// them; a turn run by itself takes none.
+    fn steers(&self) -> crate::Steers {
+        crate::Steers::Words
+    }
+
     fn efforts(&self) -> &'static [&'static str] {
         &["low", "medium", "high", "xhigh", "max", "ultra"]
     }

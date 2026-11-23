@@ -3,7 +3,7 @@
 //! `agy acp` see it print them.
 #![allow(clippy::unwrap_used)]
 
-use clarp_backend::{Signal, by_id};
+use clarp_backend::{Signal, Steers, by_id};
 use clarp_kernel::conversation::ToolStatus;
 use clarp_kernel::turn::RunOutcome;
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -355,24 +355,28 @@ fn prompted(tokens_in: u64, tokens_out: u64) -> Value {
 }
 
 #[test]
-fn a_running_turn_takes_another_message_in_claude_and_agy_acp_and_in_no_other_tool() {
+fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_as_words_in_codex() {
     for (id, steers) in [
-        ("claude", true),
-        ("agy-acp", true),
-        ("agy", false),
-        ("codex", false),
-        ("grok", false),
-        ("muse", false),
-        ("opencode", false),
-        ("deepseek", false),
-        ("scripted", false),
+        ("claude", Steers::Stdin),
+        ("agy-acp", Steers::Stdin),
+        ("codex", Steers::Words),
+        ("agy", Steers::No),
+        ("grok", Steers::No),
+        ("muse", Steers::No),
+        ("opencode", Steers::No),
+        ("deepseek", Steers::No),
+        ("scripted", Steers::No),
     ] {
         let backend = by_id(id).unwrap();
         assert_eq!(backend.steers(), steers, "{id}");
         // Only Claude Code keeps a record of what it read beside its output; for agy-acp the
         // spool is the record.
         assert_eq!(backend.records_reads(), id == "claude", "{id}");
-        assert_eq!(backend.steers_message("and this too"), steers, "{id}");
+        assert_eq!(
+            backend.steers_message("and this too"),
+            steers != Steers::No,
+            "{id}"
+        );
         assert!(
             !backend.steers_message("  \n"),
             "{id}: an empty message is no message"

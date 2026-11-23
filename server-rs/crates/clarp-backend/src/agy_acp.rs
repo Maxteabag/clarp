@@ -177,8 +177,8 @@ impl Backend for AgyAcp {
     /// turn's output alone tells what was read: a Host that restarts reads it in the spool, and
     /// a message the driver never said it took (it refused it, or died before) runs as a turn
     /// of its own (`Backend::records_reads` is false).
-    fn steers(&self) -> bool {
-        true
+    fn steers(&self) -> crate::Steers {
+        crate::Steers::Stdin
     }
 
     /// Only words: the driver gives a steered message as text, and the files a message names

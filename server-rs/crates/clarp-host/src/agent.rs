@@ -2976,9 +2976,11 @@ impl Worker {
         // while the owner's setting runs chat turns there: with it off, a goal turn is not
         // steered, as before (review of 23 Nov 2026). The actor reads from the turn's spool
         // whether it can, and decides by the message's text.
-        let can_offer_steering = (self.setup.backend.steers()
-            || (self.setup.record.backend == "codex" && self.chat_lane()))
-            && match &ask {
+        let can_offer_steering = match self.setup.backend.steers() {
+            clarp_backend::Steers::Stdin => true,
+            clarp_backend::Steers::Words => self.chat_lane(),
+            clarp_backend::Steers::No => false,
+        } && match &ask {
                 Ask::Send {
                     message,
                     admission,
