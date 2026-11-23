@@ -179,6 +179,8 @@ class Host:
         self.events: list = []
         self.events_lock = threading.Lock()
         self.stream_stop = threading.Event()
+        self.owned: set = set()
+        self.unowned: list = []
 
     def start(self):
         for name in ("data", "run", "config/clarp-host", "share/logs", "ws"):
@@ -212,11 +214,34 @@ class Host:
         text = "".join(f"{key} = {value}\n" for key, value in settings.items())
         (self.root / "config" / "clarp-host" / "config.toml").write_text(text)
 
+    def remember(self):
+        """Note every process below the Host now, by pid and start time. A shim and a lane are
+        made to outlive their Host, and once it is gone they are no longer below it: what the
+        run started is known only from these notes, taken while the Host lives (after each case,
+        and once more just before it is stopped)."""
+        if not self.proc or self.proc.poll() is not None:
+            return
+        parents = {}
+        for entry in pathlib.Path("/proc").iterdir():
+            if entry.name.isdigit():
+                info = proc_stat(int(entry.name))
+                if info:
+                    parents.setdefault(info["ppid"], []).append(info["pid"])
+        frontier = list(parents.get(self.proc.pid, []))
+        while frontier:
+            pid = frontier.pop()
+            start = started_at(pid)
+            if start is not None:
+                self.owned.add((pid, start))
+            frontier += parents.get(pid, [])
+
     def stop(self) -> list:
-        """Stop the Host by its own pid (hard rule 6), then whatever it started that outlived it.
-        A shim is made to outlive its Host, so the processes still working in the run's folder
-        are found by their working directory, captured, and ended by those ids. Says which."""
+        """Stop the Host by its own pid (hard rule 6), then what it started that outlived it: only
+        the processes noted below it while it ran (`remember`), each by its pid and start time, so
+        no other process is ever signalled. Says which were ended, and names any other process
+        that still works in the run's folder without ending it."""
         self.stream_stop.set()
+        self.remember()
         if self.proc and self.proc.poll() is None:
             os.kill(self.proc.pid, signal.SIGTERM)
             try:
@@ -224,28 +249,28 @@ class Host:
             except subprocess.TimeoutExpired:
                 os.kill(self.proc.pid, signal.SIGKILL)
                 self.proc.wait(timeout=10)
-        left = self.processes_in_root()
-        for lane in lanes(self):
-            left += [pid for pid in [lane["pid"]] + lane["group"] if pid not in left]
-        for pid in left:
+        left = [one for one in sorted(self.owned) if alive(one)]
+        for pid, _ in left:
             try:
                 os.kill(pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
         deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and any(not pid_gone(pid) for pid in left):
+        while time.monotonic() < deadline and any(alive(one) for one in left):
             time.sleep(0.2)
-        for pid in left:
-            if not pid_gone(pid):
+        for one in left:
+            if alive(one):
                 try:
-                    os.kill(pid, signal.SIGKILL)
+                    os.kill(one[0], signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-        return left
+        self.unowned = [pid for pid in self.processes_in_root() if pid not in {p for p, _ in self.owned}]
+        return [pid for pid, _ in left]
 
     def processes_in_root(self) -> list:
-        """The ids of this user's processes whose working directory is in the run's folder."""
-        found, mine = [], str(self.root)
+        """The ids of this user's processes that work in the run's folder or name it as a whole
+        path in their command line. Only reported, never signalled."""
+        found = []
         for entry in pathlib.Path("/proc").iterdir():
             if not entry.name.isdigit() or int(entry.name) == os.getpid():
                 continue
@@ -255,7 +280,7 @@ class Host:
                 cwd = os.readlink(entry / "cwd")
             except OSError:
                 continue
-            if cwd == mine or cwd.startswith(mine + "/") or mine in command_line(int(entry.name)):
+            if in_folder(cwd, self.root) or names_folder(command_line(int(entry.name)), self.root):
                 found.append(int(entry.name))
         return found
 
@@ -406,6 +431,16 @@ class Agent:
 # Codex lanes: the long-lived `clarp-shim codex-goal-lane` of an agent and its app-server
 # ---------------------------------------------------------------------------------------------
 
+def in_folder(path: str, folder: pathlib.Path) -> bool:
+    """Is `path` the folder or inside it, by whole path components (`/a/b-c` is not in `/a/b`)?"""
+    return path == str(folder) or path.startswith(str(folder) + "/")
+
+
+def names_folder(text: str, folder: pathlib.Path) -> bool:
+    """Does `text` name the folder, or a path inside it, as a whole path?"""
+    return re.search(re.escape(str(folder)) + r"(?=/|\s|$)", text) is not None
+
+
 def command_line(pid: int) -> str:
     try:
         return pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
@@ -447,7 +482,6 @@ def commands_of(host: "Host", lane, name: str) -> list:
     in its app-server's group, and any other of this user's called so that work in the run's
     folder (a command that left the lane's tree is still the turn's)."""
     found = {m["pid"] for m in (lane or {}).get("members", []) if m["name"] == name}
-    mine = str(host.root)
     for entry in pathlib.Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
@@ -457,7 +491,7 @@ def commands_of(host: "Host", lane, name: str) -> list:
             cwd = os.readlink(entry / "cwd")
         except OSError:
             continue
-        if cwd == mine or cwd.startswith(mine + "/"):
+        if in_folder(cwd, host.root):
             found.add(int(entry.name))
     return [(pid, started_at(pid)) for pid in sorted(found) if started_at(pid) is not None]
 
@@ -518,10 +552,10 @@ def lanes(host: Host) -> list:
             info = proc_stat(int(entry.name))
             if info:
                 stats[info["pid"]] = info
-    mine, found = str(host.root), []
+    found = []
     for pid, info in stats.items():
         line = command_line(pid)
-        if "codex-goal-lane" not in line or mine not in line:
+        if "codex-goal-lane" not in line or not names_folder(line, host.root):
             continue
         socket_path = next((word for word in line.split() if word.endswith("-cxg.sock")), "")
         children = [p for p, i in stats.items() if i["ppid"] == pid]
@@ -1176,6 +1210,7 @@ def run(args) -> int:
                     found.update({"case": case, "round": n, "load_before": started, "load_after": load(),
                                   "seconds": round(time.monotonic() - began, 1)})
                     entry["cases"].append(found)
+                    host.remember()
                     shown = {k: v for k, v in (found.get("measures") or {}).items()}
                     print(f"{row} {case} #{n} load {started['load1']:.2f}: {json.dumps(shown)}", flush=True)
                     save()
@@ -1191,6 +1226,7 @@ def run(args) -> int:
     finally:
         result["ended"] = load()
         result["left_after_host"] = host.stop()
+        result["unowned_in_folder"] = host.unowned
         result["settings"]["after"] = mentions(root)
         result["settings"]["undone"] = undo_mentions(root) + drop_claude_sessions(root)
         save()
