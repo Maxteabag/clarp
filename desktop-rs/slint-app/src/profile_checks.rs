@@ -582,9 +582,25 @@ pub(super) fn backend_row_check(out: String) {
                 return false;
             }
             check(window.get_overlay() == "profile", "Escape steps back to the models, the profile stays");
+            // The keyboard alone from here: Up/Down move, Enter picks, Enter moves.
             let bridge = window.global::<ProfileBridge>();
-            bridge.invoke_pick_transit("gpt-5.5".into());
-            bridge.invoke_confirm_transit();
+            check(bridge.get_transit_cursor() == 0, &format!("the keyboard starts on the first model: {}", bridge.get_transit_cursor()));
+            headless::press(Key::DownArrow);
+            check(bridge.get_transit_cursor() == 1, &format!("Down moves to the next model: {}", bridge.get_transit_cursor()));
+            headless::press(Key::DownArrow);
+            check(bridge.get_transit_cursor() == 1, "and stays on the last one");
+            headless::press(Key::UpArrow);
+            check(bridge.get_transit_cursor() == 0, "Up moves back");
+            headless::press(Key::Return);
+            true
+        })),
+        ("enter moves", Box::new(|_, window, _| {
+            let bridge = window.global::<ProfileBridge>();
+            if backend_now(window).1 != "confirm" {
+                return false;
+            }
+            check(bridge.get_transit_title() == "Move Rachel to Codex · GPT-5.5?", &format!("Enter picked the highlighted model: {}", bridge.get_transit_title()));
+            headless::press(Key::Return);
             true
         })),
         ("moved", Box::new(move |app, window, elapsed| {

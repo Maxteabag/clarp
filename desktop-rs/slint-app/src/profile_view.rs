@@ -455,7 +455,15 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     bridge.set_transit_body(transit_row.picker.body.into());
     bridge.set_transit_loading(transit_row.picker.loading);
     bridge.set_transit_error(transit_row.picker.error.into());
-    bridge.set_transit_choices(ModelRc::new(VecModel::from(transit_row.picker.choices)));
+    // The keyboard starts on what the agent runs now, else the first
+    // choice that can be chosen; a new list (backends, then models) resets it.
+    let choices = transit_row.picker.choices;
+    let start = choices.iter().position(|c| c.current && c.enabled).or_else(|| choices.iter().position(|c| c.enabled));
+    let same = bridge.get_transit_choices().iter().map(|c| c.id).eq(choices.iter().map(|c| c.id.clone()));
+    if !same {
+        bridge.set_transit_cursor(start.map_or(-1, |i| i as i32));
+    }
+    bridge.set_transit_choices(ModelRc::new(VecModel::from(choices)));
 }
 
 // ---- the Backend row (feature agent_backend_transit) ---------------------------
@@ -674,7 +682,23 @@ pub fn wire(window: &AppWindow) {
             fill(app, window, session);
         });
     });
-    bridge.on_pick_transit(|id| {
+    bridge.on_next_transit(|from, step| {
+        // The next choice that can be chosen from `from`, stepping by
+        // `step`; at either end it stays where it is.
+        let Some(window) = crate::window() else { return from };
+        let choices: Vec<bool> = window.global::<ProfileBridge>().get_transit_choices().iter().map(|c| c.enabled).collect();
+        let mut at = from;
+        loop {
+            at += step;
+            if at < 0 || at as usize >= choices.len() {
+                return if from >= 0 && (from as usize) < choices.len() { from } else { choices.iter().position(|e| *e).map_or(-1, |i| i as i32) };
+            }
+            if choices[at as usize] {
+                return at;
+            }
+        }
+    });
+        bridge.on_pick_transit(|id| {
         with_session(|app, window, session| {
             let step = window.global::<ProfileBridge>().get_transit_step();
             if step == "backends" {
