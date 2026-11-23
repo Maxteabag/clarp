@@ -269,6 +269,35 @@ export component AgentProfile inherits Modal {
                         IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
                     }
                 }
+                if root.info.backend-shown: Card {
+                    title: "BACKEND";
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Backend"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+                        Text {
+                            text: root.info.backend-value;
+                            color: root.info.backend-enabled ? Palette.text : Palette.muted;
+                            font-size: 12 * Look.unit;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            accessible-label: "Backend, " + root.info.backend-value;
+                        }
+                        if root.info.backend-moving: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+                        IconButton {
+                            icon: @image-url("icons/swap.svg");
+                            tip: "Change backend";
+                            enabled: root.info.backend-enabled;
+                            clicked => { ProfileBridge.open-transit(); }
+                        }
+                    }
+                    if root.info.backend-detail != "": Text {
+                        text: root.info.backend-detail;
+                        color: root.info.backend-failed ? Palette.danger : Palette.muted;
+                        font-size: 11 * Look.unit;
+                        wrap: word-wrap;
+                    }
+                }
                 if root.info.plan-shown: Card {
                     title: "CURRENT PLAN";
                     HorizontalLayout {
@@ -325,35 +354,6 @@ export component AgentProfile inherits Modal {
                             enabled: !root.info.prompts-loading;
                             clicked => { ProfileBridge.load-older(); }
                         }
-                    }
-                }
-                if root.info.backend-shown: Card {
-                    title: "BACKEND";
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Backend"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
-                        Text {
-                            text: root.info.backend-value;
-                            color: root.info.backend-enabled ? Palette.text : Palette.muted;
-                            font-size: 12 * Look.unit;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            horizontal-stretch: 1;
-                            accessible-label: "Backend, " + root.info.backend-value;
-                        }
-                        if root.info.backend-moving: Busy { reduced-motion: ProfileBridge.reduced-motion; }
-                        IconButton {
-                            icon: @image-url("icons/swap.svg");
-                            tip: "Change backend";
-                            enabled: root.info.backend-enabled;
-                            clicked => { ProfileBridge.open-transit(); }
-                        }
-                    }
-                    if root.info.backend-detail != "": Text {
-                        text: root.info.backend-detail;
-                        color: root.info.backend-failed ? Palette.danger : Palette.muted;
-                        font-size: 11 * Look.unit;
-                        wrap: word-wrap;
                     }
                 }
                 Card {
