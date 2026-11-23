@@ -138,6 +138,19 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 flush(&mut out, &mut prose_start, prose_end);
                 out.push(Block::Rule);
             }
+            // Each top-level list item is a block of its own (with its own
+            // marker: a lone "2." still reads as 2), so the chat's paragraph
+            // spacing falls between items: Slint's text draws a paragraph
+            // break as a bare line break, so inside one block they ran
+            // together. Nested lists stay inside their item.
+            Event::Start(Tag::Item) if depth == 1 => {
+                if prose_start.is_some_and(|from| prose_end > from) {
+                    flush(&mut out, &mut prose_start, prose_end);
+                }
+                prose_start = Some(range.start);
+                resume = false;
+                depth += 1;
+            }
             Event::Start(_) => {
                 if depth == 0 || resume {
                     prose_start.get_or_insert(range.start);
@@ -145,10 +158,16 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 }
                 depth += 1;
             }
-            Event::End(_) => {
+            Event::End(end) => {
                 depth = depth.saturating_sub(1);
+                if depth == 1 && matches!(end, TagEnd::Item) {
+                    prose_end = range.end;
+                }
                 if depth == 0 {
                     prose_end = range.end;
+                    // Each top-level paragraph (and the end of a list) closes
+                    // its block, for the same reason.
+                    flush(&mut out, &mut prose_start, prose_end);
                 }
             }
             _ => {
@@ -301,7 +320,8 @@ mod tests {
                 Block::Prose("Run `cargo test` first, then read the [guide](https://example.com).".into()),
                 Block::Code { language: "rust".into(), text: "fn main() {\n    println!(\"hi\");\n}".into() },
                 Block::Quote("Keep the **main** checkout untouched.".into()),
-                Block::Prose("- core models\n- **Qt bridges**".into()),
+                Block::Prose("- core models".into()),
+                Block::Prose("- **Qt bridges**".into()),
                 Block::Table(vec![
                     vec!["step".into(), "state".into()],
                     vec!["port".into(), "done".into()],
@@ -321,7 +341,8 @@ mod tests {
         assert_eq!(
             blocks(markdown),
             vec![
-                Block::Prose("Steps:\n\n1. Switch the profile:".into()),
+                Block::Prose("Steps:".into()),
+                Block::Prose("1. Switch the profile:".into()),
                 Block::Code { language: "bash".into(), text: "hotseat switch personal".into() },
                 Block::Prose("2. Verify it:\n   - **Session:** `orion`".into()),
             ]
@@ -332,7 +353,30 @@ mod tests {
     fn plain_text_is_one_prose_block() {
         assert_eq!(blocks("Hello there"), vec![Block::Prose("Hello there".into())]);
         assert_eq!(blocks(""), vec![]);
-        assert_eq!(blocks("One\n\nTwo"), vec![Block::Prose("One\n\nTwo".into())]);
+        assert_eq!(blocks("One\n\nTwo"), vec![Block::Prose("One".into()), Block::Prose("Two".into())]);
+    }
+
+    /// Peter, 23 Nov: "the paragraph spaces not showing". Slint draws a
+    /// paragraph break inside one block as a bare line break, so every
+    /// paragraph and every top-level list item is a block of its own and the
+    /// chat's paragraph spacing falls between them. Numbers stay (a lone "2."
+    /// reads as 2), and a nested list stays inside its item.
+    #[test]
+    fn paragraphs_and_list_items_are_blocks_of_their_own() {
+        let markdown = "**The cause is the cache.**\n\nHere is why:\n\n1. It keeps the old order.\n2. It is saved on close.\n   - even when the send failed\n3. Opening reads it first.\n\nThat is all.";
+        assert_eq!(
+            blocks(markdown),
+            vec![
+                Block::Prose("**The cause is the cache.**".into()),
+                Block::Prose("Here is why:".into()),
+                Block::Prose("1. It keeps the old order.".into()),
+                Block::Prose("2. It is saved on close.\n   - even when the send failed".into()),
+                Block::Prose("3. Opening reads it first.".into()),
+                Block::Prose("That is all.".into()),
+            ]
+        );
+        // A loose list (blank lines between items) splits the same way.
+        assert_eq!(blocks("- one\n\n- two"), vec![Block::Prose("- one".into()), Block::Prose("- two".into())]);
     }
 
     #[test]
