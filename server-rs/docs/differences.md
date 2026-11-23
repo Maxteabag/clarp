@@ -605,6 +605,18 @@ Issue 217 (feature contract 150) gives the Rust Host's original paired VoIP reci
 a bounded ring answer grace through the existing answer route. The Python Host
 still settles the ring at 45 seconds.
 
+An agent imported by a move (`POST /agents/import`) is held on the Rust Host
+until the move is handed over: every message, the user's included, waits in its
+queue, and nothing starts until the hand-off's resume (`POST /turn-queue/resume`,
+or the app's Resume). The import's answer says so (`held: true`). The Python Host
+has no import (the move is the Rust Host's migration route); until 22 Nov 2026 the
+Rust Host held only the agent's own work after an import and ran what its user said.
+
+Issue 314: the Rust Host refuses to remove a contact (persona) that a chat was
+made as, archived chats included: `DELETE /personas/{name}` answers 409
+`{"error": "contact is in use by a chat"}`. The Python Host removed it, and the
+chat kept the persona it was made with.
+
 Issue 216 (feature contract 151) adds per-call mode selection to the Rust Host.
 The Python Host requires a Live default for user-started Live calls. The Rust Host
 advertises availability separately and accepts explicit Live through `/calls/live`.
