@@ -824,6 +824,8 @@ fn changed_roles(previous: &Message, incoming: &Message) -> Vec<Role> {
     check(previous.automated != incoming.automated, Role::Automated);
     check(previous.category != incoming.category, Role::Category);
     check(previous.tool_details_available != incoming.tool_details_available, Role::ToolDetailsAvailable);
+    // A turn's anchor arrives again as conversation once the turn ends.
+    check(previous.revision == incoming.revision && (previous.view != incoming.view || previous.session_rows != incoming.session_rows), Role::Revision);
     check(previous.activity_count != incoming.activity_count, Role::ActivityCount);
     check(previous.timestamp != incoming.timestamp, Role::DayLabel);
     roles
@@ -843,6 +845,7 @@ pub fn message_to_json(message: &Message) -> Value {
         "tool_details_available": message.tool_details_available,
         "delivery_failed": message.delivery_failed, "tools": message.tools,
         "display_cells": message.display_cells, "hidden_before": message.hidden_before,
+        "view": message.view, "session_rows": message.session_rows,
     })
 }
 

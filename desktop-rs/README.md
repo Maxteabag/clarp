@@ -40,6 +40,21 @@ headings, while lines inside one paragraph keep the font's own spacing.
 "Text weight" reaches interface text without a weight of its own; message
 text keeps the face's regular weight.
 
+## Conversation view
+
+On a Host with the `chat_view` feature (contract 145, issue 702) a chat is
+drawn in Conversation or Session view, as in the iOS app
+(`clarp_core::chat_view`, `engine/src/chat_view.rs`). Conversation keeps the
+user's messages, the agent's posts, each turn's final reply and cards; the
+rows the Host tags `session` (commentary, tools, turns between agents) leave.
+A working agent is one Running box (the live step and its clock; opened, its
+steps), with the agent's own turn as a quiet second line while a conversation
+fork answers (`main_turn`, contract 153). A finished turn's reply offers Show
+work (its hover button, or a right-click), which opens the turn's left-out rows
+in place. The chat's ⋯ menu picks its view (kept on this device and written to
+the Host's agent setting); Settings › Clean chat puts every chat without its
+own choice in Conversation. `--check conversation-view` exercises it.
+
 ## Build and run
 
 ```sh

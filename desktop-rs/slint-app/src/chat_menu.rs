@@ -1,7 +1,9 @@
 //! A chat's own choices (#653): its Tool activity (this device's, kept by
 //! its Host's server id and its session; "Follow Settings" follows the
 //! global choice) and its messages between agents (the Host's per-chat
-//! choice, `POST /agent-coordination`). Both are in the chat's "⋯" menu on
+//! choice, `POST /agent-coordination`), and on a Host that offers it its
+//! Conversation or Session view (#702: this device's own choice, written to
+//! the Host's agent setting too). All are in the chat's "⋯" menu on
 //! its pane's frame, each a submenu showing its current value, and in its
 //! profile. The menu also opens the agent's artifacts (its profile's
 //! Artifacts).
@@ -51,6 +53,25 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     menu.set_coordination_choices(choices(&COORDINATION, &coordination));
     menu.set_coordination_label(SharedString::from(coordination_label(&coordination)));
     menu.set_coordination_shown(engine.chat_hidden_coordination(session));
+    // Conversation or Session view (#702): Follow Settings shows what it
+    // follows ("Follow Settings · Conversation").
+    let offered = engine.chat_view_offered(session);
+    let own = engine.chat_view_menu_value(session);
+    menu.set_view_shown(offered);
+    menu.set_view_choices(choices(&clarp_core::chat_view::MENU, own));
+    menu.set_view_label(SharedString::from(view_label(&engine, session)));
+    menu.set_activity_shown(!(offered && engine.chat_view_conversation(session)));
+}
+
+/// The words for the chat's view: its own choice, or "Follow Settings ·
+/// Conversation" with what it follows.
+pub fn view_label(engine: &Engine, session: &str) -> String {
+    let own = engine.chat_view_menu_value(session);
+    if own == "default" {
+        format!("Follow Settings · {}", clarp_core::chat_view::label(engine.chat_view(session)))
+    } else {
+        clarp_core::chat_view::menu_label(own).to_owned()
+    }
 }
 
 /// Opens (or closes again) the menu of pane `pane_id`.
@@ -84,6 +105,7 @@ pub fn pick(app: &App, window: &AppWindow, submenu: &str, value: &str) {
         match submenu {
             "activity" => set_activity(&mut app.engine.borrow_mut(), &session, value),
             "coordination" => app.engine.borrow_mut().set_chat_coordination(&session, value),
+            "view" => app.engine.borrow_mut().set_chat_view(&session, value),
             _ => {}
         }
     }
