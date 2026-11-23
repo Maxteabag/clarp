@@ -471,6 +471,16 @@ fn blocks(order: &Order, text: &str, capabilities: &Value) -> io::Result<Vec<Val
     Ok(blocks)
 }
 
+/// The conversation the turn is bound to, with the name of the turn's own message where the
+/// order gives one (an older Host's order gives none).
+fn bound(session: &str, resumed: bool, uuid: &str) -> Value {
+    let mut line = said("bound", json!({"session": session, "resumed": resumed}));
+    if !uuid.trim().is_empty() {
+        line["uuid"] = json!(uuid.trim());
+    }
+    line
+}
+
 /// Writes the mark of a conversation Antigravity can no longer continue.
 fn mark_poisoned(session: &str) {
     if let Some(dir) = shared::poisoned_dir()
@@ -578,10 +588,7 @@ fn open(
         turn.record.resume_ms = Some(ms(began));
         match answer {
             Ok(Answer::Result(opened)) => {
-                emit(&said(
-                    "bound",
-                    json!({"session": named, "resumed": true, "uuid": order.uuid}),
-                ))?;
+                emit(&bound(named, true, &order.uuid))?;
                 return Ok(Ok((named.to_string(), opened)));
             }
             // A conversation agy no longer has is not begun anew here, empty: it is marked,
@@ -611,10 +618,7 @@ fn open(
         Ok(Answer::Result(opened)) => {
             match opened["sessionId"].as_str().filter(|id| !id.is_empty()) {
                 Some(id) => {
-                    emit(&said(
-                        "bound",
-                        json!({"session": id, "resumed": false, "uuid": order.uuid}),
-                    ))?;
+                    emit(&bound(id, false, &order.uuid))?;
                     Ok(Ok((id.to_string(), opened)))
                 }
                 None => {

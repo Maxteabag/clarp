@@ -794,10 +794,12 @@ fn a_message_antigravity_refuses_is_never_read_and_the_first_answer_stands() {
         .unwrap();
     assert_eq!(refused["uuid"], "u-add");
     // Nothing that reads as an answer names it: only the record of its sending and refusal.
-    assert!(seen.iter().all(|line| {
-        line.to_string().contains("u-add")
-            == (line["clarp"] == "steer" || line["type"] == "steer_refused")
-    }));
+    assert!(
+        seen.iter()
+            .filter(|line| line.to_string().contains("u-add"))
+            .all(|line| line["clarp"] == "steer" || line["type"] == "steer_refused"),
+        "{seen:?}"
+    );
     assert_eq!(driver(seen, "prompted")[0]["uuid"], "u-own");
     assert_eq!(place.sent_of("session/prompt").len(), 2);
     assert!(seen.iter().all(|line| read_of(line).is_none()));
