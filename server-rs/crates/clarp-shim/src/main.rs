@@ -63,7 +63,7 @@ const HOLD_RETRY_AFTER: Duration = Duration::from_millis(25);
 const HOLD_RETRY_WINDOW: Duration = Duration::from_millis(10);
 /// The drivers a served tool is run through: the shim's own program, with one of these words
 /// first.
-const SERVED: [&str; 2] = ["opencode-turn", clarp_tool_args::agy_acp::DRIVER];
+const SERVED: [&str; 2] = ["opencode-turn", clarp_acp::agy::DRIVER];
 const ENDED_WHILE_HELD: &str = "the tool was ended while it was held";
 
 struct Args {
@@ -1465,7 +1465,7 @@ fn main() -> ExitCode {
     }
     if argv
         .peek()
-        .is_some_and(|word| word == clarp_tool_args::agy_acp::DRIVER)
+        .is_some_and(|word| word == clarp_acp::agy::DRIVER)
     {
         argv.next();
         return match agy_acp::run(&argv.next().unwrap_or_else(|| "agy".into())) {

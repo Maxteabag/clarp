@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 clarp-provider-hook.workspace = true
 clarp-tool-args.workspace = true
+clarp-acp.workspace = true
 base64 = "0.22"
 minreq = { version = "2.14", default-features = false }
 clarp-spool.workspace = true

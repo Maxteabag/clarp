@@ -1,0 +1,13 @@
+[package]
+name = "clarp-acp"
+description = "The Agent Client Protocol (v1) as the shim speaks it to a tool and the Host reads it back: its messages and a JSON-RPC client over standard input and output"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

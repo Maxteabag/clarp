@@ -7,7 +7,7 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
 
-use clarp_tool_args::agy_acp::{DRIVER, Order};
+use clarp_acp::agy::{DRIVER, Order};
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use serde_json::{Value, json};
@@ -131,6 +131,10 @@ fn a_turn_opens_a_conversation_chooses_its_model_and_streams_what_antigravity_sa
     assert_eq!(updates(&printed, "agent_message_chunk").len(), 2);
     let answered = driver(&printed, "prompted")[0];
     assert_eq!(answered["result"]["stopReason"], "end_turn");
+    // How long it took to hear from Antigravity, for the first real turns to give numbers.
+    let timing = driver(&printed, "timing")[0];
+    assert!(timing["launch_to_first_update_ms"].is_u64(), "{timing}");
+    assert!(timing["resume_ms"].is_null(), "a new conversation resumes nothing");
 
     // The Host's head went into Antigravity's instructions, and the message is the user's.
     let opened = &place.sent_of("session/new")[0]["params"];
@@ -187,6 +191,7 @@ fn a_conversation_is_resumed_and_one_antigravity_lost_is_begun_anew() {
     assert!(status.success());
     assert_eq!(driver(&printed, "bound")[0]["session"], "conv-old");
     assert_eq!(driver(&printed, "bound")[0]["resumed"], true);
+    assert!(driver(&printed, "timing")[0]["resume_ms"].is_u64());
     assert_eq!(
         place.sent_of("session/resume")[0]["params"]["sessionId"],
         "conv-old"
@@ -218,7 +223,7 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
     );
     assert_eq!(updates(&printed, "tool_call_update").len(), 1);
     let permission = driver(&printed, "permission")[0];
-    assert_eq!(permission["answer"], "allow_once");
+    assert_eq!((&permission["kind"], &permission["answer"]), (&json!("allow_once"), &json!("Allow")));
     let answer = place
         .sent()
         .into_iter()
@@ -229,17 +234,18 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
         json!({"outcome": "selected", "optionId": "yes"})
     );
 
-    // A question with no way to allow it is declined, and the turn goes on.
+    // A question with fixed choices is answered with its first, and the turn goes on: nobody
+    // is waited for.
     let question = Place::new("question", "question");
     let (printed, status) = question.run(&question.order(""));
     assert!(status.success());
-    assert_eq!(driver(&printed, "permission")[0]["answer"], "cancelled");
+    assert_eq!(driver(&printed, "permission")[0]["answer"], "Red");
     let answer = question
         .sent()
         .into_iter()
         .find(|message| message["id"] == "perm-1")
         .unwrap();
-    assert_eq!(answer["result"]["outcome"], json!({"outcome": "cancelled"}));
+    assert_eq!(answer["result"]["outcome"], json!({"outcome": "selected", "optionId": "red"}));
 }
 
 #[test]

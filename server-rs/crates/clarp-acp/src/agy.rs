@@ -1,5 +1,5 @@
-//! What the Host and its turn driver share of Antigravity run over the Agent Client Protocol
-//! (`agy acp`): the turn order the backend writes and the driver reads, the limits on what a
+//! What is Antigravity's own when it runs over the protocol (`agy acp`), shared by the shim and
+//! the Host's backend: the turn order the backend writes and the driver reads, the limits on what a
 //! message carries, where a conversation Antigravity can no longer continue is marked, and
 //! how a failure Antigravity reports is read.
 //!
@@ -163,7 +163,7 @@ pub fn poisoned_dir() -> Option<PathBuf> {
 
 /// The mark of one conversation, for a name that is one path component.
 pub fn poisoned_mark(dir: &Path, session: &str) -> Option<PathBuf> {
-    crate::native_session_name(session).then(|| dir.join(session))
+    crate::session_name(session).then(|| dir.join(session))
 }
 
 /// What went wrong, as Antigravity's own words say it.

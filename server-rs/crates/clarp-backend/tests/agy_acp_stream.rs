@@ -115,7 +115,7 @@ fn a_tool_call_is_named_as_the_conversation_names_tools_and_ends_with_its_output
             json!({"sessionUpdate": "tool_call", "toolCallId": "t-1", "title": "run_command",
                       "kind": "execute", "status": "pending", "rawInput": {"CommandLine": "ls", "Cwd": "/w"}}),
         ),
-        json!({"clarp": "permission", "title": "Run ls?", "answer": "allow_once"}),
+        json!({"clarp": "permission", "title": "Run ls?", "kind": "allow_once", "answer": "Allow"}),
         update(
             json!({"sessionUpdate": "tool_call_update", "toolCallId": "t-1", "status": "completed",
                       "rawOutput": {"combinedOutput": "Output:\na\nb"}}),
@@ -156,11 +156,11 @@ fn a_tool_call_is_named_as_the_conversation_names_tools_and_ends_with_its_output
 }
 
 #[test]
-fn a_declined_question_a_lost_conversation_and_a_turn_limit_are_told() {
+fn a_question_answered_by_policy_a_lost_conversation_and_a_turn_limit_are_told() {
     let lines = [
         json!({"clarp": "bound", "session": "conv-new", "resumed": false, "lost": "conv-gone"}),
         json!({"clarp": "notice", "code": "agy-model", "text": "Antigravity does not offer x."}),
-        json!({"clarp": "permission", "title": "Which colour?", "answer": "cancelled"}),
+        json!({"clarp": "permission", "title": "Which colour?", "kind": "reject_once", "answer": "Red"}),
         json!({"clarp": "prompted", "result": {"stopReason": "max_tokens"}}),
     ];
     let signals = read(&lines, "", Some(0), None);
@@ -175,7 +175,7 @@ fn a_declined_question_a_lost_conversation_and_a_turn_limit_are_told() {
         ]
     );
     assert!(notices(&signals)[0].1.contains("conv-gone"));
-    assert!(notices(&signals)[2].1.contains("Which colour?"));
+    assert!(notices(&signals)[2].1.contains("Which colour?") && notices(&signals)[2].1.contains("Red"));
     assert_eq!(ended(&signals), &RunOutcome::Completed);
 }
 
