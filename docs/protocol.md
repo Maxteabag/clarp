@@ -1264,6 +1264,11 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   installed, unhidden rows (plus the backend an existing agent runs on),
   and every Fork / Resume / Compact / MCP control follows its flag. A flag
   the Host does not send means the client's old default, never "no".
+  A row with `runs_through` (DeepSeek's `opencode`) is another card of that row's program and
+  sign-in. On a Rust Host with feature `backend_agy_acp` (contract 165) the list has `agy-acp`,
+  "Antigravity (ACP)": `agy` driven over the Agent Client Protocol, `runs_through` `agy`, with
+  `agy`'s models and sign-in. An agent can be made on it or moved to and from it like any
+  backend; `supports_steer` is false, so a message sent while its turn runs waits for the next.
 - `GET /voices?for=<session>` — voice catalogue with availability.
 - `GET /dirs?path=` — directory completion for the start dialog. Answers `{"base", "matches"}`: a path that
   ends in a slash lists the visible directories inside it (absolute paths only); any other path completes its last

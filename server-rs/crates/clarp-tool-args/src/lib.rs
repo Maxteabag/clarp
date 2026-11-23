@@ -1,5 +1,4 @@
 //! Keep the standalone shim independent of Host and speech-engine dependencies.
-pub mod agy_acp;
 pub mod opencode;
 
 /// A native session identifier that can be used as a single path component.

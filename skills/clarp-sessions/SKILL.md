@@ -62,8 +62,8 @@ move to ...` message): answer with the summary alone, use no tool. If you cannot
 a cheap model writes it. The
 agent's name, voice, goals and chat history stay.
 
-`agy-acp` ("Antigravity (ACP)" in the pickers, on a Rust Host whose
-`GET /agent-model-options` lists it) is Antigravity driven over the Agent Client
+`agy-acp` ("Antigravity (ACP)" in the pickers, on a Rust Host with the feature
+`backend_agy_acp`, contract 165) is Antigravity driven over the Agent Client
 Protocol (`agy acp`): the same program, sign-in, models and conversations as `agy`,
 but its message has no 60 KB limit, files a user attached (pictures, sounds, PDFs)
 reach the model as themselves, and Stop cancels the turn cleanly. It cannot yet be

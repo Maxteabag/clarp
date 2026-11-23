@@ -31,7 +31,8 @@ use clarp_kernel::takeover::Input;
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, Origin, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
-use clarp_tool_args::agy_acp::{self as shared, Order};
+use clarp_acp::agy::{self as shared, Order};
+use clarp_acp::schema::{self, PromptResponse, SessionUpdate, StopReason};
 use serde_json::{Value, json};
 
 use crate::agy::{self, Agy};
@@ -212,7 +213,7 @@ fn text_of(value: &Value) -> &str {
 #[derive(Debug, Clone, PartialEq)]
 enum Told {
     /// Antigravity answered the prompt, with this reason for stopping.
-    Answered(String),
+    Answered(StopReason),
     /// Something failed, in these words, at this stage.
     Failed { stage: String, text: String },
 }
@@ -274,11 +275,6 @@ impl AcpInterpreter {
         }));
     }
 
-    fn next_piece(&mut self) -> u64 {
-        self.pieces += 1;
-        self.pieces
-    }
-
     /// The message being written is whole: it is a message of the conversation.
     fn close_message(&mut self, out: &mut Vec<Signal>) {
         if let Some((number, text)) = self.message.take()
@@ -317,8 +313,8 @@ impl AcpInterpreter {
             self.on_driver(what, &message, out);
             return;
         }
-        if message["method"] == "session/update" {
-            self.on_update(&message["params"]["update"], t, out);
+        if let Some(update) = SessionUpdate::of_notification(&message) {
+            self.on_update(update, t, out);
         }
     }
 
@@ -343,13 +339,7 @@ impl AcpInterpreter {
                     );
                 }
             }
-            "model" => {
-                let model = text_of(&line["model"]).trim();
-                if !model.is_empty() && self.model.as_deref() != Some(model) {
-                    self.model = Some(model.to_string());
-                    out.push(Signal::Model(model.to_string()));
-                }
-            }
+            "model" => self.model(text_of(&line["model"]), out),
             "notice" => {
                 let code = match text_of(&line["code"]) {
                     "" => "agy-acp",
@@ -360,30 +350,29 @@ impl AcpInterpreter {
                     self.notice(code, text, out);
                 }
             }
-            "permission" if line["answer"] == "cancelled" => {
-                let title = text_of(&line["title"]);
-                self.notice(
-                    "agy-question",
-                    format!(
-                        "Antigravity asked something Clarp cannot answer during a turn, and it was declined: {}",
-                        shorten(title, 300)
-                    ),
-                    out,
-                );
+            // A question with fixed choices is answered by policy, as a permission is: the
+            // user is told what was chosen. An allowed permission says nothing.
+            "permission" if !matches!(text_of(&line["kind"]), "allow_once" | "allow_always") => {
+                let title = shorten(text_of(&line["title"]), 300);
+                let text = match line["answer"].as_str() {
+                    Some(answer) => format!("Antigravity asked \"{title}\"; Clarp answered \"{answer}\"."),
+                    None => format!("Antigravity asked \"{title}\" and offered no answer; it was declined."),
+                };
+                self.notice("agy-question", text, out);
             }
             "cancel" => self.cancelled = true,
             "prompted" => {
                 self.close_thought(out);
                 self.close_message(out);
-                let result = &line["result"];
-                if let Some((tokens_in, tokens_out)) = usage(&result["usage"]) {
+                let answer = PromptResponse::read(&line["result"]);
+                if let Some((tokens_in, tokens_out)) = answer.usage.and_then(|usage| usage.tokens()) {
                     out.push(Signal::Usage {
                         tokens_in,
                         tokens_out,
                     });
                 }
                 out.push(Signal::Concluded);
-                self.told = Some(Told::Answered(text_of(&result["stopReason"]).to_string()));
+                self.told = Some(Told::Answered(answer.stop_reason));
             }
             "failed" => {
                 self.close_thought(out);
@@ -399,79 +388,78 @@ impl AcpInterpreter {
         }
     }
 
-    fn on_update(&mut self, update: &Value, t: i64, out: &mut Vec<Signal>) {
-        match text_of(&update["sessionUpdate"]) {
-            "agent_message_chunk" => {
+    fn model(&mut self, model: &str, out: &mut Vec<Signal>) {
+        let model = model.trim();
+        if !model.is_empty() && self.model.as_deref() != Some(model) {
+            self.model = Some(model.to_string());
+            out.push(Signal::Model(model.to_string()));
+        }
+    }
+
+    /// A piece of what the agent says or thinks, added to the message or thought being written.
+    fn piece(&mut self, thought: bool, piece: &str, out: &mut Vec<Signal>) {
+        if thought {
+            self.close_message(out);
+        } else {
+            self.close_thought(out);
+        }
+        if piece.is_empty() {
+            return;
+        }
+        let open = if thought { &self.thought } else { &self.message };
+        let number = match open {
+            Some((number, _)) => *number,
+            None => {
+                self.pieces += 1;
+                self.pieces
+            }
+        };
+        let slot = if thought {
+            &mut self.thought
+        } else {
+            &mut self.message
+        };
+        let (_, text) = slot.get_or_insert_with(|| (number, String::new()));
+        text.push_str(piece);
+        let text = text.clone();
+        if thought {
+            self.moved(Activity::Thinking, out);
+            if !text.trim().is_empty() {
+                out.push(Signal::Glimpse(Glimpse::Reasoning {
+                    id: format!("{SHOWN}:t{number}"),
+                    text,
+                }));
+            }
+            return;
+        }
+        let reply = format!("r-{}-{number}", self.name);
+        self.moved(Activity::Responding, out);
+        if !text.trim().is_empty() {
+            out.push(Signal::Glimpse(Glimpse::Message {
+                id: format!("{SHOWN}:m{number}"),
+                text: text.clone(),
+                row: Some(reply.clone()),
+            }));
+            out.push(Signal::Live(LiveReply { id: reply, text }));
+        }
+    }
+
+    fn on_update(&mut self, update: SessionUpdate, t: i64, out: &mut Vec<Signal>) {
+        match update {
+            SessionUpdate::AgentMessageChunk { content } => self.piece(false, content.text(), out),
+            SessionUpdate::AgentThoughtChunk { content } => self.piece(true, content.text(), out),
+            SessionUpdate::ToolCall(call) | SessionUpdate::ToolCallUpdate(call) => {
                 self.close_thought(out);
-                let piece = text_of(&update["content"]["text"]);
-                if piece.is_empty() {
-                    return;
-                }
-                let number = match &self.message {
-                    Some((number, _)) => *number,
-                    None => {
-                        let number = self.next_piece();
-                        self.message = Some((number, String::new()));
-                        number
-                    }
-                };
-                let Some((_, text)) = self.message.as_mut() else {
-                    return;
-                };
-                text.push_str(piece);
-                let text = text.clone();
-                let reply = format!("r-{}-{number}", self.name);
-                self.moved(Activity::Responding, out);
-                if !text.trim().is_empty() {
-                    out.push(Signal::Glimpse(Glimpse::Message {
-                        id: format!("{SHOWN}:m{number}"),
-                        text: text.clone(),
-                        row: Some(reply.clone()),
-                    }));
-                    out.push(Signal::Live(LiveReply { id: reply, text }));
-                }
-            }
-            "agent_thought_chunk" => {
                 self.close_message(out);
-                let piece = text_of(&update["content"]["text"]);
-                let number = match &self.thought {
-                    Some((number, _)) => *number,
-                    None => {
-                        let number = self.next_piece();
-                        self.thought = Some((number, String::new()));
-                        number
-                    }
-                };
-                let Some((_, text)) = self.thought.as_mut() else {
-                    return;
-                };
-                text.push_str(piece);
-                let text = text.clone();
-                self.moved(Activity::Thinking, out);
-                if !text.trim().is_empty() {
-                    out.push(Signal::Glimpse(Glimpse::Reasoning {
-                        id: format!("{SHOWN}:t{number}"),
-                        text,
-                    }));
-                }
+                self.on_tool(&call, t, out);
             }
-            "tool_call" | "tool_call_update" => {
-                self.close_thought(out);
-                self.close_message(out);
-                self.on_tool(update, t, out);
-            }
-            "plan" => {
-                let steps: Vec<Value> = update["entries"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
+            SessionUpdate::Plan { entries } => {
+                let steps: Vec<Value> = entries
+                    .iter()
                     .map(|entry| {
                         json!({
-                            "text": text_of(&entry["content"]),
-                            "status": match text_of(&entry["status"]) {
-                                "" => "pending",
-                                status => status,
-                            },
+                            "text": entry.content,
+                            "status": entry.status.as_deref().filter(|status| !status.is_empty()).unwrap_or("pending"),
                         })
                     })
                     .collect();
@@ -480,31 +468,22 @@ impl AcpInterpreter {
                     steps: Value::Array(steps),
                 }));
             }
-            "usage_update" => {
-                if let Some(used) = update["used"].as_u64() {
-                    out.push(Signal::Context { tokens: used });
+            SessionUpdate::UsageUpdate { used: Some(used), .. } => {
+                out.push(Signal::Context { tokens: used });
+            }
+            SessionUpdate::ConfigOptionUpdate { config_options } => {
+                if let Some(model) = schema::current(&Value::Array(config_options), "model") {
+                    self.model(&model, out);
                 }
             }
-            "config_option_update" => {
-                let current = update["configOptions"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|option| option["category"] == "model" || option["id"] == "model")
-                    .and_then(|option| option["currentValue"].as_str());
-                if let Some(model) = current.map(str::trim).filter(|model| !model.is_empty())
-                    && self.model.as_deref() != Some(model)
-                {
-                    self.model = Some(model.to_string());
-                    out.push(Signal::Model(model.to_string()));
-                }
-            }
-            _ => {}
+            SessionUpdate::UsageUpdate { used: None, .. }
+            | SessionUpdate::UserMessageChunk { .. }
+            | SessionUpdate::Other => {}
         }
     }
 
-    fn on_tool(&mut self, update: &Value, t: i64, out: &mut Vec<Signal>) {
-        let raw = text_of(&update["toolCallId"]).trim().to_string();
+    fn on_tool(&mut self, update: &schema::ToolCall, t: i64, out: &mut Vec<Signal>) {
+        let raw = update.tool_call_id.trim().to_string();
         if raw.is_empty() {
             return;
         }
@@ -536,8 +515,7 @@ impl AcpInterpreter {
             out.push(Signal::Tool(call));
             self.moved(Activity::Tool { name }, out);
         }
-        let status = text_of(&update["status"]);
-        if !matches!(status, "completed" | "failed") {
+        if !update.ended() {
             return;
         }
         let Some(call) = self.tools.get_mut(&raw) else {
@@ -547,7 +525,7 @@ impl AcpInterpreter {
             return; // told twice
         }
         let (came_back, exit_code) = tool_output(update);
-        let failed = status == "failed" || exit_code.is_some_and(|code| code != 0);
+        let failed = update.status.as_deref() == Some("failed") || exit_code.is_some_and(|code| code != 0);
         call.status = if failed {
             ToolStatus::Error
         } else {
@@ -581,15 +559,15 @@ impl AcpInterpreter {
                     format!("agy was ended by signal {signal}")
                 },
             },
-            (Some(Told::Answered(stop)), _) => match stop.as_str() {
-                "cancelled" => RunOutcome::Interrupted {
+            (Some(Told::Answered(stop)), _) => match stop {
+                StopReason::Cancelled => RunOutcome::Interrupted {
                     reason: "Antigravity cancelled the turn".to_string(),
                 },
-                "refusal" => RunOutcome::Failed {
+                StopReason::Refusal => RunOutcome::Failed {
                     reason: "Antigravity refused to go on with this turn".to_string(),
                 },
-                "max_tokens" | "max_turn_requests" => {
-                    let what = if stop == "max_tokens" {
+                StopReason::MaxTokens | StopReason::MaxTurnRequests => {
+                    let what = if *stop == StopReason::MaxTokens {
                         "tokens"
                     } else {
                         "requests"
@@ -603,7 +581,7 @@ impl AcpInterpreter {
                     );
                     RunOutcome::Completed
                 }
-                _ => RunOutcome::Completed,
+                StopReason::EndTurn | StopReason::Other(_) => RunOutcome::Completed,
             },
             (Some(Told::Failed { stage, text }), _) => {
                 let tail = self.stderr.text().unwrap_or_default();
@@ -638,38 +616,24 @@ impl AcpInterpreter {
     }
 }
 
-/// What a turn took, from the prompt's answer (`inputTokens`, `outputTokens`, and what was
-/// read from the cache and thought, where it says them): what went in, cache reads with it,
-/// and what came out, thinking with it, as the Host counts every tool's turn.
-fn usage(usage: &Value) -> Option<(u64, u64)> {
-    let figure = |key: &str| usage[key].as_u64();
-    let input = figure("inputTokens");
-    let output = figure("outputTokens");
-    if input.is_none() && output.is_none() {
-        return None;
-    }
-    let cached = figure("cachedReadTokens").unwrap_or(0);
-    let thought = figure("thoughtTokens").unwrap_or(0);
-    Some((
-        input.unwrap_or(0).saturating_add(cached),
-        output.unwrap_or(0).saturating_add(thought),
-    ))
-}
-
 /// What a tool is called in the conversation: Antigravity's own name of it where the title
 /// says one, else what its kind is, else its title.
-fn tool_name(update: &Value) -> String {
-    let title = text_of(&update["title"]).trim();
+fn tool_name(update: &schema::ToolCall) -> String {
+    let title = update.title.as_deref().unwrap_or_default().trim();
     let native = title
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .find_map(agy::known_tool);
     if let Some(name) = native {
         return name.to_string();
     }
-    if update["rawInput"]["CommandLine"].is_string() {
+    if update
+        .raw_input
+        .as_ref()
+        .is_some_and(|input| input["CommandLine"].is_string())
+    {
         return "Bash".to_string();
     }
-    let by_kind = match text_of(&update["kind"]) {
+    let by_kind = match update.kind.as_deref().unwrap_or_default() {
         "execute" => "Bash",
         "read" => "Read",
         "edit" | "delete" | "move" => "Edit",
@@ -686,12 +650,13 @@ fn tool_name(update: &Value) -> String {
 
 /// What a tool was given, under the names the conversation's tools have; the file of a
 /// call that names none in its input is the first place it says it touches.
-fn tool_input(name: &str, update: &Value) -> Value {
-    let mut input = agy::tool_input(name, &update["rawInput"]);
-    let location = update["locations"]
-        .as_array()
+fn tool_input(name: &str, update: &schema::ToolCall) -> Value {
+    let mut input = agy::tool_input(name, update.raw_input.as_ref().unwrap_or(&Value::Null));
+    let location = update
+        .locations
+        .as_ref()
         .and_then(|places| places.first())
-        .map(|place| text_of(&place["path"]))
+        .map(|place| place.path.as_str())
         .filter(|path| !path.is_empty());
     if let (Some(path), Some(fields)) = (location, input.as_object_mut())
         && let Some(file) = fields.get_mut("file_path")
@@ -703,8 +668,8 @@ fn tool_input(name: &str, update: &Value) -> Value {
 }
 
 /// What a tool gave back, and the code its command ended with where that is said.
-fn tool_output(update: &Value) -> (String, Option<i64>) {
-    let raw = &update["rawOutput"];
+fn tool_output(update: &schema::ToolCall) -> (String, Option<i64>) {
+    let raw = update.raw_output.as_ref().unwrap_or(&Value::Null);
     for key in ["combinedOutput", "combined_output", "output"] {
         if let Some(output) = raw[key].as_str().filter(|output| !output.is_empty()) {
             return agy::came_back(output);
@@ -714,7 +679,7 @@ fn tool_output(update: &Value) -> (String, Option<i64>) {
         return agy::came_back(output);
     }
     let mut parts: Vec<String> = Vec::new();
-    for block in update["content"].as_array().into_iter().flatten() {
+    for block in update.content.iter().flatten() {
         match text_of(&block["type"]) {
             "content" => {
                 let text = text_of(&block["content"]["text"]);

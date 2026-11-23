@@ -170,6 +170,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
+name = "clarp-acp"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "clarp-actor"
 version = "0.0.1"
 dependencies = [
@@ -189,11 +197,11 @@ dependencies = [
 name = "clarp-backend"
 version = "0.0.1"
 dependencies = [
+ "clarp-acp",
  "clarp-child",
  "clarp-kernel",
  "clarp-speech",
  "clarp-spool",
- "clarp-tool-args",
  "jiff",
  "regex",
  "rusqlite",
@@ -313,6 +321,7 @@ name = "clarp-shim"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "clarp-acp",
  "clarp-provider-hook",
  "clarp-sealed",
  "clarp-spool",
