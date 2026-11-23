@@ -36,7 +36,10 @@ pub struct PaneState {
     book: crate::scroll_book::HeightBook,
     /// The presentation settings the rows were last presented with; a
     /// preference change re-presents only when these moved.
-    presented_with: Option<(i32, bool, bool, bool)>,
+    presented_with: Option<(i32, bool, bool, bool, (bool, bool))>,
+    /// Conversation view (#702): older pages read this visit to fill a
+    /// short screen, by the chat and view they were read for.
+    fill: (String, u32),
     pub report: Report,
     pub draft: String,
     draft_set: i32,
@@ -91,6 +94,7 @@ impl PaneState {
             rows: RowCache::default(),
             book,
             presented_with: None,
+            fill: (String::new(), 0),
             report: Report { follows: true, at_end: true, ..Report::default() },
             draft: String::new(),
             draft_set: 0,
@@ -575,15 +579,21 @@ impl App {
         // its tools) the item rows show instead.
         // Finished turns fold the same way (§7.6): their rows show as the
         // fold, their tools as its rows.
-        let (live, history) = {
+        let (live, history, projection) = {
             let engine = self.engine.borrow();
             let rows = engine.conversation(&pane.session).map(|c| c.rows().to_vec()).unwrap_or_default();
             let expanded = self.expanded.borrow();
             let live = crate::live_view::present(&engine, &pane.session, &rows, &expanded);
             let history = crate::live_view::history(&engine, &pane.session, &rows, &expanded, live.as_ref());
-            (live, history)
+            // Conversation view (#702): the rows it leaves out, and each
+            // finished turn's Show work on its reply.
+            let projection = crate::live_view::conversation_view(&engine, &pane.session, &rows).then(|| clarp_core::chat_view::project(&rows, &expanded));
+            (live, history, projection)
         };
         let mut hide = history.hidden_rows.clone();
+        if let Some(projection) = &projection {
+            hide.extend(projection.hidden_rows.iter().cloned());
+        }
         let mut strip = history.stripped_calls.clone();
         if let Some(live) = &live {
             hide.extend(live.absorbed_rows.iter().chain(&live.hidden_rows).cloned());
@@ -653,6 +663,11 @@ impl App {
                         }
                         Err(_) => {}
                     }
+                }
+                // Show work on a finished turn's reply (Conversation view).
+                if let Some(work) = projection.as_ref().and_then(|p| p.anchors.get(&row.message.id)) {
+                    shown.work_key = work.key.clone().into();
+                    shown.work_open = work.open;
                 }
                 // A message addressed to this chat's agent by an @-mention.
                 if shown.author == "user" {
@@ -743,7 +758,7 @@ impl App {
             let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
             // Another agent's prompt is drawn again when it opens or folds.
             // An unsent message is drawn again when its status becomes due.
-            format!("{cards}|{}|{pictures}|{receipt}|{}|{}", explained.join(","), row.prompt.expanded, row.status_due)
+            format!("{cards}|{}|{pictures}|{receipt}|{}|{}|{}:{}", explained.join(","), row.prompt.expanded, row.status_due, row.work_key, row.work_open)
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented
@@ -766,15 +781,43 @@ impl App {
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
         crate::scroll_book::measure_soon();
+        self.fill_conversation(pane, projection.is_some());
+    }
+
+    /// A Conversation page shorter than the screen must not look empty:
+    /// older pages are read, as scrolling up reads them, until there are
+    /// enough rows, history ends or five pages were read this round. A new
+    /// round begins when the chat opens or switches to Conversation.
+    fn fill_conversation(&self, pane: &mut PaneState, conversation: bool) {
+        const ROWS: usize = 12;
+        const PAGES: u32 = 5;
+        let round = if conversation { pane.session.clone() } else { String::new() };
+        if pane.fill.0 != round {
+            pane.fill = (round, 0);
+        }
+        if !conversation || pane.shown.len() >= ROWS || pane.fill.1 >= PAGES {
+            return;
+        }
+        let mut engine = self.engine.borrow_mut();
+        let more = engine.conversation(&pane.session).is_some_and(|c| c.has_more() && !c.loading());
+        if more {
+            pane.fill.1 += 1;
+            engine.load_older(&pane.session);
+        }
     }
 
     /// What a transcript's rows depend on among the preferences.
-    fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool) {
+    fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool, (bool, bool)) {
         let engine = self.engine.borrow();
         // The quiet line where agent messages were (#653) is drawn or not.
         let line = engine.chat_hidden_coordination(session) && engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true);
         // The chat's own Tool activity (#653), else the global one.
-        (engine.chat_activity_mode(session), engine.show_when_ready(), self.prefs.borrow().timestamps, line)
+        // The chat's view (#702): its own choice, Clean chat or the Host's.
+        // Its Running box stands for a working agent's turn when no live
+        // turn does, so a snapshot that starts or ends one draws it again.
+        let conversation = engine.chat_view_conversation(session);
+        let busy = conversation && engine.roster().find(session).is_some_and(|a| a.busy);
+        (engine.chat_activity_mode(session), engine.show_when_ready(), self.prefs.borrow().timestamps, line, (conversation, busy))
     }
 
     /// Puts the live rows where the turn happened (`Presented::anchors`):
@@ -1047,7 +1090,8 @@ impl App {
             let fresh = rebound.contains(&pane.id);
             // A preference re-presents a transcript only when one its rows
             // depend on changed (the theme, voice and the rest do not).
-            let preference = changes.contains(&Change::Preferences) && pane.presented_with != Some(presentation);
+            // The roster brings the Host's chat view (#702).
+            let preference = changes.iter().any(|c| matches!(c, Change::Preferences | Change::Roster)) && pane.presented_with != Some(presentation);
             let conversation = fresh
                 || preference
                 || changes.iter().any(|c| matches!(c, Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) | Change::Live(s) if *s == session));

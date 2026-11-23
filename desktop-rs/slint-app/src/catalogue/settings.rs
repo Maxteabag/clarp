@@ -98,6 +98,20 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("0"),
+        // Conversation view for every chat (#702), this device's switch:
+        // a chat's own choice in its menu still wins. Listed while a Host
+        // this desktop reads offers the views.
+        Setting::toggle(
+            e("clean-chat", clarp_core::chat_view::CLEAN_TITLE, "chats", clarp_core::chat_view::CLEAN_DETAIL, &["conversation view", "session view", "chat view", "only replies", "hide work", "running box", "toggle"]),
+            "CHATS",
+            |app| app.engine.borrow().clean_chat(),
+            |app, _, on| {
+                app.engine.borrow_mut().set_clean_chat(on);
+                app.refresh(&[Change::Preferences]);
+            },
+        )
+        .default("off")
+        .when(|app| app.engine.borrow().chat_view_anywhere()),
         // Coordination between agents (`hidden_coordination`, #653): the
         // Host's own setting, written only when the reader flips it.
         Setting::toggle(
