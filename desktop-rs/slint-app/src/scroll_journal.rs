@@ -205,8 +205,8 @@ const FLASH_EVERY: Duration = Duration::from_secs(10);
 const EVENTS_PER_FRAME: usize = 12;
 
 /// A flash: the frame drawn away (`jumped`) and the one back (`back`), by
-/// when they were drawn, how it showed (`offset`: a viewport or more away;
-/// `top-row`: another row across the top) and how many viewports away.
+/// when they were drawn, how it showed (`jump_back`: a viewport or more
+/// away; `top_flip`: another row across the top) and how many viewports away.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Flash {
     pub kind: &'static str,
@@ -248,7 +248,7 @@ pub fn detect(frames: &[Frame]) -> Option<Flash> {
         if offset_flash || top_flash {
             let farthest = away.iter().map(|f| before.distance(&f.shot)).fold(0.0, f32::max);
             return Some(Flash {
-                kind: if offset_flash { "offset" } else { "top-row" },
+                kind: if offset_flash { "jump_back" } else { "top_flip" },
                 jumped: frames[jumped].at,
                 back: frames[back].at,
                 frames_away: back - jumped,
@@ -366,51 +366,90 @@ pub fn flash_lines(pane: &str, flash: &Flash, frames: &[Frame], skipped: u32, cl
     lines
 }
 
-/// The /clog event's detail: the flash, and as many of its frames (the
-/// newest; always those from the one before the jump) as fit the Host's
-/// 4 KB detail. Each frame is [ms from the jump, offset, content, viewport,
-/// place × 1000, top row index, follow 0/1, rows, top row (an index into
-/// `tops`), "what happened"].
-pub fn flash_detail(pane: &str, flash: &Flash, frames: &[Frame], skipped: u32) -> Value {
-    const MOST: usize = 3800;
-    let first_needed = frames.iter().position(|f| f.at >= flash.jumped).unwrap_or(0).saturating_sub(1);
-    let build = |from: usize, with_events: bool| {
-        let shown = &frames[from..];
-        let mut tops: Vec<String> = Vec::new();
-        let rows: Vec<Value> = shown
-            .iter()
-            .map(|f| {
-                let s = &f.shot;
-                let id: String = s.top.chars().take(24).collect();
-                let top = tops.iter().position(|t| *t == id).unwrap_or_else(|| {
-                    tops.push(id);
-                    tops.len() - 1
-                });
-                let ms = (f.at.as_secs_f64() - flash.jumped.as_secs_f64()) * 1000.0;
-                let what: String = if with_events { f.events.join(",").chars().take(60).collect() } else { String::new() };
-                json!([ms.round() as i64, s.offset.round() as i64, s.content.round() as i64, s.viewport.round() as i64, (s.place() * 1000.0).round() as i64, s.top_index, u8::from(s.follow), s.rows, top, what])
-            })
-            .collect();
-        json!({
-            "v": 1,
-            "pane": pane,
-            "kind": flash.kind,
-            "viewports": (flash.viewports * 10.0).round() / 10.0,
-            "frames_away": flash.frames_away,
-            "skipped": skipped,
-            "dropped": from,
-            "fields": "ms,offset,content,viewport,place_milli,top_index,follow,rows,top,events",
-            "frames": rows,
-            "tops": tops,
-        })
-    };
-    for from in 0..=first_needed {
-        let detail = build(from, true);
-        if detail.to_string().len() <= MOST {
-            return detail;
+/// What happened before a frame, as the Host's `scroll_flash` names it:
+/// (kind, note), kind reload, insert, remove, height or live. Pins, the
+/// list's re-estimates and moves are the local journal's only.
+fn host_events(events: &[String]) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    for event in events {
+        if let Some(why) = event.strip_prefix("reset:") {
+            out.push(("reload", why.to_owned()));
+        } else if let Some(counts) = event.strip_prefix("rows ") {
+            let count = |sign: char| counts.split(' ').find_map(|c| c.strip_prefix(sign)).and_then(|n| n.parse::<usize>().ok()).unwrap_or(0);
+            let (removed, inserted, updated) = (count('-'), count('+'), count('~'));
+            if removed > 0 {
+                out.push(("remove", format!("{removed} rows")));
+            }
+            if inserted > 0 {
+                out.push(("insert", format!("{inserted} rows")));
+            }
+            if updated > 0 {
+                out.push(("live", format!("{updated} rows updated")));
+            }
+        } else if event == "height" {
+            out.push(("height", String::new()));
+        } else if event == "live" {
+            out.push(("live", "tick".to_owned()));
         }
     }
-    build(first_needed, false)
+    out
+}
+
+/// The shared `scroll_flash` event's detail (every app sends this shape):
+/// `chat` the chat's session on the Host it is posted to, `window` the
+/// pane, `screen` the viewport's height, `rule` jump_back or top_flip,
+/// `frames` [{t ms from the jump, y offset, h content height, top message
+/// id, g a gesture}] (only those where y, h or top changed; at most 60),
+/// `events` [{t, kind, note}] (at most 30). It stays under the Host's 4 KB
+/// detail: the oldest frames go first, then the oldest events, never the
+/// flash's own frames.
+pub fn flash_detail(chat: &str, pane: &str, flash: &Flash, frames: &[Frame]) -> Value {
+    const MOST: usize = 3900;
+    const MOST_FRAMES: usize = 60;
+    const MOST_EVENTS: usize = 30;
+    let ms = |at: Duration| ((at.as_secs_f64() - flash.jumped.as_secs_f64()) * 1000.0).round() as i64;
+    let mut kept: Vec<Value> = Vec::new();
+    let mut needed = 0;
+    let mut last: Option<&Shot> = None;
+    let mut events: Vec<Value> = Vec::new();
+    for (i, frame) in frames.iter().enumerate() {
+        let s = &frame.shot;
+        for (kind, note) in host_events(&frame.events) {
+            events.push(json!({"t": ms(frame.at), "kind": kind, "note": note}));
+        }
+        let changed = last.is_none_or(|l| (l.offset - s.offset).abs() >= 0.5 || (l.content - s.content).abs() >= 0.5 || l.top != s.top);
+        // The frame before the jump is the flash's too.
+        let flash_frame = frames.get(i + 1).is_some_and(|next| next.at >= flash.jumped) || frame.at >= flash.jumped;
+        if changed || (flash_frame && frame.at <= flash.back) {
+            if flash_frame && needed == 0 {
+                needed = kept.len();
+            }
+            kept.push(json!({"t": ms(frame.at), "y": s.offset.round() as i64, "h": s.content.round() as i64, "top": s.top,
+                             "g": frame.events.iter().any(|e| asked(e))}));
+            last = Some(s);
+        }
+    }
+    let screen = frames.iter().find(|f| f.at >= flash.jumped).map_or(0.0, |f| f.shot.viewport);
+    let mut from_frame = kept.len().saturating_sub(MOST_FRAMES).min(needed);
+    let mut from_event = events.len().saturating_sub(MOST_EVENTS);
+    loop {
+        let detail = json!({
+            "chat": chat,
+            "window": pane,
+            "screen": screen.round() as i64,
+            "rule": flash.kind,
+            "frames": &kept[from_frame..],
+            "events": &events[from_event..],
+        });
+        if detail.to_string().len() <= MOST || (from_frame >= needed && from_event >= events.len()) {
+            return detail;
+        }
+        if from_frame < needed {
+            from_frame += 1;
+        } else {
+            from_event += 1;
+        }
+    }
 }
 
 thread_local! {
@@ -443,10 +482,17 @@ pub fn frame_drawn() {
             for line in flash_lines(&pane, &flash, &frames, skipped, &clock) {
                 eprintln!("{line}");
             }
-            let detail = flash_detail(&pane, &flash, &frames, skipped);
+            // A peer's chat goes to its own Host, under its session there.
+            let session = crate::app().map(|app| app.session_of(&pane)).unwrap_or_default();
+            let mut posted = None;
             if let Some(app) = crate::app() {
-                app.engine.borrow().report_client_event("scroll_flash", "fault", detail.clone());
+                app.engine.borrow().report_chat_event(&session, "scroll_flash", "warning", |chat| {
+                    let detail = flash_detail(chat, &pane, &flash, &frames);
+                    posted = Some(detail.clone());
+                    detail
+                });
             }
+            let detail = posted.unwrap_or_else(|| flash_detail(&session, &pane, &flash, &frames));
             FLASHES.with(|f| f.borrow_mut().push(detail));
         });
     }
@@ -537,7 +583,7 @@ mod tests {
         let found = frames(&shots);
         assert_eq!(detect(&found[..3]), None, "still away is not a flash yet");
         let flash = detect(&found).expect("back within three frames");
-        assert_eq!(flash.kind, "offset");
+        assert_eq!(flash.kind, "jump_back");
         assert_eq!(flash.frames_away, 2);
         assert_eq!(flash.jumped, Duration::from_millis(16));
         assert!((flash.viewports - 4054.0 / 480.0).abs() < 0.01, "{flash:?}");
@@ -548,7 +594,7 @@ mod tests {
         let end = at_end(93, 6095.0);
         let past = Shot { offset: -6115.0 - 700.0, ..end.clone() };
         let flash = detect(&frames(&[(end.clone(), &[][..]), (past, &[][..]), (end, &[][..])])).expect("overshoot and back");
-        assert_eq!(flash.kind, "offset");
+        assert_eq!(flash.kind, "jump_back");
     }
 
     #[test]
@@ -571,7 +617,7 @@ mod tests {
         let end = at_end(78, 8421.0);
         let other = Shot { top: "row-60".into(), top_index: 60, offset: end.offset + 100.0, ..end.clone() };
         let flash = detect(&frames(&[(end.clone(), &[][..]), (other, &[][..]), (end, &[][..])])).expect("top row flash");
-        assert_eq!(flash.kind, "top-row");
+        assert_eq!(flash.kind, "top_flip");
     }
 
     #[test]
@@ -619,24 +665,46 @@ mod tests {
     }
 
     #[test]
-    fn the_hosts_event_fits_its_detail_and_keeps_the_flash() {
+    fn the_scroll_flash_event_has_the_shared_shape_and_fits_four_kb() {
         let end = at_end(78, 8421.0);
         let up = Shot { offset: -3887.0, ..end.clone() };
-        let mut shots: Vec<(Shot, &[&str])> = (0..180).map(|i| (Shot { top: format!("a-long-message-id-{i:04}-0123456789"), ..end.clone() }, &["live", "height", "rows -1 +2"][..])).collect();
-        shots.push((up, &["rows -3 +1"][..]));
+        // 180 frames before the flash, each another top row (so each is kept).
+        let mut shots: Vec<(Shot, &[&str])> = (0..180)
+            .map(|i| (Shot { top: format!("a-long-message-id-{i:04}-0123456789"), ..end.clone() }, &["live", "height", "rows -1 +2 ~1"][..]))
+            .collect();
+        shots.push((end.clone(), &["reset:chat"][..]));
+        shots.push((up, &["rows -3 +1 ~0"][..]));
         shots.push((end.clone(), &["follow"][..]));
+        shots.push((end.clone(), &["live"][..]));
         let frames = frames(&shots);
-        let flash = detect(&frames).expect("flash");
-        let detail = flash_detail("pane-3", &flash, &frames, 2);
-        assert!(detail.to_string().len() <= 3800, "{}", detail.to_string().len());
-        let rows = detail["frames"].as_array().unwrap();
-        assert_eq!(rows.last().unwrap()[0], 16, "the frame back, 16 ms after the jump");
-        assert_eq!(rows[rows.len() - 2][4], 489, "the jump's place, x1000");
-        assert_eq!(detail["kind"], "offset");
-        assert_eq!(detail["skipped"], 2);
-        assert_eq!(detail["dropped"].as_u64().unwrap() as usize + rows.len(), frames.len());
+        let flash = detect(&frames[..frames.len() - 1]).expect("flash");
+        let detail = flash_detail("rachel", "pane-3", &flash, &frames);
+        assert!(detail.to_string().len() <= 3900, "{}", detail.to_string().len());
+        let mut keys: Vec<&String> = detail.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["chat", "events", "frames", "rule", "screen", "window"]);
+        assert_eq!((detail["chat"].as_str(), detail["window"].as_str(), detail["screen"].as_i64(), detail["rule"].as_str()), (Some("rachel"), Some("pane-3"), Some(480), Some("jump_back")));
+        let shown = detail["frames"].as_array().unwrap();
+        assert!(shown.len() <= 60);
+        for frame in shown {
+            let mut fields: Vec<&String> = frame.as_object().unwrap().keys().collect();
+            fields.sort();
+            assert_eq!(fields, ["g", "h", "t", "top", "y"]);
+        }
+        // The flash: before it, away and back (the last frame did not move).
+        let tail: Vec<(i64, i64)> = shown[shown.len() - 3..].iter().map(|f| (f["t"].as_i64().unwrap(), f["y"].as_i64().unwrap())).collect();
+        assert_eq!(tail, [(-16, -7941), (0, -3887), (16, -7941)]);
+        let events = detail["events"].as_array().unwrap();
+        assert!(events.len() <= 30);
+        for event in events {
+            assert!(["reload", "insert", "remove", "height", "live"].contains(&event["kind"].as_str().unwrap()), "{event}");
+            let mut fields: Vec<&String> = event.as_object().unwrap().keys().collect();
+            fields.sort();
+            assert_eq!(fields, ["kind", "note", "t"]);
+        }
+        let last: Vec<(&str, &str)> = events[events.len() - 4..].iter().map(|e| (e["kind"].as_str().unwrap(), e["note"].as_str().unwrap())).collect();
+        assert_eq!(last, [("reload", "chat"), ("remove", "3 rows"), ("insert", "1 rows"), ("live", "tick")]);
         let lines = flash_lines("pane-3", &flash, &frames, 0, "t");
         assert_eq!(lines.len(), frames.len() + 1);
-        assert!(lines.last().unwrap().ends_with("<- back"), "{}", lines.last().unwrap());
     }
 }
