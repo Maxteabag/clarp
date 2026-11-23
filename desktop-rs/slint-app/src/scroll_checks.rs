@@ -1215,3 +1215,143 @@ pub(super) fn scroll_jump_check(out: String) {
         (1000, act(|app, window| { crate::commands::run(app, window, "close-pane"); }))], 2500, always()));
     run_stages(stages);
 }
+
+// ---- the chat flashing another scroll state (`--check scroll-paint`)
+
+/// What the frames drawn while the chat streamed showed.
+#[derive(Default)]
+struct Painted {
+    /// Frames drawn while the chat followed, and those of them that did not
+    /// show its end.
+    following: usize,
+    off_end: Vec<String>,
+    done: usize,
+    begun: Option<Instant>,
+}
+
+/// `--check scroll-paint --out DIR`: a chat following its end shows its
+/// end in every frame drawn, pixel for pixel. Frames are drawn as the real
+/// window draws them (only what changed is repainted, at 60 Hz), and every
+/// other one is compared with a whole repaint of the same state: a region
+/// the partial repaint missed keeps an older frame's rows on screen, the
+/// flash of another scroll state. Agent turns stream into a 200-row chat
+/// (tools come and go, rows are filed, a live reply grows and is replaced,
+/// rows land in bursts), the reader switches to another chat and back, and
+/// a long reply grows fast.
+pub(super) fn scroll_paint_check(out: String) {
+    const SESSION: &str = "paint";
+    const ROWS: usize = 200;
+    const STEP_MS: u64 = 120;
+    let mut steps: Vec<(String, Box<dyn Fn()>)> = Vec::new();
+    for turn in 0..3 {
+        steps.extend(agent_turn(SESSION, turn));
+        steps.push((format!("turn {turn}: three rows land at once"), Box::new(move || {
+            upsert(SESSION, json!((0..3).map(|n| json!({"id": format!("paint-burst-{turn}-{n}"), "role": if n == 0 { "user" } else { "assistant" }, "text": LOREM.repeat(1 + n)})).collect::<Vec<_>>()));
+        })));
+        for n in 0..6 {
+            steps.push((format!("turn {turn}: a fast reply grows ({n})"), Box::new(move || {
+                upsert(SESSION, json!([{"id": format!("paint-fast-{turn}"), "role": "assistant", "kind": "live", "text": streamed(n)}]));
+            })));
+        }
+        steps.push((format!("turn {turn}: the fast reply is filed"), Box::new(move || {
+            upsert(SESSION, json!([{"id": format!("paint-fast-done-{turn}"), "role": "assistant", "text": streamed(6)}]));
+        })));
+        steps.push((format!("turn {turn}: another chat"), Box::new(|| {
+            app_now().engine.borrow_mut().select("rachel");
+            crate::pump();
+        })));
+        steps.push((format!("turn {turn}: back to the streaming chat"), Box::new(|| {
+            app_now().engine.borrow_mut().select(SESSION);
+            crate::pump();
+        })));
+    }
+    let steps = Rc::new(steps);
+    let count = steps.len();
+    let state = Rc::new(RefCell::new(Painted::default()));
+    let (s1, s2) = (state.clone(), state.clone());
+    let saved = out.clone();
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(|app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Paint"})).is_ok(), "the Host takes a new chat");
+            true
+        })),
+        ("select", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find(SESSION).is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select(SESSION);
+            crate::pump();
+            true
+        })),
+        ("fill", Box::new(|app, _, elapsed| {
+            if app.engine.borrow().conversation(SESSION).is_none() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(control("/__control/rich", &json!({"session": SESSION, "count": ROWS})).is_ok(), &format!("the Host fills the chat with {ROWS} varied rows"));
+            true
+        })),
+        ("at the end", Box::new(move |app, window, elapsed| {
+            if rows(window).len() < ROWS || elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            if !(report().follows && report().at_end && last_row_visible().0) {
+                app.to_latest();
+                return false;
+            }
+            headless::pace(headless::Pacing { partial: true, hz: 60 });
+            headless::verify_paint(true, Some(saved.clone()));
+            let watch = s1.clone();
+            headless::after_draw(Some(Box::new(move || {
+                let mut st = watch.borrow_mut();
+                let app = app_now();
+                // Only the streaming chat, and only once it is drawn again.
+                if app.engine.borrow().selected_session() != SESSION || app.active_messages().is_none_or(|m| slint::Model::row_count(&*m) < ROWS) {
+                    return;
+                }
+                let now = report();
+                if !now.follows {
+                    return;
+                }
+                st.following += 1;
+                if !now.at_end {
+                    let at = st.begun.map_or(0, |b| b.elapsed().as_millis());
+                    st.off_end.push(format!("frame {} at {at}ms: offset {:.0}, top row #{}", headless::frames_drawn(), now.offset, now.top));
+                }
+            })));
+            s1.borrow_mut().begun = Some(Instant::now());
+            true
+        })),
+        ("streams", Box::new(move |_, _, elapsed| {
+            let due = (elapsed.as_millis() as u64 / STEP_MS) as usize;
+            loop {
+                let next = {
+                    let st = s2.borrow();
+                    (st.done < count && st.done <= due).then_some(st.done)
+                };
+                let Some(next) = next else { break };
+                (steps[next].1)();
+                s2.borrow_mut().done += 1;
+            }
+            if s2.borrow().done < count || elapsed < Duration::from_millis(STEP_MS * count as u64 + 1500) {
+                return false;
+            }
+            headless::after_draw(None);
+            let paint = headless::paint();
+            headless::verify_paint(false, None);
+            headless::pace(headless::Pacing::default());
+            let st = s2.borrow();
+            check(paint.compared >= 20, &format!("the paint check compared partial frames with whole repaints while {count} updates streamed in ({} compared)", paint.compared));
+            check(paint.stale.is_empty(), &format!("every partial frame shows what a whole repaint shows: {} of {} differed (first: {:?}; saved as stale-*.png)", paint.stale.len(), paint.compared, paint.stale.iter().take(4).collect::<Vec<_>>()));
+            check(st.following >= count / 2, &format!("frames were drawn while the chat followed ({} frames)", st.following));
+            check(st.off_end.is_empty(), &format!("no frame of the following chat is drawn off its end: {} of {} were: {:?}", st.off_end.len(), st.following, st.off_end.iter().take(6).collect::<Vec<_>>()));
+            let (visible, numbers) = last_row_visible();
+            check(report().follows && visible, &format!("the chat still follows and shows its last row whole: {numbers}"));
+            shot(&out, "scroll-paint-01-streamed");
+            true
+        })),
+    ];
+    run_stages(stages);
+}

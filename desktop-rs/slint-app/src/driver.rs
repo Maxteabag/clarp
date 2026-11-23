@@ -490,6 +490,7 @@ pub fn start_check(name: &str, out: String) {
             scroll_checks::scroll_check(out)
         }
         "scroll-jump" => scroll_checks::scroll_jump_check(out),
+        "scroll-paint" => scroll_checks::scroll_paint_check(out),
         "scrollbar" => {
             row_overlap_checks::watch();
             scrollbar_checks::scrollbar_check(out)
