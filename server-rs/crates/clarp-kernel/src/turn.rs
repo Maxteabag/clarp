@@ -1690,4 +1690,36 @@ mod tests {
             "turn 7: `settled` cannot follow the state `queued`"
         );
     }
+
+    #[test]
+    fn a_wait_for_an_account_keeps_its_reset_and_reads_a_log_from_before_it() {
+        let parked = |wait: Wait| TurnEvent::Parked {
+            wait,
+            kind: "usage_limit".to_string(),
+            reason: "out".to_string(),
+            at_ms: 5,
+        };
+        let told = parked(Wait::Account {
+            until_ms: 70,
+            resets_at_ms: Some(60),
+        });
+        let written = serde_json::to_string(&told).unwrap();
+        assert!(written.contains(r#""resets_at_ms":60"#), "{written}");
+        assert_eq!(serde_json::from_str::<TurnEvent>(&written).unwrap(), told);
+        // Without a reset it is written as before, and a line from before reads as one
+        // without.
+        let before = r#"{"event":"parked","wait":{"for":"account","until_ms":70},"kind":"usage_limit","reason":"out","at_ms":5}"#;
+        let untold = parked(Wait::account(70));
+        assert_eq!(serde_json::to_string(&untold).unwrap(), before);
+        assert_eq!(serde_json::from_str::<TurnEvent>(before).unwrap(), untold);
+        assert_eq!(Wait::account(70).resets_at_ms(), None);
+        assert_eq!(
+            Wait::Retry {
+                until_ms: 70,
+                resume: false
+            }
+            .resets_at_ms(),
+            None
+        );
+    }
 }

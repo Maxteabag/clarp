@@ -201,13 +201,33 @@ impl Service {
         })
     }
 
-    /// The agent's turn, carried over a restart, waits for an account that has usage again
-    /// at this time, as its tool said before the Host stopped.
-    pub fn out_until(self: &Arc<Self>, agent: &str, turn: TurnId, resets_at_ms: i64) {
+    /// A Host that starts found the agent's turn waiting for an account: the recovery it
+    /// waited in is taken up, from when it began to wait, with the turn in it and when its
+    /// tool said the account has usage again. All at once, so that no answer of the selector
+    /// finds the recovery without the turn's reset.
+    pub fn carried_turn(
+        self: &Arc<Self>,
+        since_ms: i64,
+        agent: &str,
+        turn: TurnId,
+        model: &str,
+        resets_at_ms: Option<i64>,
+    ) {
         let trace = turn.0.to_string();
         self.told(|pool, now| {
-            pool.out_until(agent, &trace, resets_at_ms, now);
-            ((), Vec::new())
+            let (_, mut effects) = pool.carried(true, since_ms, &[agent.to_string()], now);
+            let starting = Starting {
+                agent,
+                trace: &trace,
+                model,
+                holds: true,
+                ends: true,
+            };
+            effects.extend(pool.register(starting, now).1);
+            if let Some(at) = resets_at_ms {
+                pool.out_until(agent, &trace, at, now);
+            }
+            ((), effects)
         });
     }
 
@@ -226,12 +246,6 @@ impl Service {
     /// agent is gone.
     pub fn disowned(self: &Arc<Self>, agent: &str) {
         self.told(|pool, now| ((), pool.disown(agent, now)));
-    }
-
-    /// A Host that starts found turns that wait for an account: the recovery they waited in
-    /// is taken up, from when the first of them began to wait.
-    pub fn carried(self: &Arc<Self>, since_ms: i64, agents: &[String]) {
-        self.told(|pool, now| ((), pool.carried(true, since_ms, agents, now).1));
     }
 
     /// Whether the owner has a selector for this tool: a recovery can be asked of the pool.

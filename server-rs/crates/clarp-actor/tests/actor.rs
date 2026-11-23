@@ -2309,14 +2309,20 @@ fn a_turn_the_pool_holds_for_its_plan_waits_and_ends_with_what_the_provider_said
 /// window begins anew: what happens to it on a Host that treats accounts this way. When it
 /// was refused, and when the account resets.
 fn out_of_usage(world: &mut World, actor: &mut Actor) -> (i64, i64) {
-    world.send(actor, "u-1", "go", Admission::Queue);
-    let resets = world.now_ms + 5 * 3_600_000;
+    out_of_usage_until(world, actor, "u-1", 5 * 3_600_000)
+}
+
+/// The same, for this message, with the account out for so long from now.
+fn out_of_usage_until(world: &mut World, actor: &mut Actor, id: &str, out_ms: i64) -> (i64, i64) {
+    world.send(actor, id, "go", Admission::Queue);
+    let resets = world.now_ms + out_ms;
     let words = "You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)";
+    let turn = *world.took.last().expect("the turn was launched");
     world.says(
-        1,
+        turn,
         &serde_json::json!({ "fail": words, "out_until_ms": resets }).to_string(),
     );
-    world.exits(1, Some(1), None);
+    world.exits(turn, Some(1), None);
     let refused_at = world.now_ms;
     world.hint(actor);
     (refused_at, resets)
@@ -2409,6 +2415,26 @@ fn a_turn_whose_account_resets_at_a_time_it_was_told_waits_until_then_where_it_m
         row,
         format!("{sentence}.\n\nYou've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)")
     );
+    // A reset that is over, or further than a week, is no reset to tell: the row says none.
+    for (id, out_ms) in [("u-2", -3_600_000), ("u-3", 9 * 86_400_000)] {
+        out_of_usage_until(&mut world, &mut actor, id, out_ms);
+        let row = actor
+            .tail(1_000)
+            .unwrap()
+            .entries
+            .iter()
+            .rev()
+            .find_map(|version| match &version.entry {
+                Entry::Notice(notice) => Some(notice.text.clone()),
+                _ => None,
+            })
+            .expect("a row says why");
+        assert_eq!(
+            row,
+            "Usage limit reached.\n\nYou've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)",
+            "{id}"
+        );
+    }
 }
 
 #[test]

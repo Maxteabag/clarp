@@ -715,6 +715,13 @@ struct LiveTurn {
 }
 
 impl LiveTurn {
+    /// When the attempt's tool said its account has usage again, where that is a reset to
+    /// wait for and to tell: not one that is over, nor one further than a week.
+    fn reset_to_wait_for(&self, now_ms: i64) -> Option<i64> {
+        self.out_until_ms
+            .filter(|at| recovery::after_reset(Some(*at), now_ms).is_some())
+    }
+
     fn open_rows(&self) -> conversation::OpenRows<'_> {
         conversation::OpenRows {
             drafts: &self.drafts,
@@ -5919,8 +5926,9 @@ impl Actor {
                                 let waits = waits.unwrap_or_default();
                                 // When the account has usage again, where the tool said so
                                 // with a usage limit.
-                                let resets_at_ms =
-                                    live.out_until_ms.filter(|_| kind == failures::USAGE_LIMIT);
+                                let resets_at_ms = live
+                                    .reset_to_wait_for(t)
+                                    .filter(|_| kind == failures::USAGE_LIMIT);
                                 // Its last row is still its message only while no attempt
                                 // has said or begun anything; and the turn's own record
                                 // counts the tools of every attempt, across a restart too.
@@ -6005,9 +6013,11 @@ impl Actor {
                                     reason,
                                     model: &model,
                                     trace_id: live.trace_id.clone(),
-                                    resets: live.out_until_ms.map(|at_ms| failures::Resets {
-                                        at_ms,
-                                        said_at_ms: t,
+                                    resets: live.reset_to_wait_for(t).map(|at_ms| {
+                                        failures::Resets {
+                                            at_ms,
+                                            said_at_ms: t,
+                                        }
                                     }),
                                 })
                                 .map(|marker| {
