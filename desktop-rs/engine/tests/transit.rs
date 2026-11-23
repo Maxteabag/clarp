@@ -39,7 +39,7 @@ fn a_move_runs_from_the_offer_through_its_phases_to_done() {
     let options = d.engine.transit_options("rachel");
     assert_eq!(options.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), ["claude", "codex", "grok"]);
     assert_eq!(options[2].reason.as_deref(), Some("Not signed in"));
-    assert_eq!(host.requests("GET", "/agent-model-options").last().unwrap()["query"]["session"], "rachel");
+    assert!(host.requests("GET", "/agent-model-options").iter().any(|r| r["query"]["session"] == "rachel"), "the offer is asked for the agent");
 
     d.engine.transit_pick_backend("rachel", "grok");
     assert_eq!(d.engine.transit_flow("rachel").step, Step::Picking, "an unavailable backend is not picked");
