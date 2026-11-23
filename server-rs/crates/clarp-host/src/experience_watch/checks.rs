@@ -629,7 +629,8 @@ mod tests {
             .send(
                 Message {
                     id: "u-blocking".into(),
-                    text: "sleep 4".into(),
+                    // Long enough to be stalled and seen so on a loaded runner; its end clears it.
+                    text: "sleep 8".into(),
                     ..Message::default()
                 },
                 Admission::Queue,
@@ -643,7 +644,9 @@ mod tests {
             .join("agents")
             .join(&worker.agent_id)
             .join("spool/1.jsonl");
-        let started_at = tokio::time::timeout(Duration::from_secs(2), async {
+        // The waits are for a condition: a wide bound costs nothing when it is met, and a loaded
+        // runner (GitHub's four cores, 22 Nov 2026) took more than two seconds to spawn.
+        let started_at = tokio::time::timeout(Duration::from_secs(20), async {
             let reader = SpoolReader::new(&spool);
             loop {
                 let running = handle
@@ -685,7 +688,7 @@ mod tests {
         assert!(handle.view().stalled_since.is_none());
         place.clock.advance_ms(120);
 
-        let entered = tokio::time::timeout(Duration::from_secs(2), async {
+        let entered = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
                 let event: Value =
                     serde_json::from_str(&events.recv().await.unwrap().json).unwrap();
@@ -748,7 +751,7 @@ mod tests {
         );
         assert_eq!(settings.recipients("stall"), ["queue-owner", "desk"]);
 
-        let cleared = tokio::time::timeout(Duration::from_secs(7), async {
+        let cleared = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 let event: Value =
                     serde_json::from_str(&events.recv().await.unwrap().json).unwrap();
