@@ -724,13 +724,13 @@ mod tests {
                 .find(|path| path.is_file())
                 .expect("python3 for the stand-in shim");
             let leave = exit.map_or(String::new(), |code| format!("sys.exit({code})"));
-            let script = r#"#!PYTHON
+            let script = r#"#!@python@
 import os, socket, sys, time
 at = sys.argv[sys.argv.index("--socket") + 1]
 here = os.path.dirname(at)
 open(os.path.join(here, "started"), "a").write("started\n")
-time.sleep(DELAY)
-LEAVE
+time.sleep(@delay@)
+@leave@
 server = socket.socket(socket.AF_UNIX)
 server.bind(at)
 server.listen(8)
@@ -746,9 +746,9 @@ try:
 except socket.timeout:
     pass
 "#
-            .replace("PYTHON", &python.display().to_string())
-            .replace("DELAY", &delay.to_string())
-            .replace("LEAVE", &leave);
+            .replace("@python@", &python.display().to_string())
+            .replace("@delay@", &delay.to_string())
+            .replace("@leave@", &leave);
             let shim = dir.join("stand-in");
             std::fs::write(&shim, script).unwrap();
             std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
