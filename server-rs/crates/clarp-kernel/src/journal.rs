@@ -904,6 +904,17 @@ impl Batch<'_> {
         match waiting {
             Ok(found) => {
                 if let Some(stored) = found.into_iter().find(|item| item.seq == message_seq) {
+                    // A message a turn gave back to the queue (`Agent::give_back`) is in the
+                    // conversation already: the turn that takes it again writes no second row.
+                    let entered = stored.key.as_deref().map(|key| self.recorder.log.find(key));
+                    match entered {
+                        Some(Ok(Some(row))) if row.kind == kind::MESSAGE => return,
+                        Some(Err(error)) => {
+                            self.failed.get_or_insert(error.into());
+                            return;
+                        }
+                        _ => {}
+                    }
                     let steered = self
                         .work
                         .joins()

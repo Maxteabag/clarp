@@ -66,7 +66,8 @@ impl Actor {
             return Ok(());
         }
         let mut batch = self.recorder.batch();
-        let mut read = Vec::new();
+        // What the queue is told waits for the write: a batch that is not written told nothing.
+        let mut told = Outputs::default();
         for (next, message) in taken {
             let uuid = clarp_kernel::takeover::attempt_prompt_uuid(
                 &self.profile.agent_id,
@@ -83,21 +84,25 @@ impl Actor {
             if batch
                 .command(Command::Join { turn: next, join }, now_ms)
                 .is_err()
-                || batch
-                    .command(Command::JoinRead { turn: next }, now_ms)
-                    .is_err()
             {
-                // A batch is all or nothing: what was taken before this one stands, and the
-                // rest waits for its own turn.
+                // What was taken before this one stands, and the rest waits for its own turn.
                 break;
             }
-            steering::queue_started(&batch, out, next, &message);
-            read.push(next);
+            if batch
+                .command(Command::JoinRead { turn: next }, now_ms)
+                .is_err()
+            {
+                // A reservation is never written without its read: nothing of this batch is,
+                // and every message waits for its own turn.
+                return Ok(());
+            }
+            steering::queue_started(&batch, &mut told, next, &message);
         }
-        if read.is_empty() {
+        if told.joined_reads.is_empty() {
             return Ok(());
         }
         batch.commit()?;
+        out.joined_reads.extend(told.joined_reads);
         out.changed.conversation = true;
         out.changed.queue = true;
         Ok(())

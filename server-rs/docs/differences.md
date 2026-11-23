@@ -591,7 +591,12 @@ the daily schedule.
   turn. The tool is given one prompt that says the user sent these while it was busy and holds
   each in order, numbered `[1]`, `[2]`, and so on; every backend. A later attempt of the turn
   (a failure that passes, a wait for an account, a restart before the launch) is given the same
-  prompt, rebuilt from the agent's log. While a turn runs that cannot take such a message now
+  prompt, rebuilt from the agent's log, and no takeover replaces it. A turn that ends before it
+  began its answer, by a Stop that is not the user's own (an agent's, a routine's, a newer
+  message sent now) or a lost process, gives the messages after its first back to the head of
+  the queue, in order, where they wait with their rows already written (Maximus's ruling of 23
+  Nov 2026: nothing the user wrote ends unanswered because someone else stopped the turn); the
+  user's own Stop ends them with the turn. While a turn runs that cannot take such a message now
   (no steering on the backend, or a steer that was not possible), its queue item and the
   `queue-updated` event it joined with say `read_together: true`. The Python Host starts one
   queued message per turn, so its agent answers the first without the others and each of the

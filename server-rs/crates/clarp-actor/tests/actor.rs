@@ -6570,3 +6570,165 @@ fn the_users_waiting_messages_are_one_turn_and_its_retry_is_given_all_of_them() 
     assert!(actor.queue().unwrap().is_empty());
     assert_eq!(actor.status().waiting, vec![]);
 }
+
+/// Turn 1 runs, and the user's three messages wait behind it: turn 2 takes the two behind
+/// its own.
+fn three_waiting(name: &str) -> (World, Actor) {
+    let mut world = World::new(name);
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    for (id, text) in [
+        ("u-2", "first words"),
+        ("u-3", "second words"),
+        ("u-4", "third words"),
+    ] {
+        world.send(&mut actor, id, text, Admission::Queue);
+    }
+    world.says(1, "One.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(world.took, vec![1, 2]);
+    assert!(actor.queue().unwrap().is_empty());
+    (world, actor)
+}
+
+fn user_rows(actor: &Actor) -> Vec<String> {
+    shown(actor)
+        .into_iter()
+        .filter(|(_, says)| says.starts_with("user: "))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// Maximus's ruling of 23 Nov 2026: nothing the user wrote ends unanswered because someone
+/// else stopped the turn. An agent's Stop of a turn that had not begun its answer gives the
+/// user's messages it took back to the queue, in order; they keep their rows, and the turn
+/// that takes them again writes none. The user's own Stop ends them with the turn.
+#[test]
+fn an_agents_stop_gives_the_users_messages_back_and_the_users_stop_ends_them() {
+    let (mut world, mut actor) = three_waiting("together-agent-stop");
+    let agent = clarp_kernel::control::Control {
+        actor: "agent:hazel".to_string(),
+        verified: true,
+        reason: "not now".to_string(),
+    };
+    let (_, out) = actor.stop_as(agent, world.tick()).unwrap();
+    world.carry_out(&mut actor, out);
+    world.exits(2, None, Some(15));
+    world.hint(&mut actor);
+    let back: Vec<String> = actor
+        .queue()
+        .unwrap()
+        .into_iter()
+        .map(|waiting| waiting.message_id)
+        .collect();
+    assert_eq!(back, ["u-3", "u-4"], "back in the queue, in order");
+    assert_eq!(user_rows(&actor), ["u-1", "u-2", "u-3", "u-4"]);
+
+    let (_, out) = actor.resume("user", world.tick()).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.took, vec![1, 2, 3], "the first of them heads a turn");
+    let together = clarp_kernel::told::together(&["second words", "third words"]);
+    assert!(
+        world.prompts[2].contains(&together),
+        "and takes the other with it: {:?}",
+        world.prompts
+    );
+    assert_eq!(
+        user_rows(&actor),
+        ["u-1", "u-2", "u-3", "u-4"],
+        "no row of theirs is written twice"
+    );
+    world.says(3, "Both.");
+    world.exits(3, Some(0), None);
+    world.hint(&mut actor);
+    assert!(actor.queue().unwrap().is_empty());
+
+    let (mut world, mut actor) = three_waiting("together-user-stop");
+    let (_, out) = actor.stop("user", world.tick()).unwrap();
+    world.carry_out(&mut actor, out);
+    world.exits(2, None, Some(15));
+    world.hint(&mut actor);
+    assert!(
+        actor.queue().unwrap().is_empty(),
+        "the user's own Stop ends them with the turn"
+    );
+}
+
+/// The run of the user's messages a turn takes stops at a message the user only carried for
+/// another agent (a coordination mark, which only the actor sees): it keeps its own turn, and
+/// so does the user's message behind it.
+#[test]
+fn the_run_stops_at_another_agents_words_and_they_keep_their_own_turn() {
+    let mut world = World::new("together-marked");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.send(&mut actor, "u-2", "first words", Admission::Queue);
+    world.send(&mut actor, "u-3", "second words", Admission::Queue);
+    let carried = Marks {
+        coordination: Some("a-boss".to_string()),
+        ..Marks::default()
+    };
+    let (_, out) = actor
+        .send_marked(
+            &message("u-c", "the boss's words"),
+            Admission::Queue,
+            None,
+            &carried,
+            world.tick(),
+        )
+        .unwrap()
+        .unwrap();
+    world.carry_out(&mut actor, out);
+    world.send(&mut actor, "u-4", "third words", Admission::Queue);
+    let waiting: Vec<(String, bool)> = actor
+        .queue()
+        .unwrap()
+        .into_iter()
+        .map(|waiting| (waiting.message_id, waiting.read_together))
+        .collect();
+    assert_eq!(
+        waiting,
+        vec![
+            ("u-2".to_string(), true),
+            ("u-3".to_string(), true),
+            ("u-c".to_string(), false),
+            ("u-4".to_string(), true),
+        ]
+    );
+
+    world.says(1, "One.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(world.took, vec![1, 2]);
+    let two = clarp_kernel::told::together(&["first words", "second words"]);
+    assert!(world.prompts[1].contains(&two), "{:?}", world.prompts);
+    assert!(!world.prompts[1].contains("the boss's words"));
+    let left: Vec<String> = actor
+        .queue()
+        .unwrap()
+        .into_iter()
+        .map(|waiting| waiting.message_id)
+        .collect();
+    assert_eq!(left, ["u-c", "u-4"]);
+
+    world.says(2, "Two.");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        world.took,
+        vec![1, 2, 4],
+        "the carried words have a turn of their own"
+    );
+    assert!(!world.prompts[2].contains("third words"));
+    world.says(4, "Boss.");
+    world.exits(4, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        world.took,
+        vec![1, 2, 4, 5],
+        "and so does the message behind them"
+    );
+    assert!(world.prompts[3].contains("third words"));
+    assert!(!world.prompts[3].contains("<clarp-queued-messages>"));
+}
