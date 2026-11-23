@@ -955,9 +955,6 @@ export component Transcript inherits FocusScope {
     // row reports where its bubble is drawn (in the window) as it moves.
     in property <string> flight-id;
     in property <float> flight-reveal: 1;
-    // While the composer shrinks under a flight the chat grows, and a
-    // following chat keeps its end in place frame by frame.
-    in property <bool> flight-pinning;
     out property <string> flight-drawn-id;
     out property <length> flight-x;
     out property <length> flight-y;
@@ -1294,16 +1291,28 @@ export component Transcript inherits FocusScope {
     }
     property <int> seen-count;
     property <string> seen-first;
-    property <length> view-height: list.visible-height;
-    changed view-height => {
-        if (root.flight-pinning && root.follow) {
-            root.pin("follow");
+    // Following keeps the end in every frame drawn. Slint settles the list
+    // and the change handlers before it paints, so a pin from here lands in
+    // the same frame as whatever moved the end away: a row growing while it
+    // streams, the list re-estimating its rows, the view itself growing or
+    // shrinking (the composer unfolding, the working footer coming and
+    // going). The pin Timer below puts it right only a frame later, and
+    // that frame, drawn short of the end, is the jitter.
+    changed at-end => { root.keep-end(); }
+    function keep-end() {
+        if (!root.follow || root.at-end) {
+            return;
         }
+        // Follow new messages off: a new message in the same chat leaves
+        // the reader where they are (`changed rows` stops following).
+        if (!Look.follow && root.seen-count > 0 && root.rows.length > root.seen-count && root.rows[0].id == root.seen-first) {
+            return;
+        }
+        root.pin("follow");
     }
-    // Following also tracks rows that grow while streaming.
     changed list-height => {
-        if (root.follow && Look.follow) {
-            root.pin("follow");
+        if (root.follow) {
+            root.keep-end();
         } else if (root.holding && root.rows.length > root.held-count && root.rows[0].id != root.held-first) {
             // The page landed: the reader's row is now the one after it.
             // The list places a row by its estimate (its index times the
