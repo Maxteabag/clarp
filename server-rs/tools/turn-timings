@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """How responsive a turn is, per backend, measured on a disposable Host. Run by hand, never a gate.
 
-    server-rs/tools/turn-timings run    [--backends codex,claude,agy] [--rounds N] [--cases LIST]
-                                        [--bin DIR] [--out DIR] [--model BACKEND=MODEL ...]
-                                        [--effort BACKEND=EFFORT ...] [--keep-host]
+    server-rs/tools/turn-timings run    [--backends codex,codex-lane,claude,agy] [--rounds N] [--cases LIST]
+                                        [--bin DIR] [--out DIR] [--model ROW=MODEL ...]
+                                        [--effort ROW=EFFORT ...] [--keep-host]
+                                        [--lane-idle-minutes N] [--lane-most N] [--lane-settle SECONDS]
     server-rs/tools/turn-timings report RUN_DIR
 
 `run` starts a Host of its own (its own data, port, token and an empty configuration folder),
@@ -25,6 +26,23 @@ times (default 5). The cases, and what each measures:
   stop    "run `sleep 30`, then reply"; Stop while the command runs. Stop to the Host saying the
           turn is over, and Stop to the tool's process being gone (the spool's `exited`, and the
           process id no longer there).
+
+The `codex-lane` row is Codex with the Host's `codex_chat_lane` setting on (written to the
+disposable Host's own config.toml, read at each turn), so its chat turns run on the agent's
+long-lived app-server lane. It makes one unmeasured warm-up turn first, so that its cases measure
+a warm lane, and adds a case:
+
+  cold    a plain turn of a new agent each round: its first turn, which starts the lane and its
+          thread. Every turn of the row says whether it started a lane (`lane_new`), and the
+          summary shows such turns apart from the warm ones.
+
+On that row the steer case also measures the second send to the lane's `steer.read` line in the
+spool and to Codex's first item after it, and the stop case allows the app-server to outlive the
+turn (`process_kept`). After its cases it reads the memory of every idle lane: the
+`clarp-shim codex-goal-lane`, its app-server child and that child's process group (where an MCP
+server the owner's Codex configuration starts lives), RSS and PSS, twice, `--lane-settle` seconds
+apart (default 30), with the `idle_ms` the lane's Inspect answers. On a Host without chat lanes
+the row runs on exec and the summary says no lane was seen.
 
 Every case records the machine's load (os.getloadavg and `uptime`) before and after it, because
 this machine is busy: never compare runs taken at very different loads. The raw timings go to
@@ -65,12 +83,16 @@ import urllib.parse
 HOME = pathlib.Path.home()
 RELEASE_BIN = HOME / ".local/share/clarp-host/bin"
 OUT = pathlib.Path("/var/tmp/turn-timings")
-BACKENDS = ("codex", "claude", "agy")
+BACKENDS = ("codex", "codex-lane", "claude", "agy")
+# A row is a backend, or a backend run another way: `codex-lane` is Codex with the Host's
+# `codex_chat_lane` on, so its chat turns run on the agent's long-lived app-server lane.
+TOOL_OF = {"codex-lane": "codex"}
+SETTINGS_OF = {"codex-lane": {"codex_chat_lane": "true"}}
 CASES = ("plain", "tool", "steer", "stop")
 # Cheap and low by default. Claude is on Sonnet: hard rule 8 of REBUILD.md.
-MODELS = {"codex": "gpt-6-luna", "claude": "sonnet", "agy": "gemini-3.8-flash-low"}
+MODELS = {"codex": "gpt-6-luna", "codex-lane": "gpt-6-luna", "claude": "sonnet", "agy": "gemini-3.8-flash-low"}
 # agy folds its effort into the model's name.
-EFFORTS = {"codex": "low", "claude": "low", "agy": ""}
+EFFORTS = {"codex": "low", "codex-lane": "low", "claude": "low", "agy": ""}
 TURN_TIMEOUT = 180.0
 ENDED = {"done", "idle", "stopped", "interrupted", "error", "failed"}
 
@@ -183,6 +205,12 @@ class Host:
             raise SystemExit("the disposable Host did not say where it listens within a minute")
         threading.Thread(target=self.stream, daemon=True).start()
 
+    def configure(self, settings: dict):
+        """The Host's own settings file, in its own configuration folder. The Host reads the
+        lane's settings at each turn, so no restart is needed."""
+        text = "".join(f"{key} = {value}\n" for key, value in settings.items())
+        (self.root / "config" / "clarp-host" / "config.toml").write_text(text)
+
     def stop(self) -> list:
         """Stop the Host by its own pid (hard rule 6), then whatever it started that outlived it.
         A shim is made to outlive its Host, so the processes still working in the run's folder
@@ -196,6 +224,8 @@ class Host:
                 os.kill(self.proc.pid, signal.SIGKILL)
                 self.proc.wait(timeout=10)
         left = self.processes_in_root()
+        for lane in lanes(self):
+            left += [pid for pid in [lane["pid"]] + lane["group"] if pid not in left]
         for pid in left:
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -224,7 +254,7 @@ class Host:
                 cwd = os.readlink(entry / "cwd")
             except OSError:
                 continue
-            if cwd == mine or cwd.startswith(mine + "/"):
+            if cwd == mine or cwd.startswith(mine + "/") or mine in command_line(int(entry.name)):
                 found.append(int(entry.name))
         return found
 
@@ -281,8 +311,9 @@ class Host:
 # ---------------------------------------------------------------------------------------------
 
 class Agent:
-    def __init__(self, host: Host, backend: str, session: str, agent_id: str):
+    def __init__(self, host: Host, backend: str, session: str, agent_id: str, row: str = ""):
         self.host, self.backend, self.session, self.agent_id = host, backend, session, agent_id
+        self.row = row or backend
         self.sent = 0
 
     def spool_dir(self) -> pathlib.Path:
@@ -368,6 +399,115 @@ class Agent:
                     return None, None
             time.sleep(0.05)
         return None, None
+
+
+# ---------------------------------------------------------------------------------------------
+# Codex lanes: the long-lived `clarp-shim codex-goal-lane` of an agent and its app-server
+# ---------------------------------------------------------------------------------------------
+
+def command_line(pid: int) -> str:
+    try:
+        return pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def proc_stat(pid: int) -> dict:
+    """A process's parent, group and name, from /proc/<pid>/stat."""
+    try:
+        raw = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return {}
+    name = raw[raw.index("(") + 1:raw.rindex(")")]
+    fields = raw[raw.rindex(")") + 2:].split()
+    return {"pid": pid, "name": name, "ppid": int(fields[1]), "pgid": int(fields[2])}
+
+
+def memory_kb(pid: int) -> tuple:
+    """RSS and PSS of one process in KiB (PSS shares a shared page out among its users)."""
+    rss = pss = 0
+    try:
+        for line in pathlib.Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines():
+            if line.startswith("Rss:"):
+                rss = int(line.split()[1])
+            elif line.startswith("Pss:"):
+                pss = int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return rss, pss
+
+
+def lane_inspect(socket_path: str) -> dict:
+    """The lane's own answer to Inspect (`{"op":"inspect"}`), or {} when it does not answer."""
+    import socket as sockets
+    try:
+        with sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM) as conn:
+            conn.settimeout(3)
+            conn.connect(socket_path)
+            conn.sendall(b'{"op":"inspect"}\n')
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+        answer = json.loads(data.decode("utf-8", "replace").strip() or "{}")
+    except (OSError, ValueError):
+        return {}
+    return answer if isinstance(answer, dict) else {}
+
+
+def find_key(value, key: str):
+    if isinstance(value, dict):
+        if key in value:
+            return value[key]
+        for child in value.values():
+            found = find_key(child, key)
+            if found is not None:
+                return found
+    return None
+
+
+def lanes(host: Host) -> list:
+    """Every lane of the disposable Host: the shim, its app-server child, that child's process
+    group (an MCP server the app-server started is in it), their memory, and the lane's idle_ms.
+    Found by the run's folder in the shim's command line; nothing outside the run is looked at
+    beyond reading /proc."""
+    stats = {}
+    for entry in pathlib.Path("/proc").iterdir():
+        if entry.name.isdigit():
+            info = proc_stat(int(entry.name))
+            if info:
+                stats[info["pid"]] = info
+    mine, found = str(host.root), []
+    for pid, info in stats.items():
+        line = command_line(pid)
+        if "codex-goal-lane" not in line or mine not in line:
+            continue
+        socket_path = next((word for word in line.split() if word.endswith("-cxg.sock")), "")
+        children = [p for p, i in stats.items() if i["ppid"] == pid]
+        groups = {stats[c]["pgid"] for c in children}
+        group = sorted({p for p, i in stats.items() if i["pgid"] in groups} | set(children))
+        members = [pid] + group
+        rss = pss = 0
+        for member in members:
+            one_rss, one_pss = memory_kb(member)
+            rss, pss = rss + one_rss, pss + one_pss
+        inspected = lane_inspect(socket_path) if socket_path else {}
+        found.append({"pid": pid, "socket": pathlib.Path(socket_path).name, "group": group,
+                      "names": sorted({stats[m]["name"] for m in group if m in stats}),
+                      "processes": len(members), "rss_kb": rss, "pss_kb": pss,
+                      "shim_rss_kb": memory_kb(pid)[0], "idle_ms": find_key(inspected, "idle_ms"),
+                      "thread": bool(find_key(inspected, "thread"))})
+    return found
+
+
+def lane_of(agent, found: list):
+    """The lane of this agent among `found` (its socket is named after the agent), or None."""
+    for lane in found:
+        if agent.agent_id and agent.agent_id in lane["socket"]:
+            return lane
+    return None
 
 
 def read_spool(path: pathlib.Path) -> list:
@@ -473,6 +613,12 @@ def spool_marks(path: pathlib.Path) -> dict:
                 marks.setdefault("first_reply", t)
             if kind in ("turn.completed", "turn/completed", "result"):
                 marks.setdefault("turn_completed", t)
+            # A lane's receipt that the running turn read a steered message, and Codex's first
+            # item after it.
+            if kind == "steer.read":
+                marks.setdefault("steer_read", t)
+            elif "steer_read" in marks and kind.startswith("item"):
+                marks.setdefault("after_steer_item", t)
     marks["records"] = [{k: v for k, v in r.items() if k in ("t", "s", "event", "type", "item", "subtype")}
                         for r in records][:200]
     return marks
@@ -571,6 +717,7 @@ def case_plain(agent: Agent, n: int) -> dict:
         "tool_start": seconds(marks.get("spawned"), marks.get("first_out")),
         "tool_ready": seconds(marks.get("spawned"), marks.get("ready")),
         "send_to_spawned": seconds(sent["t_send"], marks.get("spawned")),
+        "send_to_ready": seconds(sent["t_send"], marks.get("ready")),
         "send_to_first_output": seconds(sent["t_send"], marks.get("first_out")),
         "model_reply_in_spool": seconds(marks.get("ready"), marks.get("first_reply")),
         "tool_turn_to_host_end": seconds(marks.get("turn_completed"), ended),
@@ -647,10 +794,13 @@ def case_steer(agent: Agent, n: int) -> dict:
     agent.wait_idle()
     spools = new_spools(agent, before)
     found["spools"] = [spool_marks(p) for p in spools]
+    first = found["spools"][0] if found["spools"] else {}
     found["measures"] = {
         "steer_mode": "steered" if steered else ("queued" if seen is not None else "not_seen"),
         "steer_answer_queued": steer["queued"],
         "steer_to_effect": seconds(steer["t_send"], seen),
+        "steer_to_read": seconds(steer["t_send"], first.get("steer_read")),
+        "steer_to_next_item": seconds(steer["t_send"], first.get("after_steer_item")),
         "steer_wait_for_own_turn": seconds(steer["t_send"], own_start),
         "first_turn_end_after_steer": seconds(steer["t_send"], first_end),
         "turns": len(spools),
@@ -674,11 +824,18 @@ def case_stop(agent: Agent, n: int) -> dict:
     t_stop = now_ms()
     status, answer = agent.host.ask("POST", "/stop", {"session": agent.session})
     t_answered = now_ms()
+    # An exec turn's process ends with the turn. A lane's app-server is meant to stay: once the
+    # spool says the turn's attempt exited, it is given three seconds more and then counted kept.
     gone = None
+    exited_at = None
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if pid_gone(pid):
             gone = now_ms()
+            break
+        if exited_at is None and spools and spool_marks(spools[0]).get("exited"):
+            exited_at = time.monotonic()
+        if exited_at is not None and time.monotonic() - exited_at > 3:
             break
         time.sleep(0.02)
     ended = agent.wait_ended(t_stop, timeout=60)
@@ -693,20 +850,33 @@ def case_stop(agent: Agent, n: int) -> dict:
         "stop_to_process_gone": seconds(t_stop, gone),
         "stop_to_spool_exited": seconds(t_stop, marks.get("exited")),
         "stop_to_signal": seconds(t_stop, marks.get("stopping")),
+        "process_kept": gone is None,
     }
     return found
 
 
-RUNNERS = {"plain": case_plain, "tool": case_tool, "steer": case_steer, "stop": case_stop}
+def case_cold(agent: Agent, n: int) -> dict:
+    """A plain turn of a new agent: for a lane, its first turn starts the lane and its thread."""
+    fresh = make_agent(agent.host, agent.backend, agent.model, agent.effort, agent.row, f"cold{n}")
+    found = case_plain(fresh, n)
+    found["agent_id"] = fresh.agent_id
+    return found
+
+
+RUNNERS = {"plain": case_plain, "tool": case_tool, "steer": case_steer, "stop": case_stop, "cold": case_cold}
 
 # The measures the summary shows, in order, per case.
 SHOWN = {
-    "plain": ["host_ack", "first_activity", "first_reply_in_log", "end_to_end", "send_to_spawned", "host_queue",
+    "cold": ["first_activity", "end_to_end", "send_to_spawned", "send_to_ready", "tool_ready", "send_to_first_output",
+             "model_reply_in_spool"],
+    "plain": ["host_ack", "first_activity", "first_reply_in_log", "end_to_end", "send_to_spawned", "send_to_ready",
+              "host_queue",
               "launch", "tool_start", "tool_ready", "send_to_first_output", "model_reply_in_spool",
               "tool_turn_to_host_end", "process_exit_after_end"],
     "tool": ["tool_round_trip_host", "tool_round_trip_spool", "tool_shown_after_spool", "tool_end_shown_after_spool",
              "send_to_tool_shown", "first_row_in_log", "end_to_end"],
-    "steer": ["steer_to_effect", "steer_wait_for_own_turn", "first_turn_end_after_steer"],
+    "steer": ["steer_to_effect", "steer_to_read", "steer_to_next_item", "steer_wait_for_own_turn",
+              "first_turn_end_after_steer"],
     "stop": ["stop_answered", "stop_to_signal", "stop_to_turn_over", "stop_to_process_gone", "stop_to_spool_exited"],
 }
 
@@ -810,8 +980,9 @@ def prune_json(value, needle: str) -> int:
 # The run
 # ---------------------------------------------------------------------------------------------
 
-def make_agent(host: Host, backend: str, model: str, effort: str) -> Agent:
-    body = {"name": f"tt-{backend}", "backend": backend, "cwd": str(host.root / "ws")}
+def make_agent(host: Host, backend: str, model: str, effort: str, row: str = "", suffix: str = "") -> Agent:
+    body = {"name": f"tt-{row or backend}{'-' + suffix if suffix else ''}", "backend": backend,
+            "cwd": str(host.root / "ws")}
     if model:
         body["model"] = model
     if effort:
@@ -826,7 +997,18 @@ def make_agent(host: Host, backend: str, model: str, effort: str) -> Agent:
         for row in (snap.get("agents") or []) if isinstance(snap, dict) else []:
             if row.get("session") == session:
                 agent_id = row.get("agent_id") or row.get("id") or ""
-    return Agent(host, backend, session, agent_id)
+    agent = Agent(host, backend, session, agent_id, row)
+    agent.model, agent.effort = model, effort
+    return agent
+
+
+def lane_settings(args) -> dict:
+    out = {}
+    if args.lane_idle_minutes is not None:
+        out["codex_lane_idle_minutes"] = str(args.lane_idle_minutes)
+    if args.lane_most is not None:
+        out["codex_lane_most"] = str(args.lane_most)
+    return out
 
 
 def pairs(given: list) -> dict:
@@ -873,33 +1055,65 @@ def run(args) -> int:
         result["host_contract"] = info.get("host_contract") if isinstance(info, dict) else None
         print(f"disposable Host {host.address} pid {host.proc.pid} version {result['host_version']}", flush=True)
         for backend in backends:
-            entry = result["backends"][backend] = {"model": models.get(backend, ""),
-                                                   "effort": efforts.get(backend, ""), "cases": []}
+            row, backend = backend, TOOL_OF.get(backend, backend)
+            entry = result["backends"][row] = {"model": models.get(row, ""), "backend": backend,
+                                               "effort": efforts.get(row, ""), "cases": []}
+            settings = {**SETTINGS_OF.get(row, {}), **(lane_settings(args) if row in SETTINGS_OF else {})}
+            host.configure(settings)
+            entry["settings"] = settings
             try:
-                agent = make_agent(host, backend, models.get(backend, ""), efforts.get(backend, ""))
+                agent = make_agent(host, backend, models.get(row, ""), efforts.get(row, ""), row)
             except RuntimeError as failed:
                 entry["error"] = str(failed)
                 print(failed, flush=True)
                 save()
                 continue
             entry["session"], entry["agent_id"] = agent.session, agent.agent_id
+            row_cases = list(cases)
+            if row in SETTINGS_OF:
+                # A lane's first turn starts it: make that turn now, unmeasured, so that `plain`
+                # measures a warm lane; `cold` measures the first turn of new agents.
+                warm = agent.send("Warm-up. Reply with exactly one word: ok")
+                agent.wait_ended(warm["t_send"])
+                agent.wait_idle()
+                if "cold" not in row_cases:
+                    row_cases.append("cold")
             for n in range(1, args.rounds + 1):
-                for case in cases:
+                for case in row_cases:
                     started = load()
                     began = time.monotonic()
                     case_began = now_ms()
+                    lanes_before = lanes(host) if row in SETTINGS_OF else []
                     try:
                         found = RUNNERS[case](agent, n)
                     except Exception as failed:  # One case failing is a result, not the end of the run.
                         found = {"error": f"{type(failed).__name__}: {failed}"}
                         agent.wait_idle()
                     found["events"] = compact_events(host, agent.session, case_began)
+                    if row in SETTINGS_OF:
+                        lanes_after = lanes(host)
+                        owner = agent
+                        if found.get("agent_id"):
+                            owner = Agent(host, backend, "", found["agent_id"], row)
+                        was, now = lane_of(owner, lanes_before), lane_of(owner, lanes_after)
+                        found.setdefault("measures", {})
+                        found["measures"]["lane_seen"] = now is not None
+                        found["measures"]["lane_new"] = now is not None and (was is None or was["pid"] != now["pid"])
                     found.update({"case": case, "round": n, "load_before": started, "load_after": load(),
                                   "seconds": round(time.monotonic() - began, 1)})
                     entry["cases"].append(found)
                     shown = {k: v for k, v in (found.get("measures") or {}).items()}
-                    print(f"{backend} {case} #{n} load {started['load1']:.2f}: {json.dumps(shown)}", flush=True)
+                    print(f"{row} {case} #{n} load {started['load1']:.2f}: {json.dumps(shown)}", flush=True)
                     save()
+            if row in SETTINGS_OF:
+                # The lanes left idle: this agent's and one per `cold` agent, on the owner's own
+                # Codex configuration (its MCP servers included), now and a little later.
+                agent.wait_idle()
+                entry["lanes_idle"] = [{"at": int(now_ms()), "lanes": lanes(host)}]
+                time.sleep(args.lane_settle)
+                entry["lanes_idle"].append({"at": int(now_ms()), "lanes": lanes(host)})
+                save()
+            host.configure({})
     finally:
         result["ended"] = load()
         result["left_after_host"] = host.stop()
@@ -947,8 +1161,20 @@ def summary(result: dict) -> str:
             lines += [f"Load (1 min) over its cases: {min(loads):.2f} to {max(loads):.2f}.", ""]
         lines.append("| case | measure | median | p90 | n |")
         lines.append("|---|---|---|---|---|")
+        groups = []
         for case, measures in SHOWN.items():
             rows = [c for c in entry["cases"] if c.get("case") == case]
+            # A lane row says of each turn whether it started its lane: a turn that did is cold,
+            # whatever case it was, and is shown apart from the warm ones.
+            if any(isinstance(c.get("measures"), dict) and c["measures"].get("lane_seen") for c in rows):
+                warm = [c for c in rows if not c["measures"].get("lane_new")]
+                cold = [c for c in rows if c["measures"].get("lane_new")]
+                groups.append((f"{case} (warm lane)" if case != "cold" else case, measures, warm))
+                if cold and case != "cold":
+                    groups.append((f"{case} (lane started)", measures, cold))
+            else:
+                groups.append((case, measures, rows))
+        for case, measures, rows in groups:
             if not rows:
                 continue
             for measure in measures:
@@ -971,6 +1197,30 @@ def summary(result: dict) -> str:
             lines.append("First activity was: " + ", ".join(f"{k or 'none'} {kinds.count(k)}" for k in sorted(set(kinds), key=str)) + ".")
         for error in errors:
             lines.append(f"Error: {error}")
+        seen = [c["measures"].get("lane_seen") for c in entry["cases"] if isinstance(c.get("measures"), dict)
+                and "lane_seen" in c["measures"]]
+        if seen and not any(seen):
+            lines.append("No lane was seen: this Host ran these turns on exec, not on a lane.")
+        kept = [c["measures"].get("process_kept") for c in entry["cases"]
+                if c.get("case") == "stop" and isinstance(c.get("measures"), dict) and "process_kept" in c["measures"]]
+        if any(kept):
+            lines.append(f"Stop: the spool's process outlived the turn in {sum(1 for k in kept if k)} of {len(kept)} "
+                         "(a lane's app-server stays).")
+        for look in entry.get("lanes_idle") or []:
+            found = look["lanes"]
+            if not found:
+                lines.append("Idle lanes: none found.")
+                continue
+            rss = [lane["rss_kb"] / 1024 for lane in found]
+            pss = [lane["pss_kb"] / 1024 for lane in found]
+            names = sorted({name for lane in found for name in lane["names"]})
+            idle = [lane["idle_ms"] for lane in found if isinstance(lane.get("idle_ms"), (int, float))]
+            lines.append(
+                f"Idle lanes at {time.strftime('%H:%M:%S', time.localtime(look['at'] / 1000))}: {len(found)}; "
+                f"RSS per lane median {statistics.median(rss):.0f} MiB (from {min(rss):.0f} to {max(rss):.0f}), "
+                f"total {sum(rss):.0f} MiB; PSS per lane median {statistics.median(pss):.0f} MiB, total {sum(pss):.0f} MiB; "
+                f"processes per lane {statistics.median([lane['processes'] for lane in found]):.0f} ({', '.join(names)})"
+                + (f"; idle_ms from {min(idle)} to {max(idle)}" if idle else "; no idle_ms from Inspect") + ".")
         lines.append("")
     settings = result.get("settings") or {}
     lines.append("## The tools' settings")
@@ -991,6 +1241,10 @@ def summary(result: dict) -> str:
         "- first_reply_in_log: send to the reply row appearing in `GET /log` (polled every 0.1 s).",
         "- end_to_end: send to the `agent-state` event that ends the turn.",
         "- send_to_spawned: send to the shim's `spawned` (the tool's process up), from the spool.",
+        "- send_to_ready: send to the tool being ready for the model (Codex `turn.started`): the launch overhead "
+        "a user waits for.",
+        "- cold: a plain turn of a new agent; on the lane row its first turn, which starts the lane and its thread. "
+        "On the lane row every other case is split into warm-lane turns and turns that started a lane.",
         "- host_queue: send to the spool being made (its birth time): the Host's own part.",
         "- launch: spool made to `spawned`: the shim starting the tool.",
         "- tool_start: `spawned` to the tool's first line of output: the tool's own start.",
@@ -1006,6 +1260,10 @@ def summary(result: dict) -> str:
         "tool_end_shown_after_spool the same for its end.",
         "- first_row_in_log: send to the first row after the message in `GET /log` (a tool row or the reply).",
         "- steer_to_effect: the second send to its row in `GET /log` (polled every 0.1 s).",
+        "- steer_to_read: the second send to the lane's `steer.read` line in the spool; steer_to_next_item: to "
+        "Codex's first item after it.",
+        "- Idle lanes: each lane's `clarp-shim codex-goal-lane`, its app-server child and that child's process "
+        "group (an MCP server it started), RSS and PSS from /proc smaps_rollup, read twice, `--lane-settle` apart.",
         "- steer_wait_for_own_turn: for a send that waited, the second send to its own turn starting.",
         "- stop_to_turn_over: Stop to the `agent-state` that ends the turn; stop_to_process_gone: Stop to the "
         "tool's process id being gone (polled every 20 ms).",
@@ -1052,6 +1310,10 @@ def main() -> int:
     go.add_argument("--model", action="append", help="BACKEND=MODEL")
     go.add_argument("--effort", action="append", help="BACKEND=EFFORT")
     go.add_argument("--keep-host", action="store_true", help="keep the disposable Host's folders afterwards")
+    go.add_argument("--lane-idle-minutes", type=int, default=None, help="codex_lane_idle_minutes for the lane row")
+    go.add_argument("--lane-most", type=int, default=None, help="codex_lane_most for the lane row")
+    go.add_argument("--lane-settle", type=float, default=30.0,
+                    help="seconds between the two looks at the idle lanes' memory")
     again = sub.add_parser("report")
     again.add_argument("run_dir")
     args = parser.parse_args()

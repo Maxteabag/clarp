@@ -79,14 +79,17 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 `docs/reference-defects.md`, reported to the release owner).
 
 **How responsive a turn is** (issue 742) is measured by hand, never as a gate:
-`server-rs/tools/turn-timings run [--backends codex,claude,agy] [--rounds 5] [--bin DIST]`. It starts a
+`server-rs/tools/turn-timings run [--backends codex,codex-lane,claude,agy] [--rounds 5] [--bin DIST]`. It starts a
 disposable Host as hard rule 2 asks (its own data, port and token, an empty configuration folder, no relay or
 push, the direct launcher; it stops if `GET /peers` is not `[]`), makes one test agent per backend on a cheap
 model at low effort (Claude on Sonnet, rule 8), and runs four cases per round: a one-word reply (time to first
 activity, launch overhead split into the Host's queue, the launch and the tool's own start from the spool, and
 end to end), a turn that runs `ls` (the call's round trip as the Host shows it), a second message during
 `sleep 20` (steer to effect, or how long it waits when the turn cannot take it) and a Stop during `sleep 30`
-(until the turn is over and its process gone). A full run is about 75 turns and 15 minutes. It writes
+(until the turn is over and its process gone). The `codex-lane` row is Codex with `codex_chat_lane` on: it
+splits turns that started a lane from warm ones, adds a cold first turn of a new agent per round, times a
+steer to the lane's `steer.read`, and reads the memory of the idle lanes (shim, app-server and its process
+group, on the owner's own Codex configuration). A full run is about 100 turns and 20 minutes. It writes
 `timings.json` and `summary.md` (median and p90 per measure) under `/var/tmp/turn-timings/<run-id>/`, with the
 machine's load beside every case: compare only runs taken at similar loads. `--bin` takes a dist folder;
 without it the installed release runs. Nothing is built. `turn-timings report <run dir>` writes the summary again.
