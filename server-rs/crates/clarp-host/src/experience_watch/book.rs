@@ -11,6 +11,13 @@ use crate::fleet::Directory;
 const DAY: i64 = 24 * 60 * 60 * 1_000;
 const MAX_CLEARED: usize = 2_000;
 const DETAIL_CHARS: usize = 2_000;
+const HOUR: i64 = 60 * 60 * 1_000;
+
+/// A finding that tells of what changed while it is open, at most hourly: the apps' scroll
+/// flashes (one per device, while new flashes come).
+fn retold(kind: &str) -> bool {
+    kind.starts_with("scroll_flash_")
+}
 
 pub(super) type Key = (String, String);
 
@@ -53,6 +60,12 @@ pub(super) struct Row {
     pub cleared_at: Option<i64>,
     pub notified_open: Vec<String>,
     pub notified_clear: Vec<String>,
+    /// When its recipients were last told of it, for a finding told again while open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_told: Option<i64>,
+    /// It changed since they were last told.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub untold: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,6 +73,8 @@ pub(super) enum Notice {
     Open(u64),
     Clear(u64),
     Summary(String),
+    /// What changed of an open finding, at the moment it was told.
+    Update(u64, i64),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -75,6 +90,7 @@ impl Owed {
             Notice::Open(id) => format!("open-{id}"),
             Notice::Clear(id) => format!("clear-{id}"),
             Notice::Summary(day) => format!("daily-{day}"),
+            Notice::Update(id, at) => format!("update-{id}-{at}"),
         };
         format!("experience-watch-{step}-{}", self.to)
     }
@@ -98,7 +114,7 @@ pub(super) fn agent_label(name: &str, session: &str) -> String {
 
 impl Row {
     pub fn refresh_subject(&mut self, directory: &Directory) {
-        if self.kind.starts_with("app_crash_") {
+        if self.kind.starts_with("app_crash_") || retold(&self.kind) {
             if let Some(device) = directory
                 .devices
                 .values()
@@ -180,7 +196,30 @@ impl Book {
             if let Some(detail) = seen.found.remove(&key) {
                 row.last_seen = now;
                 row.count = row.count.saturating_add(1);
-                row.detail = detail.chars().take(DETAIL_CHARS).collect();
+                let detail: String = detail.chars().take(DETAIL_CHARS).collect();
+                if retold(&row.kind) {
+                    row.untold |= detail != row.detail;
+                    let last = row.last_told.unwrap_or(row.first_seen);
+                    if row.untold && now.saturating_sub(last) >= HOUR {
+                        row.untold = false;
+                        row.last_told = Some(now);
+                        let text = format!(
+                            "Experience watch: {} still open for {} at {}. {} (clarp-admin experience --open)",
+                            row.kind,
+                            row.subject_label(),
+                            clock(now, zone),
+                            detail,
+                        );
+                        for to in settings.recipients(&row.kind) {
+                            self.owed.push(Owed {
+                                notice: Notice::Update(row.id, now),
+                                to,
+                                text: text.clone(),
+                            });
+                        }
+                    }
+                }
+                row.detail = detail;
             } else if !seen.unavailable.contains(&key)
                 && !seen.unavailable_kinds.contains(row.kind.as_str())
             {
@@ -219,6 +258,8 @@ impl Book {
                 cleared_at: None,
                 notified_open: Vec::new(),
                 notified_clear: Vec::new(),
+                last_told: Some(now),
+                untold: false,
             };
             row.refresh_subject(directory);
             let text = format!(
@@ -309,6 +350,7 @@ impl Book {
             }
             Notice::Open(id) => (id, false),
             Notice::Clear(id) => (id, true),
+            Notice::Update(..) => return,
         };
         if let Some(row) = self.rows.iter_mut().find(|row| row.id == id) {
             let recipients = if clearing {

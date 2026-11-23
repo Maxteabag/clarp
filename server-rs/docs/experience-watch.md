@@ -69,16 +69,19 @@ show the paired device name with its ID, or the agent's name and session.
 Timestamps use the Host's local timezone, with a UTC offset. JSON keeps
 the stable subject IDs and original epoch-millisecond timestamps.
 
-A chat-view scroll flash is a `scroll_flash` client event (below). One flash
-in the window is a finding of its platform: `scroll_flash_ios`,
-`scroll_flash_android`, `scroll_flash_desktop` or `scroll_flash_web`, its
-subject the platform. The notice reads "N chat-view scroll flashes since
-HH:MM on <platform>; the newest at HH:MM: <rule>, with <cause kinds>."
-Its owner is `owners.<kind>`, else `owners.scroll_flash`, else that
-platform's app-crash owner (`app_crash_<platform>`, else `app_crash`), and
-the front desk as for every finding.
+A chat-view scroll flash is a `scroll_flash` client event (below). One finding
+per device: its first flash opens `scroll_flash_<platform>` (`ios`, `android`,
+`desktop` or `web`) with the device as subject. The watcher reads each device's
+flashes of the last 24 hours, whatever the pass's window: the finding reads
+"N chat-view scroll flashes since HH:MM on <platform>; the newest at HH:MM:
+<rule>, with <cause kinds>.", new flashes update it, and its recipients hear of
+what changed at most once an hour while it stays open. It clears 24 hours
+after the device's newest flash. Its owner is `owners.<kind>`, else
+`owners.scroll_flash`, else that platform's app-crash owner
+(`app_crash_<platform>`, else `app_crash`), and the front desk as for every
+finding.
 
-The apps' scroll dashcam sends `scroll_flash` (level `warning`) to `POST /clog`
+The apps' scroll dashcam sends `scroll_flash` (level `fault`) to `POST /clog`
 when a chat view jumps and comes back without a gesture. Its `detail` is
 `{"chat": session, "window": pane, "screen": viewport height px,
 "rule": "jump_back" | "top_flip", "frames": [{"t": ms, "y": offset px,

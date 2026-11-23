@@ -307,10 +307,11 @@ pub(crate) async fn crash_candidates(
         .await
 }
 
-/// What the apps reported of chat-view scroll flashes on one platform in a window.
+/// What one device reported of chat-view scroll flashes in a window.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Flashes {
     pub count: u64,
+    pub first_at: i64,
     pub newest_at: i64,
     /// The newest flash's rule (`jump_back`, `top_flip`).
     pub rule: String,
@@ -318,11 +319,18 @@ pub(crate) struct Flashes {
     pub causes: Vec<String>,
 }
 
-/// The scroll flashes of a window, by platform (the client that sent them).
-pub(crate) fn flashes_by_platform(rows: &[Flash]) -> std::collections::BTreeMap<String, Flashes> {
-    let mut by: std::collections::BTreeMap<String, Flashes> = Default::default();
+pub(crate) type ByDevice = std::collections::BTreeMap<(String, String), Flashes>;
+
+/// The scroll flashes of a window, by device and the platform (client) that sent them.
+pub(crate) fn flashes_by_device(rows: &[Flash]) -> ByDevice {
+    let mut by = ByDevice::new();
     for row in rows {
-        let flashes = by.entry(row.client.clone()).or_default();
+        let flashes = by
+            .entry((row.device.clone(), row.client.clone()))
+            .or_default();
+        if flashes.count == 0 || row.received_at < flashes.first_at {
+            flashes.first_at = row.received_at;
+        }
         flashes.count += 1;
         if row.received_at >= flashes.newest_at {
             flashes.newest_at = row.received_at;
@@ -346,17 +354,13 @@ pub(crate) fn flashes_by_platform(rows: &[Flash]) -> std::collections::BTreeMap<
     by
 }
 
-/// The scroll flashes apps reported in the window, by platform.
-pub(crate) async fn flashes(
-    app: &App,
-    since: i64,
-    now: i64,
-) -> Result<std::collections::BTreeMap<String, Flashes>, String> {
+/// The scroll flashes apps reported in the window, by device and platform.
+pub(crate) async fn flashes(app: &App, since: i64, now: i64) -> Result<ByDevice, String> {
     let rows = app
         .client_events
         .call(move |store| store.flashes(since, now).map_err(|why| why.to_string()))
         .await?;
-    Ok(flashes_by_platform(&rows))
+    Ok(flashes_by_device(&rows))
 }
 
 pub(crate) async fn record(
@@ -541,9 +545,10 @@ mod tests {
     }
 
     #[test]
-    fn flashes_are_counted_by_platform_with_the_newest_ones_rule_and_causes() {
+    fn flashes_are_counted_by_device_with_the_newest_ones_rule_and_causes() {
         let row = |client: &str, at, rule: &str, kinds: &[&str]| {
             Flash {
+            device: format!("{client}-phone"),
             client: client.into(),
             received_at: at,
             detail: Some(
@@ -552,17 +557,20 @@ mod tests {
             ),
         }
         };
-        let by = flashes_by_platform(&[
+        let by = flashes_by_device(&[
             row("ios", 10, "top_flip", &["insert"]),
             row("desktop", 11, "jump_back", &["live"]),
             row("ios", 20, "jump_back", &["reload", "height", "reload"]),
         ]);
-        let ios = &by["ios"];
+        let ios = &by[&("ios-phone".to_owned(), "ios".to_owned())];
         assert_eq!(
-            (ios.count, ios.newest_at, ios.rule.as_str()),
-            (2, 20, "jump_back")
+            (ios.count, ios.first_at, ios.newest_at, ios.rule.as_str()),
+            (2, 10, 20, "jump_back")
         );
         assert_eq!(ios.causes, ["reload", "height"]);
-        assert_eq!(by["desktop"].count, 1);
+        assert_eq!(
+            by[&("desktop-phone".to_owned(), "desktop".to_owned())].count,
+            1
+        );
     }
 }

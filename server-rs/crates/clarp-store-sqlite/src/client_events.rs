@@ -63,6 +63,7 @@ pub struct CrashCandidate {
 
 /// One chat-view scroll flash an app reported (`scroll_flash`): for the watcher's count.
 pub struct Flash {
+    pub device: String,
     pub client: String,
     pub received_at: i64,
     pub detail: Option<String>,
@@ -189,15 +190,16 @@ impl Store {
     /// The chat-view scroll flashes apps reported in the window, the oldest first.
     pub fn flashes(&self, since: i64, now: i64) -> rusqlite::Result<Vec<Flash>> {
         let mut select = self.connection.prepare_cached(
-            "SELECT client, received_at, detail FROM client_events
+            "SELECT device, client, received_at, detail FROM client_events
              WHERE received_at BETWEEN ?1 AND ?2 AND event = 'scroll_flash'
              ORDER BY received_at, id",
         )?;
         let rows = select.query_map(params![since, now], |row| {
             Ok(Flash {
-                client: row.get(0)?,
-                received_at: row.get(1)?,
-                detail: row.get(2)?,
+                device: row.get(0)?,
+                client: row.get(1)?,
+                received_at: row.get(2)?,
+                detail: row.get(3)?,
             })
         })?;
         rows.collect()
@@ -335,9 +337,9 @@ mod tests {
         let read = store.flashes(10, 20).unwrap();
         let seen: Vec<_> = read
             .iter()
-            .map(|f| (f.client.as_str(), f.received_at))
+            .map(|f| (f.device.as_str(), f.client.as_str(), f.received_at))
             .collect();
-        assert_eq!(seen, [("ios", 10), ("desktop", 12)]);
+        assert_eq!(seen, [("phone", "ios", 10), ("phone", "desktop", 12)]);
         assert_eq!(read[0].detail.as_deref(), Some("{\"rule\":\"jump_back\"}"));
     }
 
