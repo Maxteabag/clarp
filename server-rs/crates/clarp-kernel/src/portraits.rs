@@ -65,7 +65,7 @@ pub fn family_of(model: &str) -> &'static str {
 pub fn family_of_tool(backend: &str) -> &'static str {
     match backend {
         "codex" => "codex",
-        "agy" => "gemini",
+        "agy" | "agy-acp" => "gemini",
         "grok" => "grok",
         "deepseek" => "deepseek",
         "muse" => "muse",
@@ -113,7 +113,7 @@ pub fn files(persona: &str, backend: &str) -> Vec<String> {
     let family = clarp_speech::listen::strip(backend).to_lowercase();
     // Antigravity's pictures are filed under the model it runs.
     let family = match family.as_str() {
-        "agy" => "gemini",
+        "agy" | "agy-acp" => "gemini",
         family => family,
     };
     if !family.is_empty() {

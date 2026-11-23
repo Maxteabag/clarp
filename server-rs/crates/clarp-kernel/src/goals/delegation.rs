@@ -22,7 +22,10 @@ pub fn reason(raw: &str) -> Result<&str, &'static str> {
 }
 
 pub fn carries_identity(backend: &str) -> bool {
-    matches!(backend, "claude" | "agy" | "grok" | "opencode" | "deepseek")
+    matches!(
+        backend,
+        "claude" | "agy" | "agy-acp" | "grok" | "opencode" | "deepseek"
+    )
 }
 
 pub fn enable<'a>(
@@ -90,4 +93,21 @@ pub fn guard(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::carries_identity;
+
+    /// Antigravity over ACP is run with the agent's session and turn token, as `agy` is: a
+    /// delegation whose principal or delegate moves between the two goes on.
+    #[test]
+    fn antigravity_over_acp_carries_the_turns_identity() {
+        for backend in ["claude", "agy", "agy-acp", "grok", "opencode", "deepseek"] {
+            assert!(carries_identity(backend), "{backend}");
+        }
+        for backend in ["codex", "muse", "scripted"] {
+            assert!(!carries_identity(backend), "{backend}");
+        }
+    }
 }
