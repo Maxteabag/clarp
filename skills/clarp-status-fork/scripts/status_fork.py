@@ -386,6 +386,7 @@ def fork_status(agent, question):
     env = {k: v for k, v in os.environ.items() if k not in (
         "CLAUDE_PWA_SESSION", "CLARP_SESSION", "CLAUDE_CODE_SESSION_ID",
         "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLARP_PROVIDER_TURN",
+        "CLARP_PROVIDER_TURN_FILE",
         "CLARP_HOST_TOKEN", "CLARP_PUSH_CREDENTIAL", "CLARP_SOURCE_TOKEN", "CLARP_PEER_TOKEN")}
     codex = agent["backend"] == "codex"
     try:

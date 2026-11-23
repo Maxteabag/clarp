@@ -2971,10 +2971,14 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
-        // A Codex turn takes steered words only on its lane; the actor reads that from the
-        // turn's own spool.
-        let can_offer_steering = matches!(self.setup.record.backend.as_str(), "claude" | "codex")
-            && match &ask {
+        // A Codex turn takes steered words only on its lane, and only while the owner's
+        // setting runs chat turns there: with it off, a goal turn is not steered, as before
+        // (review of 23 Nov 2026). The actor reads from the turn's spool whether it can.
+        let can_offer_steering = match self.setup.record.backend.as_str() {
+            "claude" => true,
+            "codex" => self.chat_lane(),
+            _ => false,
+        } && match &ask {
                 Ask::Send {
                     message,
                     admission,
@@ -3004,7 +3008,11 @@ impl Worker {
         // A message may start a turn, and a turn's tool is told what holds when it starts:
         // the owner's settings and file are read now.
         if matches!(ask, Ask::Send { .. }) {
-            actor.retell(Some(self.setup.telling.of(&self.setup.record)));
+            let told = self.setup.telling.of(&self.setup.record);
+            // The Codex lane is started with what the profile says of the agent, and is
+            // started again when that changes: the same as the turn's tool is told.
+            self.setup.profile.told = Some(told.clone());
+            actor.retell(Some(told));
             // Whether its turns that answer another agent are shown as such: the key may have
             // been read since the agent was opened.
             actor.hide_coordination(clarp_kernel::coordination::can_leave_note(
@@ -3380,7 +3388,9 @@ impl Worker {
                 answered(result, answer)?
             }
             Ask::RefreshTelling => {
-                actor.retell(Some(self.setup.telling.of(&self.setup.record)));
+                let told = self.setup.telling.of(&self.setup.record);
+                self.setup.profile.told = Some(told.clone());
+                actor.retell(Some(told));
                 return Ok(());
             }
             Ask::ExpireProviderLinks(native) => {

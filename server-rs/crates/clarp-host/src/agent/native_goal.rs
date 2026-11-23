@@ -310,14 +310,16 @@ impl Worker {
                     return Err(std::io::Error::other("the actor stopped this attempt"));
                 }
                 match lane.submit((*order).clone(), submission.clone(), token.clone()) {
-                    // The login changed since the lane started, and it left without giving
-                    // Codex anything: the same attempt goes to a lane under the new login,
-                    // once.
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::PermissionDenied
-                            && !spool.try_exists().unwrap_or(true) =>
-                    {
-                        lane.wait_released()?;
+                    // Nothing of the attempt reached Codex (no spool): the login changed and
+                    // the lane left, or an idle lane left between the look and the prompt
+                    // (its own idle time, another agent's room). The same attempt goes to a
+                    // new lane, once.
+                    Err(error) if !spool.try_exists().unwrap_or(true) => {
+                        // A lane that refused for its login is on its way out; any other may
+                        // still be there, and is looked at again rather than waited for.
+                        if error.kind() == std::io::ErrorKind::PermissionDenied {
+                            lane.wait_released()?;
+                        }
                         start()?;
                         if !launch_permitted(&tx, turn, attempt) {
                             return Err(std::io::Error::other("the actor stopped this attempt"));

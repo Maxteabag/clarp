@@ -41,6 +41,7 @@ mod tests {
             "CLAUDE_PWA_SESSION",
             "CLARP_SESSION",
             "CLARP_PROVIDER_TURN",
+            "CLARP_PROVIDER_TURN_FILE",
             "CLARP_BACKGROUND_ORIGIN",
             "CLARP_RUST_MANAGED_TURN",
             "CLARP_AGY_MANAGED_TURN",

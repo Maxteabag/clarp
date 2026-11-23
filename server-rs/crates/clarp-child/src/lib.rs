@@ -33,6 +33,7 @@ pub fn child_environment() -> &'static [(&'static str, Option<std::ffi::OsString
         (SESSION_ENV, Clear),               // Agent named to provider hooks and skills.
         ("CLARP_SESSION", Clear),           // Agent calling a Clarp tool.
         (TURN_ENV, Clear),                  // Host-issued identity of the calling turn.
+        ("CLARP_PROVIDER_TURN_FILE", Clear), // Where a Codex lane keeps that identity.
         ("CLARP_BACKGROUND_ORIGIN", Clear), // Originating native Bash invocation.
         (MANAGED_CLAUDE_ENV, Clear),        // Rust-managed Claude process.
         (MANAGED_AGY_ENV, Clear),           // Managed Antigravity stream owns its callbacks.
