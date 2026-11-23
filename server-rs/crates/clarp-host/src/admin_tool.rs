@@ -137,14 +137,16 @@ pub(crate) async fn prompt(
                 _ => {}
             }
         }
-        let executable = home().join(".local/share/clarp/bin/clarp-admin");
+        // The delayed prompt is sent by this Host's own tool, which finds the Host by the file
+        // its installer wrote: the timer runs outside any turn.
+        let executable = share_dir().join("tools/clarp-admin");
         return schedule_prompt(&parsed, &executable, app.clock.now_ms(), async |args| {
             if !tokio::fs::metadata(&executable)
                 .await
                 .is_ok_and(|file| file.is_file())
             {
                 return Err(
-                    "could not schedule prompt: the managed clarp-admin wrapper is missing".into(),
+                    "could not schedule prompt: this Host's clarp-admin tool is missing".into(),
                 );
             }
             launch_prompt(args).await
@@ -752,6 +754,21 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
 
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME").map_or_else(|| std::path::PathBuf::from("/"), std::path::PathBuf::from)
+}
+
+/// Where this Host's files are (`CLARP_SHARE_DIR`, which its unit sets), else where its
+/// installer puts them.
+fn share_dir() -> std::path::PathBuf {
+    let from_env = |name| {
+        std::env::var_os(name)
+            .filter(|path| !path.is_empty())
+            .map(std::path::PathBuf::from)
+    };
+    from_env("CLARP_SHARE_DIR").unwrap_or_else(|| {
+        from_env("XDG_DATA_HOME")
+            .unwrap_or_else(|| home().join(".local/share"))
+            .join("clarp-host")
+    })
 }
 
 /// What a ring held as a live voice call is about, as a file has it: no larger than such a
@@ -2298,11 +2315,7 @@ fn paths(data: &Path) -> ToolAnswer {
             .filter(|path| !path.is_empty())
             .map(std::path::PathBuf::from)
     };
-    let share = from_env("CLARP_SHARE_DIR").unwrap_or_else(|| {
-        from_env("XDG_DATA_HOME")
-            .unwrap_or_else(|| home().join(".local/share"))
-            .join("clarp-host")
-    });
+    let share = share_dir();
     let config = crate::config::host_config_dir();
     let service = config
         .with_file_name("systemd")
@@ -2520,7 +2533,7 @@ mod tests {
             &[],
         )
         .unwrap();
-        let path = Path::new("/owner/.local/share/clarp/bin/clarp-admin");
+        let path = Path::new("/owner/.local/share/clarp-host/tools/clarp-admin");
         let answer = schedule_prompt(&parsed, path, 123, async |args| {
             assert_eq!(args[0], "--user");
             assert!(args.iter().any(|arg| arg == "--expand-environment=no"));

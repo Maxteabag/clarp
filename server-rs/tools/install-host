@@ -18,10 +18,12 @@
 #                  whatever the phone reaches in front of it: the Host's own token is only taken
 #                  from the loopback
 #   --name         what the apps call this Host (default: "<hostname> Rust")
-#   --claude, --codex, --agy, --opencode   the programs to run for a turn. Default: the ones the Python Host on this
+#   --claude, --codex, --agy, --opencode   the programs to run for a turn. Default: the ones this Host ran before
+#                  (read from its unit); at a first install, the ones the Python Host on this
 #                  machine runs (read from its unit, clarp-runtime.service), so that an agent
-#                  that moves is run by the same tool it was run by; without a Python Host, the
-#                  ones on the path. Run this again after the Python Host changed its tools
+#                  that moves is run by the same tool it was run by; without either, the ones on
+#                  the path. A toolchain of the Python Host's that this Host runs is copied to its
+#                  own (~/.local/share/clarp-host/toolchains), and run from there
 #   --push-relay   the relay that carries pushes to phones (default: the one the Python Host
 #                  uses, Clarp Audio Central), or `off`. A phone that gave this Host a grant of
 #                  its own is reached with nothing more. To reach phones that gave none, the
@@ -48,11 +50,11 @@
 #                  with it and moves no seat; unless it keeps the logins itself (--accounts
 #                  select) it tells the tool to renew none as it reads
 #   --whisper      the Python that runs the Host's own engine that listens (speech to text): one
-#                  that has faster-whisper. Default: the Python Host's own on this machine, when it
-#                  has the library; it is run where it is, with the model that Host is set to and
-#                  the model's files that are on this machine already. `off`, or no such Python:
-#                  this Host has no engine of its own. Run this again after the Python Host was
-#                  updated: its Python is in a directory that Host makes anew each time
+#                  that has faster-whisper. Default: the one this Host ran before, else the Python
+#                  Host's own on this machine, when it has the library, copied to this Host's own
+#                  place (~/.local/share/clarp-host/environments); it runs the model that Host is
+#                  set to, from the model's files that are on this machine already. `off`, or no
+#                  such Python: this Host has no engine of its own
 #   --speech-keys  the file in which the keys of engines reached over the network (ElevenLabs) are
 #                  looked up each time a clip is to be heard. Default: the Python Host's own
 #                  config, when it is there. Nothing of it is copied or kept: a key the owner
@@ -165,15 +167,97 @@ push_relay="${chosen[push-relay]:-https://clarp-audio-central.peter-w-adams96.wo
 [ "$push_relay" = off ] && push_relay=""
 port="${listen##*:}"; address="${listen%:*}"
 
-# The world an agent's commands run in: the one the Python Host on this machine gives them, so
-# that an agent that moves finds what it found before. Without a Python Host, a plain one.
-tools_path="$(systemctl --user show clarp-runtime.service -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^PATH=//p' | head -1)"
+# What this Host's unit, as it was installed before, gives a turn: an update changes none of it
+# by itself. The value of one of its environment's names, or of one of its options.
+own_unit="$units/clarp-host.service"
+unit_sets() {
+    [ -f "$own_unit" ] || return 0
+    sed -n "s/^Environment=\"\{0,1\}$1=\(.*\)/\1/p" "$own_unit" | sed 's/"$//' | head -1
+}
+unit_option() {
+    [ -f "$own_unit" ] || return 0
+    sed -n "s/^ExecStart=.* $1 \"\([^\"]*\)\".*/\1/p" "$own_unit" | head -1
+}
+# The world an agent's commands run in: the one this Host gave them before; at a first install
+# the one the Python Host on this machine gives them, so that an agent that moves finds what it
+# found before. Without either, a plain one.
+tools_path="$(unit_sets PATH)"
+tools_path="${tools_path#"$share/tools:"}"
+[ -n "$tools_path" ] || tools_path="$(systemctl --user show clarp-runtime.service -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^PATH=//p' | head -1)"
 tools_path="${tools_path:-$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin}"
-# This Host's own tools first: a name found there is never looked for further.
-tools_path="$share/tools:$tools_path"
 # Where the Python Host on this machine keeps its tools, when there is one.
 python_share="$(systemctl --user show clarp-runtime.service -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^CLARP_SHARE_DIR=//p' | head -1)"
 python_share="${python_share:-$HOME/.local/share/clarp}"
+# What of the Python Host's install this Host runs (a toolchain its agents' tools come from, the
+# Python its engine that listens runs in) is copied once to this Host's own place, so that the
+# Python Host's files can go. Where the filesystem lets a copy share its blocks (btrfs, XFS),
+# the copy takes no space. The launchers in its bin/ name the place they were installed in, and
+# are told the new one. Any other path is given back as it is, and so is one whose copy failed.
+own_copy() {
+    local path="$1" rest kind id from to
+    case "$path" in
+        "$python_share"/toolchains/?*|"$python_share"/environments/?*) ;;
+        *) printf '%s\n' "$path"; return 0 ;;
+    esac
+    rest="${path#"$python_share"/}"; kind="${rest%%/*}"; rest="${rest#*/}"; id="${rest%%/*}"
+    case "$id" in .|..|*[!A-Za-z0-9._-]*) printf '%s\n' "$path"; return 0 ;; esac
+    from="$python_share/$kind/$id"; to="$share/$kind/$id"
+    if [ ! -d "$to" ]; then
+        if [ ! -d "$from" ]; then
+            echo "install-host: $from is gone, and this Host keeps no copy of it" >&2
+            printf '%s\n' "$path"; return 0
+        fi
+        mkdir -p "$share/$kind"
+        rm -rf "$to.new"
+        if ! cp -a --reflink=auto "$from" "$to.new" >&2 ||
+            ! python3 - "$from" "$to.new/bin" "$to" >&2 <<'PY'
+import os, sys
+old, bin_dir, new = sys.argv[1:4]
+old, new = old.encode(), new.encode()
+for name in os.listdir(bin_dir) if os.path.isdir(bin_dir) else []:
+    path = os.path.join(bin_dir, name)
+    if os.path.islink(path) or not os.path.isfile(path) or os.path.getsize(path) > 1 << 20:
+        continue
+    with open(path, "rb") as said:
+        text = said.read()
+    if b"\0" in text or old not in text:
+        continue
+    with open(path + ".new", "wb") as told:
+        told.write(text.replace(old, new))
+    os.chmod(path + ".new", os.stat(path).st_mode & 0o7777)
+    os.replace(path + ".new", path)
+PY
+        then
+            echo "install-host: could not copy $from; this Host runs it where it is" >&2
+            rm -rf "$to.new"; printf '%s\n' "$path"; return 0
+        fi
+        mv "$to.new" "$to"
+        echo "install-host: copied $from to $to" >&2
+    fi
+    printf '%s\n' "$to${path#"$from"}"
+}
+# The path holds this Host's copies of those toolchains, and not the Python Host's own tools:
+# this Host's tools come first and answer every one of those names.
+own_path=""
+IFS=: read -r -a entries <<< "$tools_path"
+for entry in "${entries[@]}"; do
+    case "$entry" in ''|"$python_share/bin"|"$share/tools") continue ;; esac
+    entry="$(own_copy "$entry")"
+    case ":$own_path:" in *":$entry:"*) ;; *) own_path="${own_path:+$own_path:}$entry" ;; esac
+done
+# This Host's own tools first: a name found there is never looked for further.
+tools_path="$share/tools:$own_path"
+claude="${claude:-$(own_copy "$(unit_sets CLARP_CLAUDE_PROGRAM)")}"
+codex="${codex:-$(own_copy "$(unit_sets CLARP_CODEX_PROGRAM)")}"
+agy="${agy:-$(own_copy "$(unit_sets CLARP_AGY_PROGRAM)")}"
+opencode="${opencode:-$(own_copy "$(unit_sets CLARP_OPENCODE_PROGRAM)")}"
+# A program this Host ran before that is gone is not quietly replaced by another of the name.
+for program in "$claude" "$codex" "$agy" "$opencode"; do
+    if [ -n "$program" ] && [ ! -x "$program" ]; then
+        echo "install-host: $program, which this Host's agents ran, is no program now: name the one to run" >&2
+        exit 2
+    fi
+done
 claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
 codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
 agy="${agy:-$(PATH="$tools_path" command -v agy || true)}"
@@ -223,14 +307,20 @@ if [ "$accounts" = select ]; then
     fi
     ask_usage=" --ask-usage"
 fi
-# Speech in. The Host's own engine is a worker run by a Python that has faster-whisper: the
-# Python Host's own interpreter on this machine, where it is, unless another is named. Which
-# model it runs is the one that Host is set to (its name and how its numbers are kept are read
-# from that Host's config, nothing else), loaded from the files this machine has already.
+# Speech in. The Host's own engine is a worker run by a Python that has faster-whisper: the one
+# it ran before, else the Python Host's own interpreter on this machine (this Host's copy of it),
+# unless another is named. Which model it runs is the one that Host is set to (its name and how
+# its numbers are kept are read from that Host's config, nothing else), loaded from the files
+# this machine has already.
 whisper="${chosen[whisper]:-}"
 if [ -z "$whisper" ]; then
-    candidate="$(sed -n 1p "$python_share/current/SERVICE_PYTHON" 2>/dev/null || true)"
-    if [ -n "$candidate" ] && "$candidate" -c 'import faster_whisper' > /dev/null 2>&1; then whisper="$candidate"; else whisper=off; fi
+    for candidate in "$(unit_option --whisper-python)" "$(sed -n 1p "$python_share/current/SERVICE_PYTHON" 2>/dev/null || true)"; do
+        [ -n "$candidate" ] || continue
+        for python in "$(own_copy "$candidate")" "$candidate"; do
+            if "$python" -c 'import faster_whisper' > /dev/null 2>&1; then whisper="$python"; break 2; fi
+        done
+    done
+    whisper="${whisper:-off}"
 fi
 whisper_model=small.en; whisper_compute=int8; whisper_source=""
 if [ "$whisper" != off ]; then
