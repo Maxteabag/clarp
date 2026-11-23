@@ -571,8 +571,8 @@ fn agent_moved_holds_a_due_goal_and_refuses_the_heartbeat_and_schedule_dispatche
     );
     assert_eq!(change(&host, &session, Value::Null).0, 200);
     wait_for("the original goal wake to run on return", || {
-        host.conversation(&session).iter().any(|(role, text)| {
-            role == "user" && text.starts_with("Continue your durable outcome commitment.")
-        })
+        host.conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "user" && text == "Goal check-in")
     });
 }

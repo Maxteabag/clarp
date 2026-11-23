@@ -719,9 +719,12 @@ pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
         "waiting"
     };
     // A goal's wake waits as the Host's own business, not as the long prompt it is.
-    let automated =
-        clarp_kernel::turn::message_automation_kind(message.origin.name(), &message.message_id);
-    let text = automated_prompt(automated).map_or_else(|| message.text.clone(), str::to_string);
+    let goal_wake =
+        clarp_kernel::turn::message_automation_kind(message.origin.name(), &message.message_id)
+            == clarp_kernel::turn::GOAL_WAKE;
+    let text = automated_prompt(clarp_kernel::turn::GOAL_WAKE)
+        .filter(|_| goal_wake)
+        .map_or_else(|| message.text.clone(), str::to_string);
     let mut item = Map::from_iter([
         ("client_msg_id".into(), json!(message.told_id)),
         ("text".into(), json!(text)),
@@ -1400,9 +1403,10 @@ fn automated_prompt(kind: &str) -> Option<&'static str> {
 
 /// Whether a row the other Host served is a goal's wake: by its id, as this Host files one.
 fn imported_goal_wake(row: &Value) -> bool {
+    let origin = row["origin"].as_str().unwrap_or("");
     row["role"] == "user"
         && row["id"].as_str().is_some_and(|id| {
-            clarp_kernel::turn::message_automation_kind("", id) == clarp_kernel::turn::GOAL_WAKE
+            clarp_kernel::turn::message_automation_kind(origin, id) == clarp_kernel::turn::GOAL_WAKE
         })
 }
 
@@ -2100,6 +2104,15 @@ mod tests {
         assert_eq!(
             (&note["text"], &note["kind"]),
             (&json!("[Clarp decision resolved]"), &json!("later"))
+        );
+        let mut watched = waiting("u-8", "poll the queue");
+        watched.origin = Origin::Trigger {
+            name: "watcher".into(),
+        };
+        assert_eq!(
+            queue_item(&watched, &directory)["text"],
+            "poll the queue",
+            "only a goal's wake waits under another name"
         );
     }
 
@@ -3497,7 +3510,8 @@ mod tests {
             Entry::Imported(Imported {
                 id: "u-task-goal-fedcba9876543210".to_string(),
                 row: json!({"id": "u-task-goal-fedcba9876543210", "role": "user",
-                            "text": prompt, "automated": false, "automation_kind": ""}),
+                            "origin": "automation", "text": prompt,
+                            "automated": false, "automation_kind": ""}),
             }),
             3,
             None,

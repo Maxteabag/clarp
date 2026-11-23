@@ -423,6 +423,11 @@ Rules:
   to the response's `latest_revision`, which never exceeds the rows actually
   returned (when `has_more` is true the server holds the cursor back so the
   next call continues the backlog).
+- **A goal's check-in is the Host's own (Rust Host contract 163, feature
+  `goal_wake_quiet`).** The message a durable goal wakes its agent with is an automated row:
+  `automated` true, `automation_kind` `goal` and the text "Goal check-in" in place of the
+  prompt, which only the agent's tool reads. Its queue item reads the same, and it cannot be
+  reworded. What the agent answers in that turn is an ordinary reply.
 - **A turn's end says why it did not complete (Rust Host contract 162, feature
   `turn_end_reason`).** The row that closes a turn carries `turn` (`turn_id`, `status`,
   `started_at_ms`, `ended_at_ms`, `worked_ms`, `tool_count`). When `status` is not

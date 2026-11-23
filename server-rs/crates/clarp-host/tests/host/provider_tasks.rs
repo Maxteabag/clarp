@@ -413,9 +413,9 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     assert_eq!(waiting["goal"]["continuation"]["state"], "waiting");
     std::fs::write(cwd.join("allow-end"), "").unwrap();
     wait_for("the goal wakes its agent on the command result", || {
-        host.conversation(&keeper).iter().any(|(role, text)| {
-            role == "user" && text.starts_with("Continue your durable outcome commitment.")
-        })
+        host.conversation(&keeper)
+            .iter()
+            .any(|(role, text)| role == "user" && text == "Goal check-in")
     });
     let settled = goal(&host, &cwd, &["get", plan_id]);
     assert_eq!(

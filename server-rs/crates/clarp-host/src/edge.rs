@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 162;
+pub const HOST_CONTRACT: u64 = 163;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -358,6 +358,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The `turn` object of a row that closes a turn that did not complete carries `reason`:
     // the Host's sentence of why it ended (issue 729).
     ("turn_end_reason", 162),
+    // The prompt a goal's owner is woken with is an automated row (`automation_kind` `goal`,
+    // text "Goal check-in"), in the queue as well, and is not edited there (owner, 23 Nov).
+    ("goal_wake_quiet", 163),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
@@ -3974,6 +3977,14 @@ async fn reword(
     let text = said["text"].as_str().map(python::strip).unwrap_or_default();
     if text.is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
+    }
+    // A goal's wake is the Host's own: its queue item shows a check-in, not its words, and
+    // saving that over the prompt would wake the agent with nothing to go on.
+    if clarp_kernel::turn::names_a_goal_wake(&id) {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "a goal's check-in is the Host's own and cannot be edited",
+        ));
     }
     let Some((member, turn)) = waiting_named(&app, &id).await? else {
         return Err(not_waiting());

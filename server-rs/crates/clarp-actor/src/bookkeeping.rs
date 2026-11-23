@@ -84,6 +84,8 @@ fn evidence_text<'a>(row: &'a Versioned, shown: &'a Value) -> &'a str {
     match &row.entry {
         Entry::Message(message) => &message.text,
         Entry::Reply(reply) => &reply.text,
+        // As the other Host kept it: a goal's wake is shown here under a label.
+        Entry::Imported(imported) => imported.row["text"].as_str().unwrap_or(""),
         _ => shown["text"].as_str().unwrap_or(""),
     }
 }

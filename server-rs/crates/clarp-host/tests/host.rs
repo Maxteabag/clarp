@@ -4180,10 +4180,9 @@ fn an_agent_is_woken_for_a_goal_that_is_due_and_a_stop_holds_its_goals_too() {
     let session = host.new_agent("Keeper");
     let dir = place.root.clone();
     let wakes = |host: &Host| {
-        let begins = "Continue your durable outcome commitment.";
         let all = host.conversation(&session);
         all.iter()
-            .filter(|(role, text)| role == "user" && text.starts_with(begins))
+            .filter(|(role, text)| role == "user" && text == "Goal check-in")
             .count()
     };
     let state_of = |host: &Host, plan_id: &str| goal(host, &dir, &["get", plan_id]);
@@ -4213,19 +4212,21 @@ fn an_agent_is_woken_for_a_goal_that_is_due_and_a_stop_holds_its_goals_too() {
     .to_string();
     goal(&host, &dir, &["checkpoint", &plan_id, "0", &checkpoint]);
     wait_for("the agent to be woken", || wakes(&host) == 1);
-    let woken_with = host
-        .conversation(&session)
-        .into_iter()
-        .find(|(role, text)| role == "user" && text.contains("clarp-goal get"))
-        .unwrap()
-        .1;
+    // The wake is a quiet check-in in the conversation, and its prompt reaches the tool: the
+    // scripted tool says back the first line it was given. What the prompt says in full (the
+    // plan to read, its continuation) is the kernel's wake prompt, which the goal vectors pin
+    // (tests/fixtures/goal-vectors.json).
+    wait_for("the agent to answer its wake", || {
+        host.conversation(&session).iter().any(|(role, text)| {
+            role == "assistant" && text.starts_with("Continue your durable outcome commitment.")
+        })
+    });
     assert!(
-        woken_with.contains(&format!("clarp-goal get {plan_id}\n")),
-        "{woken_with}"
-    );
-    assert!(
-        woken_with.contains("Continuation: Go on in a moment\n"),
-        "{woken_with}"
+        !host
+            .conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "user" && text.starts_with("Continue your durable")),
+        "the wake's words are never shown as typed"
     );
     wait_for("what the wake's turn came to", || {
         state_of(&host, &plan_id)["goal"]["continuation"]["last_execution"]["kind"] == "done"

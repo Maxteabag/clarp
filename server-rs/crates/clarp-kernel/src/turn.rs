@@ -86,18 +86,27 @@ pub fn automation_kind(origin: &str) -> &str {
 /// "should not appear in chat"). What the agent answers in that turn is shown as ever.
 pub const GOAL_WAKE: &str = "goal";
 
-/// The automation kind of a message by its origin and its id: a goal's wake, whose id is
-/// `u-` and the wake's own id (whatever origin it was filed with, before this rule too), is
-/// [`GOAL_WAKE`]; any other message is its origin's ([`automation_kind`]).
+/// The automation kind of a message by its origin and its id: a goal's wake, which the Host
+/// files under origin `automation` with the id `u-` and the wake's own id (before this rule
+/// too, and on the other Host), is [`GOAL_WAKE`]; any other message is its origin's
+/// ([`automation_kind`]). A person's message is never a wake, whatever id it was sent under.
 pub fn message_automation_kind<'a>(origin: &'a str, id: &str) -> &'a str {
-    let wake = id
-        .strip_prefix("u-")
-        .is_some_and(|rest| rest.starts_with(crate::goals::WAKE_PREFIX));
+    let wake = origin == "automation"
+        && id
+            .strip_prefix("u-")
+            .is_some_and(|rest| rest.starts_with(crate::goals::WAKE_PREFIX));
     if wake {
         GOAL_WAKE
     } else {
         automation_kind(origin)
     }
+}
+
+/// Whether a waiting message named by this id in the queue is a goal's wake: the Host's own,
+/// which nobody rewords ([`message_automation_kind`]; the queue names it without `u-`).
+pub fn names_a_goal_wake(queue_id: &str) -> bool {
+    let id = queue_id.strip_prefix("u-").unwrap_or(queue_id);
+    id.starts_with(crate::goals::WAKE_PREFIX)
 }
 
 /// Whether the turns of an origin are left out of a chat that is read without automation.
@@ -960,8 +969,15 @@ mod tests {
             message_automation_kind("automation", "u-task-goal-0123"),
             GOAL_WAKE
         );
-        assert_eq!(message_automation_kind("", "u-task-goal-0123"), GOAL_WAKE);
+        assert_eq!(
+            message_automation_kind("user", "u-task-goal-0123"),
+            "",
+            "a person's message is never a wake, whatever its id"
+        );
         assert_eq!(message_automation_kind("automation", "u-1"), "");
+        assert!(names_a_goal_wake("task-goal-0123"));
+        assert!(names_a_goal_wake("u-task-goal-0123"));
+        assert!(!names_a_goal_wake("m2"));
         assert_eq!(message_automation_kind("heartbeat", "u-1"), "heartbeat");
         assert_eq!(
             message_automation_kind("automation", "task-goal-0123"),
