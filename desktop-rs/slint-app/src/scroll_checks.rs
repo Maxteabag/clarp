@@ -1306,9 +1306,11 @@ impl Dash {
 /// frame drawn: none may leave the end, and its flash detector finds none.
 pub(super) fn scroll_flash_check(out: String) {
     const SESSION: &str = "flash";
+    const TALL: &str = "flash-tall";
+    const SHORT: &str = "flash-short";
     const ROWS: usize = 200;
     let state = Rc::new(RefCell::new(Dash::default()));
-    let (s1, s2) = (state.clone(), state.clone());
+    let (s1, s2, s3) = (state.clone(), state.clone(), state.clone());
     let mut steps: Vec<(String, Box<dyn Fn()>)> = Vec::new();
     for turn in 0..3 {
         steps.extend(agent_turn(SESSION, turn));
@@ -1337,6 +1339,14 @@ pub(super) fn scroll_flash_check(out: String) {
             }
             check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Paint"})).is_ok(), "the Host takes a new chat");
             check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Flash"})).is_ok(), "the Host takes a new chat");
+            // Two more to switch to: one of a few very tall rows, one of
+            // many short ones (the list's estimate of a row's height differs
+            // most between them).
+            check(control("/__control/add-agent", &json!({"session": TALL, "persona": "Tall"})).is_ok(), "the Host takes a chat of tall rows");
+            check(control("/__control/add-agent", &json!({"session": SHORT, "persona": "Short"})).is_ok(), "the Host takes a chat of short rows");
+            check(control("/__control/rich", &json!({"session": SHORT, "count": 300})).is_ok(), "the Host fills the short chat");
+            upsert(TALL, json!((0..24).map(|n| json!({"id": format!("tall-{n}"), "role": if n % 4 == 0 { "user" } else { "assistant" },
+                "text": if n % 4 == 0 { format!("Short question {n}?") } else { format!("Long answer {n}. {}", LOREM.repeat(20 + 7 * (n % 5))) }})).collect::<Vec<_>>()));
             true
         })),
         ("select", Box::new(|app, _, _| {
@@ -1457,6 +1467,36 @@ pub(super) fn scroll_flash_check(out: String) {
             let (visible, numbers) = last_row_visible();
             check(report().follows && visible, &format!("the chat still follows and shows its last row whole: {numbers}"));
             shot(&out, "scroll-flash-01-streamed");
+            *st = Dash { pane: st.pane.clone(), flashes: crate::scroll_journal::flashes_seen(), posted: crate::scroll_journal::flashes().len(), ..Dash::default() };
+            true
+        })),
+        // The pane opens other chats and comes back, following: each opens
+        // at its end, and no frame between shows any other place.
+        ("switches", Box::new(move |app, _, elapsed| {
+            const CHATS: [&str; 6] = [TALL, SESSION, SHORT, TALL, SHORT, SESSION];
+            let mut st = s3.borrow_mut();
+            let due = (elapsed.as_millis() / 1500) as usize;
+            while st.done < CHATS.len() && st.done <= due {
+                app.engine.borrow_mut().select(CHATS[st.done]);
+                crate::pump();
+                st.done += 1;
+            }
+            st.look();
+            if st.done < CHATS.len() || elapsed < Duration::from_millis(1500 * CHATS.len() as u64 + 500) {
+                return false;
+            }
+            let following: Vec<&crate::scroll_journal::Frame> = st.frames.iter().filter(|f| f.shot.follow).collect();
+            let off: Vec<String> = following
+                .iter()
+                .filter(|f| (f.shot.place() - 1.0).abs() * (f.shot.content - f.shot.viewport).max(0.0) > 2.0)
+                .take(8)
+                .map(|f| format!("{:.0}ms place {:.3} offset {:.0} content {:.0} rows {} [{}]", f.at.as_secs_f64() * 1000.0, f.shot.place(), f.shot.offset, f.shot.content, f.shot.rows, f.events.join(", ")))
+                .collect();
+            check(off.is_empty(), &format!("opening chats while following, no frame is drawn off a chat's end ({} frames following): {off:?}", following.len()));
+            let flashes = crate::scroll_journal::flashes_seen() - st.flashes;
+            check(flashes == 0, &format!("opening chats, the dashcam finds no flash ({flashes} found; posted {:?})", &crate::scroll_journal::flashes()[st.posted..]));
+            let (visible, numbers) = last_row_visible();
+            check(report().follows && visible, &format!("the chat opened last follows and shows its last row whole: {numbers}"));
             true
         })),
     ];
