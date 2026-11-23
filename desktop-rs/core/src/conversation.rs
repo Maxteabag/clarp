@@ -367,6 +367,7 @@ impl Conversation {
             display_text: text.to_owned(),
             timestamp: now_iso(),
             pending: true,
+            sent_here: true,
             ..Message::default()
         };
         let at = self.messages.len();
@@ -595,7 +596,7 @@ impl Conversation {
         // pending/failed flags: only the /send answer confirms it
         // (CLIENT-SEND-500).
         let mut optimistic: Vec<Message> =
-            self.messages.iter().filter(|m| m.pending || m.delivery_failed).cloned().collect();
+            self.messages.iter().filter(|m| m.pending || m.delivery_failed || m.sent_here).cloned().collect();
         for message in rows.iter_mut() {
             // F4: a reload that omits a send's receipt (unknown) keeps its last state.
             if message.send_state.is_empty()
@@ -610,8 +611,10 @@ impl Conversation {
             }
         }
         // A failed send the new rows do not carry goes with the replaced
-        // chat, as before; an unconfirmed one stays at the end.
-        optimistic.retain(|local| local.pending);
+        // chat, as before; an unconfirmed one stays at the end, and so does a
+        // delivered one the Host has not sent back yet (a message steered into
+        // a running turn comes back when the turn reads it).
+        optimistic.retain(|local| local.pending || (local.sent_here && !local.delivery_failed));
         rows.extend(optimistic);
         self.reset(rows);
         self.emit(Signal::CountChanged);

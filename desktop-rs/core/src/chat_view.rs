@@ -126,13 +126,13 @@ pub fn set_own(settings: &mut crate::settings::Settings, key: &str, view: Option
 /// Whether a row belongs to the conversation view. A row the Host did not
 /// tag reads as Session (a row it meant to hide is never shown), except a
 /// message of one's own not yet read back, which is always conversation:
-/// pending, failed, or delivered but not yet sent back by the Host (no
-/// revision). A message steered into a running turn is answered 2xx at
+/// pending, failed, or delivered but not yet sent back by the Host
+/// (`sent_here`). A message steered into a running turn is answered 2xx at
 /// once but comes back tagged only when the turn reads it; hiding it
 /// meanwhile made Peter's own message vanish (23 Nov 2026).
 pub fn in_conversation(row: &Message) -> bool {
     if row.view.is_empty() {
-        return row.role == "user" && (row.pending || row.delivery_failed || row.revision == 0);
+        return row.role == "user" && (row.pending || row.delivery_failed || row.sent_here);
     }
     row.view == CONVERSATION
 }

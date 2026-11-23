@@ -605,3 +605,20 @@ fn automated_rows_are_left_out_and_a_row_marked_later_goes() {
     ]}), LoadKind::Delta);
     assert_eq!(h.model.rows().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
 }
+
+/// A delivered send the Host has not sent back yet (steered into a running
+/// turn) survives a replacing read, and goes when the Host's row arrives.
+#[test]
+fn a_delivered_send_not_yet_sent_back_survives_a_replace() {
+    let mut h = Harness::new("s");
+    h.log(json!({"conversation_id": "c", "latest_revision": 1, "turns": [turn("a", 1)]}), LoadKind::Tail);
+    h.optimistic("m1", "Is the server under load?");
+    h.model.confirm_delivery("m1");
+    h.sync();
+    h.log(json!({"conversation_id": "c2", "latest_revision": 2, "turns": [turn("a", 1), turn("b", 2)]}), LoadKind::Replace);
+    assert_eq!(h.model.rows().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a", "b", "u-m1"], "the delivered send stays");
+    h.log(json!({"conversation_id": "c2", "latest_revision": 3, "turns": [{"id": "u-m1", "role": "user", "text": "Is the server under load?", "revision": 3, "view": "conversation"}]}), LoadKind::Delta);
+    let own = h.model.rows().iter().find(|m| m.id == "u-m1").expect("one row");
+    assert!(!own.sent_here && !own.pending, "the Host's row took its place");
+    assert_eq!(h.model.rows().iter().filter(|m| m.id == "u-m1").count(), 1);
+}

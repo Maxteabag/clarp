@@ -274,6 +274,7 @@ fn a_box_whose_reply_is_not_drawn_leaves_its_rows_alone() {
 fn an_own_message_never_leaves_the_conversation_before_the_host_sends_it_back() {
     let mut own = row(json!({"id": "u-1", "role": "user", "text": "Is the server under load?"}));
     own.pending = true;
+    own.sent_here = true;
     assert!(chat_view::in_conversation(&own), "pending");
     own.pending = false;
     assert!(chat_view::in_conversation(&own), "delivered, not yet read back by the Host");

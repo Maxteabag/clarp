@@ -381,6 +381,9 @@ pub struct Message {
     /// F4 (`send_delivery_state`): this user send's delivery state from its own
     /// receipt (`pending_launch`, `stopped`, `handed_over`); empty = unknown.
     pub send_state: String,
+    /// This client's own send, not yet sent back by the Host: local only. The
+    /// Host's row that takes its place (by id) does not carry it.
+    pub sent_here: bool,
     pub activity: bool,
     pub automated: bool,
     pub tool_details_available: bool,
