@@ -740,6 +740,12 @@ def undo_mentions(root: pathlib.Path) -> list:
             continue
         if str(root) not in text:
             continue
+        # Every Claude Code that runs on the machine writes this file, at any moment, and none
+        # takes a lock: a rewrite here could undo another agent's change. An entry for a folder
+        # that is gone does no harm, so it is reported and left.
+        if path.name == ".claude.json":
+            done.append(f"{path}: names the run's folder; left alone (every running Claude writes it)")
+            continue
         stamp = path.stat().st_mtime_ns
         if path.suffix == ".json":
             try:
