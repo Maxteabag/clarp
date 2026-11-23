@@ -29,7 +29,7 @@ use clarp_acp::agy::{self as shared, Order};
 use clarp_acp::schema::{self, PromptResponse, SessionUpdate, StopReason};
 use clarp_kernel::conversation::{Notice, Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
-use clarp_kernel::takeover::Input;
+use clarp_kernel::takeover::{self, Input};
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, Origin, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -140,6 +140,12 @@ pub fn order(spec: &TurnSpec) -> Order {
         // Only the new message's files: a record carried before it names old ones.
         attachments: attached(&told::without_restored(&spec.prompt)),
         silence_ms: 0,
+        uuid: takeover::attempt_prompt_uuid(
+            &spec.agent_id,
+            spec.turn,
+            spec.trace_id.as_deref(),
+            spec.attempt,
+        ),
     }
 }
 
